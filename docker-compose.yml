@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: noxia_backend
+    restart: always
+    environment:
+      # Si on passe sur Postgres un jour, la DATABASE_URL ira ici.
+      # Pour l'instant SQLite crée dev.db en local.
+      - PORT=3001
+      - NODE_ENV=production
+    volumes:
+      # Stockage persistant pour la BDD SQLite
+      - sqlite_data:/app/prisma
+      # Stockage persistant des photos (100% gratuit sur le disque VPS)
+      - uploads_data:/app/uploads
+    networks:
+      - noxia-network
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: noxia_frontend
+    restart: always
+    environment:
+      - VITE_API_URL=/api
+    networks:
+      - noxia-network
+      # Réseau externe Nginx Proxy Manager
+      - nginx-proxy
+    # Nginx Proxy Manager pourra cibler ce conteneur (noxia_frontend) sur le port 80
+
+networks:
+  noxia-network:
+    driver: bridge
+  # Réseau géré par votre Nginx Proxy Manager Hostinger
+  nginx-proxy:
+    external: true
+
+volumes:
+  sqlite_data:
+  uploads_data:
