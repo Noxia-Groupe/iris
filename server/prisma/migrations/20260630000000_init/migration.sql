@@ -31,10 +31,10 @@ CREATE TABLE "Chantier" (
     "dateDebut" TIMESTAMP(3) NOT NULL,
     "dateFin" TIMESTAMP(3),
     "statut" TEXT NOT NULL DEFAULT 'EN_COURS',
-    "budgetGlobalVendu" DOUBLE PRECISION NOT NULL,
-    "budgetMaterielVendu" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "budgetMainOeuvreVendu" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "heuresVendues" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "budgetGlobalVendu" DECIMAL(12,2) NOT NULL,
+    "budgetMaterielVendu" DECIMAL(12,2) NOT NULL DEFAULT 0,
+    "budgetMainOeuvreVendu" DECIMAL(12,2) NOT NULL DEFAULT 0,
+    "heuresVendues" DECIMAL(10,2) NOT NULL DEFAULT 0,
     "responsableId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -56,8 +56,8 @@ CREATE TABLE "LigneBudgetPrevisionnel" (
     "id" TEXT NOT NULL,
     "chantierId" TEXT NOT NULL,
     "categorieId" TEXT NOT NULL,
-    "montantAlloue" DOUBLE PRECISION NOT NULL,
-    "heuresAllouees" DOUBLE PRECISION,
+    "montantAlloue" DECIMAL(12,2) NOT NULL,
+    "heuresAllouees" DECIMAL(10,2),
 
     CONSTRAINT "LigneBudgetPrevisionnel_pkey" PRIMARY KEY ("id")
 );
@@ -69,7 +69,7 @@ CREATE TABLE "AchatReel" (
     "fournisseurId" TEXT NOT NULL,
     "numeroFacture" TEXT,
     "description" TEXT NOT NULL,
-    "montantHT" DOUBLE PRECISION NOT NULL,
+    "montantHT" DECIMAL(12,2) NOT NULL,
     "chantierId" TEXT NOT NULL,
     "categorieId" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -83,7 +83,7 @@ CREATE TABLE "Intervenant" (
     "id" TEXT NOT NULL,
     "nom" TEXT NOT NULL,
     "role" TEXT NOT NULL,
-    "tauxHoraireCharge" DOUBLE PRECISION NOT NULL,
+    "tauxHoraireCharge" DECIMAL(10,2) NOT NULL,
 
     CONSTRAINT "Intervenant_pkey" PRIMARY KEY ("id")
 );
@@ -94,8 +94,8 @@ CREATE TABLE "PointageHeure" (
     "date" TIMESTAMP(3) NOT NULL,
     "intervenantId" TEXT NOT NULL,
     "chantierId" TEXT NOT NULL,
-    "nbrHeures" DOUBLE PRECISION NOT NULL,
-    "tauxHoraireApplique" DOUBLE PRECISION NOT NULL,
+    "nbrHeures" DECIMAL(10,2) NOT NULL,
+    "tauxHoraireApplique" DECIMAL(10,2) NOT NULL,
     "commentaire" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -118,7 +118,7 @@ CREATE TABLE "PhotoChantier" (
 CREATE TABLE "Parametres" (
     "id" TEXT NOT NULL DEFAULT 'singleton',
     "margeCommercialeActive" BOOLEAN NOT NULL DEFAULT true,
-    "tauxHoraireMoyen" DOUBLE PRECISION NOT NULL DEFAULT 30,
+    "tauxHoraireMoyen" DECIMAL(10,2) NOT NULL DEFAULT 30,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -129,9 +129,9 @@ CREATE TABLE "Parametres" (
 CREATE TABLE "Commissionnement" (
     "id" TEXT NOT NULL,
     "mode" TEXT NOT NULL DEFAULT 'FIXE',
-    "tauxFixe" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "bonusHeure" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "malusHeure" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "tauxFixe" DECIMAL(6,2) NOT NULL DEFAULT 0,
+    "bonusHeure" DECIMAL(6,2) NOT NULL DEFAULT 0,
+    "malusHeure" DECIMAL(6,2) NOT NULL DEFAULT 0,
     "chantierId" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,

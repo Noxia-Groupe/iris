@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import multer from 'multer';
 import archiver from 'archiver';
 import path from 'path';
@@ -62,13 +62,32 @@ const requireAdmin: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+// Convertit récursivement les Decimal Prisma en nombres pour la sérialisation JSON
+// (sinon ils seraient sérialisés en chaînes côté client). Les montants sont stockés
+// en Decimal (précis) en base, et exposés en `number` à l'API.
+function decimalToNumber(value: any): any {
+  if (value === null || value === undefined) return value;
+  if (Prisma.Decimal.isDecimal(value)) return (value as Prisma.Decimal).toNumber();
+  if (value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map(decimalToNumber);
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      out[key] = decimalToNumber(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
 // --- Paramètres globaux (singleton) ---
 interface Parametres { margeCommercialeActive: boolean; tauxHoraireMoyen: number }
 
+// Retourne les paramètres avec les Decimal convertis en nombres.
 async function getParametres(): Promise<Parametres> {
   const existing = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
-  if (existing) return existing;
-  return prisma.parametres.create({ data: { id: 'singleton' } });
+  const p = existing ?? await prisma.parametres.create({ data: { id: 'singleton' } });
+  return decimalToNumber(p) as Parametres;
 }
 
 // --- Calcul centralisé des métriques d'un chantier (source unique de vérité) ---
@@ -110,11 +129,12 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
 
 // Sérialise un chantier pour le client en masquant les données commerciales aux non-admins.
 function serializeChantier(chantier: any, params: Parametres, isAdmin: boolean) {
+  const c = decimalToNumber(chantier);
   return {
-    ...chantier,
-    budgetGlobalVendu: isAdmin ? chantier.budgetGlobalVendu : null,
-    commissionnement: isAdmin ? chantier.commissionnement : null,
-    metrics: computeChantierMetrics(chantier, params, isAdmin),
+    ...c,
+    budgetGlobalVendu: isAdmin ? c.budgetGlobalVendu : null,
+    commissionnement: isAdmin ? c.commissionnement : null,
+    metrics: computeChantierMetrics(c, params, isAdmin),
   };
 }
 
@@ -307,7 +327,7 @@ app.put('/api/users/:id/password', requireAuth, requireAdmin, async (req, res) =
 // Intervenants
 app.get('/api/intervenants', requireAuth, async (req, res) => {
   try {
-    res.json(await prisma.intervenant.findMany());
+    res.json(decimalToNumber(await prisma.intervenant.findMany()));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching intervenants' });
   }
@@ -336,7 +356,7 @@ app.post('/api/fournisseurs', requireAuth, async (req, res) => res.json(await pr
 // Achats
 app.get('/api/achats', requireAuth, async (req, res) => {
   try {
-    res.json(await prisma.achatReel.findMany({ include: { chantier: true, categorie: true, fournisseur: true } }));
+    res.json(decimalToNumber(await prisma.achatReel.findMany({ include: { chantier: true, categorie: true, fournisseur: true } })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching achats' });
   }
@@ -363,7 +383,7 @@ app.post('/api/achats', requireAuth, async (req, res) => {
 // Pointages (Heures)
 app.get('/api/heures', requireAuth, async (req, res) => {
   try {
-    res.json(await prisma.pointageHeure.findMany({ include: { chantier: true, intervenant: true } }));
+    res.json(decimalToNumber(await prisma.pointageHeure.findMany({ include: { chantier: true, intervenant: true } })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching heures' });
   }
@@ -487,7 +507,7 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
       update: data,
       create: { id: 'singleton', ...data },
     });
-    res.json(p);
+    res.json(decimalToNumber(p));
   } catch (error) {
     res.status(500).json({ error: 'Error updating parametres' });
   }
@@ -501,10 +521,10 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
     const params = await getParametres();
     // Un conducteur ne voit que les chantiers dont il est responsable.
     const where = isAdmin ? {} : { responsableId: user.id };
-    const chantiers = await prisma.chantier.findMany({
+    const chantiers = decimalToNumber(await prisma.chantier.findMany({
       where,
       include: { achats: true, pointages: true, commissionnement: true },
-    });
+    }));
 
     let nbEnCours = 0;
     let nbTermines = 0;
@@ -558,9 +578,9 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
   try {
     const params = await getParametres();
     const users = await prisma.user.findMany({ select: { id: true, name: true, email: true } });
-    const chantiers = await prisma.chantier.findMany({
+    const chantiers = decimalToNumber(await prisma.chantier.findMany({
       include: { achats: true, pointages: true, commissionnement: true },
-    });
+    }));
 
     const byUser: Record<string, any> = {};
     for (const u of users) {
@@ -606,13 +626,14 @@ app.post('/api/chantiers/:id/analyze', requireAuth, async (req, res) => {
     }
 
     // Collect all data for the prompt
-    const chantier = await prisma.chantier.findUnique({
+    const chantierRaw = await prisma.chantier.findUnique({
       where: { id: req.params.id },
       include: { pointages: { include: { intervenant: true } }, achats: true }
     });
 
-    if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
+    if (!chantierRaw) return res.status(404).json({ error: 'Chantier introuvable' });
 
+    const chantier = decimalToNumber(chantierRaw);
     let heuresRealisees = 0;
     chantier.pointages.forEach((p: { nbrHeures: number }) => heuresRealisees += p.nbrHeures);
     const totalAchats = chantier.achats.reduce((acc: number, a: { montantHT: number }) => acc + a.montantHT, 0);

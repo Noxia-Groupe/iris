@@ -41,10 +41,10 @@ model Chantier {
   dateFin               DateTime?
   statut                String                    @default("EN_COURS")
   
-  budgetGlobalVendu     Float
-  budgetMaterielVendu   Float                     @default(0)
-  budgetMainOeuvreVendu Float                     @default(0)
-  heuresVendues         Float                     @default(0)
+  budgetGlobalVendu     Decimal                   @db.Decimal(12, 2)
+  budgetMaterielVendu   Decimal                   @default(0) @db.Decimal(12, 2)
+  budgetMainOeuvreVendu Decimal                   @default(0) @db.Decimal(12, 2)
+  heuresVendues         Decimal                   @default(0) @db.Decimal(10, 2)
   
   responsableId         String?
   responsable           User?                     @relation(fields: [responsableId], references: [id])
@@ -72,8 +72,8 @@ model LigneBudgetPrevisionnel {
   id             String    @id @default(uuid())
   chantierId     String
   categorieId    String
-  montantAlloue  Float
-  heuresAllouees Float?
+  montantAlloue  Decimal   @db.Decimal(12, 2)
+  heuresAllouees Decimal?  @db.Decimal(10, 2)
 
   chantier       Chantier  @relation(fields: [chantierId], references: [id])
   categorie      Categorie @relation(fields: [categorieId], references: [id])
@@ -90,7 +90,7 @@ model AchatReel {
   numeroFacture   String?
   
   description     String
-  montantHT       Float
+  montantHT       Decimal     @db.Decimal(12, 2)
   
   chantierId      String
   chantier        Chantier    @relation(fields: [chantierId], references: [id])
@@ -106,7 +106,7 @@ model Intervenant {
   id                 String          @id @default(uuid())
   nom                String
   role               String
-  tauxHoraireCharge  Float
+  tauxHoraireCharge  Decimal         @db.Decimal(10, 2)
 
   pointages          PointageHeure[]
 }
@@ -116,8 +116,8 @@ model PointageHeure {
   date                 DateTime
   intervenantId        String
   chantierId           String
-  nbrHeures            Float
-  tauxHoraireApplique  Float
+  nbrHeures            Decimal     @db.Decimal(10, 2)
+  tauxHoraireApplique  Decimal     @db.Decimal(10, 2)
   commentaire          String?
 
   intervenant          Intervenant @relation(fields: [intervenantId], references: [id])
@@ -141,7 +141,7 @@ model PhotoChantier {
 model Parametres {
   id                     String   @id @default("singleton")
   margeCommercialeActive Boolean  @default(true)  // affichage/calcul de la marge commerciale
-  tauxHoraireMoyen       Float    @default(30)     // valorisation €/h du bonus/malus dynamique
+  tauxHoraireMoyen       Decimal  @default(30) @db.Decimal(10, 2) // valorisation €/h du bonus/malus
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -150,9 +150,9 @@ model Parametres {
 model Commissionnement {
   id          String   @id @default(uuid())
   mode        String   @default("FIXE") // FIXE ou DYNAMIQUE
-  tauxFixe    Float    @default(0)      // % commission sur marge fixe
-  bonusHeure  Float    @default(0)      // % bonus si avance
-  malusHeure  Float    @default(0)      // % malus si retard
+  tauxFixe    Decimal  @default(0) @db.Decimal(6, 2)  // % commission sur marge fixe
+  bonusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // % bonus si avance
+  malusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // % malus si retard
   
   chantierId  String   @unique
   chantier    Chantier @relation(fields: [chantierId], references: [id])
