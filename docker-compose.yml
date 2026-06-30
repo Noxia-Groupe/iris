@@ -5,7 +5,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: noxia_backend
+    container_name: marge_backend
     restart: always
     environment:
       # Si on passe sur Postgres un jour, la DATABASE_URL ira ici.
@@ -24,7 +24,7 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: noxia_frontend
+    container_name: marge_frontend
     restart: always
     environment:
       - VITE_API_URL=/api
@@ -32,7 +32,7 @@ services:
       - noxia-network
       # Réseau externe Nginx Proxy Manager
       - nginx-proxy
-    # Nginx Proxy Manager pourra cibler ce conteneur (noxia_frontend) sur le port 80
+    # Nginx Proxy Manager pourra cibler ce conteneur (marge_frontend) sur le port 80
 
 networks:
   noxia-network:
