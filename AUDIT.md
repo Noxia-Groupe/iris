@@ -138,8 +138,11 @@ guide de déploiement détaillé.
    *(Reste : pagination des listes brutes achats/heures.)*
 6. ✅ **Marge commerciale paramétrable** (modèle `Parametres`, éditable par les admins)
    + **masquage serveur par rôle** des champs financiers.
-7. Postgres + migrations, typage TS strict, toasts, tests/CI, enrichissement du rapport IA,
-   SSO réel, exploitation de `LigneBudgetPrevisionnel`.
+7. ✅ **Postgres + migrations** : datasource PostgreSQL, migration initiale versionnée
+   (validée contre un PG 16 réel), `prisma migrate deploy` au démarrage, service `db`
+   dans docker-compose. *(Reste : passer les montants de `Float` à `Decimal`.)*
+8. Typage TS strict, toasts, tests/CI, enrichissement du rapport IA, SSO réel,
+   exploitation de `LigneBudgetPrevisionnel`, pagination, rate limiting login.
 
 ---
 
@@ -159,5 +162,6 @@ guide de déploiement détaillé.
 | Marge commerciale paramétrable par les admins (`Parametres`) | ✅ |
 | Stats serveur globales / par conducteur + scoping conducteur | ✅ |
 | Nettoyage git (`*.db`, `dist/`, `index.js`, `.gitignore` UTF-8) | ✅ |
+| PostgreSQL + migrations versionnées (`prisma migrate deploy`) | ✅ |
 | Rate limiting login / CORS restreint | ⏳ Roadmap |
 | Purge de l'historique git (données déjà committées) | ⏳ Roadmap §4 |
