@@ -94,6 +94,31 @@ const Admin = () => {
     }
   };
 
+  const handlePasswordChange = async (userId: string, userName: string) => {
+    const newPassword = window.prompt(`Entrez le nouveau mot de passe pour ${userName} (minimum 6 caractères) :`);
+    if (!newPassword) return;
+    if (newPassword.length < 6) {
+      alert("Le mot de passe doit faire au moins 6 caractères.");
+      return;
+    }
+    
+    try {
+      const res = await fetch(`${API_URL}/users/${userId}/password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword })
+      });
+      if (res.ok) {
+        alert("Mot de passe mis à jour avec succès.");
+      } else {
+        const data = await res.json();
+        alert(data.error || "Erreur lors de la mise à jour du mot de passe.");
+      }
+    } catch (e) {
+      alert("Impossible de joindre le serveur.");
+    }
+  };
+
   return (
     <div>
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 gap-4">
@@ -349,6 +374,7 @@ const Admin = () => {
                   <th className="px-6 py-4 font-semibold">Nom</th>
                   <th className="px-6 py-4 font-semibold">Email</th>
                   <th className="px-6 py-4 font-semibold">Rôle d'accès</th>
+                  <th className="px-6 py-4 font-semibold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -367,6 +393,14 @@ const Admin = () => {
                         <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
                         <option value="ADMIN">Administrateur</option>
                       </select>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button 
+                        onClick={() => handlePasswordChange(u.id, u.name)}
+                        className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded transition-colors"
+                      >
+                        Changer Mdp
+                      </button>
                     </td>
                   </tr>
                 ))}

@@ -154,6 +154,23 @@ app.patch('/api/users/:id/role', async (req, res) => {
   }
 });
 
+app.put('/api/users/:id/password', async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caractères.' });
+    }
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data: { password: hashedPassword }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating password' });
+  }
+});
+
 // Intervenants
 app.get('/api/intervenants', async (req, res) => {
   try {
