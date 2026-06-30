@@ -62,6 +62,13 @@ const requireAdmin: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+// Express 5 type les valeurs de req.params comme `string | string[]`. Nos routes
+// n'utilisent que des paramètres simples (:id) : on en extrait toujours une string.
+function paramId(req: express.Request): string {
+  const id = paramId(req);
+  return Array.isArray(id) ? id[0] : id;
+}
+
 // Convertit récursivement les Decimal Prisma en nombres pour la sérialisation JSON
 // (sinon ils seraient sérialisés en chaînes côté client). Les montants sont stockés
 // en Decimal (précis) en base, et exposés en `number` à l'API.
@@ -271,7 +278,7 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
     }
 
     const chantier = await prisma.chantier.update({
-      where: { id: req.params.id },
+      where: { id: paramId(req) },
       data
     });
     res.json(chantier);
@@ -297,7 +304,7 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       return res.status(400).json({ error: 'Rôle invalide' });
     }
     const user = await prisma.user.update({
-      where: { id: req.params.id },
+      where: { id: paramId(req) },
       data: { role },
       select: { id: true, name: true, email: true, role: true }
     });
@@ -315,7 +322,7 @@ app.put('/api/users/:id/password', requireAuth, requireAdmin, async (req, res) =
     }
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
-      where: { id: req.params.id },
+      where: { id: paramId(req) },
       data: { password: hashedPassword }
     });
     res.json({ success: true });
@@ -419,7 +426,7 @@ app.post('/api/chantiers/:id/photos', requireAuth, uploadPhoto, async (req, res)
       data: {
         url,
         legende: req.body.legende || '',
-        chantierId: req.params.id,
+        chantierId: paramId(req),
         auteurId: (req as AuthRequest).user?.id || null
       }
     });
@@ -431,12 +438,12 @@ app.post('/api/chantiers/:id/photos', requireAuth, uploadPhoto, async (req, res)
 
 app.delete('/api/chantiers/:id/photos/purge', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const photos = await prisma.photoChantier.findMany({ where: { chantierId: req.params.id } });
+    const photos = await prisma.photoChantier.findMany({ where: { chantierId: paramId(req) } });
     for (const p of photos) {
       const filePath = path.join(__dirname, p.url);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
-    await prisma.photoChantier.deleteMany({ where: { chantierId: req.params.id } });
+    await prisma.photoChantier.deleteMany({ where: { chantierId: paramId(req) } });
     res.json({ message: 'Purge terminée' });
   } catch (error) {
     res.status(500).json({ error: 'Error purging photos' });
@@ -445,10 +452,10 @@ app.delete('/api/chantiers/:id/photos/purge', requireAuth, requireAdmin, async (
 
 app.get('/api/chantiers/:id/photos/export', requireAuth, async (req, res) => {
   try {
-    const chantier = await prisma.chantier.findUnique({ where: { id: req.params.id } });
+    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) } });
     if (!chantier) return res.status(404).json({ error: 'Chantier not found' });
 
-    const photos = await prisma.photoChantier.findMany({ where: { chantierId: req.params.id } });
+    const photos = await prisma.photoChantier.findMany({ where: { chantierId: paramId(req) } });
 
     res.attachment(`photos-${chantier.nom.replace(/\s+/g, '_')}.zip`);
     // @ts-ignore — typage de la lib archiver variable selon les versions (export = function)
@@ -477,9 +484,9 @@ app.put('/api/chantiers/:id/commissionnement', requireAuth, requireAdmin, async 
       malusHeure: parseFloat(req.body.malusHeure) || 0
     };
     const comm = await prisma.commissionnement.upsert({
-      where: { chantierId: req.params.id },
+      where: { chantierId: paramId(req) },
       update: data,
-      create: { ...data, chantierId: req.params.id }
+      create: { ...data, chantierId: paramId(req) }
     });
     res.json(comm);
   } catch (error) {
@@ -627,7 +634,7 @@ app.post('/api/chantiers/:id/analyze', requireAuth, async (req, res) => {
 
     // Collect all data for the prompt
     const chantierRaw = await prisma.chantier.findUnique({
-      where: { id: req.params.id },
+      where: { id: paramId(req) },
       include: { pointages: { include: { intervenant: true } }, achats: true }
     });
 
