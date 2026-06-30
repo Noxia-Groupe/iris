@@ -51,10 +51,9 @@ La « marge commerciale réservée aux admins » était gérée par `userRole ==
 React, alors que l'API renvoyait toutes les données (dont `commissionnement`) à tout le
 monde. Un conducteur pouvait voir la marge via la réponse réseau ou en éditant
 `localStorage.user.role`. **Règle métier non respectée.**
-➡️ **Partiellement** : les routes sont protégées (lecture authentifiée), mais le
-filtrage/masquage **par champ** des données financières selon le rôle reste à faire
-côté serveur (voir Roadmap §6). Tant que ce n'est pas fait, considérer la marge
-commerciale comme « non confidentielle vis-à-vis d'un conducteur authentifié ».
+➡️ **Corrigé** : la marge commerciale et le prix de vente global ne sont calculés et
+renvoyés qu'aux admins (et si la marge est activée dans les paramètres). Le calcul est
+centralisé côté serveur ; un conducteur ne reçoit plus ces champs (voir §6).
 
 ### 2.4 Autres failles
 - **`JWT_SECRET` par défaut en dur** → tokens forgeables si l'env manque.
@@ -131,9 +130,14 @@ guide de déploiement détaillé.
 2. ✅ **API URL via `import.meta.env`** : débloque la production.
 3. ✅ **Sécuriser l'API** : `requireAuth` + `requireAdmin`, client qui envoie le token,
    `JWT_SECRET` obligatoire en prod, whitelist anti-mass-assignment, limites d'upload.
-4. **Nettoyer le repo** : retirer `*.db` et `dist/` du suivi git, supprimer `index.js`.
-5. **Endpoints d'agrégation** + scoping par conducteur (stats globales/chantier/conducteur).
-6. **Marge commerciale paramétrable** + **masquage serveur par rôle** des champs financiers.
+4. ✅ **Nettoyer le repo** : `*.db` et `dist/` retirés du suivi git, `index.js` supprimé,
+   `.gitignore` racine réécrit en UTF-8. *(Reste : purge de l'historique git des données
+   déjà committées — nécessite une réécriture d'historique + force-push.)*
+5. ✅ **Endpoints d'agrégation** + scoping par conducteur : `/api/stats/global` et
+   `/api/stats/conducteurs`, métriques par chantier calculées côté serveur.
+   *(Reste : pagination des listes brutes achats/heures.)*
+6. ✅ **Marge commerciale paramétrable** (modèle `Parametres`, éditable par les admins)
+   + **masquage serveur par rôle** des champs financiers.
 7. Postgres + migrations, typage TS strict, toasts, tests/CI, enrichissement du rapport IA,
    SSO réel, exploitation de `LigneBudgetPrevisionnel`.
 
@@ -151,6 +155,9 @@ guide de déploiement détaillé.
 | `JWT_SECRET` obligatoire en production | ✅ |
 | Whitelist anti-mass-assignment (chantier, commissionnement) | ✅ |
 | Limites d'upload (taille + type MIME) | ✅ |
-| Masquage serveur de la marge par rôle | ⏳ Roadmap §6 |
+| Masquage serveur de la marge par rôle | ✅ |
+| Marge commerciale paramétrable par les admins (`Parametres`) | ✅ |
+| Stats serveur globales / par conducteur + scoping conducteur | ✅ |
+| Nettoyage git (`*.db`, `dist/`, `index.js`, `.gitignore` UTF-8) | ✅ |
 | Rate limiting login / CORS restreint | ⏳ Roadmap |
-| Suppression `*.db` / `dist/` du git, suppression `index.js` | ⏳ Roadmap §4 |
+| Purge de l'historique git (données déjà committées) | ⏳ Roadmap §4 |
