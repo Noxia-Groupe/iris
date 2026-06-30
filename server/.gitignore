@@ -1,5 +1,13 @@
 node_modules
-# Keep environment variables out of version control
+
+# Build output (régénéré au build Docker)
+dist/
+
+# Bases de données locales (contiennent des données — ne pas versionner)
+*.db
+prisma/*.db
+
+# Variables d'environnement
 .env
 
 /generated/prisma
