@@ -44,6 +44,8 @@ const Heures = () => {
       .reduce((acc, h) => acc + h.nbrHeures, 0);
   };
 
+  const todayDate = new Date().toISOString().split('T')[0];
+
   return (
     <div>
       <h1 className="text-primary font-bold mb-4">Journal des Heures</h1>
@@ -72,66 +74,106 @@ const Heures = () => {
         })}
       </div>
 
-      <div className="card mb-4">
-        <h2 className="mb-4">Pointer des Heures</h2>
-        <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4 items-start sm:items-end flex-wrap">
-          <div className="form-group mb-0 w-full sm:w-auto" style={{flex: '1 1 150px'}}>
-            <label className="form-label">Date</label>
-            <input required type="date" name="date" className="form-input" />
+      <div className="card mb-6 shadow-sm border-0 bg-white">
+        <h2 className="mb-4 text-xl font-bold text-gray-800 flex items-center gap-2">
+          <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          Saisir des Heures
+        </h2>
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="flex flex-col">
+            <label className="text-sm font-semibold text-gray-600 mb-1">Date</label>
+            <input required type="date" name="date" defaultValue={todayDate} className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" />
           </div>
-          <div className="form-group mb-0" style={{flex: '1 1 200px'}}>
-            <label className="form-label">Intervenant</label>
-            <select required name="intervenantId" className="form-input">
-              <option value="">Sélectionner...</option>
+          
+          <div className="flex flex-col">
+            <label className="text-sm font-semibold text-gray-600 mb-1">Intervenant</label>
+            <select required name="intervenantId" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full bg-white">
+              <option value="">Sélectionner un intervenant...</option>
               {intervenants.map(i => <option key={i.id} value={i.id}>{i.nom} ({i.role})</option>)}
             </select>
           </div>
-          <div className="form-group mb-0" style={{flex: '1 1 200px'}}>
-            <label className="form-label">Chantier</label>
-            <select required name="chantierId" className="form-input">
-              <option value="">Sélectionner...</option>
+          
+          <div className="flex flex-col">
+            <label className="text-sm font-semibold text-gray-600 mb-1">Chantier</label>
+            <select required name="chantierId" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full bg-white">
+              <option value="">Sélectionner un chantier...</option>
               {chantiers.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
             </select>
           </div>
-          <div className="form-group mb-0 w-full sm:w-auto" style={{flex: '1 1 150px'}}>
-            <label className="form-label">Nombre d'heures (h)</label>
-            <input required type="number" step="0.5" min="0.5" name="nbrHeures" className="form-input" />
+          
+          <div className="flex flex-col">
+            <label className="text-sm font-semibold text-gray-600 mb-1">Nombre d'heures (h)</label>
+            <input required type="number" step="0.5" min="0.5" name="nbrHeures" placeholder="Ex: 3.5" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" />
           </div>
-          <div className="form-group mb-0 w-full sm:w-auto" style={{flex: '2 1 200px'}}>
-            <label className="form-label">Commentaire (Optionnel)</label>
-            <input type="text" name="commentaire" className="form-input" placeholder="Travaux effectués..." />
+          
+          <div className="flex flex-col lg:col-span-2">
+            <label className="text-sm font-semibold text-gray-600 mb-1">Commentaire (Optionnel)</label>
+            <input type="text" name="commentaire" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" placeholder="Travaux effectués, imprévus..." />
           </div>
-          <button className="btn btn-primary w-full sm:w-auto" style={{flex: '1 1 100%'}}>Enregistrer le pointage</button>
+          
+          <div className="md:col-span-2 lg:col-span-3 mt-2">
+            <button className="w-full bg-primary hover:bg-primary-dark text-white font-bold py-4 px-6 rounded-xl transition-colors shadow-md text-lg">
+              Enregistrer le pointage
+            </button>
+          </div>
         </form>
       </div>
 
-      <div className="card">
-        <h3 className="mb-4">Historique des Pointages</h3>
-        <div className="overflow-x-auto">
-          <table style={{width: '100%', minWidth: '600px', textAlign: 'left', borderCollapse: 'collapse'}}>
+      <div>
+        <h3 className="mb-4 text-xl font-bold text-gray-800">Historique récent</h3>
+        
+        {/* Vue Mobile : Cartes */}
+        <div className="grid grid-cols-1 gap-4 md:hidden">
+          {heures.slice().reverse().map(h => (
+            <div key={h.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2">
+              <div className="flex justify-between items-start border-b border-gray-50 pb-2">
+                <span className="font-bold text-gray-800">{h.chantier?.nom}</span>
+                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{new Date(h.date).toLocaleDateString()}</span>
+              </div>
+              <div className="flex justify-between items-center mt-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs">
+                    {h.intervenant?.nom?.substring(0, 2).toUpperCase()}
+                  </div>
+                  <span className="text-sm text-gray-600">{h.intervenant?.nom}</span>
+                </div>
+                <div className="flex flex-col items-end">
+                  <span className="font-extrabold text-primary text-lg">{h.nbrHeures}h</span>
+                </div>
+              </div>
+              {h.commentaire && (
+                <p className="text-xs text-gray-500 italic mt-1 bg-gray-50 p-2 rounded-md">"{h.commentaire}"</p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Vue Desktop : Tableau */}
+        <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr style={{borderBottom: '1px solid var(--color-border)'}}>
-              <th style={{padding: '8px'}}>Date</th>
-              <th style={{padding: '8px'}}>Chantier</th>
-              <th style={{padding: '8px'}}>Intervenant</th>
-              <th style={{padding: '8px'}}>Heures Effectuées</th>
-              <th style={{padding: '8px', textAlign: 'right'}}>Coût Interne Calculé</th>
-            </tr>
-          </thead>
-          <tbody>
-            {heures.map(h => (
-              <tr key={h.id} style={{borderBottom: '1px solid var(--color-border)'}}>
-                <td style={{padding: '8px'}}>{new Date(h.date).toLocaleDateString()}</td>
-                <td style={{padding: '8px'}}>{h.chantier?.nom}</td>
-                <td style={{padding: '8px'}}>{h.intervenant?.nom}</td>
-                <td style={{padding: '8px'}}>{h.nbrHeures}h</td>
-                <td style={{padding: '8px', textAlign: 'right', fontWeight: 'bold'}}>
-                  {(h.nbrHeures * h.tauxHoraireApplique).toFixed(2)} €
-                </td>
+              <tr className="bg-gray-50 text-xs uppercase text-gray-500 border-b border-gray-100">
+                <th className="px-6 py-4">Date</th>
+                <th className="px-6 py-4">Chantier</th>
+                <th className="px-6 py-4">Intervenant</th>
+                <th className="px-6 py-4">Heures</th>
+                <th className="px-6 py-4 text-right">Coût Interne</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {heures.slice().reverse().map(h => (
+                <tr key={h.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-6 py-4 text-sm text-gray-600">{new Date(h.date).toLocaleDateString()}</td>
+                  <td className="px-6 py-4 font-semibold text-gray-800">{h.chantier?.nom}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{h.intervenant?.nom}</td>
+                  <td className="px-6 py-4 font-bold text-primary">{h.nbrHeures}h</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-500 text-right">
+                    {(h.nbrHeures * h.tauxHoraireApplique).toFixed(2)} €
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
