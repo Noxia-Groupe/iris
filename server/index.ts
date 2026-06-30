@@ -140,6 +140,20 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
+app.patch('/api/users/:id/role', async (req, res) => {
+  try {
+    const { role } = req.body;
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { role },
+      select: { id: true, name: true, email: true, role: true }
+    });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating user role' });
+  }
+});
+
 // Intervenants
 app.get('/api/intervenants', async (req, res) => {
   try {

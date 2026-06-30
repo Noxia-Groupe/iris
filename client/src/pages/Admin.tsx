@@ -10,8 +10,10 @@ const Admin = () => {
   const [fournisseurs, setFournisseurs] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
   
-  // Mock Rôle pour la démo
-  const [userRole, setUserRole] = useState<'ADMIN' | 'CONDUCTEUR_TRAVAUX'>('ADMIN');
+  // Rôle réel
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
+  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
 
   useEffect(() => {
     fetchData();
@@ -79,14 +81,27 @@ const Admin = () => {
     fetchData();
   };
 
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    try {
+      await fetch(`${API_URL}/users/${userId}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole })
+      });
+      fetchData(); // Rafraîchir la liste
+    } catch (e) {
+      alert("Erreur lors de la mise à jour du rôle");
+    }
+  };
+
   return (
     <div>
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 gap-4">
         <h1 className="text-primary font-bold">Administration & Paramétrage</h1>
         <div className="flex gap-2 items-center bg-gray-100 p-2 rounded">
-          <span className="text-sm font-bold">Vue simulée :</span>
-          <button className={`btn btn-sm ${userRole === 'ADMIN' ? 'btn-primary' : 'bg-white'}`} onClick={() => setUserRole('ADMIN')}>Admin</button>
-          <button className={`btn btn-sm ${userRole === 'CONDUCTEUR_TRAVAUX' ? 'btn-primary' : 'bg-white'}`} onClick={() => setUserRole('CONDUCTEUR_TRAVAUX')}>Conducteur Travaux</button>
+          <span className="text-sm font-semibold text-gray-500">
+            Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : 'Conducteur'}</strong>
+          </span>
         </div>
       </div>
 
@@ -99,6 +114,7 @@ const Admin = () => {
             <button className={`btn ${activeTab === 'categories' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('categories')}>Catégories</button>
             <button className={`btn ${activeTab === 'marges' ? 'btn-primary' : 'bg-white'}`} onClick={() => { setActiveTab('marges'); fetchData(); }}>Marges & Commissions</button>
             <button className={`btn ${activeTab === 'performances' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('performances')}>Performances</button>
+            <button className={`btn ${activeTab === 'utilisateurs' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('utilisateurs')}>Utilisateurs</button>
           </>
         )}
       </div>
@@ -316,6 +332,46 @@ const Admin = () => {
           <h2 className="mb-4 text-primary-dark">Performances & Statistiques des Conducteurs</h2>
           <div className="p-8 text-center text-muted bg-gray-50 rounded">
             (Module V4 : Statistiques d'assiduité de remplissage et classements par conducteur de travaux basés sur les marges générées.)
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'utilisateurs' && userRole === 'ADMIN' && (
+        <div className="card">
+          <h2 className="mb-4 text-primary-dark">Gestion des Comptes Utilisateurs (SSO & Local)</h2>
+          <p className="mb-6 text-sm text-gray-600">
+            Par défaut, les nouveaux utilisateurs se connectant via le SSO Microsoft se voient attribuer le rôle de <strong>Conducteur de Travaux</strong>. Vous pouvez les promouvoir en Administrateur ici.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse bg-white border rounded">
+              <thead>
+                <tr className="bg-gray-50 text-xs uppercase text-gray-500 border-b border-gray-100">
+                  <th className="px-6 py-4 font-semibold">Nom</th>
+                  <th className="px-6 py-4 font-semibold">Email</th>
+                  <th className="px-6 py-4 font-semibold">Rôle d'accès</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {users.map(u => (
+                  <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 font-bold text-gray-800">{u.name}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{u.email}</td>
+                    <td className="px-6 py-4">
+                      <select 
+                        className={`form-input py-1 px-3 text-sm font-semibold rounded ${u.role === 'ADMIN' ? 'bg-primary/10 text-primary border-primary' : 'bg-gray-100 text-gray-600 border-gray-300'}`}
+                        value={u.role}
+                        onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                        disabled={u.email === user?.email} // Empêcher l'admin de se rétrograder lui-même
+                        title={u.email === user?.email ? "Vous ne pouvez pas modifier votre propre rôle." : "Modifier le rôle"}
+                      >
+                        <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
+                        <option value="ADMIN">Administrateur</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
