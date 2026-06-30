@@ -1,6 +1,11 @@
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
+
+# OpenSSL est requis par le moteur Prisma. Sur Alpine (musl), la détection échoue
+# ("Could not parse schema engine response" / erreur de chargement de libssl).
+# On utilise Debian slim + openssl, où Prisma auto-détecte le bon moteur.
+RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copier les fichiers de configuration
 COPY package*.json ./
