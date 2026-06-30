@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const API_URL = 'http://localhost:3001/api';
+import { apiFetch } from '../api';
 
 const Heures = () => {
   const [heures, setHeures] = useState<any[]>([]);
@@ -13,9 +12,9 @@ const Heures = () => {
 
   const fetchData = async () => {
     const [heuresRes, chantiersRes, intervRes] = await Promise.all([
-      fetch(`${API_URL}/heures`),
-      fetch(`${API_URL}/chantiers`),
-      fetch(`${API_URL}/intervenants`)
+      apiFetch('/heures'),
+      apiFetch('/chantiers'),
+      apiFetch('/intervenants')
     ]);
     
     setHeures(await heuresRes.json());
@@ -28,12 +27,11 @@ const Heures = () => {
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData.entries());
     
-    await fetch(`${API_URL}/heures`, {
+    await apiFetch('/heures', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    
+
     (e.target as HTMLFormElement).reset();
     fetchData();
   };

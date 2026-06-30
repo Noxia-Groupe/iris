@@ -1,4 +1,17 @@
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* Couleurs de marque exposées comme tokens Tailwind (génère bg-primary, text-accent, etc.) */
+@theme {
+  --color-primary: #002359;
+  --color-primary-dark: #000726;
+  --color-accent: #0251a1;
+  --color-muted: #666666;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --font-sans: 'Montserrat', sans-serif;
+}
 
 :root {
   /* Noxia Brand Colors */
@@ -148,16 +161,4 @@ body {
   overflow-y: auto;
 }
 
-/* Utilities */
-.text-primary { color: var(--color-primary); }
-.text-accent { color: var(--color-accent); }
-.text-danger { color: var(--color-danger); }
-.text-success { color: var(--color-success); }
-.font-bold { font-weight: 700; }
-.mb-2 { margin-bottom: var(--spacing-2); }
-.mb-4 { margin-bottom: var(--spacing-4); }
-.flex { display: flex; }
-.items-center { align-items: center; }
-.justify-between { justify-content: space-between; }
-.gap-2 { gap: var(--spacing-2); }
-.gap-4 { gap: var(--spacing-4); }
+/* Les utilitaires (flex, gap-*, mb-*, text-primary, ...) sont désormais fournis par Tailwind. */

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const API_URL = 'http://localhost:3001/api';
+import { apiFetch } from '../api';
 
 const Achats = () => {
   const [achats, setAchats] = useState<any[]>([]);
@@ -14,10 +13,10 @@ const Achats = () => {
 
   const fetchData = async () => {
     const [achatsRes, chantiersRes, categoriesRes, fournRes] = await Promise.all([
-      fetch(`${API_URL}/achats`),
-      fetch(`${API_URL}/chantiers`),
-      fetch(`${API_URL}/categories`),
-      fetch(`${API_URL}/fournisseurs`)
+      apiFetch('/achats'),
+      apiFetch('/chantiers'),
+      apiFetch('/categories'),
+      apiFetch('/fournisseurs')
     ]);
     
     setAchats(await achatsRes.json());
@@ -31,12 +30,11 @@ const Achats = () => {
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData.entries());
     
-    await fetch(`${API_URL}/achats`, {
+    await apiFetch('/achats', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    
+
     (e.target as HTMLFormElement).reset();
     fetchData();
   };

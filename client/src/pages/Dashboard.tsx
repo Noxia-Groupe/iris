@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import html2pdf from 'html2pdf.js';
 import imageCompression from 'browser-image-compression';
-
-const API_URL = 'http://localhost:3001/api';
+import { apiFetch, assetUrl } from '../api';
 
 const Dashboard = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
@@ -26,7 +25,7 @@ const Dashboard = () => {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch(`${API_URL}/config`);
+      const res = await apiFetch('/config');
       const data = await res.json();
       setAiEnabled(data.aiEnabled);
     } catch(e) { console.error(e); }
@@ -34,7 +33,7 @@ const Dashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_URL}/chantiers`);
+      const res = await apiFetch('/chantiers');
       const data = await res.json();
       setChantiers(data);
       if (data.length > 0 && !selectedChantierId) {
@@ -57,7 +56,7 @@ const Dashboard = () => {
     if (!selectedChantierId) return;
     setAiLoading(true);
     try {
-      const res = await fetch(`${API_URL}/chantiers/${selectedChantierId}/analyze`, { method: 'POST' });
+      const res = await apiFetch(`/chantiers/${selectedChantierId}/analyze`, { method: 'POST' });
       const data = await res.json();
       if (data.report) setAiReport(data.report);
       else alert(data.error || "Erreur IA");
@@ -73,9 +72,9 @@ const Dashboard = () => {
     const opt = {
       margin: 0.5,
       filename: `Rapport_${selectedChantier.nom}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
+      image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      jsPDF: { unit: 'in' as const, format: 'letter' as const, orientation: 'portrait' as const }
     };
     html2pdf().set(opt).from(printRef.current).save();
   };
@@ -90,7 +89,7 @@ const Dashboard = () => {
       formData.append('photo', compressedFile);
       formData.append('legende', 'Photo mobile');
 
-      await fetch(`${API_URL}/chantiers/${selectedChantierId}/photos`, {
+      await apiFetch(`/chantiers/${selectedChantierId}/photos`, {
         method: 'POST',
         body: formData,
       });
@@ -359,7 +358,7 @@ const Dashboard = () => {
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
               {selectedChantier.photos?.map((p: any) => (
                 <div key={p.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-gray-200 bg-gray-50 aspect-square">
-                  <img src={`http://localhost:3001${p.url}`} alt="Chantier" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                  <img src={assetUrl(p.url)} alt="Chantier" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end">
                     <div className="p-4 w-full">
                       <div className="text-white text-xs font-semibold">{new Date(p.createdAt).toLocaleDateString()}</div>

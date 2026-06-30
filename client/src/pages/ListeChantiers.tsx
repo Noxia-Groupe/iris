@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const API_URL = 'http://localhost:3001/api';
+import { apiFetch } from '../api';
 
 const ListeChantiers = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
@@ -17,7 +16,7 @@ const ListeChantiers = () => {
 
   const fetchChantiers = async () => {
     try {
-      const res = await fetch(`${API_URL}/chantiers`);
+      const res = await apiFetch('/chantiers');
       const data = await res.json();
       if(Array.isArray(data)) setChantiers(data);
     } catch (e) {
@@ -27,14 +26,29 @@ const ListeChantiers = () => {
     }
   };
 
-  const handleZipExport = (id: string) => {
-    window.location.href = `${API_URL}/chantiers/${id}/photos/export`;
+  const handleZipExport = async (id: string, nom: string) => {
+    try {
+      const res = await apiFetch(`/chantiers/${id}/photos/export`);
+      if (!res.ok) { alert("Export impossible"); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `photos-${nom.replace(/\s+/g, '_')}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert("Export impossible");
+    }
   };
 
   const handlePurge = async (id: string) => {
     if(!confirm("Purger TOUTES les photos de ce chantier ?")) return;
     try {
-      await fetch(`${API_URL}/chantiers/${id}/photos/purge`, { method: 'DELETE' });
+      await apiFetch(`/chantiers/${id}/photos/purge`, { method: 'DELETE' });
       fetchChantiers();
     } catch(e) {
       console.error(e);
@@ -127,8 +141,8 @@ const ListeChantiers = () => {
                   {userRole === 'ADMIN' && (
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
-                        <button 
-                          onClick={() => handleZipExport(c.id)} 
+                        <button
+                          onClick={() => handleZipExport(c.id, c.nom)}
                           className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
                           title="Télécharger Photos (ZIP)"
                         >

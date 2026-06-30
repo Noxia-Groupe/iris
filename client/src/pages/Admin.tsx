@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
-
-const API_URL = 'http://localhost:3001/api';
+import { apiFetch } from '../api';
 
 const Admin = () => {
   const [activeTab, setActiveTab] = useState('chantiers');
-  const [users, setUsers] = useState<any[]>([]); // Mock users
+  const [users, setUsers] = useState<any[]>([]);
   const [intervenants, setIntervenants] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
   const [fournisseurs, setFournisseurs] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
   
@@ -20,24 +18,24 @@ const Admin = () => {
   }, [activeTab]);
 
   const fetchData = async () => {
-    const endpoints = {
-      intervenants: `${API_URL}/intervenants`,
-      categories: `${API_URL}/categories`,
-      fournisseurs: `${API_URL}/fournisseurs`,
-      chantiers: `${API_URL}/chantiers`,
-      users: `${API_URL}/users`
+    // Les onglets marges/performances/utilisateurs s'appuient sur la liste des chantiers.
+    const endpoints: Record<string, string> = {
+      intervenants: '/intervenants',
+      fournisseurs: '/fournisseurs',
+      chantiers: '/chantiers',
+      marges: '/chantiers',
+      performances: '/chantiers',
     };
-    
-    try {
-      const res = await fetch(endpoints[activeTab as keyof typeof endpoints]);
-      const data = await res.json();
-      
-      if (activeTab === 'intervenants') setIntervenants(data);
-      if (activeTab === 'categories') setCategories(data);
-      if (activeTab === 'fournisseurs') setFournisseurs(data);
-      if (activeTab === 'chantiers') setChantiers(data);
 
-      const usersRes = await fetch(endpoints.users);
+    try {
+      const res = await apiFetch(endpoints[activeTab] || '/chantiers');
+      const data = await res.json();
+
+      if (activeTab === 'intervenants') setIntervenants(data);
+      else if (activeTab === 'fournisseurs') setFournisseurs(data);
+      else setChantiers(data);
+
+      const usersRes = await apiFetch('/users');
       setUsers(await usersRes.json());
     } catch (e) {
       console.error(e);
@@ -49,12 +47,11 @@ const Admin = () => {
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData.entries());
     
-    await fetch(`${API_URL}/${type}`, {
+    await apiFetch(`/${type}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    
+
     (e.target as HTMLFormElement).reset();
     fetchData();
   };
@@ -72,9 +69,8 @@ const Admin = () => {
       malusHeure: parseFloat(data.malusHeure as string) || 0
     };
 
-    await fetch(`${API_URL}/chantiers/${chantierId}/commissionnement`, {
+    await apiFetch(`/chantiers/${chantierId}/commissionnement`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     alert('Règles de commissionnement mises à jour');
@@ -83,9 +79,8 @@ const Admin = () => {
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     try {
-      await fetch(`${API_URL}/users/${userId}/role`, {
+      await apiFetch(`/users/${userId}/role`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: newRole })
       });
       fetchData(); // Rafraîchir la liste
@@ -103,9 +98,8 @@ const Admin = () => {
     }
     
     try {
-      const res = await fetch(`${API_URL}/users/${userId}/password`, {
+      const res = await apiFetch(`/users/${userId}/password`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPassword })
       });
       if (res.ok) {
