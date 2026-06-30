@@ -1,6 +1,25 @@
 version: '3.8'
 
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: marge_db
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-marge}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-marge_password}
+      - POSTGRES_DB=${POSTGRES_DB:-marge}
+    volumes:
+      # Stockage persistant de la base PostgreSQL
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - noxia-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marge} -d ${POSTGRES_DB:-marge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./server
@@ -8,14 +27,18 @@ services:
     container_name: marge_backend
     restart: always
     environment:
-      # Si on passe sur Postgres un jour, la DATABASE_URL ira ici.
-      # Pour l'instant SQLite crée dev.db en local.
       - PORT=3001
       - NODE_ENV=production
+      # URL de connexion construite à partir des identifiants du service "db".
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-marge}:${POSTGRES_PASSWORD:-marge_password}@db:5432/${POSTGRES_DB:-marge}?schema=public
+    # Secrets applicatifs (JWT_SECRET obligatoire en prod, GEMINI_API_KEY, ADMIN_*).
+    env_file:
+      - ./server/.env
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      # Stockage persistant pour la BDD SQLite
-      - sqlite_data:/app/prisma
-      # Stockage persistant des photos (100% gratuit sur le disque VPS)
+      # Stockage persistant des photos (sur le disque VPS)
       - uploads_data:/app/uploads
     networks:
       - noxia-network
@@ -42,5 +65,5 @@ networks:
     external: true
 
 volumes:
-  sqlite_data:
+  postgres_data:
   uploads_data:
