@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const API_URL = 'http://localhost:3001/api';
+import { apiFetch } from '../api';
 
 const ListeChantiers = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
@@ -17,7 +16,7 @@ const ListeChantiers = () => {
 
   const fetchChantiers = async () => {
     try {
-      const res = await fetch(`${API_URL}/chantiers`);
+      const res = await apiFetch('/chantiers');
       const data = await res.json();
       if(Array.isArray(data)) setChantiers(data);
     } catch (e) {
@@ -27,14 +26,29 @@ const ListeChantiers = () => {
     }
   };
 
-  const handleZipExport = (id: string) => {
-    window.location.href = `${API_URL}/chantiers/${id}/photos/export`;
+  const handleZipExport = async (id: string, nom: string) => {
+    try {
+      const res = await apiFetch(`/chantiers/${id}/photos/export`);
+      if (!res.ok) { alert("Export impossible"); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `photos-${nom.replace(/\s+/g, '_')}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert("Export impossible");
+    }
   };
 
   const handlePurge = async (id: string) => {
     if(!confirm("Purger TOUTES les photos de ce chantier ?")) return;
     try {
-      await fetch(`${API_URL}/chantiers/${id}/photos/purge`, { method: 'DELETE' });
+      await apiFetch(`/chantiers/${id}/photos/purge`, { method: 'DELETE' });
       fetchChantiers();
     } catch(e) {
       console.error(e);
@@ -76,27 +90,12 @@ const ListeChantiers = () => {
                 </td>
               </tr>
             ) : list.map(c => {
-              // Calcul des métriques
-              const depenseMaterielReelle = c.achats?.reduce((acc: number, a: any) => acc + a.montantHT, 0) || 0;
-              let heuresRealisees = 0;
-              let depenseMOReelle = 0;
-              c.pointages?.forEach((h: any) => {
-                heuresRealisees += h.nbrHeures;
-                depenseMOReelle += (h.nbrHeures * h.tauxHoraireApplique);
-              });
-              
-              const totalDepensesReelles = depenseMaterielReelle + depenseMOReelle;
-              const comm = c.commissionnement;
-              const diffHeures = c.heuresVendues - heuresRealisees; 
-              
-              let bonusMalus = 0;
-              if (comm?.mode === 'DYNAMIQUE') {
-                if (diffHeures > 0) bonusMalus = diffHeures * 30 * (comm.bonusHeure / 100); 
-                else bonusMalus = diffHeures * 30 * (comm.malusHeure / 100); 
-              }
-              
-              const margeCommerciale = c.budgetGlobalVendu - totalDepensesReelles + bonusMalus;
-              const progressPct = Math.min(100, Math.max(0, (heuresRealisees / (c.heuresVendues || 1)) * 100));
+              // Métriques calculées côté serveur (marge masquée pour les non-admins)
+              const metrics = c.metrics || {};
+              const heuresRealisees = metrics.heuresRealisees || 0;
+              const diffHeures = metrics.diffHeures ?? (c.heuresVendues - heuresRealisees);
+              const margeCommerciale: number | null = metrics.margeCommerciale ?? null;
+              const progressPct = Math.min(100, Math.max(0, metrics.pctHeures ?? 0));
 
               return (
                 <tr key={c.id} className="hover:bg-gray-50 transition-colors">
@@ -115,9 +114,13 @@ const ListeChantiers = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     {userRole === 'ADMIN' ? (
-                      <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                        {margeCommerciale > 0 ? '+' : ''}{margeCommerciale.toLocaleString()} €
-                      </span>
+                      margeCommerciale !== null ? (
+                        <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                          {margeCommerciale > 0 ? '+' : ''}{margeCommerciale.toLocaleString()} €
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 text-sm">—</span>
+                      )
                     ) : (
                       <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                         {diffHeures > 0 ? '+' : ''}{diffHeures} h
@@ -127,8 +130,8 @@ const ListeChantiers = () => {
                   {userRole === 'ADMIN' && (
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
-                        <button 
-                          onClick={() => handleZipExport(c.id)} 
+                        <button
+                          onClick={() => handleZipExport(c.id, c.nom)}
                           className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
                           title="Télécharger Photos (ZIP)"
                         >

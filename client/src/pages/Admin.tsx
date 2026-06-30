@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
-
-const API_URL = 'http://localhost:3001/api';
+import { apiFetch } from '../api';
 
 const Admin = () => {
   const [activeTab, setActiveTab] = useState('chantiers');
-  const [users, setUsers] = useState<any[]>([]); // Mock users
+  const [users, setUsers] = useState<any[]>([]);
   const [intervenants, setIntervenants] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
   const [fournisseurs, setFournisseurs] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
+  const [parametres, setParametres] = useState<any>(null);
+  const [perf, setPerf] = useState<any[]>([]);
   
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -20,27 +20,50 @@ const Admin = () => {
   }, [activeTab]);
 
   const fetchData = async () => {
-    const endpoints = {
-      intervenants: `${API_URL}/intervenants`,
-      categories: `${API_URL}/categories`,
-      fournisseurs: `${API_URL}/fournisseurs`,
-      chantiers: `${API_URL}/chantiers`,
-      users: `${API_URL}/users`
+    // Les onglets marges/performances/utilisateurs s'appuient sur la liste des chantiers.
+    const endpoints: Record<string, string> = {
+      intervenants: '/intervenants',
+      fournisseurs: '/fournisseurs',
+      chantiers: '/chantiers',
+      marges: '/chantiers',
+      performances: '/chantiers',
     };
-    
-    try {
-      const res = await fetch(endpoints[activeTab as keyof typeof endpoints]);
-      const data = await res.json();
-      
-      if (activeTab === 'intervenants') setIntervenants(data);
-      if (activeTab === 'categories') setCategories(data);
-      if (activeTab === 'fournisseurs') setFournisseurs(data);
-      if (activeTab === 'chantiers') setChantiers(data);
 
-      const usersRes = await fetch(endpoints.users);
+    try {
+      const res = await apiFetch(endpoints[activeTab] || '/chantiers');
+      const data = await res.json();
+
+      if (activeTab === 'intervenants') setIntervenants(data);
+      else if (activeTab === 'fournisseurs') setFournisseurs(data);
+      else setChantiers(data);
+
+      const usersRes = await apiFetch('/users');
       setUsers(await usersRes.json());
+
+      if (activeTab === 'marges') {
+        const pRes = await apiFetch('/parametres');
+        if (pRes.ok) setParametres(await pRes.json());
+      }
+      if (activeTab === 'performances') {
+        const perfRes = await apiFetch('/stats/conducteurs');
+        if (perfRes.ok) setPerf(await perfRes.json());
+      }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleParamsSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    const payload = {
+      margeCommercialeActive: formData.get('margeCommercialeActive') === 'on',
+      tauxHoraireMoyen: parseFloat(formData.get('tauxHoraireMoyen') as string) || 0,
+    };
+    const res = await apiFetch('/parametres', { method: 'PUT', body: JSON.stringify(payload) });
+    if (res.ok) {
+      setParametres(await res.json());
+      alert('Paramètres mis à jour');
     }
   };
 
@@ -49,12 +72,11 @@ const Admin = () => {
     const formData = new FormData(e.target as HTMLFormElement);
     const data = Object.fromEntries(formData.entries());
     
-    await fetch(`${API_URL}/${type}`, {
+    await apiFetch(`/${type}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    
+
     (e.target as HTMLFormElement).reset();
     fetchData();
   };
@@ -72,9 +94,8 @@ const Admin = () => {
       malusHeure: parseFloat(data.malusHeure as string) || 0
     };
 
-    await fetch(`${API_URL}/chantiers/${chantierId}/commissionnement`, {
+    await apiFetch(`/chantiers/${chantierId}/commissionnement`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     alert('Règles de commissionnement mises à jour');
@@ -83,9 +104,8 @@ const Admin = () => {
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     try {
-      await fetch(`${API_URL}/users/${userId}/role`, {
+      await apiFetch(`/users/${userId}/role`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: newRole })
       });
       fetchData(); // Rafraîchir la liste
@@ -103,9 +123,8 @@ const Admin = () => {
     }
     
     try {
-      const res = await fetch(`${API_URL}/users/${userId}/password`, {
+      const res = await apiFetch(`/users/${userId}/password`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPassword })
       });
       if (res.ok) {
@@ -315,7 +334,25 @@ const Admin = () => {
       )}
 
       {activeTab === 'marges' && userRole === 'ADMIN' && (
-        <div className="card">
+        <>
+          <div className="card mb-4">
+            <h2 className="mb-2 text-primary-dark">Paramètres de la Marge Commerciale</h2>
+            <p className="text-sm text-muted mb-4">
+              Réglages globaux. La marge commerciale est calculée côté serveur et n'est visible que par les administrateurs.
+            </p>
+            <form key={parametres ? 'loaded' : 'loading'} onSubmit={handleParamsSubmit} className="flex flex-col sm:flex-row gap-6 sm:items-end">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" name="margeCommercialeActive" defaultChecked={parametres?.margeCommercialeActive ?? true} className="w-4 h-4" />
+                <span className="text-sm font-semibold text-gray-700">Activer l'affichage et le calcul de la marge commerciale</span>
+              </label>
+              <div className="form-group mb-0">
+                <label className="form-label">Taux horaire moyen (€/h)</label>
+                <input type="number" step="0.5" name="tauxHoraireMoyen" defaultValue={parametres?.tauxHoraireMoyen ?? 30} className="form-input" />
+              </div>
+              <button className="btn btn-primary">Enregistrer</button>
+            </form>
+          </div>
+          <div className="card">
           <h2 className="mb-4 text-primary-dark">Politique de Commissionnement par Chantier</h2>
           <div className="grid grid-cols-1 gap-6">
             {chantiers.map(c => {
@@ -349,14 +386,43 @@ const Admin = () => {
               );
             })}
           </div>
-        </div>
+          </div>
+        </>
       )}
 
       {activeTab === 'performances' && userRole === 'ADMIN' && (
         <div className="card">
           <h2 className="mb-4 text-primary-dark">Performances & Statistiques des Conducteurs</h2>
-          <div className="p-8 text-center text-muted bg-gray-50 rounded">
-            (Module V4 : Statistiques d'assiduité de remplissage et classements par conducteur de travaux basés sur les marges générées.)
+          <p className="text-sm text-muted mb-4">Classement par marge commerciale générée (calculé côté serveur).</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 text-xs uppercase text-gray-500 border-b border-gray-100">
+                  <th className="px-4 py-3 font-semibold">#</th>
+                  <th className="px-4 py-3 font-semibold">Conducteur</th>
+                  <th className="px-4 py-3 font-semibold text-center">Chantiers</th>
+                  <th className="px-4 py-3 font-semibold text-right">CA Vendu</th>
+                  <th className="px-4 py-3 font-semibold text-right">Marge générée</th>
+                  <th className="px-4 py-3 font-semibold text-right">Marge %</th>
+                  <th className="px-4 py-3 font-semibold text-right">Remplissage h.</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {perf.length === 0 ? (
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 italic">Aucune donnée (aucun chantier affecté à un conducteur).</td></tr>
+                ) : perf.map((p, i) => (
+                  <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 font-bold text-gray-400">{i + 1}</td>
+                    <td className="px-4 py-3 font-bold text-gray-800">{p.name}</td>
+                    <td className="px-4 py-3 text-center">{p.nbChantiers}</td>
+                    <td className="px-4 py-3 text-right text-gray-600">{Math.round(p.caTotal).toLocaleString()} €</td>
+                    <td className={`px-4 py-3 text-right font-bold ${p.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{Math.round(p.margeTotal).toLocaleString()} €</td>
+                    <td className="px-4 py-3 text-right text-gray-600">{(p.margePct ?? 0).toFixed(1)}%</td>
+                    <td className="px-4 py-3 text-right text-gray-600">{(p.tauxRemplissageHeures ?? 0).toFixed(0)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

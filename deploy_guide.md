@@ -48,27 +48,45 @@ cd noxia-marge-chantier
 git pull origin main
 ```
 
-## 2. Configuration (Fichier .env)
+## 2. Configuration (Fichiers .env)
 
-Créez le fichier de configuration côté serveur (`server/.env`) :
+L'application utilise désormais **PostgreSQL** (conteneurisé). Deux fichiers de
+configuration sont nécessaires. Des modèles sont fournis (`.env.example`).
+
+**a) `.env` à la racine** (identifiants de la base, lus par docker-compose) :
 
 ```bash
-cd server
+cp .env.example .env
 nano .env
 ```
-
-Ajoutez-y ces variables :
 ```env
-PORT=3001
-NODE_ENV=production
+POSTGRES_USER=marge
+POSTGRES_PASSWORD=un_mot_de_passe_base_robuste
+POSTGRES_DB=marge
+```
 
-# Optionnel : Clé API pour l'Intelligence Artificielle Google Gemini (laissez vide pour désactiver la fonction IA)
-GEMINI_API_KEY="votre_clé_api_gemini_si_besoin"
+**b) `server/.env`** (secrets applicatifs) :
 
-# Identifiants du compte administrateur (Créé automatiquement au 1er lancement)
+```bash
+cp server/.env.example server/.env
+nano server/.env
+```
+```env
+# OBLIGATOIRE en production : le serveur refuse de démarrer sans cette clé.
+JWT_SECRET="une_longue_chaine_aleatoire_et_secrete"
+
+# Identifiants du compte administrateur (créé automatiquement au 1er lancement)
 ADMIN_EMAIL="votre_email@domaine.com"
 ADMIN_PASSWORD="un_mot_de_passe_robuste"
+
+# Optionnel : clé API Google Gemini (laissez vide pour désactiver le rapport IA)
+GEMINI_API_KEY=""
+
+PORT=3001
 ```
+
+> Note : en Docker, `DATABASE_URL` est construite et injectée **automatiquement** par
+> docker-compose à partir du service `db` — inutile de la définir vous-même ici.
 
 ## 3. Lancement avec Docker Compose
 
@@ -79,6 +97,24 @@ cd ..
 docker-compose up -d --build
 ```
 *Note : Le réseau externe `nginx-proxy` doit déjà exister sur votre VPS, car il est géré par votre NPM.*
+
+### Migrations de base de données
+
+Les **migrations Prisma sont appliquées automatiquement** au démarrage du conteneur
+backend (`prisma migrate deploy`). Pour faire évoluer le schéma par la suite :
+
+1. En local, modifiez `server/prisma/schema.prisma` puis créez la migration :
+   `npx prisma migrate dev --name description_du_changement`
+2. Commitez le dossier généré dans `server/prisma/migrations/`.
+3. Sur le VPS, `docker-compose up -d --build` rejoue les nouvelles migrations.
+
+### Sauvegarde de la base
+
+Les données vivent dans le volume Docker `postgres_data`. Pour un export :
+
+```bash
+docker exec marge_db pg_dump -U marge marge > sauvegarde_$(date +%F).sql
+```
 
 ## 4. Configuration dans Nginx Proxy Manager (NPM)
 

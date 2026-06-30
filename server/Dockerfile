@@ -9,9 +9,13 @@ COPY tsconfig.json ./
 # Installer les dépendances
 RUN npm install
 
-# Copier le code source et le schéma Prisma
+# Copier le code source, le schéma Prisma et les migrations
 COPY prisma ./prisma
 COPY *.ts ./
+
+# DATABASE_URL factice : nécessaire au build de `prisma generate` (aucune connexion
+# réelle n'est effectuée ici). La vraie URL est injectée au runtime par docker-compose.
+ENV DATABASE_URL="postgresql://user:password@localhost:5432/marge?schema=public"
 
 # Générer le client Prisma et compiler le TypeScript
 RUN npx prisma generate
@@ -23,5 +27,5 @@ RUN mkdir -p uploads
 # Exposer le port de l'API
 EXPOSE 3001
 
-# Lancer le serveur (assurez-vous de faire un db push ou db deploy selon votre CI/CD)
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node dist/index.js"]
+# Au démarrage : applique les migrations versionnées (crée/maj le schéma) puis lance l'API.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

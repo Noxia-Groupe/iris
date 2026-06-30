@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import multer from 'multer';
 import archiver from 'archiver';
 import path from 'path';
@@ -21,6 +21,123 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// --- Sécurité : résolution du secret JWT ---
+// En production, le secret est OBLIGATOIRE : on refuse de démarrer sinon.
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET manquant : définissez-le dans server/.env avant de démarrer en production.');
+  }
+  console.warn('[AVERTISSEMENT] JWT_SECRET non défini — clé de développement non sécurisée utilisée.');
+  return 'dev_only_insecure_secret_change_me';
+}
+const JWT_SECRET = resolveJwtSecret();
+
+// --- Middlewares d'authentification / autorisation ---
+interface AuthRequest extends express.Request {
+  user?: { id: string; role: string };
+}
+
+const requireAuth: express.RequestHandler = (req, res, next) => {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Authentification requise' });
+    return;
+  }
+  try {
+    const payload = jwt.verify(header.slice(7), JWT_SECRET) as { id: string; role: string };
+    (req as AuthRequest).user = { id: payload.id, role: payload.role };
+    next();
+  } catch {
+    res.status(401).json({ error: 'Session expirée ou invalide' });
+  }
+};
+
+const requireAdmin: express.RequestHandler = (req, res, next) => {
+  if ((req as AuthRequest).user?.role !== 'ADMIN') {
+    res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+    return;
+  }
+  next();
+};
+
+// Convertit récursivement les Decimal Prisma en nombres pour la sérialisation JSON
+// (sinon ils seraient sérialisés en chaînes côté client). Les montants sont stockés
+// en Decimal (précis) en base, et exposés en `number` à l'API.
+function decimalToNumber(value: any): any {
+  if (value === null || value === undefined) return value;
+  if (Prisma.Decimal.isDecimal(value)) return (value as Prisma.Decimal).toNumber();
+  if (value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map(decimalToNumber);
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      out[key] = decimalToNumber(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+// --- Paramètres globaux (singleton) ---
+interface Parametres { margeCommercialeActive: boolean; tauxHoraireMoyen: number }
+
+// Retourne les paramètres avec les Decimal convertis en nombres.
+async function getParametres(): Promise<Parametres> {
+  const existing = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+  const p = existing ?? await prisma.parametres.create({ data: { id: 'singleton' } });
+  return decimalToNumber(p) as Parametres;
+}
+
+// --- Calcul centralisé des métriques d'un chantier (source unique de vérité) ---
+// La marge commerciale n'est calculée que pour les admins ET si elle est activée.
+function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: boolean) {
+  const achats: any[] = chantier.achats || [];
+  const pointages: any[] = chantier.pointages || [];
+
+  const materielReel = achats.reduce((s: number, a: any) => s + a.montantHT, 0);
+  let heuresRealisees = 0;
+  let moReel = 0;
+  for (const p of pointages) {
+    heuresRealisees += p.nbrHeures;
+    moReel += p.nbrHeures * p.tauxHoraireApplique;
+  }
+  const totalDepenses = materielReel + moReel;
+  const diffHeures = chantier.heuresVendues - heuresRealisees;
+  const pctMateriel = chantier.budgetMaterielVendu > 0 ? (materielReel / chantier.budgetMaterielVendu) * 100 : 0;
+  const pctHeures = chantier.heuresVendues > 0 ? (heuresRealisees / chantier.heuresVendues) * 100 : 0;
+
+  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures };
+
+  if (!isAdmin || !params.margeCommercialeActive) {
+    return { ...base, bonusMalus: null, margeBrute: null, margeCommerciale: null, margePct: null };
+  }
+
+  const comm = chantier.commissionnement;
+  let bonusMalus = 0;
+  if (comm && comm.mode === 'DYNAMIQUE') {
+    const taux = diffHeures > 0 ? comm.bonusHeure : comm.malusHeure;
+    bonusMalus = diffHeures * params.tauxHoraireMoyen * (taux / 100);
+  }
+  const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
+  const margeCommerciale = margeBrute + bonusMalus;
+  const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
+
+  return { ...base, bonusMalus, margeBrute, margeCommerciale, margePct };
+}
+
+// Sérialise un chantier pour le client en masquant les données commerciales aux non-admins.
+function serializeChantier(chantier: any, params: Parametres, isAdmin: boolean) {
+  const c = decimalToNumber(chantier);
+  return {
+    ...c,
+    budgetGlobalVendu: isAdmin ? c.budgetGlobalVendu : null,
+    commissionnement: isAdmin ? c.commissionnement : null,
+    metrics: computeChantierMetrics(c, params, isAdmin),
+  };
+}
+
 // Configuration Multer pour le stockage local des photos
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -37,33 +154,49 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 Mo max par fichier
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Seules les images sont autorisées.'));
+  }
+});
 
-// Routes de base
+// Wrapper pour transformer les erreurs Multer (taille/type) en réponses JSON propres
+const uploadPhoto: express.RequestHandler = (req, res, next) => {
+  upload.single('photo')(req, res, (err: unknown) => {
+    if (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Upload invalide' });
+      return;
+    }
+    next();
+  });
+};
+
+// Routes de base (publiques)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// Configuration globale
+// Configuration globale (publique : indique simplement si l'IA est activée)
 app.get('/api/config', (req, res) => {
   res.json({ aiEnabled: !!process.env.GEMINI_API_KEY });
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_default_key_change_in_prod';
-
-// Auth Login
+// Auth Login (publique)
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await prisma.user.findUnique({ where: { email } });
-    
+
     if (!user || !user.password) {
       return res.status(401).json({ error: 'Identifiants incorrects' });
     }
-    
+
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
       return res.status(401).json({ error: 'Identifiants incorrects' });
     }
-    
+
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (error) {
@@ -72,8 +205,10 @@ app.post('/api/login', async (req, res) => {
 });
 
 // Chantiers
-app.get('/api/chantiers', async (req, res) => {
+app.get('/api/chantiers', requireAuth, async (req, res) => {
   try {
+    const isAdmin = (req as AuthRequest).user?.role === 'ADMIN';
+    const params = await getParametres();
     const chantiers = await prisma.chantier.findMany({
       include: {
         responsable: true,
@@ -83,13 +218,13 @@ app.get('/api/chantiers', async (req, res) => {
         commissionnement: true
       }
     });
-    res.json(chantiers);
+    res.json(chantiers.map((c: any) => serializeChantier(c, params, isAdmin)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
   }
 });
 
-app.post('/api/chantiers', async (req, res) => {
+app.post('/api/chantiers', requireAuth, requireAdmin, async (req, res) => {
   try {
     const chantier = await prisma.chantier.create({
       data: {
@@ -117,12 +252,27 @@ app.post('/api/chantiers', async (req, res) => {
   }
 });
 
-// Update Chantier (pour le statut)
-app.patch('/api/chantiers/:id', async (req, res) => {
+// Update Chantier (pour le statut, le budget, etc.) — champs en liste blanche (anti mass-assignment)
+app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
+    const allowed = ['nom', 'client', 'numeroDevis', 'statut', 'responsableId'];
+    const numericFields = ['budgetGlobalVendu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu', 'heuresVendues'];
+    const dateFields = ['dateDebut', 'dateFin'];
+
+    const data: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (key in req.body) data[key] = req.body[key];
+    }
+    for (const key of numericFields) {
+      if (key in req.body) data[key] = parseFloat(req.body[key]) || 0;
+    }
+    for (const key of dateFields) {
+      if (key in req.body && req.body[key]) data[key] = new Date(req.body[key]).toISOString();
+    }
+
     const chantier = await prisma.chantier.update({
       where: { id: req.params.id },
-      data: req.body
+      data
     });
     res.json(chantier);
   } catch (error) {
@@ -130,8 +280,8 @@ app.patch('/api/chantiers/:id', async (req, res) => {
   }
 });
 
-// Users
-app.get('/api/users', async (req, res) => {
+// Users (administration réservée aux admins)
+app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const users = await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true } });
     res.json(users);
@@ -140,9 +290,12 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-app.patch('/api/users/:id/role', async (req, res) => {
+app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { role } = req.body;
+    if (role !== 'ADMIN' && role !== 'CONDUCTEUR_TRAVAUX') {
+      return res.status(400).json({ error: 'Rôle invalide' });
+    }
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: { role },
@@ -154,7 +307,7 @@ app.patch('/api/users/:id/role', async (req, res) => {
   }
 });
 
-app.put('/api/users/:id/password', async (req, res) => {
+app.put('/api/users/:id/password', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { newPassword } = req.body;
     if (!newPassword || newPassword.length < 6) {
@@ -172,15 +325,15 @@ app.put('/api/users/:id/password', async (req, res) => {
 });
 
 // Intervenants
-app.get('/api/intervenants', async (req, res) => {
+app.get('/api/intervenants', requireAuth, async (req, res) => {
   try {
-    res.json(await prisma.intervenant.findMany());
+    res.json(decimalToNumber(await prisma.intervenant.findMany()));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching intervenants' });
   }
 });
 
-app.post('/api/intervenants', async (req, res) => {
+app.post('/api/intervenants', requireAuth, requireAdmin, async (req, res) => {
   try {
     res.json(await prisma.intervenant.create({
       data: {
@@ -195,21 +348,21 @@ app.post('/api/intervenants', async (req, res) => {
 });
 
 // Categories & Fournisseurs
-app.get('/api/categories', async (req, res) => res.json(await prisma.categorie.findMany()));
-app.post('/api/categories', async (req, res) => res.json(await prisma.categorie.create({ data: req.body })));
-app.get('/api/fournisseurs', async (req, res) => res.json(await prisma.fournisseur.findMany()));
-app.post('/api/fournisseurs', async (req, res) => res.json(await prisma.fournisseur.create({ data: req.body })));
+app.get('/api/categories', requireAuth, async (req, res) => res.json(await prisma.categorie.findMany()));
+app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => res.json(await prisma.categorie.create({ data: { nom: req.body.nom, description: req.body.description || null } })));
+app.get('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.findMany()));
+app.post('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.create({ data: { nom: req.body.nom, contact: req.body.contact || null } })));
 
 // Achats
-app.get('/api/achats', async (req, res) => {
+app.get('/api/achats', requireAuth, async (req, res) => {
   try {
-    res.json(await prisma.achatReel.findMany({ include: { chantier: true, categorie: true, fournisseur: true } }));
+    res.json(decimalToNumber(await prisma.achatReel.findMany({ include: { chantier: true, categorie: true, fournisseur: true } })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching achats' });
   }
 });
 
-app.post('/api/achats', async (req, res) => {
+app.post('/api/achats', requireAuth, async (req, res) => {
   try {
     res.json(await prisma.achatReel.create({
       data: {
@@ -228,19 +381,19 @@ app.post('/api/achats', async (req, res) => {
 });
 
 // Pointages (Heures)
-app.get('/api/heures', async (req, res) => {
+app.get('/api/heures', requireAuth, async (req, res) => {
   try {
-    res.json(await prisma.pointageHeure.findMany({ include: { chantier: true, intervenant: true } }));
+    res.json(decimalToNumber(await prisma.pointageHeure.findMany({ include: { chantier: true, intervenant: true } })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching heures' });
   }
 });
 
-app.post('/api/heures', async (req, res) => {
+app.post('/api/heures', requireAuth, async (req, res) => {
   try {
     const intervenant = await prisma.intervenant.findUnique({ where: { id: req.body.intervenantId } });
     if (!intervenant) return res.status(404).json({ error: 'Intervenant not found' });
-    
+
     res.json(await prisma.pointageHeure.create({
       data: {
         date: new Date(req.body.date).toISOString(),
@@ -257,20 +410,17 @@ app.post('/api/heures', async (req, res) => {
 });
 
 // Photos Upload & Purge
-app.post('/api/chantiers/:id/photos', upload.single('photo'), async (req, res) => {
+app.post('/api/chantiers/:id/photos', requireAuth, uploadPhoto, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    
-    // On limitera côté front ou middleware plus tard si besoin.
-    // @ts-ignore
+
     const url = `/uploads/${req.file.filename}`;
     const photo = await prisma.photoChantier.create({
       data: {
         url,
-        // @ts-ignore
         legende: req.body.legende || '',
         chantierId: req.params.id,
-        auteurId: req.body.auteurId || null
+        auteurId: (req as AuthRequest).user?.id || null
       }
     });
     res.json(photo);
@@ -279,7 +429,7 @@ app.post('/api/chantiers/:id/photos', upload.single('photo'), async (req, res) =
   }
 });
 
-app.delete('/api/chantiers/:id/photos/purge', async (req, res) => {
+app.delete('/api/chantiers/:id/photos/purge', requireAuth, requireAdmin, async (req, res) => {
   try {
     const photos = await prisma.photoChantier.findMany({ where: { chantierId: req.params.id } });
     for (const p of photos) {
@@ -293,18 +443,18 @@ app.delete('/api/chantiers/:id/photos/purge', async (req, res) => {
   }
 });
 
-app.get('/api/chantiers/:id/photos/export', async (req, res) => {
+app.get('/api/chantiers/:id/photos/export', requireAuth, async (req, res) => {
   try {
     const chantier = await prisma.chantier.findUnique({ where: { id: req.params.id } });
     if (!chantier) return res.status(404).json({ error: 'Chantier not found' });
 
     const photos = await prisma.photoChantier.findMany({ where: { chantierId: req.params.id } });
-    
+
     res.attachment(`photos-${chantier.nom.replace(/\s+/g, '_')}.zip`);
-    // @ts-ignore
+    // @ts-ignore — typage de la lib archiver variable selon les versions (export = function)
     const archive = archiver('zip', { zlib: { level: 9 } });
     archive.pipe(res);
-    
+
     for (const p of photos) {
       const filePath = path.join(__dirname, p.url);
       if (fs.existsSync(filePath)) {
@@ -317,13 +467,19 @@ app.get('/api/chantiers/:id/photos/export', async (req, res) => {
   }
 });
 
-// Commissionnement
-app.put('/api/chantiers/:id/commissionnement', async (req, res) => {
+// Commissionnement (réservé aux admins) — champs en liste blanche
+app.put('/api/chantiers/:id/commissionnement', requireAuth, requireAdmin, async (req, res) => {
   try {
+    const data = {
+      mode: req.body.mode === 'DYNAMIQUE' ? 'DYNAMIQUE' : 'FIXE',
+      tauxFixe: parseFloat(req.body.tauxFixe) || 0,
+      bonusHeure: parseFloat(req.body.bonusHeure) || 0,
+      malusHeure: parseFloat(req.body.malusHeure) || 0
+    };
     const comm = await prisma.commissionnement.upsert({
       where: { chantierId: req.params.id },
-      update: req.body,
-      create: { ...req.body, chantierId: req.params.id }
+      update: data,
+      create: { ...data, chantierId: req.params.id }
     });
     res.json(comm);
   } catch (error) {
@@ -331,24 +487,156 @@ app.put('/api/chantiers/:id/commissionnement', async (req, res) => {
   }
 });
 
+// Paramètres globaux (admin uniquement)
+app.get('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    res.json(await getParametres());
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching parametres' });
+  }
+});
+
+app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const data = {
+      margeCommercialeActive: !!req.body.margeCommercialeActive,
+      tauxHoraireMoyen: parseFloat(req.body.tauxHoraireMoyen) || 0,
+    };
+    const p = await prisma.parametres.upsert({
+      where: { id: 'singleton' },
+      update: data,
+      create: { id: 'singleton', ...data },
+    });
+    res.json(decimalToNumber(p));
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating parametres' });
+  }
+});
+
+// Statistiques globales (agrégées côté serveur, périmètre selon le rôle)
+app.get('/api/stats/global', requireAuth, async (req, res) => {
+  try {
+    const user = (req as AuthRequest).user!;
+    const isAdmin = user.role === 'ADMIN';
+    const params = await getParametres();
+    // Un conducteur ne voit que les chantiers dont il est responsable.
+    const where = isAdmin ? {} : { responsableId: user.id };
+    const chantiers = decimalToNumber(await prisma.chantier.findMany({
+      where,
+      include: { achats: true, pointages: true, commissionnement: true },
+    }));
+
+    let nbEnCours = 0;
+    let nbTermines = 0;
+    let materielReel = 0;
+    let moReel = 0;
+    let heuresVendues = 0;
+    let heuresRealisees = 0;
+    let caTotal = 0;
+    let depensesTotal = 0;
+    let margeTotal = 0;
+
+    for (const c of chantiers) {
+      if (c.statut === 'EN_COURS') nbEnCours++;
+      else if (c.statut === 'TERMINE') nbTermines++;
+      const m = computeChantierMetrics(c, params, isAdmin);
+      materielReel += m.materielReel;
+      moReel += m.moReel;
+      heuresRealisees += m.heuresRealisees;
+      heuresVendues += c.heuresVendues;
+      depensesTotal += m.totalDepenses;
+      if (isAdmin) {
+        caTotal += c.budgetGlobalVendu;
+        margeTotal += m.margeCommerciale ?? 0;
+      }
+    }
+
+    const result: Record<string, unknown> = {
+      nbChantiers: chantiers.length,
+      nbEnCours,
+      nbTermines,
+      materielReel,
+      moReel,
+      depensesTotal,
+      heuresVendues,
+      heuresRealisees,
+      tauxRemplissageHeures: heuresVendues > 0 ? (heuresRealisees / heuresVendues) * 100 : 0,
+    };
+    if (isAdmin && params.margeCommercialeActive) {
+      result.caTotal = caTotal;
+      result.margeTotal = margeTotal;
+      result.margePct = caTotal > 0 ? (margeTotal / caTotal) * 100 : 0;
+    }
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing global stats' });
+  }
+});
+
+// Statistiques par conducteur de travaux (admin uniquement, classées par marge générée)
+app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const params = await getParametres();
+    const users = await prisma.user.findMany({ select: { id: true, name: true, email: true } });
+    const chantiers = decimalToNumber(await prisma.chantier.findMany({
+      include: { achats: true, pointages: true, commissionnement: true },
+    }));
+
+    const byUser: Record<string, any> = {};
+    for (const u of users) {
+      byUser[u.id] = {
+        id: u.id, name: u.name, email: u.email,
+        nbChantiers: 0, caTotal: 0, depensesTotal: 0, margeTotal: 0,
+        heuresVendues: 0, heuresRealisees: 0,
+      };
+    }
+
+    for (const c of chantiers) {
+      if (!c.responsableId || !byUser[c.responsableId]) continue;
+      const agg = byUser[c.responsableId];
+      const m = computeChantierMetrics(c, params, true);
+      agg.nbChantiers++;
+      agg.caTotal += c.budgetGlobalVendu;
+      agg.depensesTotal += m.totalDepenses;
+      agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
+      agg.heuresVendues += c.heuresVendues;
+      agg.heuresRealisees += m.heuresRealisees;
+    }
+
+    const list = Object.values(byUser)
+      .filter((a: any) => a.nbChantiers > 0)
+      .map((a: any) => ({
+        ...a,
+        margePct: a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
+        tauxRemplissageHeures: a.heuresVendues > 0 ? (a.heuresRealisees / a.heuresVendues) * 100 : 0,
+      }))
+      .sort((x: any, y: any) => y.margeTotal - x.margeTotal);
+
+    res.json(list);
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing conducteurs stats' });
+  }
+});
+
 // IA Analysis
-app.post('/api/chantiers/:id/analyze', async (req, res) => {
+app.post('/api/chantiers/:id/analyze', requireAuth, async (req, res) => {
   try {
     if (!ai) {
       return res.status(403).json({ error: "L'IA n'est pas activée (GEMINI_API_KEY manquante)." });
     }
 
     // Collect all data for the prompt
-    const chantier = await prisma.chantier.findUnique({ 
+    const chantierRaw = await prisma.chantier.findUnique({
       where: { id: req.params.id },
       include: { pointages: { include: { intervenant: true } }, achats: true }
     });
 
-    if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
+    if (!chantierRaw) return res.status(404).json({ error: 'Chantier introuvable' });
 
+    const chantier = decimalToNumber(chantierRaw);
     let heuresRealisees = 0;
-    chantier.pointages.forEach((p: any) => heuresRealisees += p.nbrHeures);
-    let totalAchats = chantier.achats.reduce((acc: number, a: any) => acc + a.montantHT, 0);
+    chantier.pointages.forEach((p: { nbrHeures: number }) => heuresRealisees += p.nbrHeures);
+    const totalAchats = chantier.achats.reduce((acc: number, a: { montantHT: number }) => acc + a.montantHT, 0);
 
     const prompt = `En tant qu'expert en gestion de chantier, analyse ce dossier:
 Nom: ${chantier.nom} (Client: ${chantier.client})
@@ -363,7 +651,7 @@ Rédige un compte-rendu exécutif d'environ 150-200 mots résumant la situation 
       model: 'gemini-2.5-flash',
       contents: prompt,
     });
-    
+
     res.json({ report: response.text });
   } catch (error) {
     console.error("AI Error:", error);
@@ -378,25 +666,25 @@ const initDb = async () => {
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@noxia.com';
     const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
     const hashedPassword = await bcrypt.hash(adminPassword, 10);
-    
-    await prisma.user.create({ 
-      data: { 
-        email: adminEmail, 
-        name: 'Administrateur', 
+
+    await prisma.user.create({
+      data: {
+        email: adminEmail,
+        name: 'Administrateur',
         role: 'ADMIN',
         password: hashedPassword
-      } 
+      }
     });
     console.log(`Compte administrateur créé : ${adminEmail}`);
 
     // Créer un conducteur factice pour tester
-    await prisma.user.create({ 
-      data: { 
-        email: 'jean@noxia.com', 
-        name: 'Jean Dupont (Conducteur)', 
+    await prisma.user.create({
+      data: {
+        email: 'jean@noxia.com',
+        name: 'Jean Dupont (Conducteur)',
         role: 'CONDUCTEUR_TRAVAUX',
         password: await bcrypt.hash('conducteur123', 10)
-      } 
+      }
     });
   }
 };
