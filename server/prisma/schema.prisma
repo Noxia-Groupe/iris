@@ -137,6 +137,16 @@ model PhotoChantier {
   createdAt   DateTime @default(now())
 }
 
+// Paramètres globaux configurables par les administrateurs (singleton).
+model Parametres {
+  id                     String   @id @default("singleton")
+  margeCommercialeActive Boolean  @default(true)  // affichage/calcul de la marge commerciale
+  tauxHoraireMoyen       Float    @default(30)     // valorisation €/h du bonus/malus dynamique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Commissionnement {
   id          String   @id @default(uuid())
   mode        String   @default("FIXE") // FIXE ou DYNAMIQUE

@@ -90,27 +90,12 @@ const ListeChantiers = () => {
                 </td>
               </tr>
             ) : list.map(c => {
-              // Calcul des métriques
-              const depenseMaterielReelle = c.achats?.reduce((acc: number, a: any) => acc + a.montantHT, 0) || 0;
-              let heuresRealisees = 0;
-              let depenseMOReelle = 0;
-              c.pointages?.forEach((h: any) => {
-                heuresRealisees += h.nbrHeures;
-                depenseMOReelle += (h.nbrHeures * h.tauxHoraireApplique);
-              });
-              
-              const totalDepensesReelles = depenseMaterielReelle + depenseMOReelle;
-              const comm = c.commissionnement;
-              const diffHeures = c.heuresVendues - heuresRealisees; 
-              
-              let bonusMalus = 0;
-              if (comm?.mode === 'DYNAMIQUE') {
-                if (diffHeures > 0) bonusMalus = diffHeures * 30 * (comm.bonusHeure / 100); 
-                else bonusMalus = diffHeures * 30 * (comm.malusHeure / 100); 
-              }
-              
-              const margeCommerciale = c.budgetGlobalVendu - totalDepensesReelles + bonusMalus;
-              const progressPct = Math.min(100, Math.max(0, (heuresRealisees / (c.heuresVendues || 1)) * 100));
+              // Métriques calculées côté serveur (marge masquée pour les non-admins)
+              const metrics = c.metrics || {};
+              const heuresRealisees = metrics.heuresRealisees || 0;
+              const diffHeures = metrics.diffHeures ?? (c.heuresVendues - heuresRealisees);
+              const margeCommerciale: number | null = metrics.margeCommerciale ?? null;
+              const progressPct = Math.min(100, Math.max(0, metrics.pctHeures ?? 0));
 
               return (
                 <tr key={c.id} className="hover:bg-gray-50 transition-colors">
@@ -129,9 +114,13 @@ const ListeChantiers = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     {userRole === 'ADMIN' ? (
-                      <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                        {margeCommerciale > 0 ? '+' : ''}{margeCommerciale.toLocaleString()} €
-                      </span>
+                      margeCommerciale !== null ? (
+                        <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                          {margeCommerciale > 0 ? '+' : ''}{margeCommerciale.toLocaleString()} €
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 text-sm">—</span>
+                      )
                     ) : (
                       <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                         {diffHeures > 0 ? '+' : ''}{diffHeures} h

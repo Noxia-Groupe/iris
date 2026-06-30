@@ -62,6 +62,62 @@ const requireAdmin: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+// --- Paramètres globaux (singleton) ---
+interface Parametres { margeCommercialeActive: boolean; tauxHoraireMoyen: number }
+
+async function getParametres(): Promise<Parametres> {
+  const existing = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+  if (existing) return existing;
+  return prisma.parametres.create({ data: { id: 'singleton' } });
+}
+
+// --- Calcul centralisé des métriques d'un chantier (source unique de vérité) ---
+// La marge commerciale n'est calculée que pour les admins ET si elle est activée.
+function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: boolean) {
+  const achats: any[] = chantier.achats || [];
+  const pointages: any[] = chantier.pointages || [];
+
+  const materielReel = achats.reduce((s: number, a: any) => s + a.montantHT, 0);
+  let heuresRealisees = 0;
+  let moReel = 0;
+  for (const p of pointages) {
+    heuresRealisees += p.nbrHeures;
+    moReel += p.nbrHeures * p.tauxHoraireApplique;
+  }
+  const totalDepenses = materielReel + moReel;
+  const diffHeures = chantier.heuresVendues - heuresRealisees;
+  const pctMateriel = chantier.budgetMaterielVendu > 0 ? (materielReel / chantier.budgetMaterielVendu) * 100 : 0;
+  const pctHeures = chantier.heuresVendues > 0 ? (heuresRealisees / chantier.heuresVendues) * 100 : 0;
+
+  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures };
+
+  if (!isAdmin || !params.margeCommercialeActive) {
+    return { ...base, bonusMalus: null, margeBrute: null, margeCommerciale: null, margePct: null };
+  }
+
+  const comm = chantier.commissionnement;
+  let bonusMalus = 0;
+  if (comm && comm.mode === 'DYNAMIQUE') {
+    const taux = diffHeures > 0 ? comm.bonusHeure : comm.malusHeure;
+    bonusMalus = diffHeures * params.tauxHoraireMoyen * (taux / 100);
+  }
+  const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
+  const margeCommerciale = margeBrute + bonusMalus;
+  const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
+
+  return { ...base, bonusMalus, margeBrute, margeCommerciale, margePct };
+}
+
+// Sérialise un chantier pour le client en masquant les données commerciales aux non-admins.
+function serializeChantier(chantier: any, params: Parametres, isAdmin: boolean) {
+  return {
+    ...chantier,
+    budgetGlobalVendu: isAdmin ? chantier.budgetGlobalVendu : null,
+    commissionnement: isAdmin ? chantier.commissionnement : null,
+    metrics: computeChantierMetrics(chantier, params, isAdmin),
+  };
+}
+
 // Configuration Multer pour le stockage local des photos
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -131,6 +187,8 @@ app.post('/api/login', async (req, res) => {
 // Chantiers
 app.get('/api/chantiers', requireAuth, async (req, res) => {
   try {
+    const isAdmin = (req as AuthRequest).user?.role === 'ADMIN';
+    const params = await getParametres();
     const chantiers = await prisma.chantier.findMany({
       include: {
         responsable: true,
@@ -140,7 +198,7 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
         commissionnement: true
       }
     });
-    res.json(chantiers);
+    res.json(chantiers.map((c: any) => serializeChantier(c, params, isAdmin)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
   }
@@ -406,6 +464,137 @@ app.put('/api/chantiers/:id/commissionnement', requireAuth, requireAdmin, async 
     res.json(comm);
   } catch (error) {
     res.status(500).json({ error: 'Error updating commissionnement' });
+  }
+});
+
+// Paramètres globaux (admin uniquement)
+app.get('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    res.json(await getParametres());
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching parametres' });
+  }
+});
+
+app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const data = {
+      margeCommercialeActive: !!req.body.margeCommercialeActive,
+      tauxHoraireMoyen: parseFloat(req.body.tauxHoraireMoyen) || 0,
+    };
+    const p = await prisma.parametres.upsert({
+      where: { id: 'singleton' },
+      update: data,
+      create: { id: 'singleton', ...data },
+    });
+    res.json(p);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating parametres' });
+  }
+});
+
+// Statistiques globales (agrégées côté serveur, périmètre selon le rôle)
+app.get('/api/stats/global', requireAuth, async (req, res) => {
+  try {
+    const user = (req as AuthRequest).user!;
+    const isAdmin = user.role === 'ADMIN';
+    const params = await getParametres();
+    // Un conducteur ne voit que les chantiers dont il est responsable.
+    const where = isAdmin ? {} : { responsableId: user.id };
+    const chantiers = await prisma.chantier.findMany({
+      where,
+      include: { achats: true, pointages: true, commissionnement: true },
+    });
+
+    let nbEnCours = 0;
+    let nbTermines = 0;
+    let materielReel = 0;
+    let moReel = 0;
+    let heuresVendues = 0;
+    let heuresRealisees = 0;
+    let caTotal = 0;
+    let depensesTotal = 0;
+    let margeTotal = 0;
+
+    for (const c of chantiers) {
+      if (c.statut === 'EN_COURS') nbEnCours++;
+      else if (c.statut === 'TERMINE') nbTermines++;
+      const m = computeChantierMetrics(c, params, isAdmin);
+      materielReel += m.materielReel;
+      moReel += m.moReel;
+      heuresRealisees += m.heuresRealisees;
+      heuresVendues += c.heuresVendues;
+      depensesTotal += m.totalDepenses;
+      if (isAdmin) {
+        caTotal += c.budgetGlobalVendu;
+        margeTotal += m.margeCommerciale ?? 0;
+      }
+    }
+
+    const result: Record<string, unknown> = {
+      nbChantiers: chantiers.length,
+      nbEnCours,
+      nbTermines,
+      materielReel,
+      moReel,
+      depensesTotal,
+      heuresVendues,
+      heuresRealisees,
+      tauxRemplissageHeures: heuresVendues > 0 ? (heuresRealisees / heuresVendues) * 100 : 0,
+    };
+    if (isAdmin && params.margeCommercialeActive) {
+      result.caTotal = caTotal;
+      result.margeTotal = margeTotal;
+      result.margePct = caTotal > 0 ? (margeTotal / caTotal) * 100 : 0;
+    }
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing global stats' });
+  }
+});
+
+// Statistiques par conducteur de travaux (admin uniquement, classées par marge générée)
+app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const params = await getParametres();
+    const users = await prisma.user.findMany({ select: { id: true, name: true, email: true } });
+    const chantiers = await prisma.chantier.findMany({
+      include: { achats: true, pointages: true, commissionnement: true },
+    });
+
+    const byUser: Record<string, any> = {};
+    for (const u of users) {
+      byUser[u.id] = {
+        id: u.id, name: u.name, email: u.email,
+        nbChantiers: 0, caTotal: 0, depensesTotal: 0, margeTotal: 0,
+        heuresVendues: 0, heuresRealisees: 0,
+      };
+    }
+
+    for (const c of chantiers) {
+      if (!c.responsableId || !byUser[c.responsableId]) continue;
+      const agg = byUser[c.responsableId];
+      const m = computeChantierMetrics(c, params, true);
+      agg.nbChantiers++;
+      agg.caTotal += c.budgetGlobalVendu;
+      agg.depensesTotal += m.totalDepenses;
+      agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
+      agg.heuresVendues += c.heuresVendues;
+      agg.heuresRealisees += m.heuresRealisees;
+    }
+
+    const list = Object.values(byUser)
+      .filter((a: any) => a.nbChantiers > 0)
+      .map((a: any) => ({
+        ...a,
+        margePct: a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
+        tauxRemplissageHeures: a.heuresVendues > 0 ? (a.heuresRealisees / a.heuresVendues) * 100 : 0,
+      }))
+      .sort((x: any, y: any) => y.margeTotal - x.margeTotal);
+
+    res.json(list);
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing conducteurs stats' });
   }
 });
 

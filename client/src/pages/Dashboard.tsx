@@ -16,11 +16,13 @@ const Dashboard = () => {
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [globalStats, setGlobalStats] = useState<any>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchStats();
     fetchConfig();
+    fetchGlobalStats();
   }, []);
 
   const fetchConfig = async () => {
@@ -28,6 +30,13 @@ const Dashboard = () => {
       const res = await apiFetch('/config');
       const data = await res.json();
       setAiEnabled(data.aiEnabled);
+    } catch(e) { console.error(e); }
+  };
+
+  const fetchGlobalStats = async () => {
+    try {
+      const res = await apiFetch('/stats/global');
+      if (res.ok) setGlobalStats(await res.json());
     } catch(e) { console.error(e); }
   };
 
@@ -106,31 +115,16 @@ const Dashboard = () => {
     </div>
   );
 
-  let depenseMaterielReelle = 0;
-  let depenseMOReelle = 0;
-  let heuresRealisees = 0;
-  let margeCommerciale = 0;
-  let totalDepensesReelles = 0;
-
-  if (selectedChantier) {
-    depenseMaterielReelle = selectedChantier.achats?.reduce((acc: number, a: any) => acc + a.montantHT, 0) || 0;
-    selectedChantier.pointages?.forEach((h: any) => {
-      heuresRealisees += h.nbrHeures;
-      depenseMOReelle += (h.nbrHeures * h.tauxHoraireApplique);
-    });
-
-    totalDepensesReelles = depenseMaterielReelle + depenseMOReelle;
-    const c = selectedChantier.commissionnement;
-    const diffHeures = selectedChantier.heuresVendues - heuresRealisees; 
-    
-    let bonusMalus = 0;
-    if (c?.mode === 'DYNAMIQUE') {
-      if (diffHeures > 0) bonusMalus = diffHeures * 30 * (c.bonusHeure / 100); 
-      else bonusMalus = diffHeures * 30 * (c.malusHeure / 100); 
-    }
-    
-    margeCommerciale = selectedChantier.budgetGlobalVendu - totalDepensesReelles + bonusMalus;
-  }
+  // Les métriques (dont la marge commerciale) sont calculées côté serveur et
+  // masquées selon le rôle. La marge n'est présente que pour les admins (et si activée).
+  const metrics = selectedChantier?.metrics || {};
+  const depenseMaterielReelle = metrics.materielReel || 0;
+  const heuresRealisees = metrics.heuresRealisees || 0;
+  const totalDepensesReelles = metrics.totalDepenses || 0;
+  const margeCommerciale: number | null = metrics.margeCommerciale ?? null;
+  const showMarge = margeCommerciale !== null;
+  const margeAffichee = margeCommerciale ?? 0;
+  const showBudgetVendu = selectedChantier?.budgetGlobalVendu != null;
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden">
@@ -167,6 +161,38 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Bandeau statistiques globales (périmètre selon le rôle, calculé côté serveur) */}
+      {globalStats && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Chantiers en cours</div>
+            <div className="text-2xl font-black text-primary-dark mt-1">
+              {globalStats.nbEnCours} <span className="text-sm font-semibold text-gray-400">/ {globalStats.nbChantiers}</span>
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Remplissage heures</div>
+            <div className="text-2xl font-black text-purple-600 mt-1">{(globalStats.tauxRemplissageHeures ?? 0).toFixed(0)}%</div>
+            <div className="text-xs text-gray-400">{Math.round(globalStats.heuresRealisees)}h / {Math.round(globalStats.heuresVendues)}h</div>
+          </div>
+          {globalStats.caTotal != null && (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">CA Vendu (total)</div>
+              <div className="text-2xl font-black text-primary-dark mt-1">{globalStats.caTotal.toLocaleString()} €</div>
+            </div>
+          )}
+          {globalStats.margeTotal != null && (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge totale</div>
+              <div className={`text-2xl font-black mt-1 ${globalStats.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {globalStats.margeTotal.toLocaleString()} €
+              </div>
+              <div className="text-xs text-gray-400">{(globalStats.margePct ?? 0).toFixed(1)}%</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {!selectedChantier ? (
         <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
@@ -209,12 +235,14 @@ const Dashboard = () => {
             
             {/* Key Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-16 h-16 bg-blue-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Budget Vendu</div>
-                <div className="text-2xl font-black text-primary-dark z-10">{selectedChantier.budgetGlobalVendu.toLocaleString()} €</div>
-              </div>
-              
+              {showBudgetVendu && (
+                <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-blue-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Budget Vendu</div>
+                  <div className="text-2xl font-black text-primary-dark z-10">{selectedChantier.budgetGlobalVendu.toLocaleString()} €</div>
+                </div>
+              )}
+
               <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-16 h-16 bg-green-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Matériel Prévu</div>
@@ -247,23 +275,23 @@ const Dashboard = () => {
               </div>
             )}
 
-            {/* Marge Commerciale Banner (Admin Only) */}
-            {userRole === 'ADMIN' && (
-              <div className={`mb-8 p-6 rounded-xl border-l-8 flex flex-col md:flex-row justify-between items-center shadow-sm relative overflow-hidden ${margeCommerciale > 0 ? 'bg-emerald-50 border-emerald-500' : 'bg-red-50 border-red-500'}`}>
+            {/* Marge Commerciale (Admin uniquement, si activée dans les paramètres) */}
+            {showMarge && (
+              <div className={`mb-8 p-6 rounded-xl border-l-8 flex flex-col md:flex-row justify-between items-center shadow-sm relative overflow-hidden ${margeAffichee > 0 ? 'bg-emerald-50 border-emerald-500' : 'bg-red-50 border-red-500'}`}>
                 {/* Decorative background element */}
                 <div className="absolute -right-10 -bottom-10 opacity-10">
-                  <svg width="150" height="150" viewBox="0 0 24 24" fill="none" stroke={margeCommerciale > 0 ? '#10b981' : '#ef4444'} strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  <svg width="150" height="150" viewBox="0 0 24 24" fill="none" stroke={margeAffichee > 0 ? '#10b981' : '#ef4444'} strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 </div>
-                
+
                 <div className="z-10 text-center md:text-left mb-4 md:mb-0">
-                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: margeCommerciale > 0 ? '#065f46' : '#991b1b' }}>
+                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: margeAffichee > 0 ? '#065f46' : '#991b1b' }}>
                     Marge Commerciale Nette
                   </div>
-                  <div className="text-5xl font-black mt-2 tracking-tight" style={{ color: margeCommerciale > 0 ? '#047857' : '#b91c1c' }}>
-                    {margeCommerciale.toLocaleString()} €
+                  <div className="text-5xl font-black mt-2 tracking-tight" style={{ color: margeAffichee > 0 ? '#047857' : '#b91c1c' }}>
+                    {margeAffichee.toLocaleString()} €
                   </div>
                 </div>
-                
+
                 <div className="z-10 bg-white/60 backdrop-blur-sm p-4 rounded-lg text-right">
                   <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Dépenses Réelles Cumulées</div>
                   <div className="font-bold text-2xl text-gray-800">{totalDepensesReelles.toLocaleString()} €</div>
