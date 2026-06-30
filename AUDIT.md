@@ -140,8 +140,10 @@ guide de déploiement détaillé.
    + **masquage serveur par rôle** des champs financiers.
 7. ✅ **Postgres + migrations** : datasource PostgreSQL, migration initiale versionnée
    (validée contre un PG 16 réel), `prisma migrate deploy` au démarrage, service `db`
-   dans docker-compose. *(Reste : passer les montants de `Float` à `Decimal`.)*
-8. Typage TS strict, toasts, tests/CI, enrichissement du rapport IA, SSO réel,
+   dans docker-compose.
+8. ✅ **Montants en `Decimal`** (NUMERIC) au lieu de `Float` : stockage exact, converti
+   en nombres à la frontière de l'API (front inchangé).
+9. Typage TS strict, toasts, tests/CI, enrichissement du rapport IA, SSO réel,
    exploitation de `LigneBudgetPrevisionnel`, pagination, rate limiting login.
 
 ---
@@ -163,5 +165,6 @@ guide de déploiement détaillé.
 | Stats serveur globales / par conducteur + scoping conducteur | ✅ |
 | Nettoyage git (`*.db`, `dist/`, `index.js`, `.gitignore` UTF-8) | ✅ |
 | PostgreSQL + migrations versionnées (`prisma migrate deploy`) | ✅ |
+| Montants en `Decimal` (NUMERIC) au lieu de `Float` | ✅ |
 | Rate limiting login / CORS restreint | ⏳ Roadmap |
 | Purge de l'historique git (données déjà committées) | ⏳ Roadmap §4 |
