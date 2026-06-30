@@ -62,8 +62,12 @@ Ajoutez-y ces variables :
 PORT=3001
 NODE_ENV=production
 
-# OPTIONNEL : Clé API pour activer l'analyse IA des chantiers (Google Gemini)
-GEMINI_API_KEY=votre_cle_api_ici
+# Optionnel : Clé API pour l'Intelligence Artificielle Google Gemini (laissez vide pour désactiver la fonction IA)
+GEMINI_API_KEY="votre_clé_api_gemini_si_besoin"
+
+# Identifiants du compte administrateur (Créé automatiquement au 1er lancement)
+ADMIN_EMAIL="votre_email@domaine.com"
+ADMIN_PASSWORD="un_mot_de_passe_robuste"
 ```
 
 ## 3. Lancement avec Docker Compose

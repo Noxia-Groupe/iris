@@ -1,8 +1,19 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen } from 'lucide-react';
 import './Sidebar.css';
 
 const Sidebar = () => {
+  const navigate = useNavigate();
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
+  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/login');
+  };
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -31,14 +42,16 @@ const Sidebar = () => {
           Journal des Heures
         </NavLink>
         
-        <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
-          <Settings size={20} />
-          Administration
-        </NavLink>
+        {userRole === 'ADMIN' && (
+          <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Settings size={20} />
+            Administration
+          </NavLink>
+        )}
       </nav>
       
       <div className="sidebar-footer">
-        <button className="nav-link btn-logout">
+        <button onClick={handleLogout} className="nav-link btn-logout">
           <LogOut size={20} />
           Déconnexion
         </button>

@@ -7,6 +7,8 @@ import archiver from 'archiver';
 import path from 'path';
 import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -43,6 +45,30 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 // Configuration globale
 app.get('/api/config', (req, res) => {
   res.json({ aiEnabled: !!process.env.GEMINI_API_KEY });
+});
+
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_default_key_change_in_prod';
+
+// Auth Login
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    
+    if (!user || !user.password) {
+      return res.status(401).json({ error: 'Identifiants incorrects' });
+    }
+    
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Identifiants incorrects' });
+    }
+    
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur lors de la connexion' });
+  }
 });
 
 // Chantiers
@@ -107,12 +133,7 @@ app.patch('/api/chantiers/:id', async (req, res) => {
 // Users
 app.get('/api/users', async (req, res) => {
   try {
-    let users = await prisma.user.findMany();
-    if (users.length === 0) {
-      await prisma.user.create({ data: { email: 'jean@noxia.com', name: 'Jean Dupont', role: 'CONDUCTEUR_TRAVAUX' } });
-      await prisma.user.create({ data: { email: 'marie@noxia.com', name: 'Marie Martin', role: 'ADMIN' } });
-      users = await prisma.user.findMany();
-    }
+    const users = await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true } });
     res.json(users);
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
@@ -319,6 +340,37 @@ Rédige un compte-rendu exécutif d'environ 150-200 mots résumant la situation 
   }
 });
 
-app.listen(port, () => {
+// Initialisation BDD (Seeding)
+const initDb = async () => {
+  const users = await prisma.user.findMany();
+  if (users.length === 0) {
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@noxia.com';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    
+    await prisma.user.create({ 
+      data: { 
+        email: adminEmail, 
+        name: 'Administrateur', 
+        role: 'ADMIN',
+        password: hashedPassword
+      } 
+    });
+    console.log(`Compte administrateur créé : ${adminEmail}`);
+
+    // Créer un conducteur factice pour tester
+    await prisma.user.create({ 
+      data: { 
+        email: 'jean@noxia.com', 
+        name: 'Jean Dupont (Conducteur)', 
+        role: 'CONDUCTEUR_TRAVAUX',
+        password: await bcrypt.hash('conducteur123', 10)
+      } 
+    });
+  }
+};
+
+app.listen(port, async () => {
+  await initDb();
   console.log(`Server running on port ${port}`);
 });

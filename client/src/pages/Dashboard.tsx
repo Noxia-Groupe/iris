@@ -9,8 +9,11 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [selectedChantierId, setSelectedChantierId] = useState<string | null>(null);
   
-  // Rôle simulé pour la démonstration
-  const [userRole, setUserRole] = useState<'ADMIN' | 'CONDUCTEUR_TRAVAUX'>('ADMIN');
+  // Rôle réel
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
+  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -157,16 +160,11 @@ const Dashboard = () => {
 
           <div className="h-8 w-px bg-gray-200 hidden md:block"></div>
 
-          {/* Toggle Rôle */}
-          <div className="flex gap-1 items-center bg-gray-100 p-1 rounded-lg">
-            <button 
-              className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-all ${userRole === 'ADMIN' ? 'bg-white shadow-sm text-primary-dark' : 'text-gray-500 hover:text-gray-700'}`} 
-              onClick={() => setUserRole('ADMIN')}
-            >Admin</button>
-            <button 
-              className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-all ${userRole === 'CONDUCTEUR_TRAVAUX' ? 'bg-white shadow-sm text-primary-dark' : 'text-gray-500 hover:text-gray-700'}`} 
-              onClick={() => setUserRole('CONDUCTEUR_TRAVAUX')}
-            >Conducteur</button>
+          {/* Rôle actuel (Affichage uniquement) */}
+          <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
+            <span className="text-sm font-semibold text-gray-500">
+              Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : 'Conducteur'}</strong>
+            </span>
           </div>
         </div>
       </div>

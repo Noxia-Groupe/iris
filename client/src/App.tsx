@@ -8,19 +8,27 @@ import Admin from './pages/Admin';
 import ListeChantiers from './pages/ListeChantiers';
 import { ErrorBoundary } from './ErrorBoundary';
 
-// Mock auth state for prototype
-const isAuthenticated = true;
+const PrivateRoute = ({ children, requiredRole }: { children: JSX.Element, requiredRole?: string }) => {
+  const token = localStorage.getItem('token');
+  const userStr = localStorage.getItem('user');
+  
+  if (!token || !userStr) {
+    return <Navigate to="/login" />;
+  }
 
-const PrivateRoute = ({ children }: { children: JSX.Element }) => {
-  return isAuthenticated ? (
+  const user = JSON.parse(userStr);
+  
+  if (requiredRole && user.role !== requiredRole) {
+    return <Navigate to="/" />; // Redirect to dashboard if not authorized
+  }
+
+  return (
     <div className="layout">
       <Sidebar />
       <main className="main-content">
         {children}
       </main>
     </div>
-  ) : (
-    <Navigate to="/login" />
   );
 };
 
@@ -56,7 +64,7 @@ function App() {
         } />
         
         <Route path="/admin" element={
-          <PrivateRoute>
+          <PrivateRoute requiredRole="ADMIN">
             <Admin />
           </PrivateRoute>
         } />
