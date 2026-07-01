@@ -91,9 +91,14 @@ function decimalToNumber(value: any): any {
 interface Parametres { margeCommercialeActive: boolean; tauxHoraireMoyen: number }
 
 // Retourne les paramètres avec les Decimal convertis en nombres.
+// upsert atomique (INSERT ... ON CONFLICT) pour éviter toute race entre requêtes
+// concurrentes au premier chargement (deux créations simultanées du singleton).
 async function getParametres(): Promise<Parametres> {
-  const existing = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
-  const p = existing ?? await prisma.parametres.create({ data: { id: 'singleton' } });
+  const p = await prisma.parametres.upsert({
+    where: { id: 'singleton' },
+    update: {},
+    create: { id: 'singleton' },
+  });
   return decimalToNumber(p) as Parametres;
 }
 
@@ -668,6 +673,9 @@ Rédige un compte-rendu exécutif d'environ 150-200 mots résumant la situation 
 
 // Initialisation BDD (Seeding)
 const initDb = async () => {
+  // Garantit l'existence de la ligne de paramètres (singleton) dès le démarrage.
+  await prisma.parametres.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
+
   const users = await prisma.user.findMany();
   if (users.length === 0) {
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@noxia.com';

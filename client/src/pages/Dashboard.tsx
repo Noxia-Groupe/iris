@@ -44,9 +44,10 @@ const Dashboard = () => {
     try {
       const res = await apiFetch('/chantiers');
       const data = await res.json();
-      setChantiers(data);
-      if (data.length > 0 && !selectedChantierId) {
-        setSelectedChantierId(data[0].id);
+      const list = Array.isArray(data) ? data : [];
+      setChantiers(list);
+      if (list.length > 0 && !selectedChantierId) {
+        setSelectedChantierId(list[0].id);
       }
     } catch (e) {
       console.error(e);
