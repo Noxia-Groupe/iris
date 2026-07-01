@@ -58,7 +58,6 @@ const Admin = () => {
     const formData = new FormData(e.target as HTMLFormElement);
     const payload = {
       margeCommercialeActive: formData.get('margeCommercialeActive') === 'on',
-      tauxHoraireMoyen: parseFloat(formData.get('tauxHoraireMoyen') as string) || 0,
     };
     const res = await apiFetch('/parametres', { method: 'PUT', body: JSON.stringify(payload) });
     if (res.ok) {
@@ -135,6 +134,47 @@ const Admin = () => {
       }
     } catch (e) {
       alert("Impossible de joindre le serveur.");
+    }
+  };
+
+  // Autorise un nouveau compte (liste blanche SSO). Le compte pourra se connecter
+  // via le SSO Microsoft avec le rôle choisi ; sans mot de passe par défaut.
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const payload = {
+      email: (formData.get('email') as string || '').trim(),
+      name: (formData.get('name') as string || '').trim(),
+      role: (formData.get('role') as string) || 'CONDUCTEUR_TRAVAUX',
+    };
+    try {
+      const res = await apiFetch('/users', { method: 'POST', body: JSON.stringify(payload) });
+      if (res.ok) {
+        form.reset();
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Erreur lors de l'ajout du compte.");
+      }
+    } catch (err) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  // Révoque l'autorisation d'un compte (suppression).
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    if (!window.confirm(`Révoquer l'accès de ${userName} ? Ce compte ne pourra plus se connecter.`)) return;
+    try {
+      const res = await apiFetch(`/users/${userId}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Erreur lors de la révocation.');
+      }
+    } catch (err) {
+      alert('Impossible de joindre le serveur.');
     }
   };
 
@@ -340,20 +380,21 @@ const Admin = () => {
             <p className="text-sm text-muted mb-4">
               Réglages globaux. La marge commerciale est calculée côté serveur et n'est visible que par les administrateurs.
             </p>
-            <form key={parametres ? 'loaded' : 'loading'} onSubmit={handleParamsSubmit} className="flex flex-col sm:flex-row gap-6 sm:items-end">
+            <form key={parametres ? 'loaded' : 'loading'} onSubmit={handleParamsSubmit} className="flex flex-col sm:flex-row gap-6 sm:items-center sm:justify-between">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" name="margeCommercialeActive" defaultChecked={parametres?.margeCommercialeActive ?? true} className="w-4 h-4" />
                 <span className="text-sm font-semibold text-gray-700">Activer l'affichage et le calcul de la marge commerciale</span>
               </label>
-              <div className="form-group mb-0">
-                <label className="form-label">Taux horaire moyen (€/h)</label>
-                <input type="number" step="0.5" name="tauxHoraireMoyen" defaultValue={parametres?.tauxHoraireMoyen ?? 30} className="form-input" />
-              </div>
               <button className="btn btn-primary">Enregistrer</button>
             </form>
           </div>
           <div className="card">
-          <h2 className="mb-4 text-primary-dark">Politique de Commissionnement par Chantier</h2>
+          <h2 className="mb-2 text-primary-dark">Politique de Commissionnement par Chantier</h2>
+          <p className="text-sm text-muted mb-4">
+            La commission du conducteur est un <strong>pourcentage de la marge commerciale</strong> du chantier.
+            En mode <strong>Dynamique</strong>, le taux de base est majoré (bonus) si le chantier est en avance sur
+            les heures vendues, ou minoré (malus) s'il est en retard. Le taux effectif est borné entre 0 % et 100 %.
+          </p>
           <div className="grid grid-cols-1 gap-6">
             {chantiers.map(c => {
               const comm = c.commissionnement || { mode: 'FIXE', tauxFixe: 0, bonusHeure: 0, malusHeure: 0 };
@@ -369,19 +410,25 @@ const Admin = () => {
                       </select>
                     </div>
                     <div className="form-group mb-0">
-                      <label className="form-label">Taux Fixe (%)</label>
+                      <label className="form-label">Commission de base (%)</label>
                       <input type="number" step="0.1" name="tauxFixe" defaultValue={comm.tauxFixe} className="form-input" />
                     </div>
                     <div className="form-group mb-0">
-                      <label className="form-label">Bonus Avance (%)</label>
+                      <label className="form-label">Bonus si avance (pts %)</label>
                       <input type="number" step="0.1" name="bonusHeure" defaultValue={comm.bonusHeure} className="form-input" />
                     </div>
                     <div className="form-group mb-0">
-                      <label className="form-label">Malus Retard (%)</label>
+                      <label className="form-label">Malus si retard (pts %)</label>
                       <input type="number" step="0.1" name="malusHeure" defaultValue={comm.malusHeure} className="form-input" />
                     </div>
                     <button className="btn btn-primary w-full">Mettre à jour</button>
                   </form>
+                  {c.metrics && c.metrics.commission != null && (
+                    <div className="mt-3 text-sm text-muted">
+                      Commission estimée à ce jour : <strong className="text-primary-dark">{Math.round(c.metrics.commission).toLocaleString()} €</strong>
+                      {' '}— taux effectif <strong>{(c.metrics.tauxCommission ?? 0).toFixed(1)} %</strong> de la marge
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -429,16 +476,44 @@ const Admin = () => {
 
       {activeTab === 'utilisateurs' && userRole === 'ADMIN' && (
         <div className="card">
-          <h2 className="mb-4 text-primary-dark">Gestion des Comptes Utilisateurs (SSO & Local)</h2>
+          <h2 className="mb-2 text-primary-dark">Gestion des Comptes Utilisateurs (SSO & Local)</h2>
           <p className="mb-6 text-sm text-gray-600">
-            Par défaut, les nouveaux utilisateurs se connectant via le SSO Microsoft se voient attribuer le rôle de <strong>Conducteur de Travaux</strong>. Vous pouvez les promouvoir en Administrateur ici.
+            Cette liste est la <strong>liste blanche d'autorisation</strong> : seuls les comptes présents ici peuvent se
+            connecter. Un email connu se connecte via le <strong>SSO Microsoft</strong> avec le rôle défini ci-dessous ;
+            toute personne <strong>absente de la liste</strong> se voit refuser l'accès (écran « Accès refusé, contactez
+            l'administrateur »). Ajoutez ci-dessous chaque personne autorisée et son rôle.
           </p>
+
+          <div className="mb-8 p-4 bg-gray-50 border rounded">
+            <h3 className="mb-4 text-primary-dark">Autoriser un compte</h3>
+            <form onSubmit={handleAddUser} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div className="form-group mb-0">
+                <label className="form-label">Email (Microsoft 365)</label>
+                <input required type="email" name="email" placeholder="prenom.nom@societe.fr" className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Nom complet</label>
+                <input required name="name" placeholder="Prénom Nom" className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Rôle d'accès</label>
+                <select name="role" defaultValue="CONDUCTEUR_TRAVAUX" className="form-input">
+                  <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
+                  <option value="ADMIN">Administrateur</option>
+                </select>
+              </div>
+              <button className="btn btn-primary w-full">Autoriser</button>
+            </form>
+          </div>
+
+          <h3 className="mb-4 text-primary-dark">Comptes autorisés</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse bg-white border rounded">
               <thead>
                 <tr className="bg-gray-50 text-xs uppercase text-gray-500 border-b border-gray-100">
                   <th className="px-6 py-4 font-semibold">Nom</th>
                   <th className="px-6 py-4 font-semibold">Email</th>
+                  <th className="px-6 py-4 font-semibold">Type</th>
                   <th className="px-6 py-4 font-semibold">Rôle d'accès</th>
                   <th className="px-6 py-4 font-semibold text-right">Actions</th>
                 </tr>
@@ -449,7 +524,12 @@ const Admin = () => {
                     <td className="px-6 py-4 font-bold text-gray-800">{u.name}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">{u.email}</td>
                     <td className="px-6 py-4">
-                      <select 
+                      <span className={`text-xs font-semibold px-2 py-1 rounded ${u.hasPassword ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {u.hasPassword ? 'Local + SSO' : 'SSO'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <select
                         className={`form-input py-1 px-3 text-sm font-semibold rounded ${u.role === 'ADMIN' ? 'bg-primary/10 text-primary border-primary' : 'bg-gray-100 text-gray-600 border-gray-300'}`}
                         value={u.role}
                         onChange={(e) => handleRoleChange(u.id, e.target.value)}
@@ -460,12 +540,20 @@ const Admin = () => {
                         <option value="ADMIN">Administrateur</option>
                       </select>
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <button 
+                    <td className="px-6 py-4 text-right whitespace-nowrap">
+                      <button
                         onClick={() => handlePasswordChange(u.id, u.name)}
                         className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded transition-colors"
                       >
                         Changer Mdp
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(u.id, u.name)}
+                        disabled={u.email === user?.email}
+                        title={u.email === user?.email ? "Vous ne pouvez pas révoquer votre propre compte." : "Révoquer l'accès"}
+                        className="ml-2 text-sm px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Révoquer
                       </button>
                     </td>
                   </tr>
