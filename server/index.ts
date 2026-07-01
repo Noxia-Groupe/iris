@@ -303,8 +303,12 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/chantiers', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/chantiers', requireAuth, async (req, res) => {
   try {
+    const authUser = (req as AuthRequest).user!;
+    // Un conducteur qui crée un chantier en devient automatiquement le responsable ;
+    // un admin peut désigner librement le responsable (ou aucun).
+    const responsableId = authUser.role === 'ADMIN' ? (req.body.responsableId || null) : authUser.id;
     const chantier = await prisma.chantier.create({
       data: {
         nom: req.body.nom,
@@ -316,7 +320,7 @@ app.post('/api/chantiers', requireAuth, requireAdmin, async (req, res) => {
         budgetMaterielVendu: parseFloat(req.body.budgetMaterielVendu) || 0,
         budgetMainOeuvreVendu: parseFloat(req.body.budgetMainOeuvreVendu) || 0,
         heuresVendues: parseFloat(req.body.heuresVendues) || 0,
-        responsableId: req.body.responsableId || null,
+        responsableId,
         statut: req.body.statut || "EN_COURS"
       },
     });
@@ -487,11 +491,99 @@ app.post('/api/intervenants', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Modifier un intervenant (nom, fonction, coût horaire). Le nouveau taux ne s'applique
+// qu'aux pointages FUTURS : les pointages passés conservent le taux figé au moment de la saisie.
+app.put('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const data: Record<string, unknown> = {};
+    if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
+    if (typeof req.body.role === 'string' && req.body.role.trim()) data.role = req.body.role.trim();
+    if (req.body.tauxHoraireCharge !== undefined) data.tauxHoraireCharge = parseFloat(req.body.tauxHoraireCharge) || 0;
+    const intervenant = await prisma.intervenant.update({ where: { id: paramId(req) }, data });
+    res.json(decimalToNumber(intervenant));
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating intervenant' });
+  }
+});
+
+// Supprimer un intervenant. Bloqué s'il possède des pointages (historique préservé).
+app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = paramId(req);
+    const used = await prisma.pointageHeure.count({ where: { intervenantId: id } });
+    if (used > 0) {
+      return res.status(409).json({ error: `Suppression impossible : cet intervenant a ${used} pointage(s) d'heures dans l'historique.` });
+    }
+    await prisma.intervenant.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting intervenant' });
+  }
+});
+
 // Categories & Fournisseurs
-app.get('/api/categories', requireAuth, async (req, res) => res.json(await prisma.categorie.findMany()));
+app.get('/api/categories', requireAuth, async (req, res) => res.json(await prisma.categorie.findMany({ orderBy: { nom: 'asc' } })));
 app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => res.json(await prisma.categorie.create({ data: { nom: req.body.nom, description: req.body.description || null } })));
-app.get('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.findMany()));
+
+// Modifier une catégorie (nom, description).
+app.put('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const data: Record<string, unknown> = {};
+    if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
+    if ('description' in req.body) data.description = req.body.description || null;
+    res.json(await prisma.categorie.update({ where: { id: paramId(req) }, data }));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une catégorie porte déjà ce nom.' });
+    res.status(500).json({ error: 'Error updating categorie' });
+  }
+});
+
+// Supprimer une catégorie. Bloqué si des achats ou lignes de budget l'utilisent.
+app.delete('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = paramId(req);
+    const achats = await prisma.achatReel.count({ where: { categorieId: id } });
+    const lignes = await prisma.ligneBudgetPrevisionnel.count({ where: { categorieId: id } });
+    if (achats + lignes > 0) {
+      return res.status(409).json({ error: `Suppression impossible : ${achats} achat(s) et ${lignes} ligne(s) de budget utilisent cette catégorie.` });
+    }
+    await prisma.categorie.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting categorie' });
+  }
+});
+
+app.get('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.findMany({ orderBy: { nom: 'asc' } })));
 app.post('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.create({ data: { nom: req.body.nom, contact: req.body.contact || null } })));
+
+// Modifier un fournisseur (nom, contact).
+app.put('/api/fournisseurs/:id', requireAuth, async (req, res) => {
+  try {
+    const data: Record<string, unknown> = {};
+    if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
+    if ('contact' in req.body) data.contact = req.body.contact || null;
+    res.json(await prisma.fournisseur.update({ where: { id: paramId(req) }, data }));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Un fournisseur porte déjà ce nom.' });
+    res.status(500).json({ error: 'Error updating fournisseur' });
+  }
+});
+
+// Supprimer un fournisseur. Bloqué si des achats y sont rattachés (historique préservé).
+app.delete('/api/fournisseurs/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = paramId(req);
+    const used = await prisma.achatReel.count({ where: { fournisseurId: id } });
+    if (used > 0) {
+      return res.status(409).json({ error: `Suppression impossible : ${used} achat(s) sont rattachés à ce fournisseur.` });
+    }
+    await prisma.fournisseur.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting fournisseur' });
+  }
+});
 
 // Achats
 app.get('/api/achats', requireAuth, async (req, res) => {
