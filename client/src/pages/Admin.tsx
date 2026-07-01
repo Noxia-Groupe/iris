@@ -9,7 +9,10 @@ const Admin = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [parametres, setParametres] = useState<any>(null);
   const [perf, setPerf] = useState<any[]>([]);
-  
+  const [categories, setCategories] = useState<any[]>([]);
+  // Ligne en cours d'édition : { type: 'intervenant'|'fournisseur'|'categorie', id, ...champs }
+  const [editRow, setEditRow] = useState<any>(null);
+
   // Rôle réel
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
@@ -24,6 +27,7 @@ const Admin = () => {
     const endpoints: Record<string, string> = {
       intervenants: '/intervenants',
       fournisseurs: '/fournisseurs',
+      categories: '/categories',
       chantiers: '/chantiers',
       marges: '/chantiers',
       performances: '/chantiers',
@@ -35,6 +39,7 @@ const Admin = () => {
 
       if (activeTab === 'intervenants') setIntervenants(data);
       else if (activeTab === 'fournisseurs') setFournisseurs(data);
+      else if (activeTab === 'categories') setCategories(data);
       else setChantiers(data);
 
       const usersRes = await apiFetch('/users');
@@ -173,6 +178,38 @@ const Admin = () => {
         const data = await res.json();
         alert(data.error || 'Erreur lors de la révocation.');
       }
+    } catch (err) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  // --- Édition / suppression génériques (intervenants, fournisseurs, catégories) ---
+  const endpointFor: Record<string, string> = {
+    intervenant: 'intervenants', fournisseur: 'fournisseurs', categorie: 'categories',
+  };
+  const editField = (field: string, value: string) => setEditRow((r: any) => ({ ...r, [field]: value }));
+
+  const saveEdit = async () => {
+    const { type, id, ...rest } = editRow || {};
+    let payload: Record<string, unknown>;
+    if (type === 'intervenant') payload = { nom: rest.nom, role: rest.role, tauxHoraireCharge: parseFloat(rest.tauxHoraireCharge) || 0 };
+    else if (type === 'fournisseur') payload = { nom: rest.nom, contact: rest.contact || null };
+    else payload = { nom: rest.nom, description: rest.description || null };
+    try {
+      const res = await apiFetch(`/${endpointFor[type]}/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      if (res.ok) { setEditRow(null); fetchData(); }
+      else { const d = await res.json(); alert(d.error || 'Erreur lors de la modification.'); }
+    } catch (err) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  const deleteEntity = async (type: string, id: string, label: string) => {
+    if (!window.confirm(`Supprimer « ${label} » ? Cette action est définitive.`)) return;
+    try {
+      const res = await apiFetch(`/${endpointFor[type]}/${id}`, { method: 'DELETE' });
+      if (res.ok) fetchData();
+      else { const d = await res.json(); alert(d.error || 'Suppression impossible.'); }
     } catch (err) {
       alert('Impossible de joindre le serveur.');
     }
@@ -325,22 +362,58 @@ const Admin = () => {
 
           <h3 className="mb-4">Liste des Intervenants</h3>
           <div className="overflow-x-auto">
-            <table style={{width: '100%', minWidth: '500px', textAlign: 'left', borderCollapse: 'collapse'}}>
+            <table style={{width: '100%', minWidth: '600px', textAlign: 'left', borderCollapse: 'collapse'}}>
               <thead>
                 <tr style={{borderBottom: '1px solid var(--color-border)'}}>
                   <th style={{padding: '8px'}}>Nom</th>
                   <th style={{padding: '8px'}}>Rôle / Fonction</th>
                   {userRole === 'ADMIN' && <th style={{padding: '8px'}}>Coût Horaire (€/h)</th>}
+                  {userRole === 'ADMIN' && <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>}
                 </tr>
               </thead>
               <tbody>
-                {intervenants.map(i => (
-                  <tr key={i.id} style={{borderBottom: '1px solid #eee'}}>
-                    <td style={{padding: '8px'}}><strong>{i.nom}</strong></td>
-                    <td style={{padding: '8px'}} className="text-muted">{i.role}</td>
-                    {userRole === 'ADMIN' && <td style={{padding: '8px'}}>{i.tauxHoraireCharge} €</td>}
-                  </tr>
-                ))}
+                {intervenants.map(i => {
+                  const isEditing = editRow?.type === 'intervenant' && editRow.id === i.id;
+                  return (
+                    <tr key={i.id} style={{borderBottom: '1px solid #eee'}}>
+                      <td style={{padding: '8px'}}>
+                        {isEditing
+                          ? <input className="form-input" value={editRow.nom} onChange={e => editField('nom', e.target.value)} />
+                          : <strong>{i.nom}</strong>}
+                      </td>
+                      <td style={{padding: '8px'}} className="text-muted">
+                        {isEditing
+                          ? <input className="form-input" value={editRow.role} onChange={e => editField('role', e.target.value)} />
+                          : i.role}
+                      </td>
+                      {userRole === 'ADMIN' && (
+                        <td style={{padding: '8px'}}>
+                          {isEditing
+                            ? <input type="number" step="0.1" className="form-input" value={editRow.tauxHoraireCharge} onChange={e => editField('tauxHoraireCharge', e.target.value)} />
+                            : `${i.tauxHoraireCharge} €`}
+                        </td>
+                      )}
+                      {userRole === 'ADMIN' && (
+                        <td style={{padding: '8px', textAlign: 'right', whiteSpace: 'nowrap'}}>
+                          {isEditing ? (
+                            <>
+                              <button type="button" onClick={saveEdit} className="text-sm px-3 py-1 bg-primary text-white font-semibold rounded">Enregistrer</button>
+                              <button type="button" onClick={() => setEditRow(null)} className="ml-2 text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Annuler</button>
+                            </>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => setEditRow({ type: 'intervenant', id: i.id, nom: i.nom, role: i.role, tauxHoraireCharge: i.tauxHoraireCharge })} className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Modifier</button>
+                              <button type="button" onClick={() => deleteEntity('intervenant', i.id, i.nom)} className="ml-2 text-sm px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded">Supprimer</button>
+                            </>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+                {intervenants.length === 0 && (
+                  <tr><td colSpan={4} className="text-muted" style={{padding: '12px', textAlign: 'center'}}>Aucun intervenant.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -363,13 +436,121 @@ const Admin = () => {
           </form>
 
           <h3 className="mb-4">Base Fournisseurs</h3>
-          <ul className="flex flex-col gap-2">
-            {fournisseurs.map(f => (
-              <li key={f.id} className="p-3 bg-gray-50 border rounded">
-                <strong>{f.nom}</strong> {f.contact && <span className="text-muted ml-2">- {f.contact}</span>}
-              </li>
-            ))}
-          </ul>
+          <div className="overflow-x-auto">
+            <table style={{width: '100%', minWidth: '500px', textAlign: 'left', borderCollapse: 'collapse'}}>
+              <thead>
+                <tr style={{borderBottom: '1px solid var(--color-border)'}}>
+                  <th style={{padding: '8px'}}>Nom</th>
+                  <th style={{padding: '8px'}}>Contact</th>
+                  <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fournisseurs.map(f => {
+                  const isEditing = editRow?.type === 'fournisseur' && editRow.id === f.id;
+                  return (
+                    <tr key={f.id} style={{borderBottom: '1px solid #eee'}}>
+                      <td style={{padding: '8px'}}>
+                        {isEditing
+                          ? <input className="form-input" value={editRow.nom} onChange={e => editField('nom', e.target.value)} />
+                          : <strong>{f.nom}</strong>}
+                      </td>
+                      <td style={{padding: '8px'}} className="text-muted">
+                        {isEditing
+                          ? <input className="form-input" value={editRow.contact || ''} onChange={e => editField('contact', e.target.value)} />
+                          : (f.contact || '—')}
+                      </td>
+                      <td style={{padding: '8px', textAlign: 'right', whiteSpace: 'nowrap'}}>
+                        {isEditing ? (
+                          <>
+                            <button type="button" onClick={saveEdit} className="text-sm px-3 py-1 bg-primary text-white font-semibold rounded">Enregistrer</button>
+                            <button type="button" onClick={() => setEditRow(null)} className="ml-2 text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Annuler</button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => setEditRow({ type: 'fournisseur', id: f.id, nom: f.nom, contact: f.contact || '' })} className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Modifier</button>
+                            <button type="button" onClick={() => deleteEntity('fournisseur', f.id, f.nom)} className="ml-2 text-sm px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded">Supprimer</button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {fournisseurs.length === 0 && (
+                  <tr><td colSpan={3} className="text-muted" style={{padding: '12px', textAlign: 'center'}}>Aucun fournisseur.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'categories' && userRole === 'ADMIN' && (
+        <div className="card">
+          <h2 className="mb-2 text-primary-dark">Catégories d'achats</h2>
+          <p className="text-sm text-muted mb-6">
+            Les catégories servent à <strong>classer les achats</strong> (Journal des Achats) : matériel, location d'engins,
+            sous-traitance, consommables… Elles permettent le suivi des dépenses par poste.
+          </p>
+          <form onSubmit={(e) => handleSubmit(e, 'categories')} className="flex flex-col sm:flex-row gap-4 items-end mb-8">
+            <div className="form-group mb-0 flex-1 w-full">
+              <label className="form-label">Nom de la catégorie</label>
+              <input required name="nom" className="form-input" placeholder="Ex : Matériel électrique" />
+            </div>
+            <div className="form-group mb-0 flex-1 w-full">
+              <label className="form-label">Description (optionnel)</label>
+              <input name="description" className="form-input" />
+            </div>
+            <button className="btn btn-primary w-full sm:w-auto">Enregistrer</button>
+          </form>
+
+          <h3 className="mb-4">Liste des catégories</h3>
+          <div className="overflow-x-auto">
+            <table style={{width: '100%', minWidth: '500px', textAlign: 'left', borderCollapse: 'collapse'}}>
+              <thead>
+                <tr style={{borderBottom: '1px solid var(--color-border)'}}>
+                  <th style={{padding: '8px'}}>Nom</th>
+                  <th style={{padding: '8px'}}>Description</th>
+                  <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categories.map(cat => {
+                  const isEditing = editRow?.type === 'categorie' && editRow.id === cat.id;
+                  return (
+                    <tr key={cat.id} style={{borderBottom: '1px solid #eee'}}>
+                      <td style={{padding: '8px'}}>
+                        {isEditing
+                          ? <input className="form-input" value={editRow.nom} onChange={e => editField('nom', e.target.value)} />
+                          : <strong>{cat.nom}</strong>}
+                      </td>
+                      <td style={{padding: '8px'}} className="text-muted">
+                        {isEditing
+                          ? <input className="form-input" value={editRow.description || ''} onChange={e => editField('description', e.target.value)} />
+                          : (cat.description || '—')}
+                      </td>
+                      <td style={{padding: '8px', textAlign: 'right', whiteSpace: 'nowrap'}}>
+                        {isEditing ? (
+                          <>
+                            <button type="button" onClick={saveEdit} className="text-sm px-3 py-1 bg-primary text-white font-semibold rounded">Enregistrer</button>
+                            <button type="button" onClick={() => setEditRow(null)} className="ml-2 text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Annuler</button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => setEditRow({ type: 'categorie', id: cat.id, nom: cat.nom, description: cat.description || '' })} className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Modifier</button>
+                            <button type="button" onClick={() => deleteEntity('categorie', cat.id, cat.nom)} className="ml-2 text-sm px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded">Supprimer</button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {categories.length === 0 && (
+                  <tr><td colSpan={3} className="text-muted" style={{padding: '12px', textAlign: 'center'}}>Aucune catégorie. Ajoutez-en une ci-dessus.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

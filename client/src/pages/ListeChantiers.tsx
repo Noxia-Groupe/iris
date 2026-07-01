@@ -4,7 +4,8 @@ import { apiFetch } from '../api';
 const ListeChantiers = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
+  const [showForm, setShowForm] = useState(false);
+
   // Rôle réel
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
@@ -52,6 +53,26 @@ const ListeChantiers = () => {
       fetchChantiers();
     } catch(e) {
       console.error(e);
+    }
+  };
+
+  // Création d'un chantier (admin et conducteur). Un conducteur en devient le responsable.
+  const handleCreateChantier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = Object.fromEntries(new FormData(form).entries());
+    try {
+      const res = await apiFetch('/chantiers', { method: 'POST', body: JSON.stringify(data) });
+      if (res.ok) {
+        form.reset();
+        setShowForm(false);
+        fetchChantiers();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Erreur lors de la création du chantier.');
+      }
+    } catch (err) {
+      alert('Impossible de joindre le serveur.');
     }
   };
 
@@ -169,13 +190,63 @@ const ListeChantiers = () => {
           <p className="text-sm text-muted mt-1">Vue globale et gestion du stockage</p>
         </div>
         
-        {/* Rôle actuel (Affichage uniquement) */}
-        <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
-          <span className="text-sm font-semibold text-gray-500">
-            Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : 'Conducteur'}</strong>
-          </span>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setShowForm(s => !s)} className="btn btn-primary flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+            Nouveau chantier
+          </button>
+          {/* Rôle actuel (Affichage uniquement) */}
+          <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
+            <span className="text-sm font-semibold text-gray-500">
+              Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : 'Conducteur'}</strong>
+            </span>
+          </div>
         </div>
       </div>
+
+      {showForm && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
+          <h2 className="text-lg font-bold text-primary-dark mb-4">Nouveau chantier</h2>
+          <form onSubmit={handleCreateChantier} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="form-group mb-0">
+              <label className="form-label">Nom du Chantier</label>
+              <input required name="nom" className="form-input" />
+            </div>
+            <div className="form-group mb-0">
+              <label className="form-label">Client</label>
+              <input required name="client" className="form-input" />
+            </div>
+            <div className="form-group mb-0">
+              <label className="form-label">N° de Devis (optionnel)</label>
+              <input name="numeroDevis" className="form-input" />
+            </div>
+            <div className="form-group mb-0">
+              <label className="form-label">Date Début</label>
+              <input required type="date" name="dateDebut" className="form-input" />
+            </div>
+            <div className="form-group mb-0">
+              <label className="form-label">Budget Global (€ HT)</label>
+              <input required type="number" step="0.01" name="budgetGlobalVendu" className="form-input" />
+            </div>
+            <div className="form-group mb-0">
+              <label className="form-label">Total Heures Vendues (h)</label>
+              <input required type="number" step="0.5" name="heuresVendues" className="form-input" />
+            </div>
+            <div className="form-group mb-0">
+              <label className="form-label">Dont Matériel (€ HT)</label>
+              <input required type="number" step="0.01" name="budgetMaterielVendu" className="form-input" />
+            </div>
+            <div className="form-group mb-0">
+              <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
+              <input required type="number" step="0.01" name="budgetMainOeuvreVendu" className="form-input" />
+            </div>
+            <div className="md:col-span-2 flex gap-2 mt-2">
+              <button className="btn btn-primary px-8">Créer le chantier</button>
+              <button type="button" onClick={() => setShowForm(false)} className="btn bg-white border">Annuler</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="flex-1">
         {renderTable(chantiersEnCours, "Chantiers En Cours", "Aucun chantier en cours.")}
