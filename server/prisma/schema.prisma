@@ -141,7 +141,6 @@ model PhotoChantier {
 model Parametres {
   id                     String   @id @default("singleton")
   margeCommercialeActive Boolean  @default(true)  // affichage/calcul de la marge commerciale
-  tauxHoraireMoyen       Decimal  @default(30) @db.Decimal(10, 2) // valorisation €/h du bonus/malus
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -150,9 +149,9 @@ model Parametres {
 model Commissionnement {
   id          String   @id @default(uuid())
   mode        String   @default("FIXE") // FIXE ou DYNAMIQUE
-  tauxFixe    Decimal  @default(0) @db.Decimal(6, 2)  // % commission sur marge fixe
-  bonusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // % bonus si avance
-  malusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // % malus si retard
+  tauxFixe    Decimal  @default(0) @db.Decimal(6, 2)  // taux de commission de base (% de la marge)
+  bonusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // points de % ajoutés au taux si en avance (mode DYNAMIQUE)
+  malusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // points de % retirés du taux si en retard (mode DYNAMIQUE)
   
   chantierId  String   @unique
   chantier    Chantier @relation(fields: [chantierId], references: [id])

@@ -34,6 +34,40 @@ function resolveJwtSecret(): string {
 }
 const JWT_SECRET = resolveJwtSecret();
 
+// --- SSO Microsoft : état de configuration ---
+// Le SSO n'est considéré "actif" que si l'application Azure AD est renseignée.
+// Tant que ce n'est pas le cas, la connexion Microsoft reste inactive côté client,
+// MAIS les autorisations d'accès (liste des comptes + rôle) sont déjà gérables ici :
+// c'est la "couche d'autorisation". Le câblage OAuth réel (obtention/vérification du
+// jeton Microsoft) est une étape ultérieure qui viendra brancher `resolveAuthorizedSsoUser`.
+const SSO_CONFIGURED = !!(process.env.AZURE_TENANT_ID && process.env.AZURE_CLIENT_ID);
+
+// Normalise un email pour les comparaisons/stockage (insensible à la casse).
+function normalizeEmail(email: unknown): string {
+  return String(email ?? '').trim().toLowerCase();
+}
+
+// Cœur de la couche d'autorisation SSO : un email Microsoft n'est autorisé que s'il
+// figure dans la liste des comptes (table User). Présent => autorisé, avec le rôle
+// associé ; absent => `null` (connexion à refuser, redirection vers « accès refusé »).
+// Sera appelé par le futur callback OAuth une fois l'identité Microsoft vérifiée.
+async function resolveAuthorizedSsoUser(email: string) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  return prisma.user.findUnique({
+    where: { email: normalized },
+    select: { id: true, name: true, email: true, role: true },
+  });
+}
+
+// Placeholder de vérification de l'identité Microsoft. À implémenter lors du câblage OAuth :
+// valider le jeton d'identité Microsoft (JWKS de login.microsoftonline.com, audience =
+// AZURE_CLIENT_ID, issuer = tenant) et en extraire l'email VÉRIFIÉ. Retourne null tant que
+// ce n'est pas fait : on n'accorde jamais d'accès sur la foi d'un email non vérifié.
+async function verifyMicrosoftIdentity(_req: express.Request): Promise<string | null> {
+  return null;
+}
+
 // --- Middlewares d'authentification / autorisation ---
 interface AuthRequest extends express.Request {
   user?: { id: string; role: string };
@@ -65,7 +99,7 @@ const requireAdmin: express.RequestHandler = (req, res, next) => {
 // Express 5 type les valeurs de req.params comme `string | string[]`. Nos routes
 // n'utilisent que des paramètres simples (:id) : on en extrait toujours une string.
 function paramId(req: express.Request): string {
-  const id = paramId(req);
+  const id = req.params.id;
   return Array.isArray(id) ? id[0] : id;
 }
 
@@ -88,7 +122,7 @@ function decimalToNumber(value: any): any {
 }
 
 // --- Paramètres globaux (singleton) ---
-interface Parametres { margeCommercialeActive: boolean; tauxHoraireMoyen: number }
+interface Parametres { margeCommercialeActive: boolean }
 
 // Retourne les paramètres avec les Decimal convertis en nombres.
 // upsert atomique (INSERT ... ON CONFLICT) pour éviter toute race entre requêtes
@@ -123,20 +157,28 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
   const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures };
 
   if (!isAdmin || !params.margeCommercialeActive) {
-    return { ...base, bonusMalus: null, margeBrute: null, margeCommerciale: null, margePct: null };
+    return { ...base, tauxCommission: null, commission: null, margeBrute: null, margeCommerciale: null, margeNette: null, margePct: null };
   }
 
-  const comm = chantier.commissionnement;
-  let bonusMalus = 0;
-  if (comm && comm.mode === 'DYNAMIQUE') {
-    const taux = diffHeures > 0 ? comm.bonusHeure : comm.malusHeure;
-    bonusMalus = diffHeures * params.tauxHoraireMoyen * (taux / 100);
-  }
+  // Marge commerciale = budget vendu − dépenses réelles (matériel + main d'œuvre).
   const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
-  const margeCommerciale = margeBrute + bonusMalus;
+  const margeCommerciale = margeBrute;
+
+  // Commission du conducteur = POURCENTAGE de la marge commerciale (plus aucun €/h).
+  // Le taux de base (tauxFixe) s'applique toujours ; en mode DYNAMIQUE il est ajusté :
+  // bonus si le chantier est en avance sur les heures, malus s'il est en retard.
+  const comm = chantier.commissionnement;
+  let tauxCommission = comm ? comm.tauxFixe : 0;
+  if (comm && comm.mode === 'DYNAMIQUE') {
+    if (diffHeures > 0) tauxCommission += comm.bonusHeure;       // en avance -> bonus
+    else if (diffHeures < 0) tauxCommission -= comm.malusHeure;  // en retard -> malus
+  }
+  tauxCommission = Math.min(100, Math.max(0, tauxCommission));    // borné à [0 %, 100 %]
+  const commission = margeCommerciale > 0 ? margeCommerciale * (tauxCommission / 100) : 0;
+  const margeNette = margeCommerciale - commission;               // marge après commission versée
   const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
 
-  return { ...base, bonusMalus, margeBrute, margeCommerciale, margePct };
+  return { ...base, tauxCommission, commission, margeBrute, margeCommerciale, margeNette, margePct };
 }
 
 // Sérialise un chantier pour le client en masquant les données commerciales aux non-admins.
@@ -189,16 +231,16 @@ const uploadPhoto: express.RequestHandler = (req, res, next) => {
 // Routes de base (publiques)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// Configuration globale (publique : indique simplement si l'IA est activée)
+// Configuration globale (publique : indique l'état de l'IA et du SSO)
 app.get('/api/config', (req, res) => {
-  res.json({ aiEnabled: !!process.env.GEMINI_API_KEY });
+  res.json({ aiEnabled: !!process.env.GEMINI_API_KEY, ssoConfigured: SSO_CONFIGURED });
 });
 
 // Auth Login (publique)
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email: normalizeEmail(email) } });
 
     if (!user || !user.password) {
       return res.status(401).json({ error: 'Identifiants incorrects' });
@@ -213,6 +255,31 @@ app.post('/api/login', async (req, res) => {
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la connexion' });
+  }
+});
+
+// Connexion via SSO Microsoft — point d'application de la couche d'autorisation.
+// Une fois l'identité Microsoft VÉRIFIÉE, l'email est confronté à la liste blanche
+// (table User) : autorisé => jeton applicatif avec le rôle associé ; sinon 403 (le client
+// redirige alors vers « /acces-refuse »). Le flux OAuth lui-même reste à câbler ; tant que
+// le SSO n'est pas configuré la route est inactive et n'émet aucun jeton.
+app.post('/api/auth/sso', async (req, res) => {
+  try {
+    if (!SSO_CONFIGURED) {
+      return res.status(503).json({ code: 'SSO_NOT_CONFIGURED', error: "La connexion Microsoft SSO n'est pas encore activée. Contactez l'administrateur." });
+    }
+    const email = await verifyMicrosoftIdentity(req);
+    if (!email) {
+      return res.status(401).json({ code: 'SSO_TOKEN_INVALID', error: 'Jeton Microsoft invalide ou non vérifié.' });
+    }
+    const user = await resolveAuthorizedSsoUser(email);
+    if (!user) {
+      return res.status(403).json({ code: 'SSO_NOT_AUTHORIZED', error: "Accès refusé : votre compte n'est pas autorisé. Contactez l'administrateur." });
+    }
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user });
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur lors de la connexion SSO' });
   }
 });
 
@@ -293,12 +360,73 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Users (administration réservée aux admins)
+// La liste des comptes EST la liste blanche d'autorisation SSO : seuls les emails
+// présents ici peuvent se connecter (via SSO Microsoft ou en local si un mot de passe
+// est défini). `hasPassword` distingue un compte local (mot de passe) d'un compte
+// autorisé SSO uniquement (sans mot de passe).
 app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const users = await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true } });
-    res.json(users);
+    const users = await prisma.user.findMany({
+      select: { id: true, name: true, email: true, role: true, password: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json(users.map((u: { id: string; name: string; email: string; role: string; password: string | null }) => ({
+      id: u.id, name: u.name, email: u.email, role: u.role, hasPassword: !!u.password,
+    })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
+  }
+});
+
+// Autorise un nouveau compte à se connecter (liste blanche SSO / création de compte).
+// Aucun mot de passe n'est défini : le compte se connecte via le SSO Microsoft. Un
+// administrateur peut ensuite lui attribuer un mot de passe local via « Changer Mdp ».
+app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    const name = String(req.body.name ?? '').trim();
+    const role = req.body.role === 'ADMIN' ? 'ADMIN' : 'CONDUCTEUR_TRAVAUX';
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Adresse email invalide.' });
+    }
+    if (!name) {
+      return res.status(400).json({ error: 'Le nom est requis.' });
+    }
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(409).json({ error: 'Un compte existe déjà pour cet email.' });
+    }
+    const user = await prisma.user.create({
+      data: { email, name, role }, // pas de mot de passe : accès via SSO Microsoft
+      select: { id: true, name: true, email: true, role: true },
+    });
+    res.status(201).json({ ...user, hasPassword: false });
+  } catch (error) {
+    res.status(500).json({ error: 'Error creating user' });
+  }
+});
+
+// Révoque un compte (retire l'autorisation d'accès). Les références nullables
+// (chantiers dont il est responsable, photos qu'il a prises) sont détachées d'abord.
+app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = paramId(req);
+    if (id === (req as AuthRequest).user?.id) {
+      return res.status(403).json({ error: 'Vous ne pouvez pas supprimer votre propre compte.' });
+    }
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    await prisma.$transaction([
+      prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
+      prisma.photoChantier.updateMany({ where: { auteurId: id }, data: { auteurId: null } }),
+      prisma.user.delete({ where: { id } }),
+    ]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting user' });
   }
 });
 
@@ -512,7 +640,6 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
   try {
     const data = {
       margeCommercialeActive: !!req.body.margeCommercialeActive,
-      tauxHoraireMoyen: parseFloat(req.body.tauxHoraireMoyen) || 0,
     };
     const p = await prisma.parametres.upsert({
       where: { id: 'singleton' },

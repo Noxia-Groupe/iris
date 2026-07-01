@@ -115,7 +115,7 @@ centralisé côté serveur ; un conducteur ne reçoit plus ces champs (voir §6)
 | Stats **globales / par chantier / par conducteur** | Le Dashboard ne montre qu'**un** chantier sélectionné. Onglet « Performances » = placeholder. Pas de vue agrégée ni de classement conducteurs. |
 | **Marge commerciale paramétrable par les admins** | Calculée d'une seule façon, affichée d'office aux admins, non protégée côté serveur. Aucun paramètre (toggle d'affichage, mode de calcul, coefficients). |
 | **Rapport IA complet** | ✅ Standby bien géré (`ai = key ? … : null` + `/api/config`). Prompt minimal (150-200 mots) — à enrichir (tendances, dépassements par poste, photos). |
-| **SSO Microsoft 365** | Bouton décoratif, non câblé. |
+| **SSO Microsoft 365** | Couche d'autorisation en place : liste blanche d'emails + rôle (Administration > Utilisateurs), gate `resolveAuthorizedSsoUser`, page « accès refusé ». Reste à câbler : le flux OAuth Microsoft lui-même (`verifyMicrosoftIdentity`, activé via `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`). |
 | Budget **prévu par poste** | `LigneBudgetPrevisionnel` existe dans le schéma mais n'est jamais utilisé. |
 
 **À garder (bons points)** : standby IA conditionné à l'env, compression d'image avant

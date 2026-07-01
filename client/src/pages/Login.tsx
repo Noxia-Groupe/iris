@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api';
 
@@ -6,8 +6,32 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [ssoInfo, setSsoInfo] = useState('');
+  const [ssoConfigured, setSsoConfigured] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  // Indique si le SSO Microsoft est réellement configuré côté serveur (app Azure AD).
+  useEffect(() => {
+    apiFetch('/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => { if (cfg) setSsoConfigured(!!cfg.ssoConfigured); })
+      .catch(() => { /* config indisponible : SSO considéré inactif */ });
+  }, []);
+
+  // Connexion Microsoft 365. Le câblage OAuth complet est une étape ultérieure : tant que
+  // le SSO n'est pas activé, on informe l'utilisateur. Les autorisations d'accès (qui peut
+  // se connecter et avec quel rôle) sont déjà gérées par l'administrateur.
+  const handleSso = () => {
+    setError('');
+    if (!ssoConfigured) {
+      setSsoInfo("La connexion Microsoft 365 n'est pas encore activée sur ce serveur. Les autorisations d'accès sont gérées par votre administrateur.");
+      return;
+    }
+    setSsoInfo('Redirection vers Microsoft 365…');
+    // TODO (étape ultérieure) : lancer le flux OAuth Microsoft (MSAL), puis échanger le
+    // jeton d'identité vérifié contre un jeton applicatif via POST /api/auth/sso.
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +69,7 @@ const Login = () => {
         </div>
         
         {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">{error}</div>}
+        {ssoInfo && <div className="mb-4 p-3 bg-blue-50 text-blue-700 rounded-md text-sm">{ssoInfo}</div>}
 
         <form onSubmit={handleLogin}>
           <div className="form-group">
@@ -61,7 +86,7 @@ const Login = () => {
           </button>
           
           <div style={{ textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-3)' }}>
-            <button type="button" className="btn btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <button type="button" onClick={handleSso} className="btn btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 23 23">
                 <path fill="#f3f3f3" d="M0 0h23v23H0z"/>
                 <path fill="#f35325" d="M1 1h10v10H1z"/>

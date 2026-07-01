@@ -7,6 +7,7 @@ import Achats from './pages/Achats';
 import Heures from './pages/Heures';
 import Admin from './pages/Admin';
 import ListeChantiers from './pages/ListeChantiers';
+import AccesRefuse from './pages/AccesRefuse';
 import { ErrorBoundary } from './ErrorBoundary';
 
 const PrivateRoute = ({ children, requiredRole }: { children: JSX.Element, requiredRole?: string }) => {
@@ -39,6 +40,7 @@ function App() {
       <Router>
         <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/acces-refuse" element={<AccesRefuse />} />
         
         <Route path="/" element={
           <PrivateRoute>
