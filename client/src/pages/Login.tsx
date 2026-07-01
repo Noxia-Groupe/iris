@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { PublicClientApplication } from '@azure/msal-browser';
 import { apiFetch } from '../api';
 
 const Login = () => {
@@ -7,30 +8,60 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [ssoInfo, setSsoInfo] = useState('');
-  const [ssoConfigured, setSsoConfigured] = useState(false);
+  const [ssoCfg, setSsoCfg] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  // Indique si le SSO Microsoft est réellement configuré côté serveur (app Azure AD).
+  // Récupère la configuration SSO (clientId + tenant Azure) exposée par le serveur.
   useEffect(() => {
     apiFetch('/config')
       .then((res) => (res.ok ? res.json() : null))
-      .then((cfg) => { if (cfg) setSsoConfigured(!!cfg.ssoConfigured); })
+      .then((cfg) => { if (cfg) setSsoCfg(cfg); })
       .catch(() => { /* config indisponible : SSO considéré inactif */ });
   }, []);
 
-  // Connexion Microsoft 365. Le câblage OAuth complet est une étape ultérieure : tant que
-  // le SSO n'est pas activé, on informe l'utilisateur. Les autorisations d'accès (qui peut
-  // se connecter et avec quel rôle) sont déjà gérées par l'administrateur.
-  const handleSso = () => {
+  // Connexion via SSO Microsoft 365 (MSAL) : ouvre la fenêtre Microsoft, récupère le jeton
+  // d'identité, puis l'échange contre un jeton applicatif via POST /api/auth/sso. Compte
+  // autorisé => connexion ; compte non autorisé => page « accès refusé ».
+  const handleSso = async () => {
     setError('');
-    if (!ssoConfigured) {
-      setSsoInfo("La connexion Microsoft 365 n'est pas encore activée sur ce serveur. Les autorisations d'accès sont gérées par votre administrateur.");
+    setSsoInfo('');
+    if (!ssoCfg?.ssoConfigured || !ssoCfg?.ssoClientId || !ssoCfg?.ssoTenantId) {
+      setSsoInfo("La connexion Microsoft 365 n'est pas activée sur ce serveur. Les autorisations d'accès sont gérées par votre administrateur.");
       return;
     }
-    setSsoInfo('Redirection vers Microsoft 365…');
-    // TODO (étape ultérieure) : lancer le flux OAuth Microsoft (MSAL), puis échanger le
-    // jeton d'identité vérifié contre un jeton applicatif via POST /api/auth/sso.
+    setLoading(true);
+    try {
+      const msal = new PublicClientApplication({
+        auth: {
+          clientId: ssoCfg.ssoClientId,
+          authority: `https://login.microsoftonline.com/${ssoCfg.ssoTenantId}`,
+          redirectUri: window.location.origin,
+        },
+        cache: { cacheLocation: 'sessionStorage' },
+      });
+      await msal.initialize();
+      const result = await msal.loginPopup({ scopes: ['openid', 'profile', 'email'] });
+      const res = await apiFetch('/auth/sso', { method: 'POST', body: JSON.stringify({ idToken: result.idToken }) });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        navigate('/');
+      } else if (res.status === 403) {
+        navigate('/acces-refuse');
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || 'Échec de la connexion Microsoft.');
+      }
+    } catch (err) {
+      const code = (err as { errorCode?: string })?.errorCode;
+      if (code === 'user_cancelled') setSsoInfo('Connexion Microsoft annulée.');
+      else if (code === 'popup_window_error' || code === 'empty_window_error') setError('La fenêtre de connexion Microsoft a été bloquée. Autorisez les popups pour ce site.');
+      else setError('Erreur lors de la connexion Microsoft.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -86,7 +117,7 @@ const Login = () => {
           </button>
           
           <div style={{ textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-3)' }}>
-            <button type="button" onClick={handleSso} className="btn btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <button type="button" onClick={handleSso} disabled={loading} className="btn btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 23 23">
                 <path fill="#f3f3f3" d="M0 0h23v23H0z"/>
                 <path fill="#f35325" d="M1 1h10v10H1z"/>
