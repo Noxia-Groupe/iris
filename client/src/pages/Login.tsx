@@ -68,9 +68,11 @@ const Login = () => {
       }
     } catch (err) {
       const code = (err as { errorCode?: string })?.errorCode;
+      const detail = (err as { errorMessage?: string })?.errorMessage || (err instanceof Error ? err.message : '');
       if (code === 'user_cancelled') setSsoInfo('Connexion Microsoft annulée.');
       else if (code === 'popup_window_error' || code === 'empty_window_error') setError('La fenêtre de connexion Microsoft a été bloquée. Autorisez les popups pour ce site.');
-      else setError('Erreur lors de la connexion Microsoft.');
+      // Code + message MSAL affichés tels quels : diagnostic direct sans avoir besoin de la console.
+      else setError(`Erreur lors de la connexion Microsoft${code ? ` [${code}]` : ''}${detail ? ` : ${detail}` : ''}`);
     } finally {
       setLoading(false);
     }
