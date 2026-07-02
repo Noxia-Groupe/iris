@@ -11,20 +11,24 @@ import Statistiques from './pages/Statistiques';
 import ListeChantiers from './pages/ListeChantiers';
 import AccesRefuse from './pages/AccesRefuse';
 import AuthCallbackMsal from './pages/AuthCallbackMsal';
+import ResultatCommercial from './pages/ResultatCommercial';
 import { ErrorBoundary } from './ErrorBoundary';
 
-const PrivateRoute = ({ children, requiredRole }: { children: JSX.Element, requiredRole?: string }) => {
+const PrivateRoute = ({ children, requiredRole, excludedRole }: { children: JSX.Element, requiredRole?: string, excludedRole?: string }) => {
   const token = localStorage.getItem('token');
   const userStr = localStorage.getItem('user');
-  
+
   if (!token || !userStr) {
     return <Navigate to="/login" />;
   }
 
   const user = JSON.parse(userStr);
-  
+
   if (requiredRole && user.role !== requiredRole) {
     return <Navigate to="/" />; // Redirect to dashboard if not authorized
+  }
+  if (excludedRole && user.role === excludedRole) {
+    return <Navigate to="/" />;
   }
 
   return (
@@ -65,17 +69,17 @@ function App() {
         } />
         
         <Route path="/achats" element={
-          <PrivateRoute>
+          <PrivateRoute excludedRole="COMMERCIAL">
             <Achats />
           </PrivateRoute>
         } />
-        
+
         <Route path="/heures" element={
-          <PrivateRoute>
+          <PrivateRoute excludedRole="COMMERCIAL">
             <Heures />
           </PrivateRoute>
         } />
-        
+
         <Route path="/admin" element={
           <PrivateRoute requiredRole="ADMIN">
             <Admin />
@@ -83,8 +87,14 @@ function App() {
         } />
 
         <Route path="/statistiques" element={
-          <PrivateRoute>
+          <PrivateRoute excludedRole="COMMERCIAL">
             <Statistiques />
+          </PrivateRoute>
+        } />
+
+        <Route path="/resultat-commercial" element={
+          <PrivateRoute requiredRole="COMMERCIAL">
+            <ResultatCommercial />
           </PrivateRoute>
         } />
         </Routes>

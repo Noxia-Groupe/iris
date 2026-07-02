@@ -4,7 +4,7 @@ import html2pdf from 'html2pdf.js';
 import imageCompression from 'browser-image-compression';
 import {
   ArrowLeft, Calendar, User, FileDown, Sparkles, Camera,
-  Package, Users, Truck, Wallet, Clock3, Hammer,
+  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase,
 } from 'lucide-react';
 import { apiFetch, assetUrl } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
@@ -23,6 +23,10 @@ const ChantierDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  const userStr = localStorage.getItem('user');
+  const currentUser = userStr ? JSON.parse(userStr) : null;
+  const userRole = currentUser?.role || 'CONDUCTEUR_TRAVAUX';
+
   const [chantier, setChantier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -32,10 +36,15 @@ const ChantierDetail = () => {
   const [aiLoading, setAiLoading] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
+  const [commerciaux, setCommerciaux] = useState<any[]>([]);
+  const [editingCommercial, setEditingCommercial] = useState(false);
+  const [savingCommercial, setSavingCommercial] = useState(false);
+
   useEffect(() => {
     fetchChantier();
     fetchConfig();
     setAiReport(null);
+    setEditingCommercial(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -45,6 +54,35 @@ const ChantierDetail = () => {
       const data = await res.json();
       setAiEnabled(data.aiEnabled);
     } catch (e) { console.error(e); }
+  };
+
+  // Liste des commerciaux, pour le sélecteur d'affectation (admin ou conducteur
+  // responsable uniquement — cf. rendu de la section Commercial ci-dessous).
+  const fetchCommerciaux = async () => {
+    try {
+      const res = await apiFetch('/users');
+      const data = await res.json();
+      if (Array.isArray(data)) setCommerciaux(data.filter((u: any) => u.role === 'COMMERCIAL'));
+    } catch (e) { console.error(e); }
+  };
+
+  const handleAssignCommercial = async (commercialId: string) => {
+    if (!id) return;
+    setSavingCommercial(true);
+    try {
+      const res = await apiFetch(`/chantiers/${id}/commercial`, { method: 'PATCH', body: JSON.stringify({ commercialId: commercialId || null }) });
+      if (res.ok) {
+        setEditingCommercial(false);
+        fetchChantier();
+      } else {
+        const d = await res.json();
+        alert(d.error || "Erreur lors de l'affectation du commercial.");
+      }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSavingCommercial(false);
+    }
   };
 
   const fetchChantier = async () => {
@@ -169,6 +207,14 @@ const ChantierDetail = () => {
   const isTermine = chantier.statut !== 'EN_COURS';
   const joursEcoules = daysBetween(dateDebut, dateFin && isTermine ? dateFin : new Date());
 
+  // Le commercial rattaché est modifiable par l'admin ou par le conducteur responsable
+  // du chantier — jamais par le commercial lui-même, ni par un autre conducteur.
+  const canEditCommercial = userRole === 'ADMIN' || (userRole === 'CONDUCTEUR_TRAVAUX' && chantier.responsable?.id === currentUser?.id);
+  const startEditCommercial = () => {
+    if (commerciaux.length === 0) fetchCommerciaux();
+    setEditingCommercial(true);
+  };
+
   return (
     <div className="flex flex-col h-full overflow-x-hidden">
 
@@ -223,6 +269,32 @@ const ChantierDetail = () => {
                 Démarré le {fmtDate(chantier.dateDebut)}
                 {isTermine && dateFin ? ` — terminé le ${fmtDate(chantier.dateFin)} (${joursEcoules} j)` : ` (il y a ${joursEcoules} j)`}
               </span>
+              {editingCommercial ? (
+                <span className="flex items-center gap-1.5">
+                  <Briefcase size={14} className="text-gray-400" />
+                  <select
+                    autoFocus
+                    disabled={savingCommercial}
+                    defaultValue={chantier.commercial?.id || ''}
+                    onChange={(e) => handleAssignCommercial(e.target.value)}
+                    onBlur={() => setEditingCommercial(false)}
+                    className="text-sm border border-gray-200 rounded-md px-2 py-0.5"
+                  >
+                    <option value="">Aucun commercial</option>
+                    {commerciaux.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5">
+                  <Briefcase size={14} className="text-gray-400" />
+                  {chantier.commercial?.name || <span className="italic text-gray-400">Aucun commercial</span>}
+                  {canEditCommercial && (
+                    <button type="button" onClick={startEditCommercial} className="text-xs font-semibold text-accent hover:underline ml-1">
+                      Modifier
+                    </button>
+                  )}
+                </span>
+              )}
             </div>
           </div>
 
@@ -429,12 +501,14 @@ const ChantierDetail = () => {
               <h3 className="text-xl font-bold text-primary-dark m-0">Galerie Photos & Suivi</h3>
               <p className="text-sm text-muted mt-1">Photos du terrain compressées automatiquement.</p>
             </div>
-            <div className="flex flex-wrap gap-3">
-              <label className="flex items-center gap-2 px-4 py-2 bg-primary text-white hover:bg-primary-dark font-semibold rounded-lg cursor-pointer transition-colors text-sm shadow-sm">
-                <Camera size={16} /> Ajouter une photo
-                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
-              </label>
-            </div>
+            {userRole !== 'COMMERCIAL' && (
+              <div className="flex flex-wrap gap-3">
+                <label className="flex items-center gap-2 px-4 py-2 bg-primary text-white hover:bg-primary-dark font-semibold rounded-lg cursor-pointer transition-colors text-sm shadow-sm">
+                  <Camera size={16} /> Ajouter une photo
+                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">

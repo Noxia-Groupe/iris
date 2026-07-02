@@ -193,7 +193,7 @@ const ListeChantiers = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end items-center gap-2">
-                      {c.statut === 'EN_COURS' && (
+                      {c.statut === 'EN_COURS' && userRole !== 'COMMERCIAL' && (
                         <button
                           onClick={() => handleCloturer(c.id, c.nom)}
                           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
@@ -263,20 +263,22 @@ const ListeChantiers = () => {
         </div>
         
         <div className="flex items-center gap-3">
-          <button onClick={() => setShowForm(s => !s)} className="btn btn-primary flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
-            Nouveau chantier
-          </button>
+          {userRole !== 'COMMERCIAL' && (
+            <button onClick={() => setShowForm(s => !s)} className="btn btn-primary flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+              Nouveau chantier
+            </button>
+          )}
           {/* Rôle actuel (Affichage uniquement) */}
           <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
             <span className="text-sm font-semibold text-gray-500">
-              Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : 'Conducteur'}</strong>
+              Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : userRole === 'COMMERCIAL' ? 'Commercial' : 'Conducteur'}</strong>
             </span>
           </div>
         </div>
       </div>
 
-      {showForm && (
+      {showForm && userRole !== 'COMMERCIAL' && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
           <h2 className="text-lg font-bold text-primary-dark mb-4">Nouveau chantier</h2>
           <form onSubmit={handleCreateChantier} className="grid grid-cols-1 md:grid-cols-2 gap-4">

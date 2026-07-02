@@ -72,7 +72,7 @@ const Dashboard = () => {
 
         <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
           <span className="text-sm font-semibold text-gray-500">
-            Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : 'Conducteur'}</strong>
+            Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : userRole === 'COMMERCIAL' ? 'Commercial' : 'Conducteur'}</strong>
           </span>
         </div>
       </div>

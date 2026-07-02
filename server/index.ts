@@ -139,6 +139,17 @@ const requireAdmin: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+// Un commercial a un accès strictement en lecture à ses propres chantiers : ni création,
+// ni modification (chantiers, achats, heures, photos), et pas d'accès aux statistiques
+// globales/conducteur — uniquement à son propre résultat commercial.
+const blockCommercial: express.RequestHandler = (req, res, next) => {
+  if ((req as AuthRequest).user?.role === 'COMMERCIAL') {
+    res.status(403).json({ error: 'Accès non autorisé pour un compte commercial.' });
+    return;
+  }
+  next();
+};
+
 // Express 5 type les valeurs de req.params comme `string | string[]`. Nos routes
 // n'utilisent que des paramètres simples (:id) : on en extrait toujours une string.
 function paramId(req: express.Request): string {
@@ -200,7 +211,7 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
   const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures };
 
   if (!isAdmin || !params.margeCommercialeActive) {
-    return { ...base, tauxCommission: null, commission: null, margeBrute: null, margeCommerciale: null, margeNette: null, margePct: null };
+    return { ...base, tauxCommission: null, commission: null, margeBrute: null, margeCommerciale: null, margeNette: null, margePct: null, tauxCommissionCommercial: null, commissionCommercial: null };
   }
 
   // Marge commerciale = budget vendu − dépenses réelles (matériel + main d'œuvre).
@@ -221,7 +232,18 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
   const margeNette = margeCommerciale - commission;               // marge après commission versée
   const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
 
-  return { ...base, tauxCommission, commission, margeBrute, margeCommerciale, margeNette, margePct };
+  // Commission du commercial : même mécanique que ci-dessus (taux fixe +/- bonus/malus
+  // selon avance/retard sur les heures), mais réglée indépendamment de celle du conducteur.
+  const commCo = chantier.commissionnementCommercial;
+  let tauxCommissionCommercial = commCo ? commCo.tauxFixe : 0;
+  if (commCo && commCo.mode === 'DYNAMIQUE') {
+    if (diffHeures > 0) tauxCommissionCommercial += commCo.bonusHeure;
+    else if (diffHeures < 0) tauxCommissionCommercial -= commCo.malusHeure;
+  }
+  tauxCommissionCommercial = Math.min(100, Math.max(0, tauxCommissionCommercial));
+  const commissionCommercial = margeCommerciale > 0 ? margeCommerciale * (tauxCommissionCommercial / 100) : 0;
+
+  return { ...base, tauxCommission, commission, margeBrute, margeCommerciale, margeNette, margePct, tauxCommissionCommercial, commissionCommercial };
 }
 
 // Sérialise un chantier pour le client en masquant les données commerciales aux non-admins.
@@ -369,11 +391,16 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
     const authUser = (req as AuthRequest).user!;
     const isAdmin = authUser.role === 'ADMIN';
     const params = await getParametres();
-    const where = isAdmin ? {} : { responsableId: authUser.id };
+    const where = isAdmin
+      ? {}
+      : authUser.role === 'COMMERCIAL'
+        ? { commercialId: authUser.id }
+        : { responsableId: authUser.id };
     const chantiers = await prisma.chantier.findMany({
       where,
       include: {
         responsable: RESPONSABLE_SELECT,
+        commercial: RESPONSABLE_SELECT,
         achats: true,
         pointages: true,
         photos: true,
@@ -398,14 +425,16 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
       where: { id: paramId(req) },
       include: {
         responsable: RESPONSABLE_SELECT,
+        commercial: RESPONSABLE_SELECT,
         achats: { include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
         pointages: { include: { intervenant: true }, orderBy: { date: 'desc' } },
         photos: { orderBy: { createdAt: 'desc' } },
         commissionnement: true
       }
     });
-    // 404 (et non 403) pour un chantier d'un autre conducteur : on ne révèle pas son existence.
-    if (!chantier || (!isAdmin && chantier.responsableId !== authUser.id)) {
+    // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
+    const isOwner = !!chantier && (chantier.responsableId === authUser.id || chantier.commercialId === authUser.id);
+    if (!chantier || (!isAdmin && !isOwner)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
     }
     res.json(serializeChantier(chantier, params, isAdmin));
@@ -414,7 +443,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/chantiers', requireAuth, async (req, res) => {
+app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
     // Un conducteur qui crée un chantier en devient automatiquement le responsable ;
@@ -506,7 +535,7 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
 // clôturer, uniquement ses propres chantiers en cours) : une fois TERMINE, il ne
 // peut plus y ajouter d'heures ou de dépenses (cf. POST /achats et /heures).
 // Seul un admin peut réouvrir un chantier clôturé (repasser en EN_COURS).
-app.patch('/api/chantiers/:id/statut', requireAuth, async (req, res) => {
+app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
     const isAdmin = authUser.role === 'ADMIN';
@@ -528,6 +557,40 @@ app.patch('/api/chantiers/:id/statut', requireAuth, async (req, res) => {
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Error updating chantier status' });
+  }
+});
+
+// Affectation du commercial sur un chantier déjà créé — modifiable par l'admin ou par
+// le conducteur responsable du chantier (pas par le commercial lui-même, ni par un tiers).
+app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
+  try {
+    const authUser = (req as AuthRequest).user!;
+    const isAdmin = authUser.role === 'ADMIN';
+    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) } });
+    if (!chantier) {
+      return res.status(404).json({ error: 'Chantier introuvable' });
+    }
+    if (!isAdmin && chantier.responsableId !== authUser.id) {
+      return res.status(403).json({ error: 'Action non autorisée' });
+    }
+
+    let commercialId: string | null = null;
+    if (req.body.commercialId) {
+      const commercial = await prisma.user.findUnique({ where: { id: String(req.body.commercialId) } });
+      if (!commercial || commercial.role !== 'COMMERCIAL') {
+        return res.status(400).json({ error: 'Commercial introuvable.' });
+      }
+      commercialId = commercial.id;
+    }
+
+    const updated = await prisma.chantier.update({
+      where: { id: chantier.id },
+      data: { commercialId },
+      include: { commercial: RESPONSABLE_SELECT },
+    });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating commercial' });
   }
 });
 
@@ -553,11 +616,13 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
 // Autorise un nouveau compte à se connecter (liste blanche SSO / création de compte).
 // Aucun mot de passe n'est défini : le compte se connecte via le SSO Microsoft. Un
 // administrateur peut ensuite lui attribuer un mot de passe local via « Changer Mdp ».
+const ALLOWED_ROLES = ['ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL'];
+
 app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
     const name = String(req.body.name ?? '').trim();
-    const role = req.body.role === 'ADMIN' ? 'ADMIN' : 'CONDUCTEUR_TRAVAUX';
+    const role = ALLOWED_ROLES.includes(req.body.role) ? req.body.role : 'CONDUCTEUR_TRAVAUX';
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Adresse email invalide.' });
@@ -593,6 +658,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     }
     await prisma.$transaction([
       prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
+      prisma.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } }),
       prisma.photoChantier.updateMany({ where: { auteurId: id }, data: { auteurId: null } }),
       prisma.user.delete({ where: { id } }),
     ]);
@@ -605,7 +671,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
 app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { role } = req.body;
-    if (role !== 'ADMIN' && role !== 'CONDUCTEUR_TRAVAUX') {
+    if (!ALLOWED_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Rôle invalide' });
     }
     const user = await prisma.user.update({
@@ -780,7 +846,7 @@ app.get('/api/achats', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/achats', requireAuth, async (req, res) => {
+app.post('/api/achats', requireAuth, blockCommercial, async (req, res) => {
   try {
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
     res.json(await prisma.achatReel.create({
@@ -808,7 +874,7 @@ app.get('/api/heures', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/heures', requireAuth, async (req, res) => {
+app.post('/api/heures', requireAuth, blockCommercial, async (req, res) => {
   try {
     const intervenant = await prisma.intervenant.findUnique({ where: { id: req.body.intervenantId } });
     if (!intervenant) return res.status(404).json({ error: 'Intervenant not found' });
@@ -830,7 +896,7 @@ app.post('/api/heures', requireAuth, async (req, res) => {
 });
 
 // Photos Upload & Purge
-app.post('/api/chantiers/:id/photos', requireAuth, uploadPhoto, async (req, res) => {
+app.post('/api/chantiers/:id/photos', requireAuth, blockCommercial, uploadPhoto, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -907,6 +973,27 @@ app.put('/api/chantiers/:id/commissionnement', requireAuth, requireAdmin, async 
   }
 });
 
+// Commissionnement du commercial (réservé aux admins) — même forme que celui du
+// conducteur, mais dans une table distincte : les deux taux sont réglés indépendamment.
+app.put('/api/chantiers/:id/commissionnement-commercial', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const data = {
+      mode: req.body.mode === 'DYNAMIQUE' ? 'DYNAMIQUE' : 'FIXE',
+      tauxFixe: parseFloat(req.body.tauxFixe) || 0,
+      bonusHeure: parseFloat(req.body.bonusHeure) || 0,
+      malusHeure: parseFloat(req.body.malusHeure) || 0
+    };
+    const comm = await prisma.commissionnementCommercial.upsert({
+      where: { chantierId: paramId(req) },
+      update: data,
+      create: { ...data, chantierId: paramId(req) }
+    });
+    res.json(comm);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating commissionnement commercial' });
+  }
+});
+
 // Paramètres globaux (admin uniquement)
 app.get('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -938,8 +1025,13 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
     const user = (req as AuthRequest).user!;
     const isAdmin = user.role === 'ADMIN';
     const params = await getParametres();
-    // Un conducteur ne voit que les chantiers dont il est responsable.
-    const where = isAdmin ? {} : { responsableId: user.id };
+    // Un conducteur ne voit que les chantiers dont il est responsable ; un commercial,
+    // uniquement ceux qu'il a vendus.
+    const where = isAdmin
+      ? {}
+      : user.role === 'COMMERCIAL'
+        ? { commercialId: user.id }
+        : { responsableId: user.id };
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
       where,
       include: { achats: true, pointages: true, commissionnement: true },
@@ -1226,7 +1318,7 @@ function periodBounds(period: 'week' | 'month' | 'year', refParam: unknown): { s
 // Classement des intervenants par heures travaillées (semaine civile / mois civil /
 // année civile, navigable) — visible par les conducteurs ET les admins. Basé sur la
 // date du travail effectué (`date`), pas l'instant de saisie.
-app.get('/api/stats/intervenants', requireAuth, async (req, res) => {
+app.get('/api/stats/intervenants', requireAuth, blockCommercial, async (req, res) => {
   try {
     const period = (['week', 'month', 'year'] as const).includes(req.query.period as any) ? (req.query.period as 'week' | 'month' | 'year') : 'week';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
@@ -1263,7 +1355,7 @@ app.get('/api/stats/intervenants', requireAuth, async (req, res) => {
 
 // Total des achats par fournisseur (mois civil / année civile, navigable) — visible
 // par les conducteurs ET les admins (même périmètre que le Journal des Achats).
-app.get('/api/stats/fournisseurs', requireAuth, async (req, res) => {
+app.get('/api/stats/fournisseurs', requireAuth, blockCommercial, async (req, res) => {
   try {
     const period = req.query.period === 'year' ? 'year' : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
@@ -1302,7 +1394,7 @@ app.get('/api/stats/fournisseurs', requireAuth, async (req, res) => {
 // année civile, navigable. Un conducteur ne voit que ses propres chantiers (même
 // périmètre que partout ailleurs) ; un admin voit tous les chantiers. Basé sur la date
 // de démarrage du chantier (dateDebut).
-app.get('/api/stats/types-chantiers', requireAuth, async (req, res) => {
+app.get('/api/stats/types-chantiers', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
     const isAdmin = authUser.role === 'ADMIN';
@@ -1337,6 +1429,83 @@ app.get('/api/stats/types-chantiers', requireAuth, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Error computing types chantiers stats' });
+  }
+});
+
+// Résultat commercial : CA vendu / marge commerciale / commission gagnée par commercial,
+// mois civil ou année civile en cours (navigable), classé par CA vendu décroissant.
+// Un admin voit tous les commerciaux (menu « Mes commerciaux ») ; un commercial ne voit
+// que sa propre ligne (menu « Résultat commercial »). Le classement/compteur est basé sur
+// la date de démarrage du chantier (dateDebut), comme les autres statistiques par période ;
+// la liste `chantiers` de chaque commercial, elle, reste l'intégralité de ses chantiers
+// (toutes périodes confondues), pour la vue détaillée.
+app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
+  try {
+    const authUser = (req as AuthRequest).user!;
+    const isAdmin = authUser.role === 'ADMIN';
+    if (!isAdmin && authUser.role !== 'COMMERCIAL') {
+      return res.status(403).json({ error: 'Accès réservé' });
+    }
+    const period = req.query.period === 'year' ? 'year' : 'month';
+    const { start, endExclusive } = periodBounds(period, req.query.ref);
+    const params = await getParametres();
+
+    const users = await prisma.user.findMany({
+      where: isAdmin ? { role: 'COMMERCIAL' } : { id: authUser.id, role: 'COMMERCIAL' },
+      select: { id: true, name: true, email: true },
+    });
+
+    const commercialIds = users.map((u) => u.id);
+    const chantiers = decimalToNumber(await prisma.chantier.findMany({
+      where: { commercialId: { in: commercialIds } },
+      include: { achats: true, pointages: true, commissionnementCommercial: true },
+    }));
+
+    const byUser: Record<string, any> = {};
+    for (const u of users) {
+      byUser[u.id] = { id: u.id, name: u.name, email: u.email, nbChantiers: 0, caTotal: 0, margeTotal: 0, commissionTotal: 0, chantiers: [] as any[] };
+    }
+
+    for (const c of chantiers) {
+      if (!c.commercialId || !byUser[c.commercialId]) continue;
+      const agg = byUser[c.commercialId];
+      const m = computeChantierMetrics(c, params, true);
+      agg.nbChantiers++;
+      agg.chantiers.push({
+        id: c.id,
+        nom: c.nom,
+        client: c.client,
+        statut: c.statut,
+        dateDebut: c.dateDebut,
+        budgetGlobalVendu: c.budgetGlobalVendu,
+        margeCommerciale: m.margeCommerciale,
+        commissionCommercial: m.commissionCommercial,
+        tauxCommissionCommercial: m.tauxCommissionCommercial,
+        commissionnementCommercial: c.commissionnementCommercial,
+      });
+      const dateDebut = new Date(c.dateDebut);
+      if (dateDebut >= start && dateDebut < endExclusive) {
+        agg.caTotal += c.budgetGlobalVendu;
+        agg.margeTotal += m.margeCommerciale ?? 0;
+        agg.commissionTotal += m.commissionCommercial ?? 0;
+      }
+    }
+
+    const list = Object.values(byUser)
+      .map((a: any) => ({
+        ...a,
+        chantiers: a.chantiers.sort((x: any, y: any) => new Date(y.dateDebut).getTime() - new Date(x.dateDebut).getTime()),
+      }))
+      .sort((x: any, y: any) => y.caTotal - x.caTotal);
+
+    res.json({
+      period,
+      periodStart: start.toISOString().slice(0, 10),
+      periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
+      commerciaux: list,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing commerciaux stats' });
   }
 });
 

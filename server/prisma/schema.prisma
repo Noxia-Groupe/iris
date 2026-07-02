@@ -11,13 +11,14 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   name      String
-  role      String   @default("CONDUCTEUR_TRAVAUX") // ADMIN ou CONDUCTEUR_TRAVAUX
+  role      String   @default("CONDUCTEUR_TRAVAUX") // ADMIN, CONDUCTEUR_TRAVAUX ou COMMERCIAL
   password  String?
   theme     String   @default("light") // "light" ou "dark" — préférence d'affichage, par compte
 
-  chantiersGeres Chantier[] // Liaison pour restreindre la vue des chefs de chantier
-  photos         PhotoChantier[] // Photos uploadées par l'utilisateur
-  
+  chantiersGeres          Chantier[]      @relation("ChantierResponsable") // Liaison pour restreindre la vue des chefs de chantier
+  chantiersCommercialises Chantier[]      @relation("ChantierCommercial") // Chantiers vendus par ce commercial
+  photos                  PhotoChantier[] // Photos uploadées par l'utilisateur
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -49,13 +50,17 @@ model Chantier {
   heuresVendues         Decimal                   @default(0) @db.Decimal(10, 2)
   
   responsableId         String?
-  responsable           User?                     @relation(fields: [responsableId], references: [id])
-  
+  responsable           User?                     @relation("ChantierResponsable", fields: [responsableId], references: [id])
+
+  commercialId          String?
+  commercial            User?                     @relation("ChantierCommercial", fields: [commercialId], references: [id])
+
   lignesBudget          LigneBudgetPrevisionnel[]
   achats                AchatReel[]
   pointages             PointageHeure[]
   photos                PhotoChantier[]
   commissionnement      Commissionnement?
+  commissionnementCommercial CommissionnementCommercial?
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -154,10 +159,28 @@ model Commissionnement {
   tauxFixe    Decimal  @default(0) @db.Decimal(6, 2)  // taux de commission de base (% de la marge)
   bonusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // points de % ajoutés au taux si en avance (mode DYNAMIQUE)
   malusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // points de % retirés du taux si en retard (mode DYNAMIQUE)
-  
+
   chantierId  String   @unique
   chantier    Chantier @relation(fields: [chantierId], references: [id])
-  
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Commission d'un commercial sur un chantier — même mécanique que Commissionnement
+// (taux fixe et/ou bonus/malus selon avance/retard sur les heures) mais distincte :
+// un chantier peut avoir un taux de commission conducteur ET un taux de commission
+// commercial, réglés indépendamment par l'administrateur.
+model CommissionnementCommercial {
+  id          String   @id @default(uuid())
+  mode        String   @default("FIXE") // FIXE ou DYNAMIQUE
+  tauxFixe    Decimal  @default(0) @db.Decimal(6, 2)
+  bonusHeure  Decimal  @default(0) @db.Decimal(6, 2)
+  malusHeure  Decimal  @default(0) @db.Decimal(6, 2)
+
+  chantierId  String   @unique
+  chantier    Chantier @relation(fields: [chantierId], references: [id])
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

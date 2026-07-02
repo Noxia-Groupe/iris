@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, Sun, Moon, PieChart } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, Sun, Moon, PieChart, TrendingUp } from 'lucide-react';
 import { applyTheme, setTheme } from '../theme';
 import './Sidebar.css';
 
@@ -9,6 +9,7 @@ const Sidebar = () => {
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  const isCommercial = userRole === 'COMMERCIAL';
   const [isDark, setIsDark] = useState(user?.theme === 'dark');
 
   const handleLogout = () => {
@@ -42,20 +43,33 @@ const Sidebar = () => {
           Liste des Chantiers
         </NavLink>
         
-        <NavLink to="/achats" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
-          <ShoppingCart size={20} />
-          Journal des Achats
-        </NavLink>
-        
-        <NavLink to="/heures" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
-          <Clock size={20} />
-          Journal des Heures
-        </NavLink>
+        {!isCommercial && (
+          <NavLink to="/achats" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <ShoppingCart size={20} />
+            Journal des Achats
+          </NavLink>
+        )}
 
-        <NavLink to="/statistiques" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
-          <PieChart size={20} />
-          Statistiques
-        </NavLink>
+        {!isCommercial && (
+          <NavLink to="/heures" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Clock size={20} />
+            Journal des Heures
+          </NavLink>
+        )}
+
+        {!isCommercial && (
+          <NavLink to="/statistiques" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <PieChart size={20} />
+            Statistiques
+          </NavLink>
+        )}
+
+        {isCommercial && (
+          <NavLink to="/resultat-commercial" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <TrendingUp size={20} />
+            Résultat Commercial
+          </NavLink>
+        )}
 
         {userRole === 'ADMIN' && (
           <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
