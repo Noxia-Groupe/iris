@@ -27,7 +27,9 @@ const Login = () => {
           auth: {
             clientId: cfg.ssoClientId,
             authority: `https://login.microsoftonline.com/${cfg.ssoTenantId}`,
-            redirectUri: window.location.origin,
+            // Page dédiée (hors PrivateRoute) : évite que le routeur redirige vers /login
+            // et écrase la réponse Microsoft avant que MSAL ait pu la lire dans le popup.
+            redirectUri: `${window.location.origin}/auth/callback`,
           },
           cache: { cacheLocation: 'sessionStorage' },
         });
