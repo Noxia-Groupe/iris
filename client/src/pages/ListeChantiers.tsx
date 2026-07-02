@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Archive, RotateCcw } from 'lucide-react';
+import { Archive, RotateCcw, Filter } from 'lucide-react';
 import { apiFetch } from '../api';
 
 const ListeChantiers = () => {
@@ -7,6 +7,8 @@ const ListeChantiers = () => {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [filterMaterielDepasse, setFilterMaterielDepasse] = useState(false);
+  const [filterHeuresDepasse, setFilterHeuresDepasse] = useState(false);
 
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -235,8 +237,17 @@ const ListeChantiers = () => {
     </div>
   );
 
-  const chantiersEnCours = chantiers.filter(c => c.statut === 'EN_COURS');
-  const chantiersTermines = chantiers.filter(c => c.statut === 'TERMINE');
+  // Filtres de dépassement — appliqués aux deux tableaux (en cours et terminés/archivés).
+  const matchesFilters = (c: any) => {
+    const metrics = c.metrics || {};
+    if (filterMaterielDepasse && !((metrics.materielReel || 0) > (c.budgetMaterielVendu || 0))) return false;
+    if (filterHeuresDepasse && !((metrics.heuresRealisees || 0) > (c.heuresVendues || 0))) return false;
+    return true;
+  };
+
+  const chantiersEnCours = chantiers.filter(c => c.statut === 'EN_COURS').filter(matchesFilters);
+  const chantiersTermines = chantiers.filter(c => c.statut === 'TERMINE').filter(matchesFilters);
+  const filtresActifs = filterMaterielDepasse || filterHeuresDepasse;
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden">
@@ -320,9 +331,26 @@ const ListeChantiers = () => {
         </div>
       )}
 
+      <div className="flex flex-wrap items-center gap-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <span className="text-sm font-semibold text-gray-500 flex items-center gap-2"><Filter size={16} /> Filtrer :</span>
+        <label className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-lg cursor-pointer border transition-colors ${filterMaterielDepasse ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100'}`}>
+          <input type="checkbox" checked={filterMaterielDepasse} onChange={(e) => setFilterMaterielDepasse(e.target.checked)} className="w-4 h-4" />
+          Budget matériel dépassé
+        </label>
+        <label className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-lg cursor-pointer border transition-colors ${filterHeuresDepasse ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100'}`}>
+          <input type="checkbox" checked={filterHeuresDepasse} onChange={(e) => setFilterHeuresDepasse(e.target.checked)} className="w-4 h-4" />
+          Heures prévues dépassées
+        </label>
+        {filtresActifs && (
+          <button onClick={() => { setFilterMaterielDepasse(false); setFilterHeuresDepasse(false); }} className="text-xs font-semibold text-accent hover:underline ml-auto">
+            Réinitialiser
+          </button>
+        )}
+      </div>
+
       <div className="flex-1">
-        {renderTable(chantiersEnCours, "Chantiers En Cours", "Aucun chantier en cours.")}
-        {renderTable(chantiersTermines, "Chantiers Terminés / Archivés", "Aucun chantier archivé.")}
+        {renderTable(chantiersEnCours, "Chantiers En Cours", filtresActifs ? "Aucun chantier en cours ne correspond aux filtres." : "Aucun chantier en cours.")}
+        {renderTable(chantiersTermines, "Chantiers Terminés / Archivés", filtresActifs ? "Aucun chantier archivé ne correspond aux filtres." : "Aucun chantier archivé.")}
       </div>
 
     </div>

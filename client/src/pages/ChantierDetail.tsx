@@ -268,14 +268,14 @@ const ChantierDetail = () => {
             <div className={`mb-8 p-6 rounded-xl border-l-8 flex flex-col gap-4 shadow-sm relative overflow-hidden ${margeAffichee > 0 ? 'bg-emerald-50 border-emerald-500' : 'bg-red-50 border-red-500'}`}>
               <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="z-10 text-center md:text-left">
-                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: margeAffichee > 0 ? '#065f46' : '#991b1b' }}>
+                  <div className={`text-xs font-bold uppercase tracking-widest ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                     Marge Commerciale Nette
                   </div>
-                  <div className="text-5xl font-black mt-2 tracking-tight" style={{ color: margeAffichee > 0 ? '#047857' : '#b91c1c' }}>
+                  <div className={`text-5xl font-black mt-2 tracking-tight ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                     {margeAffichee.toLocaleString()} €
                   </div>
                   {metrics.margePct != null && (
-                    <div className="text-sm font-bold mt-1" style={{ color: margeAffichee > 0 ? '#047857' : '#b91c1c' }}>
+                    <div className={`text-sm font-bold mt-1 ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                       {metrics.margePct.toFixed(1)}% du budget vendu
                     </div>
                   )}

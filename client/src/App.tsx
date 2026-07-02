@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import Achats from './pages/Achats';
 import Heures from './pages/Heures';
 import Admin from './pages/Admin';
+import Statistiques from './pages/Statistiques';
 import ListeChantiers from './pages/ListeChantiers';
 import AccesRefuse from './pages/AccesRefuse';
 import AuthCallbackMsal from './pages/AuthCallbackMsal';
@@ -78,6 +79,12 @@ function App() {
         <Route path="/admin" element={
           <PrivateRoute requiredRole="ADMIN">
             <Admin />
+          </PrivateRoute>
+        } />
+
+        <Route path="/statistiques" element={
+          <PrivateRoute>
+            <Statistiques />
           </PrivateRoute>
         } />
         </Routes>

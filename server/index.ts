@@ -56,7 +56,7 @@ async function resolveAuthorizedSsoUser(email: string) {
   if (!normalized) return null;
   return prisma.user.findUnique({
     where: { email: normalized },
-    select: { id: true, name: true, email: true, role: true },
+    select: { id: true, name: true, email: true, role: true, theme: true },
   });
 }
 
@@ -302,7 +302,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, theme: user.theme } });
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la connexion' });
   }
@@ -330,6 +330,23 @@ app.post('/api/auth/sso', async (req, res) => {
     res.json({ token, user });
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la connexion SSO' });
+  }
+});
+
+// Préférence d'affichage (clair/sombre) : chaque utilisateur (admin ou conducteur) ne
+// peut modifier que la sienne — l'id vient du jeton, jamais du corps de la requête.
+app.put('/api/me/theme', requireAuth, async (req, res) => {
+  try {
+    const theme = req.body.theme === 'dark' ? 'dark' : 'light';
+    const authUser = (req as AuthRequest).user!;
+    const user = await prisma.user.update({
+      where: { id: authUser.id },
+      data: { theme },
+      select: { id: true, name: true, email: true, role: true, theme: true },
+    });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating theme' });
   }
 });
 
@@ -1131,6 +1148,143 @@ app.get('/api/stats/conducteurs/assiduite', requireAuth, requireAdmin, async (re
     });
   } catch (error) {
     res.status(500).json({ error: 'Error computing assiduite stats' });
+  }
+});
+
+// Répartition des chantiers TERMINÉS (admin uniquement) selon qu'ils ont été livrés
+// entièrement dans les clous (heures ET coût main d'œuvre en avance, matériel dans le
+// budget), ou en dépassement sur le temps (heures ou coût MO), le matériel, ou les deux.
+// Alimente le camembert de l'onglet Statistiques > Chantiers.
+app.get('/api/stats/chantiers-repartition', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const params = await getParametres();
+    const chantiers = decimalToNumber(await prisma.chantier.findMany({
+      where: { statut: 'TERMINE' },
+      include: { achats: true, pointages: true, commissionnement: true },
+    }));
+
+    let positif = 0, tempsSeul = 0, materielSeul = 0, lesDeux = 0;
+    for (const c of chantiers) {
+      const m = computeChantierMetrics(c, params, true);
+      const tempsOk = m.diffHeures >= 0 && (c.budgetMainOeuvreVendu - m.moReel) >= 0;
+      const materielOk = m.materielReel <= c.budgetMaterielVendu;
+      if (tempsOk && materielOk) positif++;
+      else if (!tempsOk && materielOk) tempsSeul++;
+      else if (tempsOk && !materielOk) materielSeul++;
+      else lesDeux++;
+    }
+
+    const total = chantiers.length;
+    const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+    res.json({
+      total,
+      categories: [
+        { key: 'positif', label: 'Tout positif (heures, coût MO et matériel dans le budget)', count: positif, pct: pct(positif) },
+        { key: 'tempsSeul', label: 'Dépassement budget temps uniquement', count: tempsSeul, pct: pct(tempsSeul) },
+        { key: 'materielSeul', label: 'Dépassement budget matériel uniquement', count: materielSeul, pct: pct(materielSeul) },
+        { key: 'lesDeux', label: 'Dépassement des deux budgets (temps ET matériel)', count: lesDeux, pct: pct(lesDeux) },
+      ],
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing chantiers repartition' });
+  }
+});
+
+// Bornes [début, fin exclue[ d'une période "semaine civile complète" (lundi->lundi
+// suivant, 7 jours), "mois civil" ou "année civile" contenant `refParam`, en UTC.
+function periodBounds(period: 'week' | 'month' | 'year', refParam: unknown): { start: Date; endExclusive: Date } {
+  const parsed = typeof refParam === 'string' && refParam ? new Date(refParam) : new Date();
+  const ref = isNaN(parsed.getTime()) ? new Date() : parsed;
+  if (period === 'year') {
+    return {
+      start: new Date(Date.UTC(ref.getUTCFullYear(), 0, 1)),
+      endExclusive: new Date(Date.UTC(ref.getUTCFullYear() + 1, 0, 1)),
+    };
+  }
+  if (period === 'month') {
+    return {
+      start: new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), 1)),
+      endExclusive: new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + 1, 1)),
+    };
+  }
+  const day = ref.getUTCDay(); // 0 = dimanche ... 6 = samedi
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const start = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate() + diffToMonday));
+  return { start, endExclusive: new Date(start.getTime() + 7 * 86400000) };
+}
+
+// Classement des intervenants par heures travaillées (semaine civile / mois civil /
+// année civile, navigable) — visible par les conducteurs ET les admins. Basé sur la
+// date du travail effectué (`date`), pas l'instant de saisie.
+app.get('/api/stats/intervenants', requireAuth, async (req, res) => {
+  try {
+    const period = (['week', 'month', 'year'] as const).includes(req.query.period as any) ? (req.query.period as 'week' | 'month' | 'year') : 'week';
+    const { start, endExclusive } = periodBounds(period, req.query.ref);
+
+    const intervenants = await prisma.intervenant.findMany({ select: { id: true, nom: true, role: true } });
+    const pointages = decimalToNumber(await prisma.pointageHeure.findMany({
+      where: { date: { gte: start, lt: endExclusive } },
+      select: { intervenantId: true, nbrHeures: true, tauxHoraireApplique: true },
+    }));
+
+    const byIntervenant: Record<string, { heures: number; cout: number }> = {};
+    for (const p of pointages) {
+      const cur = byIntervenant[p.intervenantId] || { heures: 0, cout: 0 };
+      cur.heures += p.nbrHeures;
+      cur.cout += p.nbrHeures * p.tauxHoraireApplique;
+      byIntervenant[p.intervenantId] = cur;
+    }
+
+    const list = intervenants
+      .map((i) => ({ id: i.id, nom: i.nom, role: i.role, heures: byIntervenant[i.id]?.heures || 0, cout: byIntervenant[i.id]?.cout || 0 }))
+      .filter((i) => i.heures > 0)
+      .sort((a, b) => b.heures - a.heures);
+
+    res.json({
+      period,
+      periodStart: start.toISOString().slice(0, 10),
+      periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
+      intervenants: list,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing intervenants stats' });
+  }
+});
+
+// Total des achats par fournisseur (mois civil / année civile, navigable) — visible
+// par les conducteurs ET les admins (même périmètre que le Journal des Achats).
+app.get('/api/stats/fournisseurs', requireAuth, async (req, res) => {
+  try {
+    const period = req.query.period === 'year' ? 'year' : 'month';
+    const { start, endExclusive } = periodBounds(period, req.query.ref);
+
+    const fournisseurs = await prisma.fournisseur.findMany({ select: { id: true, nom: true } });
+    const achats = decimalToNumber(await prisma.achatReel.findMany({
+      where: { date: { gte: start, lt: endExclusive } },
+      select: { fournisseurId: true, montantHT: true },
+    }));
+
+    const byFournisseur: Record<string, { total: number; nb: number }> = {};
+    for (const a of achats) {
+      const cur = byFournisseur[a.fournisseurId] || { total: 0, nb: 0 };
+      cur.total += a.montantHT;
+      cur.nb += 1;
+      byFournisseur[a.fournisseurId] = cur;
+    }
+
+    const list = fournisseurs
+      .map((f) => ({ id: f.id, nom: f.nom, total: byFournisseur[f.id]?.total || 0, nbAchats: byFournisseur[f.id]?.nb || 0 }))
+      .filter((f) => f.nbAchats > 0)
+      .sort((a, b) => b.total - a.total);
+
+    res.json({
+      period,
+      periodStart: start.toISOString().slice(0, 10),
+      periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
+      fournisseurs: list,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing fournisseurs stats' });
   }
 });
 

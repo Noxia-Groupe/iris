@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, Sun, Moon, PieChart } from 'lucide-react';
+import { applyTheme, setTheme } from '../theme';
 import './Sidebar.css';
 
 const Sidebar = () => {
@@ -7,11 +9,19 @@ const Sidebar = () => {
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  const [isDark, setIsDark] = useState(user?.theme === 'dark');
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    applyTheme('light');
     navigate('/login');
+  };
+
+  const toggleTheme = () => {
+    const next = isDark ? 'light' : 'dark';
+    setIsDark(!isDark);
+    setTheme(next);
   };
 
   return (
@@ -41,7 +51,12 @@ const Sidebar = () => {
           <Clock size={20} />
           Journal des Heures
         </NavLink>
-        
+
+        <NavLink to="/statistiques" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+          <PieChart size={20} />
+          Statistiques
+        </NavLink>
+
         {userRole === 'ADMIN' && (
           <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <Settings size={20} />
@@ -51,6 +66,10 @@ const Sidebar = () => {
       </nav>
       
       <div className="sidebar-footer">
+        <button onClick={toggleTheme} className="nav-link btn-logout">
+          {isDark ? <Sun size={20} /> : <Moon size={20} />}
+          {isDark ? 'Mode clair' : 'Mode sombre'}
+        </button>
         <button onClick={handleLogout} className="nav-link btn-logout">
           <LogOut size={20} />
           Déconnexion

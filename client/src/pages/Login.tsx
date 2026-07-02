@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PublicClientApplication } from '@azure/msal-browser';
 import { apiFetch } from '../api';
+import { applyTheme } from '../theme';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -59,6 +60,7 @@ const Login = () => {
         const data = await res.json();
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
+        applyTheme(data.user.theme === 'dark' ? 'dark' : 'light');
         navigate('/');
       } else if (res.status === 403) {
         navigate('/acces-refuse');
@@ -94,6 +96,7 @@ const Login = () => {
       if (res.ok) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
+        applyTheme(data.user.theme === 'dark' ? 'dark' : 'light');
         navigate('/');
       } else {
         setError(data.error || 'Erreur de connexion');

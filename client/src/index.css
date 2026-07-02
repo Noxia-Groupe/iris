@@ -1,5 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
+/* Mode sombre piloté par une classe (.dark sur <html>), pas par les préférences OS :
+   la préférence est choisie par l'utilisateur et enregistrée sur son compte. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* Couleurs de marque exposées comme tokens Tailwind (génère bg-primary, text-accent, etc.) */
 @theme {
@@ -55,6 +58,24 @@
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Mode sombre : redéfinit les mêmes tokens (jamais une palette séparée), dans la même
+   famille bleu nuit que la sidebar (déjà sombre) pour rester cohérent avec la marque. */
+.dark {
+  color-scheme: dark;
+  --color-gray-light: #232d47;
+  --color-gray-medium: #34405f;
+
+  --color-bg: #0a0f1e;
+  --color-surface: #121a2e;
+  --color-text: #e8ecf3;
+  --color-text-muted: #8b93a7;
+  --color-border: #232d47;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
 }
 
 body {
@@ -156,3 +177,87 @@ body {
 }
 
 /* Les utilitaires (flex, gap-*, mb-*, text-primary, ...) sont désormais fournis par Tailwind. */
+
+/* ---------------------------------------------------------------------------
+   Mode sombre : équivalents des utilitaires Tailwind de couleur (bg-*, text-*,
+   border-*) réellement utilisés dans l'app. Volontairement hors @layer : comme
+   pour les tokens ci-dessus, ça leur donne la priorité sur les utilitaires
+   Tailwind (@layer utilities) sans avoir à ajouter un variant dark: partout —
+   un seul endroit à maintenir plutôt que des centaines de className.
+   --------------------------------------------------------------------------- */
+
+/* Surfaces (cartes, fonds, pastilles) */
+.dark .bg-white { background-color: var(--color-surface); }
+.dark .bg-gray-50 { background-color: #101728; }
+.dark .bg-gray-100 { background-color: #1c2743; }
+.dark .bg-gray-200 { background-color: #26314f; }
+.dark .bg-gray-300 { background-color: #34405f; }
+.dark .bg-gray-700 { background-color: #2e3958; }
+.dark .bg-gray-800 { background-color: #232d47; }
+.dark .bg-white\/60 { background-color: rgba(255, 255, 255, 0.06); }
+.dark .bg-gray-50\/50 { background-color: rgba(16, 23, 40, 0.5); }
+
+/* Bordures / séparateurs */
+.dark .border-gray-50 { border-color: #182036; }
+.dark .border-gray-100 { border-color: #202a44; }
+.dark .border-gray-200 { border-color: #283354; }
+.dark .border-gray-300 { border-color: #34405f; }
+.dark .divide-gray-100 > :not(:last-child) { border-color: #202a44; }
+.dark .border-black\/5 { border-color: rgba(255, 255, 255, 0.08); }
+
+/* Texte neutre */
+.dark .text-gray-800 { color: #e8ecf3; }
+.dark .text-gray-700 { color: #d3d9e5; }
+.dark .text-gray-600 { color: #b0b8ca; }
+.dark .text-gray-500 { color: #8b93a7; }
+.dark .text-gray-400 { color: #6b7488; }
+.dark .text-gray-300 { color: #4b5468; }
+
+/* Pastilles / badges colorés (fond clair + texte foncé en mode jour ->
+   fond teinté sombre + texte clair en mode nuit) */
+.dark .bg-blue-50 { background-color: #12233f; }
+.dark .bg-blue-100 { background-color: #16294a; }
+.dark .bg-emerald-50 { background-color: #0f2e22; }
+.dark .bg-emerald-100 { background-color: #123626; }
+.dark .bg-green-100 { background-color: #123626; }
+.dark .bg-red-50 { background-color: #3a1414; }
+.dark .bg-red-100 { background-color: #451a1a; }
+.dark .bg-red-200 { background-color: #522020; }
+.dark .bg-purple-50 { background-color: #241a3d; }
+.dark .bg-purple-100 { background-color: #2b2049; }
+.dark .bg-orange-100 { background-color: #3a2410; }
+.dark .bg-indigo-50 { background-color: #1e1a42; }
+.dark .bg-indigo-100 { background-color: #241f4d; }
+.dark .bg-indigo-300 { background-color: #4c47a3; }
+.dark .bg-yellow-50 { background-color: #3a2f0d; }
+
+.dark .text-blue-600 { color: #6ea8f5; }
+.dark .text-blue-700 { color: #8db8f7; }
+.dark .text-emerald-600 { color: #34d399; }
+.dark .text-emerald-700 { color: #4fdda8; }
+.dark .text-red-600 { color: #f87171; }
+.dark .text-red-700 { color: #fb9a9a; }
+.dark .text-orange-500 { color: #fb923c; }
+.dark .text-orange-600 { color: #fb923c; }
+.dark .text-purple-500 { color: #a78bfa; }
+.dark .text-purple-600 { color: #b39cfb; }
+.dark .text-indigo-600 { color: #929cf7; }
+.dark .text-indigo-700 { color: #a3acf8; }
+.dark .text-indigo-900 { color: #c7d2fe; }
+.dark .text-amber-600 { color: #fbbf24; }
+.dark .text-yellow-800 { color: #fde68a; }
+
+.dark .border-emerald-500 { border-color: #10b981; }
+.dark .border-red-500 { border-color: #ef4444; }
+.dark .border-red-200 { border-color: #5b2323; }
+.dark .border-indigo-100 { border-color: #2a2a52; }
+
+/* Couleurs de marque (--color-primary-dark/-primary/-accent) : volontairement PAS
+   redéfinies globalement (elles servent aussi de fonds fixes, sidebar, login...).
+   En texte sur une surface sombre en revanche, le navy quasi noir de la marque
+   devient illisible : ces utilitaires précis sont éclaircis. */
+.dark .text-primary-dark { color: #f0f3fa; }
+.dark .text-primary { color: #c9d6ec; }
+.dark .text-accent { color: #5b9bf0; }
+.dark .bg-primary\/10 { background-color: rgba(59, 130, 246, 0.15); }
+.dark .border-primary { border-color: #3b82f6; }
