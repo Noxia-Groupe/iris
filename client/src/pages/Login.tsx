@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PublicClientApplication } from '@azure/msal-browser';
 import { apiFetch } from '../api';
@@ -8,15 +8,32 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [ssoInfo, setSsoInfo] = useState('');
-  const [ssoCfg, setSsoCfg] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  // Instance MSAL + promesse d'initialisation, créées dès le chargement de la page (pas au
+  // clic) : `initialize()` est asynchrone, et si on l'attend DANS le gestionnaire de clic,
+  // le délai introduit entre le geste utilisateur et l'appel réel à `window.open` fait que
+  // certains navigateurs bloquent silencieusement le popup (aucune erreur, rien ne s'ouvre).
+  const msalRef = useRef<PublicClientApplication | null>(null);
+  const msalReadyRef = useRef<Promise<void> | null>(null);
 
-  // Récupère la configuration SSO (clientId + tenant Azure) exposée par le serveur.
+  // Récupère la configuration SSO (clientId + tenant Azure) et initialise MSAL en avance.
   useEffect(() => {
     apiFetch('/config')
       .then((res) => (res.ok ? res.json() : null))
-      .then((cfg) => { if (cfg) setSsoCfg(cfg); })
+      .then((cfg) => {
+        if (!cfg?.ssoConfigured || !cfg?.ssoClientId || !cfg?.ssoTenantId) return;
+        const msal = new PublicClientApplication({
+          auth: {
+            clientId: cfg.ssoClientId,
+            authority: `https://login.microsoftonline.com/${cfg.ssoTenantId}`,
+            redirectUri: window.location.origin,
+          },
+          cache: { cacheLocation: 'sessionStorage' },
+        });
+        msalRef.current = msal;
+        msalReadyRef.current = msal.initialize();
+      })
       .catch(() => { /* config indisponible : SSO considéré inactif */ });
   }, []);
 
@@ -26,21 +43,14 @@ const Login = () => {
   const handleSso = async () => {
     setError('');
     setSsoInfo('');
-    if (!ssoCfg?.ssoConfigured || !ssoCfg?.ssoClientId || !ssoCfg?.ssoTenantId) {
+    const msal = msalRef.current;
+    if (!msal) {
       setSsoInfo("La connexion Microsoft 365 n'est pas activée sur ce serveur. Les autorisations d'accès sont gérées par votre administrateur.");
       return;
     }
     setLoading(true);
     try {
-      const msal = new PublicClientApplication({
-        auth: {
-          clientId: ssoCfg.ssoClientId,
-          authority: `https://login.microsoftonline.com/${ssoCfg.ssoTenantId}`,
-          redirectUri: window.location.origin,
-        },
-        cache: { cacheLocation: 'sessionStorage' },
-      });
-      await msal.initialize();
+      if (msalReadyRef.current) await msalReadyRef.current; // déjà résolue en temps normal
       const result = await msal.loginPopup({ scopes: ['openid', 'profile', 'email'] });
       const res = await apiFetch('/auth/sso', { method: 'POST', body: JSON.stringify({ idToken: result.idToken }) });
       if (res.ok) {
