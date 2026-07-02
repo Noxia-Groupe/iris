@@ -8,6 +8,7 @@ import Heures from './pages/Heures';
 import Admin from './pages/Admin';
 import ListeChantiers from './pages/ListeChantiers';
 import AccesRefuse from './pages/AccesRefuse';
+import AuthCallbackMsal from './pages/AuthCallbackMsal';
 import { ErrorBoundary } from './ErrorBoundary';
 
 const PrivateRoute = ({ children, requiredRole }: { children: JSX.Element, requiredRole?: string }) => {
@@ -41,6 +42,7 @@ function App() {
         <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/acces-refuse" element={<AccesRefuse />} />
+        <Route path="/auth/callback" element={<AuthCallbackMsal />} />
         
         <Route path="/" element={
           <PrivateRoute>
