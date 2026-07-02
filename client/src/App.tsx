@@ -12,6 +12,8 @@ import ListeChantiers from './pages/ListeChantiers';
 import AccesRefuse from './pages/AccesRefuse';
 import AuthCallbackMsal from './pages/AuthCallbackMsal';
 import ResultatCommercial from './pages/ResultatCommercial';
+import Performances from './pages/Performances';
+import MesCommerciaux from './pages/MesCommerciaux';
 import { ErrorBoundary } from './ErrorBoundary';
 
 const PrivateRoute = ({ children, requiredRole, excludedRole }: { children: JSX.Element, requiredRole?: string, excludedRole?: string }) => {
@@ -83,6 +85,18 @@ function App() {
         <Route path="/admin" element={
           <PrivateRoute requiredRole="ADMIN">
             <Admin />
+          </PrivateRoute>
+        } />
+
+        <Route path="/performances" element={
+          <PrivateRoute requiredRole="ADMIN">
+            <Performances />
+          </PrivateRoute>
+        } />
+
+        <Route path="/commerciaux" element={
+          <PrivateRoute requiredRole="ADMIN">
+            <MesCommerciaux />
           </PrivateRoute>
         } />
 

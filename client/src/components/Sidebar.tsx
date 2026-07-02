@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, Sun, Moon, PieChart, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, Sun, Moon, PieChart, TrendingUp, Activity, Award } from 'lucide-react';
 import { applyTheme, setTheme } from '../theme';
 import './Sidebar.css';
 
@@ -72,10 +72,20 @@ const Sidebar = () => {
         )}
 
         {userRole === 'ADMIN' && (
-          <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
-            <Settings size={20} />
-            Administration
-          </NavLink>
+          <>
+            <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Settings size={20} />
+              Administration
+            </NavLink>
+            <NavLink to="/performances" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Activity size={20} />
+              Performances
+            </NavLink>
+            <NavLink to="/commerciaux" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Award size={20} />
+              Mes Commerciaux
+            </NavLink>
+          </>
         )}
       </nav>
       

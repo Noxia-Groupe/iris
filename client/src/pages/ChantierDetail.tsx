@@ -4,11 +4,15 @@ import html2pdf from 'html2pdf.js';
 import imageCompression from 'browser-image-compression';
 import {
   ArrowLeft, Calendar, User, FileDown, Sparkles, Camera,
-  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase,
+  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, X,
 } from 'lucide-react';
 import { apiFetch, assetUrl } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
+import { TYPES_CHANTIER } from '../chantierTypes';
+
+// Date ISO (avec ou sans heure) -> "YYYY-MM-DD" attendu par <input type="date">.
+const toDateInputValue = (d: string | null | undefined) => (d ? d.slice(0, 10) : '');
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
 const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
@@ -40,11 +44,18 @@ const ChantierDetail = () => {
   const [editingCommercial, setEditingCommercial] = useState(false);
   const [savingCommercial, setSavingCommercial] = useState(false);
 
+  // Édition des informations du chantier (nom, budgets, dates...) — réservée aux admins,
+  // le serveur (PATCH /api/chantiers/:id) refuse déjà la requête à quiconque d'autre.
+  const [conducteurs, setConducteurs] = useState<any[]>([]);
+  const [editingChantier, setEditingChantier] = useState(false);
+  const [savingChantier, setSavingChantier] = useState(false);
+
   useEffect(() => {
     fetchChantier();
     fetchConfig();
     setAiReport(null);
     setEditingCommercial(false);
+    setEditingChantier(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -58,11 +69,12 @@ const ChantierDetail = () => {
 
   // Liste des commerciaux, pour le sélecteur d'affectation (admin ou conducteur
   // responsable uniquement — cf. rendu de la section Commercial ci-dessous).
+  // /commerciaux (contrairement à /users) est accessible à tout utilisateur authentifié.
   const fetchCommerciaux = async () => {
     try {
-      const res = await apiFetch('/users');
+      const res = await apiFetch('/commerciaux');
       const data = await res.json();
-      if (Array.isArray(data)) setCommerciaux(data.filter((u: any) => u.role === 'COMMERCIAL'));
+      if (Array.isArray(data)) setCommerciaux(data);
     } catch (e) { console.error(e); }
   };
 
@@ -82,6 +94,43 @@ const ChantierDetail = () => {
       alert('Impossible de joindre le serveur.');
     } finally {
       setSavingCommercial(false);
+    }
+  };
+
+  // Liste des conducteurs, pour le sélecteur de responsable dans le formulaire d'édition
+  // (admin uniquement — /users est une route admin-only, cohérent ici).
+  const fetchConducteurs = async () => {
+    try {
+      const res = await apiFetch('/users');
+      const data = await res.json();
+      if (Array.isArray(data)) setConducteurs(data.filter((u: any) => u.role === 'CONDUCTEUR_TRAVAUX'));
+    } catch (e) { console.error(e); }
+  };
+
+  const startEditChantier = () => {
+    if (conducteurs.length === 0) fetchConducteurs();
+    setEditingChantier(true);
+  };
+
+  const handleChantierSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    const formData = new FormData(e.target as HTMLFormElement);
+    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types') };
+    setSavingChantier(true);
+    try {
+      const res = await apiFetch(`/chantiers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+      if (res.ok) {
+        setEditingChantier(false);
+        fetchChantier();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Erreur lors de la modification du chantier.');
+      }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSavingChantier(false);
     }
   };
 
@@ -233,6 +282,14 @@ const ChantierDetail = () => {
 
           {/* Action Bar */}
           <div className="absolute top-6 right-6 flex gap-2">
+            {userRole === 'ADMIN' && (
+              <button
+                onClick={startEditChantier}
+                className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold hover:bg-gray-50 transition-colors shadow-sm text-sm"
+              >
+                <Pencil size={16} /> Modifier
+              </button>
+            )}
             {aiEnabled && (
               <button
                 onClick={handleGenerateAI}
@@ -534,6 +591,82 @@ const ChantierDetail = () => {
         </div>
 
       </div>
+
+      {/* Modale d'édition du chantier — réservée aux admins */}
+      {editingChantier && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditingChantier(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-primary-dark m-0">Modifier le chantier</h3>
+              <button type="button" onClick={() => setEditingChantier(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={22} />
+              </button>
+            </div>
+            <form onSubmit={handleChantierSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="form-group mb-0">
+                <label className="form-label">Nom du Chantier</label>
+                <input required name="nom" defaultValue={chantier.nom} className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Client</label>
+                <input required name="client" defaultValue={chantier.client} className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">N° de Devis</label>
+                <input name="numeroDevis" defaultValue={chantier.numeroDevis || ''} className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Responsable Chantier</label>
+                <select required name="responsableId" className="form-input" defaultValue={chantier.responsable?.id || ''}>
+                  <option value="" disabled>Sélectionner un conducteur...</option>
+                  {conducteurs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Date Début</label>
+                <input required type="date" name="dateDebut" defaultValue={toDateInputValue(chantier.dateDebut)} className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Date Fin</label>
+                <input type="date" name="dateFin" defaultValue={toDateInputValue(chantier.dateFin)} className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
+                <input required type="number" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Total Heures Vendues (h)</label>
+                <input required type="number" step="0.5" name="heuresVendues" defaultValue={chantier.heuresVendues} className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Dont Matériel (€ HT)</label>
+                <input required type="number" step="0.01" name="budgetMaterielVendu" defaultValue={chantier.budgetMaterielVendu} className="form-input" />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
+                <input required type="number" step="0.01" name="budgetMainOeuvreVendu" defaultValue={chantier.budgetMainOeuvreVendu} className="form-input" />
+              </div>
+              <div className="form-group mb-0 md:col-span-2">
+                <label className="form-label">Type(s) de chantier</label>
+                <div className="flex flex-wrap gap-2">
+                  {TYPES_CHANTIER.map((t) => (
+                    <label key={t} className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                      <input type="checkbox" name="types" value={t} defaultChecked={chantier.types?.includes(t)} className="w-4 h-4" />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="md:col-span-2 flex gap-2 mt-2">
+                <button type="submit" disabled={savingChantier} className="btn btn-primary px-8">
+                  {savingChantier ? 'Enregistrement...' : 'Enregistrer les modifications'}
+                </button>
+                <button type="button" onClick={() => setEditingChantier(false)} className="btn bg-white border">Annuler</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

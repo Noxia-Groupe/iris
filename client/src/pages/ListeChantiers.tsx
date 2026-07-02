@@ -6,6 +6,7 @@ import { TYPES_CHANTIER } from '../chantierTypes';
 const ListeChantiers = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [commerciaux, setCommerciaux] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [filterMaterielDepasse, setFilterMaterielDepasse] = useState(false);
@@ -20,6 +21,8 @@ const ListeChantiers = () => {
     fetchChantiers();
     // La liste des conducteurs (pour l'affectation) n'est accessible qu'aux admins.
     if (userRole === 'ADMIN') fetchUsers();
+    // Le commercial rattaché est à choisir dès la création, par l'admin comme le conducteur.
+    if (userRole !== 'COMMERCIAL') fetchCommerciaux();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -40,6 +43,16 @@ const ListeChantiers = () => {
       const res = await apiFetch('/users');
       const data = await res.json();
       if (Array.isArray(data)) setUsers(data.filter((u: any) => u.role === 'CONDUCTEUR_TRAVAUX'));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchCommerciaux = async () => {
+    try {
+      const res = await apiFetch('/commerciaux');
+      const data = await res.json();
+      if (Array.isArray(data)) setCommerciaux(data);
     } catch (e) {
       console.error(e);
     }
@@ -304,6 +317,13 @@ const ListeChantiers = () => {
                 <div className="form-input bg-gray-50 text-gray-500">Vous-même (attribution automatique)</div>
               </div>
             )}
+            <div className="form-group mb-0">
+              <label className="form-label">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
+              <select required={commerciaux.length > 0} name="commercialId" className="form-input" defaultValue="">
+                <option value="" disabled>Sélectionner un commercial...</option>
+                {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
             <div className="form-group mb-0">
               <label className="form-label">N° de Devis (optionnel)</label>
               <input name="numeroDevis" className="form-input" />

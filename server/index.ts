@@ -465,6 +465,21 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
     } else {
       responsableId = authUser.id;
     }
+
+    // Commercial rattaché : obligatoire dès la création (par l'admin ou le conducteur),
+    // sauf si aucun compte commercial n'est encore autorisé dans l'application — sinon
+    // la création de chantiers serait bloquée tant qu'aucun commercial n'existe.
+    let commercialId: string | null = null;
+    if (req.body.commercialId) {
+      const commercial = await prisma.user.findUnique({ where: { id: String(req.body.commercialId) } });
+      if (!commercial || commercial.role !== 'COMMERCIAL') {
+        return res.status(400).json({ error: 'Commercial introuvable.' });
+      }
+      commercialId = commercial.id;
+    } else if ((await prisma.user.count({ where: { role: 'COMMERCIAL' } })) > 0) {
+      return res.status(400).json({ error: 'Veuillez sélectionner le commercial rattaché à ce chantier.' });
+    }
+
     const chantier = await prisma.chantier.create({
       data: {
         nom: req.body.nom,
@@ -477,6 +492,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
         budgetMainOeuvreVendu: parseFloat(req.body.budgetMainOeuvreVendu) || 0,
         heuresVendues: parseFloat(req.body.heuresVendues) || 0,
         responsableId,
+        commercialId,
         statut: req.body.statut || "EN_COURS",
         types: sanitizeTypes(req.body.types)
       },
@@ -702,6 +718,23 @@ app.put('/api/users/:id/password', requireAuth, requireAdmin, async (req, res) =
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error updating password' });
+  }
+});
+
+// Liste minimale des commerciaux (id + nom), pour peupler les sélecteurs d'affectation
+// (création de chantier, réattribution). Contrairement à /api/users, accessible à tout
+// utilisateur authentifié (pas seulement les admins) : un conducteur doit pouvoir choisir
+// le commercial rattaché à un chantier qu'il crée ou dont il est responsable.
+app.get('/api/commerciaux', requireAuth, async (req, res) => {
+  try {
+    const commerciaux = await prisma.user.findMany({
+      where: { role: 'COMMERCIAL' },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    res.json(commerciaux);
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching commerciaux' });
   }
 });
 
