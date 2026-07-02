@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Archive, RotateCcw } from 'lucide-react';
 import { apiFetch } from '../api';
 
 const ListeChantiers = () => {
@@ -70,6 +71,31 @@ const ListeChantiers = () => {
     }
   };
 
+  // Clôturer un chantier (en cours -> terminé) : possible pour son responsable ou un
+  // admin. Une fois clôturé, plus aucune heure ni dépense ne peut y être ajoutée.
+  const handleCloturer = async (id: string, nom: string) => {
+    if (!confirm(`Clôturer « ${nom} » ? Il passera en Terminé/Archivé et il ne sera plus possible d'y ajouter des heures ou des dépenses.`)) return;
+    try {
+      const res = await apiFetch(`/chantiers/${id}/statut`, { method: 'PATCH', body: JSON.stringify({ statut: 'TERMINE' }) });
+      if (res.ok) fetchChantiers();
+      else { const d = await res.json(); alert(d.error || 'Erreur lors de la clôture du chantier.'); }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  // Réouvrir un chantier clôturé (terminé -> en cours) : réservé aux admins.
+  const handleReouvrir = async (id: string, nom: string) => {
+    if (!confirm(`Réouvrir « ${nom} » ? Il repassera en cours.`)) return;
+    try {
+      const res = await apiFetch(`/chantiers/${id}/statut`, { method: 'PATCH', body: JSON.stringify({ statut: 'EN_COURS' }) });
+      if (res.ok) fetchChantiers();
+      else { const d = await res.json(); alert(d.error || 'Erreur lors de la réouverture du chantier.'); }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
   // Création d'un chantier (admin et conducteur). Un conducteur en devient le responsable.
   const handleCreateChantier = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,9 +138,7 @@ const ListeChantiers = () => {
               <th className="px-6 py-4 font-semibold text-right">
                 {userRole === 'ADMIN' ? 'Marge Actuelle' : 'Solde Heures'}
               </th>
-              {userRole === 'ADMIN' && (
-                <th className="px-6 py-4 font-semibold text-right">Actions Photos</th>
-              )}
+              <th className="px-6 py-4 font-semibold text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -162,26 +186,46 @@ const ListeChantiers = () => {
                       </span>
                     )}
                   </td>
-                  {userRole === 'ADMIN' && (
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-2">
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex justify-end items-center gap-2">
+                      {c.statut === 'EN_COURS' && (
                         <button
-                          onClick={() => handleZipExport(c.id, c.nom)}
-                          className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                          title="Télécharger Photos (ZIP)"
+                          onClick={() => handleCloturer(c.id, c.nom)}
+                          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
+                          title="Clôturer le chantier"
                         >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                          <Archive size={14} /> Clôturer
                         </button>
-                        <button 
-                          onClick={() => handlePurge(c.id)} 
-                          className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                          title="Purger Photos"
+                      )}
+                      {c.statut === 'TERMINE' && userRole === 'ADMIN' && (
+                        <button
+                          onClick={() => handleReouvrir(c.id, c.nom)}
+                          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-blue-50 text-accent hover:bg-blue-100 rounded-lg transition-colors"
+                          title="Réouvrir le chantier"
                         >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          <RotateCcw size={14} /> Réouvrir
                         </button>
-                      </div>
-                    </td>
-                  )}
+                      )}
+                      {userRole === 'ADMIN' && (
+                        <>
+                          <button
+                            onClick={() => handleZipExport(c.id, c.nom)}
+                            className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                            title="Télécharger Photos (ZIP)"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                          </button>
+                          <button
+                            onClick={() => handlePurge(c.id)}
+                            className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                            title="Purger Photos"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               );
             })}

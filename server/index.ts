@@ -475,6 +475,35 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Clôture / réouverture d'un chantier. Un conducteur peut clôturer (uniquement
+// clôturer, uniquement ses propres chantiers en cours) : une fois TERMINE, il ne
+// peut plus y ajouter d'heures ou de dépenses (cf. POST /achats et /heures).
+// Seul un admin peut réouvrir un chantier clôturé (repasser en EN_COURS).
+app.patch('/api/chantiers/:id/statut', requireAuth, async (req, res) => {
+  try {
+    const authUser = (req as AuthRequest).user!;
+    const isAdmin = authUser.role === 'ADMIN';
+    const nextStatut = req.body.statut;
+    if (nextStatut !== 'EN_COURS' && nextStatut !== 'TERMINE') {
+      return res.status(400).json({ error: 'Statut invalide.' });
+    }
+
+    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) } });
+    if (!chantier || (!isAdmin && chantier.responsableId !== authUser.id)) {
+      return res.status(404).json({ error: 'Chantier introuvable' });
+    }
+
+    if (!isAdmin && (nextStatut !== 'TERMINE' || chantier.statut !== 'EN_COURS')) {
+      return res.status(403).json({ error: 'Seul un administrateur peut réouvrir un chantier clôturé.' });
+    }
+
+    const updated = await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: nextStatut } });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating chantier status' });
+  }
+});
+
 // Users (administration réservée aux admins)
 // La liste des comptes EST la liste blanche d'autorisation SSO : seuls les emails
 // présents ici peuvent se connecter (via SSO Microsoft ou en local si un mot de passe
@@ -697,6 +726,24 @@ app.delete('/api/fournisseurs/:id', requireAuth, requireAdmin, async (req, res) 
   }
 });
 
+// Un chantier clôturé (TERMINE) devient en lecture seule pour les conducteurs : ils ne
+// peuvent plus y ajouter d'heures ou de dépenses ; un admin garde un accès total (c'est
+// lui seul qui peut d'ailleurs réouvrir un chantier clôturé, cf. PATCH .../statut).
+// Envoie la réponse d'erreur et retourne null si l'écriture est refusée.
+async function assertChantierWritable(req: express.Request, res: express.Response, chantierId: string) {
+  const isAdmin = (req as AuthRequest).user?.role === 'ADMIN';
+  const chantier = await prisma.chantier.findUnique({ where: { id: chantierId } });
+  if (!chantier) {
+    res.status(404).json({ error: 'Chantier introuvable' });
+    return null;
+  }
+  if (!isAdmin && chantier.statut !== 'EN_COURS') {
+    res.status(403).json({ error: 'Ce chantier est clôturé : impossible d\'y ajouter une dépense ou des heures.' });
+    return null;
+  }
+  return chantier;
+}
+
 // Achats
 app.get('/api/achats', requireAuth, async (req, res) => {
   try {
@@ -708,6 +755,7 @@ app.get('/api/achats', requireAuth, async (req, res) => {
 
 app.post('/api/achats', requireAuth, async (req, res) => {
   try {
+    if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
     res.json(await prisma.achatReel.create({
       data: {
         date: new Date(req.body.date).toISOString(),
@@ -737,6 +785,7 @@ app.post('/api/heures', requireAuth, async (req, res) => {
   try {
     const intervenant = await prisma.intervenant.findUnique({ where: { id: req.body.intervenantId } });
     if (!intervenant) return res.status(404).json({ error: 'Intervenant not found' });
+    if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
 
     res.json(await prisma.pointageHeure.create({
       data: {
@@ -916,10 +965,14 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
   }
 });
 
-// Statistiques par conducteur de travaux (admin uniquement, classées par marge générée)
-// Statistiques par conducteur de travaux (admin uniquement) : marge/CA, fréquence de
-// remplissage heures, avance/retard sur les chantiers en cours (heures et matériel),
-// et taux d'objectifs respectés sur les chantiers terminés (livrés sans dépassement).
+// Statistiques par conducteur de travaux (admin uniquement) : marge/CA, avance/retard
+// sur les chantiers en cours (heures et matériel), et taux d'objectifs respectés sur
+// les chantiers terminés (livrés sans dépassement).
+// NB : pas de "taux de remplissage heures" ici (heures réalisées / heures vendues) —
+// cet indicateur mélangeait avancement du CHANTIER et assiduité du CONDUCTEUR : un
+// chantier fini en avance y ferait mécaniquement baisser le score, un chantier en
+// dérive le ferait monter. L'assiduité de saisie a sa propre route ci-dessous
+// (GET /stats/conducteurs/assiduite), basée sur le rythme réel de saisie.
 app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) => {
   try {
     const params = await getParametres();
@@ -934,7 +987,6 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
         id: u.id, name: u.name, email: u.email,
         nbChantiers: 0, nbChantiersEnCours: 0, nbChantiersTermines: 0,
         caTotal: 0, depensesTotal: 0, margeTotal: 0,
-        heuresVendues: 0, heuresRealisees: 0,
         // Chantiers EN_COURS uniquement : où en est le conducteur par rapport au budget vendu.
         nbEnAvanceHeures: 0, nbEnRetardHeures: 0,
         nbMaterielDansBudget: 0, nbMaterielDepasse: 0,
@@ -957,8 +1009,6 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
       agg.caTotal += c.budgetGlobalVendu;
       agg.depensesTotal += m.totalDepenses;
       agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
-      agg.heuresVendues += c.heuresVendues;
-      agg.heuresRealisees += m.heuresRealisees;
 
       if (enCours) {
         if (m.diffHeures > 0) agg.nbEnAvanceHeures++;
@@ -976,7 +1026,6 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
       .map((a: any) => ({
         ...a,
         margePct: a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
-        tauxRemplissageHeures: a.heuresVendues > 0 ? (a.heuresRealisees / a.heuresVendues) * 100 : 0,
         tauxObjectifsRespectes: a.nbChantiersTermines > 0 ? (a.nbObjectifsRespectes / a.nbChantiersTermines) * 100 : null,
       }))
       .sort((x: any, y: any) => y.margeTotal - x.margeTotal);
@@ -984,6 +1033,104 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
     res.json(list);
   } catch (error) {
     res.status(500).json({ error: 'Error computing conducteurs stats' });
+  }
+});
+
+// Bornes lundi 00:00 -> samedi 00:00 (exclusif) de la semaine civile contenant `ref`,
+// en UTC. `weekParam` est une date quelconque de la semaine visée (ex: "2026-06-29").
+function weekBoundsFrom(weekParam: unknown): { monday: Date; friday: Date; saturdayExclusive: Date } {
+  const parsed = typeof weekParam === 'string' && weekParam ? new Date(weekParam) : new Date();
+  const ref = isNaN(parsed.getTime()) ? new Date() : parsed;
+  const day = ref.getUTCDay(); // 0 = dimanche ... 6 = samedi
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate() + diffToMonday));
+  const friday = new Date(monday.getTime() + 4 * 86400000);
+  const saturdayExclusive = new Date(monday.getTime() + 5 * 86400000);
+  return { monday, friday, saturdayExclusive };
+}
+
+const JOURS_OUVRES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
+
+// Assiduité de saisie des conducteurs (admin uniquement), semaine civile lundi-vendredi.
+// Mesure leur usage réel de l'application — et non l'avancement de leurs chantiers :
+// jours où ils ont saisi au moins une heure, volume saisi par jour, et à quelle heure
+// de la journée ils saisissent habituellement (basé sur `createdAt`, l'instant de
+// saisie — pas `date`, qui est la date du travail effectué et n'a pas d'heure fiable).
+// Un conducteur est associé aux pointages des chantiers dont IL est responsable (il n'y
+// a pas d'auteur direct sur un pointage ; en pratique, un conducteur ne saisit que sur
+// ses propres chantiers en cours, cf. POST /heures).
+app.get('/api/stats/conducteurs/assiduite', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { monday, friday, saturdayExclusive } = weekBoundsFrom(req.query.week);
+    const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX' }, select: { id: true, name: true, email: true } });
+    const userIds = users.map((u) => u.id);
+
+    const pointages = decimalToNumber(await prisma.pointageHeure.findMany({
+      where: {
+        createdAt: { gte: monday, lt: saturdayExclusive },
+        chantier: { responsableId: { in: userIds } },
+      },
+      select: { nbrHeures: true, createdAt: true, chantier: { select: { responsableId: true } } },
+    }));
+
+    interface DayAgg { date: string; label: string; nbSaisies: number; heuresSaisies: number }
+    const byUser: Record<string, { days: DayAgg[]; heuresParHeureJournee: Record<number, number> }> = {};
+    for (const u of users) {
+      byUser[u.id] = {
+        days: JOURS_OUVRES.map((label, i) => ({
+          date: new Date(monday.getTime() + i * 86400000).toISOString().slice(0, 10),
+          label,
+          nbSaisies: 0,
+          heuresSaisies: 0,
+        })),
+        heuresParHeureJournee: {},
+      };
+    }
+
+    for (const p of pointages) {
+      const responsableId = p.chantier?.responsableId;
+      if (!responsableId || !byUser[responsableId]) continue;
+      const agg = byUser[responsableId];
+      const created = new Date(p.createdAt);
+      const dayIndex = Math.round((Date.UTC(created.getUTCFullYear(), created.getUTCMonth(), created.getUTCDate()) - monday.getTime()) / 86400000);
+      if (dayIndex >= 0 && dayIndex < 5) {
+        agg.days[dayIndex].nbSaisies += 1;
+        agg.days[dayIndex].heuresSaisies += p.nbrHeures;
+      }
+      const heure = created.getUTCHours();
+      agg.heuresParHeureJournee[heure] = (agg.heuresParHeureJournee[heure] || 0) + 1;
+    }
+
+    const conducteurs = users.map((u) => {
+      const agg = byUser[u.id];
+      const joursActifs = agg.days.filter((d) => d.nbSaisies > 0).length;
+      const heuresTotalesSaisies = agg.days.reduce((s, d) => s + d.heuresSaisies, 0);
+      const nbSaisiesTotal = agg.days.reduce((s, d) => s + d.nbSaisies, 0);
+      const tranchesHoraires = Object.entries(agg.heuresParHeureJournee)
+        .map(([heure, nbSaisies]) => ({ heure: Number(heure), nbSaisies }))
+        .sort((a, b) => a.heure - b.heure);
+      const heurePic = tranchesHoraires.length > 0
+        ? tranchesHoraires.reduce((max, t) => (t.nbSaisies > max.nbSaisies ? t : max)).heure
+        : null;
+      return {
+        id: u.id, name: u.name, email: u.email,
+        days: agg.days,
+        joursActifs,
+        heuresTotalesSaisies,
+        moyenneHeuresParJourActif: joursActifs > 0 ? heuresTotalesSaisies / joursActifs : 0,
+        nbSaisiesTotal,
+        tranchesHoraires,
+        heurePic,
+      };
+    });
+
+    res.json({
+      weekStart: monday.toISOString().slice(0, 10),
+      weekEnd: friday.toISOString().slice(0, 10),
+      conducteurs,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing assiduite stats' });
   }
 });
 

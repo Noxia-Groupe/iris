@@ -5,7 +5,12 @@ const Heures = () => {
   const [heures, setHeures] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [intervenants, setIntervenants] = useState<any[]>([]);
-  
+
+  // Rôle réel
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
+  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -43,6 +48,10 @@ const Heures = () => {
   };
 
   const todayDate = new Date().toISOString().split('T')[0];
+
+  // Un chantier clôturé est en lecture seule pour un conducteur : on ne le propose
+  // plus à la saisie (un admin, lui, garde la main pour corriger l'historique).
+  const chantiersSelectionnables = userRole === 'ADMIN' ? chantiers : chantiers.filter(c => c.statut === 'EN_COURS');
 
   return (
     <div>
@@ -95,7 +104,7 @@ const Heures = () => {
             <label className="text-sm font-semibold text-gray-600 mb-1">Chantier</label>
             <select required name="chantierId" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full bg-white">
               <option value="">Sélectionner un chantier...</option>
-              {chantiers.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+              {chantiersSelectionnables.map(c => <option key={c.id} value={c.id}>{c.nom}{c.statut === 'TERMINE' ? ' (Terminé)' : ''}</option>)}
             </select>
           </div>
           
