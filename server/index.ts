@@ -336,12 +336,17 @@ app.post('/api/auth/sso', async (req, res) => {
 // Champs publics d'un responsable (jamais le hash de mot de passe).
 const RESPONSABLE_SELECT = { select: { id: true, name: true, email: true, role: true } } as const;
 
-// Chantiers
+// Chantiers — un conducteur ne voit que les chantiers dont il est responsable ;
+// un admin voit tout. Un chantier sans responsable reste invisible aux conducteurs
+// jusqu'à ce qu'un admin lui en affecte un.
 app.get('/api/chantiers', requireAuth, async (req, res) => {
   try {
-    const isAdmin = (req as AuthRequest).user?.role === 'ADMIN';
+    const authUser = (req as AuthRequest).user!;
+    const isAdmin = authUser.role === 'ADMIN';
     const params = await getParametres();
+    const where = isAdmin ? {} : { responsableId: authUser.id };
     const chantiers = await prisma.chantier.findMany({
+      where,
       include: {
         responsable: RESPONSABLE_SELECT,
         achats: true,
@@ -361,7 +366,8 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
 // intervenant) et triées de la plus récente à la plus ancienne pour les journaux.
 app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
   try {
-    const isAdmin = (req as AuthRequest).user?.role === 'ADMIN';
+    const authUser = (req as AuthRequest).user!;
+    const isAdmin = authUser.role === 'ADMIN';
     const params = await getParametres();
     const chantier = await prisma.chantier.findUnique({
       where: { id: paramId(req) },
@@ -373,7 +379,10 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
         commissionnement: true
       }
     });
-    if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
+    // 404 (et non 403) pour un chantier d'un autre conducteur : on ne révèle pas son existence.
+    if (!chantier || (!isAdmin && chantier.responsableId !== authUser.id)) {
+      return res.status(404).json({ error: 'Chantier introuvable' });
+    }
     res.json(serializeChantier(chantier, params, isAdmin));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantier' });
@@ -384,8 +393,21 @@ app.post('/api/chantiers', requireAuth, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
     // Un conducteur qui crée un chantier en devient automatiquement le responsable ;
-    // un admin peut désigner librement le responsable (ou aucun).
-    const responsableId = authUser.role === 'ADMIN' ? (req.body.responsableId || null) : authUser.id;
+    // un admin doit obligatoirement désigner un responsable (sinon le chantier créé
+    // resterait invisible à tout conducteur, cf. filtrage ci-dessus).
+    let responsableId: string;
+    if (authUser.role === 'ADMIN') {
+      responsableId = String(req.body.responsableId || '');
+      if (!responsableId) {
+        return res.status(400).json({ error: 'Veuillez sélectionner le conducteur responsable de ce chantier.' });
+      }
+      const responsable = await prisma.user.findUnique({ where: { id: responsableId } });
+      if (!responsable) {
+        return res.status(400).json({ error: 'Conducteur responsable introuvable.' });
+      }
+    } else {
+      responsableId = authUser.id;
+    }
     const chantier = await prisma.chantier.create({
       data: {
         nom: req.body.nom,
@@ -421,7 +443,20 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
 
     const data: Record<string, unknown> = {};
     for (const key of allowed) {
-      if (key in req.body) data[key] = req.body[key];
+      if (key !== 'responsableId' && key in req.body) data[key] = req.body[key];
+    }
+    // Un chantier doit toujours avoir un responsable (les conducteurs ne voient que
+    // leurs chantiers) : on interdit de le vider, et on vérifie qu'il existe.
+    if ('responsableId' in req.body) {
+      const responsableId = String(req.body.responsableId || '');
+      if (!responsableId) {
+        return res.status(400).json({ error: 'Un chantier doit toujours avoir un conducteur responsable.' });
+      }
+      const responsable = await prisma.user.findUnique({ where: { id: responsableId } });
+      if (!responsable) {
+        return res.status(400).json({ error: 'Conducteur responsable introuvable.' });
+      }
+      data.responsableId = responsableId;
     }
     for (const key of numericFields) {
       if (key in req.body) data[key] = parseFloat(req.body[key]) || 0;
@@ -882,10 +917,13 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
 });
 
 // Statistiques par conducteur de travaux (admin uniquement, classées par marge générée)
+// Statistiques par conducteur de travaux (admin uniquement) : marge/CA, fréquence de
+// remplissage heures, avance/retard sur les chantiers en cours (heures et matériel),
+// et taux d'objectifs respectés sur les chantiers terminés (livrés sans dépassement).
 app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) => {
   try {
     const params = await getParametres();
-    const users = await prisma.user.findMany({ select: { id: true, name: true, email: true } });
+    const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX' }, select: { id: true, name: true, email: true } });
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
       include: { achats: true, pointages: true, commissionnement: true },
     }));
@@ -894,8 +932,14 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
     for (const u of users) {
       byUser[u.id] = {
         id: u.id, name: u.name, email: u.email,
-        nbChantiers: 0, caTotal: 0, depensesTotal: 0, margeTotal: 0,
+        nbChantiers: 0, nbChantiersEnCours: 0, nbChantiersTermines: 0,
+        caTotal: 0, depensesTotal: 0, margeTotal: 0,
         heuresVendues: 0, heuresRealisees: 0,
+        // Chantiers EN_COURS uniquement : où en est le conducteur par rapport au budget vendu.
+        nbEnAvanceHeures: 0, nbEnRetardHeures: 0,
+        nbMaterielDansBudget: 0, nbMaterielDepasse: 0,
+        // Chantiers TERMINE uniquement : livrés dans les clous (heures ET matériel) ?
+        nbObjectifsRespectes: 0,
       };
     }
 
@@ -903,12 +947,28 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
       if (!c.responsableId || !byUser[c.responsableId]) continue;
       const agg = byUser[c.responsableId];
       const m = computeChantierMetrics(c, params, true);
+      const enCours = c.statut === 'EN_COURS';
+      const termine = c.statut === 'TERMINE';
+      const materielDansBudget = m.materielReel <= c.budgetMaterielVendu;
+
       agg.nbChantiers++;
+      if (enCours) agg.nbChantiersEnCours++;
+      if (termine) agg.nbChantiersTermines++;
       agg.caTotal += c.budgetGlobalVendu;
       agg.depensesTotal += m.totalDepenses;
       agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
       agg.heuresVendues += c.heuresVendues;
       agg.heuresRealisees += m.heuresRealisees;
+
+      if (enCours) {
+        if (m.diffHeures > 0) agg.nbEnAvanceHeures++;
+        else if (m.diffHeures < 0) agg.nbEnRetardHeures++;
+        if (materielDansBudget) agg.nbMaterielDansBudget++;
+        else agg.nbMaterielDepasse++;
+      }
+      if (termine && m.diffHeures >= 0 && materielDansBudget) {
+        agg.nbObjectifsRespectes++;
+      }
     }
 
     const list = Object.values(byUser)
@@ -917,6 +977,7 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
         ...a,
         margePct: a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
         tauxRemplissageHeures: a.heuresVendues > 0 ? (a.heuresRealisees / a.heuresVendues) * 100 : 0,
+        tauxObjectifsRespectes: a.nbChantiersTermines > 0 ? (a.nbObjectifsRespectes / a.nbChantiersTermines) * 100 : null,
       }))
       .sort((x: any, y: any) => y.margeTotal - x.margeTotal);
 

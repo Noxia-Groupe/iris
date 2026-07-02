@@ -3,6 +3,7 @@ import { apiFetch } from '../api';
 
 const ListeChantiers = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
 
@@ -13,6 +14,9 @@ const ListeChantiers = () => {
 
   useEffect(() => {
     fetchChantiers();
+    // La liste des conducteurs (pour l'affectation) n'est accessible qu'aux admins.
+    if (userRole === 'ADMIN') fetchUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchChantiers = async () => {
@@ -24,6 +28,16 @@ const ListeChantiers = () => {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const res = await apiFetch('/users');
+      const data = await res.json();
+      if (Array.isArray(data)) setUsers(data.filter((u: any) => u.role === 'CONDUCTEUR_TRAVAUX'));
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -144,7 +158,7 @@ const ListeChantiers = () => {
                       )
                     ) : (
                       <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                        {diffHeures > 0 ? '+' : ''}{diffHeures} h
+                        {diffHeures > 0 ? '+' : ''}{diffHeures.toFixed(2)} h
                       </span>
                     )}
                   </td>
@@ -216,6 +230,20 @@ const ListeChantiers = () => {
               <label className="form-label">Client</label>
               <input required name="client" className="form-input" />
             </div>
+            {userRole === 'ADMIN' ? (
+              <div className="form-group mb-0">
+                <label className="form-label">Conducteur responsable</label>
+                <select required name="responsableId" className="form-input" defaultValue="">
+                  <option value="" disabled>Sélectionner un conducteur...</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="form-group mb-0">
+                <label className="form-label">Conducteur responsable</label>
+                <div className="form-input bg-gray-50 text-gray-500">Vous-même (attribution automatique)</div>
+              </div>
+            )}
             <div className="form-group mb-0">
               <label className="form-label">N° de Devis (optionnel)</label>
               <input name="numeroDevis" className="form-input" />

@@ -258,9 +258,9 @@ const Admin = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Responsable Chantier</label>
-              <select name="responsableId" className="form-input">
-                <option value="">Sélectionner (optionnel)...</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              <select required name="responsableId" className="form-input" defaultValue="">
+                <option value="" disabled>Sélectionner un conducteur...</option>
+                {users.filter(u => u.role === 'CONDUCTEUR_TRAVAUX').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
             <div className="form-group mb-0">
@@ -303,6 +303,7 @@ const Admin = () => {
                   <div>
                     <h4 className="font-bold text-lg text-primary">{c.nom}</h4>
                     <span className="text-sm text-muted">Client : {c.client} | Devis : {c.numeroDevis || 'Non spécifié'}</span>
+                    <div className="text-sm text-muted mt-0.5">Responsable : <strong className="text-gray-700">{c.responsable?.name || 'Non affecté'}</strong></div>
                   </div>
                   <span className="badge" style={{ backgroundColor: 'var(--color-primary-dark)', color: 'white', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem' }}>
                     {c.statut}
@@ -619,39 +620,95 @@ const Admin = () => {
       )}
 
       {activeTab === 'performances' && userRole === 'ADMIN' && (
-        <div className="card">
-          <h2 className="mb-4 text-primary-dark">Performances & Statistiques des Conducteurs</h2>
-          <p className="text-sm text-muted mb-4">Classement par marge commerciale générée (calculé côté serveur).</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-gray-50 text-xs uppercase text-gray-500 border-b border-gray-100">
-                  <th className="px-4 py-3 font-semibold">#</th>
-                  <th className="px-4 py-3 font-semibold">Conducteur</th>
-                  <th className="px-4 py-3 font-semibold text-center">Chantiers</th>
-                  <th className="px-4 py-3 font-semibold text-right">CA Vendu</th>
-                  <th className="px-4 py-3 font-semibold text-right">Marge générée</th>
-                  <th className="px-4 py-3 font-semibold text-right">Marge %</th>
-                  <th className="px-4 py-3 font-semibold text-right">Remplissage h.</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {perf.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 italic">Aucune donnée (aucun chantier affecté à un conducteur).</td></tr>
-                ) : perf.map((p, i) => (
-                  <tr key={p.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-bold text-gray-400">{i + 1}</td>
-                    <td className="px-4 py-3 font-bold text-gray-800">{p.name}</td>
-                    <td className="px-4 py-3 text-center">{p.nbChantiers}</td>
-                    <td className="px-4 py-3 text-right text-gray-600">{Math.round(p.caTotal).toLocaleString()} €</td>
-                    <td className={`px-4 py-3 text-right font-bold ${p.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{Math.round(p.margeTotal).toLocaleString()} €</td>
-                    <td className="px-4 py-3 text-right text-gray-600">{(p.margePct ?? 0).toFixed(1)}%</td>
-                    <td className="px-4 py-3 text-right text-gray-600">{(p.tauxRemplissageHeures ?? 0).toFixed(0)}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div>
+          <div className="mb-4">
+            <h2 className="text-primary-dark m-0">Performances & Statistiques des Conducteurs</h2>
+            <p className="text-sm text-muted mt-1">
+              Classées par marge commerciale générée. Visible uniquement par les administrateurs.
+            </p>
           </div>
+
+          {perf.length === 0 ? (
+            <div className="card text-center py-12 text-gray-400 italic">
+              Aucune donnée (aucun chantier affecté à un conducteur).
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {perf.map((p, i) => (
+                <div key={p.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                  <div className="flex items-start justify-between gap-3 mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 font-bold text-sm flex items-center justify-center shrink-0">#{i + 1}</div>
+                      <div>
+                        <div className="font-bold text-gray-800">{p.name}</div>
+                        <div className="text-xs text-muted">{p.email}</div>
+                      </div>
+                    </div>
+                    <div className="text-right text-xs font-semibold text-gray-500 whitespace-nowrap">
+                      {p.nbChantiersEnCours} en cours · {p.nbChantiersTermines} terminé{p.nbChantiersTermines > 1 ? 's' : ''}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">CA vendu</div>
+                      <div className="font-bold text-gray-800 mt-0.5">{Math.round(p.caTotal).toLocaleString()} €</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge générée</div>
+                      <div className={`font-bold mt-0.5 ${p.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{Math.round(p.margeTotal).toLocaleString()} €</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge %</div>
+                      <div className="font-bold text-gray-800 mt-0.5">{(p.margePct ?? 0).toFixed(1)}%</div>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Fréquence de remplissage (heures)</span>
+                      <span className="text-sm font-black text-purple-600">{(p.tauxRemplissageHeures ?? 0).toFixed(0)}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-purple-500"
+                        style={{ width: `${Math.min(100, p.tauxRemplissageHeures ?? 0)}%` }}
+                      />
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">{Math.round(p.heuresRealisees)}h / {Math.round(p.heuresVendues)}h vendues (tous chantiers)</div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div>
+                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">Chantiers en cours — heures</div>
+                      <div className="flex gap-2">
+                        <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">{p.nbEnAvanceHeures} en avance</span>
+                        <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full bg-red-100 text-red-700">{p.nbEnRetardHeures} en retard</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">Chantiers en cours — matériel</div>
+                      <div className="flex gap-2">
+                        <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">{p.nbMaterielDansBudget} dans le budget</span>
+                        <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full bg-red-100 text-red-700">{p.nbMaterielDepasse} dépassé{p.nbMaterielDepasse > 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Objectifs respectés (chantiers terminés)</span>
+                    {p.tauxObjectifsRespectes == null ? (
+                      <span className="text-sm text-gray-400 italic">Aucun chantier terminé</span>
+                    ) : (
+                      <span className={`text-sm font-black ${p.tauxObjectifsRespectes >= 50 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {p.nbObjectifsRespectes}/{p.nbChantiersTermines} ({p.tauxObjectifsRespectes.toFixed(0)}%)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
