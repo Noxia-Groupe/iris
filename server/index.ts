@@ -19,6 +19,9 @@ const app = express();
 const prisma = new PrismaClient();
 const port = process.env.PORT || 3001;
 
+// Ne pas révéler la techno serveur (en-tête `X-Powered-By: Express`).
+app.disable('x-powered-by');
+
 app.use(cors());
 app.use(express.json());
 

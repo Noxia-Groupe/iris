@@ -66,6 +66,14 @@ centralisé côté serveur ; un conducteur ne reçoit plus ces champs (voir §6)
 - **Pas de rate limiting** sur `/login` (brute force). _À faire._
 - **CORS grand ouvert** (`app.use(cors())`). _À restreindre par env (faible risque
   derrière le proxy nginx en same-origin)._
+- **Aucun en-tête de sécurité HTTP** (CSP, HSTS, X-Frame-Options, etc.) → note F sur
+  securityheaders.com.
+  ➡️ **Corrigé** : en-têtes ajoutés dans `client/nginx.conf` (seul point d'entrée externe,
+  couvre `/`, `/api/` et `/uploads/`) — `Content-Security-Policy`, `Strict-Transport-Security`,
+  `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`. La CSP
+  autorise explicitement Google Fonts et `login.microsoftonline.com` (SSO Microsoft) pour ne
+  rien casser ; pas de `Cross-Origin-Opener-Policy` (casserait le pont popup MSAL, cf.
+  `AuthCallbackMsal.tsx`). `X-Powered-By: Express` désactivé côté serveur.
 - **Base de données committée dans git** : `server/dev.db` et `server/prisma/dev.db`
   contiennent des données réelles (emails, noms, rôles). `server/dist/` aussi committé.
   _À retirer du suivi git + purger l'historique (voir Roadmap §4)._
