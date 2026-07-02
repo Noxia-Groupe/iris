@@ -353,6 +353,14 @@ app.put('/api/me/theme', requireAuth, async (req, res) => {
 // Champs publics d'un responsable (jamais le hash de mot de passe).
 const RESPONSABLE_SELECT = { select: { id: true, name: true, email: true, role: true } } as const;
 
+// Types de chantier (liste fermée, plusieurs possibles par chantier) — sert aussi de
+// liste blanche pour ne jamais stocker de valeur arbitraire envoyée par le client.
+const TYPES_CHANTIER = ['Vidéo', 'Alarme', "Contrôle d'accès", 'Interphonie', 'Câblage réseau'];
+function sanitizeTypes(input: unknown): string[] {
+  const arr = Array.isArray(input) ? input : input ? [input] : [];
+  return TYPES_CHANTIER.filter((t) => arr.includes(t));
+}
+
 // Chantiers — un conducteur ne voit que les chantiers dont il est responsable ;
 // un admin voit tout. Un chantier sans responsable reste invisible aux conducteurs
 // jusqu'à ce qu'un admin lui en affecte un.
@@ -437,7 +445,8 @@ app.post('/api/chantiers', requireAuth, async (req, res) => {
         budgetMainOeuvreVendu: parseFloat(req.body.budgetMainOeuvreVendu) || 0,
         heuresVendues: parseFloat(req.body.heuresVendues) || 0,
         responsableId,
-        statut: req.body.statut || "EN_COURS"
+        statut: req.body.statut || "EN_COURS",
+        types: sanitizeTypes(req.body.types)
       },
     });
     // Create default commissionnement
@@ -481,6 +490,7 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
     for (const key of dateFields) {
       if (key in req.body && req.body[key]) data[key] = new Date(req.body[key]).toISOString();
     }
+    if ('types' in req.body) data.types = sanitizeTypes(req.body.types);
 
     const chantier = await prisma.chantier.update({
       where: { id: paramId(req) },
@@ -1285,6 +1295,48 @@ app.get('/api/stats/fournisseurs', requireAuth, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Error computing fournisseurs stats' });
+  }
+});
+
+// Nombre de chantiers par type (un chantier peut avoir plusieurs types), mois civil /
+// année civile, navigable. Un conducteur ne voit que ses propres chantiers (même
+// périmètre que partout ailleurs) ; un admin voit tous les chantiers. Basé sur la date
+// de démarrage du chantier (dateDebut).
+app.get('/api/stats/types-chantiers', requireAuth, async (req, res) => {
+  try {
+    const authUser = (req as AuthRequest).user!;
+    const isAdmin = authUser.role === 'ADMIN';
+    const period = req.query.period === 'year' ? 'year' : 'month';
+    const { start, endExclusive } = periodBounds(period, req.query.ref);
+
+    const chantiers = await prisma.chantier.findMany({
+      where: {
+        dateDebut: { gte: start, lt: endExclusive },
+        ...(isAdmin ? {} : { responsableId: authUser.id }),
+      },
+      select: { types: true },
+    });
+
+    const counts: Record<string, number> = {};
+    for (const t of TYPES_CHANTIER) counts[t] = 0;
+    for (const c of chantiers) {
+      for (const t of c.types) counts[t] = (counts[t] || 0) + 1;
+    }
+
+    const totalChantiers = chantiers.length;
+    const types = Object.entries(counts)
+      .map(([type, count]) => ({ type, count, pct: totalChantiers > 0 ? (count / totalChantiers) * 100 : 0 }))
+      .sort((a, b) => b.count - a.count);
+
+    res.json({
+      period,
+      periodStart: start.toISOString().slice(0, 10),
+      periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
+      totalChantiers,
+      types,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error computing types chantiers stats' });
   }
 });
 

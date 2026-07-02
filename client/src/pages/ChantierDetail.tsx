@@ -208,6 +208,9 @@ const ChantierDetail = () => {
               <span className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${isTermine ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-accent'}`}>
                 {STATUT_LABELS[chantier.statut] || chantier.statut}
               </span>
+              {chantier.types?.map((t: string) => (
+                <span key={t} className="text-[11px] font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full">{t}</span>
+              ))}
             </div>
             <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-gray-600">
               <span className="flex items-center gap-1.5"><strong className="text-gray-800">Client:</strong> {chantier.client}</span>

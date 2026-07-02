@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
+import { TYPES_CHANTIER } from '../chantierTypes';
 
 // Une date "YYYY-MM-DD" (sans fuseau, tel que renvoyé par le serveur) -> "DD/MM".
 const fmtJourMois = (isoDate: string) => {
@@ -106,8 +107,10 @@ const Admin = () => {
   const handleSubmit = async (e: React.FormEvent, type: string) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
-    const data = Object.fromEntries(formData.entries());
-    
+    const data: Record<string, unknown> = Object.fromEntries(formData.entries());
+    // Plusieurs cases "types" partagent le même name : entries() n'en garderait qu'une.
+    if (type === 'chantiers') data.types = formData.getAll('types');
+
     await apiFetch(`/${type}`, {
       method: 'POST',
       body: JSON.stringify(data)
@@ -321,7 +324,19 @@ const Admin = () => {
                 </div>
               </div>
             </div>
-            
+
+            <div className="form-group mb-0 md:col-span-2">
+              <label className="form-label">Type(s) de chantier</label>
+              <div className="flex flex-wrap gap-2">
+                {TYPES_CHANTIER.map((t) => (
+                  <label key={t} className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                    <input type="checkbox" name="types" value={t} className="w-4 h-4" />
+                    {t}
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <div className="col-span-1 md:col-span-2 mt-2">
               <button className="btn btn-primary w-full md:w-auto px-8">Enregistrer le chantier</button>
             </div>
@@ -336,6 +351,13 @@ const Admin = () => {
                     <h4 className="font-bold text-lg text-primary">{c.nom}</h4>
                     <span className="text-sm text-muted">Client : {c.client} | Devis : {c.numeroDevis || 'Non spécifié'}</span>
                     <div className="text-sm text-muted mt-0.5">Responsable : <strong className="text-gray-700">{c.responsable?.name || 'Non affecté'}</strong></div>
+                    {c.types && c.types.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {c.types.map((t: string) => (
+                          <span key={t} className="text-[11px] font-semibold px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full">{t}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <span className="badge" style={{ backgroundColor: 'var(--color-primary-dark)', color: 'white', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem' }}>
                     {c.statut}

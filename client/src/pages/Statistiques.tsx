@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { PieChart, Users, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
+import { PieChart, Users, Truck, Tags, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiFetch } from '../api';
 
 type Period = 'week' | 'month' | 'year';
@@ -259,6 +259,77 @@ function FournisseursTab() {
   );
 }
 
+function TypesChantiersTab() {
+  const [period, setPeriod] = useState<Period>('month');
+  const [ref, setRef] = useState(() => new Date().toISOString().slice(0, 10));
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    apiFetch(`/stats/types-chantiers?period=${period}&ref=${ref}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setData)
+      .catch(() => setData(null));
+  }, [period, ref]);
+
+  const list = data?.types || [];
+  const totalChantiers = data?.totalChantiers || 0;
+  const maxCount = Math.max(1, ...list.map((t: any) => t.count));
+
+  return (
+    <div>
+      <PeriodNav
+        period={period}
+        granularities={['month', 'year']}
+        onPeriodChange={setPeriod}
+        refDate={ref}
+        onRefChange={setRef}
+        label={data ? periodLabel(period, data.periodStart, data.periodEnd) : '…'}
+      />
+
+      {!data ? (
+        <div className="text-center py-16 text-gray-400 italic">Chargement...</div>
+      ) : totalChantiers === 0 ? (
+        <div className="text-center py-16">
+          <div className="text-4xl mb-3 opacity-50">🏗️</div>
+          <div className="text-gray-500 font-medium">Aucun chantier démarré sur cette période.</div>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table style={{ width: '100%', minWidth: '500px', textAlign: 'left', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                <th style={{ padding: '8px' }}>Type de chantier</th>
+                <th style={{ padding: '8px', textAlign: 'right' }}>Nombre de chantiers</th>
+                <th style={{ padding: '8px', textAlign: 'right' }}>% du total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((t: any) => (
+                <tr key={t.type} style={{ borderBottom: '1px solid #eee' }}>
+                  <td style={{ padding: '8px' }}>
+                    <div className="flex items-center gap-3">
+                      <strong className="text-gray-800 whitespace-nowrap">{t.type}</strong>
+                      <div className="hidden sm:block flex-1 h-2 bg-gray-100 rounded-full overflow-hidden min-w-[4rem]">
+                        <div className="h-full rounded-full bg-indigo-500" style={{ width: `${(t.count / maxCount) * 100}%` }} />
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ padding: '8px', textAlign: 'right' }} className="font-black text-indigo-600">{t.count}</td>
+                  <td style={{ padding: '8px', textAlign: 'right' }} className="text-gray-500 font-semibold">{t.pct.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="text-xs text-gray-400 mt-3">
+            {totalChantiers} chantier{totalChantiers > 1 ? 's' : ''} démarré{totalChantiers > 1 ? 's' : ''} sur la période
+            (un chantier peut compter dans plusieurs types).
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const Statistiques = () => {
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
@@ -292,6 +363,9 @@ const Statistiques = () => {
         <button className={`btn flex items-center gap-2 ${activeTab === 'fournisseurs' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('fournisseurs')}>
           <Truck size={16} /> Fournisseurs
         </button>
+        <button className={`btn flex items-center gap-2 ${activeTab === 'types' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('types')}>
+          <Tags size={16} /> Types de chantiers
+        </button>
       </div>
 
       <div className="card">
@@ -316,6 +390,15 @@ const Statistiques = () => {
             <h2 className="mb-1 text-primary-dark">Total des achats par fournisseur</h2>
             <p className="text-sm text-muted mb-4">Sur la période sélectionnée.</p>
             <FournisseursTab />
+          </>
+        )}
+        {activeTab === 'types' && (
+          <>
+            <h2 className="mb-1 text-primary-dark">Répartition des chantiers par type</h2>
+            <p className="text-sm text-muted mb-4">
+              Nombre de chantiers démarrés sur la période, classé par ordre décroissant (un chantier peut avoir plusieurs types).
+            </p>
+            <TypesChantiersTab />
           </>
         )}
       </div>

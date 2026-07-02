@@ -41,7 +41,8 @@ model Chantier {
   dateDebut             DateTime
   dateFin               DateTime?
   statut                String                    @default("EN_COURS")
-  
+  types                 String[]                  @default([]) // Vidéo, Alarme, Contrôle d'accès, Interphonie, Câblage réseau... (plusieurs possibles)
+
   budgetGlobalVendu     Decimal                   @db.Decimal(12, 2)
   budgetMaterielVendu   Decimal                   @default(0) @db.Decimal(12, 2)
   budgetMainOeuvreVendu Decimal                   @default(0) @db.Decimal(12, 2)

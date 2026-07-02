@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Archive, RotateCcw, Filter } from 'lucide-react';
 import { apiFetch } from '../api';
+import { TYPES_CHANTIER } from '../chantierTypes';
 
 const ListeChantiers = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
@@ -102,7 +103,9 @@ const ListeChantiers = () => {
   const handleCreateChantier = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
-    const data = Object.fromEntries(new FormData(form).entries());
+    const formData = new FormData(form);
+    // Plusieurs cases "types" partagent le même name : entries() n'en garderait qu'une.
+    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types') };
     try {
       const res = await apiFetch('/chantiers', { method: 'POST', body: JSON.stringify(data) });
       if (res.ok) {
@@ -322,6 +325,17 @@ const ListeChantiers = () => {
             <div className="form-group mb-0">
               <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
               <input required type="number" step="0.01" name="budgetMainOeuvreVendu" className="form-input" />
+            </div>
+            <div className="form-group mb-0 md:col-span-2">
+              <label className="form-label">Type(s) de chantier</label>
+              <div className="flex flex-wrap gap-2">
+                {TYPES_CHANTIER.map((t) => (
+                  <label key={t} className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                    <input type="checkbox" name="types" value={t} className="w-4 h-4" />
+                    {t}
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="md:col-span-2 flex gap-2 mt-2">
               <button className="btn btn-primary px-8">Créer le chantier</button>
