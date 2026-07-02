@@ -109,6 +109,7 @@ const ChantierDetail = () => {
 
   const startEditChantier = () => {
     if (conducteurs.length === 0) fetchConducteurs();
+    if (commerciaux.length === 0) fetchCommerciaux();
     setEditingChantier(true);
   };
 
@@ -116,17 +117,27 @@ const ChantierDetail = () => {
     e.preventDefault();
     if (!id) return;
     const formData = new FormData(e.target as HTMLFormElement);
+    // Le commercial rattaché a sa propre route (/commercial) — pas dans la liste blanche
+    // de PATCH /chantiers/:id — on l'envoie donc à part, après les autres champs.
+    const commercialId = String(formData.get('commercialId') || '');
+    formData.delete('commercialId');
     const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types') };
     setSavingChantier(true);
     try {
       const res = await apiFetch(`/chantiers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
-      if (res.ok) {
-        setEditingChantier(false);
-        fetchChantier();
-      } else {
+      if (!res.ok) {
         const d = await res.json();
         alert(d.error || 'Erreur lors de la modification du chantier.');
+        return;
       }
+      const commRes = await apiFetch(`/chantiers/${id}/commercial`, { method: 'PATCH', body: JSON.stringify({ commercialId: commercialId || null }) });
+      if (!commRes.ok) {
+        const d = await commRes.json();
+        alert(d.error || "Erreur lors de l'affectation du commercial.");
+        return;
+      }
+      setEditingChantier(false);
+      fetchChantier();
     } catch (e) {
       alert('Impossible de joindre le serveur.');
     } finally {
@@ -620,6 +631,13 @@ const ChantierDetail = () => {
                 <select required name="responsableId" className="form-input" defaultValue={chantier.responsable?.id || ''}>
                   <option value="" disabled>Sélectionner un conducteur...</option>
                   {conducteurs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Commercial rattaché</label>
+                <select name="commercialId" className="form-input" defaultValue={chantier.commercial?.id || ''}>
+                  <option value="">Aucun commercial</option>
+                  {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div className="form-group mb-0">
