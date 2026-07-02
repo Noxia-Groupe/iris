@@ -27,7 +27,7 @@ const Sidebar = () => {
           Tableau de Bord
         </NavLink>
         
-        <NavLink to="/chantiers" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+        <NavLink to="/chantiers" end className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
           <FolderOpen size={20} />
           Liste des Chantiers
         </NavLink>

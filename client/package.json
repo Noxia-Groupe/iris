@@ -12,6 +12,7 @@
   "dependencies": {
     "@azure/msal-browser": "^5.16.0",
     "browser-image-compression": "^2.0.2",
+    "html2canvas-pro": "^2.2.1",
     "html2pdf.js": "^0.14.0",
     "lucide-react": "^1.22.0",
     "react": "^19.2.7",

@@ -333,6 +333,9 @@ app.post('/api/auth/sso', async (req, res) => {
   }
 });
 
+// Champs publics d'un responsable (jamais le hash de mot de passe).
+const RESPONSABLE_SELECT = { select: { id: true, name: true, email: true, role: true } } as const;
+
 // Chantiers
 app.get('/api/chantiers', requireAuth, async (req, res) => {
   try {
@@ -340,7 +343,7 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
     const params = await getParametres();
     const chantiers = await prisma.chantier.findMany({
       include: {
-        responsable: true,
+        responsable: RESPONSABLE_SELECT,
         achats: true,
         pointages: true,
         photos: true,
@@ -350,6 +353,30 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
     res.json(chantiers.map((c: any) => serializeChantier(c, params, isAdmin)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
+  }
+});
+
+// Détail d'un chantier : mêmes métriques que la liste, enrichies des relations
+// nécessaires aux répartitions (achats par catégorie/fournisseur, heures par
+// intervenant) et triées de la plus récente à la plus ancienne pour les journaux.
+app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
+  try {
+    const isAdmin = (req as AuthRequest).user?.role === 'ADMIN';
+    const params = await getParametres();
+    const chantier = await prisma.chantier.findUnique({
+      where: { id: paramId(req) },
+      include: {
+        responsable: RESPONSABLE_SELECT,
+        achats: { include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
+        pointages: { include: { intervenant: true }, orderBy: { date: 'desc' } },
+        photos: { orderBy: { createdAt: 'desc' } },
+        commissionnement: true
+      }
+    });
+    if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
+    res.json(serializeChantier(chantier, params, isAdmin));
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching chantier' });
   }
 });
 

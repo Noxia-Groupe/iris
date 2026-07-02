@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
+import ChantierDetail from './pages/ChantierDetail';
 import Login from './pages/Login';
 import Achats from './pages/Achats';
 import Heures from './pages/Heures';
@@ -49,7 +50,13 @@ function App() {
             <Dashboard />
           </PrivateRoute>
         } />
-        
+
+        <Route path="/chantiers/:id" element={
+          <PrivateRoute>
+            <ChantierDetail />
+          </PrivateRoute>
+        } />
+
         <Route path="/chantiers" element={
           <PrivateRoute>
             <ListeChantiers />
