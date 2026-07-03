@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
+import ThemeToggle from './components/ThemeToggle';
 import Dashboard from './pages/Dashboard';
 import ChantierDetail from './pages/ChantierDetail';
 import Login from './pages/Login';
@@ -36,9 +37,14 @@ const PrivateRoute = ({ children, requiredRole, excludedRole }: { children: JSX.
   return (
     <div className="layout">
       <Sidebar />
-      <main className="main-content">
-        {children}
-      </main>
+      <div className="content-area">
+        <header className="topbar bg-white border-b border-gray-100">
+          <ThemeToggle />
+        </header>
+        <main className="main-content">
+          {children}
+        </main>
+      </div>
     </div>
   );
 };

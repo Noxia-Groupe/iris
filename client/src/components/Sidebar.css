@@ -5,7 +5,7 @@
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-2);
+  gap: 2px;
   flex: 1;
 }
 
@@ -13,12 +13,13 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-3);
-  padding: var(--spacing-3);
+  padding: 0.5rem var(--spacing-3);
   color: rgba(255, 255, 255, 0.7);
   text-decoration: none;
   border-radius: var(--radius-md);
   transition: all 0.2s;
   font-weight: 500;
+  font-size: 0.9rem;
 }
 
 .nav-link:hover {

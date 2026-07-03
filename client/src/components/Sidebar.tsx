@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, Sun, Moon, PieChart, TrendingUp, Activity, Award } from 'lucide-react';
-import { applyTheme, setTheme } from '../theme';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award } from 'lucide-react';
+import { applyTheme } from '../theme';
 import './Sidebar.css';
 
 const Sidebar = () => {
@@ -10,19 +9,12 @@ const Sidebar = () => {
   const user = userStr ? JSON.parse(userStr) : null;
   const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
   const isCommercial = userRole === 'COMMERCIAL';
-  const [isDark, setIsDark] = useState(user?.theme === 'dark');
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     applyTheme('light');
     navigate('/login');
-  };
-
-  const toggleTheme = () => {
-    const next = isDark ? 'light' : 'dark';
-    setIsDark(!isDark);
-    setTheme(next);
   };
 
   return (
@@ -90,10 +82,6 @@ const Sidebar = () => {
       </nav>
       
       <div className="sidebar-footer">
-        <button onClick={toggleTheme} className="nav-link btn-logout">
-          {isDark ? <Sun size={20} /> : <Moon size={20} />}
-          {isDark ? 'Mode clair' : 'Mode sombre'}
-        </button>
         <button onClick={handleLogout} className="nav-link btn-logout">
           <LogOut size={20} />
           Déconnexion
