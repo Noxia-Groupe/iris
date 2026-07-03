@@ -1081,64 +1081,93 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Statistiques globales (agrégées côté serveur, périmètre selon le rôle)
+// Statistiques du tableau de bord : compteurs de statut (instantanés, jamais filtrés par
+// période — comme les listes "chantiers en cours/archivés" du dashboard qu'ils
+// accompagnent) + résultats chiffrés du mois civil ou de l'année civile EN COURS
+// (pas de navigation vers une période passée, contrairement aux autres pages stats).
+// Le périmètre (tous / mes chantiers / mes ventes) suit le rôle comme partout ailleurs.
 app.get('/api/stats/global', requireAuth, async (req, res) => {
   try {
     const user = (req as AuthRequest).user!;
     const isAdmin = user.role === 'ADMIN';
+    const isCommercial = user.role === 'COMMERCIAL';
     const params = await getParametres();
-    // Un conducteur ne voit que les chantiers dont il est responsable ; un commercial,
-    // uniquement ceux qu'il a vendus.
+    const period = req.query.period === 'year' ? 'year' : 'month';
+    const { start, endExclusive } = periodBounds(period, req.query.ref);
+
     const where = isAdmin
       ? {}
-      : user.role === 'COMMERCIAL'
+      : isCommercial
         ? { commercialId: user.id }
         : { responsableId: user.id };
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
       where,
-      include: { achats: true, pointages: true, commissionnement: true },
+      include: { achats: true, pointages: true },
     }));
 
     let nbEnCours = 0;
     let nbTermines = 0;
-    let materielReel = 0;
-    let moReel = 0;
-    let heuresVendues = 0;
-    let heuresRealisees = 0;
-    let caTotal = 0;
-    let depensesTotal = 0;
-    let margeTotal = 0;
+    let achatsTotal = 0;
+    let heuresTotal = 0;
 
     for (const c of chantiers) {
       if (c.statut === 'EN_COURS') nbEnCours++;
       else if (c.statut === 'TERMINE') nbTermines++;
-      const m = computeChantierMetrics(c, params, isAdmin);
-      materielReel += m.materielReel;
-      moReel += m.moReel;
-      heuresRealisees += m.heuresRealisees;
-      heuresVendues += c.heuresVendues;
-      depensesTotal += m.totalDepenses;
-      if (isAdmin) {
-        caTotal += c.budgetGlobalVendu;
-        margeTotal += m.margeCommerciale ?? 0;
+      for (const a of c.achats) {
+        const d = new Date(a.date);
+        if (d >= start && d < endExclusive) achatsTotal += a.montantHT;
+      }
+      for (const p of c.pointages) {
+        const d = new Date(p.date);
+        if (d >= start && d < endExclusive) heuresTotal += p.nbrHeures;
       }
     }
 
     const result: Record<string, unknown> = {
+      period,
+      periodStart: start.toISOString().slice(0, 10),
+      periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
       nbChantiers: chantiers.length,
       nbEnCours,
       nbTermines,
-      materielReel,
-      moReel,
-      depensesTotal,
-      heuresVendues,
-      heuresRealisees,
-      tauxRemplissageHeures: heuresVendues > 0 ? (heuresRealisees / heuresVendues) * 100 : 0,
     };
-    if (isAdmin && params.margeCommercialeActive) {
-      result.caTotal = caTotal;
-      result.margeTotal = margeTotal;
-      result.margePct = caTotal > 0 ? (margeTotal / caTotal) * 100 : 0;
+
+    if (!isCommercial) {
+      // ADMIN + CONDUCTEUR : total des achats de la période (peu importe le statut du
+      // chantier — un achat facturé ce mois compte, chantier ouvert ou non).
+      result.achatsTotal = achatsTotal;
     }
+    if (!isAdmin && !isCommercial) {
+      // CONDUCTEUR : heures totales enregistrées sur la période, tous ses chantiers.
+      result.heuresTotal = heuresTotal;
+    }
+
+    if (params.margeCommercialeActive) {
+      if (isAdmin) {
+        // CA vendu / marge / commission commerciale de la période, tous commerciaux
+        // confondus — même définition que la commission (chantiers Terminés ET
+        // Encaissés, rattachés au mois de leur clôture) : ce sont des résultats
+        // FINALISÉS du mois, pas un cumul de portefeuille en cours.
+        const commerciaux = await prisma.user.findMany({ where: { role: 'COMMERCIAL' }, select: { id: true } });
+        const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params);
+        let caTotal = 0, margeTotal = 0, commissionCommercialeTotal = 0;
+        for (const agg of Object.values(byCommercial) as any[]) {
+          caTotal += agg.caTotal;
+          margeTotal += agg.margeTotal;
+          commissionCommercialeTotal += agg.commissionTotal;
+        }
+        result.caTotal = caTotal;
+        result.margeTotal = margeTotal;
+        result.margePct = caTotal > 0 ? (margeTotal / caTotal) * 100 : 0;
+        result.commissionCommercialeTotal = commissionCommercialeTotal;
+      } else if (isCommercial) {
+        const { byCommercial } = await computeCommissionsParCommercial([user.id], start, endExclusive, params);
+        const mine = byCommercial[user.id];
+        result.margeTotal = mine?.margeTotal ?? 0;
+        result.commissionTotal = mine?.commissionTotal ?? 0;
+      }
+    }
+
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: 'Error computing global stats' });
@@ -1548,6 +1577,68 @@ function dateClotureChantier(c: any): Date | null {
   return c.dateFin ? new Date(c.dateFin) : new Date(c.updatedAt);
 }
 
+// Calcule marge/commission (barème progressif + primes d'objectifs et de suivi
+// administratif) par commercial sur [start, endExclusive[, mois par mois (cf. commentaire
+// de /api/stats/commerciaux). Réutilisé par cette route (détail par chantier) ET par
+// /api/stats/global (total agrégé pour les cartes du tableau de bord).
+async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres) {
+  const commercialIdSet = new Set(commercialIds);
+  const chantiers = decimalToNumber(await prisma.chantier.findMany({
+    where: { commercialId: { in: commercialIds } },
+    include: { achats: true, pointages: true },
+  }));
+
+  const moisPeriode = moisKeysDansPeriode(start, endExclusive);
+  const primesAdmin = await prisma.primeMensuelleCommercial.findMany({
+    where: { commercialId: { in: commercialIds }, periode: { in: moisPeriode } },
+  });
+  const suiviAdminSet = new Set(primesAdmin.filter((p) => p.suiviAdministratif).map((p) => `${p.commercialId}:${p.periode}`));
+
+  const buckets: Record<string, Record<string, { ca: number; margeStandard: number; margeNoxia: number }>> = {};
+  for (const c of chantiers) {
+    if (!c.commercialId || !commercialIdSet.has(c.commercialId)) continue;
+    const dateCloture = dateClotureChantier(c);
+    if (!c.encaisse || !dateCloture || dateCloture < start || dateCloture >= endExclusive) continue;
+    const m = computeChantierMetrics(c, params, true);
+    const moisKey = dateCloture.toISOString().slice(0, 7);
+    buckets[c.commercialId] ??= {};
+    buckets[c.commercialId][moisKey] ??= { ca: 0, margeStandard: 0, margeNoxia: 0 };
+    const b = buckets[c.commercialId][moisKey];
+    b.ca += c.budgetGlobalVendu;
+    if (c.dossierNoxia) b.margeNoxia += m.margeCommerciale ?? 0;
+    else b.margeStandard += m.margeCommerciale ?? 0;
+  }
+
+  const commissionsParMoisGroupe: Record<string, { standard: number; noxia: number }> = {};
+  const byCommercial: Record<string, any> = {};
+  for (const id of commercialIds) {
+    const buck = buckets[id] || {};
+    let commissionStandard = 0, commissionNoxia = 0, primeCA = 0, primeMarge = 0, primeAdmin = 0, caTotal = 0, margeTotal = 0, margeStandard = 0, margeNoxia = 0;
+    for (const [moisKey, b] of Object.entries(buck)) {
+      const cStandard = commissionBaremeProgressif(b.margeStandard, BAREME_COMMERCIAL_STANDARD);
+      const cNoxia = commissionBaremeProgressif(b.margeNoxia, BAREME_COMMERCIAL_NOXIA);
+      commissionsParMoisGroupe[`${id}:${moisKey}`] = { standard: cStandard, noxia: cNoxia };
+      commissionStandard += cStandard;
+      commissionNoxia += cNoxia;
+      caTotal += b.ca;
+      margeStandard += b.margeStandard;
+      margeNoxia += b.margeNoxia;
+      margeTotal += b.margeStandard + b.margeNoxia;
+      if (b.ca >= OBJECTIF_CA_MENSUEL) primeCA += PRIME_OBJECTIF_CA;
+      if (b.margeStandard + b.margeNoxia >= OBJECTIF_MARGE_MENSUEL) primeMarge += PRIME_OBJECTIF_MARGE;
+      if (suiviAdminSet.has(`${id}:${moisKey}`)) primeAdmin += PRIME_SUIVI_ADMINISTRATIF;
+    }
+    const commissionBareme = commissionStandard + commissionNoxia;
+    byCommercial[id] = {
+      caTotal, margeTotal, margeStandard, margeNoxia,
+      commissionBareme, commissionStandard, commissionNoxia, primeCA, primeMarge, primeAdmin,
+      commissionTotal: commissionBareme + primeCA + primeMarge + primeAdmin,
+    };
+  }
+
+  return { byCommercial, chantiers, buckets, commissionsParMoisGroupe, moisPeriode, suiviAdminSet };
+}
+
 // Résultat commercial : CA vendu / marge / commission (barème progressif + primes
 // d'objectifs) par commercial, mois civil ou année civile en cours (navigable), classé
 // par CA vendu décroissant. Un admin voit tous les commerciaux (menu « Mes commerciaux »),
@@ -1576,65 +1667,14 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
     });
 
     const commercialIds = users.map((u) => u.id);
-    const commercialIdSet = new Set(commercialIds);
-    const chantiers = decimalToNumber(await prisma.chantier.findMany({
-      where: { commercialId: { in: commercialIds } },
-      include: { achats: true, pointages: true },
-    }));
+    const { byCommercial, chantiers, buckets, commissionsParMoisGroupe, moisPeriode, suiviAdminSet } =
+      await computeCommissionsParCommercial(commercialIds, start, endExclusive, params);
 
-    // Prime "suivi administratif" : validée par un admin, mois par mois. On récupère
-    // toutes les périodes couvertes par la vue demandée (1 mois, ou les 12 de l'année).
-    const moisPeriode = moisKeysDansPeriode(start, endExclusive);
-    const primesAdmin = await prisma.primeMensuelleCommercial.findMany({
-      where: { commercialId: { in: commercialIds }, periode: { in: moisPeriode } },
-    });
-    const suiviAdminSet = new Set(primesAdmin.filter((p) => p.suiviAdministratif).map((p) => `${p.commercialId}:${p.periode}`));
-
-    // Étape 1 : regrouper les chantiers validés par (commercial, mois de clôture).
-    const buckets: Record<string, Record<string, { ca: number; margeStandard: number; margeNoxia: number }>> = {};
-    for (const c of chantiers) {
-      if (!c.commercialId || !commercialIdSet.has(c.commercialId)) continue;
-      const dateCloture = dateClotureChantier(c);
-      if (!c.encaisse || !dateCloture || dateCloture < start || dateCloture >= endExclusive) continue;
-      const m = computeChantierMetrics(c, params, true);
-      const moisKey = dateCloture.toISOString().slice(0, 7);
-      buckets[c.commercialId] ??= {};
-      buckets[c.commercialId][moisKey] ??= { ca: 0, margeStandard: 0, margeNoxia: 0 };
-      const b = buckets[c.commercialId][moisKey];
-      b.ca += c.budgetGlobalVendu;
-      if (c.dossierNoxia) b.margeNoxia += m.margeCommerciale ?? 0;
-      else b.margeStandard += m.margeCommerciale ?? 0;
-    }
-
-    // Étape 2 : barème + primes par commercial, mois par mois. On mémorise au passage la
-    // commission de chaque groupe (standard/NOXIA) de chaque mois pour permettre, à
-    // l'étape 3, d'afficher une quote-part indicative par chantier (la vraie base de
-    // calcul reste la marge cumulée du mois, pas le chantier isolé).
-    const commissionsParMoisGroupe: Record<string, { standard: number; noxia: number }> = {};
     const byUser: Record<string, any> = {};
     for (const u of users) {
-      const buck = buckets[u.id] || {};
-      let commissionStandard = 0, commissionNoxia = 0, primeCA = 0, primeMarge = 0, primeAdmin = 0, caTotal = 0, margeTotal = 0, margeStandard = 0, margeNoxia = 0;
-      for (const [moisKey, b] of Object.entries(buck)) {
-        const cStandard = commissionBaremeProgressif(b.margeStandard, BAREME_COMMERCIAL_STANDARD);
-        const cNoxia = commissionBaremeProgressif(b.margeNoxia, BAREME_COMMERCIAL_NOXIA);
-        commissionsParMoisGroupe[`${u.id}:${moisKey}`] = { standard: cStandard, noxia: cNoxia };
-        commissionStandard += cStandard;
-        commissionNoxia += cNoxia;
-        caTotal += b.ca;
-        margeStandard += b.margeStandard;
-        margeNoxia += b.margeNoxia;
-        margeTotal += b.margeStandard + b.margeNoxia;
-        if (b.ca >= OBJECTIF_CA_MENSUEL) primeCA += PRIME_OBJECTIF_CA;
-        if (b.margeStandard + b.margeNoxia >= OBJECTIF_MARGE_MENSUEL) primeMarge += PRIME_OBJECTIF_MARGE;
-        if (suiviAdminSet.has(`${u.id}:${moisKey}`)) primeAdmin += PRIME_SUIVI_ADMINISTRATIF;
-      }
-      const commissionBareme = commissionStandard + commissionNoxia;
       byUser[u.id] = {
         id: u.id, name: u.name, email: u.email, nbChantiers: 0,
-        caTotal, margeTotal, margeStandard, margeNoxia,
-        commissionBareme, commissionStandard, commissionNoxia, primeCA, primeMarge, primeAdmin,
-        commissionTotal: commissionBareme + primeCA + primeMarge + primeAdmin,
+        ...byCommercial[u.id],
         // Pertinent seulement en vue "mois" (l'objectif est mensuel) : état de la prime
         // pour le mois actuellement affiché, pour la case à cocher admin.
         suiviAdministratif: period === 'month' ? suiviAdminSet.has(`${u.id}:${moisPeriode[0]}`) : null,
@@ -1642,7 +1682,7 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
       };
     }
 
-    // Étape 3 : détail par chantier (toutes périodes confondues, pour la vue détaillée).
+    // Détail par chantier (toutes périodes confondues, pour la vue détaillée).
     for (const c of chantiers) {
       if (!c.commercialId || !byUser[c.commercialId]) continue;
       const agg = byUser[c.commercialId];

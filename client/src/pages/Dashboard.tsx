@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3 } from 'lucide-react';
+import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
+
+type Period = 'month' | 'year';
 
 const Dashboard = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [globalStats, setGlobalStats] = useState<any>(null);
+  // Résultats du mois civil ou de l'année civile EN COURS uniquement — pas de navigation
+  // vers une période passée ici (contrairement aux pages Résultat Commercial / Mes
+  // Commerciaux). Les listes de chantiers ci-dessous ne suivent pas ce choix.
+  const [period, setPeriod] = useState<Period>('month');
   const navigate = useNavigate();
 
   // Rôle réel
@@ -17,8 +23,13 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchChantiers();
-    fetchGlobalStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    fetchGlobalStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
 
   const fetchChantiers = async () => {
     try {
@@ -34,7 +45,7 @@ const Dashboard = () => {
 
   const fetchGlobalStats = async () => {
     try {
-      const res = await apiFetch('/stats/global');
+      const res = await apiFetch(`/stats/global?period=${period}`);
       if (res.ok) setGlobalStats(await res.json());
     } catch (e) {
       console.error(e);
@@ -60,6 +71,15 @@ const Dashboard = () => {
 
   const fmtDate = (d: string) => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
 
+  const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+  const periodLabel = (() => {
+    if (!globalStats?.periodStart) return '';
+    const [y, m] = globalStats.periodStart.split('-').map(Number);
+    return period === 'year' ? `Année ${y}` : `${MOIS[m - 1]} ${y}`;
+  })();
+
+  const commissionCommerciale = globalStats?.commissionCommercialeTotal ?? globalStats?.commissionTotal;
+
   return (
     <div className="flex flex-col h-full overflow-x-hidden">
 
@@ -70,16 +90,34 @@ const Dashboard = () => {
           <p className="text-sm text-muted mt-1">Suivi financier et opérationnel</p>
         </div>
 
-        <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
-          <span className="text-sm font-semibold text-gray-500">
-            Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : userRole === 'COMMERCIAL' ? 'Commercial' : 'Conducteur'}</strong>
-          </span>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Résultats du mois civil / de l'année civile EN COURS uniquement — pas de
+              navigation vers une période passée (à la différence des autres pages stats). */}
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+            {(['month', 'year'] as Period[]).map((g) => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setPeriod(g)}
+                className={`text-sm font-semibold px-3 py-1.5 rounded-md transition-colors ${period === g ? 'bg-white shadow-sm text-primary-dark' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                {g === 'month' ? 'Mois en cours' : 'Année en cours'}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
+            <span className="text-sm font-semibold text-gray-500">
+              Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : userRole === 'COMMERCIAL' ? 'Commercial' : 'Conducteur'}</strong>
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Bandeau statistiques globales (périmètre selon le rôle, calculé côté serveur) */}
+      {/* Bandeau statistiques (périmètre selon le rôle, calculé côté serveur). "Chantiers
+          en cours" est un instantané, indépendant de la période ; le reste porte sur le
+          mois/l'année sélectionné ci-dessus (periodLabel). */}
       {globalStats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
             <div className="p-2 rounded-lg bg-blue-50 text-accent"><Building2 size={18} /></div>
             <div>
@@ -89,32 +127,64 @@ const Dashboard = () => {
               </div>
             </div>
           </div>
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
-            <div className="p-2 rounded-lg bg-purple-50 text-purple-600"><Clock3 size={18} /></div>
-            <div>
-              <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Remplissage heures</div>
-              <div className="text-2xl font-black text-purple-600 mt-0.5">{(globalStats.tauxRemplissageHeures ?? 0).toFixed(0)}%</div>
-              <div className="text-xs text-gray-400">{Math.round(globalStats.heuresRealisees)}h / {Math.round(globalStats.heuresVendues)}h</div>
+
+          {globalStats.achatsTotal != null && (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-orange-50 text-orange-600"><ShoppingCart size={18} /></div>
+              <div>
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total des achats</div>
+                <div className="text-2xl font-black text-orange-600 mt-0.5">{Math.round(globalStats.achatsTotal).toLocaleString()} €</div>
+                <div className="text-xs text-gray-400">{periodLabel}</div>
+              </div>
             </div>
-          </div>
+          )}
+
+          {globalStats.heuresTotal != null && (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-purple-50 text-purple-600"><Clock3 size={18} /></div>
+              <div>
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Heures enregistrées</div>
+                <div className="text-2xl font-black text-purple-600 mt-0.5">{Math.round(globalStats.heuresTotal).toLocaleString()} h</div>
+                <div className="text-xs text-gray-400">{periodLabel}</div>
+              </div>
+            </div>
+          )}
+
           {globalStats.caTotal != null && (
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
               <div className="p-2 rounded-lg bg-blue-50 text-accent"><Wallet size={18} /></div>
               <div>
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">CA Vendu (total)</div>
-                <div className="text-2xl font-black text-primary-dark mt-0.5">{globalStats.caTotal.toLocaleString()} €</div>
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">CA Vendu</div>
+                <div className="text-2xl font-black text-primary-dark mt-0.5">{Math.round(globalStats.caTotal).toLocaleString()} €</div>
+                <div className="text-xs text-gray-400">{periodLabel}</div>
               </div>
             </div>
           )}
+
           {globalStats.margeTotal != null && (
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
               <div className={`p-2 rounded-lg ${globalStats.margeTotal >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}><TrendingUp size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge totale</div>
                 <div className={`text-2xl font-black mt-0.5 ${globalStats.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {globalStats.margeTotal.toLocaleString()} €
+                  {Math.round(globalStats.margeTotal).toLocaleString()} €
                 </div>
-                <div className="text-xs text-gray-400">{(globalStats.margePct ?? 0).toFixed(1)}%</div>
+                <div className="text-xs text-gray-400">
+                  {globalStats.margePct != null ? `${globalStats.margePct.toFixed(1)}% · ` : ''}{periodLabel}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {commissionCommerciale != null && (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600"><Award size={18} /></div>
+              <div>
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                  {userRole === 'ADMIN' ? 'Commission commerciale versée' : 'Ma commission gagnée'}
+                </div>
+                <div className="text-2xl font-black text-emerald-600 mt-0.5">{Math.round(commissionCommerciale).toLocaleString()} €</div>
+                <div className="text-xs text-gray-400">{periodLabel}</div>
               </div>
             </div>
           )}

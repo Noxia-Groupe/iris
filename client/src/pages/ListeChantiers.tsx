@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Archive, RotateCcw, Filter } from 'lucide-react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 
 const ListeChantiers = () => {
+  const navigate = useNavigate();
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [commerciaux, setCommerciaux] = useState<any[]>([]);
@@ -175,7 +177,11 @@ const ListeChantiers = () => {
               const progressPct = Math.min(100, Math.max(0, metrics.pctHeures ?? 0));
 
               return (
-                <tr key={c.id} className="hover:bg-gray-50 transition-colors">
+                <tr
+                  key={c.id}
+                  onClick={() => navigate(`/chantiers/${c.id}`)}
+                  className="hover:bg-gray-50 transition-colors cursor-pointer"
+                >
                   <td className="px-6 py-4">
                     <div className="font-bold text-gray-800">{c.nom}</div>
                     <div className="text-xs text-gray-400">Devis: {c.numeroDevis || 'N/A'}</div>
@@ -204,7 +210,7 @@ const ListeChantiers = () => {
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-right">
+                  <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end items-center gap-2">
                       {c.statut === 'EN_COURS' && userRole !== 'COMMERCIAL' && (
                         <button
