@@ -214,7 +214,7 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
   const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures };
 
   if (!isAdmin || !params.margeCommercialeActive) {
-    return { ...base, tauxCommission: null, commission: null, margeBrute: null, margeCommerciale: null, margeNette: null, margePct: null, tauxCommissionCommercial: null, commissionCommercial: null };
+    return { ...base, tauxCommission: null, commission: null, margeBrute: null, margeCommerciale: null, margeNette: null, margePct: null };
   }
 
   // Marge commerciale = budget vendu − dépenses réelles (matériel + main d'œuvre).
@@ -235,18 +235,12 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
   const margeNette = margeCommerciale - commission;               // marge après commission versée
   const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
 
-  // Commission du commercial : même mécanique que ci-dessus (taux fixe +/- bonus/malus
-  // selon avance/retard sur les heures), mais réglée indépendamment de celle du conducteur.
-  const commCo = chantier.commissionnementCommercial;
-  let tauxCommissionCommercial = commCo ? commCo.tauxFixe : 0;
-  if (commCo && commCo.mode === 'DYNAMIQUE') {
-    if (diffHeures > 0) tauxCommissionCommercial += commCo.bonusHeure;
-    else if (diffHeures < 0) tauxCommissionCommercial -= commCo.malusHeure;
-  }
-  tauxCommissionCommercial = Math.min(100, Math.max(0, tauxCommissionCommercial));
-  const commissionCommercial = margeCommerciale > 0 ? margeCommerciale * (tauxCommissionCommercial / 100) : 0;
+  // NB : la commission du COMMERCIAL n'est plus un taux réglé par chantier — elle suit
+  // désormais le barème progressif mensuel du "Système de rémunération commerciale"
+  // (cf. BAREME_COMMERCIAL_* et computeCommissionMensuelle, utilisés par /api/stats/commerciaux).
+  // Elle se calcule sur la marge cumulée du mois du commercial, pas chantier par chantier.
 
-  return { ...base, tauxCommission, commission, margeBrute, margeCommerciale, margeNette, margePct, tauxCommissionCommercial, commissionCommercial };
+  return { ...base, tauxCommission, commission, margeBrute, margeCommerciale, margeNette, margePct };
 }
 
 // Sérialise un chantier pour le client en masquant les données commerciales aux non-admins.
@@ -494,7 +488,8 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
         responsableId,
         commercialId,
         statut: req.body.statut || "EN_COURS",
-        types: sanitizeTypes(req.body.types)
+        types: sanitizeTypes(req.body.types),
+        dossierNoxia: !!req.body.dossierNoxia,
       },
     });
     // Create default commissionnement
@@ -539,6 +534,7 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
       if (key in req.body && req.body[key]) data[key] = new Date(req.body[key]).toISOString();
     }
     if ('types' in req.body) data.types = sanitizeTypes(req.body.types);
+    if ('dossierNoxia' in req.body) data.dossierNoxia = !!req.body.dossierNoxia;
 
     const chantier = await prisma.chantier.update({
       where: { id: paramId(req) },
@@ -572,7 +568,15 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req,
       return res.status(403).json({ error: 'Seul un administrateur peut réouvrir un chantier clôturé.' });
     }
 
-    const updated = await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: nextStatut } });
+    // La date de clôture sert de mois de rattachement à la rémunération commerciale
+    // (barème progressif + primes d'objectifs, cf. /api/stats/commerciaux) : on la
+    // renseigne automatiquement à la clôture si elle n'a pas déjà été saisie à la main.
+    const data: Record<string, unknown> = { statut: nextStatut };
+    if (nextStatut === 'TERMINE' && !chantier.dateFin) {
+      data.dateFin = new Date();
+    }
+
+    const updated = await prisma.chantier.update({ where: { id: chantier.id }, data });
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Error updating chantier status' });
@@ -1009,24 +1013,45 @@ app.put('/api/chantiers/:id/commissionnement', requireAuth, requireAdmin, async 
   }
 });
 
-// Commissionnement du commercial (réservé aux admins) — même forme que celui du
-// conducteur, mais dans une table distincte : les deux taux sont réglés indépendamment.
-app.put('/api/chantiers/:id/commissionnement-commercial', requireAuth, requireAdmin, async (req, res) => {
+// Clause de sécurisation des commissions : une commission n'est définitivement due
+// que si le chantier est Terminé ET Encaissé (cf. règle 6 du système de rémunération
+// commerciale — annulation/litige/impayé => la commission n'est pas due ou est récupérée).
+// Réservé aux admins ; togglable indépendamment du statut Terminé/En cours.
+app.patch('/api/chantiers/:id/encaisse', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const data = {
-      mode: req.body.mode === 'DYNAMIQUE' ? 'DYNAMIQUE' : 'FIXE',
-      tauxFixe: parseFloat(req.body.tauxFixe) || 0,
-      bonusHeure: parseFloat(req.body.bonusHeure) || 0,
-      malusHeure: parseFloat(req.body.malusHeure) || 0
-    };
-    const comm = await prisma.commissionnementCommercial.upsert({
-      where: { chantierId: paramId(req) },
-      update: data,
-      create: { ...data, chantierId: paramId(req) }
+    const encaisse = !!req.body.encaisse;
+    const chantier = await prisma.chantier.update({
+      where: { id: paramId(req) },
+      data: { encaisse, dateEncaissement: encaisse ? new Date() : null },
     });
-    res.json(comm);
+    res.json(decimalToNumber(chantier));
   } catch (error) {
-    res.status(500).json({ error: 'Error updating commissionnement commercial' });
+    res.status(500).json({ error: 'Error updating encaissement' });
+  }
+});
+
+// Prime "suivi administratif" (qualité et rigueur) du système de rémunération
+// commerciale — ne peut pas être déduite des données de gestion, validée à la main
+// par un administrateur, mois par mois (periode "YYYY-MM").
+app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const periode = String(req.body.periode || '');
+    if (!/^\d{4}-\d{2}$/.test(periode)) {
+      return res.status(400).json({ error: 'Période invalide (attendu "YYYY-MM").' });
+    }
+    const commercial = await prisma.user.findUnique({ where: { id: paramId(req) } });
+    if (!commercial || commercial.role !== 'COMMERCIAL') {
+      return res.status(404).json({ error: 'Commercial introuvable.' });
+    }
+    const suiviAdministratif = !!req.body.suiviAdministratif;
+    const prime = await prisma.primeMensuelleCommercial.upsert({
+      where: { commercialId_periode: { commercialId: commercial.id, periode } },
+      update: { suiviAdministratif },
+      create: { commercialId: commercial.id, periode, suiviAdministratif },
+    });
+    res.json(prime);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating prime mensuelle' });
   }
 });
 
@@ -1468,13 +1493,72 @@ app.get('/api/stats/types-chantiers', requireAuth, blockCommercial, async (req, 
   }
 });
 
-// Résultat commercial : CA vendu / marge commerciale / commission gagnée par commercial,
-// mois civil ou année civile en cours (navigable), classé par CA vendu décroissant.
-// Un admin voit tous les commerciaux (menu « Mes commerciaux ») ; un commercial ne voit
-// que sa propre ligne (menu « Résultat commercial »). Le classement/compteur est basé sur
-// la date de démarrage du chantier (dateDebut), comme les autres statistiques par période ;
-// la liste `chantiers` de chaque commercial, elle, reste l'intégralité de ses chantiers
-// (toutes périodes confondues), pour la vue détaillée.
+// --- Système de rémunération commerciale : barème progressif mensuel ---
+// (cf. document "Système de rémunération commerciale" fourni par la direction).
+// Chaque tranche de marge du MOIS est commissionnée à son propre taux, comme un barème
+// d'impôt progressif : atteindre la tranche haute ne fait pas basculer toute la marge à
+// son taux, seule la fraction qui la dépasse l'est.
+const BAREME_COMMERCIAL_STANDARD = [
+  { plafond: 20000, taux: 16 },
+  { plafond: 30000, taux: 20 },
+  { plafond: Infinity, taux: 25 },
+];
+// Barème réduit pour les dossiers rattachés à NOXIA (cf. Chantier.dossierNoxia).
+const BAREME_COMMERCIAL_NOXIA = [
+  { plafond: 20000, taux: 8 },
+  { plafond: 30000, taux: 10 },
+  { plafond: Infinity, taux: 12.5 },
+];
+const OBJECTIF_CA_MENSUEL = 70000;
+const OBJECTIF_MARGE_MENSUEL = 17000;
+const PRIME_OBJECTIF_CA = 450;
+const PRIME_OBJECTIF_MARGE = 450;
+const PRIME_SUIVI_ADMINISTRATIF = 250;
+
+function commissionBaremeProgressif(marge: number, bareme: { plafond: number; taux: number }[]): number {
+  if (marge <= 0) return 0;
+  let commission = 0;
+  let plancher = 0;
+  for (const { plafond, taux } of bareme) {
+    if (marge <= plancher) break;
+    commission += (Math.min(marge, plafond) - plancher) * (taux / 100);
+    plancher = plafond;
+  }
+  return commission;
+}
+
+// Clés "YYYY-MM" (UTC) de chaque mois civil couvert par [start, endExclusive[.
+function moisKeysDansPeriode(start: Date, endExclusive: Date): string[] {
+  const keys: string[] = [];
+  const cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  while (cur < endExclusive) {
+    keys.push(cur.toISOString().slice(0, 7));
+    cur.setUTCMonth(cur.getUTCMonth() + 1);
+  }
+  return keys;
+}
+
+// Date de rattachement mensuel d'un chantier pour le calcul des commissions : celle où
+// sa marge est réputée acquise. On retient la date de clôture (dateFin, auto-renseignée
+// au passage en Terminé — cf. PATCH /chantiers/:id/statut), avec repli sur updatedAt pour
+// les chantiers déjà clôturés avant l'introduction de ce champ. Un chantier En cours n'a
+// pas encore de date de clôture : sa marge n'est pas rattachable à un mois.
+function dateClotureChantier(c: any): Date | null {
+  if (c.statut !== 'TERMINE') return null;
+  return c.dateFin ? new Date(c.dateFin) : new Date(c.updatedAt);
+}
+
+// Résultat commercial : CA vendu / marge / commission (barème progressif + primes
+// d'objectifs) par commercial, mois civil ou année civile en cours (navigable), classé
+// par CA vendu décroissant. Un admin voit tous les commerciaux (menu « Mes commerciaux »),
+// un commercial ne voit que sa propre ligne (menu « Résultat commercial »).
+//
+// Le barème et les primes d'objectifs sont MENSUELS (cf. doc) : seuls les chantiers
+// Terminés ET Encaissés comptent (clause de sécurisation), rattachés au mois de leur
+// clôture. La vue "Année" agrège 12 calculs mensuels indépendants — elle n'applique
+// jamais le barème à une marge annuelle globale. La liste `chantiers` de chaque
+// commercial reste l'intégralité de ses chantiers (toutes périodes confondues), pour la
+// vue détaillée ; `comptabiliseDansPeriode` indique lesquels comptent dans les totaux.
 app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
@@ -1492,39 +1576,110 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
     });
 
     const commercialIds = users.map((u) => u.id);
+    const commercialIdSet = new Set(commercialIds);
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
       where: { commercialId: { in: commercialIds } },
-      include: { achats: true, pointages: true, commissionnementCommercial: true },
+      include: { achats: true, pointages: true },
     }));
 
-    const byUser: Record<string, any> = {};
-    for (const u of users) {
-      byUser[u.id] = { id: u.id, name: u.name, email: u.email, nbChantiers: 0, caTotal: 0, margeTotal: 0, commissionTotal: 0, chantiers: [] as any[] };
+    // Prime "suivi administratif" : validée par un admin, mois par mois. On récupère
+    // toutes les périodes couvertes par la vue demandée (1 mois, ou les 12 de l'année).
+    const moisPeriode = moisKeysDansPeriode(start, endExclusive);
+    const primesAdmin = await prisma.primeMensuelleCommercial.findMany({
+      where: { commercialId: { in: commercialIds }, periode: { in: moisPeriode } },
+    });
+    const suiviAdminSet = new Set(primesAdmin.filter((p) => p.suiviAdministratif).map((p) => `${p.commercialId}:${p.periode}`));
+
+    // Étape 1 : regrouper les chantiers validés par (commercial, mois de clôture).
+    const buckets: Record<string, Record<string, { ca: number; margeStandard: number; margeNoxia: number }>> = {};
+    for (const c of chantiers) {
+      if (!c.commercialId || !commercialIdSet.has(c.commercialId)) continue;
+      const dateCloture = dateClotureChantier(c);
+      if (!c.encaisse || !dateCloture || dateCloture < start || dateCloture >= endExclusive) continue;
+      const m = computeChantierMetrics(c, params, true);
+      const moisKey = dateCloture.toISOString().slice(0, 7);
+      buckets[c.commercialId] ??= {};
+      buckets[c.commercialId][moisKey] ??= { ca: 0, margeStandard: 0, margeNoxia: 0 };
+      const b = buckets[c.commercialId][moisKey];
+      b.ca += c.budgetGlobalVendu;
+      if (c.dossierNoxia) b.margeNoxia += m.margeCommerciale ?? 0;
+      else b.margeStandard += m.margeCommerciale ?? 0;
     }
 
+    // Étape 2 : barème + primes par commercial, mois par mois. On mémorise au passage la
+    // commission de chaque groupe (standard/NOXIA) de chaque mois pour permettre, à
+    // l'étape 3, d'afficher une quote-part indicative par chantier (la vraie base de
+    // calcul reste la marge cumulée du mois, pas le chantier isolé).
+    const commissionsParMoisGroupe: Record<string, { standard: number; noxia: number }> = {};
+    const byUser: Record<string, any> = {};
+    for (const u of users) {
+      const buck = buckets[u.id] || {};
+      let commissionStandard = 0, commissionNoxia = 0, primeCA = 0, primeMarge = 0, primeAdmin = 0, caTotal = 0, margeTotal = 0, margeStandard = 0, margeNoxia = 0;
+      for (const [moisKey, b] of Object.entries(buck)) {
+        const cStandard = commissionBaremeProgressif(b.margeStandard, BAREME_COMMERCIAL_STANDARD);
+        const cNoxia = commissionBaremeProgressif(b.margeNoxia, BAREME_COMMERCIAL_NOXIA);
+        commissionsParMoisGroupe[`${u.id}:${moisKey}`] = { standard: cStandard, noxia: cNoxia };
+        commissionStandard += cStandard;
+        commissionNoxia += cNoxia;
+        caTotal += b.ca;
+        margeStandard += b.margeStandard;
+        margeNoxia += b.margeNoxia;
+        margeTotal += b.margeStandard + b.margeNoxia;
+        if (b.ca >= OBJECTIF_CA_MENSUEL) primeCA += PRIME_OBJECTIF_CA;
+        if (b.margeStandard + b.margeNoxia >= OBJECTIF_MARGE_MENSUEL) primeMarge += PRIME_OBJECTIF_MARGE;
+        if (suiviAdminSet.has(`${u.id}:${moisKey}`)) primeAdmin += PRIME_SUIVI_ADMINISTRATIF;
+      }
+      const commissionBareme = commissionStandard + commissionNoxia;
+      byUser[u.id] = {
+        id: u.id, name: u.name, email: u.email, nbChantiers: 0,
+        caTotal, margeTotal, margeStandard, margeNoxia,
+        commissionBareme, commissionStandard, commissionNoxia, primeCA, primeMarge, primeAdmin,
+        commissionTotal: commissionBareme + primeCA + primeMarge + primeAdmin,
+        // Pertinent seulement en vue "mois" (l'objectif est mensuel) : état de la prime
+        // pour le mois actuellement affiché, pour la case à cocher admin.
+        suiviAdministratif: period === 'month' ? suiviAdminSet.has(`${u.id}:${moisPeriode[0]}`) : null,
+        chantiers: [] as any[],
+      };
+    }
+
+    // Étape 3 : détail par chantier (toutes périodes confondues, pour la vue détaillée).
     for (const c of chantiers) {
       if (!c.commercialId || !byUser[c.commercialId]) continue;
       const agg = byUser[c.commercialId];
       const m = computeChantierMetrics(c, params, true);
       agg.nbChantiers++;
+
+      const dateCloture = dateClotureChantier(c);
+      const valide = c.statut === 'TERMINE' && c.encaisse;
+      const dansPeriode = valide && !!dateCloture && dateCloture >= start && dateCloture < endExclusive;
+      let commissionEstimee: number | null = null;
+      if (dansPeriode && dateCloture) {
+        const moisKey = dateCloture.toISOString().slice(0, 7);
+        const groupe = commissionsParMoisGroupe[`${c.commercialId}:${moisKey}`];
+        const b = buckets[c.commercialId]?.[moisKey];
+        if (groupe && b) {
+          const margeGroupe = c.dossierNoxia ? b.margeNoxia : b.margeStandard;
+          const commissionGroupe = c.dossierNoxia ? groupe.noxia : groupe.standard;
+          commissionEstimee = margeGroupe > 0 ? commissionGroupe * ((m.margeCommerciale ?? 0) / margeGroupe) : 0;
+        }
+      }
+
       agg.chantiers.push({
         id: c.id,
         nom: c.nom,
         client: c.client,
         statut: c.statut,
         dateDebut: c.dateDebut,
+        dateFin: c.dateFin,
+        dossierNoxia: c.dossierNoxia,
+        encaisse: c.encaisse,
+        dateEncaissement: c.dateEncaissement,
         budgetGlobalVendu: c.budgetGlobalVendu,
         margeCommerciale: m.margeCommerciale,
-        commissionCommercial: m.commissionCommercial,
-        tauxCommissionCommercial: m.tauxCommissionCommercial,
-        commissionnementCommercial: c.commissionnementCommercial,
+        valide,
+        comptabiliseDansPeriode: dansPeriode,
+        commissionEstimee,
       });
-      const dateDebut = new Date(c.dateDebut);
-      if (dateDebut >= start && dateDebut < endExclusive) {
-        agg.caTotal += c.budgetGlobalVendu;
-        agg.margeTotal += m.margeCommerciale ?? 0;
-        agg.commissionTotal += m.commissionCommercial ?? 0;
-      }
     }
 
     const list = Object.values(byUser)
@@ -1538,6 +1693,8 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
       period,
       periodStart: start.toISOString().slice(0, 10),
       periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
+      bareme: { standard: BAREME_COMMERCIAL_STANDARD, noxia: BAREME_COMMERCIAL_NOXIA },
+      objectifs: { ca: OBJECTIF_CA_MENSUEL, marge: OBJECTIF_MARGE_MENSUEL, primeCA: PRIME_OBJECTIF_CA, primeMarge: PRIME_OBJECTIF_MARGE, primeAdmin: PRIME_SUIVI_ADMINISTRATIF },
       commerciaux: list,
     });
   } catch (error) {

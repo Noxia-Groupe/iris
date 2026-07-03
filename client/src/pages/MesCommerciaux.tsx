@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Award } from 'lucide-react';
+import { Award, CheckCircle2, Circle } from 'lucide-react';
 import { apiFetch } from '../api';
+import { ObjectifBar } from '../components/ObjectifBar';
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé' };
 
 const periodLabelComm = (period: 'month' | 'year', periodStart: string) => {
   const [y, m] = periodStart.split('-').map(Number);
@@ -16,10 +18,18 @@ const shiftCommRef = (ref: string, period: 'month' | 'year', dir: 1 | -1): strin
   return d.toISOString().slice(0, 10);
 };
 
+const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
+
 // Suivi des commerciaux (CA vendu, marge, commission) — page réservée aux administrateurs
 // (extraite de l'onglet « Mes Commerciaux » d'Administration pour être son propre menu,
 // cf. Sidebar.tsx). Route protégée côté client (PrivateRoute requiredRole) et données
 // servies protégées côté serveur (requireAdmin / requireAuth selon la route).
+//
+// La commission ne suit plus un taux réglé à la main par chantier : elle applique le
+// barème progressif mensuel du "Système de rémunération commerciale" (standard/NOXIA),
+// complété par les primes d'objectifs. Cette page permet à l'admin de valider les deux
+// leviers qui restent manuels : le statut "Encaissé" par chantier (clause de sécurisation
+// des commissions) et la prime "suivi administratif" par commercial et par mois.
 const MesCommerciaux = () => {
   const [commerciaux, setCommerciaux] = useState<any[]>([]);
   const [commerciauxMeta, setCommerciauxMeta] = useState<any>(null);
@@ -45,25 +55,33 @@ const MesCommerciaux = () => {
     }
   };
 
-  const handleCommissionCommercialSubmit = async (e: React.FormEvent, chantierId: string) => {
-    e.preventDefault();
-    const formData = new FormData(e.target as HTMLFormElement);
-    const data = Object.fromEntries(formData.entries());
-
-    const payload = {
-      mode: data.mode,
-      tauxFixe: parseFloat(data.tauxFixe as string) || 0,
-      bonusHeure: parseFloat(data.bonusHeure as string) || 0,
-      malusHeure: parseFloat(data.malusHeure as string) || 0
-    };
-
-    await apiFetch(`/chantiers/${chantierId}/commissionnement-commercial`, {
-      method: 'PUT',
-      body: JSON.stringify(payload)
-    });
-    alert('Règles de commission commerciale mises à jour');
-    fetchCommerciaux();
+  // Prime "suivi administratif" : validée à la main par mois, faute de pouvoir être
+  // déduite des données de gestion (qualité/rigueur du suivi, pas un montant).
+  const handleToggleSuiviAdmin = async (commercialId: string, current: boolean) => {
+    if (!commerciauxMeta) return;
+    try {
+      await apiFetch(`/commerciaux/${commercialId}/prime-mensuelle`, {
+        method: 'PUT',
+        body: JSON.stringify({ periode: commerciauxMeta.periodStart.slice(0, 7), suiviAdministratif: !current }),
+      });
+      fetchCommerciaux();
+    } catch (e) {
+      console.error(e);
+    }
   };
+
+  // Clause de sécurisation : une commission n'est comptabilisée dans le barème du mois
+  // que si le chantier est Terminé ET Encaissé.
+  const handleToggleEncaisse = async (chantierId: string, current: boolean) => {
+    try {
+      await apiFetch(`/chantiers/${chantierId}/encaisse`, { method: 'PATCH', body: JSON.stringify({ encaisse: !current }) });
+      fetchCommerciaux();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const objectifs = commerciauxMeta?.objectifs;
 
   return (
     <div>
@@ -121,63 +139,107 @@ const MesCommerciaux = () => {
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="text-right">
-                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">CA vendu</div>
-                      <div className="font-bold text-gray-800">{Math.round(c.caTotal).toLocaleString()} €</div>
+                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">CA validé</div>
+                      <div className="font-bold text-gray-800">{fmtEuro(c.caTotal)}</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge</div>
-                      <div className={`font-bold ${c.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{Math.round(c.margeTotal).toLocaleString()} €</div>
+                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge validée</div>
+                      <div className={`font-bold ${c.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtEuro(c.margeTotal)}</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Commission</div>
-                      <div className="font-bold text-purple-600">{Math.round(c.commissionTotal).toLocaleString()} €</div>
+                      <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Rémunération variable</div>
+                      <div className="font-bold text-purple-600">{fmtEuro(c.commissionTotal)}</div>
                     </div>
                     <span className="text-gray-400 text-xs">{isExpanded ? '▲' : '▼'}</span>
                   </div>
                 </div>
 
                 {isExpanded && (
-                  <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col gap-4">
+                  <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col gap-5">
+                    {/* Barème progressif : marge et commission par groupe standard/NOXIA */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
+                        <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Barème standard (16 / 20 / 25 %)</div>
+                        <div className="flex justify-between text-sm"><span className="text-gray-500">Marge</span><strong className="text-gray-800">{fmtEuro(c.margeStandard)}</strong></div>
+                        <div className="flex justify-between text-sm"><span className="text-gray-500">Commission</span><strong className="text-purple-600">{fmtEuro(c.commissionStandard)}</strong></div>
+                      </div>
+                      <div className="p-4 rounded-lg bg-amber-50 border border-amber-100">
+                        <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-2">Barème NOXIA (8 / 10 / 12,5 %)</div>
+                        <div className="flex justify-between text-sm"><span className="text-amber-700/70">Marge</span><strong className="text-gray-800">{fmtEuro(c.margeNoxia)}</strong></div>
+                        <div className="flex justify-between text-sm"><span className="text-amber-700/70">Commission</span><strong className="text-purple-600">{fmtEuro(c.commissionNoxia)}</strong></div>
+                      </div>
+                    </div>
+
+                    {/* Primes sur objectifs mensuels (non pertinent en vue Année) */}
+                    {commerciauxPeriod === 'month' && objectifs && (
+                      <div className="p-4 rounded-lg bg-gray-50 border border-gray-100 flex flex-col gap-4">
+                        <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Primes sur objectifs mensuels</div>
+                        <ObjectifBar label={`Objectif CA (${fmtEuro(objectifs.ca)})`} value={c.caTotal} target={objectifs.ca} prime={objectifs.primeCA} />
+                        <ObjectifBar label={`Objectif marge (${fmtEuro(objectifs.marge)})`} value={c.margeTotal} target={objectifs.marge} prime={objectifs.primeMarge} />
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSuiviAdmin(c.id, !!c.suiviAdministratif)}
+                          className={`flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg border w-fit transition-colors ${c.suiviAdministratif ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+                        >
+                          {c.suiviAdministratif ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                          Suivi administratif validé (+{objectifs.primeAdmin} €)
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Détail des chantiers rattachés */}
                     {c.chantiers.length === 0 ? (
                       <div className="text-sm text-gray-400 italic">Aucun chantier rattaché.</div>
-                    ) : c.chantiers.map((ch: any) => {
-                      const comm = ch.commissionnementCommercial || { mode: 'FIXE', tauxFixe: 0, bonusHeure: 0, malusHeure: 0 };
-                      return (
-                        <div key={ch.id} className="p-4 border rounded bg-gray-50">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-bold text-gray-800 m-0">{ch.nom} <span className="text-sm font-normal text-muted">({ch.client})</span></h4>
-                            <span className="text-xs font-bold uppercase px-2 py-1 rounded-full bg-gray-100 text-gray-500">{ch.statut === 'TERMINE' ? 'Terminé' : 'En cours'}</span>
-                          </div>
-                          <div className="grid grid-cols-3 gap-3 mb-4 text-sm">
-                            <div><span className="text-gray-400">CA vendu : </span><strong className="text-gray-800">{Math.round(ch.budgetGlobalVendu).toLocaleString()} €</strong></div>
-                            <div><span className="text-gray-400">Marge : </span><strong className={(ch.margeCommerciale ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}>{ch.margeCommerciale != null ? `${Math.round(ch.margeCommerciale).toLocaleString()} €` : '—'}</strong></div>
-                            <div><span className="text-gray-400">Commission : </span><strong className="text-purple-600">{ch.commissionCommercial != null ? `${Math.round(ch.commissionCommercial).toLocaleString()} €` : '—'}</strong></div>
-                          </div>
-                          <form onSubmit={(e) => handleCommissionCommercialSubmit(e, ch.id)} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-                            <div className="form-group mb-0">
-                              <label className="form-label">Mode</label>
-                              <select name="mode" className="form-input" defaultValue={comm.mode}>
-                                <option value="FIXE">Taux Fixe</option>
-                                <option value="DYNAMIQUE">Dynamique (Bonus/Malus)</option>
-                              </select>
-                            </div>
-                            <div className="form-group mb-0">
-                              <label className="form-label">Commission de base (%)</label>
-                              <input type="number" step="0.1" name="tauxFixe" defaultValue={comm.tauxFixe} className="form-input" />
-                            </div>
-                            <div className="form-group mb-0">
-                              <label className="form-label">Bonus si avance (pts %)</label>
-                              <input type="number" step="0.1" name="bonusHeure" defaultValue={comm.bonusHeure} className="form-input" />
-                            </div>
-                            <div className="form-group mb-0">
-                              <label className="form-label">Malus si retard (pts %)</label>
-                              <input type="number" step="0.1" name="malusHeure" defaultValue={comm.malusHeure} className="form-input" />
-                            </div>
-                            <button className="btn btn-primary w-full">Mettre à jour</button>
-                          </form>
-                        </div>
-                      );
-                    })}
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-sm">
+                          <thead>
+                            <tr className="text-[11px] uppercase text-gray-500 border-b border-gray-100">
+                              <th className="py-2 pr-3 font-semibold">Chantier</th>
+                              <th className="py-2 pr-3 font-semibold">Statut</th>
+                              <th className="py-2 pr-3 font-semibold text-right">Marge</th>
+                              <th className="py-2 pr-3 font-semibold text-right">Commission (quote-part)</th>
+                              <th className="py-2 pr-3 font-semibold text-center">Encaissement</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {c.chantiers.map((ch: any) => (
+                              <tr key={ch.id}>
+                                <td className="py-2 pr-3">
+                                  <strong className="text-gray-800">{ch.nom}</strong>
+                                  <span className="text-gray-400"> ({ch.client})</span>
+                                  {ch.dossierNoxia && <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full">NOXIA</span>}
+                                </td>
+                                <td className="py-2 pr-3">
+                                  <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full ${ch.statut === 'TERMINE' ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-accent'}`}>
+                                    {STATUT_LABELS[ch.statut] || ch.statut}
+                                  </span>
+                                </td>
+                                <td className={`py-2 pr-3 text-right font-bold ${(ch.margeCommerciale ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                  {ch.margeCommerciale != null ? fmtEuro(ch.margeCommerciale) : '—'}
+                                </td>
+                                <td className="py-2 pr-3 text-right font-bold text-purple-600">
+                                  {ch.comptabiliseDansPeriode ? fmtEuro(ch.commissionEstimee ?? 0) : <span className="font-normal text-gray-400 italic">en attente</span>}
+                                </td>
+                                <td className="py-2 pr-3 text-center">
+                                  {ch.statut === 'TERMINE' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleEncaisse(ch.id, !!ch.encaisse)}
+                                      className={`text-[11px] font-bold uppercase px-2 py-1 rounded-full transition-colors ${ch.encaisse ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
+                                    >
+                                      {ch.encaisse ? '✓ Encaissé' : 'Non encaissé'}
+                                    </button>
+                                  ) : (
+                                    <span className="text-gray-300">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

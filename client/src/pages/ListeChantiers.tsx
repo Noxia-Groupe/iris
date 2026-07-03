@@ -359,6 +359,12 @@ const ListeChantiers = () => {
                 ))}
               </div>
             </div>
+            <div className="form-group mb-0 md:col-span-2">
+              <label className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors w-fit">
+                <input type="checkbox" name="dossierNoxia" value="true" className="w-4 h-4" />
+                Dossier NOXIA (barème de commission commerciale réduit)
+              </label>
+            </div>
             <div className="md:col-span-2 flex gap-2 mt-2">
               <button className="btn btn-primary px-8">Créer le chantier</button>
               <button type="button" onClick={() => setShowForm(false)} className="btn bg-white border">Annuler</button>

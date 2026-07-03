@@ -78,6 +78,24 @@ const ChantierDetail = () => {
     } catch (e) { console.error(e); }
   };
 
+  // Bascule la clause de sécurisation "Encaissé" (réservée aux admins) — une commission
+  // commerciale n'est comptabilisée dans le barème mensuel que si le chantier est
+  // Terminé ET Encaissé (cf. règle 6 du système de rémunération commerciale).
+  const [savingEncaisse, setSavingEncaisse] = useState(false);
+  const handleToggleEncaisse = async () => {
+    if (!id || !chantier) return;
+    setSavingEncaisse(true);
+    try {
+      const res = await apiFetch(`/chantiers/${id}/encaisse`, { method: 'PATCH', body: JSON.stringify({ encaisse: !chantier.encaisse }) });
+      if (res.ok) fetchChantier();
+      else { const d = await res.json(); alert(d.error || "Erreur lors de la mise à jour de l'encaissement."); }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSavingEncaisse(false);
+    }
+  };
+
   const handleAssignCommercial = async (commercialId: string) => {
     if (!id) return;
     setSavingCommercial(true);
@@ -121,7 +139,9 @@ const ChantierDetail = () => {
     // de PATCH /chantiers/:id — on l'envoie donc à part, après les autres champs.
     const commercialId = String(formData.get('commercialId') || '');
     formData.delete('commercialId');
-    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types') };
+    // Case à cocher unique : absente de FormData quand décochée, on la force donc à
+    // explicitement true/false pour que décocher l'enregistre bien (cf. 'types' ci-dessous).
+    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), dossierNoxia: formData.get('dossierNoxia') === 'true' };
     setSavingChantier(true);
     try {
       const res = await apiFetch(`/chantiers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
@@ -324,6 +344,24 @@ const ChantierDetail = () => {
               </span>
               {chantier.types?.map((t: string) => (
                 <span key={t} className="text-[11px] font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full">{t}</span>
+              ))}
+              {chantier.dossierNoxia && (
+                <span className="text-[11px] font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">Dossier NOXIA</span>
+              )}
+              {isTermine && (userRole === 'ADMIN' ? (
+                <button
+                  type="button"
+                  onClick={handleToggleEncaisse}
+                  disabled={savingEncaisse}
+                  title="Réservé aux admins : conditionne la commission commerciale du mois de clôture"
+                  className={`text-[11px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full transition-colors ${chantier.encaisse ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
+                >
+                  {chantier.encaisse ? '✓ Encaissé' : 'Non encaissé'}
+                </button>
+              ) : (
+                <span className={`text-[11px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${chantier.encaisse ? 'bg-emerald-100 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+                  {chantier.encaisse ? '✓ Encaissé' : 'Non encaissé'}
+                </span>
               ))}
             </div>
             <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-gray-600">
@@ -674,6 +712,12 @@ const ChantierDetail = () => {
                     </label>
                   ))}
                 </div>
+              </div>
+              <div className="form-group mb-0 md:col-span-2">
+                <label className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors w-fit">
+                  <input type="checkbox" name="dossierNoxia" value="true" defaultChecked={!!chantier.dossierNoxia} className="w-4 h-4" />
+                  Dossier NOXIA (barème de commission commerciale réduit)
+                </label>
               </div>
               <div className="md:col-span-2 flex gap-2 mt-2">
                 <button type="submit" disabled={savingChantier} className="btn btn-primary px-8">
