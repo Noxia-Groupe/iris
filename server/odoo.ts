@@ -10,21 +10,32 @@
 // Utilise l'API externe JSON-RPC standard d'Odoo (mêmes services/authentification que
 // l'API XML-RPC — /jsonrpc au lieu de /xmlrpc/2/*), disponible nativement via `fetch`
 // sans dépendance supplémentaire.
+//
+// Les variables d'environnement sont lues à CHAQUE appel (pas une fois au chargement du
+// module) : dotenv.config() s'exécute dans index.ts après l'import de ce module (l'ordre
+// des require() ne suit pas l'ordre visuel du fichier), donc process.env.ODOO_* ne serait
+// pas encore renseigné si on le lisait une seule fois au niveau du module.
+function getConfig() {
+  return {
+    url: process.env.ODOO_URL?.replace(/\/+$/, ''),
+    db: process.env.ODOO_DB,
+    username: process.env.ODOO_USERNAME,
+    apiKey: process.env.ODOO_API_KEY,
+  };
+}
 
-const ODOO_URL = process.env.ODOO_URL?.replace(/\/+$/, '');
-const ODOO_DB = process.env.ODOO_DB;
-const ODOO_USERNAME = process.env.ODOO_USERNAME;
-const ODOO_API_KEY = process.env.ODOO_API_KEY;
-
-export const odooConfigured = !!(ODOO_URL && ODOO_DB && ODOO_USERNAME && ODOO_API_KEY);
+export function odooConfigured(): boolean {
+  const { url, db, username, apiKey } = getConfig();
+  return !!(url && db && username && apiKey);
+}
 
 const ODOO_TIMEOUT_MS = 5000;
 
-async function jsonRpcCall(service: string, method: string, args: unknown[]): Promise<any> {
+async function jsonRpcCall(url: string, service: string, method: string, args: unknown[]): Promise<any> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ODOO_TIMEOUT_MS);
   try {
-    const res = await fetch(`${ODOO_URL}/jsonrpc`, {
+    const res = await fetch(`${url}/jsonrpc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', method: 'call', params: { service, method, args }, id: Date.now() }),
@@ -43,9 +54,9 @@ async function jsonRpcCall(service: string, method: string, args: unknown[]): Pr
 // session expirable comme un cookie, inutile de se reconnecter à chaque recherche).
 let cachedUid: number | null = null;
 
-async function authenticate(): Promise<number> {
+async function authenticate(url: string, db: string, username: string, apiKey: string): Promise<number> {
   if (cachedUid != null) return cachedUid;
-  const uid = await jsonRpcCall('common', 'login', [ODOO_DB, ODOO_USERNAME, ODOO_API_KEY]);
+  const uid = await jsonRpcCall(url, 'common', 'login', [db, username, apiKey]);
   if (!uid) throw new Error('Authentification Odoo refusée');
   cachedUid = uid;
   return uid;
@@ -62,12 +73,13 @@ export interface OdooClient {
 // Une requête vide renvoie les premiers contacts par ordre alphabétique (liste initiale
 // au clic, avant toute saisie).
 export async function odooSearchClients(query: string, limit = 20): Promise<OdooClient[]> {
-  if (!odooConfigured) throw new Error('Odoo non configuré');
-  const uid = await authenticate();
+  const { url, db, username, apiKey } = getConfig();
+  if (!url || !db || !username || !apiKey) throw new Error('Odoo non configuré');
+  const uid = await authenticate(url, db, username, apiKey);
   const trimmed = query.trim();
   const domain = trimmed ? [['name', 'ilike', trimmed]] : [];
-  const rows = await jsonRpcCall('object', 'execute_kw', [
-    ODOO_DB, uid, ODOO_API_KEY,
+  const rows = await jsonRpcCall(url, 'object', 'execute_kw', [
+    db, uid, apiKey,
     'res.partner', 'search_read',
     [domain, ['name', 'email', 'city']],
     { limit, order: 'name asc' },

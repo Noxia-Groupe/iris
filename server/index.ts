@@ -372,7 +372,7 @@ function sanitizeTypes(input: unknown): string[] {
 // injoignable, ou en erreur) laisse simplement l'utilisateur saisir le client en texte
 // libre côté client, sans qu'aucune donnée ne soit jamais écrite dans Odoo.
 app.get('/api/odoo/clients', requireAuth, async (req, res) => {
-  if (!odooConfigured) return res.json({ odooAvailable: false, clients: [] });
+  if (!odooConfigured()) return res.json({ odooAvailable: false, clients: [] });
   try {
     const clients = await odooSearchClients(String(req.query.q || ''), 20);
     res.json({ odooAvailable: true, clients });
