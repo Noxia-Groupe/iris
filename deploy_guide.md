@@ -98,6 +98,12 @@ docker-compose up -d --build
 ```
 *Note : Le réseau externe `nginx-proxy` doit déjà exister sur votre VPS, car il est géré par votre NPM.*
 
+*Note : Le réseau externe `backup-net` doit également exister avant le premier démarrage — il permet à pgBackWeb (autre stack Docker sur le même VPS) d'atteindre le service `db` pour les sauvegardes. Créez-le une seule fois avec :*
+```bash
+docker network create backup-net
+```
+*Ajoutez ensuite ce même réseau externe `backup-net` au service pgBackWeb dans son propre `docker-compose.yml`, puis connectez-vous à la base depuis pgBackWeb avec l'hôte `marge_db` (nom du conteneur), le port `5432` et les identifiants définis dans votre `.env`.*
+
 ### Migrations de base de données
 
 Les **migrations Prisma sont appliquées automatiquement** au démarrage du conteneur

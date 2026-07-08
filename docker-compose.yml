@@ -12,6 +12,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - noxia-network
+      # Réseau partagé avec pgBackWeb pour les sauvegardes
+      - backup-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marge} -d ${POSTGRES_DB:-marge}"]
       interval: 10s
@@ -60,6 +62,9 @@ networks:
     driver: bridge
   # Réseau géré par votre Nginx Proxy Manager Hostinger
   nginx-proxy:
+    external: true
+  # Réseau partagé avec pgBackWeb (autre stack Docker sur le même VPS)
+  backup-net:
     external: true
 
 volumes:
