@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
+import { ClientAutocomplete } from '../components/ClientAutocomplete';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
@@ -302,11 +303,11 @@ const Admin = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Client</label>
-              <input required name="client" className="form-input" />
+              <ClientAutocomplete required />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">N° de Devis</label>
-              <input name="numeroDevis" className="form-input" />
+              <input required name="numeroDevis" className="form-input" />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Responsable Chantier</label>

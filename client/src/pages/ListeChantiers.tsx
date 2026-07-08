@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Archive, RotateCcw, Filter } from 'lucide-react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
+import { ClientAutocomplete } from '../components/ClientAutocomplete';
 
 const ListeChantiers = () => {
   const navigate = useNavigate();
@@ -307,7 +308,7 @@ const ListeChantiers = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Client</label>
-              <input required name="client" className="form-input" />
+              <ClientAutocomplete required />
             </div>
             {userRole === 'ADMIN' ? (
               <div className="form-group mb-0">
@@ -331,8 +332,8 @@ const ListeChantiers = () => {
               </select>
             </div>
             <div className="form-group mb-0">
-              <label className="form-label">N° de Devis (optionnel)</label>
-              <input name="numeroDevis" className="form-input" />
+              <label className="form-label">N° de Devis</label>
+              <input required name="numeroDevis" className="form-input" />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Date Début</label>

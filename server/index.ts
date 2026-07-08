@@ -10,6 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { odooConfigured, odooSearchClients } from './odoo';
 
 dotenv.config();
 
@@ -366,6 +367,21 @@ function sanitizeTypes(input: unknown): string[] {
   return TYPES_CHANTIER.filter((t) => arr.includes(t));
 }
 
+// Recherche de clients Odoo (lecture seule, cf. odoo.ts) pour le champ "Client" d'un
+// chantier. Ne renvoie jamais d'erreur HTTP : odooAvailable:false (Odoo non configuré,
+// injoignable, ou en erreur) laisse simplement l'utilisateur saisir le client en texte
+// libre côté client, sans qu'aucune donnée ne soit jamais écrite dans Odoo.
+app.get('/api/odoo/clients', requireAuth, async (req, res) => {
+  if (!odooConfigured) return res.json({ odooAvailable: false, clients: [] });
+  try {
+    const clients = await odooSearchClients(String(req.query.q || ''), 20);
+    res.json({ odooAvailable: true, clients });
+  } catch (error) {
+    console.error('Odoo search error:', error);
+    res.json({ odooAvailable: false, clients: [] });
+  }
+});
+
 // Chantiers — un conducteur ne voit que les chantiers dont il est responsable ;
 // un admin voit tout. Un chantier sans responsable reste invisible aux conducteurs
 // jusqu'à ce qu'un admin lui en affecte un.
@@ -458,11 +474,16 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
       return res.status(400).json({ error: 'Veuillez sélectionner le commercial rattaché à ce chantier.' });
     }
 
+    const numeroDevis = String(req.body.numeroDevis || '').trim();
+    if (!numeroDevis) {
+      return res.status(400).json({ error: 'Veuillez saisir le numéro de devis.' });
+    }
+
     const chantier = await prisma.chantier.create({
       data: {
         nom: req.body.nom,
         client: req.body.client,
-        numeroDevis: req.body.numeroDevis,
+        numeroDevis,
         dateDebut: new Date(req.body.dateDebut).toISOString(),
         dateFin: req.body.dateFin ? new Date(req.body.dateFin).toISOString() : null,
         budgetGlobalVendu: parseFloat(req.body.budgetGlobalVendu) || 0,
@@ -492,7 +513,15 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
 
     const data: Record<string, unknown> = {};
     for (const key of allowed) {
-      if (key !== 'responsableId' && key in req.body) data[key] = req.body[key];
+      if (key !== 'responsableId' && key !== 'numeroDevis' && key in req.body) data[key] = req.body[key];
+    }
+    // Le numéro de devis est obligatoire : on interdit de le vider.
+    if ('numeroDevis' in req.body) {
+      const numeroDevis = String(req.body.numeroDevis || '').trim();
+      if (!numeroDevis) {
+        return res.status(400).json({ error: 'Le numéro de devis est obligatoire.' });
+      }
+      data.numeroDevis = numeroDevis;
     }
     // Un chantier doit toujours avoir un responsable (les conducteurs ne voient que
     // leurs chantiers) : on interdit de le vider, et on vérifie qu'il existe.
@@ -584,6 +613,8 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
         return res.status(400).json({ error: 'Commercial introuvable.' });
       }
       commercialId = commercial.id;
+    } else if ((await prisma.user.count({ where: { role: 'COMMERCIAL' } })) > 0) {
+      return res.status(400).json({ error: 'Un chantier doit toujours avoir un commercial rattaché.' });
     }
 
     const updated = await prisma.chantier.update({
@@ -1343,14 +1374,22 @@ app.get('/api/stats/chantiers-repartition', requireAuth, requireAdmin, async (re
 });
 
 // Bornes [début, fin exclue[ d'une période "semaine civile complète" (lundi->lundi
-// suivant, 7 jours), "mois civil" ou "année civile" contenant `refParam`, en UTC.
-function periodBounds(period: 'week' | 'month' | 'year', refParam: unknown): { start: Date; endExclusive: Date } {
+// suivant, 7 jours), "mois civil", "trimestre civil" (janv-mars, avr-juin, juil-sept,
+// oct-déc) ou "année civile" contenant `refParam`, en UTC.
+function periodBounds(period: 'week' | 'month' | 'quarter' | 'year', refParam: unknown): { start: Date; endExclusive: Date } {
   const parsed = typeof refParam === 'string' && refParam ? new Date(refParam) : new Date();
   const ref = isNaN(parsed.getTime()) ? new Date() : parsed;
   if (period === 'year') {
     return {
       start: new Date(Date.UTC(ref.getUTCFullYear(), 0, 1)),
       endExclusive: new Date(Date.UTC(ref.getUTCFullYear() + 1, 0, 1)),
+    };
+  }
+  if (period === 'quarter') {
+    const quarterStartMonth = Math.floor(ref.getUTCMonth() / 3) * 3;
+    return {
+      start: new Date(Date.UTC(ref.getUTCFullYear(), quarterStartMonth, 1)),
+      endExclusive: new Date(Date.UTC(ref.getUTCFullYear(), quarterStartMonth + 3, 1)),
     };
   }
   if (period === 'month') {
@@ -1617,7 +1656,9 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
     if (!isAdmin && authUser.role !== 'COMMERCIAL') {
       return res.status(403).json({ error: 'Accès réservé' });
     }
-    const period = req.query.period === 'year' ? 'year' : 'month';
+    const period = (['month', 'quarter', 'year'] as const).includes(req.query.period as any)
+      ? (req.query.period as 'month' | 'quarter' | 'year')
+      : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
     const params = await getParametres();
 

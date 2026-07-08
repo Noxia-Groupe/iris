@@ -9,6 +9,7 @@ import {
 import { apiFetch, assetUrl } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
+import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { TYPES_CHANTIER } from '../chantierTypes';
 
 // Date ISO (avec ou sans heure) -> "YYYY-MM-DD" attendu par <input type="date">.
@@ -386,7 +387,7 @@ const ChantierDetail = () => {
                     onBlur={() => setEditingCommercial(false)}
                     className="text-sm border border-gray-200 rounded-md px-2 py-0.5"
                   >
-                    <option value="">Aucun commercial</option>
+                    <option value="" disabled>Sélectionner un commercial...</option>
                     {commerciaux.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </span>
@@ -636,11 +637,11 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Client</label>
-                <input required name="client" defaultValue={chantier.client} className="form-input" />
+                <ClientAutocomplete required defaultValue={chantier.client} />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">N° de Devis</label>
-                <input name="numeroDevis" defaultValue={chantier.numeroDevis || ''} className="form-input" />
+                <input required name="numeroDevis" defaultValue={chantier.numeroDevis || ''} className="form-input" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Responsable Chantier</label>
@@ -650,9 +651,9 @@ const ChantierDetail = () => {
                 </select>
               </div>
               <div className="form-group mb-0">
-                <label className="form-label">Commercial rattaché</label>
-                <select name="commercialId" className="form-input" defaultValue={chantier.commercial?.id || ''}>
-                  <option value="">Aucun commercial</option>
+                <label className="form-label">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
+                <select required={commerciaux.length > 0} name="commercialId" className="form-input" defaultValue={chantier.commercial?.id || ''}>
+                  <option value="" disabled>Sélectionner un commercial...</option>
                   {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>

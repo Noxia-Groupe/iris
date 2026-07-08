@@ -3,7 +3,7 @@ import { TrendingUp, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-reac
 import { apiFetch } from '../api';
 import { ObjectifBar } from '../components/ObjectifBar';
 
-type Period = 'month' | 'year';
+type Period = 'month' | 'quarter' | 'year';
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
@@ -15,13 +15,16 @@ const fmtJourMois = (isoDate: string) => {
 const shiftRef = (ref: string, period: Period, dir: 1 | -1): string => {
   const d = new Date(ref + 'T00:00:00Z');
   if (period === 'month') d.setUTCMonth(d.getUTCMonth() + dir);
+  else if (period === 'quarter') d.setUTCMonth(d.getUTCMonth() + dir * 3);
   else d.setUTCFullYear(d.getUTCFullYear() + dir);
   return d.toISOString().slice(0, 10);
 };
 
 const periodLabel = (period: Period, periodStart: string) => {
   const [y, m] = periodStart.split('-').map(Number);
-  return period === 'year' ? `Année ${y}` : `${MOIS[m - 1]} ${y}`;
+  if (period === 'year') return `Année ${y}`;
+  if (period === 'quarter') return `T${Math.ceil(m / 3)} ${y}`;
+  return `${MOIS[m - 1]} ${y}`;
 };
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
@@ -56,13 +59,13 @@ const ResultatCommercial = () => {
       <div className="card">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-            {(['month', 'year'] as Period[]).map((g) => (
+            {(['month', 'quarter', 'year'] as Period[]).map((g) => (
               <button
                 key={g}
                 onClick={() => setPeriod(g)}
                 className={`text-sm font-semibold px-3 py-1.5 rounded-md transition-colors ${period === g ? 'bg-white shadow-sm text-primary-dark' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                {g === 'month' ? 'Mois' : 'Année'}
+                {g === 'month' ? 'Mois' : g === 'quarter' ? 'Trimestre' : 'Année'}
               </button>
             ))}
           </div>

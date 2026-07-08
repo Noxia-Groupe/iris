@@ -6,14 +6,19 @@ import { ObjectifBar } from '../components/ObjectifBar';
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé' };
 
-const periodLabelComm = (period: 'month' | 'year', periodStart: string) => {
+type CommPeriod = 'month' | 'quarter' | 'year';
+
+const periodLabelComm = (period: CommPeriod, periodStart: string) => {
   const [y, m] = periodStart.split('-').map(Number);
-  return period === 'year' ? `Année ${y}` : `${MOIS[m - 1]} ${y}`;
+  if (period === 'year') return `Année ${y}`;
+  if (period === 'quarter') return `T${Math.ceil(m / 3)} ${y}`;
+  return `${MOIS[m - 1]} ${y}`;
 };
 
-const shiftCommRef = (ref: string, period: 'month' | 'year', dir: 1 | -1): string => {
+const shiftCommRef = (ref: string, period: CommPeriod, dir: 1 | -1): string => {
   const d = new Date(ref + 'T00:00:00Z');
   if (period === 'month') d.setUTCMonth(d.getUTCMonth() + dir);
+  else if (period === 'quarter') d.setUTCMonth(d.getUTCMonth() + dir * 3);
   else d.setUTCFullYear(d.getUTCFullYear() + dir);
   return d.toISOString().slice(0, 10);
 };
@@ -33,7 +38,7 @@ const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 const MesCommerciaux = () => {
   const [commerciaux, setCommerciaux] = useState<any[]>([]);
   const [commerciauxMeta, setCommerciauxMeta] = useState<any>(null);
-  const [commerciauxPeriod, setCommerciauxPeriod] = useState<'month' | 'year'>('month');
+  const [commerciauxPeriod, setCommerciauxPeriod] = useState<CommPeriod>('month');
   const [commerciauxRef, setCommerciauxRef] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [expandedCommercialId, setExpandedCommercialId] = useState<string | null>(null);
 
@@ -94,14 +99,14 @@ const MesCommerciaux = () => {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-            {(['month', 'year'] as const).map((g) => (
+            {(['month', 'quarter', 'year'] as const).map((g) => (
               <button
                 key={g}
                 type="button"
                 onClick={() => setCommerciauxPeriod(g)}
                 className={`text-sm font-semibold px-3 py-1.5 rounded-md transition-colors ${commerciauxPeriod === g ? 'bg-white shadow-sm text-primary-dark' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                {g === 'month' ? 'Mois' : 'Année'}
+                {g === 'month' ? 'Mois' : g === 'quarter' ? 'Trimestre' : 'Année'}
               </button>
             ))}
           </div>
