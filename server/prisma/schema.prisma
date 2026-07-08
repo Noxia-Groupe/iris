@@ -68,7 +68,6 @@ model Chantier {
   achats                AchatReel[]
   pointages             PointageHeure[]
   photos                PhotoChantier[]
-  commissionnement      Commissionnement?
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -159,20 +158,6 @@ model Parametres {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-}
-
-model Commissionnement {
-  id          String   @id @default(uuid())
-  mode        String   @default("FIXE") // FIXE ou DYNAMIQUE
-  tauxFixe    Decimal  @default(0) @db.Decimal(6, 2)  // taux de commission de base (% de la marge)
-  bonusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // points de % ajoutés au taux si en avance (mode DYNAMIQUE)
-  malusHeure  Decimal  @default(0) @db.Decimal(6, 2)  // points de % retirés du taux si en retard (mode DYNAMIQUE)
-
-  chantierId  String   @unique
-  chantier    Chantier @relation(fields: [chantierId], references: [id])
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 }
 
 // Prime mensuelle "suivi administratif" (qualité et rigueur) du système de

@@ -214,33 +214,20 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
   const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures };
 
   if (!isAdmin || !params.margeCommercialeActive) {
-    return { ...base, tauxCommission: null, commission: null, margeBrute: null, margeCommerciale: null, margeNette: null, margePct: null };
+    return { ...base, margeBrute: null, margeCommerciale: null, margePct: null };
   }
 
   // Marge commerciale = budget vendu − dépenses réelles (matériel + main d'œuvre).
+  // Il n'y a pas de variable pour les conducteurs de travaux : seuls les commerciaux
+  // ont une rémunération variable, calculée à part sur le barème progressif mensuel
+  // du "Système de rémunération commerciale" (cf. BAREME_COMMERCIAL_* et
+  // computeCommissionsParCommercial, utilisés par /api/stats/commerciaux) — sur la
+  // marge cumulée du mois du commercial, pas chantier par chantier.
   const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
   const margeCommerciale = margeBrute;
-
-  // Commission du conducteur = POURCENTAGE de la marge commerciale (plus aucun €/h).
-  // Le taux de base (tauxFixe) s'applique toujours ; en mode DYNAMIQUE il est ajusté :
-  // bonus si le chantier est en avance sur les heures, malus s'il est en retard.
-  const comm = chantier.commissionnement;
-  let tauxCommission = comm ? comm.tauxFixe : 0;
-  if (comm && comm.mode === 'DYNAMIQUE') {
-    if (diffHeures > 0) tauxCommission += comm.bonusHeure;       // en avance -> bonus
-    else if (diffHeures < 0) tauxCommission -= comm.malusHeure;  // en retard -> malus
-  }
-  tauxCommission = Math.min(100, Math.max(0, tauxCommission));    // borné à [0 %, 100 %]
-  const commission = margeCommerciale > 0 ? margeCommerciale * (tauxCommission / 100) : 0;
-  const margeNette = margeCommerciale - commission;               // marge après commission versée
   const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
 
-  // NB : la commission du COMMERCIAL n'est plus un taux réglé par chantier — elle suit
-  // désormais le barème progressif mensuel du "Système de rémunération commerciale"
-  // (cf. BAREME_COMMERCIAL_* et computeCommissionMensuelle, utilisés par /api/stats/commerciaux).
-  // Elle se calcule sur la marge cumulée du mois du commercial, pas chantier par chantier.
-
-  return { ...base, tauxCommission, commission, margeBrute, margeCommerciale, margeNette, margePct };
+  return { ...base, margeBrute, margeCommerciale, margePct };
 }
 
 // Sérialise un chantier pour le client en masquant les données commerciales aux non-admins.
@@ -249,7 +236,6 @@ function serializeChantier(chantier: any, params: Parametres, isAdmin: boolean) 
   return {
     ...c,
     budgetGlobalVendu: isAdmin ? c.budgetGlobalVendu : null,
-    commissionnement: isAdmin ? c.commissionnement : null,
     metrics: computeChantierMetrics(c, params, isAdmin),
   };
 }
@@ -401,7 +387,6 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
         achats: true,
         pointages: true,
         photos: true,
-        commissionnement: true
       }
     });
     res.json(chantiers.map((c: any) => serializeChantier(c, params, isAdmin)));
@@ -426,7 +411,6 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
         achats: { include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
         pointages: { include: { intervenant: true }, orderBy: { date: 'desc' } },
         photos: { orderBy: { createdAt: 'desc' } },
-        commissionnement: true
       }
     });
     // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
@@ -491,10 +475,6 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
         types: sanitizeTypes(req.body.types),
         dossierNoxia: !!req.body.dossierNoxia,
       },
-    });
-    // Create default commissionnement
-    await prisma.commissionnement.create({
-      data: { chantierId: chantier.id }
     });
     res.json(chantier);
   } catch (error) {
@@ -993,26 +973,6 @@ app.get('/api/chantiers/:id/photos/export', requireAuth, async (req, res) => {
   }
 });
 
-// Commissionnement (réservé aux admins) — champs en liste blanche
-app.put('/api/chantiers/:id/commissionnement', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const data = {
-      mode: req.body.mode === 'DYNAMIQUE' ? 'DYNAMIQUE' : 'FIXE',
-      tauxFixe: parseFloat(req.body.tauxFixe) || 0,
-      bonusHeure: parseFloat(req.body.bonusHeure) || 0,
-      malusHeure: parseFloat(req.body.malusHeure) || 0
-    };
-    const comm = await prisma.commissionnement.upsert({
-      where: { chantierId: paramId(req) },
-      update: data,
-      create: { ...data, chantierId: paramId(req) }
-    });
-    res.json(comm);
-  } catch (error) {
-    res.status(500).json({ error: 'Error updating commissionnement' });
-  }
-});
-
 // Clause de sécurisation des commissions : une commission n'est définitivement due
 // que si le chantier est Terminé ET Encaissé (cf. règle 6 du système de rémunération
 // commerciale — annulation/litige/impayé => la commission n'est pas due ou est récupérée).
@@ -1187,7 +1147,7 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
     const params = await getParametres();
     const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX' }, select: { id: true, name: true, email: true } });
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
-      include: { achats: true, pointages: true, commissionnement: true },
+      include: { achats: true, pointages: true },
     }));
 
     const byUser: Record<string, any> = {};
@@ -1352,7 +1312,7 @@ app.get('/api/stats/chantiers-repartition', requireAuth, requireAdmin, async (re
     const params = await getParametres();
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
       where: { statut: 'TERMINE' },
-      include: { achats: true, pointages: true, commissionnement: true },
+      include: { achats: true, pointages: true },
     }));
 
     let positif = 0, tempsSeul = 0, materielSeul = 0, lesDeux = 0;

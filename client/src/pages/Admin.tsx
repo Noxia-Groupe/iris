@@ -2,6 +2,33 @@ import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 
+const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
+
+// Rendu des tranches d'un barème progressif (JSON.stringify transforme un plafond
+// Infinity en null : la dernière tranche est donc "au-delà de X €", sans borne haute).
+const BaremeTranches = ({ tranches }: { tranches?: { plafond: number | null; taux: number }[] }) => {
+  if (!tranches || tranches.length === 0) return null;
+  let plancher = 0;
+  return (
+    <ul className="text-sm space-y-1">
+      {tranches.map((t, i) => {
+        const label = plancher === 0
+          ? `Jusqu'à ${fmtEuro(t.plafond ?? 0)}`
+          : t.plafond == null
+            ? `Au-delà de ${fmtEuro(plancher)}`
+            : `De ${fmtEuro(plancher)} à ${fmtEuro(t.plafond)}`;
+        plancher = t.plafond ?? plancher;
+        return (
+          <li key={i} className="flex justify-between gap-4">
+            <span className="text-gray-500">{label}</span>
+            <strong className="text-gray-800">{t.taux} %</strong>
+          </li>
+        );
+      })}
+    </ul>
+  );
+};
+
 const Admin = () => {
   const [activeTab, setActiveTab] = useState('chantiers');
   const [users, setUsers] = useState<any[]>([]);
@@ -10,6 +37,7 @@ const Admin = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [parametres, setParametres] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
+  const [remunerationCommerciale, setRemunerationCommerciale] = useState<any>(null);
   // Ligne en cours d'édition : { type: 'intervenant'|'fournisseur'|'categorie', id, ...champs }
   const [editRow, setEditRow] = useState<any>(null);
 
@@ -23,13 +51,11 @@ const Admin = () => {
   }, [activeTab]);
 
   const fetchData = async () => {
-    // Les onglets marges/utilisateurs s'appuient sur la liste des chantiers.
     const endpoints: Record<string, string> = {
       intervenants: '/intervenants',
       fournisseurs: '/fournisseurs',
       categories: '/categories',
       chantiers: '/chantiers',
-      marges: '/chantiers',
     };
 
     try {
@@ -47,6 +73,15 @@ const Admin = () => {
       if (activeTab === 'marges') {
         const pRes = await apiFetch('/parametres');
         if (pRes.ok) setParametres(await pRes.json());
+
+        // Bareme/objectifs de la rémunération commerciale : valeurs de référence exposées
+        // en lecture seule (cf. /api/stats/commerciaux), déjà utilisées telles quelles par
+        // les commerciaux dans "Mes commerciaux" / "Résultat commercial".
+        const cRes = await apiFetch('/stats/commerciaux');
+        if (cRes.ok) {
+          const data = await cRes.json();
+          setRemunerationCommerciale({ bareme: data.bareme, objectifs: data.objectifs });
+        }
       }
     } catch (e) {
       console.error(e);
@@ -79,27 +114,6 @@ const Admin = () => {
     });
 
     (e.target as HTMLFormElement).reset();
-    fetchData();
-  };
-
-  const handleCommissionSubmit = async (e: React.FormEvent, chantierId: string) => {
-    e.preventDefault();
-    const formData = new FormData(e.target as HTMLFormElement);
-    const data = Object.fromEntries(formData.entries());
-    
-    // Convert to numbers
-    const payload = {
-      mode: data.mode,
-      tauxFixe: parseFloat(data.tauxFixe as string) || 0,
-      bonusHeure: parseFloat(data.bonusHeure as string) || 0,
-      malusHeure: parseFloat(data.malusHeure as string) || 0
-    };
-
-    await apiFetch(`/chantiers/${chantierId}/commissionnement`, {
-      method: 'PUT',
-      body: JSON.stringify(payload)
-    });
-    alert('Règles de commissionnement mises à jour');
     fetchData();
   };
 
@@ -592,52 +606,43 @@ const Admin = () => {
               <button className="btn btn-primary">Enregistrer</button>
             </form>
           </div>
-          <div className="card">
-          <h2 className="mb-2 text-primary-dark">Politique de Commissionnement par Chantier</h2>
-          <p className="text-sm text-muted mb-4">
-            La commission du conducteur est un <strong>pourcentage de la marge commerciale</strong> du chantier.
-            En mode <strong>Dynamique</strong>, le taux de base est majoré (bonus) si le chantier est en avance sur
-            les heures vendues, ou minoré (malus) s'il est en retard. Le taux effectif est borné entre 0 % et 100 %.
-          </p>
-          <div className="grid grid-cols-1 gap-6">
-            {chantiers.map(c => {
-              const comm = c.commissionnement || { mode: 'FIXE', tauxFixe: 0, bonusHeure: 0, malusHeure: 0 };
-              return (
-                <div key={c.id} className="p-4 border rounded bg-gray-50">
-                  <h3 className="font-bold text-lg mb-4">{c.nom} <span className="text-sm font-normal text-muted">({c.client})</span></h3>
-                  <form onSubmit={(e) => handleCommissionSubmit(e, c.id)} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-                    <div className="form-group mb-0">
-                      <label className="form-label">Mode</label>
-                      <select name="mode" className="form-input" defaultValue={comm.mode}>
-                        <option value="FIXE">Taux Fixe</option>
-                        <option value="DYNAMIQUE">Dynamique (Bonus/Malus)</option>
-                      </select>
-                    </div>
-                    <div className="form-group mb-0">
-                      <label className="form-label">Commission de base (%)</label>
-                      <input type="number" step="0.1" name="tauxFixe" defaultValue={comm.tauxFixe} className="form-input" />
-                    </div>
-                    <div className="form-group mb-0">
-                      <label className="form-label">Bonus si avance (pts %)</label>
-                      <input type="number" step="0.1" name="bonusHeure" defaultValue={comm.bonusHeure} className="form-input" />
-                    </div>
-                    <div className="form-group mb-0">
-                      <label className="form-label">Malus si retard (pts %)</label>
-                      <input type="number" step="0.1" name="malusHeure" defaultValue={comm.malusHeure} className="form-input" />
-                    </div>
-                    <button className="btn btn-primary w-full">Mettre à jour</button>
-                  </form>
-                  {c.metrics && c.metrics.commission != null && (
-                    <div className="mt-3 text-sm text-muted">
-                      Commission estimée à ce jour : <strong className="text-primary-dark">{Math.round(c.metrics.commission).toLocaleString()} €</strong>
-                      {' '}— taux effectif <strong>{(c.metrics.tauxCommission ?? 0).toFixed(1)} %</strong> de la marge
-                    </div>
-                  )}
+
+          <div className="card mb-4">
+            <h2 className="mb-2 text-primary-dark">Rémunération Commerciale (barème progressif)</h2>
+            <p className="text-sm text-muted mb-4">
+              La commission des <strong>commerciaux</strong> ne suit plus un taux réglé par chantier : elle applique
+              désormais un barème progressif sur la marge cumulée du mois (standard, ou réduit pour les dossiers
+              NOXIA), complété par des primes d'objectifs mensuels. Ces valeurs sont pour l'instant fixées côté
+              serveur — écran en lecture seule. Détail par commercial dans le menu « Mes commerciaux ».
+            </p>
+            {remunerationCommerciale ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div className="p-4 rounded border bg-gray-50">
+                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Barème standard</div>
+                    <BaremeTranches tranches={remunerationCommerciale.bareme?.standard} />
+                  </div>
+                  <div className="p-4 rounded border bg-amber-50">
+                    <div className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-2">Barème dossiers NOXIA</div>
+                    <BaremeTranches tranches={remunerationCommerciale.bareme?.noxia} />
+                  </div>
                 </div>
-              );
-            })}
+                {remunerationCommerciale.objectifs && (
+                  <div className="p-4 rounded border bg-gray-50">
+                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Objectifs et primes mensuelles</div>
+                    <ul className="text-sm space-y-1 list-disc list-inside text-gray-600">
+                      <li>Objectif CA vendu : <strong className="text-gray-800">{fmtEuro(remunerationCommerciale.objectifs.ca)}</strong> → prime de <strong className="text-gray-800">{remunerationCommerciale.objectifs.primeCA} €</strong></li>
+                      <li>Objectif marge commerciale : <strong className="text-gray-800">{fmtEuro(remunerationCommerciale.objectifs.marge)}</strong> → prime de <strong className="text-gray-800">{remunerationCommerciale.objectifs.primeMarge} €</strong></li>
+                      <li>Suivi administratif (validé manuellement chaque mois, cf. « Mes commerciaux ») → prime de <strong className="text-gray-800">{remunerationCommerciale.objectifs.primeAdmin} €</strong></li>
+                    </ul>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-gray-400 italic">Chargement du barème...</p>
+            )}
           </div>
-          </div>
+
         </>
       )}
 

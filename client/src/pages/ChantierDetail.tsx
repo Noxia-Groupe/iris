@@ -450,7 +450,7 @@ const ChantierDetail = () => {
               <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="z-10 text-center md:text-left">
                   <div className={`text-xs font-bold uppercase tracking-widest ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                    Marge Commerciale Nette
+                    Marge Commerciale
                   </div>
                   <div className={`text-5xl font-black mt-2 tracking-tight ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                     {margeAffichee.toLocaleString()} €
@@ -465,30 +465,8 @@ const ChantierDetail = () => {
                 <div className="z-10 bg-white/60 backdrop-blur-sm p-4 rounded-lg text-right">
                   <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Dépenses Réelles Cumulées</div>
                   <div className="font-bold text-2xl text-gray-800">{totalDepensesReelles.toLocaleString()} €</div>
-                  {chantier.commissionnement?.mode === 'DYNAMIQUE' && (
-                    <div className="text-xs font-semibold text-blue-600 mt-2 flex items-center justify-end gap-1">
-                      <Sparkles size={12} /> Mode Dynamique Actif
-                    </div>
-                  )}
                 </div>
               </div>
-
-              {(metrics.commission != null || metrics.margeNette != null) && (
-                <div className="z-10 grid grid-cols-2 sm:grid-cols-3 gap-3 pt-4 border-t border-black/5">
-                  <div className="bg-white/60 backdrop-blur-sm p-3 rounded-lg">
-                    <div className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">Taux commission</div>
-                    <div className="font-bold text-lg text-gray-800">{(metrics.tauxCommission ?? 0).toFixed(1)}%</div>
-                  </div>
-                  <div className="bg-white/60 backdrop-blur-sm p-3 rounded-lg">
-                    <div className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">Commission</div>
-                    <div className="font-bold text-lg text-gray-800">{(metrics.commission ?? 0).toLocaleString()} €</div>
-                  </div>
-                  <div className="bg-white/60 backdrop-blur-sm p-3 rounded-lg">
-                    <div className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">Marge nette</div>
-                    <div className="font-bold text-lg text-gray-800">{(metrics.margeNette ?? 0).toLocaleString()} €</div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
