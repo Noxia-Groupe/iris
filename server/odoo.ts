@@ -62,6 +62,21 @@ async function authenticate(url: string, db: string, username: string, apiKey: s
   return uid;
 }
 
+// Authentifie puis appelle search_read sur `model` — factorise la partie commune aux
+// recherches clients et devis (lecture seule dans les deux cas).
+async function searchRead(model: string, domain: unknown[], fields: string[], limit: number, order: string): Promise<any[]> {
+  const { url, db, username, apiKey } = getConfig();
+  if (!url || !db || !username || !apiKey) throw new Error('Odoo non configuré');
+  const uid = await authenticate(url, db, username, apiKey);
+  const rows = await jsonRpcCall(url, 'object', 'execute_kw', [
+    db, uid, apiKey,
+    model, 'search_read',
+    [domain, fields],
+    { limit, order },
+  ]);
+  return rows || [];
+}
+
 export interface OdooClient {
   id: number;
   name: string;
@@ -73,21 +88,36 @@ export interface OdooClient {
 // Une requête vide renvoie les premiers contacts par ordre alphabétique (liste initiale
 // au clic, avant toute saisie).
 export async function odooSearchClients(query: string, limit = 20): Promise<OdooClient[]> {
-  const { url, db, username, apiKey } = getConfig();
-  if (!url || !db || !username || !apiKey) throw new Error('Odoo non configuré');
-  const uid = await authenticate(url, db, username, apiKey);
   const trimmed = query.trim();
   const domain = trimmed ? [['name', 'ilike', trimmed]] : [];
-  const rows = await jsonRpcCall(url, 'object', 'execute_kw', [
-    db, uid, apiKey,
-    'res.partner', 'search_read',
-    [domain, ['name', 'email', 'city']],
-    { limit, order: 'name asc' },
-  ]);
-  return (rows || []).map((r: any) => ({
+  const rows = await searchRead('res.partner', domain, ['name', 'email', 'city'], limit, 'name asc');
+  return rows.map((r: any) => ({
     id: r.id,
     name: r.name,
     email: r.email || null,
     city: r.city || null,
+  }));
+}
+
+export interface OdooDevis {
+  id: number;
+  name: string;
+  amountUntaxed: number;
+  clientName: string | null;
+}
+
+// Recherche de devis/commandes Odoo par numéro (search_read sur sale.order — lecture
+// seule) : sert à préremplir le budget global vendu (HT) d'un chantier à partir de son
+// numéro de devis (amount_untaxed), sans jamais rien créer ni modifier dans Odoo. Une
+// requête vide renvoie les devis les plus récents (tri décroissant par numéro).
+export async function odooSearchDevis(query: string, limit = 20): Promise<OdooDevis[]> {
+  const trimmed = query.trim();
+  const domain = trimmed ? [['name', 'ilike', trimmed]] : [];
+  const rows = await searchRead('sale.order', domain, ['name', 'amount_untaxed', 'partner_id'], limit, 'name desc');
+  return rows.map((r: any) => ({
+    id: r.id,
+    name: r.name,
+    amountUntaxed: r.amount_untaxed ?? 0,
+    clientName: Array.isArray(r.partner_id) ? r.partner_id[1] : null,
   }));
 }

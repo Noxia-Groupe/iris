@@ -10,7 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { odooConfigured, odooSearchClients } from './odoo';
+import { odooConfigured, odooSearchClients, odooSearchDevis } from './odoo';
 
 dotenv.config();
 
@@ -379,6 +379,21 @@ app.get('/api/odoo/clients', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Odoo search error:', error);
     res.json({ odooAvailable: false, clients: [] });
+  }
+});
+
+// Recherche de devis Odoo (lecture seule, cf. odoo.ts) pour préremplir le budget global
+// vendu (HT) d'un chantier à partir de son numéro de devis. Même contrat que
+// /api/odoo/clients ci-dessus : jamais d'erreur HTTP, odooAvailable:false si indisponible,
+// l'utilisateur reste libre de saisir le numéro et le montant à la main.
+app.get('/api/odoo/devis', requireAuth, async (req, res) => {
+  if (!odooConfigured()) return res.json({ odooAvailable: false, devis: [] });
+  try {
+    const devis = await odooSearchDevis(String(req.query.q || ''), 20);
+    res.json({ odooAvailable: true, devis });
+  } catch (error) {
+    console.error('Odoo search error (devis):', error);
+    res.json({ odooAvailable: false, devis: [] });
   }
 });
 

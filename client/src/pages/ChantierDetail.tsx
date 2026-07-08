@@ -10,6 +10,7 @@ import { apiFetch, assetUrl } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
+import { DevisAutocomplete } from '../components/DevisAutocomplete';
 import { TYPES_CHANTIER } from '../chantierTypes';
 
 // Date ISO (avec ou sans heure) -> "YYYY-MM-DD" attendu par <input type="date">.
@@ -50,6 +51,9 @@ const ChantierDetail = () => {
   const [conducteurs, setConducteurs] = useState<any[]>([]);
   const [editingChantier, setEditingChantier] = useState(false);
   const [savingChantier, setSavingChantier] = useState(false);
+  // Préremplissage du budget global vendu depuis un devis Odoo sélectionné (modale
+  // d'édition ci-dessous) — champ non contrôlé, on écrit directement dedans.
+  const editChantierBudgetRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchChantier();
@@ -641,7 +645,13 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">N° de Devis</label>
-                <input required name="numeroDevis" defaultValue={chantier.numeroDevis || ''} className="form-input" />
+                <DevisAutocomplete
+                  required
+                  defaultValue={chantier.numeroDevis || ''}
+                  onMontantFound={(montant) => {
+                    if (editChantierBudgetRef.current) editChantierBudgetRef.current.value = String(montant);
+                  }}
+                />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Responsable Chantier</label>
@@ -667,7 +677,7 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
-                <input required type="number" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
+                <input ref={editChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Total Heures Vendues (h)</label>

@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Archive, RotateCcw, Filter } from 'lucide-react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
+import { DevisAutocomplete } from '../components/DevisAutocomplete';
 
 const ListeChantiers = () => {
   const navigate = useNavigate();
@@ -14,6 +15,9 @@ const ListeChantiers = () => {
   const [showForm, setShowForm] = useState(false);
   const [filterMaterielDepasse, setFilterMaterielDepasse] = useState(false);
   const [filterHeuresDepasse, setFilterHeuresDepasse] = useState(false);
+  // Préremplissage du budget global vendu depuis un devis Odoo sélectionné (formulaire
+  // de création ci-dessous) — champ non contrôlé, on écrit directement dedans.
+  const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
 
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -333,7 +337,12 @@ const ListeChantiers = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">N° de Devis</label>
-              <input required name="numeroDevis" className="form-input" />
+              <DevisAutocomplete
+                required
+                onMontantFound={(montant) => {
+                  if (nouveauChantierBudgetRef.current) nouveauChantierBudgetRef.current.value = String(montant);
+                }}
+              />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Date Début</label>
@@ -341,7 +350,7 @@ const ListeChantiers = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Budget Global (€ HT)</label>
-              <input required type="number" step="0.01" name="budgetGlobalVendu" className="form-input" />
+              <input ref={nouveauChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" className="form-input" />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Total Heures Vendues (h)</label>

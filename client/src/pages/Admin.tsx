@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
+import { DevisAutocomplete } from '../components/DevisAutocomplete';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
@@ -83,6 +84,9 @@ const Admin = () => {
   const [remunerationCommerciale, setRemunerationCommerciale] = useState<any>(null);
   // Ligne en cours d'édition : { type: 'intervenant'|'fournisseur'|'categorie', id, ...champs }
   const [editRow, setEditRow] = useState<any>(null);
+  // Préremplissage du budget global vendu depuis un devis Odoo sélectionné (formulaire
+  // de création de chantier ci-dessous) — champ non contrôlé, on écrit directement dedans.
+  const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
 
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -307,7 +311,12 @@ const Admin = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">N° de Devis</label>
-              <input required name="numeroDevis" className="form-input" />
+              <DevisAutocomplete
+                required
+                onMontantFound={(montant) => {
+                  if (nouveauChantierBudgetRef.current) nouveauChantierBudgetRef.current.value = String(montant);
+                }}
+              />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Responsable Chantier</label>
@@ -333,7 +342,7 @@ const Admin = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="form-group mb-0">
                   <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
-                  <input required type="number" step="0.01" name="budgetGlobalVendu" className="form-input" />
+                  <input ref={nouveauChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" className="form-input" />
                 </div>
                 <div className="form-group mb-0">
                   <label className="form-label">Dont Matériel (€ HT)</label>
