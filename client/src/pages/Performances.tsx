@@ -131,6 +131,21 @@ const Performances = () => {
                 </div>
               </div>
 
+              {/* Dépassement d'heures tous chantiers confondus (en cours ET terminés) — un
+                  chantier en cours déjà en dépassement remonte ici sans attendre sa clôture,
+                  avec son impact en euros sur le budget main d'œuvre (manque à gagner). */}
+              <div className="pt-3 mb-3 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Dépassement heures (tous chantiers)</span>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm font-black ${(p.tauxDepassementHeures ?? 0) > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                    {(p.tauxDepassementHeures ?? 0).toFixed(1)}%
+                  </span>
+                  <span className={`text-sm font-black ${p.manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {p.manqueAGagnerMainOeuvre > 0 ? `-${Math.round(p.manqueAGagnerMainOeuvre).toLocaleString()} €` : '0 €'}
+                  </span>
+                </div>
+              </div>
+
               <div className="pt-3 mb-3 border-t border-gray-100 flex items-center justify-between">
                 <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Objectifs respectés (chantiers terminés)</span>
                 {p.tauxObjectifsRespectes == null ? (

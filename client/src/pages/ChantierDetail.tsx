@@ -281,7 +281,12 @@ const ChantierDetail = () => {
   const metrics = chantier.metrics || {};
   const depenseMaterielReelle = metrics.materielReel || 0;
   const heuresRealisees = metrics.heuresRealisees || 0;
+  const coutMainOeuvreReel = metrics.moReel || 0;
   const totalDepensesReelles = metrics.totalDepenses || 0;
+  // Manque à gagner dû au dépassement du budget main d'œuvre : les heures en trop ne sont
+  // pas facturées au client mais coûtent quand même en salaire — cette différence ronge la
+  // marge sans que ça saute aux yeux sur la seule barre "Consommation Heures" (en h, pas en €).
+  const manqueAGagnerMainOeuvre = Math.max(0, coutMainOeuvreReel - chantier.budgetMainOeuvreVendu);
   const margeCommerciale: number | null = metrics.margeCommerciale ?? null;
   const showMarge = margeCommerciale !== null;
   const margeAffichee = margeCommerciale ?? 0;
@@ -499,7 +504,7 @@ const ChantierDetail = () => {
           )}
 
           {/* Progress Bars */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
             {/* Matériel */}
             <div>
               <div className="flex justify-between items-end mb-2">
@@ -517,7 +522,31 @@ const ChantierDetail = () => {
               </div>
             </div>
 
-            {/* Main d'oeuvre */}
+            {/* Coût main d'oeuvre (€) — distinct de la barre "Heures" ci-dessous : un
+                dépassement d'heures se traduit ici en euros réellement dépensés en salaire,
+                avec le manque à gagner correspondant s'il dépasse le budget vendu. */}
+            <div>
+              <div className="flex justify-between items-end mb-2">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2 m-0">
+                  <Wallet size={18} className="text-orange-500" /> Coût Main d'Œuvre
+                </h3>
+                <div className="text-right">
+                  <span className="text-xl font-black text-orange-600">{coutMainOeuvreReel.toLocaleString()} €</span>
+                  <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.budgetMainOeuvreVendu.toLocaleString()} €</span>
+                </div>
+              </div>
+              <ProgressMeter value={coutMainOeuvreReel} max={chantier.budgetMainOeuvreVendu} color="orange" striped />
+              <div className="mt-2 flex justify-between items-center text-xs font-bold">
+                <span className={manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-gray-300'}>
+                  {manqueAGagnerMainOeuvre > 0 ? `Manque à gagner : -${manqueAGagnerMainOeuvre.toLocaleString()} €` : ''}
+                </span>
+                <span className="text-gray-500">
+                  {((coutMainOeuvreReel / Math.max(1, chantier.budgetMainOeuvreVendu)) * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+
+            {/* Heures */}
             <div>
               <div className="flex justify-between items-end mb-2">
                 <h3 className="font-bold text-gray-800 flex items-center gap-2 m-0">

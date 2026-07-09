@@ -1219,6 +1219,10 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
         nbMaterielDansBudget: 0, nbMaterielDepasse: 0,
         // Chantiers TERMINE uniquement : livrés dans les clous (heures ET matériel) ?
         nbObjectifsRespectes: 0,
+        // Tous chantiers confondus (en cours ET terminés) : dépassement d'heures et son
+        // impact en euros sur le budget main d'œuvre — un chantier en cours déjà en
+        // dépassement doit remonter ici sans attendre sa clôture.
+        heuresVenduesTotal: 0, heuresRealiseesTotal: 0, manqueAGagnerMainOeuvre: 0,
       };
     }
 
@@ -1236,6 +1240,9 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
       agg.caTotal += c.budgetGlobalVendu;
       agg.depensesTotal += m.totalDepenses;
       agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
+      agg.heuresVenduesTotal += c.heuresVendues;
+      agg.heuresRealiseesTotal += m.heuresRealisees;
+      agg.manqueAGagnerMainOeuvre += Math.max(0, m.moReel - c.budgetMainOeuvreVendu);
 
       if (enCours) {
         if (m.diffHeures > 0) agg.nbEnAvanceHeures++;
@@ -1254,6 +1261,11 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
         ...a,
         margePct: a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
         tauxObjectifsRespectes: a.nbChantiersTermines > 0 ? (a.nbObjectifsRespectes / a.nbChantiersTermines) * 100 : null,
+        // % d'heures consommées au-delà du total vendu, tous chantiers confondus (0 si
+        // aucun dépassement net). Ex: 12% = 12% d'heures en plus de ce qui a été vendu.
+        tauxDepassementHeures: a.heuresVenduesTotal > 0
+          ? (Math.max(0, a.heuresRealiseesTotal - a.heuresVenduesTotal) / a.heuresVenduesTotal) * 100
+          : null,
       }))
       .sort((x: any, y: any) => y.margeTotal - x.margeTotal);
 

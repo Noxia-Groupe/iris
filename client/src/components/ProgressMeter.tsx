@@ -1,8 +1,9 @@
-type MeterColor = 'blue' | 'purple';
+type MeterColor = 'blue' | 'purple' | 'orange';
 
 const COLORS: Record<MeterColor, { normal: string; warning: string; danger: string }> = {
   blue: { normal: '#0251a1', warning: '#f59e0b', danger: '#ef4444' },
   purple: { normal: '#8b5cf6', warning: '#f59e0b', danger: '#ef4444' },
+  orange: { normal: '#ea580c', warning: '#f59e0b', danger: '#ef4444' },
 };
 
 function fillColor(color: MeterColor, ratio: number): string {
