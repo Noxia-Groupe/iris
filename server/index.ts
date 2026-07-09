@@ -1113,12 +1113,16 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
 
     let nbEnCours = 0;
     let nbTermines = 0;
+    let nbTerminesNonEncaisses = 0;
     let achatsTotal = 0;
     let heuresTotal = 0;
 
     for (const c of chantiers) {
       if (c.statut === 'EN_COURS') nbEnCours++;
-      else if (c.statut === 'TERMINE') nbTermines++;
+      else if (c.statut === 'TERMINE') {
+        nbTermines++;
+        if (!c.encaisse) nbTerminesNonEncaisses++;
+      }
       for (const a of c.achats) {
         const d = new Date(a.date);
         if (d >= start && d < endExclusive) achatsTotal += a.montantHT;
@@ -1137,6 +1141,12 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
       nbEnCours,
       nbTermines,
     };
+
+    if (isAdmin) {
+      // Chantiers Terminés mais pas encore Encaissés (clause de sécurisation des
+      // commissions) : réservé aux admins, ce sont eux qui valident l'encaissement.
+      result.nbTerminesNonEncaisses = nbTerminesNonEncaisses;
+    }
 
     if (!isCommercial) {
       // ADMIN + CONDUCTEUR : total des achats de la période (peu importe le statut du

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award } from 'lucide-react';
+import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 
@@ -127,6 +127,31 @@ const Dashboard = () => {
               </div>
             </div>
           </div>
+
+          {/* Instantané indépendant de la période, comme "Chantiers en cours" — visible
+              par tous les rôles (périmètre déjà filtré côté serveur selon le rôle). */}
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-gray-100 text-gray-500"><CheckCircle2 size={18} /></div>
+            <div>
+              <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Chantiers terminés</div>
+              <div className="text-2xl font-black text-primary-dark mt-0.5">{globalStats.nbTermines}</div>
+            </div>
+          </div>
+
+          {/* Réservé aux admins : ce sont eux qui valident l'encaissement (cf. bouton sur
+              la fiche chantier), clause de sécurisation qui conditionne le calcul de la
+              commission commerciale du mois de clôture. */}
+          {globalStats.nbTerminesNonEncaisses != null && (
+            <div className={`bg-white p-4 rounded-xl shadow-sm border flex items-start gap-3 ${globalStats.nbTerminesNonEncaisses > 0 ? 'border-amber-200' : 'border-gray-100'}`}>
+              <div className={`p-2 rounded-lg ${globalStats.nbTerminesNonEncaisses > 0 ? 'bg-amber-50 text-amber-600' : 'bg-gray-100 text-gray-400'}`}><AlertTriangle size={18} /></div>
+              <div>
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">En attente d'encaissement</div>
+                <div className={`text-2xl font-black mt-0.5 ${globalStats.nbTerminesNonEncaisses > 0 ? 'text-amber-600' : 'text-primary-dark'}`}>
+                  {globalStats.nbTerminesNonEncaisses}
+                </div>
+              </div>
+            </div>
+          )}
 
           {globalStats.achatsTotal != null && (
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
