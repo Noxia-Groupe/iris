@@ -4,7 +4,7 @@ import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, Shop
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 
-type Period = 'month' | 'year';
+type Period = 'month' | 'quarter' | 'year';
 
 const Dashboard = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
@@ -75,7 +75,9 @@ const Dashboard = () => {
   const periodLabel = (() => {
     if (!globalStats?.periodStart) return '';
     const [y, m] = globalStats.periodStart.split('-').map(Number);
-    return period === 'year' ? `Année ${y}` : `${MOIS[m - 1]} ${y}`;
+    if (period === 'year') return `Année ${y}`;
+    if (period === 'quarter') return `T${Math.ceil(m / 3)} ${y}`;
+    return `${MOIS[m - 1]} ${y}`;
   })();
 
   const commissionCommerciale = globalStats?.commissionCommercialeTotal ?? globalStats?.commissionTotal;
@@ -91,17 +93,17 @@ const Dashboard = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Résultats du mois civil / de l'année civile EN COURS uniquement — pas de
+          {/* Résultats du mois/trimestre/année civil(e) EN COURS uniquement — pas de
               navigation vers une période passée (à la différence des autres pages stats). */}
           <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-            {(['month', 'year'] as Period[]).map((g) => (
+            {(['month', 'quarter', 'year'] as Period[]).map((g) => (
               <button
                 key={g}
                 type="button"
                 onClick={() => setPeriod(g)}
                 className={`text-sm font-semibold px-3 py-1.5 rounded-md transition-colors ${period === g ? 'bg-white shadow-sm text-primary-dark' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                {g === 'month' ? 'Mois en cours' : 'Année en cours'}
+                {g === 'month' ? 'Mois en cours' : g === 'quarter' ? 'Trimestre en cours' : 'Année en cours'}
               </button>
             ))}
           </div>

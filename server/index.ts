@@ -1098,7 +1098,9 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
     const isAdmin = user.role === 'ADMIN';
     const isCommercial = user.role === 'COMMERCIAL';
     const params = await getParametres();
-    const period = req.query.period === 'year' ? 'year' : 'month';
+    const period = (['month', 'quarter', 'year'] as const).includes(req.query.period as any)
+      ? (req.query.period as 'month' | 'quarter' | 'year')
+      : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
 
     const where = isAdmin
