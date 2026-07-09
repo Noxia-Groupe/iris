@@ -409,6 +409,29 @@ const ChantierDetail = () => {
             </div>
           </div>
 
+          {/* Bannière de rappel : un chantier Terminé mais Non encaissé ne compte pas dans
+              la commission du commercial du mois (clause de sécurisation des commissions).
+              Le badge ci-dessus permet déjà de basculer ce statut, mais reste discret parmi
+              les autres badges — cette bannière rend l'action impossible à manquer. */}
+          {isTermine && !chantier.encaisse && userRole === 'ADMIN' && (
+            <div className="mb-6 p-4 rounded-xl border-l-8 border-amber-500 bg-amber-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="font-bold text-amber-800">Chantier terminé, en attente d'encaissement</div>
+                <div className="text-sm text-amber-700">
+                  Tant que l'encaissement n'est pas validé, la marge et la commission du commercial ne sont pas comptabilisées pour ce chantier.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleEncaisse}
+                disabled={savingEncaisse}
+                className="shrink-0 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-semibold text-sm transition-colors"
+              >
+                {savingEncaisse ? 'Validation...' : "Valider l'encaissement"}
+              </button>
+            </div>
+          )}
+
           {/* Key Metrics */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {showBudgetVendu && (
