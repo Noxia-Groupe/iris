@@ -283,10 +283,13 @@ const ChantierDetail = () => {
   const heuresRealisees = metrics.heuresRealisees || 0;
   const coutMainOeuvreReel = metrics.moReel || 0;
   const totalDepensesReelles = metrics.totalDepenses || 0;
-  // Manque à gagner dû au dépassement du budget main d'œuvre : les heures en trop ne sont
-  // pas facturées au client mais coûtent quand même en salaire — cette différence ronge la
-  // marge sans que ça saute aux yeux sur la seule barre "Consommation Heures" (en h, pas en €).
-  const manqueAGagnerMainOeuvre = Math.max(0, coutMainOeuvreReel - chantier.budgetMainOeuvreVendu);
+  // Manque à gagner = uniquement le coût des heures EN TROP par rapport au vendu, valorisées
+  // au taux horaire moyen réellement appliqué sur ce chantier — pas la différence avec le
+  // budget main d'œuvre vendu (qui peut s'écarter du taux horaire pour d'autres raisons,
+  // ex: marge intégrée au devis, et fausserait alors le montant du dépassement lui-même).
+  const heuresDepassement = Math.max(0, heuresRealisees - chantier.heuresVendues);
+  const tauxHoraireMoyen = heuresRealisees > 0 ? coutMainOeuvreReel / heuresRealisees : 0;
+  const manqueAGagnerMainOeuvre = heuresDepassement * tauxHoraireMoyen;
   const margeCommerciale: number | null = metrics.margeCommerciale ?? null;
   const showMarge = margeCommerciale !== null;
   const margeAffichee = margeCommerciale ?? 0;

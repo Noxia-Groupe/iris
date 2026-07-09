@@ -131,19 +131,43 @@ const Performances = () => {
                 </div>
               </div>
 
-              {/* Dépassement d'heures tous chantiers confondus (en cours ET terminés) — un
-                  chantier en cours déjà en dépassement remonte ici sans attendre sa clôture,
-                  avec son impact en euros sur le budget main d'œuvre (manque à gagner). */}
-              <div className="pt-3 mb-3 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Dépassement heures (tous chantiers)</span>
-                <div className="flex items-center gap-3">
-                  <span className={`text-sm font-black ${(p.tauxDepassementHeures ?? 0) > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                    {(p.tauxDepassementHeures ?? 0).toFixed(1)}%
-                  </span>
-                  <span className={`text-sm font-black ${p.manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                    {p.manqueAGagnerMainOeuvre > 0 ? `-${Math.round(p.manqueAGagnerMainOeuvre).toLocaleString()} €` : '0 €'}
-                  </span>
+              {/* Même chose pour les chantiers TERMINÉS — sans quoi un dépassement disparaît
+                  purement et simplement de ces stats dès la clôture du chantier. */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">Chantiers terminés — heures</div>
+                  <div className="flex gap-2">
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">{p.nbTermineEnAvanceHeures} dans les clous</span>
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full bg-red-100 text-red-700">{p.nbTermineEnRetardHeures} dépassé{p.nbTermineEnRetardHeures > 1 ? 's' : ''}</span>
+                  </div>
                 </div>
+                <div>
+                  <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">Chantiers terminés — matériel</div>
+                  <div className="flex gap-2">
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">{p.nbTermineMaterielDansBudget} dans le budget</span>
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full bg-red-100 text-red-700">{p.nbTermineMaterielDepasse} dépassé{p.nbTermineMaterielDepasse > 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dépassement d'heures sur les seuls chantiers TERMINÉS (résultat définitif —
+                  un chantier en cours a encore des heures disponibles, le mélanger fausserait
+                  le taux), avec son impact en euros valorisé au taux horaire moyen réellement
+                  appliqué (manque à gagner sur les heures en trop, pas sur le budget vendu). */}
+              <div className="pt-3 mb-3 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Dépassement heures (chantiers terminés)</span>
+                {p.tauxDepassementHeures == null ? (
+                  <span className="text-sm text-gray-400 italic">Aucun chantier terminé</span>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <span className={`text-sm font-black ${p.tauxDepassementHeures > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                      {p.tauxDepassementHeures.toFixed(1)}%
+                    </span>
+                    <span className={`text-sm font-black ${p.manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {p.manqueAGagnerMainOeuvre > 0 ? `-${Math.round(p.manqueAGagnerMainOeuvre).toLocaleString()} €` : '0 €'}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 mb-3 border-t border-gray-100 flex items-center justify-between">

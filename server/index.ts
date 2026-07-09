@@ -1217,12 +1217,13 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
         // Chantiers EN_COURS uniquement : où en est le conducteur par rapport au budget vendu.
         nbEnAvanceHeures: 0, nbEnRetardHeures: 0,
         nbMaterielDansBudget: 0, nbMaterielDepasse: 0,
-        // Chantiers TERMINE uniquement : livrés dans les clous (heures ET matériel) ?
+        // Chantiers TERMINE uniquement : livrés dans les clous (heures ET matériel) ? Un
+        // chantier en cours a encore des heures/du budget disponibles, son résultat n'est
+        // pas définitif — ces stats ne portent donc que sur les chantiers clôturés.
         nbObjectifsRespectes: 0,
-        // Tous chantiers confondus (en cours ET terminés) : dépassement d'heures et son
-        // impact en euros sur le budget main d'œuvre — un chantier en cours déjà en
-        // dépassement doit remonter ici sans attendre sa clôture.
-        heuresVenduesTotal: 0, heuresRealiseesTotal: 0, manqueAGagnerMainOeuvre: 0,
+        nbTermineEnAvanceHeures: 0, nbTermineEnRetardHeures: 0,
+        nbTermineMaterielDansBudget: 0, nbTermineMaterielDepasse: 0,
+        heuresVenduesTermineTotal: 0, heuresRealiseesTermineTotal: 0, manqueAGagnerMainOeuvre: 0,
       };
     }
 
@@ -1240,9 +1241,6 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
       agg.caTotal += c.budgetGlobalVendu;
       agg.depensesTotal += m.totalDepenses;
       agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
-      agg.heuresVenduesTotal += c.heuresVendues;
-      agg.heuresRealiseesTotal += m.heuresRealisees;
-      agg.manqueAGagnerMainOeuvre += Math.max(0, m.moReel - c.budgetMainOeuvreVendu);
 
       if (enCours) {
         if (m.diffHeures > 0) agg.nbEnAvanceHeures++;
@@ -1250,8 +1248,22 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
         if (materielDansBudget) agg.nbMaterielDansBudget++;
         else agg.nbMaterielDepasse++;
       }
-      if (termine && m.diffHeures >= 0 && materielDansBudget) {
-        agg.nbObjectifsRespectes++;
+      if (termine) {
+        if (m.diffHeures >= 0) agg.nbTermineEnAvanceHeures++;
+        else agg.nbTermineEnRetardHeures++;
+        if (materielDansBudget) agg.nbTermineMaterielDansBudget++;
+        else agg.nbTermineMaterielDepasse++;
+        if (m.diffHeures >= 0 && materielDansBudget) agg.nbObjectifsRespectes++;
+
+        agg.heuresVenduesTermineTotal += c.heuresVendues;
+        agg.heuresRealiseesTermineTotal += m.heuresRealisees;
+        // Manque à gagner = uniquement le coût des heures EN TROP par rapport au vendu,
+        // valorisées au taux horaire moyen réellement appliqué sur ce chantier — pas la
+        // différence avec le budget main d'œuvre vendu (qui peut s'écarter du taux horaire
+        // pour d'autres raisons et fausserait le montant du dépassement lui-même).
+        const heuresDepassement = Math.max(0, m.heuresRealisees - c.heuresVendues);
+        const tauxHoraireMoyen = m.heuresRealisees > 0 ? m.moReel / m.heuresRealisees : 0;
+        agg.manqueAGagnerMainOeuvre += heuresDepassement * tauxHoraireMoyen;
       }
     }
 
@@ -1261,10 +1273,11 @@ app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) =>
         ...a,
         margePct: a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
         tauxObjectifsRespectes: a.nbChantiersTermines > 0 ? (a.nbObjectifsRespectes / a.nbChantiersTermines) * 100 : null,
-        // % d'heures consommées au-delà du total vendu, tous chantiers confondus (0 si
-        // aucun dépassement net). Ex: 12% = 12% d'heures en plus de ce qui a été vendu.
-        tauxDepassementHeures: a.heuresVenduesTotal > 0
-          ? (Math.max(0, a.heuresRealiseesTotal - a.heuresVenduesTotal) / a.heuresVenduesTotal) * 100
+        // % d'heures consommées au-delà du total vendu, sur les seuls chantiers TERMINES
+        // (résultat définitif) — un chantier en cours en avance compenserait à tort un
+        // chantier terminé en net dépassement si on les mélangeait.
+        tauxDepassementHeures: a.heuresVenduesTermineTotal > 0
+          ? (Math.max(0, a.heuresRealiseesTermineTotal - a.heuresVenduesTermineTotal) / a.heuresVenduesTermineTotal) * 100
           : null,
       }))
       .sort((x: any, y: any) => y.margeTotal - x.margeTotal);
