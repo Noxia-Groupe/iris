@@ -63,6 +63,13 @@ const ChantierDetail = () => {
   const [editingPointageId, setEditingPointageId] = useState<string | null>(null);
   const [savingPointage, setSavingPointage] = useState(false);
 
+  // Correction d'un achat déjà saisi (erreur de montant, de fournisseur, de
+  // catégorie...) — mêmes droits que ci-dessus (PATCH /api/achats/:id).
+  const [fournisseurs, setFournisseurs] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [editingAchatId, setEditingAchatId] = useState<string | null>(null);
+  const [savingAchat, setSavingAchat] = useState(false);
+
   useEffect(() => {
     fetchChantier();
     fetchConfig();
@@ -211,6 +218,51 @@ const ChantierDetail = () => {
       alert('Impossible de joindre le serveur.');
     } finally {
       setSavingPointage(false);
+    }
+  };
+
+  // Listes fournisseurs/catégories, pour les sélecteurs du formulaire de correction d'un
+  // achat (chargées à la demande, au premier clic sur "Modifier").
+  const fetchFournisseurs = async () => {
+    try {
+      const res = await apiFetch('/fournisseurs');
+      const data = await res.json();
+      if (Array.isArray(data)) setFournisseurs(data);
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const res = await apiFetch('/categories');
+      const data = await res.json();
+      if (Array.isArray(data)) setCategories(data);
+    } catch (e) { console.error(e); }
+  };
+
+  const startEditAchat = (achatId: string) => {
+    if (fournisseurs.length === 0) fetchFournisseurs();
+    if (categories.length === 0) fetchCategories();
+    setEditingAchatId(achatId);
+  };
+
+  const handleAchatSubmit = async (e: React.FormEvent, achatId: string) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    const data = Object.fromEntries(formData.entries());
+    setSavingAchat(true);
+    try {
+      const res = await apiFetch(`/achats/${achatId}`, { method: 'PATCH', body: JSON.stringify(data) });
+      if (res.ok) {
+        setEditingAchatId(null);
+        fetchChantier();
+      } else {
+        const d = await res.json();
+        alert(d.error || "Erreur lors de la modification de l'achat.");
+      }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSavingAchat(false);
     }
   };
 
@@ -647,13 +699,51 @@ const ChantierDetail = () => {
             ) : (
               <div className="divide-y divide-gray-100">
                 {achats.slice(0, 6).map((a) => (
-                  <div key={a.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-gray-700 truncate">{a.description}</div>
-                      <div className="text-xs text-gray-400">{fmtDate(a.date)} · {a.fournisseur?.nom} · {a.categorie?.nom}</div>
+                  editingAchatId === a.id ? (
+                    <form
+                      key={a.id}
+                      onSubmit={(e) => handleAchatSubmit(e, a.id)}
+                      className="grid grid-cols-2 gap-2 px-6 py-3 bg-gray-50"
+                    >
+                      <input required type="date" name="date" defaultValue={toDateInputValue(a.date)} className="form-input text-sm" />
+                      <input required type="number" step="0.01" name="montantHT" defaultValue={a.montantHT} placeholder="Montant HT" className="form-input text-sm" />
+                      <select required name="fournisseurId" defaultValue={a.fournisseurId} className="form-input text-sm">
+                        {fournisseurs.length === 0 && <option value={a.fournisseurId}>{a.fournisseur?.nom}</option>}
+                        {fournisseurs.map((f) => <option key={f.id} value={f.id}>{f.nom}</option>)}
+                      </select>
+                      <select required name="categorieId" defaultValue={a.categorieId} className="form-input text-sm">
+                        {categories.length === 0 && <option value={a.categorieId}>{a.categorie?.nom}</option>}
+                        {categories.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
+                      </select>
+                      <input required type="text" name="description" defaultValue={a.description} placeholder="Description" className="form-input text-sm col-span-2" />
+                      <input type="text" name="numeroFacture" defaultValue={a.numeroFacture || ''} placeholder="N° de facture (optionnel)" className="form-input text-sm col-span-2" />
+                      <div className="col-span-2 flex gap-2 justify-end">
+                        <button type="button" disabled={savingAchat} onClick={() => setEditingAchatId(null)} className="btn bg-white border text-xs px-3 py-1.5">Annuler</button>
+                        <button type="submit" disabled={savingAchat} className="btn btn-primary text-xs px-3 py-1.5">
+                          {savingAchat ? 'Enregistrement...' : 'Enregistrer'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div key={a.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-gray-700 truncate">{a.description}</div>
+                        <div className="text-xs text-gray-400">{fmtDate(a.date)} · {a.fournisseur?.nom} · {a.categorie?.nom}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="font-bold text-gray-800 whitespace-nowrap">{fmtEuro(a.montantHT)}</div>
+                        {userRole !== 'COMMERCIAL' && (
+                          <button
+                            onClick={() => startEditAchat(a.id)}
+                            className="p-1.5 text-gray-400 hover:text-accent hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Corriger cet achat"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="font-bold text-gray-800 whitespace-nowrap">{fmtEuro(a.montantHT)}</div>
-                  </div>
+                  )
                 ))}
               </div>
             )}

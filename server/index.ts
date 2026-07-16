@@ -1002,6 +1002,39 @@ app.post('/api/achats', requireAuth, blockCommercial, async (req, res) => {
   }
 });
 
+// Correction d'un achat déjà saisi (erreur de montant, de fournisseur, de catégorie...) —
+// mêmes droits que la saisie (tout compte non-commercial, sur un chantier EN_COURS ou
+// n'importe quel chantier pour un admin, cf. assertChantierWritable). Ne permet pas de
+// changer le chantier de l'achat, comme pour PATCH /api/heures/:id.
+app.patch('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
+  try {
+    const achatId = paramId(req);
+    const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
+    if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
+    if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
+
+    const data: Record<string, unknown> = {};
+    if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
+    if ('numeroFacture' in req.body) data.numeroFacture = req.body.numeroFacture || null;
+    if ('description' in req.body) data.description = req.body.description;
+    if ('montantHT' in req.body) data.montantHT = parseFloat(req.body.montantHT) || 0;
+    if ('fournisseurId' in req.body) {
+      const fournisseur = await prisma.fournisseur.findUnique({ where: { id: String(req.body.fournisseurId) } });
+      if (!fournisseur) return res.status(404).json({ error: 'Fournisseur introuvable.' });
+      data.fournisseurId = fournisseur.id;
+    }
+    if ('categorieId' in req.body) {
+      const categorie = await prisma.categorie.findUnique({ where: { id: String(req.body.categorieId) } });
+      if (!categorie) return res.status(404).json({ error: 'Catégorie introuvable.' });
+      data.categorieId = categorie.id;
+    }
+
+    res.json(await prisma.achatReel.update({ where: { id: achatId }, data }));
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating achat' });
+  }
+});
+
 // Pointages (Heures)
 app.get('/api/heures', requireAuth, async (req, res) => {
   try {
