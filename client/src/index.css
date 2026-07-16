@@ -224,6 +224,19 @@ select.form-input option {
 .dark .bg-white\/60 { background-color: rgba(255, 255, 255, 0.06); }
 .dark .bg-gray-50\/50 { background-color: rgba(16, 23, 40, 0.5); }
 
+/* Choix survolés : lignes de tableau/liste cliquables, suggestions d'autocomplete, chips
+   de sélection (type de chantier, filtres...). hover:bg-gray-50/100 n'ont pas d'équivalent
+   dark redéfini (contrairement aux mêmes classes sans hover ci-dessus) : ça retombe sur le
+   gris clair par défaut de Tailwind, quasi blanc sur fond sombre, qui rend le texte clair
+   du mode sombre presque invisible. On reprend ici le bleu de marque en version
+   translucide (même esprit que le fond plein de l'onglet actif de la sidebar, cf.
+   Sidebar.css .nav-link.active) : assez visible pour signaler le survol, assez léger pour
+   rester lisible avec le texte et les badges de couleur déjà présents sur la ligne. */
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-100:hover {
+  background-color: rgba(59, 130, 246, 0.18);
+}
+
 /* Bordures / séparateurs */
 .dark .border-gray-50 { border-color: #182036; }
 .dark .border-gray-100 { border-color: #202a44; }
