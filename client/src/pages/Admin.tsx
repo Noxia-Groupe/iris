@@ -6,6 +6,12 @@ import { DevisAutocomplete } from '../components/DevisAutocomplete';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
+// Un ADMIN marqué "estCommercial" apparaît en plus comme un commercial (choix
+// d'affectation sur un chantier, statistiques de "Mes commerciaux") — même définition que
+// isCommercialLike() côté serveur (server/index.ts).
+const isCommercialLike = (u: { role: string; estCommercial?: boolean }) =>
+  u.role === 'COMMERCIAL' || (u.role === 'ADMIN' && !!u.estCommercial);
+
 // Rendu des tranches d'un barème progressif (JSON.stringify transforme un plafond
 // Infinity en null : la dernière tranche est donc "au-delà de X €", sans borne haute).
 const BaremeTranches = ({ tranches }: { tranches?: { plafond: number | null; taux: number }[] }) => {
@@ -84,6 +90,9 @@ const Admin = () => {
   const [remunerationCommerciale, setRemunerationCommerciale] = useState<any>(null);
   // Ligne en cours d'édition : { type: 'intervenant'|'fournisseur'|'categorie', id, ...champs }
   const [editRow, setEditRow] = useState<any>(null);
+  // Rôle sélectionné dans le formulaire "Autoriser un compte" — contrôlé uniquement pour
+  // afficher la case "estCommercial" quand le rôle choisi est Administrateur.
+  const [newUserRole, setNewUserRole] = useState('CONDUCTEUR_TRAVAUX');
   // Préremplissage du budget global vendu depuis un devis Odoo sélectionné (formulaire
   // de création de chantier ci-dessous) — champ non contrôlé, on écrit directement dedans.
   const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
@@ -176,6 +185,20 @@ const Admin = () => {
     }
   };
 
+  // Bascule "estCommercial" sur un compte ADMIN : il reste administrateur à part entière,
+  // mais apparaît en plus comme un choix de commercial rattaché et dans "Mes commerciaux".
+  const handleToggleEstCommercial = async (userId: string, current: boolean) => {
+    try {
+      await apiFetch(`/users/${userId}/est-commercial`, {
+        method: 'PATCH',
+        body: JSON.stringify({ estCommercial: !current })
+      });
+      fetchData();
+    } catch (e) {
+      alert("Erreur lors de la mise à jour.");
+    }
+  };
+
   const handlePasswordChange = async (userId: string, userName: string) => {
     const newPassword = window.prompt(`Entrez le nouveau mot de passe pour ${userName} (minimum 6 caractères) :`);
     if (!newPassword) return;
@@ -210,10 +233,12 @@ const Admin = () => {
       email: (formData.get('email') as string || '').trim(),
       name: (formData.get('name') as string || '').trim(),
       role: (formData.get('role') as string) || 'CONDUCTEUR_TRAVAUX',
+      estCommercial: formData.get('estCommercial') === 'on',
     };
     try {
       const res = await apiFetch('/users', { method: 'POST', body: JSON.stringify(payload) });
       if (res.ok) {
+        setNewUserRole('CONDUCTEUR_TRAVAUX');
         form.reset();
         fetchData();
       } else {
@@ -326,10 +351,10 @@ const Admin = () => {
               </select>
             </div>
             <div className="form-group mb-0">
-              <label className="form-label">Commercial rattaché{users.some(u => u.role === 'COMMERCIAL') ? '' : ' (aucun disponible)'}</label>
-              <select required={users.some(u => u.role === 'COMMERCIAL')} name="commercialId" className="form-input" defaultValue="">
+              <label className="form-label">Commercial rattaché{users.some(isCommercialLike) ? '' : ' (aucun disponible)'}</label>
+              <select required={users.some(isCommercialLike)} name="commercialId" className="form-input" defaultValue="">
                 <option value="" disabled>Sélectionner un commercial...</option>
-                {users.filter(u => u.role === 'COMMERCIAL').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {users.filter(isCommercialLike).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
             <div className="form-group mb-0">
@@ -798,12 +823,20 @@ const Admin = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Rôle d'accès</label>
-                <select name="role" defaultValue="CONDUCTEUR_TRAVAUX" className="form-input">
+                <select name="role" value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)} className="form-input">
                   <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
                   <option value="COMMERCIAL">Commercial</option>
                   <option value="ADMIN">Administrateur</option>
                 </select>
               </div>
+              {newUserRole === 'ADMIN' && (
+                <div className="form-group mb-0 md:col-span-2">
+                  <label className="flex items-center gap-2 text-sm font-medium px-3 py-2.5 bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors w-fit">
+                    <input type="checkbox" name="estCommercial" className="w-4 h-4" />
+                    Apparaît aussi comme commercial (affectation aux chantiers et statistiques dans « Mes commerciaux »)
+                  </label>
+                </div>
+              )}
               <button className="btn btn-primary w-full">Autoriser</button>
             </form>
           </div>
@@ -817,6 +850,7 @@ const Admin = () => {
                   <th className="px-6 py-4 font-semibold">Email</th>
                   <th className="px-6 py-4 font-semibold">Type</th>
                   <th className="px-6 py-4 font-semibold">Rôle d'accès</th>
+                  <th className="px-6 py-4 font-semibold">Aussi commercial</th>
                   <th className="px-6 py-4 font-semibold text-right">Actions</th>
                 </tr>
               </thead>
@@ -842,6 +876,21 @@ const Admin = () => {
                         <option value="COMMERCIAL">Commercial</option>
                         <option value="ADMIN">Administrateur</option>
                       </select>
+                    </td>
+                    <td className="px-6 py-4">
+                      {u.role === 'ADMIN' ? (
+                        <label className="flex items-center gap-2 cursor-pointer w-fit">
+                          <input
+                            type="checkbox"
+                            checked={!!u.estCommercial}
+                            onChange={() => handleToggleEstCommercial(u.id, !!u.estCommercial)}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-xs text-gray-500">{u.estCommercial ? 'Oui' : 'Non'}</span>
+                        </label>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right whitespace-nowrap">
                       <button

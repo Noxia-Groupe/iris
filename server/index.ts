@@ -154,6 +154,17 @@ const blockCommercial: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+// Un administrateur peut être marqué "estCommercial" : il garde alors tous les droits
+// d'administration (blockCommercial ne le concerne pas, il reste role === 'ADMIN'), mais
+// apparaît EN PLUS comme un commercial pour l'affectation aux chantiers et les
+// statistiques/marges de "Mes commerciaux" — au même titre qu'un compte de rôle
+// COMMERCIAL. isCommercialLike() et COMMERCIAL_OR_FILTER couvrent les deux cas partout où
+// l'appli devait jusqu'ici filtrer strictement sur role === 'COMMERCIAL'.
+function isCommercialLike(u: { role: string; estCommercial?: boolean | null }): boolean {
+  return u.role === 'COMMERCIAL' || (u.role === 'ADMIN' && !!u.estCommercial);
+}
+const COMMERCIAL_OR_FILTER = [{ role: 'COMMERCIAL' }, { role: 'ADMIN', estCommercial: true }];
+
 // Express 5 type les valeurs de req.params comme `string | string[]`. Nos routes
 // n'utilisent que des paramètres simples (:id) : on en extrait toujours une string.
 function paramId(req: express.Request): string {
@@ -503,11 +514,11 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
     let commercialId: string | null = null;
     if (req.body.commercialId) {
       const commercial = await prisma.user.findUnique({ where: { id: String(req.body.commercialId) } });
-      if (!commercial || commercial.role !== 'COMMERCIAL') {
+      if (!commercial || !isCommercialLike(commercial)) {
         return res.status(400).json({ error: 'Commercial introuvable.' });
       }
       commercialId = commercial.id;
-    } else if ((await prisma.user.count({ where: { role: 'COMMERCIAL' } })) > 0) {
+    } else if ((await prisma.user.count({ where: { OR: COMMERCIAL_OR_FILTER } })) > 0) {
       return res.status(400).json({ error: 'Veuillez sélectionner le commercial rattaché à ce chantier.' });
     }
 
@@ -653,11 +664,11 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
     let commercialId: string | null = null;
     if (req.body.commercialId) {
       const commercial = await prisma.user.findUnique({ where: { id: String(req.body.commercialId) } });
-      if (!commercial || commercial.role !== 'COMMERCIAL') {
+      if (!commercial || !isCommercialLike(commercial)) {
         return res.status(400).json({ error: 'Commercial introuvable.' });
       }
       commercialId = commercial.id;
-    } else if ((await prisma.user.count({ where: { role: 'COMMERCIAL' } })) > 0) {
+    } else if ((await prisma.user.count({ where: { OR: COMMERCIAL_OR_FILTER } })) > 0) {
       return res.status(400).json({ error: 'Un chantier doit toujours avoir un commercial rattaché.' });
     }
 
@@ -680,11 +691,11 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
 app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, password: true },
+      select: { id: true, name: true, email: true, role: true, password: true, estCommercial: true },
       orderBy: { createdAt: 'asc' },
     });
-    res.json(users.map((u: { id: string; name: string; email: string; role: string; password: string | null }) => ({
-      id: u.id, name: u.name, email: u.email, role: u.role, hasPassword: !!u.password,
+    res.json(users.map((u: { id: string; name: string; email: string; role: string; password: string | null; estCommercial: boolean }) => ({
+      id: u.id, name: u.name, email: u.email, role: u.role, hasPassword: !!u.password, estCommercial: u.estCommercial,
     })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
@@ -701,6 +712,9 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     const email = normalizeEmail(req.body.email);
     const name = String(req.body.name ?? '').trim();
     const role = ALLOWED_ROLES.includes(req.body.role) ? req.body.role : 'CONDUCTEUR_TRAVAUX';
+    // "estCommercial" n'a de sens que pour un ADMIN (cf. isCommercialLike) : ignoré pour
+    // les autres rôles, pour éviter un état orphelin sans effet mais trompeur en base.
+    const estCommercial = role === 'ADMIN' && !!req.body.estCommercial;
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Adresse email invalide.' });
@@ -713,8 +727,8 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
       return res.status(409).json({ error: 'Un compte existe déjà pour cet email.' });
     }
     const user = await prisma.user.create({
-      data: { email, name, role }, // pas de mot de passe : accès via SSO Microsoft
-      select: { id: true, name: true, email: true, role: true },
+      data: { email, name, role, estCommercial }, // pas de mot de passe : accès via SSO Microsoft
+      select: { id: true, name: true, email: true, role: true, estCommercial: true },
     });
     res.status(201).json({ ...user, hasPassword: false });
   } catch (error) {
@@ -754,12 +768,39 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
     }
     const user = await prisma.user.update({
       where: { id: paramId(req) },
-      data: { role },
-      select: { id: true, name: true, email: true, role: true }
+      // "estCommercial" n'a de sens que pour un ADMIN : on le retire si le compte quitte
+      // ce rôle, pour ne pas laisser un état orphelin qui réapparaîtrait s'il redevenait
+      // ADMIN plus tard sans qu'on l'ait explicitement redemandé.
+      data: role === 'ADMIN' ? { role } : { role, estCommercial: false },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true }
     });
     res.json(user);
   } catch (error) {
     res.status(500).json({ error: 'Error updating user role' });
+  }
+});
+
+// Bascule "estCommercial" sur un compte ADMIN : il apparaît alors, en plus de ses droits
+// d'administration intacts, comme un choix possible de commercial rattaché à un chantier
+// et dans les statistiques/marges de "Mes commerciaux" (cf. isCommercialLike). Réservé aux
+// ADMIN : un COMMERCIAL est déjà commercial, un conducteur n'a pas vocation à y apparaître.
+app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+    if (!target) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    if (target.role !== 'ADMIN') {
+      return res.status(400).json({ error: 'Seul un compte Administrateur peut être marqué "aussi commercial".' });
+    }
+    const user = await prisma.user.update({
+      where: { id: target.id },
+      data: { estCommercial: !!req.body.estCommercial },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true },
+    });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating estCommercial' });
   }
 });
 
@@ -783,11 +824,12 @@ app.put('/api/users/:id/password', requireAuth, requireAdmin, async (req, res) =
 // Liste minimale des commerciaux (id + nom), pour peupler les sélecteurs d'affectation
 // (création de chantier, réattribution). Contrairement à /api/users, accessible à tout
 // utilisateur authentifié (pas seulement les admins) : un conducteur doit pouvoir choisir
-// le commercial rattaché à un chantier qu'il crée ou dont il est responsable.
+// le commercial rattaché à un chantier qu'il crée ou dont il est responsable. Inclut les
+// admins marqués "estCommercial" (cf. isCommercialLike).
 app.get('/api/commerciaux', requireAuth, async (req, res) => {
   try {
     const commerciaux = await prisma.user.findMany({
-      where: { role: 'COMMERCIAL' },
+      where: { OR: COMMERCIAL_OR_FILTER },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
@@ -1106,7 +1148,7 @@ app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async
       return res.status(400).json({ error: 'Période invalide (attendu "YYYY-MM").' });
     }
     const commercial = await prisma.user.findUnique({ where: { id: paramId(req) } });
-    if (!commercial || commercial.role !== 'COMMERCIAL') {
+    if (!commercial || !isCommercialLike(commercial)) {
       return res.status(404).json({ error: 'Commercial introuvable.' });
     }
     const suiviAdministratif = !!req.body.suiviAdministratif;
@@ -1226,7 +1268,7 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
         // confondus — même définition que la commission (chantiers Terminés ET
         // Encaissés, rattachés au mois de leur clôture) : ce sont des résultats
         // FINALISÉS du mois, pas un cumul de portefeuille en cours.
-        const commerciaux = await prisma.user.findMany({ where: { role: 'COMMERCIAL' }, select: { id: true } });
+        const commerciaux = await prisma.user.findMany({ where: { OR: COMMERCIAL_OR_FILTER }, select: { id: true } });
         const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params);
         let caTotal = 0, margeTotal = 0, commissionCommercialeTotal = 0;
         for (const agg of Object.values(byCommercial) as any[]) {
@@ -1775,7 +1817,7 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
     const params = await getParametres();
 
     const users = await prisma.user.findMany({
-      where: isAdmin ? { role: 'COMMERCIAL' } : { id: authUser.id, role: 'COMMERCIAL' },
+      where: isAdmin ? { OR: COMMERCIAL_OR_FILTER } : { id: authUser.id, role: 'COMMERCIAL' },
       select: { id: true, name: true, email: true },
     });
 
