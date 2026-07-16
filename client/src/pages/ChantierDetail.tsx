@@ -576,7 +576,8 @@ const ChantierDetail = () => {
             </div>
           )}
 
-          {/* Marge Commerciale (Admin uniquement, si activée dans les paramètres) */}
+          {/* Marge Commerciale (admin, ou conducteur responsable sur sa fiche chantier — cf.
+              GET /api/chantiers/:id côté serveur —, si activée dans les paramètres) */}
           {showMarge && (
             <div className={`mb-8 p-6 rounded-xl border-l-8 flex flex-col gap-4 shadow-sm relative overflow-hidden ${margeAffichee > 0 ? 'bg-emerald-50 border-emerald-500' : 'bg-red-50 border-red-500'}`}>
               <div className="flex flex-col md:flex-row justify-between items-center gap-4">

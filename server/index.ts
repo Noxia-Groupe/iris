@@ -206,8 +206,10 @@ async function getParametres(): Promise<Parametres> {
 }
 
 // --- Calcul centralisé des métriques d'un chantier (source unique de vérité) ---
-// La marge commerciale n'est calculée que pour les admins ET si elle est activée.
-function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: boolean) {
+// La marge commerciale n'est calculée que si elle est activée ET pour les profils
+// autorisés à la voir (admin partout ; conducteur responsable sur SA fiche chantier
+// uniquement, cf. GET /api/chantiers/:id — pas sur la liste ni le tableau de bord).
+function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: boolean) {
   const achats: any[] = chantier.achats || [];
   const pointages: any[] = chantier.pointages || [];
 
@@ -225,14 +227,15 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
 
   const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures };
 
-  if (!isAdmin || !params.margeCommercialeActive) {
+  if (!canSeeMarge || !params.margeCommercialeActive) {
     return { ...base, margeBrute: null, margeCommerciale: null, margePct: null };
   }
 
   // Marge commerciale = budget vendu − dépenses réelles (matériel + main d'œuvre).
-  // Il n'y a pas de variable pour les conducteurs de travaux : seuls les commerciaux
-  // ont une rémunération variable, calculée à part sur le barème progressif mensuel
-  // du "Système de rémunération commerciale" (cf. BAREME_COMMERCIAL_* et
+  // Il n'y a pas de variable sur cette marge pour les conducteurs de travaux (voir la
+  // marge ne leur ouvre droit à rien) : seuls les commerciaux ont une rémunération
+  // variable, calculée à part sur le barème progressif mensuel du "Système de
+  // rémunération commerciale" (cf. BAREME_COMMERCIAL_* et
   // computeCommissionsParCommercial, utilisés par /api/stats/commerciaux) — sur la
   // marge cumulée du mois du commercial, pas chantier par chantier.
   const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
@@ -242,13 +245,14 @@ function computeChantierMetrics(chantier: any, params: Parametres, isAdmin: bool
   return { ...base, margeBrute, margeCommerciale, margePct };
 }
 
-// Sérialise un chantier pour le client en masquant les données commerciales aux non-admins.
-function serializeChantier(chantier: any, params: Parametres, isAdmin: boolean) {
+// Sérialise un chantier pour le client en masquant les données commerciales aux profils
+// non autorisés à les voir (cf. canSeeMarge ci-dessus).
+function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean) {
   const c = decimalToNumber(chantier);
   return {
     ...c,
-    budgetGlobalVendu: isAdmin ? c.budgetGlobalVendu : null,
-    metrics: computeChantierMetrics(c, params, isAdmin),
+    budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
+    metrics: computeChantierMetrics(c, params, canSeeMarge),
   };
 }
 
@@ -482,7 +486,11 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     if (!chantier || (!isAdmin && !isOwner)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
     }
-    res.json(serializeChantier(chantier, params, isAdmin));
+    // Sur SA fiche chantier (pas sur la liste ni le tableau de bord), le conducteur
+    // responsable voit désormais la marge commerciale et le budget vendu comme un admin —
+    // pas le commercial, qui a sa propre vue "Résultat commercial" à l'échelle du mois.
+    const canSeeMarge = isAdmin || (authUser.role === 'CONDUCTEUR_TRAVAUX' && chantier.responsableId === authUser.id);
+    res.json(serializeChantier(chantier, params, canSeeMarge));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantier' });
   }
