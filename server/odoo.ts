@@ -21,6 +21,11 @@ function getConfig() {
     db: process.env.ODOO_DB,
     username: process.env.ODOO_USERNAME,
     apiKey: process.env.ODOO_API_KEY,
+    // Nom (ou fragment de nom) de la section de devis à considérer comme "Matériel" pour
+    // le préremplissage automatique du budget matériel (cf. odooDevisMateriel ci-dessous).
+    // Comparaison insensible à la casse et aux accents, donc "Matériel"/"MATERIEL" matchent
+    // tous les deux la valeur par défaut.
+    materielSectionLabel: process.env.ODOO_SECTION_MATERIEL_LABEL || 'materiel',
   };
 }
 
@@ -110,9 +115,16 @@ export interface OdooDevis {
 // seule) : sert à préremplir le budget global vendu (HT) d'un chantier à partir de son
 // numéro de devis (amount_untaxed), sans jamais rien créer ni modifier dans Odoo. Une
 // requête vide renvoie les devis les plus récents (tri décroissant par numéro).
-export async function odooSearchDevis(query: string, limit = 20): Promise<OdooDevis[]> {
+//
+// Si partnerId est fourni (client Odoo déjà sélectionné dans le formulaire), on restreint
+// aux devis de ce client — via child_of plutôt qu'une égalité stricte, pour couvrir le cas
+// où le devis est adressé à un contact enfant (ex: un site) du client sélectionné. Ce
+// filtre n'est qu'une aide : le numéro de devis reste un champ texte libre côté client.
+export async function odooSearchDevis(query: string, limit = 20, partnerId?: number): Promise<OdooDevis[]> {
   const trimmed = query.trim();
-  const domain = trimmed ? [['name', 'ilike', trimmed]] : [];
+  const domain: unknown[] = [];
+  if (trimmed) domain.push(['name', 'ilike', trimmed]);
+  if (partnerId) domain.push(['partner_id', 'child_of', partnerId]);
   const rows = await searchRead('sale.order', domain, ['name', 'amount_untaxed', 'partner_id'], limit, 'name desc');
   return rows.map((r: any) => ({
     id: r.id,
@@ -120,4 +132,46 @@ export async function odooSearchDevis(query: string, limit = 20): Promise<OdooDe
     amountUntaxed: r.amount_untaxed ?? 0,
     clientName: Array.isArray(r.partner_id) ? r.partner_id[1] : null,
   }));
+}
+
+// Normalise une chaîne pour une comparaison insensible à la casse et aux accents
+// (ex: "Matériel" et "MATERIEL" doivent matcher le même libellé de section).
+function normalizeLabel(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+// Calcule le sous-total de la section "Matériel" d'un devis (lecture seule sur
+// sale.order.line) : sert à préremplir le champ "Dont Matériel" d'un chantier, de la même
+// façon que amount_untaxed préremplit le budget global. Un devis Odoo est structuré en
+// lignes de produits entrecoupées de lignes de section (display_type = 'line_section', qui
+// ne portent qu'un titre) ; le "Total Matériel" vu dans Odoo est le sous-total des lignes
+// de produits situées sous la section dont le titre correspond à materielSectionLabel.
+//
+// Renvoie null (et non 0) si aucune section de ce nom n'existe sur ce devis : un 0
+// silencieux écraserait le champ à tort, alors que null laisse le formulaire ne pas y
+// toucher et l'utilisateur saisir le montant à la main.
+export async function odooDevisMateriel(devisId: number): Promise<number | null> {
+  const { url, db, username, apiKey, materielSectionLabel } = getConfig();
+  if (!url || !db || !username || !apiKey) throw new Error('Odoo non configuré');
+  const uid = await authenticate(url, db, username, apiKey);
+  const lines = await jsonRpcCall(url, 'object', 'execute_kw', [
+    db, uid, apiKey,
+    'sale.order.line', 'search_read',
+    [[['order_id', '=', devisId]], ['display_type', 'name', 'price_subtotal']],
+    { order: 'sequence asc, id asc' },
+  ]);
+  const needle = normalizeLabel(materielSectionLabel);
+  let inMaterielSection = false;
+  let found = false;
+  let total = 0;
+  for (const line of lines || []) {
+    if (line.display_type === 'line_section') {
+      inMaterielSection = normalizeLabel(line.name || '').includes(needle);
+      if (inMaterielSection) found = true;
+      continue;
+    }
+    if (line.display_type) continue; // notes et autres lignes non-produit : ignorées
+    if (inMaterielSection) total += line.price_subtotal || 0;
+  }
+  return found ? total : null;
 }

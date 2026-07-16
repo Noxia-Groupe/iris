@@ -15,9 +15,15 @@ const ListeChantiers = () => {
   const [showForm, setShowForm] = useState(false);
   const [filterMaterielDepasse, setFilterMaterielDepasse] = useState(false);
   const [filterHeuresDepasse, setFilterHeuresDepasse] = useState(false);
-  // Préremplissage du budget global vendu depuis un devis Odoo sélectionné (formulaire
-  // de création ci-dessous) — champ non contrôlé, on écrit directement dedans.
+  // Préremplissage du budget global vendu et du "Dont Matériel" depuis un devis Odoo
+  // sélectionné (formulaire de création ci-dessous) — champs non contrôlés, on écrit
+  // directement dedans.
   const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
+  const nouveauChantierMaterielRef = useRef<HTMLInputElement>(null);
+  // Client Odoo sélectionné dans le formulaire de création : sert à ne proposer, dans le
+  // champ "N° de Devis", que les devis de ce client. Remis à null dès que le champ Client
+  // redevient une saisie libre (cf. ClientAutocomplete.onSelect).
+  const [nouveauChantierClientId, setNouveauChantierClientId] = useState<number | null>(null);
 
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -125,11 +131,20 @@ const ListeChantiers = () => {
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     // Plusieurs cases "types" partagent le même name : entries() n'en garderait qu'une.
-    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types') };
+    const types = formData.getAll('types');
+    // Un groupe de cases à cocher ne peut pas porter l'attribut HTML `required` pour
+    // exiger "au moins une" (il exigerait alors qu'elles soient toutes cochées) : la
+    // vérification se fait donc ici, en JS.
+    if (types.length === 0) {
+      alert('Veuillez sélectionner au moins un type de chantier.');
+      return;
+    }
+    const data = { ...Object.fromEntries(formData.entries()), types };
     try {
       const res = await apiFetch('/chantiers', { method: 'POST', body: JSON.stringify(data) });
       if (res.ok) {
         form.reset();
+        setNouveauChantierClientId(null);
         setShowForm(false);
         fetchChantiers();
       } else {
@@ -312,7 +327,7 @@ const ListeChantiers = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Client</label>
-              <ClientAutocomplete required />
+              <ClientAutocomplete required onSelect={(c) => setNouveauChantierClientId(c ? c.id : null)} />
             </div>
             {userRole === 'ADMIN' ? (
               <div className="form-group mb-0">
@@ -339,8 +354,12 @@ const ListeChantiers = () => {
               <label className="form-label">N° de Devis</label>
               <DevisAutocomplete
                 required
+                partnerId={nouveauChantierClientId}
                 onMontantFound={(montant) => {
                   if (nouveauChantierBudgetRef.current) nouveauChantierBudgetRef.current.value = String(montant);
+                }}
+                onMaterielFound={(montant) => {
+                  if (nouveauChantierMaterielRef.current) nouveauChantierMaterielRef.current.value = String(montant);
                 }}
               />
             </div>
@@ -358,14 +377,14 @@ const ListeChantiers = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Dont Matériel (€ HT)</label>
-              <input required type="number" step="0.01" name="budgetMaterielVendu" className="form-input" />
+              <input ref={nouveauChantierMaterielRef} required type="number" step="0.01" name="budgetMaterielVendu" className="form-input" />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
               <input required type="number" step="0.01" name="budgetMainOeuvreVendu" className="form-input" />
             </div>
             <div className="form-group mb-0 md:col-span-2">
-              <label className="form-label">Type(s) de chantier</label>
+              <label className="form-label">Type(s) de chantier (au moins un requis)</label>
               <div className="flex flex-wrap gap-2">
                 {TYPES_CHANTIER.map((t) => (
                   <label key={t} className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">

@@ -14,18 +14,27 @@ const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
  * Champ "N° de Devis" avec recherche des devis Odoo Online (lecture seule) : au clic,
  * affiche une liste déroulante (devis les plus récents) ; taper filtre par les premières
  * lettres/chiffres. Sélectionner un devis préremplit aussi le budget global vendu (HT)
- * via `onMontantFound` — l'utilisateur reste libre de corriger ce montant ensuite. Reste
- * un simple champ texte libre si Odoo n'est pas configuré, injoignable, ou si le devis
- * recherché n'existe pas côté Odoo — aucune saisie n'est jamais écrite dans Odoo.
+ * via `onMontantFound`, ainsi que le "Dont Matériel" via `onMaterielFound` (sous-total de
+ * la section "Matériel" du devis, s'il y en a une) — l'utilisateur reste libre de corriger
+ * ces montants ensuite. Reste un simple champ texte libre si Odoo n'est pas configuré,
+ * injoignable, ou si le devis recherché n'existe pas côté Odoo — aucune saisie n'est
+ * jamais écrite dans Odoo.
+ *
+ * `partnerId` (optionnel, id du client Odoo déjà sélectionné) restreint les suggestions
+ * aux devis de ce client, sans empêcher de saisir librement un autre numéro.
  */
 export function DevisAutocomplete({
   defaultValue = '',
   required = false,
+  partnerId,
   onMontantFound,
+  onMaterielFound,
 }: {
   defaultValue?: string;
   required?: boolean;
+  partnerId?: number | null;
   onMontantFound?: (montant: number) => void;
+  onMaterielFound?: (montant: number) => void;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [suggestions, setSuggestions] = useState<OdooDevis[]>([]);
@@ -36,7 +45,9 @@ export function DevisAutocomplete({
   useEffect(() => {
     if (!open) return;
     const handle = setTimeout(() => {
-      apiFetch(`/odoo/devis?q=${encodeURIComponent(value.trim())}`)
+      const params = new URLSearchParams({ q: value.trim() });
+      if (partnerId) params.set('partnerId', String(partnerId));
+      apiFetch(`/odoo/devis?${params.toString()}`)
         .then((res) => (res.ok ? res.json() : { odooAvailable: false, devis: [] }))
         .then((data) => {
           setOdooAvailable(!!data.odooAvailable);
@@ -49,7 +60,7 @@ export function DevisAutocomplete({
     }, 300);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, open]);
+  }, [value, open, partnerId]);
 
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
@@ -82,6 +93,14 @@ export function DevisAutocomplete({
                 setValue(d.name);
                 setOpen(false);
                 onMontantFound?.(d.amountUntaxed);
+                if (onMaterielFound) {
+                  apiFetch(`/odoo/devis/${d.id}/materiel`)
+                    .then((res) => (res.ok ? res.json() : { montantMateriel: null }))
+                    .then((data) => {
+                      if (typeof data.montantMateriel === 'number') onMaterielFound(data.montantMateriel);
+                    })
+                    .catch(() => {});
+                }
               }}
             >
               <div className="font-semibold text-gray-800 flex justify-between gap-3">

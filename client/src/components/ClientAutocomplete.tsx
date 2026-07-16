@@ -14,8 +14,20 @@ interface OdooClient {
  * la liste par les premières lettres. Reste un simple champ texte libre si Odoo n'est
  * pas configuré, injoignable, ou si le client recherché n'existe pas côté Odoo — aucune
  * saisie n'est jamais écrite dans Odoo.
+ *
+ * `onSelect` remonte le contact Odoo choisi (ou null dès que l'utilisateur retape à la
+ * main, le champ redevenant alors une saisie libre non liée à un client Odoo précis) —
+ * sert par exemple à ne proposer, dans le champ "N° de Devis", que les devis de ce client.
  */
-export function ClientAutocomplete({ defaultValue = '', required = false }: { defaultValue?: string; required?: boolean }) {
+export function ClientAutocomplete({
+  defaultValue = '',
+  required = false,
+  onSelect,
+}: {
+  defaultValue?: string;
+  required?: boolean;
+  onSelect?: (client: OdooClient | null) => void;
+}) {
   const [value, setValue] = useState(defaultValue);
   const [suggestions, setSuggestions] = useState<OdooClient[]>([]);
   const [odooAvailable, setOdooAvailable] = useState(true);
@@ -57,7 +69,7 @@ export function ClientAutocomplete({ defaultValue = '', required = false }: { de
         autoComplete="off"
         className="form-input"
         value={value}
-        onChange={(e) => { setValue(e.target.value); setOpen(true); }}
+        onChange={(e) => { setValue(e.target.value); setOpen(true); onSelect?.(null); }}
         onFocus={() => setOpen(true)}
         placeholder="Rechercher un client Odoo ou saisir librement..."
       />
@@ -67,7 +79,7 @@ export function ClientAutocomplete({ defaultValue = '', required = false }: { de
             <li
               key={c.id}
               className="px-3 py-2 cursor-pointer hover:bg-gray-100"
-              onClick={() => { setValue(c.name); setOpen(false); }}
+              onClick={() => { setValue(c.name); setOpen(false); onSelect?.(c); }}
             >
               <div className="font-semibold text-gray-800">{c.name}</div>
               {(c.email || c.city) && (

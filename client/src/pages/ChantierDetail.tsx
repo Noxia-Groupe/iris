@@ -55,6 +55,14 @@ const ChantierDetail = () => {
   // d'édition ci-dessous) — champ non contrôlé, on écrit directement dedans.
   const editChantierBudgetRef = useRef<HTMLInputElement>(null);
 
+  // Correction d'un pointage d'heures déjà saisi (erreur de date, d'intervenant, de
+  // nombre d'heures...) — ouverte aux conducteurs comme aux admins (contrairement à
+  // l'édition des infos du chantier ci-dessus, réservée aux admins) : le serveur
+  // (PATCH /api/heures/:id) applique les mêmes droits que la saisie initiale.
+  const [intervenants, setIntervenants] = useState<any[]>([]);
+  const [editingPointageId, setEditingPointageId] = useState<string | null>(null);
+  const [savingPointage, setSavingPointage] = useState(false);
+
   useEffect(() => {
     fetchChantier();
     fetchConfig();
@@ -167,6 +175,42 @@ const ChantierDetail = () => {
       alert('Impossible de joindre le serveur.');
     } finally {
       setSavingChantier(false);
+    }
+  };
+
+  // Liste des intervenants, pour le sélecteur de technicien dans le formulaire de
+  // correction d'un pointage (chargée à la demande, au premier clic sur "Modifier").
+  const fetchIntervenants = async () => {
+    try {
+      const res = await apiFetch('/intervenants');
+      const data = await res.json();
+      if (Array.isArray(data)) setIntervenants(data);
+    } catch (e) { console.error(e); }
+  };
+
+  const startEditPointage = (pointageId: string) => {
+    if (intervenants.length === 0) fetchIntervenants();
+    setEditingPointageId(pointageId);
+  };
+
+  const handlePointageSubmit = async (e: React.FormEvent, pointageId: string) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    const data = Object.fromEntries(formData.entries());
+    setSavingPointage(true);
+    try {
+      const res = await apiFetch(`/heures/${pointageId}`, { method: 'PATCH', body: JSON.stringify(data) });
+      if (res.ok) {
+        setEditingPointageId(null);
+        fetchChantier();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Erreur lors de la modification du pointage.');
+      }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSavingPointage(false);
     }
   };
 
@@ -625,13 +669,46 @@ const ChantierDetail = () => {
             ) : (
               <div className="divide-y divide-gray-100">
                 {pointages.slice(0, 6).map((p) => (
-                  <div key={p.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-gray-700 truncate">{p.intervenant?.nom}</div>
-                      <div className="text-xs text-gray-400">{fmtDate(p.date)} · {p.intervenant?.role}</div>
+                  editingPointageId === p.id ? (
+                    <form
+                      key={p.id}
+                      onSubmit={(e) => handlePointageSubmit(e, p.id)}
+                      className="grid grid-cols-2 gap-2 px-6 py-3 bg-gray-50"
+                    >
+                      <input required type="date" name="date" defaultValue={toDateInputValue(p.date)} className="form-input text-sm" />
+                      <select required name="intervenantId" defaultValue={p.intervenantId} className="form-input text-sm">
+                        {intervenants.length === 0 && <option value={p.intervenantId}>{p.intervenant?.nom}</option>}
+                        {intervenants.map((i) => <option key={i.id} value={i.id}>{i.nom} ({i.role})</option>)}
+                      </select>
+                      <input required type="number" step="0.5" min="0.5" name="nbrHeures" defaultValue={p.nbrHeures} className="form-input text-sm" />
+                      <input type="text" name="commentaire" defaultValue={p.commentaire || ''} placeholder="Commentaire" className="form-input text-sm" />
+                      <div className="col-span-2 flex gap-2 justify-end">
+                        <button type="button" disabled={savingPointage} onClick={() => setEditingPointageId(null)} className="btn bg-white border text-xs px-3 py-1.5">Annuler</button>
+                        <button type="submit" disabled={savingPointage} className="btn btn-primary text-xs px-3 py-1.5">
+                          {savingPointage ? 'Enregistrement...' : 'Enregistrer'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div key={p.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-gray-700 truncate">{p.intervenant?.nom}</div>
+                        <div className="text-xs text-gray-400">{fmtDate(p.date)} · {p.intervenant?.role}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="font-bold text-gray-800 whitespace-nowrap">{p.nbrHeures} h</div>
+                        {userRole !== 'COMMERCIAL' && (
+                          <button
+                            onClick={() => startEditPointage(p.id)}
+                            className="p-1.5 text-gray-400 hover:text-accent hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Corriger ce pointage"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="font-bold text-gray-800 whitespace-nowrap">{p.nbrHeures} h</div>
-                  </div>
+                  )
                 ))}
               </div>
             )}

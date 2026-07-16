@@ -10,7 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { odooConfigured, odooSearchClients, odooSearchDevis } from './odoo';
+import { odooConfigured, odooSearchClients, odooSearchDevis, odooDevisMateriel } from './odoo';
 
 dotenv.config();
 
@@ -386,14 +386,36 @@ app.get('/api/odoo/clients', requireAuth, async (req, res) => {
 // vendu (HT) d'un chantier à partir de son numéro de devis. Même contrat que
 // /api/odoo/clients ci-dessus : jamais d'erreur HTTP, odooAvailable:false si indisponible,
 // l'utilisateur reste libre de saisir le numéro et le montant à la main.
+// partnerId (optionnel) restreint aux devis du client Odoo déjà sélectionné dans le
+// formulaire, pour ne pas faire chercher le bon devis dans toute la base — la saisie
+// libre du numéro reste toujours possible, filtrée ou non.
 app.get('/api/odoo/devis', requireAuth, async (req, res) => {
   if (!odooConfigured()) return res.json({ odooAvailable: false, devis: [] });
   try {
-    const devis = await odooSearchDevis(String(req.query.q || ''), 20);
+    const partnerId = req.query.partnerId ? Number(req.query.partnerId) : undefined;
+    const devis = await odooSearchDevis(String(req.query.q || ''), 20, partnerId && !Number.isNaN(partnerId) ? partnerId : undefined);
     res.json({ odooAvailable: true, devis });
   } catch (error) {
     console.error('Odoo search error (devis):', error);
     res.json({ odooAvailable: false, devis: [] });
+  }
+});
+
+// Sous-total de la section "Matériel" d'un devis Odoo (lecture seule, cf.
+// odoo.ts:odooDevisMateriel) pour préremplir le champ "Dont Matériel" d'un chantier une
+// fois un devis sélectionné. Même contrat que les routes Odoo ci-dessus : jamais d'erreur
+// HTTP, montantMateriel:null si indisponible ou si le devis n'a pas de section "Matériel"
+// — l'utilisateur reste libre de saisir/corriger le montant à la main.
+app.get('/api/odoo/devis/:id/materiel', requireAuth, async (req, res) => {
+  if (!odooConfigured()) return res.json({ odooAvailable: false, montantMateriel: null });
+  try {
+    const devisId = Number(req.params.id);
+    if (Number.isNaN(devisId)) return res.json({ odooAvailable: false, montantMateriel: null });
+    const montantMateriel = await odooDevisMateriel(devisId);
+    res.json({ odooAvailable: true, montantMateriel });
+  } catch (error) {
+    console.error('Odoo search error (devis materiel):', error);
+    res.json({ odooAvailable: false, montantMateriel: null });
   }
 });
 
@@ -494,6 +516,13 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
       return res.status(400).json({ error: 'Veuillez saisir le numéro de devis.' });
     }
 
+    // Le type de chantier n'est pas un champ texte : au moins une case doit être cochée
+    // (dossierNoxia est une case à part, non concernée par cette règle).
+    const types = sanitizeTypes(req.body.types);
+    if (types.length === 0) {
+      return res.status(400).json({ error: 'Veuillez sélectionner au moins un type de chantier.' });
+    }
+
     const chantier = await prisma.chantier.create({
       data: {
         nom: req.body.nom,
@@ -508,7 +537,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
         responsableId,
         commercialId,
         statut: req.body.statut || "EN_COURS",
-        types: sanitizeTypes(req.body.types),
+        types,
         dossierNoxia: !!req.body.dossierNoxia,
       },
     });
@@ -958,6 +987,37 @@ app.post('/api/heures', requireAuth, blockCommercial, async (req, res) => {
     }));
   } catch (error) {
     res.status(500).json({ error: 'Error creating pointage' });
+  }
+});
+
+// Correction d'un pointage d'heures déjà saisi (erreur de date, d'intervenant, de nombre
+// d'heures...) — mêmes droits que la saisie (tout compte non-commercial, sur un chantier
+// EN_COURS ou n'importe quel chantier pour un admin, cf. assertChantierWritable). Ne
+// permet pas de changer le chantier du pointage : ce n'est pas une réaffectation, juste
+// une correction de saisie sur le chantier d'origine.
+app.patch('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
+  try {
+    const pointageId = paramId(req);
+    const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
+    if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
+    if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
+
+    const data: Record<string, unknown> = {};
+    if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
+    if ('nbrHeures' in req.body) data.nbrHeures = parseFloat(req.body.nbrHeures) || 0;
+    if ('commentaire' in req.body) data.commentaire = req.body.commentaire || null;
+    // Changer l'intervenant réapplique son taux horaire chargé ACTUEL (même logique qu'à
+    // la création) : le taux figé de l'ancien intervenant n'a pas de sens pour le nouveau.
+    if ('intervenantId' in req.body && req.body.intervenantId !== pointage.intervenantId) {
+      const intervenant = await prisma.intervenant.findUnique({ where: { id: String(req.body.intervenantId) } });
+      if (!intervenant) return res.status(404).json({ error: 'Intervenant introuvable.' });
+      data.intervenantId = intervenant.id;
+      data.tauxHoraireApplique = intervenant.tauxHoraireCharge;
+    }
+
+    res.json(await prisma.pointageHeure.update({ where: { id: pointageId }, data }));
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating pointage' });
   }
 });
 
