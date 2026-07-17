@@ -46,6 +46,18 @@ export function addDays(d: Date, n: number): Date {
   return x;
 }
 
+// Numéro de semaine ISO 8601 (celui du calendrier civil français : la semaine 1 est celle
+// qui contient le premier jeudi de l'année, semaines toujours lundi-dimanche). Fonctionne
+// quel que soit le jour de la semaine passé en argument (on se recale sur le jeudi de sa
+// semaine avant de compter), donc utilisable directement avec le lundi de semaine du planning.
+export function isoWeekNumber(d: Date): number {
+  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const jour = x.getUTCDay() || 7; // lundi=1 ... dimanche=7
+  x.setUTCDate(x.getUTCDate() + 4 - jour); // jeudi de cette semaine
+  const debutAnnee = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+  return Math.ceil(((x.getTime() - debutAnnee.getTime()) / 86400000 + 1) / 7);
+}
+
 // Décale un jour "YYYY-MM-DD" de n jours (en UTC : pas de surprise de fuseau/DST).
 export function shiftDateStr(s: string, n: number): string {
   const d = new Date(`${s}T00:00:00Z`);

@@ -4,9 +4,18 @@ import { ChevronLeft, ChevronRight, ChevronDown, RefreshCw, AlertTriangle, MapPi
 import { API_URL } from '../api';
 import {
   type Intervenant, type PlanningEvent,
-  toDateStr, mondayOfWeek, addDays,
+  toDateStr, mondayOfWeek, addDays, isoWeekNumber,
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, adresseEvent,
 } from '../planningUtils';
+
+// Plage "13 – 19 juillet 2026" (ou "28 juin – 4 juillet 2026" si la semaine chevauche deux
+// mois) : le mois n'est répété qu'une fois quand il est identique aux deux bornes.
+function formatPlageSemaine(debut: Date, fin: Date): string {
+  const memeMois = debut.getMonth() === fin.getMonth() && debut.getFullYear() === fin.getFullYear();
+  const debutStr = debut.toLocaleDateString('fr-FR', { day: 'numeric', month: memeMois ? undefined : 'long' });
+  const finStr = fin.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+  return `${debutStr} – ${finStr}`;
+}
 
 // ---------------------------------------------------------------------------
 // Vue publique, en LECTURE SEULE et SANS authentification, du planning d'intervention —
@@ -34,6 +43,7 @@ const PlanningPublic = () => {
   const weekStartStr = toDateStr(weekStart);
   const weekEndStr = toDateStr(jours[6]);
   const todayStr = toDateStr(new Date());
+  const isoWeek = isoWeekNumber(weekStart);
 
   // Retrouve le technicien choisi précédemment sur ce même lien (typiquement gardé en
   // favori sur le téléphone) : évite d'avoir à se re-sélectionner à chaque ouverture.
@@ -128,7 +138,7 @@ const PlanningPublic = () => {
           </select>
         )}
 
-        <div className="flex items-center justify-between gap-2 mb-4 bg-white px-2 py-2 rounded-xl shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between gap-2 bg-white px-2 py-2 rounded-xl shadow-sm border border-gray-100">
           <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2.5 bg-gray-100 active:bg-gray-200 rounded-lg" title="Semaine précédente">
             <ChevronLeft size={18} />
           </button>
@@ -138,6 +148,12 @@ const PlanningPublic = () => {
           <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2.5 bg-gray-100 active:bg-gray-200 rounded-lg" title="Semaine suivante">
             <ChevronRight size={18} />
           </button>
+        </div>
+        {/* "Aujourd'hui" ci-dessus est une action (revenir à la semaine courante), pas une
+            étiquette : elle ne change jamais. Le numéro de semaine ISO 8601 ci-dessous
+            indique, lui, la semaine réellement affichée. */}
+        <div className="text-center text-xs font-semibold text-gray-500 mt-1.5 mb-4">
+          Semaine {isoWeek} · {formatPlageSemaine(weekStart, jours[6])}
         </div>
 
         {loading && events.length === 0 ? (
