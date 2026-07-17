@@ -886,6 +886,9 @@ app.put('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) => 
 });
 
 // Supprimer un intervenant. Bloqué s'il possède des pointages (historique préservé).
+// Ses affectations du planning d'intervention sont purement prévisionnelles : il en est
+// simplement retiré (cascade de la table de liaison), et celles dont il était le SEUL
+// technicien sont supprimées — une affectation sans personne n'aurait plus de sens.
 app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const id = paramId(req);
@@ -893,10 +896,235 @@ app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) 
     if (used > 0) {
       return res.status(409).json({ error: `Suppression impossible : cet intervenant a ${used} pointage(s) d'heures dans l'historique.` });
     }
-    await prisma.intervenant.delete({ where: { id } });
+    const affectationsSolo = await prisma.planningEvent.findMany({
+      where: { intervenants: { some: { id }, every: { id } } },
+      select: { id: true },
+    });
+    await prisma.$transaction([
+      prisma.planningEvent.deleteMany({ where: { id: { in: affectationsSolo.map((e) => e.id) } } }),
+      prisma.intervenant.delete({ where: { id } }),
+    ]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting intervenant' });
+  }
+});
+
+// --- Planning d'intervention (module réservé aux administrateurs) ---
+// Affectation PRÉVISIONNELLE des techniciens : sur un chantier suivi, sur un chantier ou
+// une intervention non suivi (ex: SAV — nom libre + client Odoo ou saisie libre), ou sur
+// un événement personnalisé (type réutilisable avec couleur). Aucun lien avec les heures
+// réelles : le planning n'écrit jamais dans PointageHeure — les heures des chantiers
+// restent saisies manuellement dans le Journal des Heures.
+
+const PLANNING_CATEGORIES = ['CHANTIER', 'HORS_CHANTIER', 'EVENEMENT'];
+const PLANNING_CRENEAUX = ['JOURNEE', 'MATIN', 'APRES_MIDI', 'HEURES'];
+
+// Jour du planning : on ne stocke que la date (minuit UTC), jamais d'heure — le créneau
+// horaire éventuel est porté par creneau/heureDebut/heureFin.
+function parsePlanningJour(value: unknown): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''));
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function parsePlanningHeure(value: unknown): string | null {
+  const s = String(value ?? '').trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(s) ? s : null;
+}
+
+function parsePlanningCouleur(value: unknown): string | null {
+  const s = String(value ?? '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : null;
+}
+
+const PLANNING_EVENT_INCLUDE = {
+  chantier: { select: { id: true, nom: true, client: true, statut: true } },
+  typeEvent: true,
+  intervenants: { select: { id: true, nom: true, role: true } },
+} as const;
+
+// Valide le contenu complet d'une affectation (à la création comme à l'édition : le PATCH
+// fusionne le corps reçu avec l'existant puis revalide le tout — mêmes règles partout).
+// Retourne { error } ou { data, intervenantIds } prêts pour Prisma. Les champs des autres
+// catégories sont systématiquement remis à null : changer une affectation de catégorie ne
+// laisse jamais traîner un chantier ou un type d'événement orphelin.
+async function validatePlanningEvent(body: Record<string, unknown>): Promise<{ error?: string; data?: Record<string, unknown>; intervenantIds?: string[] }> {
+  const categorie = String(body.categorie || '');
+  if (!PLANNING_CATEGORIES.includes(categorie)) return { error: 'Catégorie invalide.' };
+
+  const dateDebut = parsePlanningJour(body.dateDebut);
+  if (!dateDebut) return { error: 'Date de début invalide.' };
+  const dateFin = body.dateFin ? parsePlanningJour(body.dateFin) : dateDebut;
+  if (!dateFin) return { error: 'Date de fin invalide.' };
+  if (dateFin < dateDebut) return { error: 'La date de fin doit être postérieure ou égale à la date de début.' };
+
+  const creneau = PLANNING_CRENEAUX.includes(String(body.creneau)) ? String(body.creneau) : 'JOURNEE';
+  let heureDebut: string | null = null;
+  let heureFin: string | null = null;
+  if (creneau === 'HEURES') {
+    heureDebut = parsePlanningHeure(body.heureDebut);
+    heureFin = parsePlanningHeure(body.heureFin);
+    if (!heureDebut || !heureFin) return { error: 'Heure de début et heure de fin requises (format HH:MM).' };
+    if (heureFin <= heureDebut) return { error: "L'heure de fin doit être postérieure à l'heure de début." };
+  }
+
+  const intervenantIds = [...new Set((Array.isArray(body.intervenantIds) ? body.intervenantIds : []).map(String))];
+  if (intervenantIds.length === 0) return { error: 'Sélectionnez au moins un technicien.' };
+  const nbTrouves = await prisma.intervenant.count({ where: { id: { in: intervenantIds } } });
+  if (nbTrouves !== intervenantIds.length) return { error: 'Un des techniciens sélectionnés est introuvable.' };
+
+  const data: Record<string, unknown> = {
+    categorie, dateDebut, dateFin, creneau, heureDebut, heureFin,
+    commentaire: String(body.commentaire || '').trim() || null,
+    chantierId: null, titre: null, client: null, typeEventId: null,
+  };
+
+  if (categorie === 'CHANTIER') {
+    const chantier = await prisma.chantier.findUnique({ where: { id: String(body.chantierId || '') } });
+    if (!chantier) return { error: 'Chantier introuvable.' };
+    data.chantierId = chantier.id;
+  } else if (categorie === 'HORS_CHANTIER') {
+    const titre = String(body.titre || '').trim();
+    if (!titre) return { error: "Saisissez le nom du chantier ou de l'intervention." };
+    data.titre = titre;
+    data.client = String(body.client || '').trim() || null;
+  } else {
+    const typeEvent = await prisma.planningEventType.findUnique({ where: { id: String(body.typeEventId || '') } });
+    if (!typeEvent) return { error: "Type d'événement introuvable." };
+    data.typeEventId = typeEvent.id;
+  }
+
+  return { data, intervenantIds };
+}
+
+// Affectations chevauchant la plage de jours [start, end] (bornes incluses).
+app.get('/api/planning/events', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const start = parsePlanningJour(req.query.start);
+    const end = parsePlanningJour(req.query.end);
+    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, format YYYY-MM-DD).' });
+    const events = await prisma.planningEvent.findMany({
+      where: { dateDebut: { lte: end }, dateFin: { gte: start } },
+      include: PLANNING_EVENT_INCLUDE,
+      orderBy: [{ dateDebut: 'asc' }, { createdAt: 'asc' }],
+    });
+    res.json(events);
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching planning events' });
+  }
+});
+
+app.post('/api/planning/events', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { error, data, intervenantIds } = await validatePlanningEvent(req.body);
+    if (error) return res.status(400).json({ error });
+    const event = await prisma.planningEvent.create({
+      data: { ...data, intervenants: { connect: intervenantIds!.map((id) => ({ id })) } } as never,
+      include: PLANNING_EVENT_INCLUDE,
+    });
+    res.status(201).json(event);
+  } catch (error) {
+    res.status(500).json({ error: 'Error creating planning event' });
+  }
+});
+
+// Édition complète ou déplacement (glisser-déposer) : fusion existant + corps reçu,
+// puis revalidation de l'ensemble — cf. validatePlanningEvent.
+app.patch('/api/planning/events/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const existing = await prisma.planningEvent.findUnique({
+      where: { id: paramId(req) },
+      include: { intervenants: { select: { id: true } } },
+    });
+    if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
+
+    const merged = {
+      categorie: existing.categorie,
+      dateDebut: existing.dateDebut.toISOString(),
+      dateFin: existing.dateFin.toISOString(),
+      creneau: existing.creneau,
+      heureDebut: existing.heureDebut,
+      heureFin: existing.heureFin,
+      chantierId: existing.chantierId,
+      titre: existing.titre,
+      client: existing.client,
+      typeEventId: existing.typeEventId,
+      commentaire: existing.commentaire,
+      intervenantIds: existing.intervenants.map((i) => i.id),
+      ...req.body,
+    };
+    const { error, data, intervenantIds } = await validatePlanningEvent(merged);
+    if (error) return res.status(400).json({ error });
+    const event = await prisma.planningEvent.update({
+      where: { id: existing.id },
+      data: { ...data, intervenants: { set: intervenantIds!.map((id) => ({ id })) } } as never,
+      include: PLANNING_EVENT_INCLUDE,
+    });
+    res.json(event);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating planning event' });
+  }
+});
+
+app.delete('/api/planning/events/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const existing = await prisma.planningEvent.findUnique({ where: { id: paramId(req) } });
+    if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
+    await prisma.planningEvent.delete({ where: { id: existing.id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting planning event' });
+  }
+});
+
+// Types d'événements personnalisés du planning (libellé + couleur, réutilisables).
+app.get('/api/planning/types', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    res.json(await prisma.planningEventType.findMany({ orderBy: { nom: 'asc' } }));
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching planning types' });
+  }
+});
+
+app.post('/api/planning/types', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const nom = String(req.body.nom || '').trim();
+    if (!nom) return res.status(400).json({ error: 'Le libellé du type est requis.' });
+    const couleur = parsePlanningCouleur(req.body.couleur) || '#f59e0b';
+    res.status(201).json(await prisma.planningEventType.create({ data: { nom, couleur } }));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Un type porte déjà ce libellé.' });
+    res.status(500).json({ error: 'Error creating planning type' });
+  }
+});
+
+app.put('/api/planning/types/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const data: Record<string, unknown> = {};
+    if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
+    const couleur = parsePlanningCouleur(req.body.couleur);
+    if (couleur) data.couleur = couleur;
+    res.json(await prisma.planningEventType.update({ where: { id: paramId(req) }, data }));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Un type porte déjà ce libellé.' });
+    res.status(500).json({ error: 'Error updating planning type' });
+  }
+});
+
+// Supprimer un type d'événement. Bloqué si des affectations du planning l'utilisent.
+app.delete('/api/planning/types/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = paramId(req);
+    const used = await prisma.planningEvent.count({ where: { typeEventId: id } });
+    if (used > 0) {
+      return res.status(409).json({ error: `Suppression impossible : ${used} affectation(s) du planning utilisent ce type.` });
+    }
+    await prisma.planningEventType.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting planning type' });
   }
 });
 

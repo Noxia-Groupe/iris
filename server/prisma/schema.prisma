@@ -73,6 +73,7 @@ model Chantier {
   achats                AchatReel[]
   pointages             PointageHeure[]
   photos                PhotoChantier[]
+  planningEvents        PlanningEvent[]
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -128,6 +129,7 @@ model Intervenant {
   tauxHoraireCharge  Decimal         @db.Decimal(10, 2)
 
   pointages          PointageHeure[]
+  planningEvents     PlanningEvent[] @relation("PlanningEventIntervenants")
 }
 
 model PointageHeure {
@@ -160,6 +162,56 @@ model PhotoChantier {
 model Parametres {
   id                     String   @id @default("singleton")
   margeCommercialeActive Boolean  @default(true)  // affichage/calcul de la marge commerciale
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Type d'événement personnalisé du planning d'intervention (Congés, Formation, SAV
+// récurrent...), réutilisable, avec sa couleur — créé et géré par les administrateurs
+// directement depuis le module Planning.
+model PlanningEventType {
+  id      String @id @default(uuid())
+  nom     String @unique
+  couleur String @default("#f59e0b")
+
+  events PlanningEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Affectation du planning d'intervention (module réservé aux administrateurs) : place un
+// ou plusieurs techniciens (Intervenant) sur un chantier suivi, un chantier/intervention
+// non suivi (ex: SAV — nom libre + client Odoo ou saisie libre), ou un événement
+// personnalisé (congés, formation...). Purement PRÉVISIONNEL : ne crée jamais de
+// PointageHeure — les heures réelles des chantiers restent saisies manuellement dans le
+// Journal des Heures.
+model PlanningEvent {
+  id        String @id @default(uuid())
+  categorie String // CHANTIER (suivi) | HORS_CHANTIER (non suivi, ex: SAV) | EVENEMENT
+
+  dateDebut  DateTime // premier jour couvert (inclus), stocké à minuit UTC
+  dateFin    DateTime // dernier jour couvert (inclus), stocké à minuit UTC
+  creneau    String   @default("JOURNEE") // JOURNEE | MATIN | APRES_MIDI | HEURES
+  heureDebut String? // "HH:MM" si creneau HEURES
+  heureFin   String? // "HH:MM" si creneau HEURES
+
+  // categorie CHANTIER : le chantier suivi affecté
+  chantierId String?
+  chantier   Chantier? @relation(fields: [chantierId], references: [id])
+
+  // categorie HORS_CHANTIER : nom libre + client (jamais lié à un enregistrement en base)
+  titre  String?
+  client String?
+
+  // categorie EVENEMENT : type réutilisable (libellé + couleur)
+  typeEventId String?
+  typeEvent   PlanningEventType? @relation(fields: [typeEventId], references: [id])
+
+  commentaire String?
+
+  intervenants Intervenant[] @relation("PlanningEventIntervenants")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -1,0 +1,802 @@
+import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Plus, Tags, Trash2, X, Users, Info } from 'lucide-react';
+import { apiFetch } from '../api';
+import { ClientAutocomplete } from '../components/ClientAutocomplete';
+
+// ---------------------------------------------------------------------------
+// Planning d'intervention (réservé aux administrateurs).
+// Vue "planning d'équipe" : une ligne par technicien (Intervenant), une colonne par
+// jour de la semaine. On y place des affectations PRÉVISIONNELLES : chantier suivi,
+// chantier/intervention non suivi (ex: SAV) ou événement personnalisé (type + couleur).
+// Aucun lien avec les heures réelles : rien n'est écrit dans le Journal des Heures.
+// ---------------------------------------------------------------------------
+
+interface Intervenant { id: string; nom: string; role: string }
+interface ChantierLite { id: string; nom: string; client: string; statut: string }
+interface PlanningType { id: string; nom: string; couleur: string }
+interface PlanningEvent {
+  id: string;
+  categorie: 'CHANTIER' | 'HORS_CHANTIER' | 'EVENEMENT';
+  dateDebut: string;
+  dateFin: string;
+  creneau: 'JOURNEE' | 'MATIN' | 'APRES_MIDI' | 'HEURES';
+  heureDebut: string | null;
+  heureFin: string | null;
+  chantierId: string | null;
+  chantier: ChantierLite | null;
+  titre: string | null;
+  client: string | null;
+  typeEventId: string | null;
+  typeEvent: PlanningType | null;
+  commentaire: string | null;
+  intervenants: Intervenant[];
+}
+
+type ModalState =
+  | { mode: 'create'; date: string; intervenantId?: string }
+  | { mode: 'edit'; event: PlanningEvent };
+
+// --- Aides dates (le planning raisonne en jours "YYYY-MM-DD", jamais en heures) ---
+
+function toDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function mondayOfWeek(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = x.getDay(); // 0 = dimanche
+  x.setDate(x.getDate() + (day === 0 ? -6 : 1 - day));
+  return x;
+}
+
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+// Décale un jour "YYYY-MM-DD" de n jours (en UTC : pas de surprise de fuseau/DST).
+function shiftDateStr(s: string, n: number): string {
+  const d = new Date(`${s}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function diffJours(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+}
+
+function formatFr(s: string): string {
+  const [y, m, d] = s.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+// --- Couleurs des pastilles ---
+// Chantier suivi : couleur stable dérivée de l'id (palette fermée) — un même chantier
+// garde la même couleur d'une semaine à l'autre. Hors suivi : orange fixe. Événement :
+// couleur du type (choisie par l'admin).
+
+const CHANTIER_COLORS = ['#2563eb', '#0e7490', '#7c3aed', '#047857', '#be185d', '#4f46e5', '#0f766e', '#9333ea'];
+const HORS_CHANTIER_COLOR = '#ea580c';
+
+function couleurEvent(ev: PlanningEvent): string {
+  if (ev.categorie === 'EVENEMENT') return ev.typeEvent?.couleur || '#f59e0b';
+  if (ev.categorie === 'HORS_CHANTIER') return HORS_CHANTIER_COLOR;
+  const id = ev.chantierId || '';
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return CHANTIER_COLORS[Math.abs(h) % CHANTIER_COLORS.length];
+}
+
+// Texte blanc ou foncé selon la luminosité du fond (les couleurs de type sont libres).
+function texteSurCouleur(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return '#fff';
+  const n = parseInt(m[1], 16);
+  const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  return lum > 160 ? '#1a1a1a' : '#fff';
+}
+
+function libelleEvent(ev: PlanningEvent): string {
+  if (ev.categorie === 'CHANTIER') return ev.chantier?.nom || 'Chantier';
+  if (ev.categorie === 'HORS_CHANTIER') return ev.titre || 'Intervention';
+  return ev.typeEvent?.nom || 'Événement';
+}
+
+function badgeCreneau(ev: PlanningEvent): string | null {
+  if (ev.creneau === 'MATIN') return 'Matin';
+  if (ev.creneau === 'APRES_MIDI') return 'Ap. midi';
+  if (ev.creneau === 'HEURES') return `${ev.heureDebut}–${ev.heureFin}`;
+  return null;
+}
+
+function tooltipEvent(ev: PlanningEvent): string {
+  const lignes = [libelleEvent(ev)];
+  const client = ev.categorie === 'CHANTIER' ? ev.chantier?.client : ev.client;
+  if (client) lignes.push(`Client : ${client}`);
+  const debut = ev.dateDebut.slice(0, 10);
+  const fin = ev.dateFin.slice(0, 10);
+  lignes.push(debut === fin ? `Le ${formatFr(debut)}` : `Du ${formatFr(debut)} au ${formatFr(fin)}`);
+  const badge = badgeCreneau(ev);
+  if (badge) lignes.push(badge);
+  lignes.push(`Technicien(s) : ${ev.intervenants.map((i) => i.nom).join(', ')}`);
+  if (ev.commentaire) lignes.push(ev.commentaire);
+  return lignes.join('\n');
+}
+
+const CATEGORIES: { value: PlanningEvent['categorie']; label: string }[] = [
+  { value: 'CHANTIER', label: 'Chantier suivi' },
+  { value: 'HORS_CHANTIER', label: 'Hors suivi (SAV…)' },
+  { value: 'EVENEMENT', label: 'Événement' },
+];
+
+const CRENEAUX: { value: PlanningEvent['creneau']; label: string }[] = [
+  { value: 'JOURNEE', label: 'Journée' },
+  { value: 'MATIN', label: 'Matin' },
+  { value: 'APRES_MIDI', label: 'Après-midi' },
+  { value: 'HEURES', label: 'Heures précises' },
+];
+
+const Planning = () => {
+  const [intervenants, setIntervenants] = useState<Intervenant[]>([]);
+  const [chantiers, setChantiers] = useState<ChantierLite[]>([]);
+  const [types, setTypes] = useState<PlanningType[]>([]);
+  const [events, setEvents] = useState<PlanningEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [weekStart, setWeekStart] = useState<Date>(() => mondayOfWeek(new Date()));
+  const [modal, setModal] = useState<ModalState | null>(null);
+  const [showTypes, setShowTypes] = useState(false);
+  // Glisser-déposer : l'affectation en cours de déplacement + la cellule d'origine.
+  const dragRef = useRef<{ eventId: string; fromIntervenantId: string; fromDate: string } | null>(null);
+
+  const jours = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const weekStartStr = toDateStr(weekStart);
+  const weekEndStr = toDateStr(jours[6]);
+  const todayStr = toDateStr(new Date());
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [intervRes, chantiersRes, typesRes] = await Promise.all([
+          apiFetch('/intervenants'),
+          apiFetch('/chantiers'),
+          apiFetch('/planning/types'),
+        ]);
+        const interv = await intervRes.json();
+        const chant = await chantiersRes.json();
+        const t = await typesRes.json();
+        if (Array.isArray(interv)) setIntervenants(interv.sort((a: Intervenant, b: Intervenant) => a.nom.localeCompare(b.nom)));
+        if (Array.isArray(chant)) setChantiers(chant);
+        if (Array.isArray(t)) setTypes(t);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const fetchEvents = async () => {
+    try {
+      const res = await apiFetch(`/planning/events?start=${weekStartStr}&end=${weekEndStr}`);
+      const data = await res.json();
+      if (Array.isArray(data)) setEvents(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    fetchEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStartStr]);
+
+  const fetchTypes = async () => {
+    try {
+      const res = await apiFetch('/planning/types');
+      const data = await res.json();
+      if (Array.isArray(data)) setTypes(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Affectations d'un technicien couvrant un jour donné, triées par créneau
+  // (matin → journée → heures → après-midi) pour une lecture naturelle de la cellule.
+  const rangCreneau: Record<string, number> = { MATIN: 0, JOURNEE: 1, HEURES: 2, APRES_MIDI: 3 };
+  const eventsCellule = (intervenantId: string, jour: string) =>
+    events
+      .filter((ev) => ev.intervenants.some((i) => i.id === intervenantId) && ev.dateDebut.slice(0, 10) <= jour && jour <= ev.dateFin.slice(0, 10))
+      .sort((a, b) => (rangCreneau[a.creneau] - rangCreneau[b.creneau]) || (a.heureDebut || '').localeCompare(b.heureDebut || ''));
+
+  // Dépôt d'une affectation sur une cellule : décale ses dates du nombre de jours du
+  // déplacement et, si on change de ligne, remplace le technicien d'origine par celui
+  // de la ligne cible (les autres techniciens de l'affectation restent inchangés).
+  const handleDrop = async (targetIntervenantId: string, targetDate: string) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag) return;
+    const ev = events.find((e) => e.id === drag.eventId);
+    if (!ev) return;
+
+    const delta = diffJours(drag.fromDate, targetDate);
+    let intervenantIds = ev.intervenants.map((i) => i.id);
+    if (targetIntervenantId !== drag.fromIntervenantId) {
+      intervenantIds = intervenantIds.filter((id) => id !== drag.fromIntervenantId);
+      if (!intervenantIds.includes(targetIntervenantId)) intervenantIds.push(targetIntervenantId);
+    }
+    if (delta === 0 && targetIntervenantId === drag.fromIntervenantId) return;
+
+    try {
+      const res = await apiFetch(`/planning/events/${ev.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          dateDebut: shiftDateStr(ev.dateDebut.slice(0, 10), delta),
+          dateFin: shiftDateStr(ev.dateFin.slice(0, 10), delta),
+          intervenantIds,
+        }),
+      });
+      if (res.ok) fetchEvents();
+      else {
+        const d = await res.json();
+        alert(d.error || 'Déplacement impossible.');
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  const handleDelete = async (ev: PlanningEvent) => {
+    if (!confirm(`Supprimer cette affectation (${libelleEvent(ev)}) du planning ?`)) return;
+    try {
+      const res = await apiFetch(`/planning/events/${ev.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setModal(null);
+        fetchEvents();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Suppression impossible.');
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-xl text-muted animate-pulse">Chargement du planning...</div>
+    </div>
+  );
+
+  const labelSemaine = `Semaine du ${weekStart.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} au ${jours[6].toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* En-tête : titre + navigation de semaine + actions */}
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <div>
+          <h1 className="text-2xl font-bold text-primary-dark m-0 leading-tight">Planning d'intervention</h1>
+          <p className="text-sm text-muted mt-1 flex items-center gap-1.5">
+            <Info size={14} className="shrink-0" />
+            Prévisionnel uniquement : n'alimente jamais les heures des chantiers (saisie manuelle dans le Journal des Heures).
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setShowTypes(true)} className="btn btn-secondary flex items-center gap-2">
+            <Tags size={16} /> Types d'événements
+          </button>
+          <button onClick={() => setModal({ mode: 'create', date: todayStr })} className="btn btn-primary flex items-center gap-2">
+            <Plus size={16} /> Affectation
+          </button>
+        </div>
+      </div>
+
+      {/* Navigation de semaine */}
+      <div className="flex items-center justify-between gap-3 mb-4 bg-white px-4 py-3 rounded-xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Semaine précédente">
+            <ChevronLeft size={18} />
+          </button>
+          <button onClick={() => setWeekStart(mondayOfWeek(new Date()))} className="text-sm font-semibold px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+            Aujourd'hui
+          </button>
+          <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Semaine suivante">
+            <ChevronRight size={18} />
+          </button>
+        </div>
+        <h2 className="text-base font-bold text-gray-800 m-0 text-right">{labelSemaine}</h2>
+      </div>
+
+      {intervenants.length === 0 ? (
+        <div className="card text-center py-12">
+          <p className="text-gray-500 font-semibold mb-2">Aucun technicien enregistré.</p>
+          <p className="text-sm text-gray-400">
+            Ajoutez d'abord vos intervenants dans <Link to="/admin" className="text-accent font-semibold hover:underline">Administration → Intervenants</Link>.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
+          <table className="w-full border-collapse" style={{ minWidth: '980px' }}>
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-10 bg-gray-50 border border-gray-100 px-3 py-3 text-left text-xs uppercase text-gray-500 font-semibold" style={{ width: '170px', minWidth: '170px' }}>
+                  Technicien
+                </th>
+                {jours.map((j) => {
+                  const jStr = toDateStr(j);
+                  const isToday = jStr === todayStr;
+                  return (
+                    <th key={jStr} className={`border border-gray-100 px-2 py-3 text-center text-xs uppercase ${isToday ? 'bg-blue-50 text-accent font-extrabold' : 'text-gray-500 font-semibold'}`}>
+                      {j.toLocaleDateString('fr-FR', { weekday: 'short' })} {String(j.getDate()).padStart(2, '0')}/{String(j.getMonth() + 1).padStart(2, '0')}
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {intervenants.map((interv) => (
+                <tr key={interv.id}>
+                  <th className="sticky left-0 z-10 bg-white border border-gray-100 px-3 py-2 text-left align-top">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 shrink-0 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs">
+                        {interv.nom.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-gray-800 text-sm truncate">{interv.nom}</div>
+                        <div className="text-xs text-gray-400 font-normal truncate">{interv.role}</div>
+                      </div>
+                    </div>
+                  </th>
+                  {jours.map((j) => {
+                    const jStr = toDateStr(j);
+                    const isToday = jStr === todayStr;
+                    const isWeekend = j.getDay() === 0 || j.getDay() === 6;
+                    const cellEvents = eventsCellule(interv.id, jStr);
+                    return (
+                      <td
+                        key={jStr}
+                        onClick={() => setModal({ mode: 'create', date: jStr, intervenantId: interv.id })}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.preventDefault(); handleDrop(interv.id, jStr); }}
+                        className={`border border-gray-100 p-1 align-top cursor-pointer transition-colors hover:bg-gray-50 ${isToday ? 'bg-blue-50' : isWeekend ? 'bg-gray-50/50' : ''}`}
+                        title="Cliquer pour ajouter une affectation"
+                      >
+                        <div className="flex flex-col gap-1" style={{ minHeight: '64px' }}>
+                          {cellEvents.map((ev) => {
+                            const bg = couleurEvent(ev);
+                            const badge = badgeCreneau(ev);
+                            return (
+                              <div
+                                key={ev.id}
+                                draggable
+                                onDragStart={(e) => {
+                                  dragRef.current = { eventId: ev.id, fromIntervenantId: interv.id, fromDate: jStr };
+                                  e.dataTransfer.effectAllowed = 'move';
+                                }}
+                                onClick={(e) => { e.stopPropagation(); setModal({ mode: 'edit', event: ev }); }}
+                                className="rounded-md px-1.5 py-1 text-xs font-semibold cursor-pointer shadow-sm leading-tight"
+                                style={{ backgroundColor: bg, color: texteSurCouleur(bg) }}
+                                title={tooltipEvent(ev)}
+                              >
+                                {badge && <span className="block font-bold opacity-90" style={{ fontSize: '10px' }}>{badge}</span>}
+                                <span className="block truncate">{libelleEvent(ev)}</span>
+                                {ev.intervenants.length > 1 && (
+                                  <span className="inline-flex items-center gap-0.5 opacity-90" style={{ fontSize: '10px' }}>
+                                    <Users size={10} /> ×{ev.intervenants.length}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {modal && (
+        <EventModal
+          key={modal.mode === 'edit' ? modal.event.id : `create-${modal.date}-${modal.intervenantId || ''}`}
+          modal={modal}
+          intervenants={intervenants}
+          chantiers={chantiers}
+          types={types}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); fetchEvents(); }}
+          onDelete={handleDelete}
+          onTypesChanged={fetchTypes}
+        />
+      )}
+
+      {showTypes && (
+        <TypesModal types={types} onClose={() => setShowTypes(false)} onChanged={() => { fetchTypes(); fetchEvents(); }} />
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Modale de création / édition d'une affectation.
+// Champs texte/dates non contrôlés (FormData, comme le reste de l'appli) ; seuls la
+// catégorie, le créneau et le choix de type (pour afficher/masquer les sections
+// correspondantes) sont contrôlés.
+// ---------------------------------------------------------------------------
+const EventModal = ({
+  modal,
+  intervenants,
+  chantiers,
+  types,
+  onClose,
+  onSaved,
+  onDelete,
+  onTypesChanged,
+}: {
+  modal: ModalState;
+  intervenants: Intervenant[];
+  chantiers: ChantierLite[];
+  types: PlanningType[];
+  onClose: () => void;
+  onSaved: () => void;
+  onDelete: (ev: PlanningEvent) => void;
+  onTypesChanged: () => void;
+}) => {
+  const isEdit = modal.mode === 'edit';
+  const event = isEdit ? modal.event : null;
+  const [categorie, setCategorie] = useState<PlanningEvent['categorie']>(event?.categorie || 'CHANTIER');
+  const [creneau, setCreneau] = useState<PlanningEvent['creneau']>(event?.creneau || 'JOURNEE');
+  const [typeSel, setTypeSel] = useState<string>(event?.typeEventId || '');
+  const [saving, setSaving] = useState(false);
+
+  // On ne propose que les chantiers en cours (c'est le sens du module) ; si une
+  // affectation existante pointe un chantier depuis clôturé, on le garde en option
+  // pour ne pas casser l'édition.
+  const chantiersEnCours = chantiers
+    .filter((c) => c.statut === 'EN_COURS' || (event?.chantierId === c.id))
+    .sort((a, b) => a.nom.localeCompare(b.nom));
+
+  const defaultDebut = isEdit ? event!.dateDebut.slice(0, 10) : modal.date;
+  const defaultFin = isEdit ? event!.dateFin.slice(0, 10) : modal.date;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const fd = new FormData(form);
+
+    const intervenantIds = fd.getAll('intervenantIds').map(String);
+    if (intervenantIds.length === 0) {
+      alert('Sélectionnez au moins un technicien.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Création d'un nouveau type d'événement à la volée si demandé.
+      let typeEventId = typeSel;
+      if (categorie === 'EVENEMENT' && typeSel === '__new__') {
+        const nom = String(fd.get('nouveauTypeNom') || '').trim();
+        if (!nom) {
+          alert("Saisissez le libellé du nouveau type d'événement.");
+          setSaving(false);
+          return;
+        }
+        const resType = await apiFetch('/planning/types', {
+          method: 'POST',
+          body: JSON.stringify({ nom, couleur: fd.get('nouveauTypeCouleur') }),
+        });
+        const dType = await resType.json();
+        if (!resType.ok) {
+          alert(dType.error || 'Erreur lors de la création du type.');
+          setSaving(false);
+          return;
+        }
+        typeEventId = dType.id;
+        onTypesChanged();
+      }
+
+      const payload = {
+        categorie,
+        creneau,
+        dateDebut: String(fd.get('dateDebut') || ''),
+        dateFin: String(fd.get('dateFin') || '') || String(fd.get('dateDebut') || ''),
+        heureDebut: String(fd.get('heureDebut') || '') || null,
+        heureFin: String(fd.get('heureFin') || '') || null,
+        chantierId: String(fd.get('chantierId') || '') || null,
+        titre: String(fd.get('titre') || '') || null,
+        client: String(fd.get('client') || '') || null,
+        typeEventId: typeEventId || null,
+        commentaire: String(fd.get('commentaire') || '') || null,
+        intervenantIds,
+      };
+
+      const res = isEdit
+        ? await apiFetch(`/planning/events/${event!.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+        : await apiFetch('/planning/events', { method: 'POST', body: JSON.stringify(payload) });
+      if (res.ok) {
+        onSaved();
+      } else {
+        const d = await res.json();
+        alert(d.error || "Erreur lors de l'enregistrement de l'affectation.");
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-4">
+          <h2 className="text-lg font-bold text-primary-dark m-0">{isEdit ? "Modifier l'affectation" : 'Nouvelle affectation'}</h2>
+          <button onClick={onClose} className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Fermer">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {/* Nature de l'affectation */}
+          <div>
+            <label className="form-label">Nature</label>
+            <div className="flex flex-wrap gap-2">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setCategorie(c.value)}
+                  className={`text-sm font-semibold px-3 py-1.5 rounded-lg border transition-colors ${categorie === c.value ? 'bg-primary text-white border-primary' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {categorie === 'CHANTIER' && (
+            <div className="form-group mb-0">
+              <label className="form-label">Chantier (en cours)</label>
+              <select required name="chantierId" className="form-input" defaultValue={event?.chantierId || ''}>
+                <option value="" disabled>Sélectionner un chantier...</option>
+                {chantiersEnCours.map((c) => (
+                  <option key={c.id} value={c.id}>{c.nom} — {c.client}{c.statut === 'TERMINE' ? ' (Terminé)' : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {categorie === 'HORS_CHANTIER' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="form-group mb-0">
+                <label className="form-label">Nom du chantier / intervention</label>
+                <input required name="titre" className="form-input" placeholder="Ex: SAV alarme entrepôt" defaultValue={event?.titre || ''} />
+              </div>
+              <div className="form-group mb-0">
+                <label className="form-label">Client (optionnel)</label>
+                <ClientAutocomplete defaultValue={event?.client || ''} />
+              </div>
+            </div>
+          )}
+
+          {categorie === 'EVENEMENT' && (
+            <div className="form-group mb-0">
+              <label className="form-label">Type d'événement</label>
+              <select required name="typeEventId" className="form-input" value={typeSel} onChange={(e) => setTypeSel(e.target.value)}>
+                <option value="" disabled>Sélectionner un type...</option>
+                {types.map((t) => (
+                  <option key={t.id} value={t.id}>{t.nom}</option>
+                ))}
+                <option value="__new__">+ Créer un nouveau type…</option>
+              </select>
+              {typeSel === '__new__' && (
+                <div className="flex gap-2 mt-2 items-center">
+                  <input name="nouveauTypeNom" className="form-input flex-1" placeholder="Libellé (ex: Congés, Formation...)" />
+                  <input type="color" name="nouveauTypeCouleur" defaultValue="#f59e0b" className="h-9 w-14 p-0.5 border border-gray-200 rounded cursor-pointer" title="Couleur du type" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Techniciens */}
+          <div>
+            <label className="form-label">Technicien(s)</label>
+            <div className="flex flex-wrap gap-2">
+              {intervenants.map((i) => (
+                <label key={i.id} className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                  <input
+                    type="checkbox"
+                    name="intervenantIds"
+                    value={i.id}
+                    className="w-4 h-4"
+                    defaultChecked={isEdit ? event!.intervenants.some((x) => x.id === i.id) : modal.intervenantId === i.id}
+                  />
+                  {i.nom}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Dates */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="form-group mb-0">
+              <label className="form-label">Du</label>
+              <input required type="date" name="dateDebut" className="form-input" defaultValue={defaultDebut} />
+            </div>
+            <div className="form-group mb-0">
+              <label className="form-label">Au (inclus)</label>
+              <input type="date" name="dateFin" className="form-input" defaultValue={defaultFin} />
+            </div>
+          </div>
+
+          {/* Créneau */}
+          <div>
+            <label className="form-label">Créneau</label>
+            <div className="flex flex-wrap gap-2">
+              {CRENEAUX.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setCreneau(c.value)}
+                  className={`text-sm font-semibold px-3 py-1.5 rounded-lg border transition-colors ${creneau === c.value ? 'bg-primary text-white border-primary' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            {creneau === 'HEURES' && (
+              <div className="flex gap-4 mt-2">
+                <div className="form-group mb-0 flex-1">
+                  <label className="form-label">De</label>
+                  <input required type="time" name="heureDebut" className="form-input" defaultValue={event?.heureDebut || '08:00'} />
+                </div>
+                <div className="form-group mb-0 flex-1">
+                  <label className="form-label">À</label>
+                  <input required type="time" name="heureFin" className="form-input" defaultValue={event?.heureFin || '12:00'} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="form-group mb-0">
+            <label className="form-label">Commentaire (optionnel)</label>
+            <input name="commentaire" className="form-input" placeholder="Consignes, matériel à prévoir..." defaultValue={event?.commentaire || ''} />
+          </div>
+
+          <div className="flex gap-2 mt-2">
+            <button disabled={saving} className="btn btn-primary px-8">{saving ? 'Enregistrement…' : isEdit ? 'Enregistrer' : 'Ajouter au planning'}</button>
+            <button type="button" onClick={onClose} className="btn bg-white border">Annuler</button>
+            {isEdit && (
+              <button type="button" onClick={() => onDelete(event!)} className="btn ml-auto flex items-center gap-1.5 bg-red-100 hover:bg-red-200 text-red-700">
+                <Trash2 size={15} /> Supprimer
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Modale de gestion des types d'événements réutilisables (libellé + couleur).
+// ---------------------------------------------------------------------------
+const TypesModal = ({ types, onClose, onChanged }: { types: PlanningType[]; onClose: () => void; onChanged: () => void }) => {
+  const [edit, setEdit] = useState<PlanningType | null>(null);
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const fd = new FormData(form);
+    try {
+      const res = await apiFetch('/planning/types', {
+        method: 'POST',
+        body: JSON.stringify({ nom: fd.get('nom'), couleur: fd.get('couleur') }),
+      });
+      if (res.ok) {
+        form.reset();
+        onChanged();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Erreur lors de la création du type.');
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  const handleSave = async () => {
+    if (!edit) return;
+    try {
+      const res = await apiFetch(`/planning/types/${edit.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ nom: edit.nom, couleur: edit.couleur }),
+      });
+      if (res.ok) {
+        setEdit(null);
+        onChanged();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Erreur lors de la modification du type.');
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  const handleDelete = async (t: PlanningType) => {
+    if (!confirm(`Supprimer le type « ${t.nom} » ?`)) return;
+    try {
+      const res = await apiFetch(`/planning/types/${t.id}`, { method: 'DELETE' });
+      if (res.ok) onChanged();
+      else {
+        const d = await res.json();
+        alert(d.error || 'Suppression impossible.');
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-primary-dark m-0">Types d'événements</h2>
+            <p className="text-xs text-muted mt-1">Libellés réutilisables (congés, formation...) avec leur couleur dans le planning.</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Fermer">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleAdd} className="flex gap-2 items-center mb-4">
+          <input required name="nom" className="form-input flex-1" placeholder="Nouveau type (ex: Congés)" />
+          <input type="color" name="couleur" defaultValue="#f59e0b" className="h-9 w-14 p-0.5 border border-gray-200 rounded cursor-pointer" title="Couleur" />
+          <button className="btn btn-primary px-3 py-2" title="Ajouter"><Plus size={16} /></button>
+        </form>
+
+        <div className="flex flex-col gap-2">
+          {types.length === 0 && <p className="text-sm text-gray-400 italic text-center py-4">Aucun type pour le moment.</p>}
+          {types.map((t) => (
+            <div key={t.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+              {edit?.id === t.id ? (
+                <>
+                  <input
+                    className="form-input flex-1"
+                    value={edit.nom}
+                    onChange={(e) => setEdit({ ...edit, nom: e.target.value })}
+                  />
+                  <input
+                    type="color"
+                    value={edit.couleur}
+                    onChange={(e) => setEdit({ ...edit, couleur: e.target.value })}
+                    className="h-9 w-12 p-0.5 border border-gray-200 rounded cursor-pointer"
+                  />
+                  <button type="button" onClick={handleSave} className="text-sm px-3 py-1 bg-primary text-white font-semibold rounded">OK</button>
+                  <button type="button" onClick={() => setEdit(null)} className="text-sm px-2 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">✕</button>
+                </>
+              ) : (
+                <>
+                  <span className="w-4 h-4 rounded shrink-0" style={{ backgroundColor: t.couleur }}></span>
+                  <span className="flex-1 text-sm font-semibold text-gray-800">{t.nom}</span>
+                  <button type="button" onClick={() => setEdit(t)} className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Modifier</button>
+                  <button type="button" onClick={() => handleDelete(t)} className="text-sm px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded" title="Supprimer">
+                    <Trash2 size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Planning;

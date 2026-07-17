@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays } from 'lucide-react';
 import { applyTheme } from '../theme';
 import './Sidebar.css';
 
@@ -65,6 +65,10 @@ const Sidebar = () => {
 
         {userRole === 'ADMIN' && (
           <>
+            <NavLink to="/planning" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+              <CalendarDays size={20} />
+              Planning
+            </NavLink>
             <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
               <Settings size={20} />
               Administration

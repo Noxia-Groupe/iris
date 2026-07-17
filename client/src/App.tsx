@@ -15,6 +15,7 @@ import AuthCallbackMsal from './pages/AuthCallbackMsal';
 import ResultatCommercial from './pages/ResultatCommercial';
 import Performances from './pages/Performances';
 import MesCommerciaux from './pages/MesCommerciaux';
+import Planning from './pages/Planning';
 import { ErrorBoundary } from './ErrorBoundary';
 
 const PrivateRoute = ({ children, requiredRole, excludedRole }: { children: JSX.Element, requiredRole?: string, excludedRole?: string }) => {
@@ -85,6 +86,12 @@ function App() {
         <Route path="/heures" element={
           <PrivateRoute excludedRole="COMMERCIAL">
             <Heures />
+          </PrivateRoute>
+        } />
+
+        <Route path="/planning" element={
+          <PrivateRoute requiredRole="ADMIN">
+            <Planning />
           </PrivateRoute>
         } />
 
