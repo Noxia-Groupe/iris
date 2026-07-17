@@ -142,18 +142,15 @@ const PlanningPublic = () => {
           <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2.5 bg-gray-100 active:bg-gray-200 rounded-lg" title="Semaine précédente">
             <ChevronLeft size={18} />
           </button>
-          <button onClick={() => setWeekStart(mondayOfWeek(new Date()))} className="flex-1 text-sm font-bold px-2 py-2 bg-gray-50 rounded-lg text-center">
-            Aujourd'hui
+          <button onClick={() => setWeekStart(mondayOfWeek(new Date()))} className="flex-1 text-sm font-bold px-2 py-2 bg-gray-50 rounded-lg text-center" title="Revenir à aujourd'hui">
+            Semaine {isoWeek}
           </button>
           <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2.5 bg-gray-100 active:bg-gray-200 rounded-lg" title="Semaine suivante">
             <ChevronRight size={18} />
           </button>
         </div>
-        {/* "Aujourd'hui" ci-dessus est une action (revenir à la semaine courante), pas une
-            étiquette : elle ne change jamais. Le numéro de semaine ISO 8601 ci-dessous
-            indique, lui, la semaine réellement affichée. */}
         <div className="text-center text-xs font-semibold text-gray-500 mt-1.5 mb-4">
-          Semaine {isoWeek} · {formatPlageSemaine(weekStart, jours[6])}
+          {formatPlageSemaine(weekStart, jours[6])}
         </div>
 
         {loading && events.length === 0 ? (

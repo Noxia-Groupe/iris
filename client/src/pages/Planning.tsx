@@ -5,7 +5,7 @@ import { apiFetch } from '../api';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import {
   type Intervenant, type ChantierLite, type PlanningType, type PlanningEvent,
-  toDateStr, mondayOfWeek, addDays, shiftDateStr, diffJours,
+  toDateStr, mondayOfWeek, addDays, shiftDateStr, diffJours, isoWeekNumber,
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, tooltipEvent,
 } from '../planningUtils';
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
@@ -205,8 +205,8 @@ const Planning = () => {
           <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Semaine précédente">
             <ChevronLeft size={18} />
           </button>
-          <button onClick={() => setWeekStart(mondayOfWeek(new Date()))} className="text-sm font-semibold px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
-            Aujourd'hui
+          <button onClick={() => setWeekStart(mondayOfWeek(new Date()))} className="text-sm font-semibold px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Revenir à aujourd'hui">
+            Semaine {isoWeekNumber(weekStart)}
           </button>
           <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Semaine suivante">
             <ChevronRight size={18} />
