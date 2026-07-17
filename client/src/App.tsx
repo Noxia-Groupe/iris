@@ -95,7 +95,7 @@ function App() {
         } />
 
         <Route path="/planning" element={
-          <PrivateRoute requiredRole="ADMIN">
+          <PrivateRoute excludedRole="COMMERCIAL">
             <Planning />
           </PrivateRoute>
         } />

@@ -1023,8 +1023,26 @@ async function validatePlanningEvent(body: Record<string, unknown>): Promise<{ e
   return { data, intervenantIds };
 }
 
+// Liste des chantiers pour peupler le sélecteur "Chantier suivi" du planning — TOUS les
+// chantiers (pas seulement ceux du conducteur connecté, contrairement à GET /api/chantiers) :
+// le planning est un outil d'équipe partagé entre conducteurs, il faut pouvoir y affecter un
+// technicien sur n'importe quel chantier en cours, pas seulement les siens. N'affecte en rien
+// la visibilité des chantiers ailleurs dans l'application (Liste des Chantiers, Tableau de
+// bord...), qui reste strictement scoped par responsable pour un conducteur.
+app.get('/api/planning/chantiers', requireAuth, blockCommercial, async (req, res) => {
+  try {
+    const chantiers = await prisma.chantier.findMany({
+      select: { id: true, nom: true, client: true, statut: true },
+      orderBy: { nom: 'asc' },
+    });
+    res.json(chantiers);
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching planning chantiers' });
+  }
+});
+
 // Affectations chevauchant la plage de jours [start, end] (bornes incluses).
-app.get('/api/planning/events', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/planning/events', requireAuth, blockCommercial, async (req, res) => {
   try {
     const start = parsePlanningJour(req.query.start);
     const end = parsePlanningJour(req.query.end);
@@ -1040,7 +1058,7 @@ app.get('/api/planning/events', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/planning/events', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/planning/events', requireAuth, blockCommercial, async (req, res) => {
   try {
     const { error, data, intervenantIds } = await validatePlanningEvent(req.body);
     if (error) return res.status(400).json({ error });
@@ -1056,7 +1074,7 @@ app.post('/api/planning/events', requireAuth, requireAdmin, async (req, res) => 
 
 // Édition complète ou déplacement (glisser-déposer) : fusion existant + corps reçu,
 // puis revalidation de l'ensemble — cf. validatePlanningEvent.
-app.patch('/api/planning/events/:id', requireAuth, requireAdmin, async (req, res) => {
+app.patch('/api/planning/events/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const existing = await prisma.planningEvent.findUnique({
       where: { id: paramId(req) },
@@ -1093,7 +1111,7 @@ app.patch('/api/planning/events/:id', requireAuth, requireAdmin, async (req, res
   }
 });
 
-app.delete('/api/planning/events/:id', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/api/planning/events/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const existing = await prisma.planningEvent.findUnique({ where: { id: paramId(req) } });
     if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
@@ -1105,7 +1123,7 @@ app.delete('/api/planning/events/:id', requireAuth, requireAdmin, async (req, re
 });
 
 // Types d'événements personnalisés du planning (libellé + couleur, réutilisables).
-app.get('/api/planning/types', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/planning/types', requireAuth, blockCommercial, async (req, res) => {
   try {
     res.json(await prisma.planningEventType.findMany({ orderBy: { nom: 'asc' } }));
   } catch (error) {
@@ -1113,7 +1131,7 @@ app.get('/api/planning/types', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/planning/types', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/planning/types', requireAuth, blockCommercial, async (req, res) => {
   try {
     const nom = String(req.body.nom || '').trim();
     if (!nom) return res.status(400).json({ error: 'Le libellé du type est requis.' });
@@ -1125,7 +1143,7 @@ app.post('/api/planning/types', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/planning/types/:id', requireAuth, requireAdmin, async (req, res) => {
+app.put('/api/planning/types/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const data: Record<string, unknown> = {};
     if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
@@ -1139,7 +1157,7 @@ app.put('/api/planning/types/:id', requireAuth, requireAdmin, async (req, res) =
 });
 
 // Supprimer un type d'événement. Bloqué si des affectations du planning l'utilisent.
-app.delete('/api/planning/types/:id', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/api/planning/types/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const id = paramId(req);
     const used = await prisma.planningEvent.count({ where: { typeEventId: id } });

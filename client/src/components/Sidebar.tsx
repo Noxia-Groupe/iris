@@ -56,6 +56,13 @@ const Sidebar = () => {
           </NavLink>
         )}
 
+        {!isCommercial && (
+          <NavLink to="/planning" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <CalendarDays size={20} />
+            Planning
+          </NavLink>
+        )}
+
         {isCommercial && (
           <NavLink to="/resultat-commercial" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <TrendingUp size={20} />
@@ -65,10 +72,6 @@ const Sidebar = () => {
 
         {userRole === 'ADMIN' && (
           <>
-            <NavLink to="/planning" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
-              <CalendarDays size={20} />
-              Planning
-            </NavLink>
             <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
               <Settings size={20} />
               Administration

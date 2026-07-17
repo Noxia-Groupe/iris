@@ -36,6 +36,14 @@ const CRENEAUX: { value: PlanningEvent['creneau']; label: string }[] = [
 ];
 
 const Planning = () => {
+  // Rôle réel : le partage public (Publier/Renouveler/Désactiver) reste réservé aux
+  // admins (action plus sensible, expose des données sans authentification) — le reste du
+  // module (affectations, types d'événements) est ouvert aux conducteurs comme aux admins.
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
+  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  const isAdmin = userRole === 'ADMIN';
+
   const [intervenants, setIntervenants] = useState<Intervenant[]>([]);
   const [chantiers, setChantiers] = useState<ChantierLite[]>([]);
   const [types, setTypes] = useState<PlanningType[]>([]);
@@ -59,11 +67,10 @@ const Planning = () => {
   useEffect(() => {
     (async () => {
       try {
-        const [intervRes, chantiersRes, typesRes, shareRes] = await Promise.all([
+        const [intervRes, chantiersRes, typesRes] = await Promise.all([
           apiFetch('/intervenants'),
-          apiFetch('/chantiers'),
+          apiFetch('/planning/chantiers'),
           apiFetch('/planning/types'),
-          apiFetch('/planning/share'),
         ]);
         const interv = await intervRes.json();
         const chant = await chantiersRes.json();
@@ -71,13 +78,19 @@ const Planning = () => {
         if (Array.isArray(interv)) setIntervenants(interv.sort((a: Intervenant, b: Intervenant) => a.nom.localeCompare(b.nom)));
         if (Array.isArray(chant)) setChantiers(chant);
         if (Array.isArray(t)) setTypes(t);
-        if (shareRes.ok) setShare(await shareRes.json());
+        // Le partage public reste réservé aux admins : pas la peine d'appeler une route
+        // qu'un conducteur ne peut de toute façon pas utiliser (403 côté serveur).
+        if (isAdmin) {
+          const shareRes = await apiFetch('/planning/share');
+          if (shareRes.ok) setShare(await shareRes.json());
+        }
       } catch (e) {
         console.error(e);
       } finally {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchEvents = async () => {
@@ -186,10 +199,12 @@ const Planning = () => {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => setShowShare(true)} className="btn btn-secondary flex items-center gap-2">
-            <Share2 size={16} />
-            {!share?.published ? 'Publier' : share.active ? 'Renouveler le lien' : 'Partage désactivé'}
-          </button>
+          {isAdmin && (
+            <button onClick={() => setShowShare(true)} className="btn btn-secondary flex items-center gap-2">
+              <Share2 size={16} />
+              {!share?.published ? 'Publier' : share.active ? 'Renouveler le lien' : 'Partage désactivé'}
+            </button>
+          )}
           <button onClick={() => setShowTypes(true)} className="btn btn-secondary flex items-center gap-2">
             <Tags size={16} /> Types d'événements
           </button>
@@ -325,7 +340,7 @@ const Planning = () => {
         <TypesModal types={types} onClose={() => setShowTypes(false)} onChanged={() => { fetchTypes(); fetchEvents(); }} />
       )}
 
-      {showShare && (
+      {isAdmin && showShare && (
         <ShareModal share={share} onClose={() => setShowShare(false)} onChanged={setShare} />
       )}
     </div>
