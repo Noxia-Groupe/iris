@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, RefreshCw, AlertTriangle, MapPin } from 'lucide-react';
 import { API_URL } from '../api';
 import {
   type Intervenant, type PlanningEvent,
   toDateStr, mondayOfWeek, addDays,
-  couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau,
+  couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, adresseEvent,
 } from '../planningUtils';
 
 // ---------------------------------------------------------------------------
@@ -160,28 +160,9 @@ const PlanningPublic = () => {
                     <div className="text-sm text-gray-400 italic px-1 py-2">Rien de prévu.</div>
                   ) : (
                     <div className="flex flex-col gap-2">
-                      {dayEvents.map((ev) => {
-                        const bg = couleurEvent(ev);
-                        const badge = badgeCreneau(ev);
-                        const client = ev.categorie === 'CHANTIER' ? ev.chantier?.client : ev.client;
-                        return (
-                          <div key={ev.id} className="rounded-xl shadow-sm p-3" style={{ backgroundColor: bg, color: texteSurCouleur(bg) }}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-bold text-base leading-tight">{libelleEvent(ev)}</span>
-                              {badge && <span className="text-xs font-bold opacity-90 shrink-0 bg-black/15 px-2 py-0.5 rounded">{badge}</span>}
-                            </div>
-                            {client && <div className="text-sm opacity-90 mt-0.5">{client}</div>}
-                            {!selectedTech && (
-                              <div className="flex flex-wrap gap-1 mt-2">
-                                {ev.intervenants.map((i) => (
-                                  <span key={i.id} className="text-xs font-semibold bg-black/15 px-2 py-0.5 rounded-full">{i.nom}</span>
-                                ))}
-                              </div>
-                            )}
-                            {ev.commentaire && <div className="text-xs opacity-90 mt-2 italic">{ev.commentaire}</div>}
-                          </div>
-                        );
-                      })}
+                      {dayEvents.map((ev) => (
+                        <EventCard key={ev.id} ev={ev} showTechniciens={!selectedTech} />
+                      ))}
                     </div>
                   )}
                 </div>
@@ -197,6 +178,68 @@ const PlanningPublic = () => {
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Carte d'une affectation. Le nom du client/chantier, quand il y en a un, est cliquable :
+// il déplie la carte pour révéler l'adresse du site et le commentaire (consignes,
+// matériel à prévoir...). Sans nom cliquable (événement personnalisé, ou SAV sans client
+// renseigné), le commentaire reste affiché directement, comme il n'y a rien d'autre sous
+// quoi le replier.
+// ---------------------------------------------------------------------------
+const EventCard = ({ ev, showTechniciens }: { ev: PlanningEvent; showTechniciens: boolean }) => {
+  const [expanded, setExpanded] = useState(false);
+  const bg = couleurEvent(ev);
+  const badge = badgeCreneau(ev);
+  const client = ev.categorie === 'CHANTIER' ? ev.chantier?.client : ev.client;
+  const adresse = adresseEvent(ev);
+  const hasDetail = !!adresse || !!ev.commentaire;
+
+  // L'en-tête (titre + client) devient un bouton dépliant dès qu'il y a quelque chose à
+  // montrer (adresse et/ou commentaire) — jamais conditionné à la présence d'un nom de
+  // client, pour rester utilisable même sur un SAV où le client n'a pas été renseigné.
+  const header = (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-bold text-base leading-tight">{libelleEvent(ev)}</span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {badge && <span className="text-xs font-bold opacity-90 bg-black/15 px-2 py-0.5 rounded">{badge}</span>}
+          {hasDetail && <ChevronDown size={16} className={`opacity-80 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
+        </div>
+      </div>
+      {client && <div className="text-sm opacity-90 mt-0.5">{client}</div>}
+    </>
+  );
+
+  return (
+    <div className="rounded-xl shadow-sm p-3" style={{ backgroundColor: bg, color: texteSurCouleur(bg) }}>
+      {hasDetail ? (
+        <button type="button" onClick={() => setExpanded((v) => !v)} className="w-full text-left">
+          {header}
+        </button>
+      ) : header}
+
+      {showTechniciens && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {ev.intervenants.map((i) => (
+            <span key={i.id} className="text-xs font-semibold bg-black/15 px-2 py-0.5 rounded-full">{i.nom}</span>
+          ))}
+        </div>
+      )}
+
+      {expanded && hasDetail && (
+        <div className="mt-2 pt-2 border-t border-white/25 flex flex-col gap-1.5 text-sm">
+          {adresse && (
+            <div className="flex items-start gap-1.5">
+              <MapPin size={14} className="shrink-0 mt-0.5 opacity-90" />
+              <span className="opacity-95">{adresse}</span>
+            </div>
+          )}
+          {ev.commentaire && <div className="opacity-90 italic">{ev.commentaire}</div>}
+        </div>
+      )}
     </div>
   );
 };

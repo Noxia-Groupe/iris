@@ -10,7 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { odooConfigured, odooSearchClients, odooSearchDevis, odooDevisMateriel } from './odoo';
+import { odooConfigured, odooSearchClients, odooSearchDevis, odooDevisMateriel, odooDevisAdresse } from './odoo';
 
 dotenv.config();
 
@@ -434,6 +434,23 @@ app.get('/api/odoo/devis/:id/materiel', requireAuth, async (req, res) => {
   }
 });
 
+// Adresse du site d'un devis Odoo (lecture seule, cf. odoo.ts:odooDevisAdresse) pour
+// préremplir le champ "Adresse" d'un chantier une fois un devis sélectionné. Même contrat
+// que les routes Odoo ci-dessus : jamais d'erreur HTTP, adresse:null si indisponible —
+// l'utilisateur reste libre de saisir/corriger l'adresse à la main.
+app.get('/api/odoo/devis/:id/adresse', requireAuth, async (req, res) => {
+  if (!odooConfigured()) return res.json({ odooAvailable: false, adresse: null });
+  try {
+    const devisId = Number(req.params.id);
+    if (Number.isNaN(devisId)) return res.json({ odooAvailable: false, adresse: null });
+    const adresse = await odooDevisAdresse(devisId);
+    res.json({ odooAvailable: true, adresse });
+  } catch (error) {
+    console.error('Odoo search error (devis adresse):', error);
+    res.json({ odooAvailable: false, adresse: null });
+  }
+});
+
 // Chantiers — un conducteur ne voit que les chantiers dont il est responsable ;
 // un admin voit tout. Un chantier sans responsable reste invisible aux conducteurs
 // jusqu'à ce qu'un admin lui en affecte un.
@@ -546,6 +563,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
       data: {
         nom: req.body.nom,
         client: req.body.client,
+        adresse: String(req.body.adresse || '').trim() || null,
         numeroDevis,
         dateDebut: new Date(req.body.dateDebut).toISOString(),
         dateFin: req.body.dateFin ? new Date(req.body.dateFin).toISOString() : null,
@@ -605,6 +623,8 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
     for (const key of dateFields) {
       if (key in req.body && req.body[key]) data[key] = new Date(req.body[key]).toISOString();
     }
+    // Facultative (contrairement au numéro de devis) : peut être vidée.
+    if ('adresse' in req.body) data.adresse = String(req.body.adresse || '').trim() || null;
     if ('types' in req.body) data.types = sanitizeTypes(req.body.types);
     if ('dossierNoxia' in req.body) data.dossierNoxia = !!req.body.dossierNoxia;
 
@@ -940,7 +960,7 @@ function parsePlanningCouleur(value: unknown): string | null {
 }
 
 const PLANNING_EVENT_INCLUDE = {
-  chantier: { select: { id: true, nom: true, client: true, statut: true } },
+  chantier: { select: { id: true, nom: true, client: true, statut: true, adresse: true } },
   typeEvent: true,
   intervenants: { select: { id: true, nom: true, role: true } },
 } as const;
@@ -978,7 +998,7 @@ async function validatePlanningEvent(body: Record<string, unknown>): Promise<{ e
   const data: Record<string, unknown> = {
     categorie, dateDebut, dateFin, creneau, heureDebut, heureFin,
     commentaire: String(body.commentaire || '').trim() || null,
-    chantierId: null, titre: null, client: null, typeEventId: null,
+    chantierId: null, titre: null, client: null, adresse: null, typeEventId: null,
   };
 
   if (categorie === 'CHANTIER') {
@@ -990,6 +1010,10 @@ async function validatePlanningEvent(body: Record<string, unknown>): Promise<{ e
     if (!titre) return { error: "Saisissez le nom du chantier ou de l'intervention." };
     data.titre = titre;
     data.client = String(body.client || '').trim() || null;
+    // Adresse du site (facultative), préremplie depuis le client Odoo choisi (cf.
+    // ClientAutocomplete) : contrairement à categorie CHANTIER, il n'existe pas de fiche
+    // chantier à côté de laquelle la stocker — elle vit uniquement sur cette affectation.
+    data.adresse = String(body.adresse || '').trim() || null;
   } else {
     const typeEvent = await prisma.planningEventType.findUnique({ where: { id: String(body.typeEventId || '') } });
     if (!typeEvent) return { error: "Type d'événement introuvable." };
@@ -1050,6 +1074,7 @@ app.patch('/api/planning/events/:id', requireAuth, requireAdmin, async (req, res
       chantierId: existing.chantierId,
       titre: existing.titre,
       client: existing.client,
+      adresse: existing.adresse,
       typeEventId: existing.typeEventId,
       commentaire: existing.commentaire,
       intervenantIds: existing.intervenants.map((i) => i.id),
@@ -1222,8 +1247,8 @@ app.get('/api/planning/public/:token', async (req, res) => {
         where: { dateDebut: { lte: end }, dateFin: { gte: start } },
         select: {
           id: true, categorie: true, dateDebut: true, dateFin: true, creneau: true,
-          heureDebut: true, heureFin: true, titre: true, client: true, commentaire: true,
-          chantier: { select: { nom: true, client: true } },
+          heureDebut: true, heureFin: true, titre: true, client: true, adresse: true, commentaire: true,
+          chantier: { select: { nom: true, client: true, adresse: true } },
           typeEvent: { select: { nom: true, couleur: true } },
           intervenants: { select: { id: true, nom: true, role: true } },
         },

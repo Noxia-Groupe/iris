@@ -4,7 +4,7 @@ import html2pdf from 'html2pdf.js';
 import imageCompression from 'browser-image-compression';
 import {
   ArrowLeft, Calendar, User, FileDown, Sparkles, Camera,
-  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, X,
+  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, X, MapPin,
 } from 'lucide-react';
 import { apiFetch, assetUrl } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
@@ -51,9 +51,11 @@ const ChantierDetail = () => {
   const [conducteurs, setConducteurs] = useState<any[]>([]);
   const [editingChantier, setEditingChantier] = useState(false);
   const [savingChantier, setSavingChantier] = useState(false);
-  // Préremplissage du budget global vendu depuis un devis Odoo sélectionné (modale
-  // d'édition ci-dessous) — champ non contrôlé, on écrit directement dedans.
+  // Préremplissage du budget global vendu et de l'adresse depuis un devis Odoo
+  // sélectionné (modale d'édition ci-dessous) — champs non contrôlés, on écrit
+  // directement dedans.
   const editChantierBudgetRef = useRef<HTMLInputElement>(null);
+  const editChantierAdresseRef = useRef<HTMLInputElement>(null);
 
   // Correction d'un pointage d'heures déjà saisi (erreur de date, d'intervenant, de
   // nombre d'heures...) — ouverte aux conducteurs comme aux admins (contrairement à
@@ -476,6 +478,9 @@ const ChantierDetail = () => {
             <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-gray-600">
               <span className="flex items-center gap-1.5"><strong className="text-gray-800">Client:</strong> {chantier.client}</span>
               <span className="flex items-center gap-1.5"><strong className="text-gray-800">Devis:</strong> {chantier.numeroDevis || 'N/A'}</span>
+              {chantier.adresse && (
+                <span className="flex items-center gap-1.5"><MapPin size={14} className="text-gray-400" /> {chantier.adresse}</span>
+              )}
               {chantier.responsable?.name && (
                 <span className="flex items-center gap-1.5"><User size={14} className="text-gray-400" /> {chantier.responsable.name}</span>
               )}
@@ -874,7 +879,14 @@ const ChantierDetail = () => {
                   onMontantFound={(montant) => {
                     if (editChantierBudgetRef.current) editChantierBudgetRef.current.value = String(montant);
                   }}
+                  onAdresseFound={(adresse) => {
+                    if (editChantierAdresseRef.current) editChantierAdresseRef.current.value = adresse;
+                  }}
                 />
+              </div>
+              <div className="form-group mb-0 md:col-span-2">
+                <label className="form-label">Adresse du site (optionnel)</label>
+                <input ref={editChantierAdresseRef} name="adresse" defaultValue={chantier.adresse || ''} className="form-input" placeholder="Préremplie depuis le devis sélectionné, ou à saisir librement..." />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Responsable Chantier</label>

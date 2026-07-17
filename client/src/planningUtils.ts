@@ -3,7 +3,7 @@
 // (libellé, couleur, badge de créneau) des deux côtés — un seul endroit à maintenir.
 
 export interface Intervenant { id: string; nom: string; role?: string }
-export interface ChantierLite { id?: string; nom: string; client: string; statut?: string }
+export interface ChantierLite { id?: string; nom: string; client: string; statut?: string; adresse?: string | null }
 export interface PlanningType { id: string; nom: string; couleur: string }
 export interface PlanningEvent {
   id: string;
@@ -17,6 +17,10 @@ export interface PlanningEvent {
   chantier: ChantierLite | null;
   titre: string | null;
   client: string | null;
+  // Adresse du site : celle du chantier suivi (ev.chantier.adresse) pour categorie
+  // CHANTIER, ou celle saisie sur l'affectation elle-même pour categorie HORS_CHANTIER
+  // (pas de fiche chantier à côté de laquelle la stocker) — cf. adresseEvent() ci-dessous.
+  adresse?: string | null;
   typeEventId?: string | null;
   typeEvent: PlanningType | null;
   commentaire: string | null;
@@ -97,10 +101,21 @@ export function badgeCreneau(ev: PlanningEvent): string | null {
   return null;
 }
 
+// Adresse du site à afficher : celle du chantier suivi pour categorie CHANTIER (source
+// unique, cf. Chantier.adresse), celle saisie sur l'affectation pour categorie
+// HORS_CHANTIER — jamais d'adresse pour un événement personnalisé.
+export function adresseEvent(ev: PlanningEvent): string | null {
+  if (ev.categorie === 'CHANTIER') return ev.chantier?.adresse || null;
+  if (ev.categorie === 'HORS_CHANTIER') return ev.adresse || null;
+  return null;
+}
+
 export function tooltipEvent(ev: PlanningEvent): string {
   const lignes = [libelleEvent(ev)];
   const client = ev.categorie === 'CHANTIER' ? ev.chantier?.client : ev.client;
   if (client) lignes.push(`Client : ${client}`);
+  const adresse = adresseEvent(ev);
+  if (adresse) lignes.push(`Adresse : ${adresse}`);
   const debut = ev.dateDebut.slice(0, 10);
   const fin = ev.dateFin.slice(0, 10);
   lignes.push(debut === fin ? `Le ${formatFr(debut)}` : `Du ${formatFr(debut)} au ${formatFr(fin)}`);

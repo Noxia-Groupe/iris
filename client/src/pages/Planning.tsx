@@ -363,6 +363,9 @@ const EventModal = ({
   const [creneau, setCreneau] = useState<PlanningEvent['creneau']>(event?.creneau || 'JOURNEE');
   const [typeSel, setTypeSel] = useState<string>(event?.typeEventId || '');
   const [saving, setSaving] = useState(false);
+  // Préremplissage de l'adresse (Hors suivi uniquement) depuis le client Odoo choisi
+  // (cf. ClientAutocomplete.onSelect) — champ non contrôlé, on écrit directement dedans.
+  const adresseRef = useRef<HTMLInputElement>(null);
 
   // On ne propose que les chantiers en cours (c'est le sens du module) ; si une
   // affectation existante pointe un chantier depuis clôturé, on le garde en option
@@ -420,6 +423,7 @@ const EventModal = ({
         chantierId: String(fd.get('chantierId') || '') || null,
         titre: String(fd.get('titre') || '') || null,
         client: String(fd.get('client') || '') || null,
+        adresse: String(fd.get('adresse') || '') || null,
         typeEventId: typeEventId || null,
         commentaire: String(fd.get('commentaire') || '') || null,
         intervenantIds,
@@ -489,7 +493,16 @@ const EventModal = ({
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Client (optionnel)</label>
-                <ClientAutocomplete defaultValue={event?.client || ''} />
+                <ClientAutocomplete
+                  defaultValue={event?.client || ''}
+                  onSelect={(c) => {
+                    if (c?.adresse && adresseRef.current) adresseRef.current.value = c.adresse;
+                  }}
+                />
+              </div>
+              <div className="form-group mb-0 md:col-span-2">
+                <label className="form-label">Adresse du site (optionnel)</label>
+                <input ref={adresseRef} name="adresse" className="form-input" defaultValue={event?.adresse || ''} placeholder="Préremplie depuis le client sélectionné, ou à saisir librement..." />
               </div>
             </div>
           )}

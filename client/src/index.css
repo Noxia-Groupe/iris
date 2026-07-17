@@ -301,3 +301,8 @@ select.form-input option {
 .dark .text-accent { color: #5b9bf0; }
 .dark .bg-primary\/10 { background-color: rgba(59, 130, 246, 0.15); }
 .dark .border-primary { border-color: #3b82f6; }
+
+/* .btn-secondary a le même problème : son texte (color: var(--color-primary-dark))
+   devient quasi noir sur son propre fond (--color-gray-light, lui bien redéfini en
+   sombre) — bouton d'apparence grisée/désactivée alors qu'il est cliquable. */
+.dark .btn-secondary { color: #f0f3fa; }

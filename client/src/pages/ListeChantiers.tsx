@@ -15,11 +15,12 @@ const ListeChantiers = () => {
   const [showForm, setShowForm] = useState(false);
   const [filterMaterielDepasse, setFilterMaterielDepasse] = useState(false);
   const [filterHeuresDepasse, setFilterHeuresDepasse] = useState(false);
-  // Préremplissage du budget global vendu et du "Dont Matériel" depuis un devis Odoo
-  // sélectionné (formulaire de création ci-dessous) — champs non contrôlés, on écrit
-  // directement dedans.
+  // Préremplissage du budget global vendu, du "Dont Matériel" et de l'adresse depuis un
+  // devis Odoo sélectionné (formulaire de création ci-dessous) — champs non contrôlés, on
+  // écrit directement dedans.
   const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
   const nouveauChantierMaterielRef = useRef<HTMLInputElement>(null);
+  const nouveauChantierAdresseRef = useRef<HTMLInputElement>(null);
   // Client Odoo sélectionné dans le formulaire de création : sert à ne proposer, dans le
   // champ "N° de Devis", que les devis de ce client. Remis à null dès que le champ Client
   // redevient une saisie libre (cf. ClientAutocomplete.onSelect).
@@ -361,7 +362,14 @@ const ListeChantiers = () => {
                 onMaterielFound={(montant) => {
                   if (nouveauChantierMaterielRef.current) nouveauChantierMaterielRef.current.value = String(montant);
                 }}
+                onAdresseFound={(adresse) => {
+                  if (nouveauChantierAdresseRef.current) nouveauChantierAdresseRef.current.value = adresse;
+                }}
               />
+            </div>
+            <div className="form-group mb-0 md:col-span-2">
+              <label className="form-label">Adresse du site (optionnel)</label>
+              <input ref={nouveauChantierAdresseRef} name="adresse" className="form-input" placeholder="Préremplie depuis le devis sélectionné, ou à saisir librement..." />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Date Début</label>

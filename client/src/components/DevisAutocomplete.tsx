@@ -14,9 +14,10 @@ const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
  * Champ "N° de Devis" avec recherche des devis Odoo Online (lecture seule) : au clic,
  * affiche une liste déroulante (devis les plus récents) ; taper filtre par les premières
  * lettres/chiffres. Sélectionner un devis préremplit aussi le budget global vendu (HT)
- * via `onMontantFound`, ainsi que le "Dont Matériel" via `onMaterielFound` (sous-total de
- * la section "Matériel" du devis, s'il y en a une) — l'utilisateur reste libre de corriger
- * ces montants ensuite. Reste un simple champ texte libre si Odoo n'est pas configuré,
+ * via `onMontantFound`, le "Dont Matériel" via `onMaterielFound` (sous-total de la section
+ * "Matériel" du devis, s'il y en a une), et l'adresse du site via `onAdresseFound`
+ * (adresse de livraison du devis, ou à défaut celle du client facturé) — l'utilisateur
+ * reste libre de corriger ces valeurs ensuite. Reste un simple champ texte libre si Odoo n'est pas configuré,
  * injoignable, ou si le devis recherché n'existe pas côté Odoo — aucune saisie n'est
  * jamais écrite dans Odoo.
  *
@@ -29,12 +30,14 @@ export function DevisAutocomplete({
   partnerId,
   onMontantFound,
   onMaterielFound,
+  onAdresseFound,
 }: {
   defaultValue?: string;
   required?: boolean;
   partnerId?: number | null;
   onMontantFound?: (montant: number) => void;
   onMaterielFound?: (montant: number) => void;
+  onAdresseFound?: (adresse: string) => void;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [suggestions, setSuggestions] = useState<OdooDevis[]>([]);
@@ -98,6 +101,14 @@ export function DevisAutocomplete({
                     .then((res) => (res.ok ? res.json() : { montantMateriel: null }))
                     .then((data) => {
                       if (typeof data.montantMateriel === 'number') onMaterielFound(data.montantMateriel);
+                    })
+                    .catch(() => {});
+                }
+                if (onAdresseFound) {
+                  apiFetch(`/odoo/devis/${d.id}/adresse`)
+                    .then((res) => (res.ok ? res.json() : { adresse: null }))
+                    .then((data) => {
+                      if (typeof data.adresse === 'string' && data.adresse) onAdresseFound(data.adresse);
                     })
                     .catch(() => {});
                 }

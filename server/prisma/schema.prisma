@@ -45,6 +45,11 @@ model Chantier {
   nom                   String
   numeroDevis           String?
   client                String
+  // Adresse du site (facultative) — préremplie depuis l'adresse de livraison/facturation
+  // du devis Odoo sélectionné (cf. GET /api/odoo/devis/:id/adresse), toujours corrigible
+  // manuellement. Seule source de vérité pour les affectations "chantier suivi" du
+  // planning d'intervention (cf. PlanningEvent) : jamais dupliquée/surchargée par affectation.
+  adresse               String?
   dateDebut             DateTime
   dateFin               DateTime?
   statut                String                    @default("EN_COURS")
@@ -217,9 +222,13 @@ model PlanningEvent {
   chantierId String?
   chantier   Chantier? @relation(fields: [chantierId], references: [id])
 
-  // categorie HORS_CHANTIER : nom libre + client (jamais lié à un enregistrement en base)
-  titre  String?
-  client String?
+  // categorie HORS_CHANTIER : nom libre + client + adresse (jamais liés à un enregistrement
+  // en base — contrairement à categorie CHANTIER, il n'existe pas de fiche à côté de
+  // laquelle stocker/corriger ces informations, elles vivent uniquement sur l'affectation).
+  // adresse préremplie depuis le client Odoo choisi (cf. ClientAutocomplete), corrigible.
+  titre   String?
+  client  String?
+  adresse String?
 
   // categorie EVENEMENT : type réutilisable (libellé + couleur)
   typeEventId String?

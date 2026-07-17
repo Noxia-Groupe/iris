@@ -6,6 +6,7 @@ interface OdooClient {
   name: string;
   email: string | null;
   city: string | null;
+  adresse: string | null;
 }
 
 /**
@@ -17,7 +18,9 @@ interface OdooClient {
  *
  * `onSelect` remonte le contact Odoo choisi (ou null dès que l'utilisateur retape à la
  * main, le champ redevenant alors une saisie libre non liée à un client Odoo précis) —
- * sert par exemple à ne proposer, dans le champ "N° de Devis", que les devis de ce client.
+ * sert par exemple à ne proposer, dans le champ "N° de Devis", que les devis de ce client,
+ * ou à préremplir un champ "Adresse" à partir de `client.adresse` (chantier non suivi du
+ * planning d'intervention).
  */
 export function ClientAutocomplete({
   defaultValue = '',

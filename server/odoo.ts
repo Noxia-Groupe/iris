@@ -87,6 +87,19 @@ export interface OdooClient {
   name: string;
   email: string | null;
   city: string | null;
+  adresse: string | null;
+}
+
+// Compose une adresse lisible à une ligne à partir des champs standards d'un contact
+// Odoo (res.partner) — utilisé aussi bien pour un contact retourné directement
+// (odooSearchClients) que pour le contact de livraison/facturation d'un devis
+// (odooDevisAdresse ci-dessous). Retourne null (jamais une chaîne vide) si le contact n'a
+// aucune de ces informations, pour laisser le champ formulaire vide plutôt qu'un texte
+// composé de virgules superflues.
+function formatAdresse(p: { street?: string | null; street2?: string | null; city?: string | null; zip?: string | null }): string | null {
+  const codePostalVille = [p.zip, p.city].filter(Boolean).join(' ').trim();
+  const parts = [p.street, p.street2, codePostalVille].map((s) => (s || '').trim()).filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
 }
 
 // Recherche de contacts Odoo par nom (search_read sur res.partner — lecture seule).
@@ -95,12 +108,13 @@ export interface OdooClient {
 export async function odooSearchClients(query: string, limit = 20): Promise<OdooClient[]> {
   const trimmed = query.trim();
   const domain = trimmed ? [['name', 'ilike', trimmed]] : [];
-  const rows = await searchRead('res.partner', domain, ['name', 'email', 'city'], limit, 'name asc');
+  const rows = await searchRead('res.partner', domain, ['name', 'email', 'city', 'street', 'street2', 'zip'], limit, 'name asc');
   return rows.map((r: any) => ({
     id: r.id,
     name: r.name,
     email: r.email || null,
     city: r.city || null,
+    adresse: formatAdresse(r),
   }));
 }
 
@@ -174,4 +188,38 @@ export async function odooDevisMateriel(devisId: number): Promise<number | null>
     if (inMaterielSection) total += line.price_subtotal || 0;
   }
   return found ? total : null;
+}
+
+// Adresse du site d'un devis (lecture seule) : sert à préremplir le champ "Adresse" d'un
+// chantier une fois un devis sélectionné, sans jamais rien créer ni modifier dans Odoo.
+// Priorité à l'adresse de LIVRAISON du devis (partner_shipping_id — le site d'intervention
+// réel, souvent différent du siège facturé) ; à défaut, adresse du client facturé
+// (partner_id). Renvoie null (et non une chaîne vide) si le devis ou le contact sont
+// introuvables, ou si le contact n'a aucune adresse renseignée — le formulaire reste alors
+// inchangé et l'utilisateur saisit l'adresse à la main.
+export async function odooDevisAdresse(devisId: number): Promise<string | null> {
+  const { url, db, username, apiKey } = getConfig();
+  if (!url || !db || !username || !apiKey) throw new Error('Odoo non configuré');
+  const uid = await authenticate(url, db, username, apiKey);
+  const orders = await jsonRpcCall(url, 'object', 'execute_kw', [
+    db, uid, apiKey,
+    'sale.order', 'search_read',
+    [[['id', '=', devisId]], ['partner_shipping_id', 'partner_id']],
+    {},
+  ]);
+  const order = orders?.[0];
+  if (!order) return null;
+  const shipping = Array.isArray(order.partner_shipping_id) ? order.partner_shipping_id[0] : null;
+  const invoice = Array.isArray(order.partner_id) ? order.partner_id[0] : null;
+  const partnerId = shipping || invoice;
+  if (!partnerId) return null;
+
+  const partners = await jsonRpcCall(url, 'object', 'execute_kw', [
+    db, uid, apiKey,
+    'res.partner', 'search_read',
+    [[['id', '=', partnerId]], ['street', 'street2', 'city', 'zip']],
+    {},
+  ]);
+  const partner = partners?.[0];
+  return partner ? formatAdresse(partner) : null;
 }
