@@ -167,6 +167,22 @@ model Parametres {
   updatedAt DateTime @updatedAt
 }
 
+// Partage public en lecture seule du planning d'intervention (singleton) — lien de type
+// "OneDrive" destiné aux techniciens, qui n'ont pas de compte dans l'application : un
+// token opaque donne accès, SANS authentification, à GET /api/planning/public/:token.
+// Le lien ne change qu'à la régénération volontaire du token par un administrateur
+// (bouton "Renouveler le lien") ; `active` permet de couper l'accès sans en générer un
+// nouveau (bouton "Désactiver le partage"), en conservant le même token pour une
+// réactivation ultérieure.
+model PlanningPublicShare {
+  id     String  @id @default("singleton")
+  token  String  @unique
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // Type d'événement personnalisé du planning d'intervention (Congés, Formation, SAV
 // récurrent...), réutilisable, avec sa couleur — créé et géré par les administrateurs
 // directement depuis le module Planning.

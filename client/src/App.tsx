@@ -16,6 +16,7 @@ import ResultatCommercial from './pages/ResultatCommercial';
 import Performances from './pages/Performances';
 import MesCommerciaux from './pages/MesCommerciaux';
 import Planning from './pages/Planning';
+import PlanningPublic from './pages/PlanningPublic';
 import { ErrorBoundary } from './ErrorBoundary';
 
 const PrivateRoute = ({ children, requiredRole, excludedRole }: { children: JSX.Element, requiredRole?: string, excludedRole?: string }) => {
@@ -58,6 +59,10 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/acces-refuse" element={<AccesRefuse />} />
         <Route path="/auth/callback" element={<AuthCallbackMsal />} />
+        {/* Lien de partage public (sans authentification, cf. module Planning) : hors
+            PrivateRoute, aucune sidebar/topbar — page autonome pensée pour un technicien
+            sans compte, sur son téléphone. */}
+        <Route path="/planning/public/:token" element={<PlanningPublic />} />
         
         <Route path="/" element={
           <PrivateRoute>

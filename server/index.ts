@@ -1128,6 +1128,116 @@ app.delete('/api/planning/types/:id', requireAuth, requireAdmin, async (req, res
   }
 });
 
+// --- Partage public du planning (lien type "OneDrive", sans authentification) ---
+// Un seul lien actif à la fois (ligne singleton) : les techniciens, qui n'ont pas de
+// compte dans l'application, y accèdent en LECTURE SEULE via GET /api/planning/public/:token.
+// Le token ne change qu'à la régénération volontaire par un administrateur (bouton
+// "Renouveler le lien") ; `active` permet de couper l'accès sans en générer un nouveau
+// (bouton "Désactiver le partage"), en conservant le même token pour une réactivation
+// ultérieure avec le lien déjà communiqué.
+function generateShareToken(): string {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+function paramToken(req: express.Request): string {
+  const t = req.params.token;
+  return Array.isArray(t) ? t[0] : t;
+}
+
+function serializeShare(share: { token: string; active: boolean; updatedAt: Date } | null) {
+  return {
+    published: !!share,
+    active: !!share?.active,
+    token: share?.token || null,
+    updatedAt: share?.updatedAt?.toISOString() || null,
+  };
+}
+
+app.get('/api/planning/share', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const share = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
+    res.json(serializeShare(share));
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching planning share' });
+  }
+});
+
+// Publie le planning (1ère fois) ou renouvelle le lien existant : génère TOUJOURS un
+// nouveau token aléatoire et (ré)active le partage — l'ancien lien devient aussitôt
+// invalide (cf. GET /api/planning/public/:token, qui compare le token reçu au token stocké).
+app.post('/api/planning/share', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const token = generateShareToken();
+    const share = await prisma.planningPublicShare.upsert({
+      where: { id: 'singleton' },
+      update: { token, active: true },
+      create: { id: 'singleton', token, active: true },
+    });
+    res.json(serializeShare(share));
+  } catch (error) {
+    res.status(500).json({ error: 'Error publishing planning share' });
+  }
+});
+
+// Active/désactive le partage SANS changer le token (contrairement à la régénération
+// ci-dessus) : permet de couper l'accès temporairement puis de le rétablir avec le même
+// lien déjà communiqué aux techniciens.
+app.patch('/api/planning/share', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const existing = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
+    if (!existing) return res.status(404).json({ error: "Le planning n'a encore jamais été publié." });
+    const share = await prisma.planningPublicShare.update({
+      where: { id: 'singleton' },
+      data: { active: !!req.body.active },
+    });
+    res.json(serializeShare(share));
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating planning share' });
+  }
+});
+
+// Consultation PUBLIQUE et SANS authentification du planning (lien de partage) —
+// destinée aux techniciens qui n'ont pas de compte. Lecture seule : mêmes affectations
+// que GET /api/planning/events, réduites à ce qui leur est utile (aucun montant, aucune
+// marge — ces champs n'existent de toute façon pas sur Chantier "lite"). Token invalide
+// OU partage désactivé renvoient la MÊME erreur générique, pour ne jamais révéler si un
+// token a existé.
+app.get('/api/planning/public/:token', async (req, res) => {
+  try {
+    const token = paramToken(req);
+    const share = token ? await prisma.planningPublicShare.findUnique({ where: { token } }) : null;
+    if (!share || !share.active) {
+      return res.status(404).json({ error: "Ce lien de planning n'est plus disponible. Contactez votre administrateur." });
+    }
+
+    const start = parsePlanningJour(req.query.start);
+    const end = parsePlanningJour(req.query.end);
+    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, format YYYY-MM-DD).' });
+
+    // `select` explicite (plutôt qu'`include`, qui renverrait aussi tous les champs
+    // scalaires bruts de PlanningEvent) : n'expose que ce qui est utile à un technicien,
+    // jamais d'identifiant interne (chantierId, typeEventId) ni de donnée de gestion.
+    const [events, intervenants] = await Promise.all([
+      prisma.planningEvent.findMany({
+        where: { dateDebut: { lte: end }, dateFin: { gte: start } },
+        select: {
+          id: true, categorie: true, dateDebut: true, dateFin: true, creneau: true,
+          heureDebut: true, heureFin: true, titre: true, client: true, commentaire: true,
+          chantier: { select: { nom: true, client: true } },
+          typeEvent: { select: { nom: true, couleur: true } },
+          intervenants: { select: { id: true, nom: true, role: true } },
+        },
+        orderBy: [{ dateDebut: 'asc' }, { createdAt: 'asc' }],
+      }),
+      prisma.intervenant.findMany({ select: { id: true, nom: true }, orderBy: { nom: 'asc' } }),
+    ]);
+
+    res.json({ events, intervenants });
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching public planning' });
+  }
+});
+
 // Categories & Fournisseurs
 app.get('/api/categories', requireAuth, async (req, res) => res.json(await prisma.categorie.findMany({ orderBy: { nom: 'asc' } })));
 app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => res.json(await prisma.categorie.create({ data: { nom: req.body.nom, description: req.body.description || null } })));
