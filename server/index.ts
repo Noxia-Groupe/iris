@@ -1424,6 +1424,22 @@ app.patch('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
   }
 });
 
+// Suppression d'un achat saisi par erreur (doublon, mauvais chantier...) — mêmes droits
+// que la correction ci-dessus (PATCH), cf. assertChantierWritable.
+app.delete('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
+  try {
+    const achatId = paramId(req);
+    const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
+    if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
+    if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
+
+    await prisma.achatReel.delete({ where: { id: achatId } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting achat' });
+  }
+});
+
 // Pointages (Heures)
 app.get('/api/heures', requireAuth, async (req, res) => {
   try {
@@ -1482,6 +1498,22 @@ app.patch('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
     res.json(await prisma.pointageHeure.update({ where: { id: pointageId }, data }));
   } catch (error) {
     res.status(500).json({ error: 'Error updating pointage' });
+  }
+});
+
+// Suppression d'un pointage saisi par erreur (doublon, mauvais chantier...) — mêmes
+// droits que la correction ci-dessus (PATCH), cf. assertChantierWritable.
+app.delete('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
+  try {
+    const pointageId = paramId(req);
+    const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
+    if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
+    if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
+
+    await prisma.pointageHeure.delete({ where: { id: pointageId } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error deleting pointage' });
   }
 });
 

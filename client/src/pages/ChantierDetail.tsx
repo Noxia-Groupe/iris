@@ -4,7 +4,7 @@ import html2pdf from 'html2pdf.js';
 import imageCompression from 'browser-image-compression';
 import {
   ArrowLeft, Calendar, User, FileDown, Sparkles, Camera,
-  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, X, MapPin,
+  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, X, MapPin,
 } from 'lucide-react';
 import { apiFetch, assetUrl } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
@@ -265,6 +265,42 @@ const ChantierDetail = () => {
       alert('Impossible de joindre le serveur.');
     } finally {
       setSavingAchat(false);
+    }
+  };
+
+  const handleDeleteAchat = async (achatId: string) => {
+    if (!confirm('Supprimer définitivement cet achat ?')) return;
+    setSavingAchat(true);
+    try {
+      const res = await apiFetch(`/achats/${achatId}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchChantier();
+      } else {
+        const d = await res.json();
+        alert(d.error || "Erreur lors de la suppression de l'achat.");
+      }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSavingAchat(false);
+    }
+  };
+
+  const handleDeletePointage = async (pointageId: string) => {
+    if (!confirm('Supprimer définitivement ce pointage ?')) return;
+    setSavingPointage(true);
+    try {
+      const res = await apiFetch(`/heures/${pointageId}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchChantier();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Erreur lors de la suppression du pointage.');
+      }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSavingPointage(false);
     }
   };
 
@@ -739,13 +775,23 @@ const ChantierDetail = () => {
                       <div className="flex items-center gap-3">
                         <div className="font-bold text-gray-800 whitespace-nowrap">{fmtEuro(a.montantHT)}</div>
                         {userRole !== 'COMMERCIAL' && (
-                          <button
-                            onClick={() => startEditAchat(a.id)}
-                            className="p-1.5 text-gray-400 hover:text-accent hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Corriger cet achat"
-                          >
-                            <Pencil size={14} />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => startEditAchat(a.id)}
+                              className="p-1.5 text-gray-400 hover:text-accent hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Corriger cet achat"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAchat(a.id)}
+                              disabled={savingAchat}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Supprimer cet achat"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -794,13 +840,23 @@ const ChantierDetail = () => {
                       <div className="flex items-center gap-3">
                         <div className="font-bold text-gray-800 whitespace-nowrap">{p.nbrHeures} h</div>
                         {userRole !== 'COMMERCIAL' && (
-                          <button
-                            onClick={() => startEditPointage(p.id)}
-                            className="p-1.5 text-gray-400 hover:text-accent hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Corriger ce pointage"
-                          >
-                            <Pencil size={14} />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => startEditPointage(p.id)}
+                              className="p-1.5 text-gray-400 hover:text-accent hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Corriger ce pointage"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePointage(p.id)}
+                              disabled={savingPointage}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Supprimer ce pointage"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
