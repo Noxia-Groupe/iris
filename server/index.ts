@@ -256,8 +256,12 @@ function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boole
   };
 }
 
-// Configuration Multer pour le stockage local des photos
-const uploadDir = path.join(__dirname, 'uploads');
+// Configuration Multer pour le stockage local des photos.
+// process.cwd() (et non __dirname) : le code compilé tourne depuis dist/ (__dirname y
+// pointerait), alors que le volume Docker persistant est monté sur le répertoire de travail
+// du conteneur (/app) — avec __dirname, les photos étaient écrites hors du volume et
+// disparaissaient à chaque redéploiement (conteneur recréé).
+const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -1541,7 +1545,7 @@ app.delete('/api/chantiers/:id/photos/purge', requireAuth, requireAdmin, async (
   try {
     const photos = await prisma.photoChantier.findMany({ where: { chantierId: paramId(req) } });
     for (const p of photos) {
-      const filePath = path.join(__dirname, p.url);
+      const filePath = path.join(process.cwd(), p.url);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
     await prisma.photoChantier.deleteMany({ where: { chantierId: paramId(req) } });
@@ -1564,7 +1568,7 @@ app.get('/api/chantiers/:id/photos/export', requireAuth, async (req, res) => {
     archive.pipe(res);
 
     for (const p of photos) {
-      const filePath = path.join(__dirname, p.url);
+      const filePath = path.join(process.cwd(), p.url);
       if (fs.existsSync(filePath)) {
         archive.file(filePath, { name: path.basename(filePath) });
       }
