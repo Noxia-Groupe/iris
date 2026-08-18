@@ -120,18 +120,33 @@ interface AuthRequest extends express.Request {
   user?: { id: string; role: string };
 }
 
-const requireAuth: express.RequestHandler = (req, res, next) => {
+// Le jeton n'authentifie QUE l'identité : le rôle est systématiquement relu en base, il
+// n'est jamais repris du jeton. Un changement de droits (promotion superadmin au démarrage,
+// rétrogradation décidée par la direction, révocation d'un compte) prend ainsi effet à la
+// requête suivante, sans attendre l'expiration du jeton (7 jours) ni une reconnexion.
+const requireAuth: express.RequestHandler = async (req, res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     res.status(401).json({ error: 'Authentification requise' });
     return;
   }
+  let payload: { id: string };
   try {
-    const payload = jwt.verify(header.slice(7), JWT_SECRET) as { id: string; role: string };
-    (req as AuthRequest).user = { id: payload.id, role: payload.role };
-    next();
+    payload = jwt.verify(header.slice(7), JWT_SECRET) as { id: string; role: string };
   } catch {
     res.status(401).json({ error: 'Session expirée ou invalide' });
+    return;
+  }
+  try {
+    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true } });
+    if (!user) {
+      res.status(401).json({ error: 'Compte introuvable ou révoqué' });
+      return;
+    }
+    (req as AuthRequest).user = { id: user.id, role: user.role };
+    next();
+  } catch {
+    res.status(500).json({ error: 'Error resolving authenticated user' });
   }
 };
 
@@ -407,6 +422,24 @@ app.post('/api/auth/sso', async (req, res) => {
   }
 });
 
+// Compte connecté, tel qu'il est EN BASE à l'instant présent. Le client s'en sert pour
+// resynchroniser le rôle qu'il a mémorisé à la connexion : sans cela, une promotion (ou
+// une rétrogradation) resterait invisible dans les menus jusqu'à la prochaine connexion,
+// alors que l'API, elle, applique déjà les nouveaux droits (cf. requireAuth).
+app.get('/api/me', requireAuth, async (req, res) => {
+  try {
+    const authUser = (req as AuthRequest).user!;
+    const user = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { id: true, name: true, email: true, role: true, theme: true },
+    });
+    if (!user) return res.status(404).json({ error: 'Compte introuvable.' });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching current user' });
+  }
+});
+
 // Préférence d'affichage (clair/sombre) : chaque utilisateur (admin ou conducteur) ne
 // peut modifier que la sienne — l'id vient du jeton, jamais du corps de la requête.
 app.put('/api/me/theme', requireAuth, async (req, res) => {
@@ -424,8 +457,11 @@ app.put('/api/me/theme', requireAuth, async (req, res) => {
   }
 });
 
-// Champs publics d'un responsable (jamais le hash de mot de passe).
-const RESPONSABLE_SELECT = { select: { id: true, name: true, email: true, role: true } } as const;
+// Champs publics d'un responsable ou d'un commercial rattaché à un chantier : jamais le
+// hash de mot de passe, et jamais le rôle non plus — l'application n'en a pas l'usage ici,
+// et un commercial rattaché peut être un super administrateur, dont le rôle ne doit pas
+// transparaître dans les données d'un chantier renvoyées à un simple administrateur.
+const RESPONSABLE_SELECT = { select: { id: true, name: true, email: true } } as const;
 
 // Types de chantier (liste fermée, plusieurs possibles par chantier) — sert aussi de
 // liste blanche pour ne jamais stocker de valeur arbitraire envoyée par le client.
@@ -772,7 +808,13 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
 // autorisé SSO uniquement (sans mot de passe).
 app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
+    // Le rôle SUPERADMIN n'existe pas du point de vue d'un ADMIN : les comptes qui le
+    // portent sont retirés de la liste qui lui est renvoyée. Il ne peut donc ni les voir,
+    // ni découvrir l'existence de ce niveau de droits, ni tenter de se l'attribuer (les
+    // routes d'écriture le refusent déjà, cf. refuseSuperAdminTarget).
+    const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
     const users = await prisma.user.findMany({
+      where: isSuper ? {} : { role: { not: ROLE_SUPERADMIN } },
       select: { id: true, name: true, email: true, role: true, password: true, estCommercial: true },
       orderBy: { createdAt: 'asc' },
     });

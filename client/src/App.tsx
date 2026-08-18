@@ -18,7 +18,7 @@ import MesCommerciaux from './pages/MesCommerciaux';
 import Planning from './pages/Planning';
 import PlanningPublic from './pages/PlanningPublic';
 import { ErrorBoundary } from './ErrorBoundary';
-import { ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
+import { ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN, useCurrentRole } from './roles';
 import { useModules } from './modules';
 
 // Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
@@ -28,17 +28,19 @@ const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
 const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX.Element, requiredRoles?: string[], excludedRole?: string }) => {
   const token = localStorage.getItem('token');
   const userStr = localStorage.getItem('user');
+  // Rôle resynchronisé avec le serveur à chaque changement d'écran : une promotion (ou
+  // une rétrogradation) intervenue depuis la connexion se répercute aussitôt sur les
+  // menus et les écrans accessibles, sans obliger à se reconnecter.
+  const role = useCurrentRole();
 
   if (!token || !userStr) {
     return <Navigate to="/login" />;
   }
 
-  const user = JSON.parse(userStr);
-
-  if (requiredRoles && !requiredRoles.includes(user.role)) {
+  if (requiredRoles && !requiredRoles.includes(role)) {
     return <Navigate to="/" />; // Redirect to dashboard if not authorized
   }
-  if (excludedRole && user.role === excludedRole) {
+  if (excludedRole && role === excludedRole) {
     return <Navigate to="/" />;
   }
 

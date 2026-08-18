@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Plus, Tags, Trash2, X, Users, Info, Share2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Tags, Trash2, X, Users, Info, Share2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../planningUtils';
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
 import { isAdminRole } from '../roles';
+import { useModules } from '../modules';
 
 // ---------------------------------------------------------------------------
 // Planning d'intervention (réservé aux administrateurs).
@@ -44,6 +45,10 @@ const Planning = () => {
   const user = userStr ? JSON.parse(userStr) : null;
   const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
   const isAdmin = isAdminRole(userRole);
+  // Module désactivé par un super administrateur : la page n'est plus atteignable que par
+  // lui (cf. App.tsx), d'où l'avertissement ci-dessous — il doit savoir que ce qu'il
+  // prépare ici n'est visible de personne d'autre tant que le module reste coupé.
+  const { planningActifGlobal } = useModules();
 
   const [intervenants, setIntervenants] = useState<Intervenant[]>([]);
   const [chantiers, setChantiers] = useState<ChantierLite[]>([]);
@@ -214,6 +219,19 @@ const Planning = () => {
           </button>
         </div>
       </div>
+
+      {!planningActifGlobal && (
+        <div className="mb-4 p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 flex items-start gap-3">
+          <AlertTriangle size={20} className="shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <strong className="block">Module Planning désactivé pour tous les utilisateurs.</strong>
+            Le planning n'apparaît plus dans le menu des autres comptes — administrateurs compris — et leur est
+            inaccessible. Aucune donnée n'a été supprimée : tout sera restitué à l'identique à la réactivation. En tant
+            que super administrateur, vous pouvez continuer à le consulter et à le modifier. La réactivation se fait
+            depuis <strong>Administration &gt; Modules</strong>.
+          </div>
+        </div>
+      )}
 
       {/* Navigation de semaine */}
       <div className="flex items-center justify-between gap-3 mb-4 bg-white px-4 py-3 rounded-xl shadow-sm border border-gray-100">

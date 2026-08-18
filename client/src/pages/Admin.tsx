@@ -3,16 +3,10 @@ import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { DevisAutocomplete } from '../components/DevisAutocomplete';
-import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, ROLE_SUPERADMIN } from '../roles';
+import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN } from '../roles';
 import { refreshModules } from '../modules';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
-
-// Un ADMIN marqué "estCommercial" apparaît en plus comme un commercial (choix
-// d'affectation sur un chantier, statistiques de "Mes commerciaux") — même définition que
-// isCommercialLike() côté serveur (server/index.ts).
-const isCommercialLike = (u: { role: string; estCommercial?: boolean }) =>
-  u.role === 'COMMERCIAL' || (isAdminRole(u.role) && !!u.estCommercial);
 
 // Rendu des tranches d'un barème progressif (JSON.stringify transforme un plafond
 // Infinity en null : la dernière tranche est donc "au-delà de X €", sans borne haute).
@@ -89,9 +83,11 @@ const ONGLETS_CONDUCTEUR = ['fournisseurs', 'categories'];
 const MESSAGE_COMPTE_SUPERADMIN = "Seul un super administrateur peut gérer un compte super administrateur.";
 
 const Admin = () => {
-  // Rôle réel du compte connecté (la page est fermée aux commerciaux, cf. App.tsx).
+  // Rôle réel du compte connecté (la page est fermée aux commerciaux, cf. App.tsx),
+  // resynchronisé avec le serveur : l'onglet « Modules » d'un compte promu super
+  // administrateur apparaît sans attendre une reconnexion.
   const user = getCurrentUser();
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  const userRole = useCurrentRole();
   const isAdmin = isAdminRole(userRole);
   const isSuper = isSuperAdminRole(userRole);
 
@@ -103,6 +99,11 @@ const Admin = () => {
   const [parametres, setParametres] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
   const [remunerationCommerciale, setRemunerationCommerciale] = useState<any>(null);
+  // Commerciaux rattachables à un chantier. Volontairement chargés depuis /commerciaux et
+  // non déduits de la liste des comptes : celle-ci ne montre pas les super administrateurs
+  // à un simple administrateur, et un superadmin « aussi commercial » doit malgré tout
+  // rester sélectionnable ici.
+  const [commerciaux, setCommerciaux] = useState<any[]>([]);
   // Ligne en cours d'édition : { type: 'intervenant'|'fournisseur'|'categorie', id, ...champs }
   const [editRow, setEditRow] = useState<any>(null);
   // Rôle sélectionné dans le formulaire "Autoriser un compte" — contrôlé uniquement pour
@@ -150,6 +151,11 @@ const Admin = () => {
       if (isAdmin) {
         const usersRes = await apiFetch('/users');
         if (usersRes.ok) setUsers(await usersRes.json());
+      }
+
+      if (activeTab === 'chantiers' && isAdmin) {
+        const comRes = await apiFetch('/commerciaux');
+        if (comRes.ok) setCommerciaux(await comRes.json());
       }
 
       if (activeTab === 'modules' && isSuper) {
@@ -431,10 +437,10 @@ const Admin = () => {
               </select>
             </div>
             <div className="form-group mb-0">
-              <label className="form-label">Commercial rattaché{users.some(isCommercialLike) ? '' : ' (aucun disponible)'}</label>
-              <select required={users.some(isCommercialLike)} name="commercialId" className="form-input" defaultValue="">
+              <label className="form-label">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
+              <select required={commerciaux.length > 0} name="commercialId" className="form-input" defaultValue="">
                 <option value="" disabled>Sélectionner un commercial...</option>
-                {users.filter(isCommercialLike).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="form-group mb-0">
@@ -961,7 +967,7 @@ const Admin = () => {
                         <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
                         <option value="COMMERCIAL">Commercial</option>
                         <option value="ADMIN">Administrateur</option>
-                        {(isSuper || isSuperAdminRole(u.role)) && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
+                        {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
                       </select>
                     </td>
                     <td className="px-6 py-4">

@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react';
+import { apiFetch, getToken } from './api';
+
 // Rôles de l'application — source unique de vérité côté client.
 // Le serveur applique exactement les mêmes règles (cf. isAdminRole / isSuperAdminRole
 // dans server/index.ts) : ce qui est masqué ici est également refusé côté API, l'affichage
@@ -46,4 +49,40 @@ export function getCurrentUser(): CurrentUser | null {
 
 export function getCurrentRole(): string {
   return getCurrentUser()?.role || ROLE_CONDUCTEUR;
+}
+
+/**
+ * Relit le compte connecté auprès du serveur et met à jour la copie locale.
+ * Indispensable après un changement de droits : le rôle mémorisé à la connexion peut
+ * dater (une promotion en super administrateur, par exemple, a lieu côté serveur sans que
+ * la session déjà ouverte en soit informée), alors que l'API applique immédiatement les
+ * nouveaux droits. Sans cette resynchronisation, les menus resteraient ceux de l'ancien
+ * rôle jusqu'à la prochaine connexion.
+ */
+export async function refreshCurrentUser(): Promise<CurrentUser | null> {
+  if (!getToken()) return null;
+  try {
+    const res = await apiFetch('/me');
+    if (!res.ok) return getCurrentUser();
+    const user = (await res.json()) as CurrentUser;
+    localStorage.setItem('user', JSON.stringify(user));
+    return user;
+  } catch {
+    return getCurrentUser();
+  }
+}
+
+/** Rôle du compte connecté : valeur mémorisée d'abord, valeur fraîche du serveur ensuite. */
+export function useCurrentRole(): string {
+  const [role, setRole] = useState(getCurrentRole);
+
+  useEffect(() => {
+    let annule = false;
+    refreshCurrentUser().then((u) => {
+      if (!annule && u?.role) setRole(u.role);
+    });
+    return () => { annule = true; };
+  }, []);
+
+  return role;
 }
