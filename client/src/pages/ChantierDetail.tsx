@@ -12,6 +12,7 @@ import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { DevisAutocomplete } from '../components/DevisAutocomplete';
 import { TYPES_CHANTIER } from '../chantierTypes';
+import { isAdminRole } from '../roles';
 
 // Date ISO (avec ou sans heure) -> "YYYY-MM-DD" attendu par <input type="date">.
 const toDateInputValue = (d: string | null | undefined) => (d ? d.slice(0, 10) : '');
@@ -436,7 +437,7 @@ const ChantierDetail = () => {
 
   // Le commercial rattaché est modifiable par l'admin ou par le conducteur responsable
   // du chantier — jamais par le commercial lui-même, ni par un autre conducteur.
-  const canEditCommercial = userRole === 'ADMIN' || (userRole === 'CONDUCTEUR_TRAVAUX' && chantier.responsable?.id === currentUser?.id);
+  const canEditCommercial = isAdminRole(userRole) || (userRole === 'CONDUCTEUR_TRAVAUX' && chantier.responsable?.id === currentUser?.id);
   const startEditCommercial = () => {
     if (commerciaux.length === 0) fetchCommerciaux();
     setEditingCommercial(true);
@@ -460,7 +461,7 @@ const ChantierDetail = () => {
 
           {/* Action Bar */}
           <div className="absolute top-6 right-6 flex gap-2">
-            {userRole === 'ADMIN' && (
+            {isAdminRole(userRole) && (
               <button
                 onClick={startEditChantier}
                 className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold hover:bg-gray-50 transition-colors shadow-sm text-sm"
@@ -495,7 +496,7 @@ const ChantierDetail = () => {
               {chantier.dossierNoxia && (
                 <span className="text-[11px] font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">Dossier NOXIA</span>
               )}
-              {isTermine && (userRole === 'ADMIN' ? (
+              {isTermine && (isAdminRole(userRole) ? (
                 <button
                   type="button"
                   onClick={handleToggleEncaisse}
@@ -558,7 +559,7 @@ const ChantierDetail = () => {
               la commission du commercial du mois (clause de sécurisation des commissions).
               Le badge ci-dessus permet déjà de basculer ce statut, mais reste discret parmi
               les autres badges — cette bannière rend l'action impossible à manquer. */}
-          {isTermine && !chantier.encaisse && userRole === 'ADMIN' && (
+          {isTermine && !chantier.encaisse && isAdminRole(userRole) && (
             <div className="mb-6 p-4 rounded-xl border-l-8 border-amber-500 bg-amber-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="font-bold text-amber-800">Chantier terminé, en attente d'encaissement</div>

@@ -1,18 +1,23 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays } from 'lucide-react';
 import { applyTheme } from '../theme';
+import { getCurrentRole, isAdminRole, ROLE_COMMERCIAL } from '../roles';
+import { clearCachedModules, useModules } from '../modules';
 import './Sidebar.css';
 
 const Sidebar = () => {
   const navigate = useNavigate();
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
-  const isCommercial = userRole === 'COMMERCIAL';
+  const userRole = getCurrentRole();
+  const isCommercial = userRole === ROLE_COMMERCIAL;
+  const isAdmin = isAdminRole(userRole);
+  // Planning : masqué pour tous les comptes (administrateurs compris) quand un superadmin
+  // a désactivé le module depuis Administration > Modules.
+  const { planningActif } = useModules();
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    clearCachedModules();
     applyTheme('light');
     navigate('/login');
   };
@@ -56,7 +61,7 @@ const Sidebar = () => {
           </NavLink>
         )}
 
-        {!isCommercial && (
+        {!isCommercial && planningActif && (
           <NavLink to="/planning" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <CalendarDays size={20} />
             Planning
@@ -70,12 +75,17 @@ const Sidebar = () => {
           </NavLink>
         )}
 
-        {userRole === 'ADMIN' && (
+        {/* Administration : complète pour les administrateurs, réduite aux référentiels
+            Fournisseurs et Catégories pour les conducteurs de travaux (cf. Admin.tsx). */}
+        {!isCommercial && (
+          <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Settings size={20} />
+            Administration
+          </NavLink>
+        )}
+
+        {isAdmin && (
           <>
-            <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Settings size={20} />
-              Administration
-            </NavLink>
             <NavLink to="/performances" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
               <Activity size={20} />
               Performances

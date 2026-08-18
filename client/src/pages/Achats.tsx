@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
+import { isAdminRole } from '../roles';
 
 const Achats = () => {
   const [achats, setAchats] = useState<any[]>([]);
@@ -46,7 +47,7 @@ const Achats = () => {
 
   // Un chantier clôturé est en lecture seule pour un conducteur : on ne le propose
   // plus à la saisie (un admin, lui, garde la main pour corriger l'historique).
-  const chantiersSelectionnables = userRole === 'ADMIN' ? chantiers : chantiers.filter(c => c.statut === 'EN_COURS');
+  const chantiersSelectionnables = isAdminRole(userRole) ? chantiers : chantiers.filter(c => c.statut === 'EN_COURS');
 
   return (
     <div>

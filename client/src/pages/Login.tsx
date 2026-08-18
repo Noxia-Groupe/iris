@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { PublicClientApplication } from '@azure/msal-browser';
 import { apiFetch } from '../api';
 import { applyTheme } from '../theme';
+import { refreshModules } from '../modules';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -61,6 +62,9 @@ const Login = () => {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
         applyTheme(data.user.theme === 'dark' ? 'dark' : 'light');
+        // Modules activés pour ce compte (cf. Administration > Modules) : chargés dès la
+        // connexion pour que le menu latéral soit juste dès le premier écran.
+        await refreshModules();
         navigate('/');
       } else if (res.status === 403) {
         navigate('/acces-refuse');
@@ -97,6 +101,7 @@ const Login = () => {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
         applyTheme(data.user.theme === 'dark' ? 'dark' : 'light');
+        await refreshModules();
         navigate('/');
       } else {
         setError(data.error || 'Erreur de connexion');

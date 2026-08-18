@@ -135,9 +135,34 @@ const requireAuth: express.RequestHandler = (req, res, next) => {
   }
 };
 
+// --- Rôles de l'application ---
+// SUPERADMIN : rôle « direction ». Il possède TOUS les droits d'un ADMIN (cf. isAdminRole,
+// utilisé partout où l'application testait jusqu'ici `role === 'ADMIN'`) et, EN PLUS, les
+// réglages qui lui sont réservés : gestion des comptes SUPERADMIN et activation ou
+// désactivation des modules de l'application (cf. Parametres.planningActif). Un ADMIN ne
+// peut ni se promouvoir superadmin, ni modifier/supprimer un compte superadmin — sans quoi
+// la séparation entre les deux rôles n'aurait aucune valeur.
+const ROLE_SUPERADMIN = 'SUPERADMIN';
+
+function isAdminRole(role: string | undefined | null): boolean {
+  return role === 'ADMIN' || role === ROLE_SUPERADMIN;
+}
+function isSuperAdminRole(role: string | undefined | null): boolean {
+  return role === ROLE_SUPERADMIN;
+}
+
 const requireAdmin: express.RequestHandler = (req, res, next) => {
-  if ((req as AuthRequest).user?.role !== 'ADMIN') {
+  if (!isAdminRole((req as AuthRequest).user?.role)) {
     res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+    return;
+  }
+  next();
+};
+
+// Réglages réservés au superadmin (modules de l'application, comptes superadmin).
+const requireSuperAdmin: express.RequestHandler = (req, res, next) => {
+  if (!isSuperAdminRole((req as AuthRequest).user?.role)) {
+    res.status(403).json({ error: 'Accès réservé au super administrateur' });
     return;
   }
   next();
@@ -161,9 +186,33 @@ const blockCommercial: express.RequestHandler = (req, res, next) => {
 // COMMERCIAL. isCommercialLike() et COMMERCIAL_OR_FILTER couvrent les deux cas partout où
 // l'appli devait jusqu'ici filtrer strictement sur role === 'COMMERCIAL'.
 function isCommercialLike(u: { role: string; estCommercial?: boolean | null }): boolean {
-  return u.role === 'COMMERCIAL' || (u.role === 'ADMIN' && !!u.estCommercial);
+  return u.role === 'COMMERCIAL' || (isAdminRole(u.role) && !!u.estCommercial);
 }
-const COMMERCIAL_OR_FILTER = [{ role: 'COMMERCIAL' }, { role: 'ADMIN', estCommercial: true }];
+const COMMERCIAL_OR_FILTER = [
+  { role: 'COMMERCIAL' },
+  { role: 'ADMIN', estCommercial: true },
+  { role: ROLE_SUPERADMIN, estCommercial: true },
+];
+
+// Module Planning : quand un SUPERADMIN le désactive (Parametres.planningActif = false),
+// il disparaît pour TOUS les autres comptes, administrateurs compris. Le blocage est ici,
+// côté serveur — masquer le menu côté client ne serait qu'un habillage, l'API resterait
+// appelable. Les données ne sont jamais supprimées : la réactivation restitue le planning
+// tel quel. Ne s'applique pas au lien de partage public (cf. GET /api/planning/public/:token),
+// qui garde son propre interrupteur (PlanningPublicShare.active).
+const requirePlanningActif: express.RequestHandler = async (req, res, next) => {
+  try {
+    if (isSuperAdminRole((req as AuthRequest).user?.role)) return next();
+    const { planningActif } = await getParametres();
+    if (!planningActif) {
+      res.status(403).json({ code: 'PLANNING_DESACTIVE', error: "Le module Planning est désactivé par l'administration." });
+      return;
+    }
+    next();
+  } catch (error) {
+    res.status(500).json({ error: 'Error checking planning module' });
+  }
+};
 
 // Express 5 type les valeurs de req.params comme `string | string[]`. Nos routes
 // n'utilisent que des paramètres simples (:id) : on en extrait toujours une string.
@@ -191,7 +240,7 @@ function decimalToNumber(value: any): any {
 }
 
 // --- Paramètres globaux (singleton) ---
-interface Parametres { margeCommercialeActive: boolean }
+interface Parametres { margeCommercialeActive: boolean; planningActif: boolean }
 
 // Retourne les paramètres avec les Decimal convertis en nombres.
 // upsert atomique (INSERT ... ON CONFLICT) pour éviter toute race entre requêtes
@@ -461,7 +510,7 @@ app.get('/api/odoo/devis/:id/adresse', requireAuth, async (req, res) => {
 app.get('/api/chantiers', requireAuth, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
-    const isAdmin = authUser.role === 'ADMIN';
+    const isAdmin = isAdminRole(authUser.role);
     const params = await getParametres();
     const where = isAdmin
       ? {}
@@ -490,7 +539,7 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
 app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
-    const isAdmin = authUser.role === 'ADMIN';
+    const isAdmin = isAdminRole(authUser.role);
     const params = await getParametres();
     const chantier = await prisma.chantier.findUnique({
       where: { id: paramId(req) },
@@ -520,11 +569,12 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
 app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
+    const isAdmin = isAdminRole(authUser.role);
     // Un conducteur qui crée un chantier en devient automatiquement le responsable ;
     // un admin doit obligatoirement désigner un responsable (sinon le chantier créé
     // resterait invisible à tout conducteur, cf. filtrage ci-dessus).
     let responsableId: string;
-    if (authUser.role === 'ADMIN') {
+    if (isAdmin) {
       responsableId = String(req.body.responsableId || '');
       if (!responsableId) {
         return res.status(400).json({ error: 'Veuillez sélectionner le conducteur responsable de ce chantier.' });
@@ -649,7 +699,7 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
 app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
-    const isAdmin = authUser.role === 'ADMIN';
+    const isAdmin = isAdminRole(authUser.role);
     const nextStatut = req.body.statut;
     if (nextStatut !== 'EN_COURS' && nextStatut !== 'TERMINE') {
       return res.status(400).json({ error: 'Statut invalide.' });
@@ -684,7 +734,7 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req,
 app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
-    const isAdmin = authUser.role === 'ADMIN';
+    const isAdmin = isAdminRole(authUser.role);
     const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) } });
     if (!chantier) {
       return res.status(404).json({ error: 'Chantier introuvable' });
@@ -737,16 +787,40 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
 // Autorise un nouveau compte à se connecter (liste blanche SSO / création de compte).
 // Aucun mot de passe n'est défini : le compte se connecte via le SSO Microsoft. Un
 // administrateur peut ensuite lui attribuer un mot de passe local via « Changer Mdp ».
-const ALLOWED_ROLES = ['ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL'];
+const ALLOWED_ROLES = [ROLE_SUPERADMIN, 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL'];
+
+// Un compte SUPERADMIN n'est administrable QUE par un superadmin : le créer, lui changer
+// de rôle, lui réattribuer un mot de passe ou le révoquer sont autant de moyens, pour un
+// simple ADMIN, de s'emparer des droits de la direction. Renvoie un message d'erreur si
+// l'opération doit être refusée, sinon null.
+function refuseSuperAdminTarget(req: express.Request, targetRole: string | null | undefined): string | null {
+  if (!isSuperAdminRole(targetRole)) return null;
+  if (isSuperAdminRole((req as AuthRequest).user?.role)) return null;
+  return 'Seul un super administrateur peut gérer un compte super administrateur.';
+}
+
+// Garde-fou : l'application doit toujours conserver au moins un compte superadmin, sinon
+// plus personne ne peut piloter les modules ni rendre la main à un autre superadmin.
+async function isLastSuperAdmin(userId: string): Promise<boolean> {
+  const count = await prisma.user.count({ where: { role: ROLE_SUPERADMIN } });
+  if (count > 1) return false;
+  const target = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+  return isSuperAdminRole(target?.role);
+}
 
 app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
     const name = String(req.body.name ?? '').trim();
     const role = ALLOWED_ROLES.includes(req.body.role) ? req.body.role : 'CONDUCTEUR_TRAVAUX';
-    // "estCommercial" n'a de sens que pour un ADMIN (cf. isCommercialLike) : ignoré pour
-    // les autres rôles, pour éviter un état orphelin sans effet mais trompeur en base.
-    const estCommercial = role === 'ADMIN' && !!req.body.estCommercial;
+    const refus = refuseSuperAdminTarget(req, role);
+    if (refus) {
+      return res.status(403).json({ error: refus });
+    }
+    // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN (cf. isCommercialLike) :
+    // ignoré pour les autres rôles, pour éviter un état orphelin sans effet mais trompeur
+    // en base.
+    const estCommercial = isAdminRole(role) && !!req.body.estCommercial;
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Adresse email invalide.' });
@@ -780,6 +854,13 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     if (!target) {
       return res.status(404).json({ error: 'Utilisateur introuvable.' });
     }
+    const refus = refuseSuperAdminTarget(req, target.role);
+    if (refus) {
+      return res.status(403).json({ error: refus });
+    }
+    if (await isLastSuperAdmin(target.id)) {
+      return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
+    }
     await prisma.$transaction([
       prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
       prisma.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } }),
@@ -798,12 +879,25 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
     if (!ALLOWED_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Rôle invalide' });
     }
+    const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+    if (!target) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    // Refus dans les DEUX sens : un ADMIN ne peut ni rétrograder un superadmin, ni
+    // promouvoir qui que ce soit (lui compris) au rang de superadmin.
+    const refus = refuseSuperAdminTarget(req, target.role) || refuseSuperAdminTarget(req, role);
+    if (refus) {
+      return res.status(403).json({ error: refus });
+    }
+    if (!isSuperAdminRole(role) && (await isLastSuperAdmin(target.id))) {
+      return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
+    }
     const user = await prisma.user.update({
-      where: { id: paramId(req) },
-      // "estCommercial" n'a de sens que pour un ADMIN : on le retire si le compte quitte
-      // ce rôle, pour ne pas laisser un état orphelin qui réapparaîtrait s'il redevenait
-      // ADMIN plus tard sans qu'on l'ait explicitement redemandé.
-      data: role === 'ADMIN' ? { role } : { role, estCommercial: false },
+      where: { id: target.id },
+      // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
+      // compte quitte ces rôles, pour ne pas laisser un état orphelin qui réapparaîtrait
+      // s'il y revenait plus tard sans qu'on l'ait explicitement redemandé.
+      data: isAdminRole(role) ? { role } : { role, estCommercial: false },
       select: { id: true, name: true, email: true, role: true, estCommercial: true }
     });
     res.json(user);
@@ -822,8 +916,12 @@ app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req
     if (!target) {
       return res.status(404).json({ error: 'Utilisateur introuvable.' });
     }
-    if (target.role !== 'ADMIN') {
+    if (!isAdminRole(target.role)) {
       return res.status(400).json({ error: 'Seul un compte Administrateur peut être marqué "aussi commercial".' });
+    }
+    const refus = refuseSuperAdminTarget(req, target.role);
+    if (refus) {
+      return res.status(403).json({ error: refus });
     }
     const user = await prisma.user.update({
       where: { id: target.id },
@@ -842,9 +940,19 @@ app.put('/api/users/:id/password', requireAuth, requireAdmin, async (req, res) =
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caractères.' });
     }
+    const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+    if (!target) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    // Réattribuer le mot de passe d'un superadmin, c'est prendre sa place : réservé aux
+    // superadmins (un superadmin peut donc changer le sien et celui de ses pairs).
+    const refus = refuseSuperAdminTarget(req, target.role);
+    if (refus) {
+      return res.status(403).json({ error: refus });
+    }
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
-      where: { id: paramId(req) },
+      where: { id: target.id },
       data: { password: hashedPassword }
     });
     res.json({ success: true });
@@ -1033,7 +1141,7 @@ async function validatePlanningEvent(body: Record<string, unknown>): Promise<{ e
 // technicien sur n'importe quel chantier en cours, pas seulement les siens. N'affecte en rien
 // la visibilité des chantiers ailleurs dans l'application (Liste des Chantiers, Tableau de
 // bord...), qui reste strictement scoped par responsable pour un conducteur.
-app.get('/api/planning/chantiers', requireAuth, blockCommercial, async (req, res) => {
+app.get('/api/planning/chantiers', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     const chantiers = await prisma.chantier.findMany({
       select: { id: true, nom: true, client: true, statut: true },
@@ -1046,7 +1154,7 @@ app.get('/api/planning/chantiers', requireAuth, blockCommercial, async (req, res
 });
 
 // Affectations chevauchant la plage de jours [start, end] (bornes incluses).
-app.get('/api/planning/events', requireAuth, blockCommercial, async (req, res) => {
+app.get('/api/planning/events', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     const start = parsePlanningJour(req.query.start);
     const end = parsePlanningJour(req.query.end);
@@ -1062,7 +1170,7 @@ app.get('/api/planning/events', requireAuth, blockCommercial, async (req, res) =
   }
 });
 
-app.post('/api/planning/events', requireAuth, blockCommercial, async (req, res) => {
+app.post('/api/planning/events', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     const { error, data, intervenantIds } = await validatePlanningEvent(req.body);
     if (error) return res.status(400).json({ error });
@@ -1078,7 +1186,7 @@ app.post('/api/planning/events', requireAuth, blockCommercial, async (req, res) 
 
 // Édition complète ou déplacement (glisser-déposer) : fusion existant + corps reçu,
 // puis revalidation de l'ensemble — cf. validatePlanningEvent.
-app.patch('/api/planning/events/:id', requireAuth, blockCommercial, async (req, res) => {
+app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     const existing = await prisma.planningEvent.findUnique({
       where: { id: paramId(req) },
@@ -1115,7 +1223,7 @@ app.patch('/api/planning/events/:id', requireAuth, blockCommercial, async (req, 
   }
 });
 
-app.delete('/api/planning/events/:id', requireAuth, blockCommercial, async (req, res) => {
+app.delete('/api/planning/events/:id', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     const existing = await prisma.planningEvent.findUnique({ where: { id: paramId(req) } });
     if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
@@ -1127,7 +1235,7 @@ app.delete('/api/planning/events/:id', requireAuth, blockCommercial, async (req,
 });
 
 // Types d'événements personnalisés du planning (libellé + couleur, réutilisables).
-app.get('/api/planning/types', requireAuth, blockCommercial, async (req, res) => {
+app.get('/api/planning/types', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     res.json(await prisma.planningEventType.findMany({ orderBy: { nom: 'asc' } }));
   } catch (error) {
@@ -1135,7 +1243,7 @@ app.get('/api/planning/types', requireAuth, blockCommercial, async (req, res) =>
   }
 });
 
-app.post('/api/planning/types', requireAuth, blockCommercial, async (req, res) => {
+app.post('/api/planning/types', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     const nom = String(req.body.nom || '').trim();
     if (!nom) return res.status(400).json({ error: 'Le libellé du type est requis.' });
@@ -1147,7 +1255,7 @@ app.post('/api/planning/types', requireAuth, blockCommercial, async (req, res) =
   }
 });
 
-app.put('/api/planning/types/:id', requireAuth, blockCommercial, async (req, res) => {
+app.put('/api/planning/types/:id', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     const data: Record<string, unknown> = {};
     if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
@@ -1161,7 +1269,7 @@ app.put('/api/planning/types/:id', requireAuth, blockCommercial, async (req, res
 });
 
 // Supprimer un type d'événement. Bloqué si des affectations du planning l'utilisent.
-app.delete('/api/planning/types/:id', requireAuth, blockCommercial, async (req, res) => {
+app.delete('/api/planning/types/:id', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
   try {
     const id = paramId(req);
     const used = await prisma.planningEvent.count({ where: { typeEventId: id } });
@@ -1200,7 +1308,7 @@ function serializeShare(share: { token: string; active: boolean; updatedAt: Date
   };
 }
 
-app.get('/api/planning/share', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, async (req, res) => {
   try {
     const share = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
     res.json(serializeShare(share));
@@ -1212,7 +1320,7 @@ app.get('/api/planning/share', requireAuth, requireAdmin, async (req, res) => {
 // Publie le planning (1ère fois) ou renouvelle le lien existant : génère TOUJOURS un
 // nouveau token aléatoire et (ré)active le partage — l'ancien lien devient aussitôt
 // invalide (cf. GET /api/planning/public/:token, qui compare le token reçu au token stocké).
-app.post('/api/planning/share', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, async (req, res) => {
   try {
     const token = generateShareToken();
     const share = await prisma.planningPublicShare.upsert({
@@ -1229,7 +1337,7 @@ app.post('/api/planning/share', requireAuth, requireAdmin, async (req, res) => {
 // Active/désactive le partage SANS changer le token (contrairement à la régénération
 // ci-dessus) : permet de couper l'accès temporairement puis de le rétablir avec le même
 // lien déjà communiqué aux techniciens.
-app.patch('/api/planning/share', requireAuth, requireAdmin, async (req, res) => {
+app.patch('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, async (req, res) => {
   try {
     const existing = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
     if (!existing) return res.status(404).json({ error: "Le planning n'a encore jamais été publié." });
@@ -1285,12 +1393,17 @@ app.get('/api/planning/public/:token', async (req, res) => {
   }
 });
 
-// Categories & Fournisseurs
+// --- Categories & Fournisseurs ---
+// Référentiels partagés du Journal des Achats : leur tenue à jour est ouverte aux
+// CONDUCTEURS DE TRAVAUX en plus des administrateurs (ils saisissent les achats au
+// quotidien et ont besoin de créer un fournisseur ou une catégorie manquante sans
+// attendre la Direction), d'où `blockCommercial` plutôt que `requireAdmin` : seuls les
+// commerciaux, dont l'accès est strictement en lecture, en restent exclus.
 app.get('/api/categories', requireAuth, async (req, res) => res.json(await prisma.categorie.findMany({ orderBy: { nom: 'asc' } })));
-app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => res.json(await prisma.categorie.create({ data: { nom: req.body.nom, description: req.body.description || null } })));
+app.post('/api/categories', requireAuth, blockCommercial, async (req, res) => res.json(await prisma.categorie.create({ data: { nom: req.body.nom, description: req.body.description || null } })));
 
 // Modifier une catégorie (nom, description).
-app.put('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
+app.put('/api/categories/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const data: Record<string, unknown> = {};
     if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
@@ -1303,7 +1416,7 @@ app.put('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Supprimer une catégorie. Bloqué si des achats ou lignes de budget l'utilisent.
-app.delete('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/api/categories/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const id = paramId(req);
     const achats = await prisma.achatReel.count({ where: { categorieId: id } });
@@ -1319,10 +1432,10 @@ app.delete('/api/categories/:id', requireAuth, requireAdmin, async (req, res) =>
 });
 
 app.get('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.findMany({ orderBy: { nom: 'asc' } })));
-app.post('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.create({ data: { nom: req.body.nom, contact: req.body.contact || null } })));
+app.post('/api/fournisseurs', requireAuth, blockCommercial, async (req, res) => res.json(await prisma.fournisseur.create({ data: { nom: req.body.nom, contact: req.body.contact || null } })));
 
 // Modifier un fournisseur (nom, contact).
-app.put('/api/fournisseurs/:id', requireAuth, async (req, res) => {
+app.put('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const data: Record<string, unknown> = {};
     if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
@@ -1335,7 +1448,7 @@ app.put('/api/fournisseurs/:id', requireAuth, async (req, res) => {
 });
 
 // Supprimer un fournisseur. Bloqué si des achats y sont rattachés (historique préservé).
-app.delete('/api/fournisseurs/:id', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const id = paramId(req);
     const used = await prisma.achatReel.count({ where: { fournisseurId: id } });
@@ -1354,7 +1467,7 @@ app.delete('/api/fournisseurs/:id', requireAuth, requireAdmin, async (req, res) 
 // lui seul qui peut d'ailleurs réouvrir un chantier clôturé, cf. PATCH .../statut).
 // Envoie la réponse d'erreur et retourne null si l'écriture est refusée.
 async function assertChantierWritable(req: express.Request, res: express.Response, chantierId: string) {
-  const isAdmin = (req as AuthRequest).user?.role === 'ADMIN';
+  const isAdmin = isAdminRole((req as AuthRequest).user?.role);
   const chantier = await prisma.chantier.findUnique({ where: { id: chantierId } });
   if (!chantier) {
     res.status(404).json({ error: 'Chantier introuvable' });
@@ -1630,6 +1743,9 @@ app.get('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// N'écrit QUE margeCommercialeActive : l'activation des modules (planningActif) est
+// réservée au superadmin et passe par PUT /api/modules — un ADMIN ne doit pas pouvoir la
+// modifier, même en glissant le champ dans le corps de cette requête.
 app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
   try {
     const data = {
@@ -1646,6 +1762,37 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// --- Modules de l'application (activation par le superadmin) ---
+// Lecture : accessible à TOUT compte authentifié — le client en a besoin pour savoir
+// quelles entrées de menu afficher. On renvoie la visibilité EFFECTIVE pour le compte
+// connecté : un superadmin garde toujours accès au planning, même désactivé (c'est lui
+// qui le pilote), les autres suivent le réglage global.
+app.get('/api/modules', requireAuth, async (req, res) => {
+  try {
+    const { planningActif } = await getParametres();
+    const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
+    res.json({ planningActif: isSuper || planningActif, planningActifGlobal: planningActif });
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching modules' });
+  }
+});
+
+// Écriture : superadmin uniquement. Désactiver le planning ne supprime RIEN — les
+// affectations et types d'événements restent en base et réapparaissent à la réactivation.
+app.put('/api/modules', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const planningActif = !!req.body.planningActif;
+    const p = await prisma.parametres.upsert({
+      where: { id: 'singleton' },
+      update: { planningActif },
+      create: { id: 'singleton', planningActif },
+    });
+    res.json({ planningActif: true, planningActifGlobal: p.planningActif });
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating modules' });
+  }
+});
+
 // Statistiques globales (agrégées côté serveur, périmètre selon le rôle)
 // Statistiques du tableau de bord : compteurs de statut (instantanés, jamais filtrés par
 // période — comme les listes "chantiers en cours/archivés" du dashboard qu'ils
@@ -1655,7 +1802,7 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
 app.get('/api/stats/global', requireAuth, async (req, res) => {
   try {
     const user = (req as AuthRequest).user!;
-    const isAdmin = user.role === 'ADMIN';
+    const isAdmin = isAdminRole(user.role);
     const isCommercial = user.role === 'COMMERCIAL';
     const params = await getParametres();
     const period = (['month', 'quarter', 'year'] as const).includes(req.query.period as any)
@@ -2098,7 +2245,7 @@ app.get('/api/stats/fournisseurs', requireAuth, blockCommercial, async (req, res
 app.get('/api/stats/types-chantiers', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
-    const isAdmin = authUser.role === 'ADMIN';
+    const isAdmin = isAdminRole(authUser.role);
     const period = req.query.period === 'year' ? 'year' : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
 
@@ -2264,7 +2411,7 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
 app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
-    const isAdmin = authUser.role === 'ADMIN';
+    const isAdmin = isAdminRole(authUser.role);
     if (!isAdmin && authUser.role !== 'COMMERCIAL') {
       return res.status(403).json({ error: 'Accès réservé' });
     }
@@ -2396,6 +2543,67 @@ Rédige un compte-rendu exécutif d'environ 150-200 mots résumant la situation 
   }
 });
 
+// --- Comptes super administrateurs de départ ---
+// Deux comptes doivent TOUJOURS exister avec le rôle SUPERADMIN, quelle que soit
+// l'ancienneté de la base (installation neuve comme base déjà en production) :
+//   - nelson@noxia-groupe.fr : compte de la direction, connexion via le SSO Microsoft
+//     (aucun mot de passe local n'est créé — il n'en a pas besoin) ;
+//   - admin@cybexia.fr : compte local « de base », qui garde son mot de passe existant.
+// La liste est surchargeable via SUPERADMIN_EMAILS (emails séparés par des virgules).
+// Traitement IDEMPOTENT et non destructif : un compte déjà présent est simplement promu
+// SUPERADMIN (son nom, son mot de passe et ses rattachements sont conservés) ; un compte
+// absent est créé. Aucun compte n'est jamais rétrogradé ici — retirer le rôle superadmin
+// se fait depuis Administration > Utilisateurs, par un superadmin.
+const SUPERADMIN_LOCAL_EMAIL = 'admin@cybexia.fr';
+const DEFAULT_SUPERADMIN_EMAILS = ['nelson@noxia-groupe.fr', SUPERADMIN_LOCAL_EMAIL];
+
+// « nelson@noxia-groupe.fr » -> « Nelson » : nom d'affichage par défaut d'un compte créé
+// automatiquement, que son titulaire ou un superadmin pourra corriger ensuite.
+function nameFromEmail(email: string): string {
+  const local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
+  return local.replace(/\b\w/g, (c) => c.toUpperCase()) || email;
+}
+
+const ensureSuperAdmins = async () => {
+  const emails = (process.env.SUPERADMIN_EMAILS || DEFAULT_SUPERADMIN_EMAILS.join(','))
+    .split(',')
+    .map(normalizeEmail)
+    .filter(Boolean);
+
+  for (const email of emails) {
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      if (existing.role !== ROLE_SUPERADMIN) {
+        await prisma.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
+        console.log(`Compte promu super administrateur : ${email}`);
+      }
+      continue;
+    }
+    // Compte local « de base » : on ne lui pose un mot de passe que si ADMIN_PASSWORD est
+    // fourni. Sans cela, aucun mot de passe par défaut n'est inventé (ce serait un accès
+    // ouvert) : le compte existe, autorisé, et un superadmin lui en attribuera un depuis
+    // Administration > Utilisateurs > « Changer Mdp ».
+    const motDePasse = email === SUPERADMIN_LOCAL_EMAIL ? process.env.ADMIN_PASSWORD : undefined;
+    await prisma.user.create({
+      data: {
+        email,
+        name: email === SUPERADMIN_LOCAL_EMAIL ? 'Administrateur' : nameFromEmail(email),
+        role: ROLE_SUPERADMIN,
+        password: motDePasse ? await bcrypt.hash(motDePasse, 10) : null,
+      },
+    });
+    console.log(
+      `Compte super administrateur créé : ${email}` +
+        (motDePasse ? ' (mot de passe local défini)' : " (connexion SSO ; définissez un mot de passe depuis Administration > Utilisateurs si besoin d'un accès local)")
+    );
+  }
+
+  const total = await prisma.user.count({ where: { role: ROLE_SUPERADMIN } });
+  if (total === 0) {
+    console.warn('[AVERTISSEMENT] Aucun compte super administrateur : les modules de l\'application ne peuvent pas être pilotés.');
+  }
+};
+
 // Initialisation BDD (Seeding)
 const initDb = async () => {
   // Garantit l'existence de la ligne de paramètres (singleton) dès le démarrage.
@@ -2431,5 +2639,6 @@ const initDb = async () => {
 
 app.listen(port, async () => {
   await initDb();
+  await ensureSuperAdmins();
   console.log(`Server running on port ${port}`);
 });

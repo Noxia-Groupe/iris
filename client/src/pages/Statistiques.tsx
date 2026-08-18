@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PieChart, Users, Truck, Tags, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiFetch } from '../api';
+import { isAdminRole, roleLabel } from '../roles';
 
 type Period = 'week' | 'month' | 'year';
 
@@ -335,7 +336,7 @@ const Statistiques = () => {
   const user = userStr ? JSON.parse(userStr) : null;
   const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
 
-  const [activeTab, setActiveTab] = useState(userRole === 'ADMIN' ? 'chantiers' : 'intervenants');
+  const [activeTab, setActiveTab] = useState(isAdminRole(userRole) ? 'chantiers' : 'intervenants');
 
   return (
     <div>
@@ -346,13 +347,13 @@ const Statistiques = () => {
         </div>
         <div className="flex gap-1 items-center bg-gray-100 p-2 rounded">
           <span className="text-sm font-semibold text-gray-500">
-            Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : 'Conducteur'}</strong>
+            Connecté en tant que: <strong className="text-primary-dark">{roleLabel(userRole)}</strong>
           </span>
         </div>
       </div>
 
       <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-        {userRole === 'ADMIN' && (
+        {isAdminRole(userRole) && (
           <button className={`btn flex items-center gap-2 ${activeTab === 'chantiers' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('chantiers')}>
             <PieChart size={16} /> Chantiers
           </button>
@@ -369,7 +370,7 @@ const Statistiques = () => {
       </div>
 
       <div className="card">
-        {activeTab === 'chantiers' && userRole === 'ADMIN' && (
+        {activeTab === 'chantiers' && isAdminRole(userRole) && (
           <>
             <h2 className="mb-1 text-primary-dark">Répartition des chantiers terminés</h2>
             <p className="text-sm text-muted mb-2">

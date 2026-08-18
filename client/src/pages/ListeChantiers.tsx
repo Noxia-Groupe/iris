@@ -5,6 +5,7 @@ import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { DevisAutocomplete } from '../components/DevisAutocomplete';
+import { isAdminRole, roleLabel } from '../roles';
 
 const ListeChantiers = () => {
   const navigate = useNavigate();
@@ -34,7 +35,7 @@ const ListeChantiers = () => {
   useEffect(() => {
     fetchChantiers();
     // La liste des conducteurs (pour l'affectation) n'est accessible qu'aux admins.
-    if (userRole === 'ADMIN') fetchUsers();
+    if (isAdminRole(userRole)) fetchUsers();
     // Le commercial rattaché est à choisir dès la création, par l'admin comme le conducteur.
     if (userRole !== 'COMMERCIAL') fetchCommerciaux();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -177,7 +178,7 @@ const ListeChantiers = () => {
               <th className="px-6 py-4 font-semibold">Client</th>
               <th className="px-6 py-4 font-semibold text-center">Avancement</th>
               <th className="px-6 py-4 font-semibold text-right">
-                {userRole === 'ADMIN' ? 'Marge Actuelle' : 'Solde Heures'}
+                {isAdminRole(userRole) ? 'Marge Actuelle' : 'Solde Heures'}
               </th>
               <th className="px-6 py-4 font-semibold text-right">Actions</th>
             </tr>
@@ -217,7 +218,7 @@ const ListeChantiers = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    {userRole === 'ADMIN' ? (
+                    {isAdminRole(userRole) ? (
                       margeCommerciale !== null ? (
                         <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                           {margeCommerciale > 0 ? '+' : ''}{margeCommerciale.toLocaleString()} €
@@ -242,7 +243,7 @@ const ListeChantiers = () => {
                           <Archive size={14} /> Clôturer
                         </button>
                       )}
-                      {c.statut === 'TERMINE' && userRole === 'ADMIN' && (
+                      {c.statut === 'TERMINE' && isAdminRole(userRole) && (
                         <button
                           onClick={() => handleReouvrir(c.id, c.nom)}
                           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-blue-50 text-accent hover:bg-blue-100 rounded-lg transition-colors"
@@ -251,7 +252,7 @@ const ListeChantiers = () => {
                           <RotateCcw size={14} /> Réouvrir
                         </button>
                       )}
-                      {userRole === 'ADMIN' && (
+                      {isAdminRole(userRole) && (
                         <>
                           <button
                             onClick={() => handleZipExport(c.id, c.nom)}
@@ -312,7 +313,7 @@ const ListeChantiers = () => {
           {/* Rôle actuel (Affichage uniquement) */}
           <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
             <span className="text-sm font-semibold text-gray-500">
-              Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : userRole === 'COMMERCIAL' ? 'Commercial' : 'Conducteur'}</strong>
+              Connecté en tant que: <strong className="text-primary-dark">{roleLabel(userRole)}</strong>
             </span>
           </div>
         </div>
@@ -330,7 +331,7 @@ const ListeChantiers = () => {
               <label className="form-label">Client</label>
               <ClientAutocomplete required onSelect={(c) => setNouveauChantierClientId(c ? c.id : null)} />
             </div>
-            {userRole === 'ADMIN' ? (
+            {isAdminRole(userRole) ? (
               <div className="form-group mb-0">
                 <label className="form-label">Conducteur responsable</label>
                 <select required name="responsableId" className="form-input" defaultValue="">

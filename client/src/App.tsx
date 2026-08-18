@@ -18,8 +18,14 @@ import MesCommerciaux from './pages/MesCommerciaux';
 import Planning from './pages/Planning';
 import PlanningPublic from './pages/PlanningPublic';
 import { ErrorBoundary } from './ErrorBoundary';
+import { ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
+import { useModules } from './modules';
 
-const PrivateRoute = ({ children, requiredRole, excludedRole }: { children: JSX.Element, requiredRole?: string, excludedRole?: string }) => {
+// Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
+// ADMIN, il doit donc figurer partout où l'ADMIN était jusqu'ici seul admis.
+const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
+
+const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX.Element, requiredRoles?: string[], excludedRole?: string }) => {
   const token = localStorage.getItem('token');
   const userStr = localStorage.getItem('user');
 
@@ -29,7 +35,7 @@ const PrivateRoute = ({ children, requiredRole, excludedRole }: { children: JSX.
 
   const user = JSON.parse(userStr);
 
-  if (requiredRole && user.role !== requiredRole) {
+  if (requiredRoles && !requiredRoles.includes(user.role)) {
     return <Navigate to="/" />; // Redirect to dashboard if not authorized
   }
   if (excludedRole && user.role === excludedRole) {
@@ -49,6 +55,13 @@ const PrivateRoute = ({ children, requiredRole, excludedRole }: { children: JSX.
       </div>
     </div>
   );
+};
+
+// Module Planning désactivé par le superadmin : la page n'est plus atteignable, même en
+// tapant l'URL. Le serveur refuse de toute façon les appels /api/planning/* (403).
+const PlanningRoute = () => {
+  const { planningActif } = useModules();
+  return planningActif ? <Planning /> : <Navigate to="/" replace />;
 };
 
 function App() {
@@ -96,24 +109,26 @@ function App() {
 
         <Route path="/planning" element={
           <PrivateRoute excludedRole="COMMERCIAL">
-            <Planning />
+            <PlanningRoute />
           </PrivateRoute>
         } />
 
+        {/* Administration : accessible aussi aux conducteurs de travaux, qui n'y voient
+            que les référentiels Fournisseurs et Catégories (cf. pages/Admin.tsx). */}
         <Route path="/admin" element={
-          <PrivateRoute requiredRole="ADMIN">
+          <PrivateRoute excludedRole="COMMERCIAL">
             <Admin />
           </PrivateRoute>
         } />
 
         <Route path="/performances" element={
-          <PrivateRoute requiredRole="ADMIN">
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
             <Performances />
           </PrivateRoute>
         } />
 
         <Route path="/commerciaux" element={
-          <PrivateRoute requiredRole="ADMIN">
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
             <MesCommerciaux />
           </PrivateRoute>
         } />
@@ -125,7 +140,7 @@ function App() {
         } />
 
         <Route path="/resultat-commercial" element={
-          <PrivateRoute requiredRole="COMMERCIAL">
+          <PrivateRoute requiredRoles={[ROLE_COMMERCIAL]}>
             <ResultatCommercial />
           </PrivateRoute>
         } />

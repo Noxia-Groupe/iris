@@ -11,10 +11,15 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   name      String
-  role      String   @default("CONDUCTEUR_TRAVAUX") // ADMIN, CONDUCTEUR_TRAVAUX ou COMMERCIAL
+  // SUPERADMIN, ADMIN, CONDUCTEUR_TRAVAUX ou COMMERCIAL.
+  // SUPERADMIN = tous les droits d'un ADMIN + les réglages réservés à la direction
+  // (gestion des comptes superadmin, activation/désactivation des modules — cf.
+  // Parametres.planningActif). Un ADMIN ne peut ni créer, ni modifier, ni supprimer
+  // un compte SUPERADMIN, ni s'attribuer ce rôle (cf. isSuperAdminRole côté serveur).
+  role      String   @default("CONDUCTEUR_TRAVAUX")
   password  String?
   theme     String   @default("light") // "light" ou "dark" — préférence d'affichage, par compte
-  // Un ADMIN marqué estCommercial garde tous ses droits d'administration, mais apparaît
+  // Un ADMIN (ou SUPERADMIN) marqué estCommercial garde tous ses droits d'administration, mais apparaît
   // EN PLUS comme un commercial : choix possible de "Commercial rattaché" sur un chantier,
   // et statistiques/marges dans "Mes commerciaux" (cf. isCommercialLike côté serveur).
   // Sans effet pour les rôles CONDUCTEUR_TRAVAUX/COMMERCIAL (un COMMERCIAL l'est déjà).
@@ -167,6 +172,13 @@ model PhotoChantier {
 model Parametres {
   id                     String   @id @default("singleton")
   margeCommercialeActive Boolean  @default(true)  // affichage/calcul de la marge commerciale
+  // Module Planning d'intervention : activé/désactivé globalement par un SUPERADMIN.
+  // Désactivé, le module DISPARAÎT pour tous les autres comptes (y compris les
+  // administrateurs) — menu masqué côté client, routes /api/planning/* refusées côté
+  // serveur — mais AUCUNE donnée n'est supprimée : les affectations et types
+  // d'événements restent en base et réapparaissent à la réactivation. Le superadmin, lui,
+  // continue d'y accéder pour préparer/consulter le planning pendant la désactivation.
+  planningActif          Boolean  @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

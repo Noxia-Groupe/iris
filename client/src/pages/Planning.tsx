@@ -9,6 +9,7 @@ import {
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, tooltipEvent,
 } from '../planningUtils';
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
+import { isAdminRole } from '../roles';
 
 // ---------------------------------------------------------------------------
 // Planning d'intervention (réservé aux administrateurs).
@@ -42,7 +43,7 @@ const Planning = () => {
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
-  const isAdmin = userRole === 'ADMIN';
+  const isAdmin = isAdminRole(userRole);
 
   const [intervenants, setIntervenants] = useState<Intervenant[]>([]);
   const [chantiers, setChantiers] = useState<ChantierLite[]>([]);

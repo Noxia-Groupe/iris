@@ -3,6 +3,8 @@ import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { DevisAutocomplete } from '../components/DevisAutocomplete';
+import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, ROLE_SUPERADMIN } from '../roles';
+import { refreshModules } from '../modules';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
@@ -10,7 +12,7 @@ const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 // d'affectation sur un chantier, statistiques de "Mes commerciaux") — même définition que
 // isCommercialLike() côté serveur (server/index.ts).
 const isCommercialLike = (u: { role: string; estCommercial?: boolean }) =>
-  u.role === 'COMMERCIAL' || (u.role === 'ADMIN' && !!u.estCommercial);
+  u.role === 'COMMERCIAL' || (isAdminRole(u.role) && !!u.estCommercial);
 
 // Rendu des tranches d'un barème progressif (JSON.stringify transforme un plafond
 // Infinity en null : la dernière tranche est donc "au-delà de X €", sans borne haute).
@@ -79,8 +81,21 @@ const PrimeTable = ({ title, rows }: { title: string; rows: { label: string; pri
   </div>
 );
 
+// Onglets ouverts aux CONDUCTEURS DE TRAVAUX : uniquement les référentiels du Journal des
+// Achats, qu'ils alimentent au quotidien. Tout le reste de l'Administration (chantiers,
+// intervenants et leurs taux, marges, comptes) reste réservé aux administrateurs.
+const ONGLETS_CONDUCTEUR = ['fournisseurs', 'categories'];
+
+const MESSAGE_COMPTE_SUPERADMIN = "Seul un super administrateur peut gérer un compte super administrateur.";
+
 const Admin = () => {
-  const [activeTab, setActiveTab] = useState('chantiers');
+  // Rôle réel du compte connecté (la page est fermée aux commerciaux, cf. App.tsx).
+  const user = getCurrentUser();
+  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  const isAdmin = isAdminRole(userRole);
+  const isSuper = isSuperAdminRole(userRole);
+
+  const [activeTab, setActiveTab] = useState(isAdmin ? 'chantiers' : 'fournisseurs');
   const [users, setUsers] = useState<any[]>([]);
   const [intervenants, setIntervenants] = useState<any[]>([]);
   const [fournisseurs, setFournisseurs] = useState<any[]>([]);
@@ -96,17 +111,23 @@ const Admin = () => {
   // Préremplissage du budget global vendu depuis un devis Odoo sélectionné (formulaire
   // de création de chantier ci-dessous) — champ non contrôlé, on écrit directement dedans.
   const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
-
-  // Rôle réel
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  // Modules activables (onglet « Modules », superadmin) : état global du Planning.
+  const [planningActif, setPlanningActif] = useState<boolean | null>(null);
+  const [modulesMessage, setModulesMessage] = useState('');
 
   useEffect(() => {
     fetchData();
   }, [activeTab]);
 
+  // Filet de sécurité : un conducteur de travaux ne peut jamais rester sur un onglet
+  // réservé aux administrateurs (rôle changé en cours de session, onglet mémorisé...).
+  useEffect(() => {
+    if (!isAdmin && !ONGLETS_CONDUCTEUR.includes(activeTab)) setActiveTab(ONGLETS_CONDUCTEUR[0]);
+  }, [activeTab, isAdmin]);
+
   const fetchData = async () => {
+    // Onglets qui affichent une liste ; les autres (marges, utilisateurs, modules)
+    // chargent leurs propres données plus bas.
     const endpoints: Record<string, string> = {
       intervenants: '/intervenants',
       fournisseurs: '/fournisseurs',
@@ -115,16 +136,29 @@ const Admin = () => {
     };
 
     try {
-      const res = await apiFetch(endpoints[activeTab] || '/chantiers');
-      const data = await res.json();
+      if (endpoints[activeTab]) {
+        const res = await apiFetch(endpoints[activeTab]);
+        const data = await res.json();
+        if (activeTab === 'intervenants') setIntervenants(data);
+        else if (activeTab === 'fournisseurs') setFournisseurs(data);
+        else if (activeTab === 'categories') setCategories(data);
+        else setChantiers(data);
+      }
 
-      if (activeTab === 'intervenants') setIntervenants(data);
-      else if (activeTab === 'fournisseurs') setFournisseurs(data);
-      else if (activeTab === 'categories') setCategories(data);
-      else setChantiers(data);
+      // La liste des comptes est réservée aux administrateurs (403 pour un conducteur) :
+      // on ne la demande donc que si le compte connecté y a droit.
+      if (isAdmin) {
+        const usersRes = await apiFetch('/users');
+        if (usersRes.ok) setUsers(await usersRes.json());
+      }
 
-      const usersRes = await apiFetch('/users');
-      setUsers(await usersRes.json());
+      if (activeTab === 'modules' && isSuper) {
+        const mRes = await apiFetch('/modules');
+        if (mRes.ok) {
+          const m = await mRes.json();
+          setPlanningActif(m.planningActifGlobal !== false);
+        }
+      }
 
       if (activeTab === 'marges') {
         const pRes = await apiFetch('/parametres');
@@ -156,6 +190,35 @@ const Admin = () => {
       alert('Paramètres mis à jour');
     }
   };
+
+  // Activation/désactivation du module Planning (superadmin). Désactivé, le planning
+  // disparaît de tous les autres comptes — administrateurs compris — SANS qu'aucune
+  // affectation ne soit supprimée : tout est restitué tel quel à la réactivation.
+  const handleModulePlanning = async (actif: boolean) => {
+    setModulesMessage('');
+    try {
+      const res = await apiFetch('/modules', { method: 'PUT', body: JSON.stringify({ planningActif: actif }) });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'Erreur lors de la mise à jour du module.');
+        return;
+      }
+      const data = await res.json();
+      setPlanningActif(data.planningActifGlobal !== false);
+      setModulesMessage(actif
+        ? 'Le module Planning est de nouveau visible par tous les comptes.'
+        : "Le module Planning est désactivé : il n'apparaît plus que pour les super administrateurs. Aucune affectation n'a été supprimée.");
+      // Le menu latéral suit immédiatement le nouveau réglage pour le compte connecté.
+      await refreshModules();
+    } catch (err) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  // Un compte SUPERADMIN n'est administrable que par un superadmin — même règle que côté
+  // serveur (refuseSuperAdminTarget) : sans cela, un simple administrateur pourrait
+  // s'emparer des droits de la direction en se promouvant ou en réinitialisant un accès.
+  const peutGererCompte = (u: { role: string }) => isSuper || !isSuperAdminRole(u.role);
 
   const handleSubmit = async (e: React.FormEvent, type: string) => {
     e.preventDefault();
@@ -304,25 +367,42 @@ const Admin = () => {
         <h1 className="text-primary font-bold">Administration & Paramétrage</h1>
         <div className="flex gap-2 items-center bg-gray-100 p-2 rounded">
           <span className="text-sm font-semibold text-gray-500">
-            Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : 'Conducteur'}</strong>
+            Connecté en tant que: <strong className="text-primary-dark">{roleLabel(userRole)}</strong>
           </span>
         </div>
       </div>
 
+      {/* Un conducteur de travaux n'accède qu'aux référentiels Fournisseurs et Catégories
+          (cf. ONGLETS_CONDUCTEUR) ; les onglets réservés ne lui sont même pas proposés. */}
       <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-        <button className={`btn ${activeTab === 'chantiers' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('chantiers')}>Chantiers</button>
-        <button className={`btn ${activeTab === 'intervenants' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('intervenants')}>Intervenants</button>
-        <button className={`btn ${activeTab === 'fournisseurs' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('fournisseurs')}>Fournisseurs</button>
-        {userRole === 'ADMIN' && (
+        {isAdmin && (
           <>
-            <button className={`btn ${activeTab === 'categories' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('categories')}>Catégories</button>
+            <button className={`btn ${activeTab === 'chantiers' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('chantiers')}>Chantiers</button>
+            <button className={`btn ${activeTab === 'intervenants' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('intervenants')}>Intervenants</button>
+          </>
+        )}
+        <button className={`btn ${activeTab === 'fournisseurs' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('fournisseurs')}>Fournisseurs</button>
+        <button className={`btn ${activeTab === 'categories' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('categories')}>Catégories</button>
+        {isAdmin && (
+          <>
             <button className={`btn ${activeTab === 'marges' ? 'btn-primary' : 'bg-white'}`} onClick={() => { setActiveTab('marges'); fetchData(); }}>Marges & Commissions</button>
             <button className={`btn ${activeTab === 'utilisateurs' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('utilisateurs')}>Utilisateurs</button>
           </>
         )}
+        {isSuper && (
+          <button className={`btn ${activeTab === 'modules' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('modules')}>Modules</button>
+        )}
       </div>
 
-      {activeTab === 'chantiers' && (
+      {!isAdmin && (
+        <div className="mb-4 p-4 bg-blue-50 text-blue-800 rounded text-sm">
+          Vous pouvez créer, modifier et supprimer les <strong>fournisseurs</strong> et les{' '}
+          <strong>catégories d'achats</strong> utilisés dans le Journal des Achats. Les autres réglages de
+          l'application sont réservés à la Direction.
+        </div>
+      )}
+
+      {activeTab === 'chantiers' && isAdmin && (
         <div className="card">
           <h2 className="mb-4 text-primary-dark">Créer un nouveau chantier</h2>
           <form onSubmit={(e) => handleSubmit(e, 'chantiers')} className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -447,9 +527,9 @@ const Admin = () => {
         </div>
       )}
 
-      {activeTab === 'intervenants' && (
+      {activeTab === 'intervenants' && isAdmin && (
         <div className="card">
-          {userRole === 'ADMIN' ? (
+          {isAdmin ? (
             <>
               <h2 className="mb-4">Ajouter un intervenant</h2>
               <form onSubmit={(e) => handleSubmit(e, 'intervenants')} className="flex flex-col sm:flex-row gap-4 items-end mb-8">
@@ -481,8 +561,8 @@ const Admin = () => {
                 <tr style={{borderBottom: '1px solid var(--color-border)'}}>
                   <th style={{padding: '8px'}}>Nom</th>
                   <th style={{padding: '8px'}}>Rôle / Fonction</th>
-                  {userRole === 'ADMIN' && <th style={{padding: '8px'}}>Coût Horaire (€/h)</th>}
-                  {userRole === 'ADMIN' && <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>}
+                  {isAdmin && <th style={{padding: '8px'}}>Coût Horaire (€/h)</th>}
+                  {isAdmin && <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -500,14 +580,14 @@ const Admin = () => {
                           ? <input className="form-input" value={editRow.role} onChange={e => editField('role', e.target.value)} />
                           : i.role}
                       </td>
-                      {userRole === 'ADMIN' && (
+                      {isAdmin && (
                         <td style={{padding: '8px'}}>
                           {isEditing
                             ? <input type="number" step="0.1" className="form-input" value={editRow.tauxHoraireCharge} onChange={e => editField('tauxHoraireCharge', e.target.value)} />
                             : `${i.tauxHoraireCharge} €`}
                         </td>
                       )}
-                      {userRole === 'ADMIN' && (
+                      {isAdmin && (
                         <td style={{padding: '8px', textAlign: 'right', whiteSpace: 'nowrap'}}>
                           {isEditing ? (
                             <>
@@ -599,7 +679,7 @@ const Admin = () => {
         </div>
       )}
 
-      {activeTab === 'categories' && userRole === 'ADMIN' && (
+      {activeTab === 'categories' && (
         <div className="card">
           <h2 className="mb-2 text-primary-dark">Catégories d'achats</h2>
           <p className="text-sm text-muted mb-6">
@@ -668,7 +748,7 @@ const Admin = () => {
         </div>
       )}
 
-      {activeTab === 'marges' && userRole === 'ADMIN' && (
+      {activeTab === 'marges' && isAdmin && (
         <>
           <div className="card mb-4">
             <h2 className="mb-2 text-primary-dark">Paramètres de la Marge Commerciale</h2>
@@ -800,7 +880,7 @@ const Admin = () => {
         </>
       )}
 
-      {activeTab === 'utilisateurs' && userRole === 'ADMIN' && (
+      {activeTab === 'utilisateurs' && isAdmin && (
         <div className="card">
           <h2 className="mb-2 text-primary-dark">Gestion des Comptes Utilisateurs (SSO & Local)</h2>
           <p className="mb-6 text-sm text-gray-600">
@@ -827,9 +907,11 @@ const Admin = () => {
                   <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
                   <option value="COMMERCIAL">Commercial</option>
                   <option value="ADMIN">Administrateur</option>
+                  {/* Seul un super administrateur peut en désigner un autre. */}
+                  {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
                 </select>
               </div>
-              {newUserRole === 'ADMIN' && (
+              {isAdminRole(newUserRole) && (
                 <div className="form-group mb-0 md:col-span-2">
                   <label className="flex items-center gap-2 text-sm font-medium px-3 py-2.5 bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors w-fit">
                     <input type="checkbox" name="estCommercial" className="w-4 h-4" />
@@ -866,23 +948,29 @@ const Admin = () => {
                     </td>
                     <td className="px-6 py-4">
                       <select
-                        className={`form-input py-1 px-3 text-sm font-semibold rounded ${u.role === 'ADMIN' ? 'bg-primary/10 text-primary border-primary' : 'bg-gray-100 text-gray-600 border-gray-300'}`}
+                        className={`form-input py-1 px-3 text-sm font-semibold rounded ${isAdminRole(u.role) ? 'bg-primary/10 text-primary border-primary' : 'bg-gray-100 text-gray-600 border-gray-300'}`}
                         value={u.role}
                         onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                        disabled={u.email === user?.email} // Empêcher l'admin de se rétrograder lui-même
-                        title={u.email === user?.email ? "Vous ne pouvez pas modifier votre propre rôle." : "Modifier le rôle"}
+                        disabled={u.email === user?.email || !peutGererCompte(u)}
+                        title={u.email === user?.email
+                          ? "Vous ne pouvez pas modifier votre propre rôle."
+                          : !peutGererCompte(u)
+                            ? MESSAGE_COMPTE_SUPERADMIN
+                            : 'Modifier le rôle'}
                       >
                         <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
                         <option value="COMMERCIAL">Commercial</option>
                         <option value="ADMIN">Administrateur</option>
+                        {(isSuper || isSuperAdminRole(u.role)) && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
                       </select>
                     </td>
                     <td className="px-6 py-4">
-                      {u.role === 'ADMIN' ? (
+                      {isAdminRole(u.role) ? (
                         <label className="flex items-center gap-2 cursor-pointer w-fit">
                           <input
                             type="checkbox"
                             checked={!!u.estCommercial}
+                            disabled={!peutGererCompte(u)}
                             onChange={() => handleToggleEstCommercial(u.id, !!u.estCommercial)}
                             className="w-4 h-4"
                           />
@@ -895,14 +983,20 @@ const Admin = () => {
                     <td className="px-6 py-4 text-right whitespace-nowrap">
                       <button
                         onClick={() => handlePasswordChange(u.id, u.name)}
-                        className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded transition-colors"
+                        disabled={!peutGererCompte(u)}
+                        title={peutGererCompte(u) ? 'Attribuer un mot de passe local' : MESSAGE_COMPTE_SUPERADMIN}
+                        className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         Changer Mdp
                       </button>
                       <button
                         onClick={() => handleDeleteUser(u.id, u.name)}
-                        disabled={u.email === user?.email}
-                        title={u.email === user?.email ? "Vous ne pouvez pas révoquer votre propre compte." : "Révoquer l'accès"}
+                        disabled={u.email === user?.email || !peutGererCompte(u)}
+                        title={u.email === user?.email
+                          ? "Vous ne pouvez pas révoquer votre propre compte."
+                          : !peutGererCompte(u)
+                            ? MESSAGE_COMPTE_SUPERADMIN
+                            : "Révoquer l'accès"}
                         className="ml-2 text-sm px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         Révoquer
@@ -913,6 +1007,66 @@ const Admin = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'modules' && isSuper && (
+        <div className="card">
+          <h2 className="mb-2 text-primary-dark">Modules de l'application</h2>
+          <p className="text-sm text-muted mb-6">
+            Réglages réservés au <strong>super administrateur</strong>. Désactiver un module le fait disparaître de
+            l'application pour <strong>tous les autres comptes, administrateurs compris</strong> : le menu n'apparaît
+            plus et les pages correspondantes deviennent inaccessibles. <strong>Aucune donnée n'est supprimée</strong> —
+            tout est restitué à l'identique dès la réactivation. Vous conservez, vous, l'accès au module pour le
+            préparer ou le consulter pendant sa désactivation.
+          </p>
+
+          {modulesMessage && (
+            <div className="mb-4 p-3 bg-blue-50 text-blue-800 rounded text-sm">{modulesMessage}</div>
+          )}
+
+          {planningActif === null ? (
+            <p className="text-sm text-gray-400 italic">Chargement des modules...</p>
+          ) : (
+            <div className="p-4 rounded border bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="font-bold text-gray-800">Planning d'intervention</div>
+                <div className="text-sm text-muted mt-0.5">
+                  Affectation des techniciens à la semaine, types d'événements et lien de partage public.
+                </div>
+                <div className="text-sm mt-2">
+                  État actuel :{' '}
+                  <strong className={planningActif ? 'text-green-700' : 'text-red-700'}>
+                    {planningActif ? 'Activé (visible par tous les comptes)' : 'Désactivé (visible du super administrateur uniquement)'}
+                  </strong>
+                </div>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleModulePlanning(true)}
+                  disabled={planningActif}
+                  className={`btn ${planningActif ? 'bg-white' : 'btn-primary'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  Activer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleModulePlanning(false)}
+                  disabled={!planningActif}
+                  className="btn bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Désactiver
+                </button>
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-muted mt-4">
+            Note : le <strong>lien de partage public</strong> du planning (destiné aux techniciens sans compte) garde
+            son propre interrupteur, dans le module Planning — désactivez-le séparément si vous souhaitez aussi couper
+            cet accès.
+          </p>
         </div>
       )}
 

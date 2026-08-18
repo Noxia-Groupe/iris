@@ -79,6 +79,10 @@ JWT_SECRET="une_longue_chaine_aleatoire_et_secrete"
 ADMIN_EMAIL="votre_email@domaine.com"
 ADMIN_PASSWORD="un_mot_de_passe_robuste"
 
+# Optionnel : comptes super administrateur, séparés par des virgules. Créés ou promus à
+# chaque démarrage. Vide = liste par défaut (nelson@noxia-groupe.fr, admin@cybexia.fr).
+SUPERADMIN_EMAILS=""
+
 # Optionnel : clé API Google Gemini (laissez vide pour désactiver le rapport IA)
 GEMINI_API_KEY=""
 

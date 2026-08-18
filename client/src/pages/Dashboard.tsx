@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
+import { isAdminRole, roleLabel } from '../roles';
 
 type Period = 'month' | 'quarter' | 'year';
 
@@ -109,7 +110,7 @@ const Dashboard = () => {
           </div>
           <div className="flex gap-1 items-center bg-gray-100 px-3 py-1.5 rounded-lg">
             <span className="text-sm font-semibold text-gray-500">
-              Connecté en tant que: <strong className="text-primary-dark">{userRole === 'ADMIN' ? 'Admin' : userRole === 'COMMERCIAL' ? 'Commercial' : 'Conducteur'}</strong>
+              Connecté en tant que: <strong className="text-primary-dark">{roleLabel(userRole)}</strong>
             </span>
           </div>
         </div>
@@ -208,7 +209,7 @@ const Dashboard = () => {
               <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600"><Award size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  {userRole === 'ADMIN' ? 'Commission commerciale versée' : 'Ma commission gagnée'}
+                  {isAdminRole(userRole) ? 'Commission commerciale versée' : 'Ma commission gagnée'}
                 </div>
                 <div className="text-2xl font-black text-emerald-600 mt-0.5">{Math.round(commissionCommerciale).toLocaleString()} €</div>
                 <div className="text-xs text-gray-400">{periodLabel}</div>
