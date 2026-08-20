@@ -254,9 +254,32 @@ export interface OdooFacture {
   date: string | null;         // date de facture
   dateEcheance: string | null;
   montantTTC: number;          // signé : négatif pour un avoir
-  montantRestantDu: number;    // signé
+  montantRestantDu: number;    // signé, corrigé selon l'état de paiement (cf. resteDuFacture)
   etatPaiement: string;        // payment_state Odoo brut (not_paid, partial, paid...)
   estAvoir: boolean;
+  // Facture couverte par des versements enregistrés mais pas encore rapprochés en banque
+  // (payment_state = in_payment) : l'argent est arrivé, le lettrage bancaire reste à faire.
+  enAttenteRapprochement: boolean;
+  // Facture COMPTABILISÉE (state = posted). Les brouillons et les factures annulées sont
+  // listés — ils expliquent à quoi se rattachent certains versements — mais n'entrent dans
+  // AUCUN total : un brouillon n'engage rien, une facture annulée n'engage plus rien.
+  comptabilisee: boolean;
+  etatMove: string;            // state Odoo brut : draft | posted | cancel
+}
+
+// États dans lesquels une facture ne laisse PLUS RIEN à encaisser, quoi qu'en dise
+// `amount_residual` :
+//   - paid       : réglée et lettrée ;
+//   - in_payment : entièrement couverte par des versements enregistrés, en attente du
+//                  rapprochement bancaire — Odoo laisse alors, selon la version et le
+//                  paramétrage des comptes d'attente, le résiduel à sa valeur d'origine ;
+//   - reversed   : annulée par un avoir, qui porte lui-même le montant en négatif.
+// Se fier au seul résiduel affichait « 0 % encaissé » sur une facture dont le versement
+// figurait pourtant, juste en dessous, dans la liste des paiements reçus.
+const ETATS_SANS_RESTE_A_ENCAISSER = ['paid', 'in_payment', 'reversed'];
+
+function resteDuFacture(etatPaiement: string, residuelOdoo: number): number {
+  return ETATS_SANS_RESTE_A_ENCAISSER.includes(etatPaiement) ? 0 : residuelOdoo;
 }
 
 export interface OdooSuiviDevis {
@@ -269,6 +292,9 @@ export interface OdooSuiviDevis {
   montantHT: number;
   montantFacture: number;  // somme des factures émises (avoirs déduits)
   montantPaye: number;     // facturé - restant dû = réellement encaissé
+  // Part du montant encaissé qui attend encore son rapprochement bancaire. Compté dans
+  // montantPaye — l'argent est bien arrivé — mais isolé pour pouvoir le signaler.
+  montantEnAttenteRapprochement: number;
   factures: OdooFacture[];
   paiements: OdooPaiement[];
 }
@@ -343,6 +369,7 @@ async function completerSuivi(commandes: any[]): Promise<OdooSuiviDevis[]> {
       montantHT: c.amount_untaxed ?? 0,
       montantFacture: 0,
       montantPaye: 0,
+      montantEnAttenteRapprochement: 0,
       factures: [],
       paiements: [],
     };
@@ -356,14 +383,18 @@ async function completerSuivi(commandes: any[]): Promise<OdooSuiviDevis[]> {
   const idsFactures = [...factureVersDevis.keys()];
   if (idsFactures.length === 0) return suivis;
 
-  // Seules les factures COMPTABILISÉES (posted) comptent : un brouillon n'engage rien et
-  // ferait apparaître un "facturé" qui n'existe pas encore.
+  // TOUTES les factures rattachées à la commande sont lues, brouillons et annulations
+  // comprises. Seules les COMPTABILISÉES (posted) alimentent les totaux — un brouillon
+  // n'engage rien, une facture annulée n'engage plus rien. Mais les écarter complètement
+  // laissait des versements orphelins à l'écran : un virement rapproché d'une facture
+  // annulée s'affichait sans qu'on puisse dire à quoi il se rattachait. On les liste donc,
+  // signalées comme non comptabilisées, pour que le rapprochement reste lisible.
   const numeroFactureParId = new Map<number, string>();
   for (const lot of paquets(idsFactures)) {
     const moves = await searchRead(
       'account.move',
-      [['id', 'in', lot], ['state', '=', 'posted']],
-      ['name', 'invoice_date', 'invoice_date_due', 'amount_total', 'amount_residual', 'payment_state', 'move_type'],
+      [['id', 'in', lot]],
+      ['name', 'invoice_date', 'invoice_date_due', 'amount_total', 'amount_residual', 'payment_state', 'move_type', 'state'],
       lot.length,
       'invoice_date asc, id asc',
       ODOO_TIMEOUT_LONG_MS,
@@ -371,22 +402,29 @@ async function completerSuivi(commandes: any[]): Promise<OdooSuiviDevis[]> {
     for (const m of moves) {
       numeroFactureParId.set(m.id, m.name);
       const signe = signeFacture(m.move_type);
+      const etatPaiement = m.payment_state || 'not_paid';
+      const comptabilisee = m.state === 'posted';
       const facture: OdooFacture = {
         id: m.id,
         numero: m.name,
         date: isoDate(m.invoice_date),
         dateEcheance: isoDate(m.invoice_date_due),
         montantTTC: signe * (m.amount_total ?? 0),
-        montantRestantDu: signe * (m.amount_residual ?? 0),
-        etatPaiement: m.payment_state || 'not_paid',
+        montantRestantDu: resteDuFacture(etatPaiement, signe * (m.amount_residual ?? 0)),
+        etatPaiement,
         estAvoir: m.move_type === 'out_refund',
+        enAttenteRapprochement: comptabilisee && etatPaiement === 'in_payment',
+        comptabilisee,
+        etatMove: m.state || '',
       };
       for (const numeroDevis of factureVersDevis.get(m.id) || []) {
         const suivi = parNumero.get(numeroDevis);
         if (!suivi) continue;
         suivi.factures.push(facture);
+        if (!comptabilisee) continue;
         suivi.montantFacture += facture.montantTTC;
         suivi.montantPaye += facture.montantTTC - facture.montantRestantDu;
+        if (facture.enAttenteRapprochement) suivi.montantEnAttenteRapprochement += facture.montantTTC;
       }
     }
   }

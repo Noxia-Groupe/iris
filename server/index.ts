@@ -1824,6 +1824,12 @@ function indicateursSuivi(suivi: OdooSuiviDevis) {
     montantHT: suivi.montantHT,
     montantFacture: suivi.montantFacture,
     montantPaye: suivi.montantPaye,
+    montantEnAttenteRapprochement: suivi.montantEnAttenteRapprochement,
+    // Somme des versements rapprochés de ce devis. Sert de contrôle : elle diffère de
+    // l'encaissé quand un virement est lettré sur une facture non comptabilisée (annulée,
+    // brouillon) ou partagé avec une autre commande. Afficher les deux évite de laisser
+    // croire à une erreur là où il n'y a qu'une affectation comptable à expliquer.
+    montantVersements: suivi.paiements.reduce((total, p) => total + p.montant, 0),
     montantRestant: suivi.montantTTC - suivi.montantPaye,
     pourcentagePaye: suivi.montantTTC > 0 ? (suivi.montantPaye / suivi.montantTTC) * 100 : 0,
     etatReglement: etatReglement(suivi.montantTTC, suivi.montantPaye),
@@ -1866,7 +1872,8 @@ function serializeSuiviChantier(
     // quand même, signalé comme non rapproché, plutôt que de le faire disparaître de la liste.
     return {
       ...base, odooTrouve: false, clientOdoo: null, dateCommande: null, etatOdoo: '',
-      montantTTC: 0, montantHT: 0, montantFacture: 0, montantPaye: 0, montantRestant: 0,
+      montantTTC: 0, montantHT: 0, montantFacture: 0, montantPaye: 0,
+      montantEnAttenteRapprochement: 0, montantVersements: 0, montantRestant: 0,
       pourcentagePaye: 0, etatReglement: 'AUCUN' as const, dernierPaiement: null, nbPaiements: 0,
     };
   }

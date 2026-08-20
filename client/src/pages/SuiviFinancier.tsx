@@ -41,6 +41,9 @@ interface Facture {
   montantRestantDu: number;
   etatPaiement: string;
   estAvoir: boolean;
+  enAttenteRapprochement: boolean;
+  comptabilisee: boolean;
+  etatMove: string;
 }
 
 // Indicateurs financiers communs aux deux listes.
@@ -53,6 +56,10 @@ interface Indicateurs {
   montantHT: number;
   montantFacture: number;
   montantPaye: number;
+  // Part de l'encaissé qui attend son rapprochement bancaire (factures « en cours »).
+  montantEnAttenteRapprochement: number;
+  // Somme des versements rapprochés, à comparer à l'encaissé (cf. serveur).
+  montantVersements: number;
   montantRestant: number;
   pourcentagePaye: number;
   etatReglement: 'SOLDE' | 'PARTIEL' | 'AUCUN';
@@ -107,7 +114,7 @@ const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(
 // Libellés lisibles des états de paiement Odoo (payment_state), qui restent techniques.
 const ETAT_FACTURE: Record<string, string> = {
   not_paid: 'Non payée',
-  in_payment: 'Paiement en cours',
+  in_payment: 'Encaissée, à rapprocher en banque',
   paid: 'Payée',
   partial: 'Partiellement payée',
   reversed: 'Annulée par un avoir',
@@ -115,6 +122,10 @@ const ETAT_FACTURE: Record<string, string> = {
 };
 
 const ETAT_ODOO: Record<string, string> = { sale: 'Bon de commande', done: 'Verrouillé' };
+
+// Une facture non comptabilisée n'entre dans aucun total, mais reste affichée : elle
+// explique à quoi se rattachent des versements qui, sinon, sembleraient orphelins.
+const ETAT_MOVE: Record<string, string> = { draft: 'Brouillon', cancel: 'Annulée' };
 
 /**
  * Barre de progression du règlement. Volontairement distincte de <ProgressMeter/>, dont
@@ -305,6 +316,11 @@ const DetailDevis = ({ path, contexte }: { path: string; contexte: Contexte }) =
         <div>
           <div className="text-xs text-muted uppercase">Encaissé</div>
           <div className="font-bold text-green-700">{fmtEuro(detail.montantPaye)}</div>
+          {detail.montantEnAttenteRapprochement > 0 && (
+            <div className="text-xs text-blue-700 mt-0.5">
+              dont {fmtEuro(detail.montantEnAttenteRapprochement)} en attente de rapprochement bancaire
+            </div>
+          )}
         </div>
       </div>
 
@@ -331,22 +347,35 @@ const DetailDevis = ({ path, contexte }: { path: string; contexte: Contexte }) =
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {detail.factures.map((f) => (
-                  <tr key={f.id}>
+                  <tr key={f.id} className={f.comptabilisee ? '' : 'bg-gray-50 text-gray-400'}>
                     <td className="px-3 py-2 font-semibold text-gray-800">
                       {f.numero}
                       {f.estAvoir && <span className="ml-2 text-xs font-semibold px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded">Avoir</span>}
+                      {!f.comptabilisee && (
+                        <span className="ml-2 text-xs font-semibold px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded">
+                          {ETAT_MOVE[f.etatMove] || 'Non comptabilisée'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-gray-600">{fmtDate(f.date)}</td>
                     <td className="px-3 py-2 text-gray-600">{fmtDate(f.dateEcheance)}</td>
                     <td className="px-3 py-2 text-right font-semibold">{fmtEuro(f.montantTTC)}</td>
-                    <td className={`px-3 py-2 text-right font-semibold ${Math.abs(f.montantRestantDu) > 0.01 ? 'text-amber-700' : 'text-green-700'}`}>
-                      {fmtEuro(f.montantRestantDu)}
+                    <td className={`px-3 py-2 text-right font-semibold ${!f.comptabilisee ? 'text-gray-400' : Math.abs(f.montantRestantDu) > 0.01 ? 'text-amber-700' : 'text-green-700'}`}>
+                      {f.comptabilisee ? fmtEuro(f.montantRestantDu) : '—'}
                     </td>
-                    <td className="px-3 py-2 text-gray-600">{ETAT_FACTURE[f.etatPaiement] || f.etatPaiement}</td>
+                    <td className={`px-3 py-2 ${f.enAttenteRapprochement ? 'text-blue-700' : 'text-gray-600'}`}>
+                      {f.comptabilisee ? (ETAT_FACTURE[f.etatPaiement] || f.etatPaiement) : 'Hors totaux'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {detail.factures.some((f) => !f.comptabilisee) && (
+              <p className="text-xs text-muted mt-2">
+                Les factures grisées ne sont pas comptabilisées dans Odoo (brouillon ou annulation) : elles n'entrent
+                dans aucun total, mais sont listées car des versements peuvent y être rattachés.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -381,6 +410,14 @@ const DetailDevis = ({ path, contexte }: { path: string; contexte: Contexte }) =
                 ))}
               </tbody>
             </table>
+            {Math.abs(detail.montantVersements - detail.montantPaye) > 1 && (
+              <p className="text-xs text-muted mt-2">
+                Total des versements rapprochés : <strong>{fmtEuro(detail.montantVersements)}</strong>, contre{' '}
+                <strong>{fmtEuro(detail.montantPaye)}</strong> d'encaissé retenu ici. L'écart vient de versements lettrés
+                sur une facture non comptabilisée (ci-dessus) ou partagés avec une autre commande : c'est la
+                comptabilité des factures qui fait foi pour la progression du règlement.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -401,6 +438,11 @@ const ColonnesReglement = ({ ligne }: { ligne: Indicateurs }) => (
       <BarreReglement pourcentage={ligne.pourcentagePaye} solde={ligne.etatReglement === 'SOLDE'} />
       {ligne.etatReglement !== 'SOLDE' && (
         <div className="text-xs text-amber-700 font-semibold mt-1">Reste {fmtEuro(ligne.montantRestant)}</div>
+      )}
+      {ligne.montantEnAttenteRapprochement > 0 && (
+        <div className="text-xs text-blue-700 mt-1">
+          dont {fmtEuro(ligne.montantEnAttenteRapprochement)} à rapprocher en banque
+        </div>
       )}
     </div>
 
