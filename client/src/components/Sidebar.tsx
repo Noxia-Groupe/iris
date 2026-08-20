@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Wallet } from 'lucide-react';
 import { applyTheme } from '../theme';
-import { getCurrentRole, isAdminRole, ROLE_COMMERCIAL } from '../roles';
+import { getCurrentRole, isAdminRole, isSuperAdminRole, ROLE_COMMERCIAL } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
 import './Sidebar.css';
 
@@ -10,6 +10,7 @@ const Sidebar = () => {
   const userRole = getCurrentRole();
   const isCommercial = userRole === ROLE_COMMERCIAL;
   const isAdmin = isAdminRole(userRole);
+  const isSuper = isSuperAdminRole(userRole);
   // Planning : masqué pour tous les comptes (administrateurs compris) quand un superadmin
   // a désactivé le module depuis Administration > Modules.
   const { planningActif } = useModules();
@@ -81,6 +82,14 @@ const Sidebar = () => {
           <NavLink to="/admin" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <Settings size={20} />
             Administration
+          </NavLink>
+        )}
+
+        {/* Suivi financier (rapprochement des paiements Odoo) : réservé à la direction. */}
+        {isSuper && (
+          <NavLink to="/suivi-financier" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Wallet size={20} />
+            Suivi Financier
           </NavLink>
         )}
 

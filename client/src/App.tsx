@@ -16,6 +16,7 @@ import ResultatCommercial from './pages/ResultatCommercial';
 import Performances from './pages/Performances';
 import MesCommerciaux from './pages/MesCommerciaux';
 import Planning from './pages/Planning';
+import SuiviFinancier from './pages/SuiviFinancier';
 import PlanningPublic from './pages/PlanningPublic';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN, useCurrentRole } from './roles';
@@ -120,6 +121,13 @@ function App() {
         <Route path="/admin" element={
           <PrivateRoute excludedRole="COMMERCIAL">
             <Admin />
+          </PrivateRoute>
+        } />
+
+        {/* Suivi financier (rapprochement Odoo) : réservé au superadmin. */}
+        <Route path="/suivi-financier" element={
+          <PrivateRoute requiredRoles={[ROLE_SUPERADMIN]}>
+            <SuiviFinancier />
           </PrivateRoute>
         } />
 

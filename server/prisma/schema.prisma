@@ -29,6 +29,7 @@ model User {
   chantiersCommercialises Chantier[]                   @relation("ChantierCommercial") // Chantiers vendus par ce commercial
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
   photos                  PhotoChantier[] // Photos uploadées par l'utilisateur
+  acquittements           AcquittementDevis[] // Devis Odoo marqués « Vu » dans le Suivi financier
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -249,6 +250,27 @@ model PlanningEvent {
   commentaire String?
 
   intervenants Intervenant[] @relation("PlanningEventIntervenants")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Marque « Vu » posée dans le Suivi financier sur un devis de vente Odoo dont le
+// règlement est incomplet mais dont on sait que c'est normal (retenue de garantie, geste
+// commercial, litige clos, écriture ancienne jamais lettrée...). Purement APPLICATIVE :
+// rien n'est jamais écrit dans Odoo, la comptabilité reste la source de vérité. L'effet
+// est un classement — le devis quitte la liste « à traiter » et rejoint les dossiers
+// clos — et la marque se retire d'un clic si elle a été posée par erreur.
+//
+// La clé est le numéro de devis (ex. S00700) et non un identifiant Odoo : c'est le seul
+// repère stable et lisible, partagé avec Chantier.numeroDevis, et il reste valable même
+// pour un devis qui n'a jamais été suivi dans l'application.
+model AcquittementDevis {
+  numeroDevis String  @id
+  motif       String?
+
+  acquitteParId String?
+  acquittePar   User?   @relation(fields: [acquitteParId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

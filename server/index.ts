@@ -10,7 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { odooConfigured, odooSearchClients, odooSearchDevis, odooDevisMateriel, odooDevisAdresse } from './odoo';
+import { odooConfigured, odooSearchClients, odooSearchDevis, odooDevisMateriel, odooDevisAdresse, odooSuiviDevis, odooCommandesVendues, type OdooSuiviDevis } from './odoo';
 
 dotenv.config();
 
@@ -1775,6 +1775,312 @@ app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async
     res.status(500).json({ error: 'Error updating prime mensuelle' });
   }
 });
+
+// --- Suivi financier (réservé au superadmin) ---
+// Rapproche les chantiers de l'application avec leur devis de vente Odoo (numeroDevis,
+// ex. S00700) pour répondre à une question que l'application ne sait pas trancher seule :
+// ce chantier a-t-il été payé, et où en est-on ? Les montants viennent d'Odoo (factures et
+// paiements) ; l'état d'avancement (En cours / Terminé) vient de l'application. Un
+// chantier terminé dont il reste à encaisser mérite une relance, un chantier en cours avec
+// un solde ouvert est normal : c'est ce croisement qui donne sa valeur à l'écran.
+//
+// Lecture seule de bout en bout : rien n'est jamais écrit dans Odoo.
+
+const STATUTS_SUIVI = ['EN_COURS', 'TERMINE', 'TOUS'];
+
+// Le bouton « Actualiser » de l'écran passe refresh=1 : c'est le seul moyen de contourner
+// le cache Odoo (cf. odoo.ts), qui évite de réinterroger à chaque affichage des centaines
+// de dossiers clos qui ne bougent plus.
+function rafraichir(req: express.Request): boolean {
+  return String(req.query.refresh || '') === '1';
+}
+
+// Plafond de commandes Odoo remontées par l'écran « Anciens chantiers ». Le parc compte
+// environ 800 affaires ; la marge laissée absorbe la croissance sans jamais laisser une
+// base inattendue produire une réponse démesurée.
+const LIMITE_COMMANDES_ODOO = Number(process.env.ODOO_LIMITE_COMMANDES || 1500);
+
+// Un chantier est « soldé » dès que le restant dû tombe sous le centime : comparer des
+// montants à l'égalité stricte laisserait des chantiers payés affichés comme partiels à
+// cause d'un arrondi de TVA.
+const EPSILON_EUROS = 0.01;
+
+function etatReglement(montantTTC: number, montantPaye: number): 'SOLDE' | 'PARTIEL' | 'AUCUN' {
+  if (montantTTC > 0 && montantPaye >= montantTTC - EPSILON_EUROS) return 'SOLDE';
+  return montantPaye > EPSILON_EUROS ? 'PARTIEL' : 'AUCUN';
+}
+
+// Indicateurs financiers d'un devis, communs aux chantiers suivis et aux dossiers anciens.
+function indicateursSuivi(suivi: OdooSuiviDevis) {
+  // « Dernier versement » = dernier encaissement REÇU : un remboursement au client
+  // (montant négatif) figure bien dans le détail, mais l'annoncer ici comme le dernier
+  // versement donnerait une lecture fausse de l'avancement du règlement.
+  const dernier = suivi.paiements.find((p) => p.montant > 0) || null;
+  return {
+    clientOdoo: suivi.clientNom,
+    dateCommande: suivi.dateCommande,
+    etatOdoo: suivi.etatOdoo,
+    montantTTC: suivi.montantTTC,
+    montantHT: suivi.montantHT,
+    montantFacture: suivi.montantFacture,
+    montantPaye: suivi.montantPaye,
+    montantRestant: suivi.montantTTC - suivi.montantPaye,
+    pourcentagePaye: suivi.montantTTC > 0 ? (suivi.montantPaye / suivi.montantTTC) * 100 : 0,
+    etatReglement: etatReglement(suivi.montantTTC, suivi.montantPaye),
+    dernierPaiement: dernier ? { date: dernier.date, montant: dernier.montant, reference: dernier.reference } : null,
+    nbPaiements: suivi.paiements.length,
+  };
+}
+
+// Marques « Vu » posées sur des devis, indexées par numéro (cf. modèle AcquittementDevis).
+async function acquittementsParNumero(numeros: string[]) {
+  const lignes = await prisma.acquittementDevis.findMany({
+    where: { numeroDevis: { in: numeros } },
+    include: { acquittePar: { select: { name: true } } },
+  });
+  return new Map(lignes.map((a) => [a.numeroDevis, {
+    le: a.updatedAt,
+    par: a.acquittePar?.name || null,
+    motif: a.motif,
+  }]));
+}
+
+// Vue « ligne » d'un chantier : ce qu'il faut pour la liste, sans le détail des factures
+// et des paiements (réservé à la fiche, cf. GET /api/suivi-financier/:id).
+function serializeSuiviChantier(
+  chantier: { id: string; nom: string; client: string; numeroDevis: string | null; statut: string; dateFin: Date | null },
+  suivi: OdooSuiviDevis | undefined,
+) {
+  const termine = chantier.statut === 'TERMINE';
+  const base = {
+    id: chantier.id,
+    nom: chantier.nom,
+    client: chantier.client,
+    numeroDevis: chantier.numeroDevis,
+    statut: chantier.statut,
+    termine,
+    dateFin: chantier.dateFin,
+  };
+  if (!suivi) {
+    // Devis introuvable côté Odoo (numéro erroné, commande supprimée...) : on l'affiche
+    // quand même, signalé comme non rapproché, plutôt que de le faire disparaître de la liste.
+    return {
+      ...base, odooTrouve: false, clientOdoo: null, dateCommande: null, etatOdoo: '',
+      montantTTC: 0, montantHT: 0, montantFacture: 0, montantPaye: 0, montantRestant: 0,
+      pourcentagePaye: 0, etatReglement: 'AUCUN' as const, dernierPaiement: null, nbPaiements: 0,
+    };
+  }
+  return { ...base, odooTrouve: true, ...indicateursSuivi(suivi) };
+}
+
+// Chantiers rapprochables : ceux qui portent un numéro de devis. Sans ce numéro, aucun
+// rapprochement n'est possible — ils sont exclus, et leur nombre est renvoyé à part pour
+// que l'écran puisse le signaler plutôt que de les passer sous silence.
+const SUIVI_CHANTIER_SELECT = {
+  id: true, nom: true, client: true, numeroDevis: true, statut: true, dateFin: true,
+} as const;
+
+app.get('/api/suivi-financier', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const statut = STATUTS_SUIVI.includes(String(req.query.statut)) ? String(req.query.statut) : 'EN_COURS';
+    const where = {
+      ...(statut === 'TOUS' ? {} : { statut }),
+      numeroDevis: { not: null },
+      NOT: { numeroDevis: '' },
+    };
+    const [chantiers, sansDevis] = await Promise.all([
+      prisma.chantier.findMany({ where, select: SUIVI_CHANTIER_SELECT, orderBy: { nom: 'asc' } }),
+      prisma.chantier.count({
+        where: {
+          ...(statut === 'TOUS' ? {} : { statut }),
+          OR: [{ numeroDevis: null }, { numeroDevis: '' }],
+        },
+      }),
+    ]);
+
+    if (!odooConfigured()) {
+      return res.json({ odooAvailable: false, chantiers: [], sansDevis });
+    }
+
+    const numeros = chantiers.map((c) => (c.numeroDevis || '').trim()).filter(Boolean);
+    const [suivi, acquittements] = await Promise.all([
+      odooSuiviDevis(numeros, { force: rafraichir(req) }),
+      acquittementsParNumero(numeros),
+    ]);
+    res.json({
+      odooAvailable: true,
+      sansDevis,
+      chantiers: chantiers.map((c) => {
+        const numero = (c.numeroDevis || '').trim();
+        return { ...serializeSuiviChantier(c, suivi.get(numero)), acquitte: acquittements.get(numero) || null };
+      }),
+    });
+  } catch (error) {
+    console.error('Suivi financier error:', error);
+    res.status(502).json({ error: "Impossible de récupérer les données financières depuis Odoo pour le moment." });
+  }
+});
+
+// --- Anciens chantiers / dossiers non suivis ---
+// Toutes les affaires VENDUES côté Odoo (state sale ou done) qui n'ont jamais eu de fiche
+// chantier dans l'application : dossiers antérieurs à sa mise en service, petites
+// interventions facturées directement, affaires suivies ailleurs. La comptabilité en garde
+// la trace, l'application non — cet écran est là pour vérifier qu'aucune de ces affaires
+// ne traîne un impayé oublié.
+//
+// Un solde ouvert n'est pas toujours une anomalie (retenue de garantie, geste commercial,
+// écriture ancienne jamais lettrée). D'où la marque « Vu » : elle ne corrige rien, ne
+// touche pas à Odoo, elle range simplement le dossier avec les affaires closes pour que la
+// liste « à traiter » ne montre que ce qui mérite encore une action.
+
+const FILTRES_ANCIENS = ['A_TRAITER', 'VUS', 'TOUS'];
+
+app.get('/api/suivi-financier/anciens', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const filtre = FILTRES_ANCIENS.includes(String(req.query.filtre)) ? String(req.query.filtre) : 'A_TRAITER';
+    if (!odooConfigured()) {
+      return res.json({ odooAvailable: false, commandes: [], total: 0, tronque: false });
+    }
+
+    const [commandes, chantiers] = await Promise.all([
+      odooCommandesVendues(LIMITE_COMMANDES_ODOO, { force: rafraichir(req) }),
+      prisma.chantier.findMany({ where: { NOT: { numeroDevis: null } }, select: { numeroDevis: true } }),
+    ]);
+    // Un devis déjà rattaché à une fiche chantier est traité par l'autre onglet : le faire
+    // apparaître ici aussi ferait douter de quelle liste fait foi.
+    const suivisDansApp = new Set(chantiers.map((c) => (c.numeroDevis || '').trim()).filter(Boolean));
+    const nonSuivis = commandes.filter((c) => !suivisDansApp.has(c.numero));
+
+    const acquittements = await acquittementsParNumero(nonSuivis.map((c) => c.numero));
+    const lignes = nonSuivis.map((c) => {
+      const indicateurs = indicateursSuivi(c);
+      return {
+        numeroDevis: c.numero,
+        ...indicateurs,
+        acquitte: acquittements.get(c.numero) || null,
+        // « À traiter » = pas entièrement réglé ET pas encore marqué vu.
+        aTraiter: indicateurs.etatReglement !== 'SOLDE' && !acquittements.has(c.numero),
+      };
+    });
+
+    const filtrees = lignes.filter((l) => (filtre === 'A_TRAITER' ? l.aTraiter : filtre === 'VUS' ? !!l.acquitte : true));
+    // Ce qui reste à encaisser passe devant, du plus gros solde au plus petit ; les
+    // dossiers réglés ou acquittés suivent, du plus récent au plus ancien.
+    filtrees.sort((a, b) => {
+      if (a.aTraiter !== b.aTraiter) return a.aTraiter ? -1 : 1;
+      if (a.aTraiter) return b.montantRestant - a.montantRestant;
+      return (b.dateCommande || '').localeCompare(a.dateCommande || '');
+    });
+
+    res.json({
+      odooAvailable: true,
+      commandes: filtrees,
+      total: lignes.length,
+      aTraiter: lignes.filter((l) => l.aTraiter).length,
+      vus: lignes.filter((l) => !!l.acquitte).length,
+      // Signale une base plus grande que le plafond de lecture, plutôt que de laisser
+      // croire à une liste exhaustive.
+      tronque: commandes.length >= LIMITE_COMMANDES_ODOO,
+    });
+  } catch (error) {
+    console.error('Suivi financier anciens error:', error);
+    res.status(502).json({ error: "Impossible de récupérer les données financières depuis Odoo pour le moment." });
+  }
+});
+
+// Fiche d'un chantier : les mêmes indicateurs, augmentés du détail des factures émises et
+// de tous les versements qui s'y rattachent.
+app.get('/api/suivi-financier/:id', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) }, select: SUIVI_CHANTIER_SELECT });
+    if (!chantier) {
+      return res.status(404).json({ error: 'Chantier introuvable.' });
+    }
+    if (!chantier.numeroDevis) {
+      return res.status(400).json({ error: "Ce chantier n'a pas de numéro de devis : aucun rapprochement Odoo n'est possible." });
+    }
+    if (!odooConfigured()) {
+      return res.json({ odooAvailable: false });
+    }
+    const numero = chantier.numeroDevis.trim();
+    const [suivi, acquittements] = await Promise.all([
+      odooSuiviDevis([numero], { force: rafraichir(req) }),
+      acquittementsParNumero([numero]),
+    ]);
+    const devis = suivi.get(numero);
+    res.json({
+      odooAvailable: true,
+      ...serializeSuiviChantier(chantier, devis),
+      acquitte: acquittements.get(numero) || null,
+      factures: devis?.factures || [],
+      paiements: devis?.paiements || [],
+    });
+  } catch (error) {
+    console.error('Suivi financier detail error:', error);
+    res.status(502).json({ error: "Impossible de récupérer les données financières depuis Odoo pour le moment." });
+  }
+});
+
+// Fiche d'un devis non suivi : mêmes indicateurs, plus le détail des factures et des versements.
+app.get('/api/suivi-financier/devis/:numero', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
+    if (!numero) return res.status(400).json({ error: 'Numéro de devis manquant.' });
+    if (!odooConfigured()) return res.json({ odooAvailable: false });
+
+    const [suivi, acquittements] = await Promise.all([
+      odooSuiviDevis([numero], { force: rafraichir(req) }),
+      acquittementsParNumero([numero]),
+    ]);
+    const devis = suivi.get(numero);
+    if (!devis) return res.status(404).json({ error: "Ce devis est introuvable dans Odoo." });
+    res.json({
+      odooAvailable: true,
+      numeroDevis: devis.numero,
+      ...indicateursSuivi(devis),
+      acquitte: acquittements.get(numero) || null,
+      factures: devis.factures,
+      paiements: devis.paiements,
+    });
+  } catch (error) {
+    console.error('Suivi financier devis error:', error);
+    res.status(502).json({ error: "Impossible de récupérer les données financières depuis Odoo pour le moment." });
+  }
+});
+
+// --- Marque « Vu » sur un devis ---
+// Purement applicative : elle n'écrit RIEN dans Odoo et ne modifie aucun montant. Elle dit
+// seulement « ce solde ouvert est connu et assumé », ce qui sort le dossier de la liste à
+// traiter. Réversible d'un clic, pour qu'une marque posée par erreur ne fige rien.
+app.put('/api/suivi-financier/acquittements/:numero', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
+    if (!numero) return res.status(400).json({ error: 'Numéro de devis manquant.' });
+    const motif = String(req.body?.motif ?? '').trim().slice(0, 500) || null;
+    const acquitteParId = (req as AuthRequest).user!.id;
+    const acquittement = await prisma.acquittementDevis.upsert({
+      where: { numeroDevis: numero },
+      update: { motif, acquitteParId },
+      create: { numeroDevis: numero, motif, acquitteParId },
+      include: { acquittePar: { select: { name: true } } },
+    });
+    res.json({ numeroDevis: numero, acquitte: { le: acquittement.updatedAt, par: acquittement.acquittePar?.name || null, motif: acquittement.motif } });
+  } catch (error) {
+    console.error('Acquittement error:', error);
+    res.status(500).json({ error: "Impossible d'enregistrer la marque « Vu »." });
+  }
+});
+
+app.delete('/api/suivi-financier/acquittements/:numero', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
+    await prisma.acquittementDevis.deleteMany({ where: { numeroDevis: numero } });
+    res.json({ numeroDevis: numero, acquitte: null });
+  } catch (error) {
+    res.status(500).json({ error: "Impossible de retirer la marque « Vu »." });
+  }
+});
+
 
 // Paramètres globaux (admin uniquement)
 app.get('/api/parametres', requireAuth, requireAdmin, async (req, res) => {

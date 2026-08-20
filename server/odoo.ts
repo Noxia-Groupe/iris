@@ -35,10 +35,14 @@ export function odooConfigured(): boolean {
 }
 
 const ODOO_TIMEOUT_MS = 5000;
+// Les lectures du suivi financier portent sur tous les devis d'un coup (commandes,
+// factures, paiements) : plus de données, donc plus de temps que les recherches
+// interactives d'un formulaire.
+const ODOO_TIMEOUT_LONG_MS = 20000;
 
-async function jsonRpcCall(url: string, service: string, method: string, args: unknown[]): Promise<any> {
+async function jsonRpcCall(url: string, service: string, method: string, args: unknown[], timeoutMs = ODOO_TIMEOUT_MS): Promise<any> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ODOO_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${url}/jsonrpc`, {
       method: 'POST',
@@ -69,7 +73,7 @@ async function authenticate(url: string, db: string, username: string, apiKey: s
 
 // Authentifie puis appelle search_read sur `model` — factorise la partie commune aux
 // recherches clients et devis (lecture seule dans les deux cas).
-async function searchRead(model: string, domain: unknown[], fields: string[], limit: number, order: string): Promise<any[]> {
+async function searchRead(model: string, domain: unknown[], fields: string[], limit: number, order: string, timeoutMs?: number): Promise<any[]> {
   const { url, db, username, apiKey } = getConfig();
   if (!url || !db || !username || !apiKey) throw new Error('Odoo non configuré');
   const uid = await authenticate(url, db, username, apiKey);
@@ -78,7 +82,7 @@ async function searchRead(model: string, domain: unknown[], fields: string[], li
     model, 'search_read',
     [domain, fields],
     { limit, order },
-  ]);
+  ], timeoutMs);
   return rows || [];
 }
 
@@ -222,4 +226,286 @@ export async function odooDevisAdresse(devisId: number): Promise<string | null> 
   ]);
   const partner = partners?.[0];
   return partner ? formatAdresse(partner) : null;
+}
+
+// --- Suivi financier : rapprochement devis de vente / factures / paiements ---
+// Lecture seule, comme tout le reste de cette intégration. Sert à répondre, devis par
+// devis, à trois questions : combien a été facturé, combien a été réellement encaissé,
+// et quand a eu lieu le dernier versement.
+//
+// Chaîne Odoo utilisée : sale.order (le devis, ex. S00700) -> invoice_ids (les factures
+// client, acomptes compris — un acompte Odoo EST une facture) -> account.payment (les
+// versements rapprochés de ces factures). Le montant encaissé est déduit des factures
+// (total - restant dû) et non de la somme des paiements : c'est la comptabilité qui fait
+// foi, un paiement pouvant être partiellement affecté à une autre facture.
+
+export interface OdooPaiement {
+  id: number;
+  reference: string;      // ex: BNK1/2026/0007
+  date: string | null;    // "YYYY-MM-DD"
+  montant: number;        // signé : négatif pour un remboursement au client
+  journal: string | null; // Banque, Caisse...
+  factures: string[];     // numéros des factures que ce versement solde
+}
+
+export interface OdooFacture {
+  id: number;
+  numero: string;
+  date: string | null;         // date de facture
+  dateEcheance: string | null;
+  montantTTC: number;          // signé : négatif pour un avoir
+  montantRestantDu: number;    // signé
+  etatPaiement: string;        // payment_state Odoo brut (not_paid, partial, paid...)
+  estAvoir: boolean;
+}
+
+export interface OdooSuiviDevis {
+  id: number;
+  numero: string;          // ex: S00700
+  clientNom: string | null;
+  dateCommande: string | null; // date de commande, pour classer les dossiers anciens
+  etatOdoo: string;        // state Odoo brut : sale (vendu) | done (verrouillé) | ...
+  montantTTC: number;      // montant vendu, toutes taxes (référence de la progression)
+  montantHT: number;
+  montantFacture: number;  // somme des factures émises (avoirs déduits)
+  montantPaye: number;     // facturé - restant dû = réellement encaissé
+  factures: OdooFacture[];
+  paiements: OdooPaiement[];
+}
+
+// Un avoir (out_refund) diminue ce que le client doit : ses montants sont comptés en négatif.
+function signeFacture(moveType: string): number {
+  return moveType === 'out_refund' ? -1 : 1;
+}
+
+function isoDate(v: unknown): string | null {
+  if (typeof v !== 'string' || !v) return null;
+  return v.slice(0, 10);
+}
+
+function nomRelation(v: unknown): string | null {
+  return Array.isArray(v) && v.length > 1 ? String(v[1]) : null;
+}
+
+// Odoo accepte de longues listes d'identifiants, mais une requête `id in [...]` de
+// plusieurs milliers d'éléments produit une requête HTTP démesurée et un temps de réponse
+// imprévisible. On découpe donc en paquets, quitte à faire quelques allers-retours.
+const TAILLE_PAQUET = 300;
+
+function paquets<T>(items: T[], taille = TAILLE_PAQUET): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += taille) out.push(items.slice(i, i + taille));
+  return out;
+}
+
+// --- Cache mémoire ---
+// Le parc compte environ 800 chantiers, dont l'immense majorité est close et soldée : les
+// interroger à chaque affichage rendrait l'écran inutilisable et solliciterait Odoo pour
+// rien, alors que ces dossiers ne bougent plus. Les résultats sont donc gardés en mémoire
+// le temps d'une courte fenêtre (ODOO_CACHE_TTL_SECONDS, 10 min par défaut), et le bouton
+// « Actualiser » de l'écran force une relecture complète.
+//
+// Cache de processus, volontairement : il se vide au redémarrage du serveur, ne demande
+// aucune infrastructure, et une donnée financière vieille de quelques minutes ne porte
+// pas à conséquence sur un écran de consultation.
+function cacheTtlMs(): number {
+  const secondes = Number(process.env.ODOO_CACHE_TTL_SECONDS || 600);
+  return (Number.isFinite(secondes) && secondes > 0 ? secondes : 600) * 1000;
+}
+
+// `null` = devis cherché et introuvable côté Odoo : on mémorise aussi cette réponse, sinon
+// un numéro erroné saisi sur un chantier relancerait une requête à chaque affichage.
+const cacheDevis = new Map<string, { valeur: OdooSuiviDevis | null; charge: number }>();
+let cacheCommandesVendues: { valeur: OdooSuiviDevis[]; charge: number } | null = null;
+
+function estFrais(charge: number): boolean {
+  return Date.now() - charge < cacheTtlMs();
+}
+
+// Complète les commandes déjà lues (numéro, client, montants) avec leurs factures et leurs
+// versements. Deux requêtes Odoo par paquet de factures, quel que soit le nombre de devis.
+async function completerSuivi(commandes: any[]): Promise<OdooSuiviDevis[]> {
+  const suivis: OdooSuiviDevis[] = [];
+  // id de facture -> numéro(s) de devis auxquels elle se rattache. Une même facture peut
+  // regrouper plusieurs commandes ; ses montants sont alors comptés pour chacune, faute de
+  // pouvoir les répartir ligne à ligne de façon fiable.
+  const factureVersDevis = new Map<number, string[]>();
+  const parNumero = new Map<string, OdooSuiviDevis>();
+
+  for (const c of commandes) {
+    const suivi: OdooSuiviDevis = {
+      id: c.id,
+      numero: c.name,
+      clientNom: nomRelation(c.partner_id),
+      dateCommande: isoDate(c.date_order),
+      etatOdoo: c.state || '',
+      montantTTC: c.amount_total ?? 0,
+      montantHT: c.amount_untaxed ?? 0,
+      montantFacture: 0,
+      montantPaye: 0,
+      factures: [],
+      paiements: [],
+    };
+    suivis.push(suivi);
+    parNumero.set(c.name, suivi);
+    for (const fid of (c.invoice_ids as number[]) || []) {
+      factureVersDevis.set(fid, [...(factureVersDevis.get(fid) || []), c.name]);
+    }
+  }
+
+  const idsFactures = [...factureVersDevis.keys()];
+  if (idsFactures.length === 0) return suivis;
+
+  // Seules les factures COMPTABILISÉES (posted) comptent : un brouillon n'engage rien et
+  // ferait apparaître un "facturé" qui n'existe pas encore.
+  const numeroFactureParId = new Map<number, string>();
+  for (const lot of paquets(idsFactures)) {
+    const moves = await searchRead(
+      'account.move',
+      [['id', 'in', lot], ['state', '=', 'posted']],
+      ['name', 'invoice_date', 'invoice_date_due', 'amount_total', 'amount_residual', 'payment_state', 'move_type'],
+      lot.length,
+      'invoice_date asc, id asc',
+      ODOO_TIMEOUT_LONG_MS,
+    );
+    for (const m of moves) {
+      numeroFactureParId.set(m.id, m.name);
+      const signe = signeFacture(m.move_type);
+      const facture: OdooFacture = {
+        id: m.id,
+        numero: m.name,
+        date: isoDate(m.invoice_date),
+        dateEcheance: isoDate(m.invoice_date_due),
+        montantTTC: signe * (m.amount_total ?? 0),
+        montantRestantDu: signe * (m.amount_residual ?? 0),
+        etatPaiement: m.payment_state || 'not_paid',
+        estAvoir: m.move_type === 'out_refund',
+      };
+      for (const numeroDevis of factureVersDevis.get(m.id) || []) {
+        const suivi = parNumero.get(numeroDevis);
+        if (!suivi) continue;
+        suivi.factures.push(facture);
+        suivi.montantFacture += facture.montantTTC;
+        suivi.montantPaye += facture.montantTTC - facture.montantRestantDu;
+      }
+    }
+  }
+
+  // Détail des versements. `reconciled_invoice_ids` n'existe que sur les versions récentes
+  // d'Odoo : en cas d'échec, on garde les montants déduits des factures (l'essentiel) et on
+  // se passe du détail « date et montant du dernier versement ».
+  try {
+    for (const lot of paquets(idsFactures)) {
+      const paiements = await searchRead(
+        'account.payment',
+        [['reconciled_invoice_ids', 'in', lot]],
+        ['name', 'date', 'amount', 'journal_id', 'payment_type', 'reconciled_invoice_ids'],
+        2000,
+        'date desc, id desc',
+        ODOO_TIMEOUT_LONG_MS,
+      );
+      for (const p of paiements) {
+        const factureIds = ((p.reconciled_invoice_ids as number[]) || []).filter((id) => factureVersDevis.has(id));
+        const paiement: OdooPaiement = {
+          id: p.id,
+          reference: p.name || '',
+          date: isoDate(p.date),
+          montant: (p.payment_type === 'outbound' ? -1 : 1) * (p.amount ?? 0),
+          journal: nomRelation(p.journal_id),
+          factures: factureIds.map((id) => numeroFactureParId.get(id)).filter((n): n is string => !!n),
+        };
+        // Un versement rapproché de plusieurs factures d'un même devis, ou lu dans deux
+        // paquets différents, ne doit y figurer qu'une fois.
+        const devisConcernes = new Set(factureIds.flatMap((id) => factureVersDevis.get(id) || []));
+        for (const numeroDevis of devisConcernes) {
+          const suivi = parNumero.get(numeroDevis);
+          if (suivi && !suivi.paiements.some((existant) => existant.id === paiement.id)) {
+            suivi.paiements.push(paiement);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Odoo: détail des paiements indisponible —', error instanceof Error ? error.message : error);
+  }
+
+  // Tri du plus récent au plus ancien, sans dépendre de l'ordre renvoyé par Odoo : c'est
+  // ce qui définit « le dernier versement » côté appelant comme à l'affichage.
+  for (const suivi of suivis) {
+    suivi.paiements.sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id - a.id);
+  }
+
+  return suivis;
+}
+
+const CHAMPS_COMMANDE = ['name', 'partner_id', 'date_order', 'state', 'amount_total', 'amount_untaxed', 'invoice_ids'];
+
+/**
+ * Rapproche une liste de numéros de devis Odoo (ex. ["S00700", "S00712"]) avec leurs
+ * factures et paiements.
+ *
+ * Un numéro sans commande correspondante côté Odoo est simplement absent du résultat :
+ * l'appelant sait alors que le rapprochement n'a pas pu se faire pour ce chantier.
+ */
+export async function odooSuiviDevis(numerosDevis: string[], options: { force?: boolean } = {}): Promise<Map<string, OdooSuiviDevis>> {
+  const resultat = new Map<string, OdooSuiviDevis>();
+  const numeros = [...new Set(numerosDevis.map((n) => n.trim()).filter(Boolean))];
+  if (numeros.length === 0) return resultat;
+
+  const aCharger: string[] = [];
+  for (const numero of numeros) {
+    const entree = options.force ? undefined : cacheDevis.get(numero);
+    if (entree && estFrais(entree.charge)) {
+      if (entree.valeur) resultat.set(numero, entree.valeur);
+    } else {
+      aCharger.push(numero);
+    }
+  }
+  if (aCharger.length === 0) return resultat;
+
+  const commandes: any[] = [];
+  for (const lot of paquets(aCharger)) {
+    commandes.push(...await searchRead('sale.order', [['name', 'in', lot]], CHAMPS_COMMANDE, lot.length, 'name asc', ODOO_TIMEOUT_LONG_MS));
+  }
+  const suivis = await completerSuivi(commandes);
+
+  const trouves = new Set<string>();
+  for (const suivi of suivis) {
+    trouves.add(suivi.numero);
+    resultat.set(suivi.numero, suivi);
+    cacheDevis.set(suivi.numero, { valeur: suivi, charge: Date.now() });
+  }
+  // Mémorise aussi les numéros restés sans correspondance (cf. commentaire du cache).
+  for (const numero of aCharger) {
+    if (!trouves.has(numero)) cacheDevis.set(numero, { valeur: null, charge: Date.now() });
+  }
+  return resultat;
+}
+
+/**
+ * Toutes les commandes Odoo effectivement VENDUES : `state` sale (bon de commande confirmé)
+ * ou done (verrouillé). Les devis non signés (draft/sent) et les commandes annulées sont
+ * exclus — ils ne représentent aucun engagement financier.
+ *
+ * Sert à repérer les dossiers qui n'ont jamais été suivis dans l'application mais dont la
+ * comptabilité, elle, garde la trace.
+ */
+export async function odooCommandesVendues(limite = 1500, options: { force?: boolean } = {}): Promise<OdooSuiviDevis[]> {
+  if (!options.force && cacheCommandesVendues && estFrais(cacheCommandesVendues.charge)) {
+    return cacheCommandesVendues.valeur;
+  }
+  const commandes = await searchRead(
+    'sale.order',
+    [['state', 'in', ['sale', 'done']]],
+    CHAMPS_COMMANDE,
+    limite,
+    'date_order desc, id desc',
+    ODOO_TIMEOUT_LONG_MS,
+  );
+  const suivis = await completerSuivi(commandes);
+  cacheCommandesVendues = { valeur: suivis, charge: Date.now() };
+  // Les fiches individuelles profitent de la même lecture : ouvrir le détail d'un dossier
+  // juste après la liste ne relance pas de requête.
+  for (const suivi of suivis) cacheDevis.set(suivi.numero, { valeur: suivi, charge: Date.now() });
+  return suivis;
 }
