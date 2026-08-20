@@ -1805,17 +1805,39 @@ const LIMITE_COMMANDES_ODOO = Number(process.env.ODOO_LIMITE_COMMANDES || 1500);
 // cause d'un arrondi de TVA.
 const EPSILON_EUROS = 0.01;
 
-function etatReglement(montantTTC: number, montantPaye: number): 'SOLDE' | 'PARTIEL' | 'AUCUN' {
+type EtatReglement = 'TROP_PERCU' | 'SOLDE' | 'PARTIEL' | 'AUCUN';
+
+function etatReglement(montantTTC: number, montantPaye: number): EtatReglement {
+  // Encaissé au-delà du montant vendu : ce n'est pas un dossier réglé de plus, c'est une
+  // anomalie à regarder (versement lettré sur la mauvaise commande, avoir jamais émis,
+  // acompte encaissé puis facture annulée). Elle mérite son propre état, pas d'être
+  // confondue avec un « soldé » tranquille.
+  if (montantPaye > montantTTC + EPSILON_EUROS) return 'TROP_PERCU';
   if (montantTTC > 0 && montantPaye >= montantTTC - EPSILON_EUROS) return 'SOLDE';
   return montantPaye > EPSILON_EUROS ? 'PARTIEL' : 'AUCUN';
 }
 
 // Indicateurs financiers d'un devis, communs aux chantiers suivis et aux dossiers anciens.
+//
+// L'encaissé retenu est le PLUS ÉLEVÉ de deux lectures de la même réalité :
+//   - l'encaissé comptable, déduit des factures (facturé - restant dû) ;
+//   - la somme des versements rapprochés de la commande.
+// En temps normal les deux coïncident. Ils divergent quand les factures d'une affaire ont
+// été annulées sans être réémises : le compte client retombe à zéro alors que la banque,
+// elle, a bien reçu l'argent — la progression tombait alors à 0 % sur des dossiers
+// intégralement payés. Retenir le maximum fait primer l'argent réellement entré, ce qui
+// est la question posée par cet écran ; `baseProgression` dit laquelle des deux lectures
+// a servi, pour que l'écart soit expliqué et non subi.
 function indicateursSuivi(suivi: OdooSuiviDevis) {
   // « Dernier versement » = dernier encaissement REÇU : un remboursement au client
   // (montant négatif) figure bien dans le détail, mais l'annoncer ici comme le dernier
   // versement donnerait une lecture fausse de l'avancement du règlement.
   const dernier = suivi.paiements.find((p) => p.montant > 0) || null;
+  const encaisseComptable = suivi.montantPaye;
+  const montantVersements = suivi.paiements.reduce((total, p) => total + p.montant, 0);
+  const montantPaye = Math.max(encaisseComptable, montantVersements);
+  const baseProgression = montantPaye > encaisseComptable + EPSILON_EUROS ? 'VERSEMENTS' : 'FACTURES';
+
   return {
     clientOdoo: suivi.clientNom,
     dateCommande: suivi.dateCommande,
@@ -1823,16 +1845,17 @@ function indicateursSuivi(suivi: OdooSuiviDevis) {
     montantTTC: suivi.montantTTC,
     montantHT: suivi.montantHT,
     montantFacture: suivi.montantFacture,
-    montantPaye: suivi.montantPaye,
+    montantPaye,
+    // Les deux lectures sont exposées telles quelles : la fiche les affiche côte à côte
+    // dès qu'elles divergent, plutôt que de laisser croire à une erreur de calcul.
+    encaisseComptable,
+    montantVersements,
+    baseProgression,
     montantEnAttenteRapprochement: suivi.montantEnAttenteRapprochement,
-    // Somme des versements rapprochés de ce devis. Sert de contrôle : elle diffère de
-    // l'encaissé quand un virement est lettré sur une facture non comptabilisée (annulée,
-    // brouillon) ou partagé avec une autre commande. Afficher les deux évite de laisser
-    // croire à une erreur là où il n'y a qu'une affectation comptable à expliquer.
-    montantVersements: suivi.paiements.reduce((total, p) => total + p.montant, 0),
-    montantRestant: suivi.montantTTC - suivi.montantPaye,
-    pourcentagePaye: suivi.montantTTC > 0 ? (suivi.montantPaye / suivi.montantTTC) * 100 : 0,
-    etatReglement: etatReglement(suivi.montantTTC, suivi.montantPaye),
+    // Négatif = trop-perçu : l'encaissé dépasse le montant vendu.
+    montantRestant: suivi.montantTTC - montantPaye,
+    pourcentagePaye: suivi.montantTTC > 0 ? (montantPaye / suivi.montantTTC) * 100 : 0,
+    etatReglement: etatReglement(suivi.montantTTC, montantPaye),
     dernierPaiement: dernier ? { date: dernier.date, montant: dernier.montant, reference: dernier.reference } : null,
     nbPaiements: suivi.paiements.length,
   };
@@ -1872,9 +1895,10 @@ function serializeSuiviChantier(
     // quand même, signalé comme non rapproché, plutôt que de le faire disparaître de la liste.
     return {
       ...base, odooTrouve: false, clientOdoo: null, dateCommande: null, etatOdoo: '',
-      montantTTC: 0, montantHT: 0, montantFacture: 0, montantPaye: 0,
-      montantEnAttenteRapprochement: 0, montantVersements: 0, montantRestant: 0,
-      pourcentagePaye: 0, etatReglement: 'AUCUN' as const, dernierPaiement: null, nbPaiements: 0,
+      montantTTC: 0, montantHT: 0, montantFacture: 0, montantPaye: 0, encaisseComptable: 0,
+      montantEnAttenteRapprochement: 0, montantVersements: 0, baseProgression: 'FACTURES' as const,
+      montantRestant: 0, pourcentagePaye: 0, etatReglement: 'AUCUN' as const,
+      dernierPaiement: null, nbPaiements: 0,
     };
   }
   return { ...base, odooTrouve: true, ...indicateursSuivi(suivi) };

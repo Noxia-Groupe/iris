@@ -55,14 +55,18 @@ interface Indicateurs {
   montantTTC: number;
   montantHT: number;
   montantFacture: number;
+  // Encaissé retenu : le plus élevé de l'encaissé comptable et des versements reçus.
   montantPaye: number;
+  // Les deux lectures qui composent le précédent (cf. indicateursSuivi côté serveur).
+  encaisseComptable: number;
+  montantVersements: number;
+  baseProgression: 'FACTURES' | 'VERSEMENTS';
   // Part de l'encaissé qui attend son rapprochement bancaire (factures « en cours »).
   montantEnAttenteRapprochement: number;
-  // Somme des versements rapprochés, à comparer à l'encaissé (cf. serveur).
-  montantVersements: number;
+  // Négatif = trop-perçu : l'encaissé dépasse le montant vendu.
   montantRestant: number;
   pourcentagePaye: number;
-  etatReglement: 'SOLDE' | 'PARTIEL' | 'AUCUN';
+  etatReglement: 'TROP_PERCU' | 'SOLDE' | 'PARTIEL' | 'AUCUN';
   dernierPaiement: { date: string | null; montant: number; reference: string } | null;
   nbPaiements: number;
   acquitte: Acquittement | null;
@@ -133,6 +137,8 @@ const ETAT_MOVE: Record<string, string> = { draft: 'Brouillon', cancel: 'Annulé
  * l'objectif, pas un dépassement à signaler.
  */
 const BarreReglement = ({ pourcentage, solde }: { pourcentage: number; solde: boolean }) => {
+  // Plafonnée à 100 % : un trop-perçu ne fait pas déborder la barre, il est signalé par le
+  // « Reste » négatif en rouge juste en dessous (cf. ColonnesReglement).
   const largeur = Math.min(100, Math.max(0, pourcentage));
   return (
     <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden shadow-inner">
@@ -144,13 +150,20 @@ const BarreReglement = ({ pourcentage, solde }: { pourcentage: number; solde: bo
   );
 };
 
+// Entièrement encaissé : soldé au centime près, ou au-delà (trop-perçu). Dans les deux
+// cas la barre est pleine — il ne reste plus rien à recevoir.
+const estEncaisse = (ligne: Indicateurs) => ligne.etatReglement === 'SOLDE' || ligne.etatReglement === 'TROP_PERCU';
+
 const BadgeReglement = ({ etat }: { etat: Indicateurs['etatReglement'] }) => {
   const styles: Record<string, string> = {
+    TROP_PERCU: 'bg-red-100 text-red-700',
     SOLDE: 'bg-green-100 text-green-700',
     PARTIEL: 'bg-blue-100 text-blue-700',
     AUCUN: 'bg-gray-100 text-gray-500',
   };
-  const labels: Record<string, string> = { SOLDE: 'Soldé', PARTIEL: 'Partiel', AUCUN: 'Aucun paiement' };
+  const labels: Record<string, string> = {
+    TROP_PERCU: 'Trop-perçu', SOLDE: 'Soldé', PARTIEL: 'Partiel', AUCUN: 'Aucun paiement',
+  };
   return <span className={`text-xs font-semibold px-2 py-1 rounded ${styles[etat]}`}>{labels[etat]}</span>;
 };
 
@@ -177,6 +190,18 @@ const BadgeVu = ({ acquitte }: { acquitte: Acquittement }) => (
 type Contexte = 'EN_COURS' | 'TERMINE' | 'ANCIEN';
 
 const ResteAEncaisser = ({ ligne, contexte }: { ligne: Indicateurs; contexte: Contexte }) => {
+  if (ligne.etatReglement === 'TROP_PERCU') {
+    return (
+      <div className="flex items-center gap-2 text-red-700">
+        <AlertTriangle size={16} className="shrink-0" />
+        <span className="text-sm font-bold">
+          Reste : {fmtEuro(ligne.montantRestant)} — trop-perçu de {fmtEuro(-ligne.montantRestant)} par rapport au
+          montant vendu. À vérifier : versement affecté à la mauvaise commande, avoir jamais émis, ou facture annulée
+          sans réémission.
+        </span>
+      </div>
+    );
+  }
   if (ligne.etatReglement === 'SOLDE') {
     return (
       <div className="flex items-center gap-2 text-green-700">
@@ -321,6 +346,9 @@ const DetailDevis = ({ path, contexte }: { path: string; contexte: Contexte }) =
               dont {fmtEuro(detail.montantEnAttenteRapprochement)} en attente de rapprochement bancaire
             </div>
           )}
+          {detail.baseProgression === 'VERSEMENTS' && (
+            <div className="text-xs text-blue-700 mt-0.5">d'après les versements reçus</div>
+          )}
         </div>
       </div>
 
@@ -410,14 +438,20 @@ const DetailDevis = ({ path, contexte }: { path: string; contexte: Contexte }) =
                 ))}
               </tbody>
             </table>
-            {Math.abs(detail.montantVersements - detail.montantPaye) > 1 && (
+            {detail.baseProgression === 'VERSEMENTS' ? (
+              <p className="text-xs text-muted mt-2">
+                Progression établie sur les <strong>versements reçus</strong> ({fmtEuro(detail.montantVersements)}) :
+                l'encaissé comptable ne ressort qu'à <strong>{fmtEuro(detail.encaisseComptable)}</strong>, les factures
+                de cette commande étant annulées ou non comptabilisées. L'argent est bien entré en banque ; c'est
+                l'écriture de facturation qui reste à régulariser dans Odoo.
+              </p>
+            ) : Math.abs(detail.montantVersements - detail.montantPaye) > 1 ? (
               <p className="text-xs text-muted mt-2">
                 Total des versements rapprochés : <strong>{fmtEuro(detail.montantVersements)}</strong>, contre{' '}
-                <strong>{fmtEuro(detail.montantPaye)}</strong> d'encaissé retenu ici. L'écart vient de versements lettrés
-                sur une facture non comptabilisée (ci-dessus) ou partagés avec une autre commande : c'est la
-                comptabilité des factures qui fait foi pour la progression du règlement.
+                <strong>{fmtEuro(detail.montantPaye)}</strong> d'encaissé retenu ici. L'écart vient de versements
+                partagés avec une autre commande : c'est alors la comptabilité des factures qui fait foi.
               </p>
-            )}
+            ) : null}
           </div>
         )}
       </div>
@@ -435,14 +469,22 @@ const ColonnesReglement = ({ ligne }: { ligne: Indicateurs }) => (
         </span>
         <span className="font-bold text-gray-800">{Math.round(ligne.pourcentagePaye)} %</span>
       </div>
-      <BarreReglement pourcentage={ligne.pourcentagePaye} solde={ligne.etatReglement === 'SOLDE'} />
-      {ligne.etatReglement !== 'SOLDE' && (
+      <BarreReglement pourcentage={ligne.pourcentagePaye} solde={estEncaisse(ligne)} />
+      {/* Reste dû négatif = trop-perçu : signalé en gras rouge, la barre restant à 100 %. */}
+      {ligne.etatReglement === 'TROP_PERCU' ? (
+        <div className="text-xs text-red-700 font-bold mt-1">
+          Reste : {fmtEuro(ligne.montantRestant)} — trop-perçu
+        </div>
+      ) : ligne.etatReglement !== 'SOLDE' ? (
         <div className="text-xs text-amber-700 font-semibold mt-1">Reste {fmtEuro(ligne.montantRestant)}</div>
-      )}
+      ) : null}
       {ligne.montantEnAttenteRapprochement > 0 && (
         <div className="text-xs text-blue-700 mt-1">
           dont {fmtEuro(ligne.montantEnAttenteRapprochement)} à rapprocher en banque
         </div>
+      )}
+      {ligne.baseProgression === 'VERSEMENTS' && (
+        <div className="text-xs text-blue-700 mt-1">progression établie sur les versements reçus</div>
       )}
     </div>
 
