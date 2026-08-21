@@ -60,7 +60,7 @@ async function resolveAuthorizedSsoUser(email: string) {
   if (!normalized) return null;
   return prisma.user.findUnique({
     where: { email: normalized },
-    select: { id: true, name: true, email: true, role: true, theme: true },
+    select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
   });
 }
 
@@ -117,7 +117,7 @@ async function verifyMicrosoftIdentity(req: express.Request): Promise<string | n
 
 // --- Middlewares d'authentification / autorisation ---
 interface AuthRequest extends express.Request {
-  user?: { id: string; role: string };
+  user?: { id: string; role: string; accesFinance: boolean };
 }
 
 // Le jeton n'authentifie QUE l'identité : le rôle est systématiquement relu en base, il
@@ -138,12 +138,12 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
     return;
   }
   try {
-    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true } });
+    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, accesFinance: true } });
     if (!user) {
       res.status(401).json({ error: 'Compte introuvable ou révoqué' });
       return;
     }
-    (req as AuthRequest).user = { id: user.id, role: user.role };
+    (req as AuthRequest).user = { id: user.id, role: user.role, accesFinance: user.accesFinance };
     next();
   } catch {
     res.status(500).json({ error: 'Error resolving authenticated user' });
@@ -178,6 +178,22 @@ const requireAdmin: express.RequestHandler = (req, res, next) => {
 const requireSuperAdmin: express.RequestHandler = (req, res, next) => {
   if (!isSuperAdminRole((req as AuthRequest).user?.role)) {
     res.status(403).json({ error: 'Accès réservé au super administrateur' });
+    return;
+  }
+  next();
+};
+
+// Suivi financier : accordé au cas par cas, indépendamment du rôle (User.accesFinance,
+// case « Finance » dans Administration > Utilisateurs). Un superadmin y accède toujours,
+// sans avoir besoin de la case. Couvre la consultation comme la pose et le retrait des
+// marques « Vu ».
+function peutVoirFinance(user: { role: string; accesFinance?: boolean | null } | undefined): boolean {
+  return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
+}
+
+const requireFinance: express.RequestHandler = (req, res, next) => {
+  if (!peutVoirFinance((req as AuthRequest).user)) {
+    res.status(403).json({ error: 'Accès au suivi financier non autorisé' });
     return;
   }
   next();
@@ -391,7 +407,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, theme: user.theme } });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, theme: user.theme, accesFinance: user.accesFinance } });
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la connexion' });
   }
@@ -431,7 +447,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
     const authUser = (req as AuthRequest).user!;
     const user = await prisma.user.findUnique({
       where: { id: authUser.id },
-      select: { id: true, name: true, email: true, role: true, theme: true },
+      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
     });
     if (!user) return res.status(404).json({ error: 'Compte introuvable.' });
     res.json(user);
@@ -815,11 +831,12 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
     const users = await prisma.user.findMany({
       where: isSuper ? {} : { role: { not: ROLE_SUPERADMIN } },
-      select: { id: true, name: true, email: true, role: true, password: true, estCommercial: true },
+      select: { id: true, name: true, email: true, role: true, password: true, estCommercial: true, accesFinance: true },
       orderBy: { createdAt: 'asc' },
     });
-    res.json(users.map((u: { id: string; name: string; email: string; role: string; password: string | null; estCommercial: boolean }) => ({
-      id: u.id, name: u.name, email: u.email, role: u.role, hasPassword: !!u.password, estCommercial: u.estCommercial,
+    res.json(users.map((u) => ({
+      id: u.id, name: u.name, email: u.email, role: u.role, hasPassword: !!u.password,
+      estCommercial: u.estCommercial, accesFinance: u.accesFinance,
     })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
@@ -863,6 +880,9 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     // ignoré pour les autres rôles, pour éviter un état orphelin sans effet mais trompeur
     // en base.
     const estCommercial = isAdminRole(role) && !!req.body.estCommercial;
+    // L'accès au Suivi financier ne s'accorde que par un superadmin (cf. peutVoirFinance) :
+    // un administrateur qui pourrait cocher la case se l'attribuerait à lui-même.
+    const accesFinance = isSuperAdminRole((req as AuthRequest).user?.role) && !!req.body.accesFinance;
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Adresse email invalide.' });
@@ -875,8 +895,8 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
       return res.status(409).json({ error: 'Un compte existe déjà pour cet email.' });
     }
     const user = await prisma.user.create({
-      data: { email, name, role, estCommercial }, // pas de mot de passe : accès via SSO Microsoft
-      select: { id: true, name: true, email: true, role: true, estCommercial: true },
+      data: { email, name, role, estCommercial, accesFinance }, // pas de mot de passe : accès via SSO Microsoft
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true },
     });
     res.status(201).json({ ...user, hasPassword: false });
   } catch (error) {
@@ -939,8 +959,10 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
       // compte quitte ces rôles, pour ne pas laisser un état orphelin qui réapparaîtrait
       // s'il y revenait plus tard sans qu'on l'ait explicitement redemandé.
+      // accesFinance n'est PAS touché : il ne dépend pas du rôle, un conducteur comme un
+      // commercial peut le conserver en changeant de fonction.
       data: isAdminRole(role) ? { role } : { role, estCommercial: false },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true }
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true }
     });
     res.json(user);
   } catch (error) {
@@ -968,11 +990,32 @@ app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req
     const user = await prisma.user.update({
       where: { id: target.id },
       data: { estCommercial: !!req.body.estCommercial },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true },
     });
     res.json(user);
   } catch (error) {
     res.status(500).json({ error: 'Error updating estCommercial' });
+  }
+});
+
+// Bascule l'accès au Suivi financier d'un compte, quel que soit son rôle. RÉSERVÉ AU
+// SUPERADMIN : ces données (encaissements, impayés, montants clients) relèvent de la
+// direction, et un administrateur qui pourrait cocher la case se l'attribuerait à
+// lui-même. Un superadmin y accède de toute façon sans cette autorisation.
+app.patch('/api/users/:id/acces-finance', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+    if (!target) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    const user = await prisma.user.update({
+      where: { id: target.id },
+      data: { accesFinance: !!req.body.accesFinance },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true },
+    });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: "Impossible de modifier l'accès au suivi financier." });
   }
 });
 
@@ -1911,7 +1954,7 @@ const SUIVI_CHANTIER_SELECT = {
   id: true, nom: true, client: true, numeroDevis: true, statut: true, dateFin: true,
 } as const;
 
-app.get('/api/suivi-financier', requireAuth, requireSuperAdmin, async (req, res) => {
+app.get('/api/suivi-financier', requireAuth, requireFinance, async (req, res) => {
   try {
     const statut = STATUTS_SUIVI.includes(String(req.query.statut)) ? String(req.query.statut) : 'EN_COURS';
     const where = {
@@ -1966,7 +2009,7 @@ app.get('/api/suivi-financier', requireAuth, requireSuperAdmin, async (req, res)
 
 const FILTRES_ANCIENS = ['A_TRAITER', 'VUS', 'TOUS'];
 
-app.get('/api/suivi-financier/anciens', requireAuth, requireSuperAdmin, async (req, res) => {
+app.get('/api/suivi-financier/anciens', requireAuth, requireFinance, async (req, res) => {
   try {
     const filtre = FILTRES_ANCIENS.includes(String(req.query.filtre)) ? String(req.query.filtre) : 'A_TRAITER';
     if (!odooConfigured()) {
@@ -2021,7 +2064,7 @@ app.get('/api/suivi-financier/anciens', requireAuth, requireSuperAdmin, async (r
 
 // Fiche d'un chantier : les mêmes indicateurs, augmentés du détail des factures émises et
 // de tous les versements qui s'y rattachent.
-app.get('/api/suivi-financier/:id', requireAuth, requireSuperAdmin, async (req, res) => {
+app.get('/api/suivi-financier/:id', requireAuth, requireFinance, async (req, res) => {
   try {
     const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) }, select: SUIVI_CHANTIER_SELECT });
     if (!chantier) {
@@ -2053,7 +2096,7 @@ app.get('/api/suivi-financier/:id', requireAuth, requireSuperAdmin, async (req, 
 });
 
 // Fiche d'un devis non suivi : mêmes indicateurs, plus le détail des factures et des versements.
-app.get('/api/suivi-financier/devis/:numero', requireAuth, requireSuperAdmin, async (req, res) => {
+app.get('/api/suivi-financier/devis/:numero', requireAuth, requireFinance, async (req, res) => {
   try {
     const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
     if (!numero) return res.status(400).json({ error: 'Numéro de devis manquant.' });
@@ -2083,7 +2126,7 @@ app.get('/api/suivi-financier/devis/:numero', requireAuth, requireSuperAdmin, as
 // Purement applicative : elle n'écrit RIEN dans Odoo et ne modifie aucun montant. Elle dit
 // seulement « ce solde ouvert est connu et assumé », ce qui sort le dossier de la liste à
 // traiter. Réversible d'un clic, pour qu'une marque posée par erreur ne fige rien.
-app.put('/api/suivi-financier/acquittements/:numero', requireAuth, requireSuperAdmin, async (req, res) => {
+app.put('/api/suivi-financier/acquittements/:numero', requireAuth, requireFinance, async (req, res) => {
   try {
     const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
     if (!numero) return res.status(400).json({ error: 'Numéro de devis manquant.' });
@@ -2102,7 +2145,7 @@ app.put('/api/suivi-financier/acquittements/:numero', requireAuth, requireSuperA
   }
 });
 
-app.delete('/api/suivi-financier/acquittements/:numero', requireAuth, requireSuperAdmin, async (req, res) => {
+app.delete('/api/suivi-financier/acquittements/:numero', requireAuth, requireFinance, async (req, res) => {
   try {
     const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
     await prisma.acquittementDevis.deleteMany({ where: { numeroDevis: numero } });

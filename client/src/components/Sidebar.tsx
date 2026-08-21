@@ -1,16 +1,19 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Wallet } from 'lucide-react';
 import { applyTheme } from '../theme';
-import { getCurrentRole, isAdminRole, isSuperAdminRole, ROLE_COMMERCIAL } from '../roles';
+import { isAdminRole, peutVoirFinance, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
 import './Sidebar.css';
 
 const Sidebar = () => {
   const navigate = useNavigate();
-  const userRole = getCurrentRole();
+  // Compte resynchronisé avec le serveur : un accès accordé (ou retiré) apparaît dans le
+  // menu sans attendre une reconnexion.
+  const user = useCurrentUser();
+  const userRole = user?.role || ROLE_CONDUCTEUR;
   const isCommercial = userRole === ROLE_COMMERCIAL;
   const isAdmin = isAdminRole(userRole);
-  const isSuper = isSuperAdminRole(userRole);
+  const voitFinance = peutVoirFinance(user);
   // Planning : masqué pour tous les comptes (administrateurs compris) quand un superadmin
   // a désactivé le module depuis Administration > Modules.
   const { planningActif } = useModules();
@@ -85,8 +88,8 @@ const Sidebar = () => {
           </NavLink>
         )}
 
-        {/* Suivi financier (rapprochement des paiements Odoo) : réservé à la direction. */}
-        {isSuper && (
+        {/* Suivi financier : superadmin, ou tout compte autorisé (case « Finance »). */}
+        {voitFinance && (
           <NavLink to="/suivi-financier" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <Wallet size={20} />
             Suivi Financier

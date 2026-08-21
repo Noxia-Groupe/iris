@@ -35,6 +35,18 @@ export interface CurrentUser {
   email?: string;
   role?: string;
   theme?: string;
+  /** Accès au Suivi financier accordé au cas par cas (cf. peutVoirFinance). */
+  accesFinance?: boolean;
+}
+
+/**
+ * Accès au Suivi financier : accordé compte par compte depuis Administration >
+ * Utilisateurs, indépendamment du rôle. Un superadmin y accède toujours, sans avoir besoin
+ * de l'autorisation. Même règle que peutVoirFinance() côté serveur — ce qui est masqué ici
+ * est également refusé par l'API.
+ */
+export function peutVoirFinance(user?: CurrentUser | null): boolean {
+  return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
 }
 
 /** Compte connecté tel que stocké au login (localStorage), ou null. */
@@ -72,17 +84,22 @@ export async function refreshCurrentUser(): Promise<CurrentUser | null> {
   }
 }
 
-/** Rôle du compte connecté : valeur mémorisée d'abord, valeur fraîche du serveur ensuite. */
-export function useCurrentRole(): string {
-  const [role, setRole] = useState(getCurrentRole);
+/** Compte connecté : valeur mémorisée d'abord, valeur fraîche du serveur ensuite. */
+export function useCurrentUser(): CurrentUser | null {
+  const [user, setUser] = useState<CurrentUser | null>(getCurrentUser);
 
   useEffect(() => {
     let annule = false;
     refreshCurrentUser().then((u) => {
-      if (!annule && u?.role) setRole(u.role);
+      if (!annule && u) setUser(u);
     });
     return () => { annule = true; };
   }, []);
 
-  return role;
+  return user;
+}
+
+/** Rôle du compte connecté, resynchronisé avec le serveur. */
+export function useCurrentRole(): string {
+  return useCurrentUser()?.role || ROLE_CONDUCTEUR;
 }

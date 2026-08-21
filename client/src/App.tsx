@@ -19,7 +19,7 @@ import Planning from './pages/Planning';
 import SuiviFinancier from './pages/SuiviFinancier';
 import PlanningPublic from './pages/PlanningPublic';
 import { ErrorBoundary } from './ErrorBoundary';
-import { ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN, useCurrentRole } from './roles';
+import { peutVoirFinance, useCurrentUser, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
 import { useModules } from './modules';
 
 // Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
@@ -29,10 +29,11 @@ const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
 const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX.Element, requiredRoles?: string[], excludedRole?: string }) => {
   const token = localStorage.getItem('token');
   const userStr = localStorage.getItem('user');
-  // Rôle resynchronisé avec le serveur à chaque changement d'écran : une promotion (ou
-  // une rétrogradation) intervenue depuis la connexion se répercute aussitôt sur les
+  // Compte resynchronisé avec le serveur à chaque changement d'écran : une promotion, une
+  // rétrogradation ou un accès accordé depuis la connexion se répercute aussitôt sur les
   // menus et les écrans accessibles, sans obliger à se reconnecter.
-  const role = useCurrentRole();
+  const utilisateur = useCurrentUser();
+  const role = utilisateur?.role || '';
 
   if (!token || !userStr) {
     return <Navigate to="/login" />;
@@ -65,6 +66,15 @@ const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX
 const PlanningRoute = () => {
   const { planningActif } = useModules();
   return planningActif ? <Planning /> : <Navigate to="/" replace />;
+};
+
+// Accès au Suivi financier accordé compte par compte : la page n'est pas atteignable en
+// tapant l'URL sans l'autorisation. Le serveur refuse de toute façon les appels (403).
+const RouteFinance = () => {
+  const utilisateur = useCurrentUser();
+  // Tant que la resynchronisation n'a pas répondu, on s'appuie sur le compte mémorisé —
+  // `useCurrentUser` le renvoie immédiatement, il n'y a donc pas d'état indéterminé.
+  return peutVoirFinance(utilisateur) ? <SuiviFinancier /> : <Navigate to="/" replace />;
 };
 
 function App() {
@@ -124,10 +134,10 @@ function App() {
           </PrivateRoute>
         } />
 
-        {/* Suivi financier (rapprochement Odoo) : réservé au superadmin. */}
+        {/* Suivi financier : superadmin, ou tout compte autorisé (case « Finance »). */}
         <Route path="/suivi-financier" element={
-          <PrivateRoute requiredRoles={[ROLE_SUPERADMIN]}>
-            <SuiviFinancier />
+          <PrivateRoute>
+            <RouteFinance />
           </PrivateRoute>
         } />
 

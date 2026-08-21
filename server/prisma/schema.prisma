@@ -24,6 +24,12 @@ model User {
   // et statistiques/marges dans "Mes commerciaux" (cf. isCommercialLike côté serveur).
   // Sans effet pour les rôles CONDUCTEUR_TRAVAUX/COMMERCIAL (un COMMERCIAL l'est déjà).
   estCommercial Boolean @default(false)
+  // Accès au Suivi financier (rapprochement des paiements Odoo). Indépendant du rôle :
+  // il s'accorde à n'importe quel compte — conducteur, commercial, administrateur —
+  // depuis Administration > Utilisateurs. Un SUPERADMIN y a toujours accès sans avoir
+  // besoin de cette case. Seul un superadmin peut l'accorder ou la retirer : ces données
+  // (encaissements, impayés, montants clients) relèvent de la direction.
+  accesFinance  Boolean @default(false)
 
   chantiersGeres          Chantier[]                   @relation("ChantierResponsable") // Liaison pour restreindre la vue des chefs de chantier
   chantiersCommercialises Chantier[]                   @relation("ChantierCommercial") // Chantiers vendus par ce commercial

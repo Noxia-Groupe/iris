@@ -268,6 +268,25 @@ const Admin = () => {
     }
   };
 
+  // Bascule l'accès au Suivi financier. Réservé au superadmin côté serveur : ces données
+  // (encaissements, impayés, montants clients) relèvent de la direction.
+  const handleToggleAccesFinance = async (userId: string, current: boolean) => {
+    try {
+      const res = await apiFetch(`/users/${userId}/acces-finance`, {
+        method: 'PATCH',
+        body: JSON.stringify({ accesFinance: !current }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "Erreur lors de la mise à jour de l'accès au suivi financier.");
+        return;
+      }
+      fetchData();
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
   const handlePasswordChange = async (userId: string, userName: string) => {
     const newPassword = window.prompt(`Entrez le nouveau mot de passe pour ${userName} (minimum 6 caractères) :`);
     if (!newPassword) return;
@@ -303,6 +322,7 @@ const Admin = () => {
       name: (formData.get('name') as string || '').trim(),
       role: (formData.get('role') as string) || 'CONDUCTEUR_TRAVAUX',
       estCommercial: formData.get('estCommercial') === 'on',
+      accesFinance: formData.get('accesFinance') === 'on',
     };
     try {
       const res = await apiFetch('/users', { method: 'POST', body: JSON.stringify(payload) });
@@ -917,14 +937,22 @@ const Admin = () => {
                   {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
                 </select>
               </div>
-              {isAdminRole(newUserRole) && (
-                <div className="form-group mb-0 md:col-span-2">
+              <div className="form-group mb-0 md:col-span-2 flex flex-wrap gap-3">
+                {isAdminRole(newUserRole) && (
                   <label className="flex items-center gap-2 text-sm font-medium px-3 py-2.5 bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors w-fit">
                     <input type="checkbox" name="estCommercial" className="w-4 h-4" />
-                    Apparaît aussi comme commercial (affectation aux chantiers et statistiques dans « Mes commerciaux »)
+                    Commercial (affectation aux chantiers et statistiques dans « Mes commerciaux »)
                   </label>
-                </div>
-              )}
+                )}
+                {/* L'accès au Suivi financier s'accorde à n'importe quel rôle, mais seul un
+                    superadmin peut le donner. */}
+                {isSuper && (
+                  <label className="flex items-center gap-2 text-sm font-medium px-3 py-2.5 bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors w-fit">
+                    <input type="checkbox" name="accesFinance" className="w-4 h-4" />
+                    Finance (accès au Suivi financier)
+                  </label>
+                )}
+              </div>
               <button className="btn btn-primary w-full">Autoriser</button>
             </form>
           </div>
@@ -938,7 +966,8 @@ const Admin = () => {
                   <th className="px-6 py-4 font-semibold">Email</th>
                   <th className="px-6 py-4 font-semibold">Type</th>
                   <th className="px-6 py-4 font-semibold">Rôle d'accès</th>
-                  <th className="px-6 py-4 font-semibold">Aussi commercial</th>
+                  <th className="px-6 py-4 font-semibold">Commercial</th>
+                  <th className="px-6 py-4 font-semibold">Finance</th>
                   <th className="px-6 py-4 font-semibold text-right">Actions</th>
                 </tr>
               </thead>
@@ -984,6 +1013,27 @@ const Admin = () => {
                         </label>
                       ) : (
                         <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    {/* Accès au Suivi financier : ouvert à tous les rôles, réglable par le
+                        seul superadmin — un administrateur le voit sans pouvoir le changer. */}
+                    <td className="px-6 py-4">
+                      {isSuperAdminRole(u.role) ? (
+                        <span className="text-xs text-gray-500" title="Un super administrateur accède toujours au suivi financier.">Oui (par défaut)</span>
+                      ) : (
+                        <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                          <input
+                            type="checkbox"
+                            checked={!!u.accesFinance}
+                            disabled={!isSuper}
+                            onChange={() => handleToggleAccesFinance(u.id, !!u.accesFinance)}
+                            className="w-4 h-4"
+                            title={isSuper
+                              ? 'Autoriser ce compte à consulter le Suivi financier'
+                              : "Seul un super administrateur peut accorder l'accès au suivi financier."}
+                          />
+                          <span className="text-xs text-gray-500">{u.accesFinance ? 'Oui' : 'Non'}</span>
+                        </label>
                       )}
                     </td>
                     <td className="px-6 py-4 text-right whitespace-nowrap">
