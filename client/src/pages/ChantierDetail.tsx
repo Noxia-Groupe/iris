@@ -4,7 +4,7 @@ import html2pdf from 'html2pdf.js';
 import imageCompression from 'browser-image-compression';
 import {
   ArrowLeft, Calendar, User, FileDown, Sparkles, Camera,
-  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, X, MapPin,
+  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, X, MapPin, Search,
 } from 'lucide-react';
 import { apiFetch, assetUrl } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
@@ -19,6 +19,8 @@ const toDateInputValue = (d: string | null | undefined) => (d ? d.slice(0, 10) :
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
 const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
+// Heures pointées : demi-heures possibles, mais pas de décimale inutile (8 h, 7,5 h).
+const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
 const daysBetween = (a: Date, b: Date) => Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000));
 
 const STATUT_LABELS: Record<string, string> = {
@@ -72,6 +74,22 @@ const ChantierDetail = () => {
   const [categories, setCategories] = useState<any[]>([]);
   const [editingAchatId, setEditingAchatId] = useState<string | null>(null);
   const [savingAchat, setSavingAchat] = useState(false);
+
+  // Journal complet des achats du chantier : la fiche liste TOUS les achats (et non plus
+  // seulement les derniers), avec de quoi retrouver rapidement une dépense précise —
+  // recherche libre, filtres fournisseur/catégorie et tri.
+  const [achatSearch, setAchatSearch] = useState('');
+  const [achatFournisseurFiltre, setAchatFournisseurFiltre] = useState('');
+  const [achatCategorieFiltre, setAchatCategorieFiltre] = useState('');
+  const [achatTri, setAchatTri] = useState<'date-desc' | 'date-asc' | 'montant-desc' | 'montant-asc'>('date-desc');
+
+  // Journal complet des heures pointées, sur le même principe que celui des achats
+  // ci-dessus : la fiche liste tous les pointages du chantier, avec recherche, filtres
+  // intervenant/rôle et tri.
+  const [pointageSearch, setPointageSearch] = useState('');
+  const [pointageIntervenantFiltre, setPointageIntervenantFiltre] = useState('');
+  const [pointageRoleFiltre, setPointageRoleFiltre] = useState('');
+  const [pointageTri, setPointageTri] = useState<'date-desc' | 'date-asc' | 'heures-desc' | 'heures-asc'>('date-desc');
 
   useEffect(() => {
     fetchChantier();
@@ -363,8 +381,10 @@ const ChantierDetail = () => {
     }
   };
 
-  const achats: any[] = chantier?.achats || [];
-  const pointages: any[] = chantier?.pointages || [];
+  // Références stables tant que le chantier n'est pas rechargé : les répartitions et le
+  // journal des achats ci-dessous sont mémorisés à partir de ces listes.
+  const achats: any[] = useMemo(() => chantier?.achats || [], [chantier]);
+  const pointages: any[] = useMemo(() => chantier?.pointages || [], [chantier]);
 
   const parCategorie: BreakdownRow[] = useMemo(() => {
     const map = new Map<string, number>();
@@ -383,6 +403,95 @@ const ChantierDetail = () => {
     }
     return Array.from(map, ([label, value]) => ({ label, value }));
   }, [achats]);
+
+  // Total dépensé sur le chantier, tous achats confondus.
+  const achatsTotal = useMemo(() => achats.reduce((s, a) => s + a.montantHT, 0), [achats]);
+
+  // Valeurs proposées dans les filtres : uniquement celles réellement présentes sur ce
+  // chantier (inutile de proposer un fournisseur chez qui rien n'a été acheté ici).
+  const achatsFournisseursDispo = useMemo(() => (
+    Array.from(new Set(achats.map((a) => a.fournisseur?.nom).filter(Boolean) as string[]))
+      .sort((a, b) => a.localeCompare(b, 'fr'))
+  ), [achats]);
+
+  const achatsCategoriesDispo = useMemo(() => (
+    Array.from(new Set(achats.map((a) => a.categorie?.nom).filter(Boolean) as string[]))
+      .sort((a, b) => a.localeCompare(b, 'fr'))
+  ), [achats]);
+
+  const achatsFiltreActif = achatSearch.trim() !== '' || achatFournisseurFiltre !== '' || achatCategorieFiltre !== '';
+
+  // Liste affichée dans le journal : tous les achats du chantier, filtrés puis triés.
+  const achatsAffiches = useMemo(() => {
+    const q = achatSearch.trim().toLowerCase();
+    const rows = achats.filter((a) => {
+      if (achatFournisseurFiltre && (a.fournisseur?.nom || '') !== achatFournisseurFiltre) return false;
+      if (achatCategorieFiltre && (a.categorie?.nom || '') !== achatCategorieFiltre) return false;
+      if (!q) return true;
+      // Recherche libre : description, n° de facture, fournisseur, catégorie, date affichée
+      // et montant — de quoi retrouver un achat à partir de n'importe quel indice.
+      return [a.description, a.numeroFacture, a.fournisseur?.nom, a.categorie?.nom, fmtDate(a.date), String(a.montantHT)]
+        .some((v) => (v || '').toString().toLowerCase().includes(q));
+    });
+    const byDate = (x: any) => new Date(x.date).getTime();
+    return rows.sort((a, b) => {
+      if (achatTri === 'date-asc') return byDate(a) - byDate(b);
+      if (achatTri === 'montant-desc') return b.montantHT - a.montantHT;
+      if (achatTri === 'montant-asc') return a.montantHT - b.montantHT;
+      return byDate(b) - byDate(a);
+    });
+  }, [achats, achatSearch, achatFournisseurFiltre, achatCategorieFiltre, achatTri]);
+
+  const achatsAffichesTotal = useMemo(() => achatsAffiches.reduce((s, a) => s + a.montantHT, 0), [achatsAffiches]);
+
+  const resetAchatsFiltres = () => {
+    setAchatSearch('');
+    setAchatFournisseurFiltre('');
+    setAchatCategorieFiltre('');
+  };
+
+  // Total des heures pointées sur le chantier.
+  const heuresTotal = useMemo(() => pointages.reduce((s, p) => s + p.nbrHeures, 0), [pointages]);
+
+  const pointagesIntervenantsDispo = useMemo(() => (
+    Array.from(new Set(pointages.map((p) => p.intervenant?.nom).filter(Boolean) as string[]))
+      .sort((a, b) => a.localeCompare(b, 'fr'))
+  ), [pointages]);
+
+  const pointagesRolesDispo = useMemo(() => (
+    Array.from(new Set(pointages.map((p) => p.intervenant?.role).filter(Boolean) as string[]))
+      .sort((a, b) => a.localeCompare(b, 'fr'))
+  ), [pointages]);
+
+  const pointagesFiltreActif = pointageSearch.trim() !== '' || pointageIntervenantFiltre !== '' || pointageRoleFiltre !== '';
+
+  // Liste affichée dans le journal des heures : tous les pointages, filtrés puis triés.
+  const pointagesAffiches = useMemo(() => {
+    const q = pointageSearch.trim().toLowerCase();
+    const rows = pointages.filter((p) => {
+      if (pointageIntervenantFiltre && (p.intervenant?.nom || '') !== pointageIntervenantFiltre) return false;
+      if (pointageRoleFiltre && (p.intervenant?.role || '') !== pointageRoleFiltre) return false;
+      if (!q) return true;
+      // Recherche libre : intervenant, rôle, commentaire, date affichée et nombre d'heures.
+      return [p.intervenant?.nom, p.intervenant?.role, p.commentaire, fmtDate(p.date), String(p.nbrHeures)]
+        .some((v) => (v || '').toString().toLowerCase().includes(q));
+    });
+    const byDate = (x: any) => new Date(x.date).getTime();
+    return rows.sort((a, b) => {
+      if (pointageTri === 'date-asc') return byDate(a) - byDate(b);
+      if (pointageTri === 'heures-desc') return b.nbrHeures - a.nbrHeures;
+      if (pointageTri === 'heures-asc') return a.nbrHeures - b.nbrHeures;
+      return byDate(b) - byDate(a);
+    });
+  }, [pointages, pointageSearch, pointageIntervenantFiltre, pointageRoleFiltre, pointageTri]);
+
+  const pointagesAffichesTotal = useMemo(() => pointagesAffiches.reduce((s, p) => s + p.nbrHeures, 0), [pointagesAffiches]);
+
+  const resetPointagesFiltres = () => {
+    setPointageSearch('');
+    setPointageIntervenantFiltre('');
+    setPointageRoleFiltre('');
+  };
 
   const parIntervenant: BreakdownRow[] = useMemo(() => {
     const map = new Map<string, { heures: number; cout: number; role: string }>();
@@ -731,22 +840,80 @@ const ChantierDetail = () => {
         </div>
 
         {/* Journaux (hors PDF) */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-6">
+          {/* Journal complet des achats : toutes les dépenses du chantier, avec recherche,
+              filtres et tri pour retrouver une ligne précise et la corriger ou la supprimer. */}
           <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-            <div className="flex items-center gap-2 px-6 py-4 border-b border-gray-100">
-              <Wallet size={18} className="text-accent" />
-              <h3 className="text-lg font-bold text-primary-dark m-0">Derniers achats</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Wallet size={18} className="text-accent" />
+                <h3 className="text-lg font-bold text-primary-dark m-0">Achats du chantier</h3>
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-50 text-accent">
+                  {achats.length} achat{achats.length > 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="text-sm text-muted">
+                Total dépensé : <strong className="text-primary-dark">{fmtEuro(achatsTotal)}</strong>
+              </div>
             </div>
+
+            {achats.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 px-6 py-3 bg-gray-50 border-b border-gray-100">
+                {/* La place de la loupe est réservée en style inline : .form-input pose son
+                    propre padding hors couche Tailwind, un utilitaire pl-* serait ignoré. */}
+                <div className="relative flex-1 min-w-[220px]">
+                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input
+                    type="search"
+                    value={achatSearch}
+                    onChange={(e) => setAchatSearch(e.target.value)}
+                    placeholder="Rechercher (description, n° de facture, fournisseur, montant...)"
+                    style={{ paddingLeft: '2.25rem' }}
+                    className="form-input text-sm"
+                  />
+                </div>
+                {/* Largeurs portées par des conteneurs : sur le champ lui-même, les
+                    utilitaires Tailwind perdraient contre le width:100% de .form-input. */}
+                <div className="w-full sm:w-52">
+                  <select value={achatFournisseurFiltre} onChange={(e) => setAchatFournisseurFiltre(e.target.value)} className="form-input text-sm">
+                    <option value="">Tous les fournisseurs</option>
+                    {achatsFournisseursDispo.map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </div>
+                <div className="w-full sm:w-52">
+                  <select value={achatCategorieFiltre} onChange={(e) => setAchatCategorieFiltre(e.target.value)} className="form-input text-sm">
+                    <option value="">Toutes les catégories</option>
+                    {achatsCategoriesDispo.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="w-full sm:w-60">
+                  <select value={achatTri} onChange={(e) => setAchatTri(e.target.value as typeof achatTri)} className="form-input text-sm">
+                    <option value="date-desc">Du plus récent au plus ancien</option>
+                    <option value="date-asc">Du plus ancien au plus récent</option>
+                    <option value="montant-desc">Montant décroissant</option>
+                    <option value="montant-asc">Montant croissant</option>
+                  </select>
+                </div>
+                {achatsFiltreActif && (
+                  <button type="button" onClick={resetAchatsFiltres} className="text-xs font-semibold text-accent hover:underline">
+                    Réinitialiser
+                  </button>
+                )}
+              </div>
+            )}
+
             {achats.length === 0 ? (
               <div className="px-6 py-8 text-center text-gray-400 italic">Aucun achat enregistré.</div>
+            ) : achatsAffiches.length === 0 ? (
+              <div className="px-6 py-8 text-center text-gray-400 italic">Aucun achat ne correspond à la recherche.</div>
             ) : (
-              <div className="divide-y divide-gray-100">
-                {achats.slice(0, 6).map((a) => (
+              <div className="divide-y divide-gray-100 max-h-[32rem] overflow-y-auto">
+                {achatsAffiches.map((a) => (
                   editingAchatId === a.id ? (
                     <form
                       key={a.id}
                       onSubmit={(e) => handleAchatSubmit(e, a.id)}
-                      className="grid grid-cols-2 gap-2 px-6 py-3 bg-gray-50"
+                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 px-6 py-3 bg-gray-50"
                     >
                       <input required type="date" name="date" defaultValue={toDateInputValue(a.date)} className="form-input text-sm" />
                       <input required type="number" step="0.01" name="montantHT" defaultValue={a.montantHT} placeholder="Montant HT" className="form-input text-sm" />
@@ -758,9 +925,9 @@ const ChantierDetail = () => {
                         {categories.length === 0 && <option value={a.categorieId}>{a.categorie?.nom}</option>}
                         {categories.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
                       </select>
-                      <input required type="text" name="description" defaultValue={a.description} placeholder="Description" className="form-input text-sm col-span-2" />
-                      <input type="text" name="numeroFacture" defaultValue={a.numeroFacture || ''} placeholder="N° de facture (optionnel)" className="form-input text-sm col-span-2" />
-                      <div className="col-span-2 flex gap-2 justify-end">
+                      <input required type="text" name="description" defaultValue={a.description} placeholder="Description" className="form-input text-sm sm:col-span-2 lg:col-span-3" />
+                      <input type="text" name="numeroFacture" defaultValue={a.numeroFacture || ''} placeholder="N° de facture (optionnel)" className="form-input text-sm sm:col-span-2 lg:col-span-1" />
+                      <div className="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
                         <button type="button" disabled={savingAchat} onClick={() => setEditingAchatId(null)} className="btn bg-white border text-xs px-3 py-1.5">Annuler</button>
                         <button type="submit" disabled={savingAchat} className="btn btn-primary text-xs px-3 py-1.5">
                           {savingAchat ? 'Enregistrement...' : 'Enregistrer'}
@@ -768,10 +935,13 @@ const ChantierDetail = () => {
                       </div>
                     </form>
                   ) : (
-                    <div key={a.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm">
+                    <div key={a.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm hover:bg-gray-50 transition-colors">
                       <div className="min-w-0">
-                        <div className="font-semibold text-gray-700 truncate">{a.description}</div>
-                        <div className="text-xs text-gray-400">{fmtDate(a.date)} · {a.fournisseur?.nom} · {a.categorie?.nom}</div>
+                        <div className="font-semibold text-gray-700">{a.description}</div>
+                        <div className="text-xs text-gray-400">
+                          {fmtDate(a.date)} · {a.fournisseur?.nom} · {a.categorie?.nom}
+                          {a.numeroFacture ? ` · Facture ${a.numeroFacture}` : ''}
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="font-bold text-gray-800 whitespace-nowrap">{fmtEuro(a.montantHT)}</div>
@@ -800,23 +970,85 @@ const ChantierDetail = () => {
                 ))}
               </div>
             )}
+            {/* Récapitulatif de la sélection : n'a de sens qu'une fois la liste filtrée,
+                sinon il répète le total affiché en en-tête. */}
+            {achatsFiltreActif && achatsAffiches.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-3 border-t border-gray-100 bg-gray-50 text-xs font-semibold text-gray-500">
+                <span>{achatsAffiches.length} achat{achatsAffiches.length > 1 ? 's' : ''} sur {achats.length}</span>
+                <span>Sous-total : <strong className="text-primary-dark">{fmtEuro(achatsAffichesTotal)}</strong></span>
+              </div>
+            )}
           </div>
 
+          {/* Journal complet des heures : tous les pointages du chantier, avec les mêmes
+              outils de recherche que le journal des achats ci-dessus. */}
           <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-            <div className="flex items-center gap-2 px-6 py-4 border-b border-gray-100">
-              <Hammer size={18} className="text-purple-500" />
-              <h3 className="text-lg font-bold text-primary-dark m-0">Dernières heures</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Hammer size={18} className="text-purple-500" />
+                <h3 className="text-lg font-bold text-primary-dark m-0">Heures du chantier</h3>
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-600">
+                  {pointages.length} pointage{pointages.length > 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="text-sm text-muted">
+                Total pointé : <strong className="text-primary-dark">{fmtHeures(heuresTotal)}</strong>
+              </div>
             </div>
+
+            {pointages.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 px-6 py-3 bg-gray-50 border-b border-gray-100">
+                <div className="relative flex-1 min-w-[220px]">
+                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input
+                    type="search"
+                    value={pointageSearch}
+                    onChange={(e) => setPointageSearch(e.target.value)}
+                    placeholder="Rechercher (intervenant, rôle, commentaire, date...)"
+                    style={{ paddingLeft: '2.25rem' }}
+                    className="form-input text-sm"
+                  />
+                </div>
+                <div className="w-full sm:w-52">
+                  <select value={pointageIntervenantFiltre} onChange={(e) => setPointageIntervenantFiltre(e.target.value)} className="form-input text-sm">
+                    <option value="">Tous les intervenants</option>
+                    {pointagesIntervenantsDispo.map((i) => <option key={i} value={i}>{i}</option>)}
+                  </select>
+                </div>
+                <div className="w-full sm:w-52">
+                  <select value={pointageRoleFiltre} onChange={(e) => setPointageRoleFiltre(e.target.value)} className="form-input text-sm">
+                    <option value="">Tous les rôles</option>
+                    {pointagesRolesDispo.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div className="w-full sm:w-60">
+                  <select value={pointageTri} onChange={(e) => setPointageTri(e.target.value as typeof pointageTri)} className="form-input text-sm">
+                    <option value="date-desc">Du plus récent au plus ancien</option>
+                    <option value="date-asc">Du plus ancien au plus récent</option>
+                    <option value="heures-desc">Heures décroissantes</option>
+                    <option value="heures-asc">Heures croissantes</option>
+                  </select>
+                </div>
+                {pointagesFiltreActif && (
+                  <button type="button" onClick={resetPointagesFiltres} className="text-xs font-semibold text-accent hover:underline">
+                    Réinitialiser
+                  </button>
+                )}
+              </div>
+            )}
+
             {pointages.length === 0 ? (
               <div className="px-6 py-8 text-center text-gray-400 italic">Aucune heure enregistrée.</div>
+            ) : pointagesAffiches.length === 0 ? (
+              <div className="px-6 py-8 text-center text-gray-400 italic">Aucun pointage ne correspond à la recherche.</div>
             ) : (
-              <div className="divide-y divide-gray-100">
-                {pointages.slice(0, 6).map((p) => (
+              <div className="divide-y divide-gray-100 max-h-[32rem] overflow-y-auto">
+                {pointagesAffiches.map((p) => (
                   editingPointageId === p.id ? (
                     <form
                       key={p.id}
                       onSubmit={(e) => handlePointageSubmit(e, p.id)}
-                      className="grid grid-cols-2 gap-2 px-6 py-3 bg-gray-50"
+                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 px-6 py-3 bg-gray-50"
                     >
                       <input required type="date" name="date" defaultValue={toDateInputValue(p.date)} className="form-input text-sm" />
                       <select required name="intervenantId" defaultValue={p.intervenantId} className="form-input text-sm">
@@ -825,7 +1057,7 @@ const ChantierDetail = () => {
                       </select>
                       <input required type="number" step="0.5" min="0.5" name="nbrHeures" defaultValue={p.nbrHeures} className="form-input text-sm" />
                       <input type="text" name="commentaire" defaultValue={p.commentaire || ''} placeholder="Commentaire" className="form-input text-sm" />
-                      <div className="col-span-2 flex gap-2 justify-end">
+                      <div className="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
                         <button type="button" disabled={savingPointage} onClick={() => setEditingPointageId(null)} className="btn bg-white border text-xs px-3 py-1.5">Annuler</button>
                         <button type="submit" disabled={savingPointage} className="btn btn-primary text-xs px-3 py-1.5">
                           {savingPointage ? 'Enregistrement...' : 'Enregistrer'}
@@ -833,13 +1065,16 @@ const ChantierDetail = () => {
                       </div>
                     </form>
                   ) : (
-                    <div key={p.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm">
+                    <div key={p.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm hover:bg-gray-50 transition-colors">
                       <div className="min-w-0">
-                        <div className="font-semibold text-gray-700 truncate">{p.intervenant?.nom}</div>
-                        <div className="text-xs text-gray-400">{fmtDate(p.date)} · {p.intervenant?.role}</div>
+                        <div className="font-semibold text-gray-700">{p.intervenant?.nom}</div>
+                        <div className="text-xs text-gray-400">
+                          {fmtDate(p.date)} · {p.intervenant?.role}
+                          {p.commentaire ? ` · ${p.commentaire}` : ''}
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="font-bold text-gray-800 whitespace-nowrap">{p.nbrHeures} h</div>
+                        <div className="font-bold text-gray-800 whitespace-nowrap">{fmtHeures(p.nbrHeures)}</div>
                         {userRole !== 'COMMERCIAL' && (
                           <>
                             <button
@@ -863,6 +1098,12 @@ const ChantierDetail = () => {
                     </div>
                   )
                 ))}
+              </div>
+            )}
+            {pointagesFiltreActif && pointagesAffiches.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-3 border-t border-gray-100 bg-gray-50 text-xs font-semibold text-gray-500">
+                <span>{pointagesAffiches.length} pointage{pointagesAffiches.length > 1 ? 's' : ''} sur {pointages.length}</span>
+                <span>Sous-total : <strong className="text-primary-dark">{fmtHeures(pointagesAffichesTotal)}</strong></span>
               </div>
             )}
           </div>
