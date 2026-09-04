@@ -7,9 +7,13 @@ import { TYPES_CHANTIER } from '../chantierTypes';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { DevisAutocomplete } from '../components/DevisAutocomplete';
 import { isAdminRole, roleLabel } from '../roles';
+import { useModules } from '../modules';
 
 const ListeChantiers = () => {
   const navigate = useNavigate();
+  // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
+  // de société n'est écrit dans l'interface.
+  const { libelleBaremeReduit } = useModules();
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [commerciaux, setCommerciaux] = useState<any[]>([]);
@@ -433,8 +437,8 @@ const ListeChantiers = () => {
             </div>
             <div className="form-group mb-0 md:col-span-2">
               <label className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors w-fit">
-                <input type="checkbox" name="dossierNoxia" value="true" className="w-4 h-4" />
-                Dossier NOXIA (barème de commission commerciale réduit)
+                <input type="checkbox" name="baremeReduit" value="true" className="w-4 h-4" />
+                {libelleBaremeReduit} (barème de commission commerciale réduit)
               </label>
             </div>
             <div className="md:col-span-2 flex gap-2 mt-2">

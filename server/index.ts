@@ -449,7 +449,7 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
   // Il n'y a pas de variable sur cette marge pour les conducteurs de travaux (voir la
   // marge ne leur ouvre droit à rien) : seuls les commerciaux ont une rémunération
   // variable, calculée à part sur le barème progressif mensuel du "Système de
-  // rémunération commerciale" (cf. BAREME_COMMERCIAL_* et
+  // rémunération commerciale" (cf. ParametresRemuneration et
   // computeCommissionsParCommercial, utilisés par /api/stats/commerciaux) — sur la
   // marge cumulée du mois du commercial, pas chantier par chantier.
   const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
@@ -837,7 +837,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
     }
 
     // Le type de chantier n'est pas un champ texte : au moins une case doit être cochée
-    // (dossierNoxia est une case à part, non concernée par cette règle).
+    // (baremeReduit est une case à part, non concernée par cette règle).
     const types = sanitizeTypes(req.body.types);
     if (types.length === 0) {
       return res.status(400).json({ error: 'Veuillez sélectionner au moins un type de chantier.' });
@@ -859,7 +859,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
         commercialId,
         statut: req.body.statut || "EN_COURS",
         types,
-        dossierNoxia: !!req.body.dossierNoxia,
+        baremeReduit: !!req.body.baremeReduit,
       },
     });
     res.json(chantier);
@@ -939,7 +939,7 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // Facultative (contrairement au numéro de devis) : peut être vidée.
     if ('adresse' in req.body) data.adresse = String(req.body.adresse || '').trim() || null;
     if ('types' in req.body) data.types = sanitizeTypes(req.body.types);
-    if ('dossierNoxia' in req.body) data.dossierNoxia = !!req.body.dossierNoxia;
+    if ('baremeReduit' in req.body) data.baremeReduit = !!req.body.baremeReduit;
 
     const chantier = await prisma.chantier.update({
       where: { id: paramId(req) },
@@ -2915,6 +2915,88 @@ app.put('/api/company', requireAuth, requireSuperAdmin, async (req, res) => {
   }
 });
 
+// --- Règles de rémunération commerciale (singleton) ---
+// Lecture ouverte aux administrateurs (l'écran « Mes commerciaux » affiche le barème
+// appliqué), écriture réservée au superadmin : ce sont les règles de paie des commerciaux.
+app.get('/api/parametres/remuneration', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const regles = await getReglesRemuneration();
+    res.json({ ...regles, baremeStandard: serialiseBareme(regles.baremeStandard), baremeReduit: serialiseBareme(regles.baremeReduit) });
+  } catch {
+    res.status(500).json({ error: 'Error fetching remuneration settings' });
+  }
+});
+
+// Valide un barème envoyé par le client. Un barème vide est accepté (aucune commission) ;
+// ce qui est refusé, c'est un barème incohérent, qui produirait des montants faux en
+// silence : taux hors de [0, 100], plafonds non croissants, ou plusieurs tranches non
+// plafonnées — seule la dernière peut l'être, sinon les suivantes ne servent à rien.
+function validerBareme(valeur: unknown, champ: string): TrancheBareme[] {
+  if (!Array.isArray(valeur)) throw new Error(`${champ} : un tableau de tranches est attendu.`);
+  if (valeur.length > 20) throw new Error(`${champ} : 20 tranches au maximum.`);
+  const tranches: TrancheBareme[] = valeur.map((t: any, i: number) => {
+    const taux = Number(t?.taux);
+    if (!Number.isFinite(taux) || taux < 0 || taux > 100) {
+      throw new Error(`${champ}, tranche ${i + 1} : le taux doit être compris entre 0 et 100.`);
+    }
+    const brut = t?.plafond;
+    const plafond = brut === null || brut === undefined || brut === '' ? Infinity : Number(brut);
+    if (plafond !== Infinity && (!Number.isFinite(plafond) || plafond <= 0)) {
+      throw new Error(`${champ}, tranche ${i + 1} : le plafond doit être un montant positif, ou vide pour la dernière tranche.`);
+    }
+    return { plafond, taux };
+  });
+  // Ce contrôle passe AVANT celui de la croissance : deux tranches sans plafond valent
+  // toutes deux Infinity, donc « non croissantes » — un message exact mais incompréhensible
+  // pour qui vient simplement de laisser deux plafonds vides.
+  if (tranches.filter((t) => t.plafond === Infinity).length > 1) {
+    throw new Error(`${champ} : une seule tranche peut être sans plafond, et ce doit être la dernière.`);
+  }
+  for (let i = 1; i < tranches.length; i++) {
+    if (tranches[i].plafond <= tranches[i - 1].plafond) {
+      throw new Error(`${champ} : les plafonds doivent être strictement croissants.`);
+    }
+  }
+  return tranches;
+}
+
+function montantPositif(valeur: unknown, champ: string): number {
+  const n = Number(valeur ?? 0);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${champ} : montant invalide.`);
+  return n;
+}
+
+app.put('/api/parametres/remuneration', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const libelle = String(body.libelleBaremeReduit ?? '').trim();
+    if (!libelle || libelle.length > 80) {
+      return res.status(400).json({ error: 'Le libellé du barème réduit est obligatoire (80 caractères au plus).' });
+    }
+    const data = {
+      baremeStandard: serialiseBareme(validerBareme(body.baremeStandard, 'Barème standard')),
+      baremeReduit: serialiseBareme(validerBareme(body.baremeReduit, 'Barème réduit')),
+      libelleBaremeReduit: libelle,
+      objectifCaMensuel: montantPositif(body.objectifCaMensuel, 'Objectif de CA mensuel'),
+      primeObjectifCa: montantPositif(body.primeObjectifCa, "Prime d'objectif de CA"),
+      objectifMargeMensuel: montantPositif(body.objectifMargeMensuel, 'Objectif de marge mensuel'),
+      primeObjectifMarge: montantPositif(body.primeObjectifMarge, "Prime d'objectif de marge"),
+      primeSuiviAdministratif: montantPositif(body.primeSuiviAdministratif, 'Prime de suivi administratif'),
+    };
+    await prisma.parametresRemuneration.upsert({
+      where: { id: 'singleton' },
+      update: data,
+      create: { id: 'singleton', ...data },
+    });
+    console.warn(`[REMUNERATION] Règles modifiées par ${(req as AuthRequest).user!.id}`);
+    const regles = await getReglesRemuneration();
+    res.json({ ...regles, baremeStandard: serialiseBareme(regles.baremeStandard), baremeReduit: serialiseBareme(regles.baremeReduit) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Enregistrement impossible.';
+    res.status(message.includes('Barème') || message.includes('montant') || message.includes('libellé') ? 400 : 500).json({ error: message });
+  }
+});
+
 // N'écrit QUE margeCommercialeActive : l'activation des modules (planningActif) est
 // réservée au superadmin et passe par PUT /api/modules — un ADMIN ne doit pas pouvoir la
 // modifier, même en glissant le champ dans le corps de cette requête.
@@ -2943,7 +3025,11 @@ app.get('/api/modules', requireAuth, async (req, res) => {
   try {
     const { planningActif } = await getParametres();
     const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
-    res.json({ planningActif: isSuper || planningActif, planningActifGlobal: planningActif });
+    // Le libellé du barème réduit voyage avec les modules : c'est le seul réglage lu par
+    // TOUS les comptes (la route /parametres/remuneration, elle, est réservée aux admins),
+    // et il s'affiche sur la fiche chantier comme sur les écrans commerciaux.
+    const { libelleBaremeReduit } = await getReglesRemuneration();
+    res.json({ planningActif: isSuper || planningActif, planningActifGlobal: planningActif, libelleBaremeReduit });
   } catch (error) {
     res.status(500).json({ error: 'Error fetching modules' });
   }
@@ -3046,7 +3132,7 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
         // Encaissés, rattachés au mois de leur clôture) : ce sont des résultats
         // FINALISÉS du mois, pas un cumul de portefeuille en cours.
         const commerciaux = await prisma.user.findMany({ where: { OR: COMMERCIAL_OR_FILTER }, select: { id: true } });
-        const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params);
+        const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params, await getReglesRemuneration());
         let caTotal = 0, margeTotal = 0, commissionCommercialeTotal = 0;
         for (const agg of Object.values(byCommercial) as any[]) {
           caTotal += agg.caTotal;
@@ -3058,7 +3144,7 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
         result.margePct = caTotal > 0 ? (margeTotal / caTotal) * 100 : 0;
         result.commissionCommercialeTotal = commissionCommercialeTotal;
       } else if (isCommercial) {
-        const { byCommercial } = await computeCommissionsParCommercial([user.id], start, endExclusive, params);
+        const { byCommercial } = await computeCommissionsParCommercial([user.id], start, endExclusive, params, await getReglesRemuneration());
         const mine = byCommercial[user.id];
         result.margeTotal = mine?.margeTotal ?? 0;
         result.commissionTotal = mine?.commissionTotal ?? 0;
@@ -3453,26 +3539,77 @@ app.get('/api/stats/types-chantiers', requireAuth, blockCommercial, async (req, 
 });
 
 // --- Système de rémunération commerciale : barème progressif mensuel ---
-// (cf. document "Système de rémunération commerciale" fourni par la direction).
 // Chaque tranche de marge du MOIS est commissionnée à son propre taux, comme un barème
 // d'impôt progressif : atteindre la tranche haute ne fait pas basculer toute la marge à
 // son taux, seule la fraction qui la dépasse l'est.
-const BAREME_COMMERCIAL_STANDARD = [
-  { plafond: 20000, taux: 16 },
-  { plafond: 30000, taux: 20 },
-  { plafond: Infinity, taux: 25 },
-];
-// Barème réduit pour les dossiers rattachés à NOXIA (cf. Chantier.dossierNoxia).
-const BAREME_COMMERCIAL_NOXIA = [
-  { plafond: 20000, taux: 8 },
-  { plafond: 30000, taux: 10 },
-  { plafond: Infinity, taux: 12.5 },
-];
-const OBJECTIF_CA_MENSUEL = 70000;
-const OBJECTIF_MARGE_MENSUEL = 17000;
-const PRIME_OBJECTIF_CA = 450;
-const PRIME_OBJECTIF_MARGE = 450;
-const PRIME_SUIVI_ADMINISTRATIF = 250;
+//
+// Les taux, seuils et primes NE SONT PLUS ÉCRITS ICI : ils vivent en base
+// (ParametresRemuneration) et s'éditent depuis Administration > Rémunération commerciale.
+// Les inscrire dans le code revenait à livrer à chaque client les règles de rémunération
+// d'une autre société, et à exiger un redéploiement pour changer un taux.
+interface TrancheBareme { plafond: number; taux: number }
+interface ReglesRemuneration {
+  baremeStandard: TrancheBareme[];
+  baremeReduit: TrancheBareme[];
+  libelleBaremeReduit: string;
+  objectifCaMensuel: number;
+  primeObjectifCa: number;
+  objectifMargeMensuel: number;
+  primeObjectifMarge: number;
+  primeSuiviAdministratif: number;
+}
+
+// Valeurs de repli, utilisées uniquement si la ligne de paramètres n'existe pas encore
+// (base créée avant la migration, ou vidée à la main). Volontairement NEUTRES : aucune
+// commission, aucune prime. Mieux vaut un montant nul, visible et corrigible en deux
+// clics, qu'un barème arbitraire qui ferait calculer de fausses rémunérations sans que
+// personne ne s'en aperçoive.
+const REMUNERATION_NEUTRE: ReglesRemuneration = {
+  baremeStandard: [],
+  baremeReduit: [],
+  libelleBaremeReduit: 'Barème réduit',
+  objectifCaMensuel: 0,
+  primeObjectifCa: 0,
+  objectifMargeMensuel: 0,
+  primeObjectifMarge: 0,
+  primeSuiviAdministratif: 0,
+};
+
+// Une tranche stockée avec `plafond: null` est la tranche non plafonnée : JSON ne sait pas
+// représenter Infinity, on le rétablit à la lecture. Les tranches sont triées par plafond
+// croissant, le calcul progressif en dépendant.
+function parseBareme(valeur: unknown): TrancheBareme[] {
+  if (!Array.isArray(valeur)) return [];
+  return valeur
+    .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
+    .map((t) => ({
+      plafond: t.plafond === null || t.plafond === undefined ? Infinity : Number(t.plafond),
+      taux: Number(t.taux),
+    }))
+    .filter((t) => Number.isFinite(t.taux) && t.taux >= 0 && (t.plafond === Infinity || Number.isFinite(t.plafond)))
+    .sort((a, b) => a.plafond - b.plafond);
+}
+
+async function getReglesRemuneration(): Promise<ReglesRemuneration> {
+  const p = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
+  if (!p) return REMUNERATION_NEUTRE;
+  const n = decimalToNumber(p);
+  return {
+    baremeStandard: parseBareme(p.baremeStandard),
+    baremeReduit: parseBareme(p.baremeReduit),
+    libelleBaremeReduit: p.libelleBaremeReduit,
+    objectifCaMensuel: n.objectifCaMensuel,
+    primeObjectifCa: n.primeObjectifCa,
+    objectifMargeMensuel: n.objectifMargeMensuel,
+    primeObjectifMarge: n.primeObjectifMarge,
+    primeSuiviAdministratif: n.primeSuiviAdministratif,
+  };
+}
+
+// Sérialisation inverse, pour l'écriture : Infinity redevient null.
+function serialiseBareme(bareme: TrancheBareme[]) {
+  return bareme.map((t) => ({ plafond: t.plafond === Infinity ? null : t.plafond, taux: t.taux }));
+}
 
 function commissionBaremeProgressif(marge: number, bareme: { plafond: number; taux: number }[]): number {
   if (marge <= 0) return 0;
@@ -3511,7 +3648,7 @@ function dateClotureChantier(c: any): Date | null {
 // administratif) par commercial sur [start, endExclusive[, mois par mois (cf. commentaire
 // de /api/stats/commerciaux). Réutilisé par cette route (détail par chantier) ET par
 // /api/stats/global (total agrégé pour les cartes du tableau de bord).
-async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres) {
+async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres, regles: ReglesRemuneration) {
   const commercialIdSet = new Set(commercialIds);
   const chantiers = decimalToNumber(await prisma.chantier.findMany({
     where: { commercialId: { in: commercialIds } },
@@ -3524,7 +3661,7 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
   });
   const suiviAdminSet = new Set(primesAdmin.filter((p) => p.suiviAdministratif).map((p) => `${p.commercialId}:${p.periode}`));
 
-  const buckets: Record<string, Record<string, { ca: number; margeStandard: number; margeNoxia: number }>> = {};
+  const buckets: Record<string, Record<string, { ca: number; margeStandard: number; margeReduite: number }>> = {};
   for (const c of chantiers) {
     if (!c.commercialId || !commercialIdSet.has(c.commercialId)) continue;
     const dateCloture = dateClotureChantier(c);
@@ -3532,36 +3669,38 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
     const m = computeChantierMetrics(c, params, true);
     const moisKey = dateCloture.toISOString().slice(0, 7);
     buckets[c.commercialId] ??= {};
-    buckets[c.commercialId][moisKey] ??= { ca: 0, margeStandard: 0, margeNoxia: 0 };
+    buckets[c.commercialId][moisKey] ??= { ca: 0, margeStandard: 0, margeReduite: 0 };
     const b = buckets[c.commercialId][moisKey];
     b.ca += c.budgetGlobalVendu;
-    if (c.dossierNoxia) b.margeNoxia += m.margeCommerciale ?? 0;
+    if (c.baremeReduit) b.margeReduite += m.margeCommerciale ?? 0;
     else b.margeStandard += m.margeCommerciale ?? 0;
   }
 
-  const commissionsParMoisGroupe: Record<string, { standard: number; noxia: number }> = {};
+  const commissionsParMoisGroupe: Record<string, { standard: number; reduit: number }> = {};
   const byCommercial: Record<string, any> = {};
   for (const id of commercialIds) {
     const buck = buckets[id] || {};
-    let commissionStandard = 0, commissionNoxia = 0, primeCA = 0, primeMarge = 0, primeAdmin = 0, caTotal = 0, margeTotal = 0, margeStandard = 0, margeNoxia = 0;
+    let commissionStandard = 0, commissionReduite = 0, primeCA = 0, primeMarge = 0, primeAdmin = 0, caTotal = 0, margeTotal = 0, margeStandard = 0, margeReduite = 0;
     for (const [moisKey, b] of Object.entries(buck)) {
-      const cStandard = commissionBaremeProgressif(b.margeStandard, BAREME_COMMERCIAL_STANDARD);
-      const cNoxia = commissionBaremeProgressif(b.margeNoxia, BAREME_COMMERCIAL_NOXIA);
-      commissionsParMoisGroupe[`${id}:${moisKey}`] = { standard: cStandard, noxia: cNoxia };
+      const cStandard = commissionBaremeProgressif(b.margeStandard, regles.baremeStandard);
+      const cReduit = commissionBaremeProgressif(b.margeReduite, regles.baremeReduit);
+      commissionsParMoisGroupe[`${id}:${moisKey}`] = { standard: cStandard, reduit: cReduit };
       commissionStandard += cStandard;
-      commissionNoxia += cNoxia;
+      commissionReduite += cReduit;
       caTotal += b.ca;
       margeStandard += b.margeStandard;
-      margeNoxia += b.margeNoxia;
-      margeTotal += b.margeStandard + b.margeNoxia;
-      if (b.ca >= OBJECTIF_CA_MENSUEL) primeCA += PRIME_OBJECTIF_CA;
-      if (b.margeStandard + b.margeNoxia >= OBJECTIF_MARGE_MENSUEL) primeMarge += PRIME_OBJECTIF_MARGE;
-      if (suiviAdminSet.has(`${id}:${moisKey}`)) primeAdmin += PRIME_SUIVI_ADMINISTRATIF;
+      margeReduite += b.margeReduite;
+      margeTotal += b.margeStandard + b.margeReduite;
+      // Un objectif à 0 n'est pas un objectif atteint d'office : sans seuil défini,
+      // aucune prime n'est due.
+      if (regles.objectifCaMensuel > 0 && b.ca >= regles.objectifCaMensuel) primeCA += regles.primeObjectifCa;
+      if (regles.objectifMargeMensuel > 0 && b.margeStandard + b.margeReduite >= regles.objectifMargeMensuel) primeMarge += regles.primeObjectifMarge;
+      if (suiviAdminSet.has(`${id}:${moisKey}`)) primeAdmin += regles.primeSuiviAdministratif;
     }
-    const commissionBareme = commissionStandard + commissionNoxia;
+    const commissionBareme = commissionStandard + commissionReduite;
     byCommercial[id] = {
-      caTotal, margeTotal, margeStandard, margeNoxia,
-      commissionBareme, commissionStandard, commissionNoxia, primeCA, primeMarge, primeAdmin,
+      caTotal, margeTotal, margeStandard, margeReduite,
+      commissionBareme, commissionStandard, commissionReduite, primeCA, primeMarge, primeAdmin,
       commissionTotal: commissionBareme + primeCA + primeMarge + primeAdmin,
     };
   }
@@ -3592,6 +3731,7 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
       : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
     const params = await getParametres();
+    const regles = await getReglesRemuneration();
 
     const users = await prisma.user.findMany({
       where: isAdmin ? { OR: COMMERCIAL_OR_FILTER } : { id: authUser.id, role: 'COMMERCIAL' },
@@ -3600,7 +3740,7 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
 
     const commercialIds = users.map((u) => u.id);
     const { byCommercial, chantiers, buckets, commissionsParMoisGroupe, moisPeriode, suiviAdminSet } =
-      await computeCommissionsParCommercial(commercialIds, start, endExclusive, params);
+      await computeCommissionsParCommercial(commercialIds, start, endExclusive, params, regles);
 
     const byUser: Record<string, any> = {};
     for (const u of users) {
@@ -3630,8 +3770,8 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
         const groupe = commissionsParMoisGroupe[`${c.commercialId}:${moisKey}`];
         const b = buckets[c.commercialId]?.[moisKey];
         if (groupe && b) {
-          const margeGroupe = c.dossierNoxia ? b.margeNoxia : b.margeStandard;
-          const commissionGroupe = c.dossierNoxia ? groupe.noxia : groupe.standard;
+          const margeGroupe = c.baremeReduit ? b.margeReduite : b.margeStandard;
+          const commissionGroupe = c.baremeReduit ? groupe.reduit : groupe.standard;
           commissionEstimee = margeGroupe > 0 ? commissionGroupe * ((m.margeCommerciale ?? 0) / margeGroupe) : 0;
         }
       }
@@ -3643,7 +3783,7 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
         statut: c.statut,
         dateDebut: c.dateDebut,
         dateFin: c.dateFin,
-        dossierNoxia: c.dossierNoxia,
+        baremeReduit: c.baremeReduit,
         encaisse: c.encaisse,
         dateEncaissement: c.dateEncaissement,
         budgetGlobalVendu: c.budgetGlobalVendu,
@@ -3665,8 +3805,9 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
       period,
       periodStart: start.toISOString().slice(0, 10),
       periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
-      bareme: { standard: BAREME_COMMERCIAL_STANDARD, noxia: BAREME_COMMERCIAL_NOXIA },
-      objectifs: { ca: OBJECTIF_CA_MENSUEL, marge: OBJECTIF_MARGE_MENSUEL, primeCA: PRIME_OBJECTIF_CA, primeMarge: PRIME_OBJECTIF_MARGE, primeAdmin: PRIME_SUIVI_ADMINISTRATIF },
+      bareme: { standard: serialiseBareme(regles.baremeStandard), reduit: serialiseBareme(regles.baremeReduit) },
+      libelleBaremeReduit: regles.libelleBaremeReduit,
+      objectifs: { ca: regles.objectifCaMensuel, marge: regles.objectifMargeMensuel, primeCA: regles.primeObjectifCa, primeMarge: regles.primeObjectifMarge, primeAdmin: regles.primeSuiviAdministratif },
       commerciaux: list,
     });
   } catch (error) {
@@ -3716,23 +3857,22 @@ Rédige un compte-rendu exécutif d'environ 150-200 mots résumant la situation 
 });
 
 // --- Comptes super administrateurs de départ ---
-// La liste par défaut est limitée au compte de direction Microsoft. Elle est
-// surchargeable via SUPERADMIN_EMAILS (emails séparés par des virgules).
+// La liste vient EXCLUSIVEMENT de SUPERADMIN_EMAILS (emails séparés par des virgules).
+// Aucun email n'est écrit ici : une instance livrée à un client ne doit pas créer d'office
+// un compte d'administration appartenant à l'éditeur.
 // Traitement IDEMPOTENT et non destructif : un compte déjà présent est simplement promu
 // SUPERADMIN (son nom, son mot de passe et ses rattachements sont conservés) ; un compte
 // absent est créé. Aucun compte n'est jamais rétrogradé ici — retirer le rôle superadmin
 // se fait depuis Administration > Utilisateurs, par un superadmin.
-const DEFAULT_SUPERADMIN_EMAILS = ['nelson@noxia-groupe.fr'];
-
-// « nelson@noxia-groupe.fr » -> « Nelson » : nom d'affichage par défaut d'un compte créé
-// automatiquement, que son titulaire ou un superadmin pourra corriger ensuite.
+// « prenom.nom@societe.fr » -> « Prenom Nom » : nom d'affichage par défaut d'un compte
+// créé automatiquement, que son titulaire ou un superadmin pourra corriger ensuite.
 function nameFromEmail(email: string): string {
   const local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
   return local.replace(/\b\w/g, (c) => c.toUpperCase()) || email;
 }
 
 const ensureSuperAdmins = async () => {
-  const emails = (process.env.SUPERADMIN_EMAILS || DEFAULT_SUPERADMIN_EMAILS.join(','))
+  const emails = (process.env.SUPERADMIN_EMAILS || '')
     .split(',')
     .map(normalizeEmail)
     .filter(Boolean);
@@ -3801,4 +3941,8 @@ export {
   commissionBaremeProgressif,
   computeChantierMetrics,
   decimalToNumber,
+  parseBareme,
+  serialiseBareme,
+  validerBareme,
+  getReglesRemuneration,
 };

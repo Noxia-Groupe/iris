@@ -82,9 +82,9 @@ model Chantier {
   budgetMainOeuvreVendu Decimal @default(0) @db.Decimal(12, 2)
   heuresVendues         Decimal @default(0) @db.Decimal(10, 2)
 
-  // Rémunération commerciale : bascule vers le barème "Dossier commercial / NOXIA"
-  // (taux réduits) au lieu du barème standard — cf. computeChantierMetrics.
-  dossierNoxia     Boolean   @default(false)
+  // Rémunération commerciale : bascule vers le barème réduit au lieu du barème standard
+  // (cf. ParametresRemuneration.baremeReduit et son libellé configurable).
+  baremeReduit     Boolean   @default(false)
   // Clause de sécurisation des commissions : une commission n'est due que si le
   // chantier est Terminé ET Encaissé (cf. règle 6 du système de rémunération commerciale).
   encaisse         Boolean   @default(false)
@@ -268,6 +268,39 @@ model ClientSite {
   equipementsInstalles EquipementInstalle[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
+}
+
+// Règles de rémunération commerciale (singleton), sorties du code pour être éditables par
+// la direction sans redéploiement — et pour qu'Iris ne porte plus dans ses sources les
+// barèmes d'une société en particulier. Une nouvelle instance démarre sur les valeurs par
+// défaut ci-dessous et les ajuste depuis Administration > Rémunération commerciale.
+//
+// Les barèmes sont stockés en JSON : un tableau de tranches, chacune { plafond, taux }.
+// `plafond: null` marque la DERNIÈRE tranche, celle qui n'est pas plafonnée (JSON ne sait
+// pas représenter Infinity). Le barème est progressif, comme l'impôt sur le revenu :
+// franchir un plafond ne requalifie que la fraction qui le dépasse.
+model ParametresRemuneration {
+  id String @id @default("singleton")
+
+  // Barème appliqué par défaut à la marge mensuelle d'un commercial.
+  baremeStandard Json
+  // Barème appliqué aux chantiers cochés « barème réduit » (cf. Chantier.baremeReduit) :
+  // affaires apportées par la société plutôt que par le commercial. Son libellé est
+  // configurable : l'application n'en connaît aucun en dur.
+  baremeReduit        Json
+  libelleBaremeReduit String @default("Barème réduit")
+
+  // Primes d'objectifs mensuels : versées quand le seuil du mois est atteint.
+  objectifCaMensuel      Decimal @default(0) @db.Decimal(12, 2)
+  primeObjectifCa        Decimal @default(0) @db.Decimal(12, 2)
+  objectifMargeMensuel   Decimal @default(0) @db.Decimal(12, 2)
+  primeObjectifMarge     Decimal @default(0) @db.Decimal(12, 2)
+  // Prime « suivi administratif » : validée à la main, mois par mois, par un
+  // administrateur (cf. PrimeMensuelleCommercial) — elle ne se déduit d'aucune donnée.
+  primeSuiviAdministratif Decimal @default(0) @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Partage public en lecture seule du planning d'intervention (singleton) — lien de type

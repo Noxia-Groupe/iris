@@ -17,7 +17,7 @@
 }
 
 :root {
-  /* Noxia Brand Colors */
+  /* Couleurs de marque par défaut — surchargées par CompanySettings (écran Société) */
   --color-primary-dark: #000726; /* Bleu nuit sombre */
   --color-primary: #002359;      /* Bleu nuit */
   --color-accent: #0251a1;       /* Bleu vif */

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Award, CheckCircle2, Circle } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ObjectifBar } from '../components/ObjectifBar';
+import { useModules } from '../modules';
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé' };
@@ -31,11 +32,14 @@ const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 // servies protégées côté serveur (requireAdmin / requireAuth selon la route).
 //
 // La commission ne suit plus un taux réglé à la main par chantier : elle applique le
-// barème progressif mensuel du "Système de rémunération commerciale" (standard/NOXIA),
+// barème progressif mensuel du "Système de rémunération commerciale" (standard/réduit),
 // complété par les primes d'objectifs. Cette page permet à l'admin de valider les deux
 // leviers qui restent manuels : le statut "Encaissé" par chantier (clause de sécurisation
 // des commissions) et la prime "suivi administratif" par commercial et par mois.
 const MesCommerciaux = () => {
+  // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
+  // de société n'est écrit dans l'interface.
+  const { libelleBaremeReduit } = useModules();
   const [commerciaux, setCommerciaux] = useState<any[]>([]);
   const [commerciauxMeta, setCommerciauxMeta] = useState<any>(null);
   const [commerciauxPeriod, setCommerciauxPeriod] = useState<CommPeriod>('month');
@@ -161,7 +165,8 @@ const MesCommerciaux = () => {
 
                 {isExpanded && (
                   <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col gap-5">
-                    {/* Barème progressif : marge et commission par groupe standard/NOXIA */}
+                    {/* Barème progressif : marge et commission par groupe standard/réduit. Le libellé
+                        du barème réduit est celui configuré dans Administration. */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
                         <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Barème standard (16 / 20 / 25 %)</div>
@@ -169,9 +174,9 @@ const MesCommerciaux = () => {
                         <div className="flex justify-between text-sm"><span className="text-gray-500">Commission</span><strong className="text-purple-600">{fmtEuro(c.commissionStandard)}</strong></div>
                       </div>
                       <div className="p-4 rounded-lg bg-amber-50 border border-amber-100">
-                        <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-2">Barème NOXIA (8 / 10 / 12,5 %)</div>
-                        <div className="flex justify-between text-sm"><span className="text-amber-700/70">Marge</span><strong className="text-gray-800">{fmtEuro(c.margeNoxia)}</strong></div>
-                        <div className="flex justify-between text-sm"><span className="text-amber-700/70">Commission</span><strong className="text-purple-600">{fmtEuro(c.commissionNoxia)}</strong></div>
+                        <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-2">{libelleBaremeReduit}</div>
+                        <div className="flex justify-between text-sm"><span className="text-amber-700/70">Marge</span><strong className="text-gray-800">{fmtEuro(c.margeReduite)}</strong></div>
+                        <div className="flex justify-between text-sm"><span className="text-amber-700/70">Commission</span><strong className="text-purple-600">{fmtEuro(c.commissionReduite)}</strong></div>
                       </div>
                     </div>
 
@@ -213,7 +218,7 @@ const MesCommerciaux = () => {
                                 <td className="py-2 pr-3">
                                   <strong className="text-gray-800">{ch.nom}</strong>
                                   <span className="text-gray-400"> ({ch.client})</span>
-                                  {ch.dossierNoxia && <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full">NOXIA</span>}
+                                  {ch.baremeReduit && <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full">{libelleBaremeReduit}</span>}
                                 </td>
                                 <td className="py-2 pr-3">
                                   <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full ${ch.statut === 'TERMINE' ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-accent'}`}>

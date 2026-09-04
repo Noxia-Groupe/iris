@@ -39,6 +39,18 @@ Base technique reprise de marge, en cours de refonte module par module. ERP pour
 9. **Web mobile technicien** — planning, détails intervention, saisie info, signature numérique
 10. **Déploiement** — Docker/VPS dédiée par société ; instance et base de données propres
 
+## Règles métier : aucune valeur de société dans le code
+
+Les barèmes de commission, objectifs mensuels, primes et le libellé du barème réduit sont
+stockés en base (`ParametresRemuneration`) et s'éditent depuis **Administration >
+Rémunération commerciale** par un super administrateur. Ils étaient auparavant écrits en
+dur dans `server/index.ts` : changer un taux imposait un redéploiement, et chaque instance
+livrée portait les règles de rémunération d'une autre société.
+
+De même, aucun email d'administration n'est codé en dur : `SUPERADMIN_EMAILS` est
+obligatoire au premier démarrage d'une instance neuve, faute de quoi aucun compte
+d'administration n'est créé.
+
 ## Hors périmètre
 
 - **Dépôt et galerie de photos.** Héritée de marge, la galerie photos de chantier a été

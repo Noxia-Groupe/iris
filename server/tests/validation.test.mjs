@@ -8,6 +8,7 @@ const {
   clientPayload, contactPayload, sitePayload, companySettingsPayload,
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
   commissionBaremeProgressif, computeChantierMetrics,
+  parseBareme, serialiseBareme, validerBareme,
 } = await import('../dist/index.js');
 
 describe('Fiche client', () => {
@@ -140,5 +141,45 @@ describe('Métriques de chantier', () => {
   test('la marge désactivée dans les paramètres masque le calcul même pour un admin', () => {
     const vue = computeChantierMetrics(chantier, { margeCommercialeActive: false, planningActif: true }, true);
     assert.equal(vue.margeCommerciale, null);
+  });
+});
+
+describe('Barèmes de rémunération configurables', () => {
+  test('un plafond null devient la tranche non plafonnée', () => {
+    // JSON ne représente pas Infinity : la dernière tranche est stockée avec plafond null.
+    const bareme = parseBareme([{ plafond: 20000, taux: 16 }, { plafond: null, taux: 25 }]);
+    assert.equal(bareme[1].plafond, Infinity);
+    assert.deepEqual(serialiseBareme(bareme), [{ plafond: 20000, taux: 16 }, { plafond: null, taux: 25 }]);
+  });
+
+  test('les tranches sont remises dans l’ordre des plafonds', () => {
+    // Le calcul progressif suppose des plafonds croissants : un barème saisi dans le
+    // désordre donnerait des commissions fausses sans lever d’erreur.
+    const bareme = parseBareme([{ plafond: 30000, taux: 20 }, { plafond: 10000, taux: 10 }]);
+    assert.deepEqual(bareme.map((t) => t.plafond), [10000, 30000]);
+  });
+
+  test('une tranche illisible est ignorée plutôt que de fausser le calcul', () => {
+    assert.deepEqual(parseBareme([{ plafond: 100, taux: 'beaucoup' }, { plafond: 200, taux: 10 }]).length, 1);
+    assert.deepEqual(parseBareme('pas un tableau'), []);
+  });
+
+  test('un barème vide ne produit aucune commission', () => {
+    assert.equal(commissionBaremeProgressif(50000, []), 0);
+  });
+
+  test('la validation refuse ce qui donnerait des montants faux', () => {
+    assert.throws(() => validerBareme([{ plafond: 100, taux: 150 }], 'Barème'), /taux/);
+    assert.throws(() => validerBareme([{ plafond: 100, taux: -1 }], 'Barème'), /taux/);
+    assert.throws(() => validerBareme([{ plafond: 30000, taux: 10 }, { plafond: 20000, taux: 20 }], 'Barème'), /croissants/);
+    assert.throws(() => validerBareme([{ plafond: null, taux: 10 }, { plafond: null, taux: 20 }], 'Barème'), /une seule tranche/);
+    assert.throws(() => validerBareme('rien', 'Barème'), /tableau/);
+  });
+
+  test('la validation accepte un barème vide et un barème valide', () => {
+    assert.deepEqual(validerBareme([], 'Barème'), []);
+    const ok = validerBareme([{ plafond: 20000, taux: 16 }, { plafond: '', taux: 25 }], 'Barème');
+    assert.equal(ok.length, 2);
+    assert.equal(ok[1].plafond, Infinity);
   });
 });

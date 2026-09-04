@@ -12,6 +12,7 @@ import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { DevisAutocomplete } from '../components/DevisAutocomplete';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole } from '../roles';
+import { useModules } from '../modules';
 
 // Date ISO (avec ou sans heure) -> "YYYY-MM-DD" attendu par <input type="date">.
 const toDateInputValue = (d: string | null | undefined) => (d ? d.slice(0, 10) : '');
@@ -35,6 +36,9 @@ const ChantierDetail = () => {
   const currentUser = userStr ? JSON.parse(userStr) : null;
   const userRole = currentUser?.role || 'CONDUCTEUR_TRAVAUX';
 
+  // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
+  // de société n'est écrit dans l'interface.
+  const { libelleBaremeReduit } = useModules();
   const [chantier, setChantier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -192,7 +196,7 @@ const ChantierDetail = () => {
     formData.delete('commercialId');
     // Case à cocher unique : absente de FormData quand décochée, on la force donc à
     // explicitement true/false pour que décocher l'enregistre bien (cf. 'types' ci-dessous).
-    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), dossierNoxia: formData.get('dossierNoxia') === 'true' };
+    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), baremeReduit: formData.get('baremeReduit') === 'true' };
     setSavingChantier(true);
     try {
       const res = await apiFetch(`/chantiers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
@@ -598,8 +602,8 @@ const ChantierDetail = () => {
               {chantier.types?.map((t: string) => (
                 <span key={t} className="text-[11px] font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full">{t}</span>
               ))}
-              {chantier.dossierNoxia && (
-                <span className="text-[11px] font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">Dossier NOXIA</span>
+              {chantier.baremeReduit && (
+                <span className="text-[11px] font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">{libelleBaremeReduit}</span>
               )}
               {isTermine && (isAdminRole(userRole) ? (
                 <button
@@ -1205,8 +1209,8 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0 md:col-span-2">
                 <label className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors w-fit">
-                  <input type="checkbox" name="dossierNoxia" value="true" defaultChecked={!!chantier.dossierNoxia} className="w-4 h-4" />
-                  Dossier NOXIA (barème de commission commerciale réduit)
+                  <input type="checkbox" name="baremeReduit" value="true" defaultChecked={!!chantier.baremeReduit} className="w-4 h-4" />
+                  {libelleBaremeReduit} (barème de commission commerciale réduit)
                 </label>
               </div>
               <div className="md:col-span-2 flex gap-2 mt-2">
