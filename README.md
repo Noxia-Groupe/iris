@@ -28,7 +28,7 @@ Base technique reprise de marge, en cours de refonte module par module. ERP pour
 
 > Référence fonctionnelle et UX : [`docs/PRODUCT-VISION-ERP-TECHNIQUE.md`](docs/PRODUCT-VISION-ERP-TECHNIQUE.md). Iris possède son propre référentiel clients, contacts, sites, devis, interventions, contrats et factures ; les intégrations externes ne sont jamais sa source de vérité.
 
-1. **Interventions SAV** — suivi, historique client, photos, rapports signés
+1. **Interventions SAV** — suivi, historique client, rapports signés
 2. **Interventions Travaux** — planning, heures, achats, devis, facture
 3. **Contrats & Maintenance récurrente** — échéances automatiques, prorata, renouvellement
 4. **Abonnements télécom** — 4G, fibre, box : cycle de facturation, suspension, résiliation
@@ -36,8 +36,15 @@ Base technique reprise de marge, en cours de refonte module par module. ERP pour
 6. **Rapprochement bancaire** — relevés automatiques + rapprochement factures / paiements
 7. **Identité client** — logo, couleurs, informations légales (SIRET, adresse, conditions)
 8. **Comptes & Droits** — profil technique, commercial, comptable, admin, super-admin ; séparation stricte plateforme/client
-9. **Web mobile technicien** — planning, détails intervention, saisie info, photo, signature numérique
+9. **Web mobile technicien** — planning, détails intervention, saisie info, signature numérique
 10. **Déploiement** — Docker/VPS dédiée par société ; instance et base de données propres
+
+## Hors périmètre
+
+- **Dépôt et galerie de photos.** Héritée de marge, la galerie photos de chantier a été
+  retirée : Iris n'a pas vocation à héberger des médias, ni sur le suivi de chantier, ni
+  sur les modules à venir. Cela supprime du même coup un volume disque à sauvegarder, un
+  service de fichiers statiques et une route d'envoi de fichiers à sécuriser.
 
 ## Authentification
 Microsoft Entra ID uniquement — adaptée par client futur (tenant client). Pas de page d'inscription publique, de connexion locale ni de mot de passe applicatif. L'application SPA utilise MSAL ; le backend vérifie la signature Microsoft (JWKS/RS256), l'issuer et l'audience avant d'appliquer sa liste blanche locale. Utilisateurs créés par un admin du tenant.

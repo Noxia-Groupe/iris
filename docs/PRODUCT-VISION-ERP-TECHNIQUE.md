@@ -51,7 +51,7 @@ Client → Devis → Versions → Acceptation/refus
 
 Iris distingue le **type de travail** sans disperser l'utilisateur dans des applications différentes :
 
-- **SAV** : demande, diagnostic, déplacement, rapport, photos, signature, éventuellement facturation.
+- **SAV** : demande, diagnostic, déplacement, rapport, signature, éventuellement facturation.
 - **Travaux / chantier** : devis accepté, phases, heures, matériel, sous-traitance, avancement, réception et facture.
 - **Maintenance planifiée** : contrat, équipement/site concerné, cadence et durée prévisionnelle.
 
@@ -92,7 +92,7 @@ Détail d'architecture : [`docs/INTEGRATIONS-M365-COMPTABILITE-FACTURATION-FR.md
 3. **Progressive disclosure** : l'utilisateur voit d'abord ce qui est utile à son rôle ; les détails restent accessibles sans encombrer l'écran.
 4. **Actions naturelles** : « créer une intervention depuis ce devis », « planifier », « générer la facture », jamais des menus techniques.
 5. **Navigation courte** : retour direct vers fiche client, site, document parent et historique.
-6. **Mobile technicien dédié** : planning du jour, intervention, rapport, photos, signature ; pas d'interface comptable réduite sur mobile.
+6. **Mobile technicien dédié** : planning du jour, intervention, rapport, signature ; pas d'interface comptable réduite sur mobile.
 7. **Historique traçable** : versions de devis, changements de statut, planification, rapports, factures et règlements.
 
 ## Catalogue initial et politique de prix

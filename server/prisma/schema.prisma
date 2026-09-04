@@ -8,17 +8,17 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String
+  id            String  @id @default(uuid())
+  email         String  @unique
+  name          String
   // SUPERADMIN, ADMIN, CONDUCTEUR_TRAVAUX ou COMMERCIAL.
   // SUPERADMIN = tous les droits d'un ADMIN + les réglages réservés à la direction
   // (gestion des comptes superadmin, activation/désactivation des modules — cf.
   // Parametres.planningActif). Un ADMIN ne peut ni créer, ni modifier, ni supprimer
   // un compte SUPERADMIN, ni s'attribuer ce rôle (cf. isSuperAdminRole côté serveur).
-  role      String   @default("CONDUCTEUR_TRAVAUX")
-  password  String?
-  theme     String   @default("light") // "light" ou "dark" — préférence d'affichage, par compte
+  role          String  @default("CONDUCTEUR_TRAVAUX")
+  password      String?
+  theme         String  @default("light") // "light" ou "dark" — préférence d'affichage, par compte
   // Un ADMIN (ou SUPERADMIN) marqué estCommercial garde tous ses droits d'administration, mais apparaît
   // EN PLUS comme un commercial : choix possible de "Commercial rattaché" sur un chantier,
   // et statistiques/marges dans "Mes commerciaux" (cf. isCommercialLike côté serveur).
@@ -36,10 +36,9 @@ model User {
   // restent rattachés, contrairement à une révocation qui les détache. Réversible.
   actif         Boolean @default(true)
 
-  chantiersGeres          Chantier[]                   @relation("ChantierResponsable") // Liaison pour restreindre la vue des chefs de chantier
-  chantiersCommercialises Chantier[]                   @relation("ChantierCommercial") // Chantiers vendus par ce commercial
+  chantiersGeres          Chantier[]                 @relation("ChantierResponsable") // Liaison pour restreindre la vue des chefs de chantier
+  chantiersCommercialises Chantier[]                 @relation("ChantierCommercial") // Chantiers vendus par ce commercial
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
-  photos                  PhotoChantier[] // Photos uploadées par l'utilisateur
   acquittements           AcquittementDevis[] // Devis Odoo marqués « Vu » dans le Suivi financier
 
   createdAt DateTime @default(now())
@@ -47,156 +46,144 @@ model User {
 }
 
 model Fournisseur {
-  id        String   @id @default(uuid())
-  nom       String   @unique
-  contact   String?
-  
-  achats    AchatReel[]
+  id      String  @id @default(uuid())
+  nom     String  @unique
+  contact String?
+
+  achats AchatReel[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Chantier {
-  id                    String                    @id @default(uuid())
-  nom                   String
+  id          String    @id @default(uuid())
+  nom         String
   // Numéro du devis de vente Odoo. Format SXXXXX (un S suivi de 5 chiffres) et unicité sont
   // exigés À LA SAISIE (cf. erreurNumeroDevis / numeroDevisDejaPris côté serveur), mais
   // volontairement PAS par une contrainte de base : des chantiers antérieurs portent une
   // valeur libre — deux numéros dans le même champ, par exemple, quand un chantier couvre
   // deux devis du même client. Un index unique les rendrait impossibles à enregistrer et
   // bloquerait la migration ; la règle ne s'applique donc qu'aux nouvelles saisies.
-  numeroDevis           String?
-  client                String
+  numeroDevis String?
+  client      String
   // Adresse du site (facultative) — préremplie depuis l'adresse de livraison/facturation
   // du devis Odoo sélectionné (cf. GET /api/odoo/devis/:id/adresse), toujours corrigible
   // manuellement. Seule source de vérité pour les affectations "chantier suivi" du
   // planning d'intervention (cf. PlanningEvent) : jamais dupliquée/surchargée par affectation.
-  adresse               String?
-  dateDebut             DateTime
-  dateFin               DateTime?
-  statut                String                    @default("EN_COURS")
-  types                 String[]                  @default([]) // Vidéo, Alarme, Contrôle d'accès, Interphonie, Câblage réseau... (plusieurs possibles)
+  adresse     String?
+  dateDebut   DateTime
+  dateFin     DateTime?
+  statut      String    @default("EN_COURS")
+  types       String[]  @default([]) // Vidéo, Alarme, Contrôle d'accès, Interphonie, Câblage réseau... (plusieurs possibles)
 
-  budgetGlobalVendu     Decimal                   @db.Decimal(12, 2)
-  budgetMaterielVendu   Decimal                   @default(0) @db.Decimal(12, 2)
-  budgetMainOeuvreVendu Decimal                   @default(0) @db.Decimal(12, 2)
-  heuresVendues         Decimal                   @default(0) @db.Decimal(10, 2)
+  budgetGlobalVendu     Decimal @db.Decimal(12, 2)
+  budgetMaterielVendu   Decimal @default(0) @db.Decimal(12, 2)
+  budgetMainOeuvreVendu Decimal @default(0) @db.Decimal(12, 2)
+  heuresVendues         Decimal @default(0) @db.Decimal(10, 2)
 
   // Rémunération commerciale : bascule vers le barème "Dossier commercial / NOXIA"
   // (taux réduits) au lieu du barème standard — cf. computeChantierMetrics.
-  dossierNoxia          Boolean                   @default(false)
+  dossierNoxia     Boolean   @default(false)
   // Clause de sécurisation des commissions : une commission n'est due que si le
   // chantier est Terminé ET Encaissé (cf. règle 6 du système de rémunération commerciale).
-  encaisse              Boolean                   @default(false)
-  dateEncaissement      DateTime?
+  encaisse         Boolean   @default(false)
+  dateEncaissement DateTime?
 
-  responsableId         String?
-  responsable           User?                     @relation("ChantierResponsable", fields: [responsableId], references: [id])
+  responsableId String?
+  responsable   User?   @relation("ChantierResponsable", fields: [responsableId], references: [id])
 
-  commercialId          String?
-  commercial            User?                     @relation("ChantierCommercial", fields: [commercialId], references: [id])
+  commercialId String?
+  commercial   User?   @relation("ChantierCommercial", fields: [commercialId], references: [id])
 
-  lignesBudget          LigneBudgetPrevisionnel[]
-  achats                AchatReel[]
-  pointages             PointageHeure[]
-  photos                PhotoChantier[]
-  planningEvents        PlanningEvent[]
+  lignesBudget   LigneBudgetPrevisionnel[]
+  achats         AchatReel[]
+  pointages      PointageHeure[]
+  planningEvents PlanningEvent[]
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Categorie {
-  id          String                    @id @default(uuid())
-  nom         String                    @unique
+  id          String  @id @default(uuid())
+  nom         String  @unique
   description String?
-  
+
   lignesBudget LigneBudgetPrevisionnel[]
   achats       AchatReel[]
 }
 
 model LigneBudgetPrevisionnel {
-  id             String    @id @default(uuid())
+  id             String   @id @default(uuid())
   chantierId     String
   categorieId    String
-  montantAlloue  Decimal   @db.Decimal(12, 2)
-  heuresAllouees Decimal?  @db.Decimal(10, 2)
+  montantAlloue  Decimal  @db.Decimal(12, 2)
+  heuresAllouees Decimal? @db.Decimal(10, 2)
 
-  chantier       Chantier  @relation(fields: [chantierId], references: [id])
-  categorie      Categorie @relation(fields: [categorieId], references: [id])
+  chantier  Chantier  @relation(fields: [chantierId], references: [id])
+  categorie Categorie @relation(fields: [categorieId], references: [id])
 
   @@unique([chantierId, categorieId])
 }
 
 model AchatReel {
-  id              String      @id @default(uuid())
-  date            DateTime
-  
-  fournisseurId   String
-  fournisseur     Fournisseur @relation(fields: [fournisseurId], references: [id])
-  numeroFacture   String?
-  
-  description     String
-  montantHT       Decimal     @db.Decimal(12, 2)
-  
-  chantierId      String
-  chantier        Chantier    @relation(fields: [chantierId], references: [id])
-  
-  categorieId     String
-  categorie       Categorie   @relation(fields: [categorieId], references: [id])
+  id   String   @id @default(uuid())
+  date DateTime
 
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  fournisseurId String
+  fournisseur   Fournisseur @relation(fields: [fournisseurId], references: [id])
+  numeroFacture String?
+
+  description String
+  montantHT   Decimal @db.Decimal(12, 2)
+
+  chantierId String
+  chantier   Chantier @relation(fields: [chantierId], references: [id])
+
+  categorieId String
+  categorie   Categorie @relation(fields: [categorieId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Intervenant {
-  id                 String          @id @default(uuid())
-  nom                String
-  role               String
-  tauxHoraireCharge  Decimal         @db.Decimal(10, 2)
+  id                String  @id @default(uuid())
+  nom               String
+  role              String
+  tauxHoraireCharge Decimal @db.Decimal(10, 2)
 
-  pointages          PointageHeure[]
-  planningEvents     PlanningEvent[] @relation("PlanningEventIntervenants")
+  pointages      PointageHeure[]
+  planningEvents PlanningEvent[] @relation("PlanningEventIntervenants")
 }
 
 model PointageHeure {
-  id                   String      @id @default(uuid())
-  date                 DateTime
-  intervenantId        String
-  chantierId           String
-  nbrHeures            Decimal     @db.Decimal(10, 2)
-  tauxHoraireApplique  Decimal     @db.Decimal(10, 2)
-  commentaire          String?
+  id                  String   @id @default(uuid())
+  date                DateTime
+  intervenantId       String
+  chantierId          String
+  nbrHeures           Decimal  @db.Decimal(10, 2)
+  tauxHoraireApplique Decimal  @db.Decimal(10, 2)
+  commentaire         String?
 
-  intervenant          Intervenant @relation(fields: [intervenantId], references: [id])
-  chantier             Chantier    @relation(fields: [chantierId], references: [id])
-  
-  createdAt            DateTime    @default(now())
-}
+  intervenant Intervenant @relation(fields: [intervenantId], references: [id])
+  chantier    Chantier    @relation(fields: [chantierId], references: [id])
 
-model PhotoChantier {
-  id          String   @id @default(uuid())
-  url         String
-  legende     String?
-  chantierId  String
-  chantier    Chantier @relation(fields: [chantierId], references: [id])
-  auteurId    String?
-  auteur      User?    @relation(fields: [auteurId], references: [id])
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 // Paramètres globaux configurables par les administrateurs (singleton).
 model Parametres {
-  id                     String   @id @default("singleton")
-  margeCommercialeActive Boolean  @default(true)  // affichage/calcul de la marge commerciale
+  id                     String  @id @default("singleton")
+  margeCommercialeActive Boolean @default(true) // affichage/calcul de la marge commerciale
   // Module Planning d'intervention : activé/désactivé globalement par un SUPERADMIN.
   // Désactivé, le module DISPARAÎT pour tous les autres comptes (y compris les
   // administrateurs) — menu masqué côté client, routes /api/planning/* refusées côté
   // serveur — mais AUCUNE donnée n'est supprimée : les affectations et types
   // d'événements restent en base et réapparaissent à la réactivation. Le superadmin, lui,
   // continue d'y accéder pour préparer/consulter le planning pendant la désactivation.
-  planningActif          Boolean  @default(true)
+  planningActif          Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -228,19 +215,19 @@ model CompanySettings {
 
 // Référentiel client natif Iris. Il ne dépend pas d'Odoo ni d'un CRM tiers.
 model Client {
-  id            String          @id @default(uuid())
-  raisonSociale String
-  nomCommercial String?
-  siren         String?         @unique
-  tvaIntra      String?
-  telephone     String?
-  email         String?
-  actif         Boolean         @default(true)
-  contacts      ClientContact[]
-  sites         ClientSite[]
+  id                   String               @id @default(uuid())
+  raisonSociale        String
+  nomCommercial        String?
+  siren                String?              @unique
+  tvaIntra             String?
+  telephone            String?
+  email                String?
+  actif                Boolean              @default(true)
+  contacts             ClientContact[]
+  sites                ClientSite[]
   equipementsInstalles EquipementInstalle[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 }
 
 // Contact métier d'un client : peut être associé ultérieurement aux interventions,
@@ -265,22 +252,22 @@ model ClientContact {
 // qu'il n'existe au plus qu'un siège social et une adresse de facturation par client.
 // L'interface impose leur sélection avant d'autoriser devis et factures.
 model ClientSite {
-  id                    String   @id @default(uuid())
-  clientId              String
-  client                Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  nom                   String
-  adresse               String
-  complementAdresse     String?
-  codePostal            String
-  ville                 String
-  pays                  String   @default("France")
-  estSiegeSocial        Boolean  @default(false)
-  estSiteFacturation    Boolean  @default(false)
-  estSiteIntervention   Boolean  @default(false)
-  principal             Boolean  @default(false)
-  equipementsInstalles  EquipementInstalle[]
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                   String               @id @default(uuid())
+  clientId             String
+  client               Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  nom                  String
+  adresse              String
+  complementAdresse    String?
+  codePostal           String
+  ville                String
+  pays                 String               @default("France")
+  estSiegeSocial       Boolean              @default(false)
+  estSiteFacturation   Boolean              @default(false)
+  estSiteIntervention  Boolean              @default(false)
+  principal            Boolean              @default(false)
+  equipementsInstalles EquipementInstalle[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 }
 
 // Partage public en lecture seule du planning d'intervention (singleton) — lien de type
@@ -294,17 +281,17 @@ model ClientSite {
 // n'est jamais stocké : seule son empreinte SHA-256 est persistée et la valeur n'est
 // révélée qu'une fois à sa création par un SUPERADMIN.
 model ApiAccessKey {
-  id          String    @id @default(uuid())
-  nom         String
-  prefixe     String    @unique
-  secretHash  String    @unique
-  scopes      String[]
-  actif       Boolean   @default(true)
-  expireLe    DateTime?
+  id             String    @id @default(uuid())
+  nom            String
+  prefixe        String    @unique
+  secretHash     String    @unique
+  scopes         String[]
+  actif          Boolean   @default(true)
+  expireLe       DateTime?
   dernierUsageLe DateTime?
-  creeParId   String
-  creeLe      DateTime  @default(now())
-  revoqueLe   DateTime?
+  creeParId      String
+  creeLe         DateTime  @default(now())
+  revoqueLe      DateTime?
 
   @@index([actif])
 }
@@ -312,97 +299,97 @@ model ApiAccessKey {
 // Catégories libres et hiérarchiques, communes à tout le catalogue. Elles permettent
 // d'organiser le métier sans imposer de nomenclature Iris (ex. Alarme > Détecteurs).
 model CatalogueCategorie {
-  id          String   @id @default(uuid())
-  nom         String   @unique
+  id          String                @id @default(uuid())
+  nom         String                @unique
   description String?
   parentId    String?
-  parent      CatalogueCategorie?  @relation("CatalogueCategorieHierarchy", fields: [parentId], references: [id])
-  enfants     CatalogueCategorie[] @relation("CatalogueCategorieHierarchy")
+  parent      CatalogueCategorie?   @relation("CatalogueCategorieHierarchy", fields: [parentId], references: [id])
+  enfants     CatalogueCategorie[]  @relation("CatalogueCategorieHierarchy")
   prestations CataloguePrestation[]
   articles    CatalogueArticle[]
   equipements CatalogueEquipement[]
-  actif       Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  actif       Boolean               @default(true)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
 }
 
 // Catalogue natif : les prestations ne portent pas de stock ni de numéro de série.
 model CataloguePrestation {
-  id               String   @id @default(uuid())
-  categorieId      String?
-  categorie        CatalogueCategorie? @relation(fields: [categorieId], references: [id])
-  reference        String   @unique
-  nom              String
-  description      String?
-  unite            String   @default("unité")
+  id                 String              @id @default(uuid())
+  categorieId        String?
+  categorie          CatalogueCategorie? @relation(fields: [categorieId], references: [id])
+  reference          String              @unique
+  nom                String
+  description        String?
+  unite              String              @default("unité")
   dureeIndicativeMin Int?
-  tauxTva          Decimal  @default(20) @db.Decimal(5, 2)
-  prixVenteHt      Decimal  @default(0) @db.Decimal(12, 2)
-  actif            Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  tauxTva            Decimal             @default(20) @db.Decimal(5, 2)
+  prixVenteHt        Decimal             @default(0) @db.Decimal(12, 2)
+  actif              Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@index([categorieId])
 }
 
 // Article vendu/consommé : suivi de stock simple, sans traçabilité unitaire obligatoire.
 model CatalogueArticle {
-  id               String   @id @default(uuid())
-  categorieId      String?
-  categorie        CatalogueCategorie? @relation(fields: [categorieId], references: [id])
-  reference        String   @unique
-  nom              String
-  description      String?
-  unite            String   @default("unité")
-  tauxTva          Decimal  @default(20) @db.Decimal(5, 2)
-  prixAchatHt      Decimal? @db.Decimal(12, 2)
-  prixVenteHt      Decimal  @default(0) @db.Decimal(12, 2)
-  stockSuivi       Boolean  @default(false)
-  stockActuel      Decimal  @default(0) @db.Decimal(12, 3)
-  actif            Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id          String              @id @default(uuid())
+  categorieId String?
+  categorie   CatalogueCategorie? @relation(fields: [categorieId], references: [id])
+  reference   String              @unique
+  nom         String
+  description String?
+  unite       String              @default("unité")
+  tauxTva     Decimal             @default(20) @db.Decimal(5, 2)
+  prixAchatHt Decimal?            @db.Decimal(12, 2)
+  prixVenteHt Decimal             @default(0) @db.Decimal(12, 2)
+  stockSuivi  Boolean             @default(false)
+  stockActuel Decimal             @default(0) @db.Decimal(12, 3)
+  actif       Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
   @@index([categorieId])
 }
 
 // Modèle catalogue d'un matériel sérialisable ; une instance installée crée un EquipementInstalle.
 model CatalogueEquipement {
-  id               String   @id @default(uuid())
-  categorieId      String?
-  categorie        CatalogueCategorie? @relation(fields: [categorieId], references: [id])
-  reference        String   @unique
-  nom              String
-  fabricant        String?
-  description      String?
-  tauxTva          Decimal  @default(20) @db.Decimal(5, 2)
-  prixVenteHt      Decimal  @default(0) @db.Decimal(12, 2)
-  actif            Boolean  @default(true)
-  equipements      EquipementInstalle[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id          String               @id @default(uuid())
+  categorieId String?
+  categorie   CatalogueCategorie?  @relation(fields: [categorieId], references: [id])
+  reference   String               @unique
+  nom         String
+  fabricant   String?
+  description String?
+  tauxTva     Decimal              @default(20) @db.Decimal(5, 2)
+  prixVenteHt Decimal              @default(0) @db.Decimal(12, 2)
+  actif       Boolean              @default(true)
+  equipements EquipementInstalle[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
 
   @@index([categorieId])
 }
 
 // Parc réellement installé : série/IMEI/MAC, garantie, client et site restent traçables.
 model EquipementInstalle {
-  id                 String              @id @default(uuid())
+  id                    String              @id @default(uuid())
   catalogueEquipementId String
-  catalogueEquipement CatalogueEquipement @relation(fields: [catalogueEquipementId], references: [id])
-  clientId           String
-  client             Client              @relation(fields: [clientId], references: [id])
-  clientSiteId       String
-  clientSite         ClientSite          @relation(fields: [clientSiteId], references: [id])
-  numeroSerie        String?
-  imei               String?
-  adresseMac         String?
-  statut             String              @default("INSTALLE")
-  installeLe         DateTime?
-  garantieJusquAu    DateTime?
-  notes              String?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  catalogueEquipement   CatalogueEquipement @relation(fields: [catalogueEquipementId], references: [id])
+  clientId              String
+  client                Client              @relation(fields: [clientId], references: [id])
+  clientSiteId          String
+  clientSite            ClientSite          @relation(fields: [clientSiteId], references: [id])
+  numeroSerie           String?
+  imei                  String?
+  adresseMac            String?
+  statut                String              @default("INSTALLE")
+  installeLe            DateTime?
+  garantieJusquAu       DateTime?
+  notes                 String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
 
   @@unique([catalogueEquipementId, numeroSerie])
   @@index([clientId])
@@ -499,12 +486,12 @@ model AcquittementDevis {
 // Les primes CA/marge du même système sont, elles, calculées automatiquement
 // (cf. computeCommissionMensuelle) et n'ont donc pas besoin d'être stockées ici.
 model PrimeMensuelleCommercial {
-  id                 String   @id @default(uuid())
-  periode            String   // "YYYY-MM"
-  suiviAdministratif Boolean  @default(false)
+  id                 String  @id @default(uuid())
+  periode            String // "YYYY-MM"
+  suiviAdministratif Boolean @default(false)
 
-  commercialId       String
-  commercial         User     @relation(fields: [commercialId], references: [id], onDelete: Cascade)
+  commercialId String
+  commercial   User   @relation(fields: [commercialId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -2,8 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient, Prisma } from '@prisma/client';
-import multer from 'multer';
-import archiver from 'archiver';
 import path from 'path';
 import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
@@ -208,7 +206,7 @@ const requireFinance: express.RequestHandler = (req, res, next) => {
 };
 
 // Un commercial a un accès strictement en lecture à ses propres chantiers : ni création,
-// ni modification (chantiers, achats, heures, photos), et pas d'accès aux statistiques
+// ni modification (chantiers, achats, heures), et pas d'accès aux statistiques
 // globales/conducteur — uniquement à son propre résultat commercial.
 const blockCommercial: express.RequestHandler = (req, res, next) => {
   if ((req as AuthRequest).user?.role === 'COMMERCIAL') {
@@ -471,46 +469,6 @@ function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boole
     metrics: computeChantierMetrics(c, params, canSeeMarge),
   };
 }
-
-// Configuration Multer pour le stockage local des photos.
-// process.cwd() (et non __dirname) : le code compilé tourne depuis dist/ (__dirname y
-// pointerait), alors que le volume Docker persistant est monté sur le répertoire de travail
-// du conteneur (/app) — avec __dirname, les photos étaient écrites hors du volume et
-// disparaissaient à chaque redéploiement (conteneur recréé).
-const uploadDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Servir statiquement le dossier uploads
-app.use('/uploads', express.static(uploadDir));
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 Mo max par fichier
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Seules les images sont autorisées.'));
-  }
-});
-
-// Wrapper pour transformer les erreurs Multer (taille/type) en réponses JSON propres
-const uploadPhoto: express.RequestHandler = (req, res, next) => {
-  upload.single('photo')(req, res, (err: unknown) => {
-    if (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : 'Upload invalide' });
-      return;
-    }
-    next();
-  });
-};
 
 // Routes de base (publiques)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
@@ -792,7 +750,6 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
         commercial: RESPONSABLE_SELECT,
         achats: true,
         pointages: true,
-        photos: true,
       }
     });
     res.json(chantiers.map((c: any) => serializeChantier(c, params, isAdmin)));
@@ -816,7 +773,6 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
         commercial: RESPONSABLE_SELECT,
         achats: { include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
         pointages: { include: { intervenant: true }, orderBy: { date: 'desc' } },
-        photos: { orderBy: { createdAt: 'desc' } },
       }
     });
     // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
@@ -1001,12 +957,12 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
 // Seul un admin peut réouvrir un chantier clôturé (repasser en EN_COURS).
 // Supprime définitivement un chantier — réservé aux administrateurs et superadmins.
 //
-// Un chantier ne vit pas seul : achats, pointages d'heures, photos, lignes de budget et
+// Un chantier ne vit pas seul : achats, pointages d'heures, lignes de budget et
 // affectations du planning y sont rattachés. Les supprimer en silence ferait disparaître
 // des données de gestion sans que personne ne l'ait vu venir. La route procède donc en
 // deux temps : sans `force`, elle REFUSE et renvoie le décompte de ce qui serait détruit,
 // que l'écran affiche pour faire confirmer ; avec `force=1`, elle supprime tout dans une
-// transaction (les photos sont aussi retirées du disque).
+// transaction.
 //
 // Un chantier vierge — créé par erreur, doublon de devis — n'a rien rattaché : il se
 // supprime alors du premier coup, sans seconde confirmation.
@@ -1018,15 +974,14 @@ app.delete('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => 
       return res.status(404).json({ error: 'Chantier introuvable.' });
     }
 
-    const [achats, pointages, photos, lignesBudget, affectations] = await Promise.all([
+    const [achats, pointages, lignesBudget, affectations] = await Promise.all([
       prisma.achatReel.count({ where: { chantierId: id } }),
       prisma.pointageHeure.count({ where: { chantierId: id } }),
-      prisma.photoChantier.count({ where: { chantierId: id } }),
       prisma.ligneBudgetPrevisionnel.count({ where: { chantierId: id } }),
       prisma.planningEvent.count({ where: { chantierId: id } }),
     ]);
-    const dependances = { achats, pointages, photos, lignesBudget, affectations };
-    const total = achats + pointages + photos + lignesBudget + affectations;
+    const dependances = { achats, pointages, lignesBudget, affectations };
+    const total = achats + pointages + lignesBudget + affectations;
 
     if (total > 0 && String(req.query.force || '') !== '1') {
       return res.status(409).json({
@@ -1034,16 +989,6 @@ app.delete('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => 
         error: 'Ce chantier porte encore des données rattachées.',
         dependances,
       });
-    }
-
-    // Fichiers photo : supprimés du disque AVANT la transaction. Les effacer après coup
-    // laisserait des fichiers orphelins si la transaction échouait ; les effacer avant
-    // laisse au pire une ligne en base sans son fichier — déjà le cas de la purge des
-    // photos, et bien moins gênant que l'inverse.
-    const fichiers = await prisma.photoChantier.findMany({ where: { chantierId: id }, select: { url: true } });
-    for (const photo of fichiers) {
-      const filePath = path.join(process.cwd(), photo.url);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
 
     // Ordre imposé par les clés étrangères : tout ce qui pointe vers le chantier d'abord.
@@ -1055,7 +1000,6 @@ app.delete('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => 
         where: { chantierId: id },
         data: { chantierId: null, categorie: 'HORS_CHANTIER', titre: chantier.nom },
       }),
-      prisma.photoChantier.deleteMany({ where: { chantierId: id } }),
       prisma.achatReel.deleteMany({ where: { chantierId: id } }),
       prisma.pointageHeure.deleteMany({ where: { chantierId: id } }),
       prisma.ligneBudgetPrevisionnel.deleteMany({ where: { chantierId: id } }),
@@ -1226,7 +1170,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Révoque un compte (retire l'autorisation d'accès). Les références nullables
-// (chantiers dont il est responsable, photos qu'il a prises) sont détachées d'abord.
+// (chantiers dont il est responsable) sont détachées d'abord.
 app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const id = paramId(req);
@@ -1247,7 +1191,6 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     await prisma.$transaction([
       prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
       prisma.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } }),
-      prisma.photoChantier.updateMany({ where: { auteurId: id }, data: { auteurId: null } }),
       prisma.user.delete({ where: { id } }),
     ]);
     res.json({ success: true });
@@ -2067,64 +2010,6 @@ app.delete('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => 
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting pointage' });
-  }
-});
-
-// Photos Upload & Purge
-app.post('/api/chantiers/:id/photos', requireAuth, blockCommercial, uploadPhoto, async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-    const url = `/uploads/${req.file.filename}`;
-    const photo = await prisma.photoChantier.create({
-      data: {
-        url,
-        legende: req.body.legende || '',
-        chantierId: paramId(req),
-        auteurId: (req as AuthRequest).user?.id || null
-      }
-    });
-    res.json(photo);
-  } catch (error) {
-    res.status(500).json({ error: 'Error uploading photo' });
-  }
-});
-
-app.delete('/api/chantiers/:id/photos/purge', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const photos = await prisma.photoChantier.findMany({ where: { chantierId: paramId(req) } });
-    for (const p of photos) {
-      const filePath = path.join(process.cwd(), p.url);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
-    await prisma.photoChantier.deleteMany({ where: { chantierId: paramId(req) } });
-    res.json({ message: 'Purge terminée' });
-  } catch (error) {
-    res.status(500).json({ error: 'Error purging photos' });
-  }
-});
-
-app.get('/api/chantiers/:id/photos/export', requireAuth, async (req, res) => {
-  try {
-    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) } });
-    if (!chantier) return res.status(404).json({ error: 'Chantier not found' });
-
-    const photos = await prisma.photoChantier.findMany({ where: { chantierId: paramId(req) } });
-
-    res.attachment(`photos-${chantier.nom.replace(/\s+/g, '_')}.zip`);
-    // @ts-ignore — typage de la lib archiver variable selon les versions (export = function)
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    archive.pipe(res);
-
-    for (const p of photos) {
-      const filePath = path.join(process.cwd(), p.url);
-      if (fs.existsSync(filePath)) {
-        archive.file(filePath, { name: path.basename(filePath) });
-      }
-    }
-    await archive.finalize();
-  } catch (error) {
-    res.status(500).json({ error: 'Error exporting photos' });
   }
 });
 

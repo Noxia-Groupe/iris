@@ -76,35 +76,6 @@ const ListeChantiers = () => {
     }
   };
 
-  const handleZipExport = async (id: string, nom: string) => {
-    try {
-      const res = await apiFetch(`/chantiers/${id}/photos/export`);
-      if (!res.ok) { alert("Export impossible"); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `photos-${nom.replace(/\s+/g, '_')}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-      alert("Export impossible");
-    }
-  };
-
-  const handlePurge = async (id: string) => {
-    if(!confirm("Purger TOUTES les photos de ce chantier ?")) return;
-    try {
-      await apiFetch(`/chantiers/${id}/photos/purge`, { method: 'DELETE' });
-      fetchChantiers();
-    } catch(e) {
-      console.error(e);
-    }
-  };
-
   // Clôturer un chantier (en cours -> terminé) : possible pour son responsable ou un
   // admin. Une fois clôturé, plus aucune heure ni dépense ne peut y être ajoutée.
   const handleCloturer = async (id: string, nom: string) => {
@@ -150,7 +121,6 @@ const ListeChantiers = () => {
       const detail = [
         d.achats && `${d.achats} achat${d.achats > 1 ? 's' : ''}`,
         d.pointages && `${d.pointages} pointage${d.pointages > 1 ? 's' : ''} d'heures`,
-        d.photos && `${d.photos} photo${d.photos > 1 ? 's' : ''}`,
         d.lignesBudget && `${d.lignesBudget} ligne${d.lignesBudget > 1 ? 's' : ''} de budget`,
       ].filter(Boolean).join('\n· ');
       const planning = d.affectations
@@ -292,23 +262,8 @@ const ListeChantiers = () => {
                       )}
                       {isAdminRole(userRole) && (
                         <>
-                          <button
-                            onClick={() => handleZipExport(c.id, c.nom)}
-                            className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                            title="Télécharger Photos (ZIP)"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                          </button>
-                          <button
-                            onClick={() => handlePurge(c.id)}
-                            className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                            title="Purger Photos"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                          </button>
-                          {/* Suppression définitive du chantier — distincte de la purge des
-                              photos ci-dessus, d'où le libellé explicite plutôt qu'une
-                              seconde corbeille muette. */}
+                          {/* Suppression définitive du chantier : libellé explicite
+                              plutôt qu'une corbeille muette, l'action est irréversible. */}
                           <button
                             onClick={() => handleSupprimer(c.id, c.nom)}
                             className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors"

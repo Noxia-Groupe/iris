@@ -1,0 +1,20 @@
+-- Suppression de la galerie photos de chantier.
+--
+-- Cette fonctionnalité venait de « marge » et n'a pas sa place dans Iris : le suivi de
+-- chantier n'a pas vocation à héberger des médias, et la stocker imposait un volume
+-- disque, un service de fichiers statiques et un envoi non authentifié à maintenir.
+--
+-- ATTENTION — MIGRATION DESTRUCTRICE. Elle supprime définitivement la table et donc
+-- l'historique des photos déjà déposées. Les FICHIERS, eux, restent dans le volume Docker
+-- `uploads_data` : la migration ne les touche pas.
+--
+-- Sur une instance qui contient des photos à conserver, faites la sauvegarde AVANT de
+-- déployer cette version :
+--
+--   docker exec iris_db pg_dump -U iris -d iris -t '"PhotoChantier"' > photos-chantier.sql
+--   docker run --rm -v iris_uploads_data:/data -v "$PWD":/sauvegarde alpine \
+--     tar czf /sauvegarde/photos-fichiers.tar.gz -C /data .
+--
+-- Le volume `uploads_data` peut ensuite être retiré du docker-compose et supprimé
+-- manuellement (`docker volume rm iris_uploads_data`) une fois la sauvegarde vérifiée.
+DROP TABLE IF EXISTS "PhotoChantier";

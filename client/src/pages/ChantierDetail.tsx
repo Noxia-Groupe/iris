@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import html2pdf from 'html2pdf.js';
-import imageCompression from 'browser-image-compression';
 import {
-  ArrowLeft, Calendar, User, FileDown, Sparkles, Camera,
+  ArrowLeft, Calendar, User, FileDown, Sparkles,
   Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, X, MapPin, Search,
 } from 'lucide-react';
-import { apiFetch, assetUrl } from '../api';
+import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
@@ -374,22 +373,6 @@ const ChantierDetail = () => {
       jsPDF: { unit: 'in' as const, format: 'letter' as const, orientation: 'portrait' as const },
     };
     html2pdf().set(opt).from(printRef.current).save();
-  };
-
-  const handlePhotoUpload = async (e: any) => {
-    const file = e.target.files[0];
-    if (!file || !id) return;
-    try {
-      const compressedFile = await imageCompression(file, { maxSizeMB: 0.5, maxWidthOrHeight: 1200 });
-      const formData = new FormData();
-      formData.append('photo', compressedFile);
-      formData.append('legende', 'Photo mobile');
-      await apiFetch(`/chantiers/${id}/photos`, { method: 'POST', body: formData });
-      fetchChantier();
-    } catch (err) {
-      console.error(err);
-      alert("Erreur lors de l'upload");
-    }
   };
 
   // Références stables tant que le chantier n'est pas rechargé : les répartitions et le
@@ -1117,45 +1100,6 @@ const ChantierDetail = () => {
               <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-3 border-t border-gray-100 bg-gray-50 text-xs font-semibold text-gray-500">
                 <span>{pointagesAffiches.length} pointage{pointagesAffiches.length > 1 ? 's' : ''} sur {pointages.length}</span>
                 <span>Sous-total : <strong className="text-primary-dark">{fmtHeures(pointagesAffichesTotal)}</strong></span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Galerie Photos */}
-        <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-md border border-gray-100">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-            <div>
-              <h3 className="text-xl font-bold text-primary-dark m-0">Galerie Photos & Suivi</h3>
-              <p className="text-sm text-muted mt-1">Photos du terrain compressées automatiquement.</p>
-            </div>
-            {userRole !== 'COMMERCIAL' && (
-              <div className="flex flex-wrap gap-3">
-                <label className="flex items-center gap-2 px-4 py-2 bg-primary text-white hover:bg-primary-dark font-semibold rounded-lg cursor-pointer transition-colors text-sm shadow-sm">
-                  <Camera size={16} /> Ajouter une photo
-                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
-                </label>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-            {chantier.photos?.map((p: any) => (
-              <div key={p.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-gray-200 bg-gray-50 aspect-square">
-                <img src={assetUrl(p.url)} alt="Chantier" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end">
-                  <div className="p-4 w-full">
-                    <div className="text-white text-xs font-semibold">{new Date(p.createdAt).toLocaleDateString()}</div>
-                    <div className="text-white/80 text-xs truncate">{p.legende || 'Photo'}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {(!chantier.photos || chantier.photos.length === 0) && (
-              <div className="col-span-full flex flex-col items-center justify-center py-16 bg-gray-50/50 rounded-xl border border-dashed border-gray-300">
-                <div className="text-4xl mb-3 opacity-50">📷</div>
-                <div className="text-gray-500 font-medium">Aucune photo pour le moment</div>
-                <div className="text-sm text-gray-400 mt-1">Les photos ajoutées apparaîtront ici.</div>
               </div>
             )}
           </div>

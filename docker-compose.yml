@@ -37,9 +37,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      # Stockage persistant des photos (sur le disque VPS)
-      - uploads_data:/app/uploads
     networks:
       - noxia-network
 
@@ -69,4 +66,3 @@ networks:
 
 volumes:
   postgres_data:
-  uploads_data:

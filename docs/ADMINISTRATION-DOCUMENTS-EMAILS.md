@@ -24,7 +24,7 @@ Exemples de blocs :
 - adresses de facturation et d'intervention ;
 - lignes, taxes, totaux et échéances ;
 - conditions générales, RIB et mentions réglementaires ;
-- signature, photos et checklist pour les rapports.
+- signature et checklist pour les rapports.
 
 ## Modèles d'e-mails et variables
 
