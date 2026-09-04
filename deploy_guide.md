@@ -6,7 +6,7 @@ Ce guide décrit comment déployer l'application NOXIA sur votre VPS Hostinger. 
 
 Étant donné que votre dépôt Github est privé, vous devez générer une clé SSH spécifique pour ce projet sur votre VPS (afin de ne pas interférer avec vos autres clés existantes).
 
-Connectez-vous à votre VPS en SSH et tapez la commande suivante (elle créera une clé nommée spécifiquement pour le projet Marge) :
+Connectez-vous à votre VPS en SSH et tapez la commande suivante (elle créera une clé nommée spécifiquement pour le projet Iris) :
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_noxia_iris -C "vps-hostinger-iris"
