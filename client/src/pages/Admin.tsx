@@ -313,29 +313,6 @@ const Admin = () => {
     }
   };
 
-  const handlePasswordChange = async (userId: string, userName: string) => {
-    const newPassword = window.prompt(`Entrez le nouveau mot de passe pour ${userName} (minimum 6 caractères) :`);
-    if (!newPassword) return;
-    if (newPassword.length < 6) {
-      alert("Le mot de passe doit faire au moins 6 caractères.");
-      return;
-    }
-    
-    try {
-      const res = await apiFetch(`/users/${userId}/password`, {
-        method: 'PUT',
-        body: JSON.stringify({ newPassword })
-      });
-      if (res.ok) {
-        alert("Mot de passe mis à jour avec succès.");
-      } else {
-        const data = await res.json();
-        alert(data.error || "Erreur lors de la mise à jour du mot de passe.");
-      }
-    } catch (e) {
-      alert("Impossible de joindre le serveur.");
-    }
-  };
 
   // Autorise un nouveau compte (liste blanche SSO). Le compte pourra se connecter
   // via le SSO Microsoft avec le rôle choisi ; sans mot de passe par défaut.
@@ -991,7 +968,7 @@ const Admin = () => {
                 <tr className="bg-gray-50 text-xs uppercase text-gray-500 border-b border-gray-100">
                   <th className="px-4 py-4 font-semibold">Nom</th>
                   <th className="px-4 py-4 font-semibold">Email</th>
-                  <th className="px-4 py-4 font-semibold">Type</th>
+
                   <th className="px-4 py-4 font-semibold">Rôle d'accès</th>
                   <th className="px-4 py-4 font-semibold">Commercial</th>
                   <th className="px-4 py-4 font-semibold">Finance</th>
@@ -1004,11 +981,7 @@ const Admin = () => {
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
                     <td className="px-4 py-4 text-sm text-gray-600">{u.email}</td>
-                    <td className="px-4 py-4">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded whitespace-nowrap ${u.hasPassword ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {u.hasPassword ? 'Local + SSO' : 'SSO'}
-                      </span>
-                    </td>
+
                     <td className="px-4 py-4">
                       {/* min-w : avec l'ajout des colonnes Commercial/Finance/Actif, le
                           select se comprimait au point de n'afficher que « Cor… ». */}
@@ -1089,14 +1062,6 @@ const Admin = () => {
                       </label>
                     </td>
                     <td className="px-4 py-4 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => handlePasswordChange(u.id, u.name)}
-                        disabled={!peutGererCompte(u)}
-                        title={peutGererCompte(u) ? 'Attribuer un mot de passe local' : MESSAGE_COMPTE_SUPERADMIN}
-                        className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        Changer Mdp
-                      </button>
                       <button
                         onClick={() => handleDeleteUser(u.id, u.name)}
                         disabled={u.email === user?.email || !peutGererCompte(u)}

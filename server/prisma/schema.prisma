@@ -202,6 +202,87 @@ model Parametres {
   updatedAt DateTime @updatedAt
 }
 
+// Identité unique de la société exploitant cette instance Iris. Chaque installation et
+// sa base sont dédiées à une seule société : ce modèle singleton n'est pas multi-tenant.
+model CompanySettings {
+  id                String   @id @default("singleton")
+  raisonSociale     String?
+  nomCommercial     String?
+  siret             String?
+  tvaIntra          String?
+  adresse           String?
+  codePostal        String?
+  ville             String?
+  pays              String?  @default("France")
+  telephone         String?
+  email             String?
+  siteWeb           String?
+  logoUrl           String?
+  couleurPrimaire   String?  @default("#1e3a8a")
+  couleurSecondaire String?  @default("#f59e0b")
+  prefixeFacture    String?
+  piedFacture       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// Référentiel client natif Iris. Il ne dépend pas d'Odoo ni d'un CRM tiers.
+model Client {
+  id            String          @id @default(uuid())
+  raisonSociale String
+  nomCommercial String?
+  siren         String?         @unique
+  tvaIntra      String?
+  telephone     String?
+  email         String?
+  actif         Boolean         @default(true)
+  contacts      ClientContact[]
+  sites         ClientSite[]
+  equipementsInstalles EquipementInstalle[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+// Contact métier d'un client : peut être associé ultérieurement aux interventions,
+// devis, contrats et factures sans confondre personne et adresse de site.
+model ClientContact {
+  id               String   @id @default(uuid())
+  clientId         String
+  client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  prenom           String?
+  nom              String
+  fonction         String?
+  email            String?
+  telephone        String?
+  principal        Boolean  @default(false)
+  estDecisionnaire Boolean  @default(false)
+  estSignataire    Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Un client possède plusieurs sites. PostgreSQL garantit via des index partiels
+// qu'il n'existe au plus qu'un siège social et une adresse de facturation par client.
+// L'interface impose leur sélection avant d'autoriser devis et factures.
+model ClientSite {
+  id                    String   @id @default(uuid())
+  clientId              String
+  client                Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  nom                   String
+  adresse               String
+  complementAdresse     String?
+  codePostal            String
+  ville                 String
+  pays                  String   @default("France")
+  estSiegeSocial        Boolean  @default(false)
+  estSiteFacturation    Boolean  @default(false)
+  estSiteIntervention   Boolean  @default(false)
+  principal             Boolean  @default(false)
+  equipementsInstalles  EquipementInstalle[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
 // Partage public en lecture seule du planning d'intervention (singleton) — lien de type
 // "OneDrive" destiné aux techniciens, qui n'ont pas de compte dans l'application : un
 // token opaque donne accès, SANS authentification, à GET /api/planning/public/:token.
@@ -209,6 +290,119 @@ model Parametres {
 // (bouton "Renouveler le lien") ; `active` permet de couper l'accès sans en générer un
 // nouveau (bouton "Désactiver le partage"), en conservant le même token pour une
 // réactivation ultérieure.
+// Clé machine-à-machine pour intégrations contrôlées (Hermes, connecteurs). Le secret
+// n'est jamais stocké : seule son empreinte SHA-256 est persistée et la valeur n'est
+// révélée qu'une fois à sa création par un SUPERADMIN.
+model ApiAccessKey {
+  id          String    @id @default(uuid())
+  nom         String
+  prefixe     String    @unique
+  secretHash  String    @unique
+  scopes      String[]
+  actif       Boolean   @default(true)
+  expireLe    DateTime?
+  dernierUsageLe DateTime?
+  creeParId   String
+  creeLe      DateTime  @default(now())
+  revoqueLe   DateTime?
+
+  @@index([actif])
+}
+
+// Catégories libres et hiérarchiques, communes à tout le catalogue. Elles permettent
+// d'organiser le métier sans imposer de nomenclature Iris (ex. Alarme > Détecteurs).
+model CatalogueCategorie {
+  id          String   @id @default(uuid())
+  nom         String   @unique
+  description String?
+  parentId    String?
+  parent      CatalogueCategorie?  @relation("CatalogueCategorieHierarchy", fields: [parentId], references: [id])
+  enfants     CatalogueCategorie[] @relation("CatalogueCategorieHierarchy")
+  prestations CataloguePrestation[]
+  articles    CatalogueArticle[]
+  equipements CatalogueEquipement[]
+  actif       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Catalogue natif : les prestations ne portent pas de stock ni de numéro de série.
+model CataloguePrestation {
+  id               String   @id @default(uuid())
+  categorieId      String?
+  categorie        CatalogueCategorie? @relation(fields: [categorieId], references: [id])
+  reference        String   @unique
+  nom              String
+  description      String?
+  unite            String   @default("unité")
+  dureeIndicativeMin Int?
+  tauxTva          Decimal  @default(20) @db.Decimal(5, 2)
+  prixVenteHt      Decimal  @default(0) @db.Decimal(12, 2)
+  actif            Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Article vendu/consommé : suivi de stock simple, sans traçabilité unitaire obligatoire.
+model CatalogueArticle {
+  id               String   @id @default(uuid())
+  categorieId      String?
+  categorie        CatalogueCategorie? @relation(fields: [categorieId], references: [id])
+  reference        String   @unique
+  nom              String
+  description      String?
+  unite            String   @default("unité")
+  tauxTva          Decimal  @default(20) @db.Decimal(5, 2)
+  prixAchatHt      Decimal? @db.Decimal(12, 2)
+  prixVenteHt      Decimal  @default(0) @db.Decimal(12, 2)
+  stockSuivi       Boolean  @default(false)
+  stockActuel      Decimal  @default(0) @db.Decimal(12, 3)
+  actif            Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Modèle catalogue d'un matériel sérialisable ; une instance installée crée un EquipementInstalle.
+model CatalogueEquipement {
+  id               String   @id @default(uuid())
+  categorieId      String?
+  categorie        CatalogueCategorie? @relation(fields: [categorieId], references: [id])
+  reference        String   @unique
+  nom              String
+  fabricant        String?
+  description      String?
+  tauxTva          Decimal  @default(20) @db.Decimal(5, 2)
+  prixVenteHt      Decimal  @default(0) @db.Decimal(12, 2)
+  actif            Boolean  @default(true)
+  equipements      EquipementInstalle[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Parc réellement installé : série/IMEI/MAC, garantie, client et site restent traçables.
+model EquipementInstalle {
+  id                 String              @id @default(uuid())
+  catalogueEquipementId String
+  catalogueEquipement CatalogueEquipement @relation(fields: [catalogueEquipementId], references: [id])
+  clientId           String
+  client             Client              @relation(fields: [clientId], references: [id])
+  clientSiteId       String
+  clientSite         ClientSite          @relation(fields: [clientSiteId], references: [id])
+  numeroSerie        String?
+  imei               String?
+  adresseMac         String?
+  statut             String              @default("INSTALLE")
+  installeLe         DateTime?
+  garantieJusquAu    DateTime?
+  notes              String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([catalogueEquipementId, numeroSerie])
+  @@index([clientId])
+  @@index([clientSiteId])
+}
+
 model PlanningPublicShare {
   id     String  @id @default("singleton")
   token  String  @unique

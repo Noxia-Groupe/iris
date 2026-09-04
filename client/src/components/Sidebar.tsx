@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Wallet } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Wallet, Building2 } from 'lucide-react';
 import { applyTheme } from '../theme';
 import { isAdminRole, peutVoirFinance, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
@@ -44,6 +44,13 @@ const Sidebar = () => {
           Liste des Chantiers
         </NavLink>
         
+        {isAdmin && (
+          <NavLink to="/clients" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Building2 size={20} />
+            Clients
+          </NavLink>
+        )}
+
         {!isCommercial && (
           <NavLink to="/achats" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <ShoppingCart size={20} />

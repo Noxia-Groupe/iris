@@ -18,6 +18,9 @@ import MesCommerciaux from './pages/MesCommerciaux';
 import Planning from './pages/Planning';
 import SuiviFinancier from './pages/SuiviFinancier';
 import PlanningPublic from './pages/PlanningPublic';
+import Clients from './pages/Clients';
+import ClientDetail from './pages/ClientDetail';
+import ApiKeys from './pages/ApiKeys';
 import { ErrorBoundary } from './ErrorBoundary';
 import { peutVoirFinance, useCurrentUser, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
 import { useModules } from './modules';
@@ -105,6 +108,22 @@ function App() {
         <Route path="/chantiers" element={
           <PrivateRoute>
             <ListeChantiers />
+          </PrivateRoute>
+        } />
+
+        <Route path="/clients" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <Clients />
+          </PrivateRoute>
+        } />
+        <Route path="/clients/:id" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <ClientDetail />
+          </PrivateRoute>
+        } />
+        <Route path="/administration/api" element={
+          <PrivateRoute requiredRoles={[ROLE_SUPERADMIN]}>
+            <ApiKeys />
           </PrivateRoute>
         } />
         

@@ -6,8 +6,7 @@ import { applyTheme } from '../theme';
 import { refreshModules } from '../modules';
 
 const Login = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+
   const [error, setError] = useState('');
   const [ssoInfo, setSsoInfo] = useState('');
   const [loading, setLoading] = useState(false);
@@ -84,34 +83,6 @@ const Login = () => {
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
-    try {
-      const res = await apiFetch('/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password })
-      });
-
-      const data = await res.json();
-      
-      if (res.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        applyTheme(data.user.theme === 'dark' ? 'dark' : 'light');
-        await refreshModules();
-        navigate('/');
-      } else {
-        setError(data.error || 'Erreur de connexion');
-      }
-    } catch (err) {
-      setError('Impossible de joindre le serveur');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-primary-dark)' }}>
@@ -124,21 +95,8 @@ const Login = () => {
         {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">{error}</div>}
         {ssoInfo && <div className="mb-4 p-3 bg-blue-50 text-blue-700 rounded-md text-sm">{ssoInfo}</div>}
 
-        <form onSubmit={handleLogin}>
-          <div className="form-group">
-            <label className="form-label">Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="form-input" placeholder="nom@noxia.com" />
-          </div>
-          <div className="form-group mb-4">
-            <label className="form-label">Mot de passe</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required className="form-input" placeholder="••••••••" />
-          </div>
-          
-          <button type="submit" disabled={loading} className="btn btn-primary" style={{ width: '100%', marginBottom: 'var(--spacing-3)' }}>
-            {loading ? 'Connexion...' : 'Se connecter'}
-          </button>
-          
-          <div style={{ textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-3)' }}>
+        <div style={{ textAlign: 'center' }}>
+          <p className="text-sm text-muted mb-4">Connexion sécurisée avec votre compte professionnel Microsoft.</p>
             <button type="button" onClick={handleSso} disabled={loading} className="btn btn-secondary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 23 23">
                 <path fill="#f3f3f3" d="M0 0h23v23H0z"/>
@@ -149,8 +107,7 @@ const Login = () => {
               </svg>
               Connexion Microsoft 365
             </button>
-          </div>
-        </form>
+        </div>
       </div>
     </div>
   );
