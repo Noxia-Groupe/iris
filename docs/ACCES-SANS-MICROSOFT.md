@@ -99,15 +99,44 @@ retrouve pas.
 | `catalogue:read` | lire les prestations, articles, équipements et catégories |
 | `catalogue:write` | créer et modifier les fiches catalogue |
 | `company:read` | lire l'identité de la société (en-tête de documents) |
+| `chantiers:read` | lire les chantiers, leurs achats et leurs heures |
+| `finances:read` | ajoute les montants vendus et la marge aux chantiers |
 
 Donnez le minimum : un agent qui rédige des devis n'a pas besoin d'écrire dans le
 référentiel client.
+
+### Pourquoi `finances:read` est séparé de `chantiers:read`
+
+Dans l'interface, les montants vendus et la marge sont déjà réservés à certains rôles :
+un conducteur de travaux ne les voit pas sur la liste des chantiers. La même règle vaut
+pour une clé d'intégration — lire un chantier ne doit pas suffire à connaître ce qu'il a
+rapporté. Un agent qui prépare un planning ou un rapport d'intervention travaille très
+bien avec `chantiers:read` seul ; `finances:read` ne se donne qu'à un agent dont c'est
+justement le sujet.
+
+### Ce qu'un agent voit, et pourquoi ce n'est pas ce que voit un humain
+
+Côté interface, le périmètre dépend du **rôle** : un conducteur ne voit que les chantiers
+dont il est responsable, un commercial ceux qu'il a vendus, un administrateur voit tout.
+
+Côté clé d'intégration, il dépend du **scope** : une clé ne représente personne en
+particulier, elle n'a donc pas de rôle à interroger. Porter `chantiers:read` vaut
+autorisation sur l'ensemble du domaine, et c'est au superadmin de ne délivrer que les
+scopes utiles à l'agent.
+
+Ce n'est pas un chemin plus permissif accordé aux robots : les deux portes exécutent le
+**même handler** (cf. `routeMixte` dans `server/index.ts`), avec les mêmes validations et
+les mêmes réponses d'erreur. Seule la façon de calculer le périmètre diffère, comme elle
+diffère déjà entre un administrateur et un conducteur.
 
 ### Utilisation
 
 ```bash
 curl -H "Authorization: Bearer iris_xxxxxxxx" https://<instance>/api/v1/clients
 curl -H "Authorization: Bearer iris_xxxxxxxx" https://<instance>/api/v1/catalogue/articles
+curl -H "Authorization: Bearer iris_xxxxxxxx" https://<instance>/api/v1/chantiers
+curl -H "Authorization: Bearer iris_xxxxxxxx" https://<instance>/api/v1/achats
+curl -H "Authorization: Bearer iris_xxxxxxxx" https://<instance>/api/v1/heures
 ```
 
 Les routes `/api/v1/…` sont servies par **exactement les mêmes handlers** que l'interface

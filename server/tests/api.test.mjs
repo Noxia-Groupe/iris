@@ -37,6 +37,14 @@ if (!TEST_DATABASE_URL) {
     await prisma.catalogueArticle.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.catalogueEquipement.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.apiAccessKey.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
+    // Domaine chantier : l'ordre suit les clés étrangères — les lignes rattachées d'abord.
+    await prisma.achatReel.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
+    await prisma.pointageHeure.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
+    await prisma.chantier.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
+    await prisma.intervenant.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
+    await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
+    await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
+    await prisma.user.deleteMany({ where: { email: 'conducteur.test@iris.test' } });
   };
 
   before(async () => {
@@ -227,6 +235,149 @@ if (!TEST_DATABASE_URL) {
         .send({ reference: 'TEST-POSE-01', nom: 'Pose de caméra', prixVenteHt: '250', tauxTva: '20' });
       assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
       assert.equal(fiche.body.prixVenteHt, 250);
+    });
+  });
+
+  // Cœur de la correction : ces journaux renvoyaient TOUS les achats et TOUTES les heures
+  // de TOUS les chantiers, chacun avec son chantier complet — budgets vendus compris — à
+  // n'importe quel compte connecté. Les tests ci-dessous vérifient les deux moitiés du
+  // défaut : le périmètre (qui voit quoi) et le contenu (ce que porte chaque ligne).
+  describe('Journaux d’achats et d’heures : périmètre et montants', () => {
+    let session = '';
+    let sessionConducteur = '';
+    let idChantierA = '';
+    let idChantierB = '';
+
+    before(async () => {
+      const res = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      session = res.body.token;
+
+      // Un conducteur, responsable d'un seul des deux chantiers.
+      const conducteur = await prisma.user.upsert({
+        where: { email: 'conducteur.test@iris.test' },
+        update: { role: 'CONDUCTEUR_TRAVAUX', actif: true },
+        create: { email: 'conducteur.test@iris.test', name: 'TEST Conducteur', role: 'CONDUCTEUR_TRAVAUX' },
+      });
+      const jwt = (await import('jsonwebtoken')).default;
+      sessionConducteur = jwt.sign({ id: conducteur.id, role: 'CONDUCTEUR_TRAVAUX' }, process.env.JWT_SECRET);
+
+      const chantier = (nom, responsableId) => prisma.chantier.create({
+        data: { nom, client: 'TEST Client', dateDebut: new Date(), budgetGlobalVendu: 100000, responsableId },
+      });
+      idChantierA = (await chantier('TEST Chantier du conducteur', conducteur.id)).id;
+      idChantierB = (await chantier('TEST Chantier d’un autre', null)).id;
+
+      const categorie = await prisma.categorie.upsert({
+        where: { nom: 'TEST Catégorie' }, update: {}, create: { nom: 'TEST Catégorie' },
+      });
+      const fournisseur = await prisma.fournisseur.upsert({
+        where: { nom: 'TEST Fournisseur' }, update: {}, create: { nom: 'TEST Fournisseur' },
+      });
+      const intervenant = await prisma.intervenant.create({
+        data: { nom: 'TEST Intervenant', role: 'Technicien', tauxHoraireCharge: 40 },
+      });
+
+      for (const chantierId of [idChantierA, idChantierB]) {
+        await prisma.achatReel.create({
+          data: { date: new Date(), description: 'TEST achat', montantHT: 1000, chantierId, categorieId: categorie.id, fournisseurId: fournisseur.id },
+        });
+        await prisma.pointageHeure.create({
+          data: { date: new Date(), nbrHeures: 7, tauxHoraireApplique: 40, chantierId, intervenantId: intervenant.id },
+        });
+      }
+    });
+
+    test('un conducteur ne reçoit que les lignes de SES chantiers', async () => {
+      const achats = await request(app).get('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(achats.status, 200);
+      const chantiersVus = new Set(achats.body.map((a) => a.chantier?.id));
+      assert.ok(chantiersVus.has(idChantierA), 'son propre chantier doit être visible');
+      assert.equal(chantiersVus.has(idChantierB), false, 'le chantier d’un autre ne doit pas apparaître');
+
+      const heures = await request(app).get('/api/heures').set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(heures.status, 200);
+      const chantiersHeures = new Set(heures.body.map((h) => h.chantier?.id));
+      assert.equal(chantiersHeures.has(idChantierB), false);
+    });
+
+    test('aucune ligne ne transporte les montants vendus du chantier', async () => {
+      // Le défaut d'origine : `include: { chantier: true }` renvoyait l'enregistrement
+      // entier. Un administrateur y a droit ailleurs, mais pas ici — ces journaux n'ont
+      // aucune raison de véhiculer un budget.
+      for (const chemin of ['/api/achats', '/api/heures']) {
+        const res = await request(app).get(chemin).set('Authorization', `Bearer ${session}`);
+        assert.equal(res.status, 200);
+        assert.ok(res.body.length > 0, `${chemin} doit renvoyer des lignes`);
+        for (const ligne of res.body) {
+          assert.equal(ligne.chantier?.budgetGlobalVendu, undefined, `${chemin} expose budgetGlobalVendu`);
+          assert.equal(ligne.chantier?.budgetMaterielVendu, undefined, `${chemin} expose budgetMaterielVendu`);
+          assert.equal(ligne.chantier?.budgetMainOeuvreVendu, undefined, `${chemin} expose budgetMainOeuvreVendu`);
+          assert.equal(ligne.chantier?.heuresVendues, undefined, `${chemin} expose heuresVendues`);
+        }
+      }
+    });
+
+    test('un administrateur voit bien toutes les lignes', async () => {
+      // Le filtrage ne doit pas amputer ceux qui ont légitimement la vue complète.
+      const achats = await request(app).get('/api/achats').set('Authorization', `Bearer ${session}`);
+      const vus = new Set(achats.body.map((a) => a.chantier?.id));
+      assert.ok(vus.has(idChantierA) && vus.has(idChantierB));
+    });
+  });
+
+  describe('Domaine chantier ouvert à un agent', () => {
+    let session = '';
+    let cleChantiers = '';
+    let cleAvecFinances = '';
+
+    before(async () => {
+      const res = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      session = res.body.token;
+      const creer = async (nom, scopes) => {
+        const r = await request(app).post('/api/admin/api-keys')
+          .set('Authorization', `Bearer ${session}`).send({ nom, scopes });
+        return r.body.apiKey;
+      };
+      cleChantiers = await creer('TEST agent chantiers', ['chantiers:read']);
+      cleAvecFinances = await creer('TEST agent finances', ['chantiers:read', 'finances:read']);
+    });
+
+    test('une clé chantiers:read lit chantiers, achats et heures', async () => {
+      for (const chemin of ['/api/v1/chantiers', '/api/v1/achats', '/api/v1/heures']) {
+        const res = await request(app).get(chemin).set('Authorization', `Bearer ${cleChantiers}`);
+        assert.equal(res.status, 200, `${chemin} → ${res.status}`);
+        assert.ok(Array.isArray(res.body));
+      }
+    });
+
+    test('elle voit tout le parc : une clé n’a pas de rôle qui la restreindrait', async () => {
+      const res = await request(app).get('/api/v1/achats').set('Authorization', `Bearer ${cleChantiers}`);
+      const vus = new Set(res.body.map((a) => a.chantier?.id));
+      assert.ok(vus.size >= 2, 'un agent autorisé sur le domaine voit l’ensemble des chantiers');
+    });
+
+    test('sans finances:read, les montants vendus restent masqués', async () => {
+      const res = await request(app).get('/api/v1/chantiers').set('Authorization', `Bearer ${cleChantiers}`);
+      assert.equal(res.status, 200);
+      const chantier = res.body.find((c) => String(c.nom).startsWith('TEST Chantier'));
+      assert.ok(chantier, 'les chantiers de test doivent être visibles');
+      assert.equal(chantier.budgetGlobalVendu, null, 'le budget vendu ne doit pas sortir sans finances:read');
+      assert.equal(chantier.metrics.margeCommerciale, null, 'la marge ne doit pas sortir sans finances:read');
+    });
+
+    test('avec finances:read, ils sortent', async () => {
+      const res = await request(app).get('/api/v1/chantiers').set('Authorization', `Bearer ${cleAvecFinances}`);
+      const chantier = res.body.find((c) => String(c.nom).startsWith('TEST Chantier'));
+      assert.equal(chantier.budgetGlobalVendu, 100000);
+      assert.notEqual(chantier.metrics.margeCommerciale, null);
+    });
+
+    test('une clé d’un autre domaine reste refusée', async () => {
+      const r = await request(app).post('/api/admin/api-keys')
+        .set('Authorization', `Bearer ${session}`).send({ nom: 'TEST agent clients', scopes: ['clients:read'] });
+      const res = await request(app).get('/api/v1/achats').set('Authorization', `Bearer ${r.body.apiKey}`);
+      assert.equal(res.status, 403);
+      assert.match(res.body.error, /chantiers:read/);
     });
   });
 

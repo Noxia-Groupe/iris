@@ -51,6 +51,17 @@ De même, aucun email d'administration n'est codé en dur : `SUPERADMIN_EMAILS` 
 obligatoire au premier démarrage d'une instance neuve, faute de quoi aucun compte
 d'administration n'est créé.
 
+## Périmètre de lecture
+
+Les listes du domaine chantier (chantiers, achats, heures) ne renvoient que ce que le
+demandeur a le droit de voir : un conducteur ses chantiers, un commercial ceux qu'il a
+vendus, un administrateur l'ensemble. Une clé d'intégration, qui n'a pas de rôle, est
+cadrée par ses scopes — `chantiers:read` pour le domaine, `finances:read` pour y ajouter
+les montants vendus et la marge.
+
+Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
+ne puisse être appliquée d'un seul côté.
+
 ## Hors périmètre
 
 - **Dépôt et galerie de photos.** Héritée de marge, la galerie photos de chantier a été

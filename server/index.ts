@@ -189,6 +189,115 @@ const requireSuperAdmin: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+// --- API d'intégration machine-à-machine (agents et connecteurs) ---
+// Deuxième porte d'entrée de l'application, à côté de Microsoft Entra ID : un agent
+// (Hermes) ou un connecteur n'a pas de compte Microsoft et ne doit pas en avoir. Il
+// s'authentifie avec une clé Iris, dont le secret n'est JAMAIS stocké — seule son
+// empreinte SHA-256 l'est, et la valeur n'est affichée qu'une fois, à sa création.
+//
+// Le SHA-256 nu suffit ici, contrairement à un mot de passe : le secret est tiré de 32
+// octets aléatoires (256 bits d'entropie), il n'est ni mémorisable ni devinable, donc il
+// n'y a rien à ralentir par un bcrypt. Le hachage protège la base, pas la clé.
+const API_SCOPES = [
+  'clients:read', 'clients:write',
+  'catalogue:read', 'catalogue:write',
+  'company:read',
+  // Domaine chantier : les chantiers eux-mêmes, leurs achats et leurs heures. Un agent
+  // qui prépare un devis ou un rapport a besoin des trois, qui décrivent le même objet.
+  'chantiers:read',
+  // Montants vendus et marge. Scope SÉPARÉ, jamais inclus dans chantiers:read : côté
+  // interface ces champs sont déjà réservés à certains rôles (cf. serializeChantier), une
+  // clé d'intégration ne doit pas les obtenir par le simple fait de lire un chantier.
+  'finances:read',
+] as const;
+type ApiScope = typeof API_SCOPES[number];
+interface ApiRequest extends express.Request { apiKey?: { id: string; nom: string; scopes: string[] }; }
+
+function apiKeyHash(key: string) {
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
+
+const requireApiKey = (scope: ApiScope): express.RequestHandler => async (req, res, next) => {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer iris_') ? header.slice(7) : '';
+  if (!token) return void res.status(401).json({ error: 'Clé API Iris requise' });
+  try {
+    const key = await prisma.apiAccessKey.findUnique({ where: { secretHash: apiKeyHash(token) } });
+    if (!key || !key.actif || key.revoqueLe || (key.expireLe && key.expireLe <= new Date())) {
+      return void res.status(401).json({ error: 'Clé API invalide, expirée ou révoquée' });
+    }
+    if (!key.scopes.includes(scope)) {
+      return void res.status(403).json({ error: `Scope requis : ${scope}` });
+    }
+    (req as ApiRequest).apiKey = { id: key.id, nom: key.nom, scopes: key.scopes };
+    // Trace de dernière utilisation : sans attente ni échec bloquant, elle sert à repérer
+    // une clé oubliée (jamais utilisée) ou toujours vivante avant de la révoquer.
+    void prisma.apiAccessKey.update({ where: { id: key.id }, data: { dernierUsageLe: new Date() } }).catch(() => undefined);
+    next();
+  } catch {
+    res.status(500).json({ error: "Erreur d'authentification de la clé API" });
+  }
+};
+
+// Monte une même opération sur les deux portes d'entrée de l'application :
+//   - /api/…    : session humaine (Entra ID ou accès de secours) ;
+//   - /api/v1/… : clé d'intégration (agent, connecteur) portant le scope demandé.
+// Un seul handler pour les deux : impossible qu'un agent contourne une règle appliquée à
+// l'interface, ou qu'une correction ne soit faite que d'un côté.
+//
+// `gardes` protège la porte interface. Par défaut requireAdmin, qui convient aux
+// référentiels (clients, catalogue). Les journaux d'achats et d'heures, eux, sont ouverts
+// à tous les rôles : ce n'est pas l'accès à la route qui les restreint, mais le périmètre
+// de ce qu'elle renvoie (cf. perimetreChantiers) — passer [] est donc délibéré, pas un
+// oubli. La porte /api/v1 ne prend jamais de garde de rôle : une clé n'en a pas.
+type MethodeHttp = 'get' | 'post' | 'put' | 'delete';
+function routeMixte(
+  methode: MethodeHttp,
+  chemin: string,
+  scope: ApiScope,
+  handler: express.RequestHandler,
+  gardes: express.RequestHandler[] = [requireAdmin],
+) {
+  app[methode](`/api${chemin}`, requireAuth, ...gardes, handler);
+  app[methode](`/api/v1${chemin}`, requireApiKey(scope), handler);
+}
+
+// --- Périmètre de lecture du domaine chantier ---
+// Une même liste (achats, heures, chantiers) ne montre pas la même chose selon qui la
+// demande. Deux natures de porteur, deux façons de le décider :
+//
+//   - session humaine : le RÔLE décide. Un administrateur voit tout ; un conducteur de
+//     travaux, les chantiers dont il est responsable ; un commercial, ceux qu'il a vendus.
+//     C'est exactement la règle qu'applique déjà GET /api/chantiers.
+//   - clé d'intégration : le SCOPE décide. Une clé ne représente personne en particulier,
+//     elle n'a donc pas de rôle à interroger ; porter `chantiers:read` vaut autorisation
+//     sur le domaine, et c'est au superadmin de ne délivrer que les scopes utiles.
+//
+// Renvoie un filtre Prisma applicable à un champ `chantier` imbriqué comme à un chantier
+// racine ; `{}` signifie « aucune restriction ».
+function perimetreChantiers(req: express.Request): Prisma.ChantierWhereInput {
+  if ((req as ApiRequest).apiKey) return {};
+  const user = (req as AuthRequest).user;
+  if (!user || isAdminRole(user.role)) return {};
+  if (user.role === 'COMMERCIAL') return { commercialId: user.id };
+  return { responsableId: user.id };
+}
+
+// Le chantier tel qu'il accompagne un achat ou un pointage : de quoi l'identifier, rien
+// de plus. `include: { chantier: true }` renvoyait l'enregistrement ENTIER — budget
+// global vendu, budget matériel, budget main-d'œuvre — à tout compte connecté, y compris
+// ceux à qui serializeChantier masque précisément ces montants ailleurs. Un `select`
+// explicite ferme la fuite par construction : ce qui n'est pas listé ne peut pas sortir.
+const CHANTIER_LITE_SELECT = { id: true, nom: true, client: true, statut: true } as const;
+
+// Les montants vendus et la marge ne sortent que pour un porteur autorisé : un rôle
+// d'administration côté session, le scope finances:read côté clé d'intégration.
+function peutVoirMontantsVendus(req: express.Request): boolean {
+  const cle = (req as ApiRequest).apiKey;
+  if (cle) return cle.scopes.includes('finances:read');
+  return isAdminRole((req as AuthRequest).user?.role);
+}
+
 // Suivi financier : accordé au cas par cas, indépendamment du rôle (User.accesFinance,
 // case « Finance » dans Administration > Utilisateurs). Un superadmin y accède toujours,
 // sans avoir besoin de la case. Couvre la consultation comme la pose et le retrait des
@@ -733,18 +842,14 @@ app.get('/api/odoo/devis/:id/adresse', requireAuth, async (req, res) => {
 // Chantiers — un conducteur ne voit que les chantiers dont il est responsable ;
 // un admin voit tout. Un chantier sans responsable reste invisible aux conducteurs
 // jusqu'à ce qu'un admin lui en affecte un.
-app.get('/api/chantiers', requireAuth, async (req, res) => {
+// Le périmètre et le masquage financier viennent des deux mêmes fonctions que les
+// journaux d'achats et d'heures : un conducteur voit ses chantiers, un commercial ceux
+// qu'il a vendus, une clé d'intégration ce que ses scopes autorisent.
+const listerChantiers: express.RequestHandler = async (req, res) => {
   try {
-    const authUser = (req as AuthRequest).user!;
-    const isAdmin = isAdminRole(authUser.role);
     const params = await getParametres();
-    const where = isAdmin
-      ? {}
-      : authUser.role === 'COMMERCIAL'
-        ? { commercialId: authUser.id }
-        : { responsableId: authUser.id };
     const chantiers = await prisma.chantier.findMany({
-      where,
+      where: perimetreChantiers(req),
       include: {
         responsable: RESPONSABLE_SELECT,
         commercial: RESPONSABLE_SELECT,
@@ -752,11 +857,15 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
         pointages: true,
       }
     });
-    res.json(chantiers.map((c: any) => serializeChantier(c, params, isAdmin)));
+    const voitMontants = peutVoirMontantsVendus(req);
+    res.json(chantiers.map((c: any) => serializeChantier(c, params, voitMontants)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
   }
-});
+};
+
+// Ouverte à tous les rôles, comme les journaux : le périmètre fait le tri.
+routeMixte('get', '/chantiers', 'chantiers:read', listerChantiers, []);
 
 // Détail d'un chantier : mêmes métriques que la liste, enrichies des relations
 // nécessaires aux répartitions (achats par catégorie/fournisseur, heures par
@@ -1860,13 +1969,28 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
 }
 
 // Achats
-app.get('/api/achats', requireAuth, async (req, res) => {
+// Journal des achats, restreint au périmètre du demandeur (cf. perimetreChantiers) et
+// dépouillé des montants du chantier (cf. CHANTIER_LITE_SELECT).
+//
+// Cette route renvoyait auparavant TOUS les achats de TOUS les chantiers, chacun avec son
+// chantier complet : un conducteur ou un commercial y lisait les budgets vendus d'affaires
+// qui ne le concernaient pas, alors que serializeChantier les lui masque partout ailleurs.
+// Le contrôle d'accès n'a de valeur que s'il tient sur toutes les portes à la fois.
+const listerAchats: express.RequestHandler = async (req, res) => {
   try {
-    res.json(decimalToNumber(await prisma.achatReel.findMany({ include: { chantier: true, categorie: true, fournisseur: true } })));
+    res.json(decimalToNumber(await prisma.achatReel.findMany({
+      where: { chantier: perimetreChantiers(req) },
+      include: {
+        chantier: { select: CHANTIER_LITE_SELECT },
+        categorie: true,
+        fournisseur: true,
+      },
+      orderBy: { date: 'desc' },
+    })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching achats' });
   }
-});
+};
 
 app.post('/api/achats', requireAuth, blockCommercial, async (req, res) => {
   try {
@@ -1937,13 +2061,26 @@ app.delete('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => 
 });
 
 // Pointages (Heures)
-app.get('/api/heures', requireAuth, async (req, res) => {
+// Journal des heures : même correction et même raison que le journal des achats.
+const listerHeures: express.RequestHandler = async (req, res) => {
   try {
-    res.json(decimalToNumber(await prisma.pointageHeure.findMany({ include: { chantier: true, intervenant: true } })));
+    res.json(decimalToNumber(await prisma.pointageHeure.findMany({
+      where: { chantier: perimetreChantiers(req) },
+      include: {
+        chantier: { select: CHANTIER_LITE_SELECT },
+        intervenant: true,
+      },
+      orderBy: { date: 'desc' },
+    })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching heures' });
   }
-});
+};
+
+// Ouvertes à tous les rôles : c'est le périmètre renvoyé qui distingue un administrateur
+// d'un conducteur, pas le droit d'appeler la route.
+routeMixte('get', '/achats', 'chantiers:read', listerAchats, []);
+routeMixte('get', '/heures', 'chantiers:read', listerHeures, []);
 
 app.post('/api/heures', requireAuth, blockCommercial, async (req, res) => {
   try {
@@ -2442,45 +2579,6 @@ app.get('/api/registry/companies', requireAuth, requireAdmin, async (req, res) =
   }
 });
 
-// --- API d'intégration machine-à-machine (agents et connecteurs) ---
-// Deuxième porte d'entrée de l'application, à côté de Microsoft Entra ID : un agent
-// (Hermes) ou un connecteur n'a pas de compte Microsoft et ne doit pas en avoir. Il
-// s'authentifie avec une clé Iris, dont le secret n'est JAMAIS stocké — seule son
-// empreinte SHA-256 l'est, et la valeur n'est affichée qu'une fois, à sa création.
-//
-// Le SHA-256 nu suffit ici, contrairement à un mot de passe : le secret est tiré de 32
-// octets aléatoires (256 bits d'entropie), il n'est ni mémorisable ni devinable, donc il
-// n'y a rien à ralentir par un bcrypt. Le hachage protège la base, pas la clé.
-const API_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'company:read'] as const;
-type ApiScope = typeof API_SCOPES[number];
-interface ApiRequest extends express.Request { apiKey?: { id: string; nom: string; scopes: string[] }; }
-
-function apiKeyHash(key: string) {
-  return crypto.createHash('sha256').update(key).digest('hex');
-}
-
-const requireApiKey = (scope: ApiScope): express.RequestHandler => async (req, res, next) => {
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer iris_') ? header.slice(7) : '';
-  if (!token) return void res.status(401).json({ error: 'Clé API Iris requise' });
-  try {
-    const key = await prisma.apiAccessKey.findUnique({ where: { secretHash: apiKeyHash(token) } });
-    if (!key || !key.actif || key.revoqueLe || (key.expireLe && key.expireLe <= new Date())) {
-      return void res.status(401).json({ error: 'Clé API invalide, expirée ou révoquée' });
-    }
-    if (!key.scopes.includes(scope)) {
-      return void res.status(403).json({ error: `Scope requis : ${scope}` });
-    }
-    (req as ApiRequest).apiKey = { id: key.id, nom: key.nom, scopes: key.scopes };
-    // Trace de dernière utilisation : sans attente ni échec bloquant, elle sert à repérer
-    // une clé oubliée (jamais utilisée) ou toujours vivante avant de la révoquer.
-    void prisma.apiAccessKey.update({ where: { id: key.id }, data: { dernierUsageLe: new Date() } }).catch(() => undefined);
-    next();
-  } catch {
-    res.status(500).json({ error: "Erreur d'authentification de la clé API" });
-  }
-};
-
 function publicApiKey(key: { id: string; nom: string; prefixe: string; scopes: string[]; actif: boolean; expireLe: Date | null; dernierUsageLe: Date | null; creeLe: Date; revoqueLe: Date | null }) {
   return { id: key.id, nom: key.nom, prefixe: key.prefixe, scopes: key.scopes, actif: key.actif, expireLe: key.expireLe, dernierUsageLe: key.dernierUsageLe, creeLe: key.creeLe, revoqueLe: key.revoqueLe };
 }
@@ -2690,17 +2788,6 @@ const modifierSite: express.RequestHandler = async (req, res) => {
     clientApiError(res, error);
   }
 };
-
-// Monte une même opération sur les deux portes d'entrée de l'application :
-//   - /api/…    : session humaine (Entra ID ou accès de secours), réservée aux admins ;
-//   - /api/v1/… : clé d'intégration (agent, connecteur) portant le scope demandé.
-// Un seul handler pour les deux : impossible qu'un agent contourne une règle appliquée à
-// l'interface, ou qu'une correction ne soit faite que d'un côté.
-type MethodeHttp = 'get' | 'post' | 'put' | 'delete';
-function routeMixte(methode: MethodeHttp, chemin: string, scope: ApiScope, handler: express.RequestHandler) {
-  app[methode](`/api${chemin}`, requireAuth, requireAdmin, handler);
-  app[methode](`/api/v1${chemin}`, requireApiKey(scope), handler);
-}
 
 routeMixte('get', '/clients', 'clients:read', listerClients);
 routeMixte('post', '/clients', 'clients:write', creerClient);
@@ -3459,8 +3546,15 @@ app.get('/api/stats/intervenants', requireAuth, blockCommercial, async (req, res
   }
 });
 
-// Total des achats par fournisseur (mois civil / année civile, navigable) — visible
-// par les conducteurs ET les admins (même périmètre que le Journal des Achats).
+// Total des achats par fournisseur (mois civil / année civile, navigable) — visible par
+// les conducteurs ET les admins.
+//
+// Agrégat volontairement calculé sur TOUS les chantiers, contrairement au Journal des
+// Achats désormais restreint au périmètre du demandeur : ce que la route renvoie est un
+// cumul par fournisseur, sans montant vendu, sans marge et sans rattachement à un
+// chantier — de l'information d'approvisionnement, utile à un conducteur pour situer ses
+// volumes. Restreindre ce cumul changerait le sens de l'écran sans rien protéger de plus ;
+// c'est un choix produit, pas un oubli du filtrage appliqué ailleurs.
 app.get('/api/stats/fournisseurs', requireAuth, blockCommercial, async (req, res) => {
   try {
     const period = req.query.period === 'year' ? 'year' : 'month';
