@@ -11,15 +11,22 @@
 #   - frontend  : compilation TypeScript stricte, build Vite et lint.
 name: CI
 
+# `push` est limité à main, `pull_request` couvre les branches de travail. Déclencher sur
+# les deux pour toute branche lançait la série DEUX FOIS par commit dès qu'une pull request
+# était ouverte : la clé de concurrence diffère entre un push (refs/heads/…) et une pull
+# request (refs/pull/N/merge), les deux séries ne s'annulaient donc pas l'une l'autre.
+#
+# Conséquence assumée : une branche sans pull request n'est pas vérifiée. Elle le sera dès
+# l'ouverture de la pull request, c'est-à-dire avant toute fusion — le moment qui compte.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 # Une nouvelle poussée sur la même branche annule la série précédente : inutile de payer
-# deux fois pour un code déjà remplacé.
+# pour un code déjà remplacé.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
