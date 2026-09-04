@@ -9,7 +9,7 @@ Ce guide décrit comment déployer l'application NOXIA sur votre VPS Hostinger. 
 Connectez-vous à votre VPS en SSH et tapez la commande suivante (elle créera une clé nommée spécifiquement pour le projet Marge) :
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_noxia_marge -C "vps-hostinger-marge"
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_noxia_iris -C "vps-hostinger-iris"
 ```
 *(Appuyez sur Entrée pour ne pas mettre de mot de passe à la clé, afin que les pulls automatisés ne bloquent pas).*
 
@@ -21,18 +21,18 @@ nano ~/.ssh/config
 
 Et ajoutez-y ces lignes :
 ```text
-Host github-marge
+Host github-iris
     HostName github.com
     User git
-    IdentityFile ~/.ssh/id_ed25519_noxia_marge
+    IdentityFile ~/.ssh/id_ed25519_noxia_iris
     IdentitiesOnly yes
 ```
 
 Enfin, affichez la clé publique générée à l'écran pour la copier :
 ```bash
-cat ~/.ssh/id_ed25519_noxia_marge.pub
+cat ~/.ssh/id_ed25519_noxia_iris.pub
 ```
-Allez sur **GitHub > Votre dépôt `marge` > Settings > Deploy keys > Add deploy key**, collez la clé publique, donnez-lui un nom (ex: "VPS Hostinger"), et validez.
+Allez sur **GitHub > Votre dépôt `iris` > Settings > Deploy keys > Add deploy key**, collez la clé publique, donnez-lui un nom (ex: "VPS Hostinger"), et validez.
 
 ## 1. Déploiement du code sur le VPS
 
@@ -41,8 +41,8 @@ Puisque votre code est synchronisé avec GitHub, il suffit de cloner ou mettre �
 
 ```bash
 # 1. Cloner (la première fois en utilisant notre Host personnalisé)
-git clone git@github-marge:Noxia-Groupe/marge.git noxia-marge-chantier
-cd noxia-marge-chantier
+git clone git@github-iris:Noxia-Groupe/iris.git noxia-iris-chantier
+cd noxia-iris-chantier
 
 # Ou mettre à jour (les fois suivantes)
 git pull origin main
@@ -60,9 +60,9 @@ cp .env.example .env
 nano .env
 ```
 ```env
-POSTGRES_USER=marge
+POSTGRES_USER=iris
 POSTGRES_PASSWORD=un_mot_de_passe_base_robuste
-POSTGRES_DB=marge
+POSTGRES_DB=iris
 ```
 
 **b) `server/.env`** (secrets applicatifs) :
@@ -106,7 +106,7 @@ docker-compose up -d --build
 ```bash
 docker network create backup-net
 ```
-*Ajoutez ensuite ce même réseau externe `backup-net` au service pgBackWeb dans son propre `docker-compose.yml`, puis connectez-vous à la base depuis pgBackWeb avec l'hôte `marge_db` (nom du conteneur), le port `5432` et les identifiants définis dans votre `.env`.*
+*Ajoutez ensuite ce même réseau externe `backup-net` au service pgBackWeb dans son propre `docker-compose.yml`, puis connectez-vous à la base depuis pgBackWeb avec l'hôte `iris_db` (nom du conteneur), le port `5432` et les identifiants définis dans votre `.env`.*
 
 ### Migrations de base de données
 
@@ -123,18 +123,18 @@ backend (`prisma migrate deploy`). Pour faire évoluer le schéma par la suite :
 Les données vivent dans le volume Docker `postgres_data`. Pour un export :
 
 ```bash
-docker exec marge_db pg_dump -U marge marge > sauvegarde_$(date +%F).sql
+docker exec iris_db pg_dump -U iris iris > sauvegarde_$(date +%F).sql
 ```
 
 ## 4. Configuration dans Nginx Proxy Manager (NPM)
 
-Rendez-vous sur l'interface web de votre Nginx Proxy Manager pour créer le proxy de votre nom de domaine (ex: `marge.noxia.com`).
+Rendez-vous sur l'interface web de votre Nginx Proxy Manager pour créer le proxy de votre nom de domaine (ex: `iris.noxia.com`).
 
 Dans **Proxy Hosts** > **Add Proxy Host** :
 
 1. **Domain Names** : `votre-domaine.com`
 2. **Scheme** : `http`
-3. **Forward Hostname / IP** : `marge_frontend` *(C'est le nom exact du conteneur frontend défini dans le docker-compose)*
+3. **Forward Hostname / IP** : `iris_frontend` *(C'est le nom exact du conteneur frontend défini dans le docker-compose)*
 4. **Forward Port** : `80`
 5. **Block Common Exploits** : Coché (Recommandé)
 6. **Websockets Support** : Coché
