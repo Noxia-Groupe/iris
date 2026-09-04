@@ -47,11 +47,11 @@ export default function Clients() {
   return <div className="max-w-6xl mx-auto space-y-6">
     <div className="flex items-center justify-between gap-4 flex-wrap">
       <div><h1 className="text-2xl font-bold text-gray-900">Clients</h1><p className="text-gray-500">Sociétés, contacts et sites de votre référentiel Iris.</p></div>
-      <button className="btn-primary flex items-center gap-2" onClick={() => setCreating(!creating)}><Plus size={18} /> Nouveau client</button>
+      <button className="btn btn-primary flex items-center gap-2" onClick={() => setCreating(!creating)}><Plus size={18} /> Nouveau client</button>
     </div>
     {creating && <form onSubmit={create} className="bg-white border rounded-xl p-4 flex gap-3 items-end">
       <label className="flex-1 text-sm font-medium">Raison sociale<input autoFocus required value={raisonSociale} onChange={e => setRaisonSociale(e.target.value)} className="mt-1 w-full border rounded px-3 py-2" /></label>
-      <button className="btn-primary" type="submit">Créer la fiche</button>
+      <button className="btn btn-primary" type="submit">Créer la fiche</button>
     </form>}
     {error && <p className="text-red-600">{error}</p>}
     <label className="relative block"><Search className="absolute left-3 top-3 text-gray-400" size={18} /><input value={query} onChange={e => search(e.target.value)} placeholder="Rechercher une société ou un SIREN" className="w-full border rounded-lg py-2.5 pl-10 pr-3" /></label>

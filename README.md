@@ -6,7 +6,7 @@
 **Déploiement** : une instance Iris dédiée par société cliente, avec sa propre base PostgreSQL
 
 ## Vision
-Base technique issue de marge, complètement refondue. ERP pour métiers techniques : interventions SAV, interventions travaux, facturation récurrente, abonnements télécom (4G/fibre), financeurs (Grenke, LPB), raccordement bancaire automatique, web app mobile pour techniciens, branding personnalisé (couleurs + logo) et identité légale de la société exploitante. Une installation Iris correspond à une seule société : déploiement à la demande, sans inscription publique ni mutualisation de base de données.
+Base technique reprise de marge, en cours de refonte module par module. ERP pour métiers techniques : interventions SAV, interventions travaux, facturation récurrente, abonnements télécom (4G/fibre), financeurs (Grenke, LPB), raccordement bancaire automatique, web app mobile pour techniciens, branding personnalisé (couleurs + logo) et identité légale de la société exploitante. Une installation Iris correspond à une seule société : déploiement à la demande, sans inscription publique ni mutualisation de base de données.
 
 ## Différences avec marge (audit anti-amalgame)
 | Élément | Marge | Iris |
@@ -42,6 +42,15 @@ Base technique issue de marge, complètement refondue. ERP pour métiers techniq
 ## Authentification
 Microsoft Entra ID uniquement — adaptée par client futur (tenant client). Pas de page d'inscription publique, de connexion locale ni de mot de passe applicatif. L'application SPA utilise MSAL ; le backend vérifie la signature Microsoft (JWKS/RS256), l'issuer et l'audience avant d'appliquer sa liste blanche locale. Utilisateurs créés par un admin du tenant.
 
+L'application n'a plus aucun mot de passe. Deux portes complètent Entra ID sans le
+remplacer — voir [`docs/ACCES-SANS-MICROSOFT.md`](docs/ACCES-SANS-MICROSOFT.md) :
+
+- **Accès de secours** (`/secours`) : réservé au super administrateur, pour entrer quand le
+  SSO est indisponible ou mal configuré. Jeton dans `server/.env`, session d'une heure,
+  tentatives journalisées. Sans lui, une instance dont le SSO tombe est inadministrable.
+- **Clés d'intégration** : pour un agent (Hermes) ou un connecteur, avec des scopes
+  restreints et une révocation immédiate. Aucun compte Microsoft n'est créé pour un robot.
+
 ### Configuration Entra ID à réaliser
 - Type d'application : **Single-page application (SPA)**.
 - URI de redirection : `https://iris.noxia-groupe.fr/auth/callback`.
@@ -62,9 +71,9 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [x] Phase 0 : Nettoyage marge → iris (docker-compose, `.env.example`, guide de déploiement)
 - [ ] Phase 1 : Audit final anti-liens marge dans le code source (grep complet)
 - [x] Authentification : Microsoft Entra ID uniquement (suppression connexion locale, mots de passe, seed de comptes locaux)
-- [x] Phase 2 : Paramétrage de l’instance — société, branding, modules, profils et rôles ; accès SuperAdmin et clés API d’intégration
+- [x] Phase 2 : Paramétrage de l’instance — société (écran + registre des entreprises), modules, profils et rôles ; clés API d’intégration et accès de secours superadmin
 - [x] Phase 3 : Référentiel clients natif — clients, contacts, sites de facturation et d’intervention
-- [ ] Phase 4 : Catalogue — en cours : modèles, migrations, catégories hiérarchiques et API ; restent l’écran Catalogue et le parc d’équipements installé
+- [ ] Phase 4 : Catalogue — fait : modèles, migrations, catégories, API et écran de gestion ; reste le parc d’équipements installé (`EquipementInstalle` existe en base, sans écran)
 - [ ] Phase 5 : Devis versionnés et conversion contrôlée vers intervention, chantier, contrat ou facture
 - [ ] Phase 6 : Interventions SAV + travaux, planning et application mobile technicien
 - [ ] Phase 7 : Contrats et maintenance cyclique — génération des interventions à planifier avec durée prévisionnelle
@@ -73,6 +82,20 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [ ] Phase 10 : Connecteurs Microsoft 365 (Outlook/Graph) et branding complet
 - [ ] Phase 11 : Auth Microsoft configurable à l'installation + accès plateforme de secours Noxia/OrizonLab
 - [ ] Phase 12 : Déploiement production dédié par client (VPS ou stack Docker + base PostgreSQL propre)
+
+## Tests
+
+```bash
+cd server && npm test
+```
+
+Les tests appellent le code : fonctions de validation exécutées directement, requêtes HTTP
+réelles sur l'application montée en mémoire. Les tests HTTP ont besoin d'une base jetable
+via `TEST_DATABASE_URL` et s'annoncent ignorés sans elle — voir
+[`server/tests/README.md`](server/tests/README.md).
+
+Un test qui relit le code source en texte n'en est pas un : il reste vert sur une branche
+qui ne compile même pas. Cette règle est la seule qui compte ici.
 
 ## Détail audit anti-amalgame (à vérifier sur le code source)
 - [ ] `grep -r "marge" server/ client/ --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist`

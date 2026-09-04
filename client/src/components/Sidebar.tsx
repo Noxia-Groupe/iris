@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Wallet, Building2 } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Wallet, Building2, BookOpen, Landmark, KeyRound } from 'lucide-react';
 import { applyTheme } from '../theme';
-import { isAdminRole, peutVoirFinance, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
+import { isAdminRole, isSuperAdminRole, peutVoirFinance, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
 import './Sidebar.css';
 
@@ -13,6 +13,7 @@ const Sidebar = () => {
   const userRole = user?.role || ROLE_CONDUCTEUR;
   const isCommercial = userRole === ROLE_COMMERCIAL;
   const isAdmin = isAdminRole(userRole);
+  const isSuperAdmin = isSuperAdminRole(userRole);
   const voitFinance = peutVoirFinance(user);
   // Planning : masqué pour tous les comptes (administrateurs compris) quand un superadmin
   // a désactivé le module depuis Administration > Modules.
@@ -48,6 +49,13 @@ const Sidebar = () => {
           <NavLink to="/clients" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <Building2 size={20} />
             Clients
+          </NavLink>
+        )}
+
+        {isAdmin && (
+          <NavLink to="/catalogue" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <BookOpen size={20} />
+            Catalogue
           </NavLink>
         )}
 
@@ -100,6 +108,20 @@ const Sidebar = () => {
           <NavLink to="/suivi-financier" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <Wallet size={20} />
             Suivi Financier
+          </NavLink>
+        )}
+
+        {isAdmin && (
+          <NavLink to="/societe" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Landmark size={20} />
+            Société
+          </NavLink>
+        )}
+
+        {isSuperAdmin && (
+          <NavLink to="/administration/api" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <KeyRound size={20} />
+            API d'intégration
           </NavLink>
         )}
 

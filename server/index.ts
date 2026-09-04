@@ -367,7 +367,10 @@ function optionalBoolean(value: unknown, field: string): boolean | undefined {
 function clientPayload(body: Record<string, unknown>, creation = false) {
   const raisonSociale = optionalClientText(body.raisonSociale, 'raisonSociale');
   if (creation && !raisonSociale) throw new Error('La raison sociale est obligatoire.');
-  const siren = optionalClientText(body.siren, 'siren', 9);
+  // Le SIREN est saisi (et lu sur un Kbis) par groupes de trois : « 123 456 789 ». On le
+  // normalise avant de le valider, sinon la mise en forme habituelle serait refusée.
+  const sirenSaisi = optionalClientText(body.siren, 'siren', 20);
+  const siren = sirenSaisi ? sirenSaisi.replace(/[\s.-]/g, '') : null;
   if (siren && !/^\d{9}$/.test(siren)) throw new Error('Le SIREN doit contenir 9 chiffres.');
   const data: Record<string, unknown> = {};
   if (raisonSociale !== null) data.raisonSociale = raisonSociale;
@@ -547,6 +550,107 @@ app.post('/api/auth/sso', async (req, res) => {
     res.json({ token, user });
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la connexion SSO' });
+  }
+});
+
+// --- Accès de secours (« break-glass ») du super administrateur ---
+// Microsoft Entra ID est la porte d'entrée normale, et la seule pour les comptes de la
+// société. Mais faire dépendre 100 % des accès d'un service extérieur crée une panne
+// unique : tenant Microsoft indisponible, application Azure supprimée ou mal reconfigurée,
+// migration de tenant, compte de direction verrouillé — et plus PERSONNE ne peut entrer,
+// pas même pour réparer. Cette route est la porte de service : elle n'ouvre qu'à UN compte
+// superadmin nommé, avec un secret qui ne vit que dans server/.env sur le VPS.
+//
+// Elle est volontairement plus stricte qu'une connexion normale :
+//   - il faut connaître un secret d'au moins 32 caractères, jamais versionné ;
+//   - le compte visé doit exister, être actif ET être SUPERADMIN ;
+//   - la session ouverte dure 1 h, pas 7 jours (c'est un accès de dépannage) ;
+//   - 5 tentatives par quart d'heure et par IP, puis blocage ;
+//   - chaque tentative, réussie ou non, laisse une trace dans les journaux du conteneur.
+// Sans BREAK_GLASS_EMAIL + BREAK_GLASS_TOKEN dans l'environnement, la route est inactive
+// et répond 503 : une instance qui n'en veut pas n'a rien à désactiver.
+const BREAK_GLASS_EMAIL = normalizeEmail(process.env.BREAK_GLASS_EMAIL || '');
+const BREAK_GLASS_TOKEN = process.env.BREAK_GLASS_TOKEN || '';
+const BREAK_GLASS_MIN_LONGUEUR = 32;
+const BREAK_GLASS_ACTIF = !!BREAK_GLASS_EMAIL && BREAK_GLASS_TOKEN.length >= BREAK_GLASS_MIN_LONGUEUR;
+
+if (BREAK_GLASS_TOKEN && !BREAK_GLASS_ACTIF) {
+  // Un secret trop court est refusé plutôt qu'accepté en silence : le croire actif alors
+  // qu'il ne l'est pas serait le pire des deux mondes le jour où on en a besoin.
+  console.warn(
+    `[SECOURS] Accès de secours INACTIF : BREAK_GLASS_TOKEN doit faire au moins ${BREAK_GLASS_MIN_LONGUEUR} caractères` +
+      (BREAK_GLASS_EMAIL ? '.' : ' et BREAK_GLASS_EMAIL doit être renseigné.')
+  );
+} else if (BREAK_GLASS_ACTIF) {
+  console.log(`[SECOURS] Accès de secours actif pour ${BREAK_GLASS_EMAIL} (session limitée à 1 h).`);
+}
+
+// Comparaison à temps constant. On compare les EMPREINTES et non les secrets eux-mêmes :
+// timingSafeEqual exige deux tampons de même longueur, et hacher d'abord évite à la fois
+// l'exception sur des longueurs différentes et la fuite de la longueur du secret attendu.
+function secretIdentique(fourni: string, attendu: string): boolean {
+  const a = crypto.createHash('sha256').update(fourni).digest();
+  const b = crypto.createHash('sha256').update(attendu).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Limitation du nombre d'essais, en mémoire du processus. Suffisant ici : il n'y a qu'un
+// backend, et un redémarrage qui remettrait les compteurs à zéro n'aide pas un attaquant
+// à deviner 256 bits d'entropie. (Un rate limiting partagé deviendra nécessaire le jour où
+// l'API tournera en plusieurs instances.)
+const BREAK_GLASS_FENETRE_MS = 15 * 60 * 1000;
+const BREAK_GLASS_MAX_ESSAIS = 5;
+const essaisSecours = new Map<string, { count: number; depuis: number }>();
+
+function tropDEssaisSecours(ip: string): boolean {
+  const maintenant = Date.now();
+  const suivi = essaisSecours.get(ip);
+  if (!suivi || maintenant - suivi.depuis > BREAK_GLASS_FENETRE_MS) {
+    essaisSecours.set(ip, { count: 1, depuis: maintenant });
+    return false;
+  }
+  suivi.count += 1;
+  return suivi.count > BREAK_GLASS_MAX_ESSAIS;
+}
+
+// Publie l'existence du mécanisme (pas le secret) pour que la page /secours sache si elle
+// doit s'afficher. Volontairement sans authentification, comme /api/config : savoir qu'une
+// porte de service existe n'aide pas à l'ouvrir.
+app.get('/api/auth/secours/etat', (_req, res) => {
+  res.json({ disponible: BREAK_GLASS_ACTIF });
+});
+
+app.post('/api/auth/secours', async (req, res) => {
+  const ip = req.ip || 'inconnue';
+  if (!BREAK_GLASS_ACTIF) {
+    return res.status(503).json({ code: 'SECOURS_INACTIF', error: "L'accès de secours n'est pas configuré sur cette instance." });
+  }
+  if (tropDEssaisSecours(ip)) {
+    console.warn(`[SECOURS] Trop de tentatives depuis ${ip} — blocage temporaire.`);
+    return res.status(429).json({ error: 'Trop de tentatives. Réessayez dans quinze minutes.' });
+  }
+  const token = String(req.body?.token || '');
+  if (!token || !secretIdentique(token, BREAK_GLASS_TOKEN)) {
+    console.warn(`[SECOURS] Tentative d'accès de secours REFUSÉE depuis ${ip}.`);
+    return res.status(401).json({ error: 'Jeton de secours invalide.' });
+  }
+  try {
+    const user = await prisma.user.findFirst({
+      where: { email: BREAK_GLASS_EMAIL, actif: true, role: ROLE_SUPERADMIN },
+      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
+    });
+    // Le secret seul ne suffit pas : il ouvre un compte précis, qui doit encore exister,
+    // être actif et être superadmin. Un compte rétrogradé ou désactivé ferme la porte.
+    if (!user) {
+      console.warn(`[SECOURS] Jeton valide mais compte ${BREAK_GLASS_EMAIL} absent, inactif ou non superadmin.`);
+      return res.status(403).json({ error: "Le compte de secours n'est pas un super administrateur actif." });
+    }
+    const jeton = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1h' });
+    console.warn(`[SECOURS] ACCÈS DE SECOURS UTILISÉ par ${user.email} depuis ${ip} — session d'une heure.`);
+    essaisSecours.delete(ip);
+    res.json({ token: jeton, user, expiresIn: 3600 });
+  } catch {
+    res.status(500).json({ error: "Erreur lors de l'ouverture de la session de secours." });
   }
 });
 
@@ -2453,138 +2557,453 @@ app.get('/api/registry/companies', requireAuth, requireAdmin, async (req, res) =
   }
 });
 
-// --- API d'intégration machine-à-machine ---
-const API_SCOPES = ['clients:read', 'company:read'] as const;
+// --- API d'intégration machine-à-machine (agents et connecteurs) ---
+// Deuxième porte d'entrée de l'application, à côté de Microsoft Entra ID : un agent
+// (Hermes) ou un connecteur n'a pas de compte Microsoft et ne doit pas en avoir. Il
+// s'authentifie avec une clé Iris, dont le secret n'est JAMAIS stocké — seule son
+// empreinte SHA-256 l'est, et la valeur n'est affichée qu'une fois, à sa création.
+//
+// Le SHA-256 nu suffit ici, contrairement à un mot de passe : le secret est tiré de 32
+// octets aléatoires (256 bits d'entropie), il n'est ni mémorisable ni devinable, donc il
+// n'y a rien à ralentir par un bcrypt. Le hachage protège la base, pas la clé.
+const API_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'company:read'] as const;
 type ApiScope = typeof API_SCOPES[number];
-interface ApiRequest extends express.Request { apiKey?: { id: string; scopes: string[] }; }
-function apiKeyHash(key: string) { return crypto.createHash('sha256').update(key).digest('hex'); }
+interface ApiRequest extends express.Request { apiKey?: { id: string; nom: string; scopes: string[] }; }
+
+function apiKeyHash(key: string) {
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
+
 const requireApiKey = (scope: ApiScope): express.RequestHandler => async (req, res, next) => {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer iris_') ? header.slice(7) : '';
   if (!token) return void res.status(401).json({ error: 'Clé API Iris requise' });
-  const key = await prisma.apiAccessKey.findUnique({ where: { secretHash: apiKeyHash(token) } });
-  if (!key || !key.actif || key.revoqueLe || (key.expireLe && key.expireLe <= new Date())) return void res.status(401).json({ error: 'Clé API invalide, expirée ou révoquée' });
-  if (!key.scopes.includes(scope)) return void res.status(403).json({ error: `Scope requis : ${scope}` });
-  (req as ApiRequest).apiKey = { id: key.id, scopes: key.scopes };
-  void prisma.apiAccessKey.update({ where: { id: key.id }, data: { dernierUsageLe: new Date() } }).catch(() => undefined);
-  next();
+  try {
+    const key = await prisma.apiAccessKey.findUnique({ where: { secretHash: apiKeyHash(token) } });
+    if (!key || !key.actif || key.revoqueLe || (key.expireLe && key.expireLe <= new Date())) {
+      return void res.status(401).json({ error: 'Clé API invalide, expirée ou révoquée' });
+    }
+    if (!key.scopes.includes(scope)) {
+      return void res.status(403).json({ error: `Scope requis : ${scope}` });
+    }
+    (req as ApiRequest).apiKey = { id: key.id, nom: key.nom, scopes: key.scopes };
+    // Trace de dernière utilisation : sans attente ni échec bloquant, elle sert à repérer
+    // une clé oubliée (jamais utilisée) ou toujours vivante avant de la révoquer.
+    void prisma.apiAccessKey.update({ where: { id: key.id }, data: { dernierUsageLe: new Date() } }).catch(() => undefined);
+    next();
+  } catch {
+    res.status(500).json({ error: "Erreur d'authentification de la clé API" });
+  }
 };
+
 function publicApiKey(key: { id: string; nom: string; prefixe: string; scopes: string[]; actif: boolean; expireLe: Date | null; dernierUsageLe: Date | null; creeLe: Date; revoqueLe: Date | null }) {
   return { id: key.id, nom: key.nom, prefixe: key.prefixe, scopes: key.scopes, actif: key.actif, expireLe: key.expireLe, dernierUsageLe: key.dernierUsageLe, creeLe: key.creeLe, revoqueLe: key.revoqueLe };
 }
+
 app.get('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (_req, res) => {
-  const keys = await prisma.apiAccessKey.findMany({ orderBy: { creeLe: 'desc' } });
-  res.json(keys.map(publicApiKey));
+  try {
+    const keys = await prisma.apiAccessKey.findMany({ orderBy: { creeLe: 'desc' } });
+    res.json(keys.map(publicApiKey));
+  } catch {
+    res.status(500).json({ error: 'Error fetching API keys' });
+  }
 });
+
+// Liste des scopes disponibles, pour que l'écran d'administration n'ait pas à les
+// dupliquer (une divergence donnerait une case à cocher que le serveur refuserait).
+app.get('/api/admin/api-scopes', requireAuth, requireSuperAdmin, (_req, res) => {
+  res.json({ scopes: API_SCOPES });
+});
+
 app.post('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (req, res) => {
   const nom = String(req.body?.nom || '').trim();
-  const scopes = Array.isArray(req.body?.scopes) ? req.body.scopes.filter((s: unknown): s is ApiScope => typeof s === 'string' && (API_SCOPES as readonly string[]).includes(s)) : [];
+  const scopes = Array.isArray(req.body?.scopes)
+    ? req.body.scopes.filter((s: unknown): s is ApiScope => typeof s === 'string' && (API_SCOPES as readonly string[]).includes(s))
+    : [];
   const expireLe = req.body?.expireLe ? new Date(String(req.body.expireLe)) : null;
-  if (!nom || nom.length > 100 || scopes.length === 0 || (expireLe && Number.isNaN(expireLe.getTime()))) return res.status(400).json({ error: 'Nom, scopes autorisés et date d’expiration valide requis.' });
-  const secret = `iris_${crypto.randomBytes(32).toString('base64url')}`;
-  const key = await prisma.apiAccessKey.create({ data: { nom, prefixe: secret.slice(0, 14), secretHash: apiKeyHash(secret), scopes, expireLe, creeParId: (req as AuthRequest).user!.id } });
-  res.status(201).json({ apiKey: secret, key: publicApiKey(key), warning: 'Copiez cette clé maintenant : elle ne sera plus jamais affichée.' });
+  if (!nom || nom.length > 100 || scopes.length === 0 || (expireLe && Number.isNaN(expireLe.getTime()))) {
+    return res.status(400).json({ error: 'Nom, scopes autorisés et date d’expiration valide requis.' });
+  }
+  try {
+    const secret = `iris_${crypto.randomBytes(32).toString('base64url')}`;
+    const key = await prisma.apiAccessKey.create({
+      data: { nom, prefixe: secret.slice(0, 14), secretHash: apiKeyHash(secret), scopes, expireLe, creeParId: (req as AuthRequest).user!.id },
+    });
+    console.warn(`[API] Clé d'intégration créée : « ${nom} » (${scopes.join(', ')}) par ${(req as AuthRequest).user!.id}`);
+    res.status(201).json({ apiKey: secret, key: publicApiKey(key), warning: 'Copiez cette clé maintenant : elle ne sera plus jamais affichée.' });
+  } catch {
+    res.status(500).json({ error: 'Création de la clé impossible.' });
+  }
 });
+
 app.post('/api/admin/api-keys/:id/revoke', requireAuth, requireSuperAdmin, async (req, res) => {
-  const key = await prisma.apiAccessKey.update({ where: { id: String(req.params.id) }, data: { actif: false, revoqueLe: new Date() } }).catch(() => null);
+  const key = await prisma.apiAccessKey
+    .update({ where: { id: paramId(req) }, data: { actif: false, revoqueLe: new Date() } })
+    .catch(() => null);
   if (!key) return res.status(404).json({ error: 'Clé API introuvable.' });
+  console.warn(`[API] Clé d'intégration révoquée : « ${key.nom} »`);
   res.json(publicApiKey(key));
 });
+
+// Identité de la société : lecture seule pour un agent (en-tête de devis, mentions
+// légales d'un document qu'il rédige). L'écriture reste réservée à un superadmin humain.
 app.get('/api/v1/company', requireApiKey('company:read'), async (_req, res) => {
-  const company = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
-  res.json(company || {});
-});
-app.get('/api/v1/clients', requireApiKey('clients:read'), async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const clients = await prisma.client.findMany({ where: { actif: true, ...(q ? { OR: [{ raisonSociale: { contains: q, mode: 'insensitive' } }, { siren: { contains: q } }] } : {}) }, include: clientDetailInclude, take: 100, orderBy: { raisonSociale: 'asc' } });
-  res.json({ clients });
-});
-app.get('/api/v1/clients/:id', requireApiKey('clients:read'), async (req, res) => {
-  const client = await prisma.client.findUnique({ where: { id: String(req.params.id) }, include: clientDetailInclude });
-  if (!client || !client.actif) return res.status(404).json({ error: 'Client introuvable.' });
-  res.json(client);
+  try {
+    res.json(await getCompanySettings());
+  } catch {
+    res.status(500).json({ error: 'Error fetching company settings' });
+  }
 });
 
 // --- Référentiel Clients natif Iris ---
-const clientDetailInclude = { contacts: { orderBy: [{ principal: 'desc' as const }, { nom: 'asc' as const }] }, sites: { orderBy: [{ principal: 'desc' as const }, { nom: 'asc' as const }] } };
+// Les handlers sont écrits UNE fois puis montés sur deux portes d'entrée (cf. routeMixte
+// plus bas) : l'interface, pour un administrateur connecté, et /api/v1, pour une clé
+// d'intégration porteuse du bon scope. Un agent et un humain appliquent ainsi exactement
+// les mêmes règles de validation — il n'existe pas de « chemin agent » plus permissif.
+const clientDetailInclude = {
+  contacts: { orderBy: [{ principal: 'desc' as const }, { nom: 'asc' as const }] },
+  sites: { orderBy: [{ principal: 'desc' as const }, { nom: 'asc' as const }] },
+};
+
 function clientApiError(res: express.Response, error: unknown) {
+  if ((error as { code?: string })?.code === 'P2002') {
+    return res.status(409).json({ error: 'Ce SIREN, ce siège social ou cette adresse de facturation est déjà pris pour ce client.' });
+  }
+  if ((error as { code?: string })?.code === 'P2025') {
+    return res.status(404).json({ error: 'Enregistrement introuvable.' });
+  }
   const message = error instanceof Error ? error.message : 'Erreur client.';
-  if ((error as any)?.code === 'P2002') return res.status(409).json({ error: 'Ce SIREN ou ce rôle de site est déjà utilisé pour ce client.' });
-  return res.status(message.startsWith('Champ client invalide') || message.includes('obligatoire') || message.includes('SIREN') ? 400 : 500).json({ error: message });
+  const saisie = message.startsWith('Champ client invalide') || message.includes('obligatoire') || message.includes('SIREN');
+  return res.status(saisie ? 400 : 500).json({ error: saisie ? message : 'Erreur client.' });
 }
-app.get('/api/clients', requireAuth, requireAdmin, async (req, res) => {
+
+// Recherche plein texte simple sur la raison sociale, le nom commercial et le SIREN.
+function clientRecherche(q: string) {
+  if (!q) return {};
+  return {
+    OR: [
+      { raisonSociale: { contains: q, mode: 'insensitive' as const } },
+      { nomCommercial: { contains: q, mode: 'insensitive' as const } },
+      { siren: { contains: q } },
+    ],
+  };
+}
+
+const listerClients: express.RequestHandler = async (req, res) => {
   const q = String(req.query.q ?? '').trim();
   const actif = req.query.actif === 'false' ? false : true;
   try {
-    const clients = await prisma.client.findMany({ where: { actif, ...(q ? { OR: [{ raisonSociale: { contains: q, mode: 'insensitive' } }, { nomCommercial: { contains: q, mode: 'insensitive' } }, { siren: { contains: q } }] } : {}) }, orderBy: { raisonSociale: 'asc' }, include: { contacts: { where: { estDecisionnaire: true }, select: { id: true, prenom: true, nom: true, estSignataire: true } }, sites: { where: { estSiteFacturation: true }, select: { ville: true } } } });
+    const clients = await prisma.client.findMany({
+      where: { actif, ...clientRecherche(q) },
+      orderBy: { raisonSociale: 'asc' },
+      take: 200,
+      include: clientDetailInclude,
+    });
     res.json({ clients });
-  } catch (error) { clientApiError(res, error); }
-});
-app.post('/api/clients', requireAuth, requireAdmin, async (req, res) => {
-  try { res.status(201).json(await prisma.client.create({ data: clientPayload(req.body ?? {}, true) as any, include: clientDetailInclude })); } catch (error) { clientApiError(res, error); }
-});
-app.get('/api/clients/:id', requireAuth, requireAdmin, async (req, res) => {
-  const client = await prisma.client.findUnique({ where: { id: paramId(req) }, include: clientDetailInclude });
-  if (!client) return res.status(404).json({ error: 'Client introuvable.' });
-  res.json(client);
-});
-app.put('/api/clients/:id', requireAuth, requireAdmin, async (req, res) => {
-  try { res.json(await prisma.client.update({ where: { id: paramId(req) }, data: clientPayload(req.body ?? {}) as any, include: clientDetailInclude })); } catch (error) { clientApiError(res, error); }
-});
-app.delete('/api/clients/:id', requireAuth, requireAdmin, async (req, res) => {
-  try { res.json(await prisma.client.update({ where: { id: paramId(req) }, data: { actif: false } })); } catch { res.status(404).json({ error: 'Client introuvable.' }); }
-});
-app.post('/api/clients/:clientId/contacts', requireAuth, requireAdmin, async (req, res) => {
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const lireClient: express.RequestHandler = async (req, res) => {
+  try {
+    const client = await prisma.client.findUnique({ where: { id: paramId(req) }, include: clientDetailInclude });
+    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    res.json(client);
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const creerClient: express.RequestHandler = async (req, res) => {
+  try {
+    const data = clientPayload((req.body ?? {}) as Record<string, unknown>, true);
+    res.status(201).json(await prisma.client.create({ data: data as never, include: clientDetailInclude }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const modifierClient: express.RequestHandler = async (req, res) => {
+  try {
+    const data = clientPayload((req.body ?? {}) as Record<string, unknown>);
+    res.json(await prisma.client.update({ where: { id: paramId(req) }, data: data as never, include: clientDetailInclude }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+// Désactivation, jamais suppression : un client porte un historique (chantiers, parc
+// installé) qu'une suppression rendrait orphelin.
+const desactiverClient: express.RequestHandler = async (req, res) => {
+  try {
+    res.json(await prisma.client.update({ where: { id: paramId(req) }, data: { actif: false } }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const creerContact: express.RequestHandler = async (req, res) => {
   const clientId = String(req.params.clientId);
-  try { const data = contactPayload(req.body ?? {}, true) as any; if (data.principal) await prisma.clientContact.updateMany({ where: { clientId }, data: { principal: false } }); res.status(201).json(await prisma.clientContact.create({ data: { ...data, clientId } })); } catch (error) { clientApiError(res, error); }
-});
-app.put('/api/clients/:clientId/contacts/:id', requireAuth, requireAdmin, async (req, res) => {
-  const clientId = String(req.params.clientId); const id = paramId(req);
-  try { const data = contactPayload(req.body ?? {}) as any; if (data.principal) await prisma.clientContact.updateMany({ where: { clientId, id: { not: id } }, data: { principal: false } }); const contact = await prisma.clientContact.updateMany({ where: { id, clientId }, data }); if (!contact.count) return res.status(404).json({ error: 'Contact introuvable.' }); res.json(await prisma.clientContact.findUnique({ where: { id } })); } catch (error) { clientApiError(res, error); }
-});
-app.post('/api/clients/:clientId/sites', requireAuth, requireAdmin, async (req, res) => {
-  try { res.status(201).json(await prisma.clientSite.create({ data: { ...sitePayload(req.body ?? {}, true), clientId: String(req.params.clientId) } as any })); } catch (error) { clientApiError(res, error); }
-});
-app.put('/api/clients/:clientId/sites/:id', requireAuth, requireAdmin, async (req, res) => {
-  try { const site = await prisma.clientSite.updateMany({ where: { id: paramId(req), clientId: String(req.params.clientId) }, data: sitePayload(req.body ?? {}) as any }); if (!site.count) return res.status(404).json({ error: 'Site introuvable.' }); res.json(await prisma.clientSite.findUnique({ where: { id: paramId(req) } })); } catch (error) { clientApiError(res, error); }
-});
+  try {
+    const data = contactPayload((req.body ?? {}) as Record<string, unknown>, true);
+    // Un seul contact principal par client : poser le drapeau retire l'ancien.
+    if (data.principal) await prisma.clientContact.updateMany({ where: { clientId }, data: { principal: false } });
+    res.status(201).json(await prisma.clientContact.create({ data: { ...data, clientId } as never }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const modifierContact: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  const id = paramId(req);
+  try {
+    const data = contactPayload((req.body ?? {}) as Record<string, unknown>);
+    if (data.principal) await prisma.clientContact.updateMany({ where: { clientId, id: { not: id } }, data: { principal: false } });
+    // updateMany (et non update) : le clientId de l'URL fait partie du filtre, on ne peut
+    // donc pas modifier le contact d'un autre client en devinant son identifiant.
+    const maj = await prisma.clientContact.updateMany({ where: { id, clientId }, data: data as never });
+    if (!maj.count) return res.status(404).json({ error: 'Contact introuvable.' });
+    res.json(await prisma.clientContact.findUnique({ where: { id } }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+// Siège social et adresse de facturation sont uniques par client (index partiels
+// PostgreSQL). Comme pour le contact principal, poser le drapeau retire l'ancien plutôt
+// que de renvoyer un conflit que l'utilisateur devrait résoudre à la main.
+async function libererDrapeauxSite(clientId: string, data: Record<string, unknown>, sauf?: string) {
+  const exclure = sauf ? { id: { not: sauf } } : {};
+  if (data.estSiegeSocial) await prisma.clientSite.updateMany({ where: { clientId, ...exclure }, data: { estSiegeSocial: false } });
+  if (data.estSiteFacturation) await prisma.clientSite.updateMany({ where: { clientId, ...exclure }, data: { estSiteFacturation: false } });
+  if (data.principal) await prisma.clientSite.updateMany({ where: { clientId, ...exclure }, data: { principal: false } });
+}
+
+const creerSite: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  try {
+    const data = sitePayload((req.body ?? {}) as Record<string, unknown>, true);
+    await libererDrapeauxSite(clientId, data);
+    res.status(201).json(await prisma.clientSite.create({ data: { ...data, clientId } as never }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const modifierSite: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  const id = paramId(req);
+  try {
+    const data = sitePayload((req.body ?? {}) as Record<string, unknown>);
+    await libererDrapeauxSite(clientId, data, id);
+    const maj = await prisma.clientSite.updateMany({ where: { id, clientId }, data: data as never });
+    if (!maj.count) return res.status(404).json({ error: 'Site introuvable.' });
+    res.json(await prisma.clientSite.findUnique({ where: { id } }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+// Monte une même opération sur les deux portes d'entrée de l'application :
+//   - /api/…    : session humaine (Entra ID ou accès de secours), réservée aux admins ;
+//   - /api/v1/… : clé d'intégration (agent, connecteur) portant le scope demandé.
+// Un seul handler pour les deux : impossible qu'un agent contourne une règle appliquée à
+// l'interface, ou qu'une correction ne soit faite que d'un côté.
+type MethodeHttp = 'get' | 'post' | 'put' | 'delete';
+function routeMixte(methode: MethodeHttp, chemin: string, scope: ApiScope, handler: express.RequestHandler) {
+  app[methode](`/api${chemin}`, requireAuth, requireAdmin, handler);
+  app[methode](`/api/v1${chemin}`, requireApiKey(scope), handler);
+}
+
+routeMixte('get', '/clients', 'clients:read', listerClients);
+routeMixte('post', '/clients', 'clients:write', creerClient);
+routeMixte('get', '/clients/:id', 'clients:read', lireClient);
+routeMixte('put', '/clients/:id', 'clients:write', modifierClient);
+routeMixte('delete', '/clients/:id', 'clients:write', desactiverClient);
+routeMixte('post', '/clients/:clientId/contacts', 'clients:write', creerContact);
+routeMixte('put', '/clients/:clientId/contacts/:id', 'clients:write', modifierContact);
+routeMixte('post', '/clients/:clientId/sites', 'clients:write', creerSite);
+routeMixte('put', '/clients/:clientId/sites/:id', 'clients:write', modifierSite);
 
 // --- Catalogue natif Iris ---
-const catalogueModels = {
+// Trois familles partagent la même forme (référence, nom, prix, TVA, catégorie) et sont
+// donc servies par les mêmes routes, la famille étant un paramètre d'URL.
+//
+// Le typage passe par `Prisma.CataloguePrestationDelegate` volontairement élargi : les
+// trois délégués Prisma ont des signatures génériques DIFFÉRENTES, si bien qu'une union
+// des trois n'est plus appelable (TS2349 — « none of those signatures are compatible with
+// each other »). On fixe donc UN type de délégué de référence pour la table de routage ;
+// les champs propres à chaque famille (durée, stock, fabricant) sont ajoutés ensuite par
+// `catalogueExtraPayload` et validés à l'exécution.
+type CatalogueFamily = 'prestations' | 'articles' | 'equipements';
+type CatalogueDelegate = typeof prisma.cataloguePrestation;
+const catalogueModels: Record<CatalogueFamily, CatalogueDelegate> = {
   prestations: prisma.cataloguePrestation,
-  articles: prisma.catalogueArticle,
-  equipements: prisma.catalogueEquipement,
-} as const;
-type CatalogueFamily = keyof typeof catalogueModels;
+  articles: prisma.catalogueArticle as unknown as CatalogueDelegate,
+  equipements: prisma.catalogueEquipement as unknown as CatalogueDelegate,
+};
+
 function catalogueFamily(value: string): CatalogueFamily | null {
   return value === 'prestations' || value === 'articles' || value === 'equipements' ? value : null;
 }
-function cataloguePayload(body: Record<string, unknown>) {
-  const reference = String(body.reference || '').trim(); const nom = String(body.nom || '').trim();
-  if (!reference || !nom || reference.length > 80 || nom.length > 200) throw new Error('Référence et nom sont obligatoires.');
-  const decimal = (value: unknown, field: string) => { const n = Number(value ?? 0); if (!Number.isFinite(n) || n < 0) throw new Error(`${field} invalide.`); return n; };
-  return { reference, nom, description: body.description ? String(body.description).trim() : null, categorieId: body.categorieId ? String(body.categorieId) : null, tauxTva: decimal(body.tauxTva ?? 20, 'TVA'), prixVenteHt: decimal(body.prixVenteHt, 'Prix de vente') };
+
+// Nombre positif obligatoire : `Number('')` vaut 0 et `Number('abc')` vaut NaN, on refuse
+// donc explicitement tout ce qui n'est pas un nombre fini positif (prix, TVA, stock).
+function catalogueNombre(value: unknown, champ: string, defaut = 0): number {
+  const n = Number(value ?? defaut);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${champ} invalide.`);
+  return n;
 }
-app.get('/api/catalogue/categories', requireAuth, requireAdmin, async (_req, res) => {
-  res.json(await prisma.catalogueCategorie.findMany({ orderBy: { nom: 'asc' } }));
-});
-app.post('/api/catalogue/categories', requireAuth, requireAdmin, async (req, res) => {
-  const nom = String(req.body?.nom || '').trim(); if (!nom || nom.length > 100) return res.status(400).json({ error: 'Nom de catégorie requis.' });
-  try { res.status(201).json(await prisma.catalogueCategorie.create({ data: { nom, description: req.body?.description ? String(req.body.description).trim() : null, parentId: req.body?.parentId ? String(req.body.parentId) : null } })); }
-  catch { res.status(409).json({ error: 'Cette catégorie existe déjà ou sa catégorie parente est invalide.' }); }
-});
-app.get('/api/catalogue/:family', requireAuth, requireAdmin, async (req, res) => {
-  const family = catalogueFamily(String(req.params.family)); if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
-  res.json(await catalogueModels[family].findMany({ include: { categorie: true }, orderBy: { nom: 'asc' } } as any));
-});
-app.post('/api/catalogue/:family', requireAuth, requireAdmin, async (req, res) => {
-  const family = catalogueFamily(String(req.params.family)); if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+
+// Champs communs aux trois familles.
+function cataloguePayload(body: Record<string, unknown>) {
+  const reference = String(body.reference || '').trim();
+  const nom = String(body.nom || '').trim();
+  if (!reference || !nom || reference.length > 80 || nom.length > 200) {
+    throw new Error('Référence et nom sont obligatoires.');
+  }
+  return {
+    reference,
+    nom,
+    description: body.description ? String(body.description).trim() : null,
+    categorieId: body.categorieId ? String(body.categorieId) : null,
+    tauxTva: catalogueNombre(body.tauxTva, 'TVA', 20),
+    prixVenteHt: catalogueNombre(body.prixVenteHt, 'Prix de vente'),
+  };
+}
+
+// Champs propres à une famille : une prestation a une durée, un article un stock, un
+// équipement un fabricant (il devient un EquipementInstalle une fois posé chez un client).
+function catalogueExtraPayload(family: CatalogueFamily, body: Record<string, unknown>) {
+  if (family === 'prestations') {
+    return {
+      unite: String(body.unite || 'unité'),
+      dureeIndicativeMin: body.dureeIndicativeMin == null ? null : catalogueNombre(body.dureeIndicativeMin, 'Durée indicative'),
+    };
+  }
+  if (family === 'articles') {
+    return {
+      unite: String(body.unite || 'unité'),
+      prixAchatHt: body.prixAchatHt == null ? null : catalogueNombre(body.prixAchatHt, "Prix d'achat"),
+      stockSuivi: !!body.stockSuivi,
+      stockActuel: catalogueNombre(body.stockActuel, 'Stock'),
+    };
+  }
+  return { fabricant: body.fabricant ? String(body.fabricant).trim() : null };
+}
+
+// Erreur catalogue : 409 sur une référence déjà prise (contrainte unique Prisma P2002),
+// 400 sur une saisie refusée par la validation, 500 sinon.
+function catalogueApiError(res: express.Response, error: unknown) {
+  if ((error as { code?: string })?.code === 'P2002') {
+    return res.status(409).json({ error: 'Cette référence catalogue est déjà utilisée.' });
+  }
+  if (error instanceof Error && !(error as { code?: string }).code) {
+    return res.status(400).json({ error: error.message });
+  }
+  return res.status(500).json({ error: 'Opération catalogue impossible.' });
+}
+
+const listerCategoriesCatalogue: express.RequestHandler = async (_req, res) => {
   try {
-    const base = cataloguePayload(req.body ?? {});
-    const extra = family === 'prestations' ? { unite: String(req.body?.unite || 'unité'), dureeIndicativeMin: req.body?.dureeIndicativeMin == null ? null : Number(req.body.dureeIndicativeMin) } : family === 'articles' ? { unite: String(req.body?.unite || 'unité'), prixAchatHt: req.body?.prixAchatHt == null ? null : Number(req.body.prixAchatHt), stockSuivi: !!req.body?.stockSuivi, stockActuel: Number(req.body?.stockActuel || 0) } : { fabricant: req.body?.fabricant ? String(req.body.fabricant).trim() : null };
-    res.status(201).json(await (catalogueModels[family] as any).create({ data: { ...base, ...extra }, include: { categorie: true } }));
-  } catch (error) { res.status(error instanceof Error ? 400 : 409).json({ error: error instanceof Error ? error.message : 'Création catalogue impossible.' }); }
-});
+    res.json(await prisma.catalogueCategorie.findMany({ orderBy: { nom: 'asc' } }));
+  } catch {
+    res.status(500).json({ error: 'Error fetching catalogue categories' });
+  }
+};
+
+const creerCategorieCatalogue: express.RequestHandler = async (req, res) => {
+  const nom = String(req.body?.nom || '').trim();
+  if (!nom || nom.length > 100) return res.status(400).json({ error: 'Nom de catégorie requis.' });
+  try {
+    res.status(201).json(await prisma.catalogueCategorie.create({
+      data: {
+        nom,
+        description: req.body?.description ? String(req.body.description).trim() : null,
+        parentId: req.body?.parentId ? String(req.body.parentId) : null,
+      },
+    }));
+  } catch {
+    res.status(409).json({ error: 'Cette catégorie existe déjà ou sa catégorie parente est invalide.' });
+  }
+};
+
+const listerCatalogue: express.RequestHandler = async (req, res) => {
+  const family = catalogueFamily(String(req.params.family));
+  if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+  try {
+    res.json(decimalToNumber(await catalogueModels[family].findMany({
+      include: { categorie: true },
+      orderBy: { nom: 'asc' },
+    })));
+  } catch {
+    res.status(500).json({ error: 'Error fetching catalogue' });
+  }
+};
+
+const creerFicheCatalogue: express.RequestHandler = async (req, res) => {
+  const family = catalogueFamily(String(req.params.family));
+  if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const data = { ...cataloguePayload(body), ...catalogueExtraPayload(family, body) };
+    res.status(201).json(decimalToNumber(await catalogueModels[family].create({
+      data: data as never,
+      include: { categorie: true },
+    })));
+  } catch (error) {
+    catalogueApiError(res, error);
+  }
+};
+
+// Modification d'une fiche catalogue. Une référence déjà utilisée ailleurs renvoie 409 ;
+// une fiche inexistante renvoie 404 (Prisma P2025).
+const modifierFicheCatalogue: express.RequestHandler = async (req, res) => {
+  const family = catalogueFamily(String(req.params.family));
+  if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const data: Record<string, unknown> = { ...cataloguePayload(body), ...catalogueExtraPayload(family, body) };
+    if (body.actif !== undefined) data.actif = !!body.actif;
+    res.json(decimalToNumber(await catalogueModels[family].update({
+      where: { id: paramId(req) },
+      data: data as never,
+      include: { categorie: true },
+    })));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2025') {
+      return res.status(404).json({ error: 'Fiche catalogue introuvable.' });
+    }
+    catalogueApiError(res, error);
+  }
+};
+
+// Désactivation (jamais de suppression) : une fiche catalogue peut déjà être référencée
+// par un équipement installé ou, demain, par un devis — la retirer casserait l'historique.
+const desactiverFicheCatalogue: express.RequestHandler = async (req, res) => {
+  const family = catalogueFamily(String(req.params.family));
+  if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+  try {
+    res.json(decimalToNumber(await catalogueModels[family].update({
+      where: { id: paramId(req) },
+      data: { actif: false } as never,
+    })));
+  } catch {
+    res.status(404).json({ error: 'Fiche catalogue introuvable.' });
+  }
+};
+
+// Le catalogue est monté sur les deux portes d'entrée, comme le référentiel clients :
+// un agent doit pouvoir lire les références et les tarifs pour rédiger un devis, et les
+// enrichir sous contrôle d'un scope d'écriture distinct de la lecture.
+routeMixte('get', '/catalogue/categories', 'catalogue:read', listerCategoriesCatalogue);
+routeMixte('post', '/catalogue/categories', 'catalogue:write', creerCategorieCatalogue);
+routeMixte('get', '/catalogue/:family', 'catalogue:read', listerCatalogue);
+routeMixte('post', '/catalogue/:family', 'catalogue:write', creerFicheCatalogue);
+routeMixte('put', '/catalogue/:family/:id', 'catalogue:write', modifierFicheCatalogue);
+routeMixte('delete', '/catalogue/:family/:id', 'catalogue:write', desactiverFicheCatalogue);
 
 // --- Société de l'instance (singleton, hors paramètres métier) ---
 app.get('/api/company', requireAuth, async (_req, res) => {
@@ -3465,8 +3884,36 @@ const initDb = async () => {
 
 };
 
-app.listen(port, async () => {
-  await initDb();
-  await ensureSuperAdmins();
-  console.log(`Server running on port ${port}`);
-});
+// Le serveur n'écoute que lorsque ce fichier est LANCÉ (node dist/index.js). Quand il est
+// simplement importé — c'est le cas des tests d'intégration, qui montent l'application
+// dans le processus de test — on expose `app` sans ouvrir de port : deux suites de tests
+// peuvent alors tourner en parallèle sans se disputer le 3001, et aucun test n'oublie de
+// fermer un serveur derrière lui.
+if (require.main === module) {
+  app.listen(port, async () => {
+    await initDb();
+    await ensureSuperAdmins();
+    console.log(`Server running on port ${port}`);
+  });
+}
+
+// Surface exportée pour les tests. `app` sert aux tests d'intégration HTTP ; les fonctions
+// pures (validation des saisies, barème de commission, empreinte de clé API) sont testées
+// directement, sans base de données ni requête.
+export {
+  app,
+  initDb,
+  ensureSuperAdmins,
+  clientPayload,
+  contactPayload,
+  sitePayload,
+  companySettingsPayload,
+  cataloguePayload,
+  catalogueExtraPayload,
+  catalogueFamily,
+  apiKeyHash,
+  secretIdentique,
+  commissionBaremeProgressif,
+  computeChantierMetrics,
+  decimalToNumber,
+};
