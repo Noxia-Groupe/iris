@@ -23,6 +23,16 @@ réponse. C'est la règle ici.
 npm test          # tout ; les tests HTTP sont ignorés s'il n'y a pas de base de test
 ```
 
+`npm test` compile d'abord (`tsc`) puis exécute `tests/run.mjs`, qui découvre les fichiers
+`*.test.mjs` de ce dossier et les passe à `node --test`.
+
+Ce petit lanceur remplace un glob `node --test "tests/**/*.test.mjs"` : les globs ne sont
+développés qu'à partir de Node 21, alors que la production et la CI tournent sous Node 20
+(cf. les Dockerfile) — la commande y échouait sur « Could not find ». Lister les fichiers à
+la main dans `package.json` marcherait aussi, mais rouvrirait le piège que ces tests
+existent pour fermer : un test ajouté et jamais exécuté faute d'avoir été inscrit quelque
+part. La découverte est donc automatique.
+
 Les tests HTTP ont besoin d'une base PostgreSQL **jetable** (ils écrivent et suppriment des
 données). Ne pointez jamais `TEST_DATABASE_URL` vers une base de production.
 
