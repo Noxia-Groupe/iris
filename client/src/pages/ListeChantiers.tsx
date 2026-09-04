@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Archive, RotateCcw, Filter } from 'lucide-react';
 import { apiFetch } from '../api';
+import { SectionRepliable } from '../components/SectionRepliable';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { DevisAutocomplete } from '../components/DevisAutocomplete';
@@ -164,12 +165,10 @@ const ListeChantiers = () => {
     </div>
   );
 
-  const renderTable = (list: any[], title: string, emptyMessage: string) => (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-8">
-      <div className="bg-gray-50 border-b border-gray-100 px-6 py-4">
-        <h2 className="text-lg font-bold text-primary-dark">{title}</h2>
-      </div>
-      
+  // `repliable` : la liste des chantiers archivés est masquée tant qu'on ne l'ouvre pas,
+  // pour ne pas noyer les chantiers en cours sous des dossiers clos.
+  const renderTable = (list: any[], title: string, emptyMessage: string, repliable = false) => {
+    const tableau = (
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -278,8 +277,33 @@ const ListeChantiers = () => {
           </tbody>
         </table>
       </div>
-    </div>
-  );
+    );
+
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-8">
+        {repliable ? (
+          <SectionRepliable
+            headerClassName="bg-gray-50 px-6 py-4"
+            titre={<h2 className="text-lg font-bold text-primary-dark m-0">{title}</h2>}
+            resume={
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider shrink-0">
+                {list.length} chantier{list.length > 1 ? 's' : ''}
+              </span>
+            }
+          >
+            {tableau}
+          </SectionRepliable>
+        ) : (
+          <>
+            <div className="bg-gray-50 border-b border-gray-100 px-6 py-4">
+              <h2 className="text-lg font-bold text-primary-dark">{title}</h2>
+            </div>
+            {tableau}
+          </>
+        )}
+      </div>
+    );
+  };
 
   // Filtres de dépassement — appliqués aux deux tableaux (en cours et terminés/archivés).
   const matchesFilters = (c: any) => {
@@ -436,7 +460,7 @@ const ListeChantiers = () => {
 
       <div className="flex-1">
         {renderTable(chantiersEnCours, "Chantiers En Cours", filtresActifs ? "Aucun chantier en cours ne correspond aux filtres." : "Aucun chantier en cours.")}
-        {renderTable(chantiersTermines, "Chantiers Terminés / Archivés", filtresActifs ? "Aucun chantier archivé ne correspond aux filtres." : "Aucun chantier archivé.")}
+        {renderTable(chantiersTermines, "Chantiers Terminés / Archivés", filtresActifs ? "Aucun chantier archivé ne correspond aux filtres." : "Aucun chantier archivé.", true)}
       </div>
 
     </div>

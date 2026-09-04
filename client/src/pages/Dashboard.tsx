@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
+import { SectionRepliable } from '../components/SectionRepliable';
 import { isAdminRole, roleLabel } from '../roles';
 
 type Period = 'month' | 'quarter' | 'year';
@@ -275,16 +276,24 @@ const Dashboard = () => {
             )}
           </div>
 
-          {/* Chantiers terminés / archivés — classés du plus récemment archivé au plus ancien */}
+          {/* Chantiers terminés / archivés — repliés par défaut : ils ne doivent pas noyer
+              les chantiers en cours, mais restent consultables d'un clic. Classés du plus
+              récemment archivé au plus ancien. */}
           <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={18} className="text-gray-400" />
-                <h2 className="text-lg font-bold text-gray-500">Chantiers terminés / archivés</h2>
-              </div>
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{archives.length} chantier{archives.length > 1 ? 's' : ''}</span>
-            </div>
-
+            <SectionRepliable
+              headerClassName="px-6 py-4"
+              titre={
+                <>
+                  <CheckCircle2 size={18} className="text-gray-400 shrink-0" />
+                  <h2 className="text-lg font-bold text-gray-500 m-0">Chantiers terminés / archivés</h2>
+                </>
+              }
+              resume={
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider shrink-0">
+                  {archives.length} chantier{archives.length > 1 ? 's' : ''}
+                </span>
+              }
+            >
             {archives.length === 0 ? (
               <div className="px-6 py-10 text-center text-gray-400 italic">Aucun chantier archivé pour le moment.</div>
             ) : (
@@ -311,6 +320,7 @@ const Dashboard = () => {
                 ))}
               </div>
             )}
+            </SectionRepliable>
           </div>
 
         </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
+import { SectionRepliable } from '../components/SectionRepliable';
 import { isAdminRole } from '../roles';
 
 const Heures = () => {
@@ -127,9 +128,18 @@ const Heures = () => {
         </form>
       </div>
 
+      {/* Historique replié par défaut : la page sert d'abord à SAISIR un pointage, le
+          formulaire doit rester la première chose visible. L'historique s'ouvre d'un clic. */}
+      <SectionRepliable
+        headerClassName="pb-3 mb-4"
+        titre={<h3 className="text-xl font-bold text-gray-800 m-0">Historique récent</h3>}
+        resume={
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider shrink-0">
+            {heures.length} pointage{heures.length > 1 ? 's' : ''}
+          </span>
+        }
+      >
       <div>
-        <h3 className="mb-4 text-xl font-bold text-gray-800">Historique récent</h3>
-        
         {/* Vue Mobile : Cartes */}
         <div className="grid grid-cols-1 gap-4 md:hidden">
           {heures.slice().reverse().map(h => (
@@ -184,6 +194,7 @@ const Heures = () => {
           </table>
         </div>
       </div>
+      </SectionRepliable>
     </div>
   );
 };
