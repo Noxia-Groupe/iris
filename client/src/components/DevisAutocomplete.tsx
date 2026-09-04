@@ -45,6 +45,15 @@ export function DevisAutocomplete({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Format SXXXXX exigé à la SAISIE uniquement. Des chantiers antérieurs portent une valeur
+  // libre (deux numéros dans le même champ, pour deux devis d'un même client) : tant que
+  // l'utilisateur n'y touche pas, on n'impose rien, sinon la moindre autre correction sur
+  // ces fiches deviendrait impossible. Dès qu'il modifie le numéro, la règle s'applique —
+  // exactement comme côté serveur.
+  const valeurInitiale = defaultValue.trim().toUpperCase();
+  const heriteHorsFormat = !!valeurInitiale && !/^S\d{5}$/.test(valeurInitiale);
+  const numeroHeriteInchange = heriteHorsFormat && value.trim().toUpperCase() === valeurInitiale;
+
   useEffect(() => {
     if (!open) return;
     const handle = setTimeout(() => {
@@ -75,6 +84,11 @@ export function DevisAutocomplete({
 
   return (
     <div ref={containerRef} className="relative">
+      {/* Format imposé SXXXXX : `pattern` fait rejeter la saisie par le navigateur avant
+          l'envoi, avec le message ci-dessous ; le serveur revalide de toute façon. La
+          saisie est mise en majuscule à la volée, pour qu'un « s00700 » collé depuis Odoo
+          ne soit pas refusé pour un simple problème de casse. Seule exception : un numéro
+          hérité hors format laissé tel quel (cf. numeroHeriteInchange). */}
       <input
         type="text"
         name="numeroDevis"
@@ -82,9 +96,12 @@ export function DevisAutocomplete({
         autoComplete="off"
         className="form-input"
         value={value}
-        onChange={(e) => { setValue(e.target.value); setOpen(true); }}
+        pattern={numeroHeriteInchange ? undefined : 'S\\d{5}'}
+        title="Format attendu : un S suivi de 5 chiffres (exemple : S00700)"
+        maxLength={numeroHeriteInchange ? undefined : 6}
+        onChange={(e) => { setValue(e.target.value.toUpperCase()); setOpen(true); }}
         onFocus={() => setOpen(true)}
-        placeholder="Rechercher un devis Odoo ou saisir librement..."
+        placeholder="Rechercher un devis Odoo (SXXXXX)..."
       />
       {open && suggestions.length > 0 && (
         <ul className="absolute z-20 mt-1 w-full max-h-56 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg text-sm">
@@ -122,6 +139,11 @@ export function DevisAutocomplete({
             </li>
           ))}
         </ul>
+      )}
+      {numeroHeriteInchange && (
+        <p className="mt-1 text-xs text-gray-400 italic">
+          Numéro hérité, hors format SXXXXX : conservé tel quel. Toute modification devra respecter le format.
+        </p>
       )}
       {open && !odooAvailable && suggestions.length === 0 && (
         <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg text-xs text-gray-400 italic px-3 py-2">

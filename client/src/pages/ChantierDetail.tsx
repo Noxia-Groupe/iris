@@ -49,11 +49,18 @@ const ChantierDetail = () => {
   const [editingCommercial, setEditingCommercial] = useState(false);
   const [savingCommercial, setSavingCommercial] = useState(false);
 
-  // Édition des informations du chantier (nom, budgets, dates...) — réservée aux admins,
-  // le serveur (PATCH /api/chantiers/:id) refuse déjà la requête à quiconque d'autre.
+  // Édition des informations du chantier (nom, budgets, dates...) — ouverte aux admins et
+  // au conducteur responsable ; le serveur (PATCH /api/chantiers/:id) refuse déjà la requête
+  // à quiconque d'autre.
   const [conducteurs, setConducteurs] = useState<any[]>([]);
   const [editingChantier, setEditingChantier] = useState(false);
   const [savingChantier, setSavingChantier] = useState(false);
+  // Responsable et commercial de la modale : champs CONTRÔLÉS, contrairement aux autres.
+  // Leurs listes arrivent après l'ouverture de la modale ; avec un simple defaultValue, le
+  // select afficherait (et enregistrerait) la première option venue au lieu du titulaire
+  // en place — une réaffectation silencieuse à l'occasion d'une correction sans rapport.
+  const [editResponsableId, setEditResponsableId] = useState('');
+  const [editCommercialId, setEditCommercialId] = useState('');
   // Préremplissage du budget global vendu et de l'adresse depuis un devis Odoo
   // sélectionné (modale d'édition ci-dessous) — champs non contrôlés, on écrit
   // directement dedans.
@@ -156,19 +163,23 @@ const ChantierDetail = () => {
     }
   };
 
-  // Liste des conducteurs, pour le sélecteur de responsable dans le formulaire d'édition
-  // (admin uniquement — /users est une route admin-only, cohérent ici).
+  // Liste des conducteurs, pour le sélecteur de responsable du formulaire d'édition.
+  // /conducteurs (comme /commerciaux, et contrairement à /users réservé aux admins) est
+  // ouverte à tout compte authentifié : le conducteur responsable édite aussi sa fiche.
+  // Les comptes désactivés n'y figurent pas.
   const fetchConducteurs = async () => {
     try {
-      const res = await apiFetch('/users');
+      const res = await apiFetch('/conducteurs');
       const data = await res.json();
-      if (Array.isArray(data)) setConducteurs(data.filter((u: any) => u.role === 'CONDUCTEUR_TRAVAUX'));
+      if (Array.isArray(data)) setConducteurs(data);
     } catch (e) { console.error(e); }
   };
 
   const startEditChantier = () => {
     if (conducteurs.length === 0) fetchConducteurs();
     if (commerciaux.length === 0) fetchCommerciaux();
+    setEditResponsableId(chantier?.responsable?.id || '');
+    setEditCommercialId(chantier?.commercial?.id || '');
     setEditingChantier(true);
   };
 
@@ -544,9 +555,11 @@ const ChantierDetail = () => {
   const isTermine = chantier.statut !== 'EN_COURS';
   const joursEcoules = daysBetween(dateDebut, dateFin && isTermine ? dateFin : new Date());
 
-  // Le commercial rattaché est modifiable par l'admin ou par le conducteur responsable
-  // du chantier — jamais par le commercial lui-même, ni par un autre conducteur.
-  const canEditCommercial = isAdminRole(userRole) || (userRole === 'CONDUCTEUR_TRAVAUX' && chantier.responsable?.id === currentUser?.id);
+  // La fiche (nom, client, dates, budgets, devis, responsable) et le commercial rattaché
+  // sont modifiables par l'admin ou par le conducteur responsable du chantier, qui corrige
+  // ainsi lui-même ses saisies — jamais par le commercial, ni par un autre conducteur.
+  const canEditChantier = isAdminRole(userRole) || (userRole === 'CONDUCTEUR_TRAVAUX' && chantier.responsable?.id === currentUser?.id);
+  const canEditCommercial = canEditChantier;
   const startEditCommercial = () => {
     if (commerciaux.length === 0) fetchCommerciaux();
     setEditingCommercial(true);
@@ -570,7 +583,7 @@ const ChantierDetail = () => {
 
           {/* Action Bar */}
           <div className="absolute top-6 right-6 flex gap-2">
-            {isAdminRole(userRole) && (
+            {canEditChantier && (
               <button
                 onClick={startEditChantier}
                 className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold hover:bg-gray-50 transition-colors shadow-sm text-sm"
@@ -1150,7 +1163,7 @@ const ChantierDetail = () => {
 
       </div>
 
-      {/* Modale d'édition du chantier — réservée aux admins */}
+      {/* Modale d'édition du chantier — admins et conducteur responsable (cf. canEditChantier) */}
       {editingChantier && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditingChantier(false)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8" onClick={(e) => e.stopPropagation()}>
@@ -1171,8 +1184,10 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">N° de Devis</label>
+                {/* Obligatoire, sauf sur un chantier antérieur créé sans devis : l'exiger
+                    ici interdirait toute autre correction sur sa fiche. */}
                 <DevisAutocomplete
-                  required
+                  required={!!chantier.numeroDevis}
                   defaultValue={chantier.numeroDevis || ''}
                   onMontantFound={(montant) => {
                     if (editChantierBudgetRef.current) editChantierBudgetRef.current.value = String(montant);
@@ -1188,15 +1203,24 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Responsable Chantier</label>
-                <select required name="responsableId" className="form-input" defaultValue={chantier.responsable?.id || ''}>
+                <select required name="responsableId" className="form-input" value={editResponsableId} onChange={(e) => setEditResponsableId(e.target.value)}>
                   <option value="" disabled>Sélectionner un conducteur...</option>
+                  {/* Si le responsable actuel a été désactivé, il ne figure plus dans la liste
+                      d'attribution : on l'y rajoute pour ne pas forcer une réaffectation à
+                      l'occasion d'une correction sans rapport (son historique lui reste). */}
+                  {chantier.responsable && !conducteurs.some(c => c.id === chantier.responsable.id) && (
+                    <option value={chantier.responsable.id}>{chantier.responsable.name} (compte désactivé)</option>
+                  )}
                   {conducteurs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
-                <select required={commerciaux.length > 0} name="commercialId" className="form-input" defaultValue={chantier.commercial?.id || ''}>
+                <select required={commerciaux.length > 0} name="commercialId" className="form-input" value={editCommercialId} onChange={(e) => setEditCommercialId(e.target.value)}>
                   <option value="" disabled>Sélectionner un commercial...</option>
+                  {chantier.commercial && !commerciaux.some(c => c.id === chantier.commercial.id) && (
+                    <option value={chantier.commercial.id}>{chantier.commercial.name} (compte désactivé)</option>
+                  )}
                   {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>

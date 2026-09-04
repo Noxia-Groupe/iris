@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Archive, RotateCcw, Filter } from 'lucide-react';
+import { Archive, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
 import { TYPES_CHANTIER } from '../chantierTypes';
@@ -54,11 +54,13 @@ const ListeChantiers = () => {
     }
   };
 
+  // /conducteurs ne renvoie que les comptes actifs : un compte désactivé (départ de
+  // l'entreprise) ne peut plus se voir attribuer un chantier.
   const fetchUsers = async () => {
     try {
-      const res = await apiFetch('/users');
+      const res = await apiFetch('/conducteurs');
       const data = await res.json();
-      if (Array.isArray(data)) setUsers(data.filter((u: any) => u.role === 'CONDUCTEUR_TRAVAUX'));
+      if (Array.isArray(data)) setUsers(data);
     } catch (e) {
       console.error(e);
     }
@@ -123,6 +125,43 @@ const ListeChantiers = () => {
       const res = await apiFetch(`/chantiers/${id}/statut`, { method: 'PATCH', body: JSON.stringify({ statut: 'EN_COURS' }) });
       if (res.ok) fetchChantiers();
       else { const d = await res.json(); alert(d.error || 'Erreur lors de la réouverture du chantier.'); }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
+  // Supprime définitivement un chantier — réservé aux admins. Le serveur refuse d'abord
+  // (409) si des données y sont rattachées et renvoie leur décompte : on l'affiche pour
+  // faire confirmer en connaissance de cause, puis on rappelle avec force=1. Un chantier
+  // vierge, lui, part en une seule confirmation.
+  const handleSupprimer = async (id: string, nom: string) => {
+    if (!confirm(`Supprimer définitivement « ${nom} » ?\n\nCette action est irréversible.`)) return;
+    try {
+      const res = await apiFetch(`/chantiers/${id}`, { method: 'DELETE' });
+      if (res.ok) { fetchChantiers(); return; }
+
+      const data = await res.json().catch(() => ({}));
+      if (res.status !== 409 || !data.dependances) {
+        alert(data.error || 'Erreur lors de la suppression du chantier.');
+        return;
+      }
+
+      const d = data.dependances;
+      const detail = [
+        d.achats && `${d.achats} achat${d.achats > 1 ? 's' : ''}`,
+        d.pointages && `${d.pointages} pointage${d.pointages > 1 ? 's' : ''} d'heures`,
+        d.photos && `${d.photos} photo${d.photos > 1 ? 's' : ''}`,
+        d.lignesBudget && `${d.lignesBudget} ligne${d.lignesBudget > 1 ? 's' : ''} de budget`,
+      ].filter(Boolean).join('\n· ');
+      const planning = d.affectations
+        ? `\n\n${d.affectations} affectation${d.affectations > 1 ? 's' : ''} du planning ${d.affectations > 1 ? 'seront détachées' : 'sera détachée'} du chantier, sans être supprimée${d.affectations > 1 ? 's' : ''}.`
+        : '';
+
+      if (!confirm(`« ${nom} » porte encore :\n· ${detail}${planning}\n\nTout sera définitivement supprimé. Confirmer ?`)) return;
+
+      const forced = await apiFetch(`/chantiers/${id}?force=1`, { method: 'DELETE' });
+      if (forced.ok) fetchChantiers();
+      else { const f = await forced.json().catch(() => ({})); alert(f.error || 'Erreur lors de la suppression du chantier.'); }
     } catch (e) {
       alert('Impossible de joindre le serveur.');
     }
@@ -266,6 +305,16 @@ const ListeChantiers = () => {
                             title="Purger Photos"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          </button>
+                          {/* Suppression définitive du chantier — distincte de la purge des
+                              photos ci-dessus, d'où le libellé explicite plutôt qu'une
+                              seconde corbeille muette. */}
+                          <button
+                            onClick={() => handleSupprimer(c.id, c.nom)}
+                            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors"
+                            title="Supprimer définitivement le chantier"
+                          >
+                            <Trash2 size={14} /> Supprimer
                           </button>
                         </>
                       )}

@@ -55,11 +55,13 @@ function normalizeEmail(email: unknown): string {
 // Cœur de la couche d'autorisation SSO : un email Microsoft n'est autorisé que s'il
 // figure dans la liste des comptes (table User). Présent => autorisé, avec le rôle
 // associé ; absent => `null` (connexion à refuser, redirection vers « accès refusé »).
+// Un compte désactivé (départ de l'entreprise) n'est plus « autorisé » : il est traité
+// exactement comme un email absent de la liste blanche. Ses données, elles, restent en base.
 async function resolveAuthorizedSsoUser(email: string) {
   const normalized = normalizeEmail(email);
   if (!normalized) return null;
-  return prisma.user.findUnique({
-    where: { email: normalized },
+  return prisma.user.findFirst({
+    where: { email: normalized, actif: true },
     select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
   });
 }
@@ -138,9 +140,15 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
     return;
   }
   try {
-    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, accesFinance: true } });
+    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, accesFinance: true, actif: true } });
     if (!user) {
       res.status(401).json({ error: 'Compte introuvable ou révoqué' });
+      return;
+    }
+    // Désactivation en cours de session : les jetons déjà émis cessent d'être acceptés à la
+    // requête suivante, sans attendre leur expiration (même logique que la relecture du rôle).
+    if (!user.actif) {
+      res.status(401).json({ code: 'COMPTE_DESACTIVE', error: 'Ce compte est désactivé.' });
       return;
     }
     (req as AuthRequest).user = { id: user.id, role: user.role, accesFinance: user.accesFinance };
@@ -244,6 +252,36 @@ const requirePlanningActif: express.RequestHandler = async (req, res, next) => {
     res.status(500).json({ error: 'Error checking planning module' });
   }
 };
+
+// Numéro de devis : un S majuscule suivi d'exactement 5 chiffres (S00700), et un seul par
+// chantier. C'est le format des devis de vente Odoo, et la clé de rapprochement du Suivi
+// financier — un numéro mal formé ou partagé par deux chantiers rend le rapprochement
+// impossible ou ambigu. La saisie est normalisée (espaces retirés, minuscule acceptée)
+// avant contrôle, pour ne pas rejeter un « s00700 » collé depuis Odoo.
+const FORMAT_NUMERO_DEVIS = /^S\d{5}$/;
+
+function normaliserNumeroDevis(valeur: unknown): string {
+  return String(valeur ?? '').trim().toUpperCase();
+}
+
+// Retourne un message d'erreur si le numéro est absent ou mal formé, sinon null.
+function erreurNumeroDevis(numeroDevis: string): string | null {
+  if (!numeroDevis) return 'Veuillez saisir le numéro de devis.';
+  if (!FORMAT_NUMERO_DEVIS.test(numeroDevis)) {
+    return 'Le numéro de devis doit être au format SXXXXX : un S suivi de 5 chiffres (exemple : S00700).';
+  }
+  return null;
+}
+
+// Vérifie qu'aucun AUTRE chantier ne porte déjà ce numéro. Le contrôle est volontairement
+// applicatif et non porté par un index unique en base : des chantiers antérieurs portent
+// une valeur libre (deux numéros dans le même champ, quand un chantier couvre deux devis
+// du même client) et un index les rendrait immodifiables. La règle ne s'applique donc
+// qu'aux numéros nouvellement saisis.
+async function numeroDevisDejaPris(numeroDevis: string, chantierIdExclu?: string): Promise<boolean> {
+  const existant = await prisma.chantier.findFirst({ where: { numeroDevis }, select: { id: true } });
+  return !!existant && existant.id !== chantierIdExclu;
+}
 
 // Express 5 type les valeurs de req.params comme `string | string[]`. Nos routes
 // n'utilisent que des paramètres simples (:id) : on en extrait toujours une string.
@@ -404,6 +442,11 @@ app.post('/api/login', async (req, res) => {
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
       return res.status(401).json({ error: 'Identifiants incorrects' });
+    }
+    // Compte désactivé : la connexion est refusée, avec un message explicite (le mot de
+    // passe étant bon, « identifiants incorrects » enverrait l'utilisateur sur une fausse piste).
+    if (!user.actif) {
+      return res.status(403).json({ code: 'COMPTE_DESACTIVE', error: "Ce compte est désactivé. Contactez l'administrateur." });
     }
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
@@ -631,8 +674,10 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
       if (!responsableId) {
         return res.status(400).json({ error: 'Veuillez sélectionner le conducteur responsable de ce chantier.' });
       }
-      const responsable = await prisma.user.findUnique({ where: { id: responsableId } });
-      if (!responsable) {
+      // Un compte désactivé n'apparaît plus dans les listes d'attribution : il ne peut pas
+      // davantage être désigné responsable d'un nouveau chantier (son historique, lui, reste).
+      const responsable = await prisma.user.findUnique({ where: { id: responsableId }, select: { id: true, actif: true } });
+      if (!responsable || !responsable.actif) {
         return res.status(400).json({ error: 'Conducteur responsable introuvable.' });
       }
     } else {
@@ -645,7 +690,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
     let commercialId: string | null = null;
     if (req.body.commercialId) {
       const commercial = await prisma.user.findUnique({ where: { id: String(req.body.commercialId) } });
-      if (!commercial || !isCommercialLike(commercial)) {
+      if (!commercial || !isCommercialLike(commercial) || !commercial.actif) {
         return res.status(400).json({ error: 'Commercial introuvable.' });
       }
       commercialId = commercial.id;
@@ -653,9 +698,13 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
       return res.status(400).json({ error: 'Veuillez sélectionner le commercial rattaché à ce chantier.' });
     }
 
-    const numeroDevis = String(req.body.numeroDevis || '').trim();
-    if (!numeroDevis) {
-      return res.status(400).json({ error: 'Veuillez saisir le numéro de devis.' });
+    const numeroDevis = normaliserNumeroDevis(req.body.numeroDevis);
+    const erreurDevis = erreurNumeroDevis(numeroDevis);
+    if (erreurDevis) {
+      return res.status(400).json({ error: erreurDevis });
+    }
+    if (await numeroDevisDejaPris(numeroDevis)) {
+      return res.status(409).json({ error: `Le devis ${numeroDevis} est déjà rattaché à un autre chantier.` });
     }
 
     // Le type de chantier n'est pas un champ texte : au moins une case doit être cochée
@@ -691,10 +740,28 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
   }
 });
 
-// Update Chantier (pour le statut, le budget, etc.) — champs en liste blanche (anti mass-assignment)
-app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
+// Update Chantier (pour le statut, le budget, etc.) — champs en liste blanche (anti mass-assignment).
+// Ouvert aux conducteurs de travaux sur LEURS chantiers : ils corrigent eux-mêmes un nom, une
+// date, un budget ou un devis mal saisi, comme le ferait un administrateur, sans avoir à en
+// solliciter un. Sur un chantier dont il n'est pas responsable, un conducteur reçoit 404 (et
+// non 403) : même règle qu'à la lecture, on ne révèle pas l'existence du chantier.
+app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
-    const allowed = ['nom', 'client', 'numeroDevis', 'statut', 'responsableId'];
+    const authUser = (req as AuthRequest).user!;
+    const existant = await prisma.chantier.findUnique({
+      where: { id: paramId(req) },
+      select: { id: true, numeroDevis: true, responsableId: true },
+    });
+    if (!existant || (!isAdminRole(authUser.role) && existant.responsableId !== authUser.id)) {
+      return res.status(404).json({ error: 'Chantier introuvable' });
+    }
+
+    // 'statut' n'est modifiable ici que par un admin : la clôture et surtout la RÉOUVERTURE
+    // d'un chantier obéissent à des règles propres (cf. PATCH /api/chantiers/:id/statut, où
+    // un conducteur peut clôturer mais jamais rouvrir). L'ouvrir ici les contournerait.
+    const allowed = isAdminRole(authUser.role)
+      ? ['nom', 'client', 'numeroDevis', 'statut', 'responsableId']
+      : ['nom', 'client', 'numeroDevis', 'responsableId'];
     const numericFields = ['budgetGlobalVendu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu', 'heuresVendues'];
     const dateFields = ['dateDebut', 'dateFin'];
 
@@ -702,13 +769,22 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
     for (const key of allowed) {
       if (key !== 'responsableId' && key !== 'numeroDevis' && key in req.body) data[key] = req.body[key];
     }
-    // Le numéro de devis est obligatoire : on interdit de le vider.
+    // Format et unicité du numéro de devis : mêmes règles qu'à la création, mais appliquées
+    // SEULEMENT si le numéro change réellement. Des chantiers antérieurs portent une valeur
+    // hors format (deux numéros dans le même champ, pour deux devis d'un même client) : les
+    // contrôler à chaque enregistrement interdirait toute autre correction sur ces fiches.
     if ('numeroDevis' in req.body) {
-      const numeroDevis = String(req.body.numeroDevis || '').trim();
-      if (!numeroDevis) {
-        return res.status(400).json({ error: 'Le numéro de devis est obligatoire.' });
+      const numeroDevis = normaliserNumeroDevis(req.body.numeroDevis);
+      if (numeroDevis !== normaliserNumeroDevis(existant.numeroDevis)) {
+        const erreurDevis = erreurNumeroDevis(numeroDevis);
+        if (erreurDevis) {
+          return res.status(400).json({ error: erreurDevis });
+        }
+        if (await numeroDevisDejaPris(numeroDevis, existant.id)) {
+          return res.status(409).json({ error: `Le devis ${numeroDevis} est déjà rattaché à un autre chantier.` });
+        }
+        data.numeroDevis = numeroDevis;
       }
-      data.numeroDevis = numeroDevis;
     }
     // Un chantier doit toujours avoir un responsable (les conducteurs ne voient que
     // leurs chantiers) : on interdit de le vider, et on vérifie qu'il existe.
@@ -717,8 +793,10 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
       if (!responsableId) {
         return res.status(400).json({ error: 'Un chantier doit toujours avoir un conducteur responsable.' });
       }
-      const responsable = await prisma.user.findUnique({ where: { id: responsableId } });
-      if (!responsable) {
+      const responsable = await prisma.user.findUnique({ where: { id: responsableId }, select: { id: true, actif: true } });
+      // Un compte désactivé (départ de l'entreprise) reste responsable des chantiers qu'il a
+      // suivis — son historique est conservé — mais ne peut plus recevoir de nouvelle affectation.
+      if (!responsable || (!responsable.actif && responsableId !== existant.responsableId)) {
         return res.status(400).json({ error: 'Conducteur responsable introuvable.' });
       }
       data.responsableId = responsableId;
@@ -748,6 +826,76 @@ app.patch('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
 // clôturer, uniquement ses propres chantiers en cours) : une fois TERMINE, il ne
 // peut plus y ajouter d'heures ou de dépenses (cf. POST /achats et /heures).
 // Seul un admin peut réouvrir un chantier clôturé (repasser en EN_COURS).
+// Supprime définitivement un chantier — réservé aux administrateurs et superadmins.
+//
+// Un chantier ne vit pas seul : achats, pointages d'heures, photos, lignes de budget et
+// affectations du planning y sont rattachés. Les supprimer en silence ferait disparaître
+// des données de gestion sans que personne ne l'ait vu venir. La route procède donc en
+// deux temps : sans `force`, elle REFUSE et renvoie le décompte de ce qui serait détruit,
+// que l'écran affiche pour faire confirmer ; avec `force=1`, elle supprime tout dans une
+// transaction (les photos sont aussi retirées du disque).
+//
+// Un chantier vierge — créé par erreur, doublon de devis — n'a rien rattaché : il se
+// supprime alors du premier coup, sans seconde confirmation.
+app.delete('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = paramId(req);
+    const chantier = await prisma.chantier.findUnique({ where: { id }, select: { id: true, nom: true } });
+    if (!chantier) {
+      return res.status(404).json({ error: 'Chantier introuvable.' });
+    }
+
+    const [achats, pointages, photos, lignesBudget, affectations] = await Promise.all([
+      prisma.achatReel.count({ where: { chantierId: id } }),
+      prisma.pointageHeure.count({ where: { chantierId: id } }),
+      prisma.photoChantier.count({ where: { chantierId: id } }),
+      prisma.ligneBudgetPrevisionnel.count({ where: { chantierId: id } }),
+      prisma.planningEvent.count({ where: { chantierId: id } }),
+    ]);
+    const dependances = { achats, pointages, photos, lignesBudget, affectations };
+    const total = achats + pointages + photos + lignesBudget + affectations;
+
+    if (total > 0 && String(req.query.force || '') !== '1') {
+      return res.status(409).json({
+        code: 'CHANTIER_NON_VIDE',
+        error: 'Ce chantier porte encore des données rattachées.',
+        dependances,
+      });
+    }
+
+    // Fichiers photo : supprimés du disque AVANT la transaction. Les effacer après coup
+    // laisserait des fichiers orphelins si la transaction échouait ; les effacer avant
+    // laisse au pire une ligne en base sans son fichier — déjà le cas de la purge des
+    // photos, et bien moins gênant que l'inverse.
+    const fichiers = await prisma.photoChantier.findMany({ where: { chantierId: id }, select: { url: true } });
+    for (const photo of fichiers) {
+      const filePath = path.join(process.cwd(), photo.url);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+
+    // Ordre imposé par les clés étrangères : tout ce qui pointe vers le chantier d'abord.
+    // Les affectations du planning ne sont pas supprimées mais DÉTACHÉES : une intervention
+    // planifiée reste un fait du planning (des techniciens y étaient affectés), elle devient
+    // simplement une intervention hors chantier suivi, qui garde le nom du chantier.
+    await prisma.$transaction([
+      prisma.planningEvent.updateMany({
+        where: { chantierId: id },
+        data: { chantierId: null, categorie: 'HORS_CHANTIER', titre: chantier.nom },
+      }),
+      prisma.photoChantier.deleteMany({ where: { chantierId: id } }),
+      prisma.achatReel.deleteMany({ where: { chantierId: id } }),
+      prisma.pointageHeure.deleteMany({ where: { chantierId: id } }),
+      prisma.ligneBudgetPrevisionnel.deleteMany({ where: { chantierId: id } }),
+      prisma.chantier.delete({ where: { id } }),
+    ]);
+
+    res.json({ success: true, nom: chantier.nom, dependances });
+  } catch (error) {
+    console.error('Suppression chantier:', error);
+    res.status(500).json({ error: 'Impossible de supprimer ce chantier.' });
+  }
+});
+
 app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
@@ -798,7 +946,10 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
     let commercialId: string | null = null;
     if (req.body.commercialId) {
       const commercial = await prisma.user.findUnique({ where: { id: String(req.body.commercialId) } });
-      if (!commercial || !isCommercialLike(commercial)) {
+      // Un commercial désactivé reste rattaché aux chantiers qu'il a vendus (historique
+      // conservé), mais ne peut plus être choisi pour une nouvelle affectation.
+      const inchange = commercial?.id === chantier.commercialId;
+      if (!commercial || !isCommercialLike(commercial) || (!commercial.actif && !inchange)) {
         return res.status(400).json({ error: 'Commercial introuvable.' });
       }
       commercialId = commercial.id;
@@ -831,12 +982,12 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
     const users = await prisma.user.findMany({
       where: isSuper ? {} : { role: { not: ROLE_SUPERADMIN } },
-      select: { id: true, name: true, email: true, role: true, password: true, estCommercial: true, accesFinance: true },
+      select: { id: true, name: true, email: true, role: true, password: true, estCommercial: true, accesFinance: true, actif: true },
       orderBy: { createdAt: 'asc' },
     });
     res.json(users.map((u) => ({
       id: u.id, name: u.name, email: u.email, role: u.role, hasPassword: !!u.password,
-      estCommercial: u.estCommercial, accesFinance: u.accesFinance,
+      estCommercial: u.estCommercial, accesFinance: u.accesFinance, actif: u.actif,
     })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
@@ -896,7 +1047,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     }
     const user = await prisma.user.create({
       data: { email, name, role, estCommercial, accesFinance }, // pas de mot de passe : accès via SSO Microsoft
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
     });
     res.status(201).json({ ...user, hasPassword: false });
   } catch (error) {
@@ -962,7 +1113,7 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       // accesFinance n'est PAS touché : il ne dépend pas du rôle, un conducteur comme un
       // commercial peut le conserver en changeant de fonction.
       data: isAdminRole(role) ? { role } : { role, estCommercial: false },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true }
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true }
     });
     res.json(user);
   } catch (error) {
@@ -990,7 +1141,7 @@ app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req
     const user = await prisma.user.update({
       where: { id: target.id },
       data: { estCommercial: !!req.body.estCommercial },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
     });
     res.json(user);
   } catch (error) {
@@ -1011,11 +1162,48 @@ app.patch('/api/users/:id/acces-finance', requireAuth, requireSuperAdmin, async 
     const user = await prisma.user.update({
       where: { id: target.id },
       data: { accesFinance: !!req.body.accesFinance },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
     });
     res.json(user);
   } catch (error) {
     res.status(500).json({ error: "Impossible de modifier l'accès au suivi financier." });
+  }
+});
+
+// Active ou désactive un compte. Une désactivation vaut départ de l'entreprise : la
+// connexion est refusée (locale comme SSO), les jetons en cours cessent d'être acceptés et
+// le compte disparaît des listes d'attribution (conducteur responsable, commercial
+// rattaché). Elle NE DÉTACHE RIEN : les chantiers qu'il a suivis ou vendus lui restent
+// rattachés et son historique d'heures est intact — c'est toute la différence avec la
+// suppression du compte. L'opération est réversible d'un clic.
+app.patch('/api/users/:id/actif', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const authUser = (req as AuthRequest).user!;
+    const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+    if (!target) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    const refus = refuseSuperAdminTarget(req, target.role);
+    if (refus) {
+      return res.status(403).json({ error: refus });
+    }
+    const actif = !!req.body.actif;
+    // On ne se désactive pas soi-même (on se verrouillerait dehors), et on ne désactive pas
+    // le dernier superadmin : plus personne ne piloterait les modules ni les comptes.
+    if (!actif && target.id === authUser.id) {
+      return res.status(400).json({ error: 'Vous ne pouvez pas désactiver votre propre compte.' });
+    }
+    if (!actif && (await isLastSuperAdmin(target.id))) {
+      return res.status(400).json({ error: "Ce compte est le dernier super administrateur : il ne peut pas être désactivé." });
+    }
+    const user = await prisma.user.update({
+      where: { id: target.id },
+      data: { actif },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
+    });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: "Impossible de modifier l'activation du compte." });
   }
 });
 
@@ -1050,17 +1238,36 @@ app.put('/api/users/:id/password', requireAuth, requireAdmin, async (req, res) =
 // (création de chantier, réattribution). Contrairement à /api/users, accessible à tout
 // utilisateur authentifié (pas seulement les admins) : un conducteur doit pouvoir choisir
 // le commercial rattaché à un chantier qu'il crée ou dont il est responsable. Inclut les
-// admins marqués "estCommercial" (cf. isCommercialLike).
+// admins marqués "estCommercial" (cf. isCommercialLike). Les comptes désactivés en sont
+// exclus : ils ne doivent plus recevoir d'affectation, même si leurs chantiers passés leur
+// restent rattachés.
 app.get('/api/commerciaux', requireAuth, async (req, res) => {
   try {
     const commerciaux = await prisma.user.findMany({
-      where: { OR: COMMERCIAL_OR_FILTER },
+      where: { actif: true, OR: COMMERCIAL_OR_FILTER },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
     res.json(commerciaux);
   } catch (error) {
     res.status(500).json({ error: 'Error fetching commerciaux' });
+  }
+});
+
+// Liste minimale des conducteurs de travaux (id + nom), pendant de /api/commerciaux : elle
+// peuple le sélecteur « Conducteur responsable » sans exiger /api/users, réservé aux admins.
+// Un conducteur peut désormais modifier ses chantiers : il lui faut cette liste. Comme pour
+// les commerciaux, les comptes désactivés n'y figurent plus.
+app.get('/api/conducteurs', requireAuth, async (req, res) => {
+  try {
+    const conducteurs = await prisma.user.findMany({
+      where: { actif: true, role: 'CONDUCTEUR_TRAVAUX' },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    res.json(conducteurs);
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching conducteurs' });
   }
 });
 

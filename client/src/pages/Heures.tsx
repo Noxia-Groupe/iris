@@ -1,17 +1,11 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
-import { isAdminRole } from '../roles';
 
 const Heures = () => {
   const [heures, setHeures] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [intervenants, setIntervenants] = useState<any[]>([]);
-
-  // Rôle réel
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
 
   useEffect(() => {
     fetchData();
@@ -51,16 +45,17 @@ const Heures = () => {
 
   const todayDate = new Date().toISOString().split('T')[0];
 
-  // Un chantier clôturé est en lecture seule pour un conducteur : on ne le propose
-  // plus à la saisie (un admin, lui, garde la main pour corriger l'historique).
-  const chantiersSelectionnables = isAdminRole(userRole) ? chantiers : chantiers.filter(c => c.statut === 'EN_COURS');
+  // Un chantier terminé ne peut plus recevoir d'heures : il ne figure pas dans le
+  // sélecteur, pour personne (les admins corrigent l'historique depuis la fiche du
+  // chantier, où les pointages existants restent modifiables).
+  const chantiersSelectionnables = chantiers.filter(c => c.statut === 'EN_COURS');
 
   return (
     <div>
       <h1 className="text-primary font-bold mb-4">Journal des Heures</h1>
       
       <div className="flex flex-col md:flex-row gap-4 mb-4">
-        {chantiers.slice(0, 3).map(c => {
+        {chantiersSelectionnables.slice(0, 3).map(c => {
           const realisees = getHeuresRealisees(c.id);
           const percent = c.heuresVendues > 0 ? (realisees / c.heuresVendues) * 100 : 0;
           return (
@@ -106,7 +101,9 @@ const Heures = () => {
             <label className="text-sm font-semibold text-gray-600 mb-1">Chantier</label>
             <select required name="chantierId" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full bg-white">
               <option value="">Sélectionner un chantier...</option>
-              {chantiersSelectionnables.map(c => <option key={c.id} value={c.id}>{c.nom}{c.statut === 'TERMINE' ? ' (Terminé)' : ''}</option>)}
+              {chantiersSelectionnables.map(c => (
+                <option key={c.id} value={c.id}>{c.nom}{c.numeroDevis ? ` — ${c.numeroDevis}` : ''}</option>
+              ))}
             </select>
           </div>
           

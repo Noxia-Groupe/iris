@@ -287,6 +287,32 @@ const Admin = () => {
     }
   };
 
+  // Active ou désactive un compte. Une désactivation vaut départ de l'entreprise : la
+  // connexion est refusée et le compte disparaît des listes d'attribution (conducteur
+  // responsable, commercial rattaché), MAIS son historique est conservé — les chantiers
+  // qu'il a suivis lui restent rattachés, contrairement à une révocation. Réversible.
+  const handleToggleActif = async (userId: string, userName: string, current: boolean) => {
+    if (current && !window.confirm(
+      `Désactiver le compte de ${userName} ?\n\n` +
+      "Il ne pourra plus se connecter et n'apparaîtra plus dans les listes d'attribution.\n" +
+      "Ses chantiers et son historique sont conservés. Vous pourrez le réactiver à tout moment."
+    )) return;
+    try {
+      const res = await apiFetch(`/users/${userId}/actif`, {
+        method: 'PATCH',
+        body: JSON.stringify({ actif: !current }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "Erreur lors de la mise à jour de l'activation du compte.");
+        return;
+      }
+      fetchData();
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
   const handlePasswordChange = async (userId: string, userName: string) => {
     const newPassword = window.prompt(`Entrez le nouveau mot de passe pour ${userName} (minimum 6 caractères) :`);
     if (!newPassword) return;
@@ -453,7 +479,8 @@ const Admin = () => {
               <label className="form-label">Responsable Chantier</label>
               <select required name="responsableId" className="form-input" defaultValue="">
                 <option value="" disabled>Sélectionner un conducteur...</option>
-                {users.filter(u => u.role === 'CONDUCTEUR_TRAVAUX').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {/* Un compte désactivé ne peut plus recevoir de chantier (son historique, lui, reste). */}
+                {users.filter(u => u.role === 'CONDUCTEUR_TRAVAUX' && u.actif !== false).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
             <div className="form-group mb-0">
@@ -962,28 +989,31 @@ const Admin = () => {
             <table className="w-full text-left border-collapse bg-white border rounded">
               <thead>
                 <tr className="bg-gray-50 text-xs uppercase text-gray-500 border-b border-gray-100">
-                  <th className="px-6 py-4 font-semibold">Nom</th>
-                  <th className="px-6 py-4 font-semibold">Email</th>
-                  <th className="px-6 py-4 font-semibold">Type</th>
-                  <th className="px-6 py-4 font-semibold">Rôle d'accès</th>
-                  <th className="px-6 py-4 font-semibold">Commercial</th>
-                  <th className="px-6 py-4 font-semibold">Finance</th>
-                  <th className="px-6 py-4 font-semibold text-right">Actions</th>
+                  <th className="px-4 py-4 font-semibold">Nom</th>
+                  <th className="px-4 py-4 font-semibold">Email</th>
+                  <th className="px-4 py-4 font-semibold">Type</th>
+                  <th className="px-4 py-4 font-semibold">Rôle d'accès</th>
+                  <th className="px-4 py-4 font-semibold">Commercial</th>
+                  <th className="px-4 py-4 font-semibold">Finance</th>
+                  <th className="px-4 py-4 font-semibold">Actif</th>
+                  <th className="px-4 py-4 font-semibold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {users.map(u => (
-                  <tr key={u.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 font-bold text-gray-800">{u.name}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{u.email}</td>
-                    <td className="px-6 py-4">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded ${u.hasPassword ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                  <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
+                    <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
+                    <td className="px-4 py-4 text-sm text-gray-600">{u.email}</td>
+                    <td className="px-4 py-4">
+                      <span className={`text-xs font-semibold px-2 py-1 rounded whitespace-nowrap ${u.hasPassword ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
                         {u.hasPassword ? 'Local + SSO' : 'SSO'}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
+                      {/* min-w : avec l'ajout des colonnes Commercial/Finance/Actif, le
+                          select se comprimait au point de n'afficher que « Cor… ». */}
                       <select
-                        className={`form-input py-1 px-3 text-sm font-semibold rounded ${isAdminRole(u.role) ? 'bg-primary/10 text-primary border-primary' : 'bg-gray-100 text-gray-600 border-gray-300'}`}
+                        className={`form-input py-1 px-3 text-sm font-semibold rounded min-w-[11rem] ${isAdminRole(u.role) ? 'bg-primary/10 text-primary border-primary' : 'bg-gray-100 text-gray-600 border-gray-300'}`}
                         value={u.role}
                         onChange={(e) => handleRoleChange(u.id, e.target.value)}
                         disabled={u.email === user?.email || !peutGererCompte(u)}
@@ -999,7 +1029,7 @@ const Admin = () => {
                         {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
                       </select>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       {isAdminRole(u.role) ? (
                         <label className="flex items-center gap-2 cursor-pointer w-fit">
                           <input
@@ -1017,7 +1047,7 @@ const Admin = () => {
                     </td>
                     {/* Accès au Suivi financier : ouvert à tous les rôles, réglable par le
                         seul superadmin — un administrateur le voit sans pouvoir le changer. */}
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       {isSuperAdminRole(u.role) ? (
                         <span className="text-xs text-gray-500" title="Un super administrateur accède toujours au suivi financier.">Oui (par défaut)</span>
                       ) : (
@@ -1036,7 +1066,29 @@ const Admin = () => {
                         </label>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-right whitespace-nowrap">
+                    {/* Compte actif : décocher vaut départ de l'entreprise. La connexion est
+                        refusée et le compte sort des listes d'attribution, mais son
+                        historique de chantiers reste intact (à l'inverse de « Révoquer »). */}
+                    <td className="px-4 py-4">
+                      <label className={`flex items-center gap-2 w-fit ${u.email === user?.email || !peutGererCompte(u) ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                        <input
+                          type="checkbox"
+                          checked={u.actif !== false}
+                          disabled={u.email === user?.email || !peutGererCompte(u)}
+                          onChange={() => handleToggleActif(u.id, u.name, u.actif !== false)}
+                          className="w-4 h-4"
+                          title={u.email === user?.email
+                            ? 'Vous ne pouvez pas désactiver votre propre compte.'
+                            : !peutGererCompte(u)
+                              ? MESSAGE_COMPTE_SUPERADMIN
+                              : "Décocher pour désactiver le compte (historique conservé)"}
+                        />
+                        <span className={`text-xs ${u.actif === false ? 'font-bold text-red-600' : 'text-gray-500'}`}>
+                          {u.actif === false ? 'Désactivé' : 'Oui'}
+                        </span>
+                      </label>
+                    </td>
+                    <td className="px-4 py-4 text-right whitespace-nowrap">
                       <button
                         onClick={() => handlePasswordChange(u.id, u.name)}
                         disabled={!peutGererCompte(u)}
