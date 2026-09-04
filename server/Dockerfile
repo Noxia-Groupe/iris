@@ -20,7 +20,7 @@ COPY *.ts ./
 
 # DATABASE_URL factice : nécessaire au build de `prisma generate` (aucune connexion
 # réelle n'est effectuée ici). La vraie URL est injectée au runtime par docker-compose.
-ENV DATABASE_URL="postgresql://user:password@localhost:5432/marge?schema=public"
+ENV DATABASE_URL="postgresql://user:password@localhost:5432/iris?schema=public"
 
 # Générer le client Prisma et compiler le TypeScript
 RUN npx prisma generate

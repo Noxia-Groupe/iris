@@ -1,7 +1,7 @@
 {
-  "name": "Marge",
-  "short_name": "Marge",
-  "description": "Suivi de marge et de rémunération commerciale par chantier",
+  "name": "Iris",
+  "short_name": "Iris",
+  "description": "Suivi de iris et de rémunération commerciale par chantier",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000726",
