@@ -1,18 +1,18 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import html2pdf from 'html2pdf.js';
-import imageCompression from 'browser-image-compression';
 import {
-  ArrowLeft, Calendar, User, FileDown, Sparkles, Camera,
+  ArrowLeft, Calendar, User, FileDown, Sparkles,
   Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, X, MapPin, Search,
 } from 'lucide-react';
-import { apiFetch, assetUrl } from '../api';
+import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
 import { ClientAutocomplete } from '../components/ClientAutocomplete';
 import { DevisAutocomplete } from '../components/DevisAutocomplete';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole } from '../roles';
+import { useModules } from '../modules';
 
 // Date ISO (avec ou sans heure) -> "YYYY-MM-DD" attendu par <input type="date">.
 const toDateInputValue = (d: string | null | undefined) => (d ? d.slice(0, 10) : '');
@@ -36,6 +36,9 @@ const ChantierDetail = () => {
   const currentUser = userStr ? JSON.parse(userStr) : null;
   const userRole = currentUser?.role || 'CONDUCTEUR_TRAVAUX';
 
+  // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
+  // de société n'est écrit dans l'interface.
+  const { libelleBaremeReduit } = useModules();
   const [chantier, setChantier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -193,7 +196,7 @@ const ChantierDetail = () => {
     formData.delete('commercialId');
     // Case à cocher unique : absente de FormData quand décochée, on la force donc à
     // explicitement true/false pour que décocher l'enregistre bien (cf. 'types' ci-dessous).
-    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), dossierNoxia: formData.get('dossierNoxia') === 'true' };
+    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), baremeReduit: formData.get('baremeReduit') === 'true' };
     setSavingChantier(true);
     try {
       const res = await apiFetch(`/chantiers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
@@ -374,22 +377,6 @@ const ChantierDetail = () => {
       jsPDF: { unit: 'in' as const, format: 'letter' as const, orientation: 'portrait' as const },
     };
     html2pdf().set(opt).from(printRef.current).save();
-  };
-
-  const handlePhotoUpload = async (e: any) => {
-    const file = e.target.files[0];
-    if (!file || !id) return;
-    try {
-      const compressedFile = await imageCompression(file, { maxSizeMB: 0.5, maxWidthOrHeight: 1200 });
-      const formData = new FormData();
-      formData.append('photo', compressedFile);
-      formData.append('legende', 'Photo mobile');
-      await apiFetch(`/chantiers/${id}/photos`, { method: 'POST', body: formData });
-      fetchChantier();
-    } catch (err) {
-      console.error(err);
-      alert("Erreur lors de l'upload");
-    }
   };
 
   // Références stables tant que le chantier n'est pas rechargé : les répartitions et le
@@ -615,8 +602,8 @@ const ChantierDetail = () => {
               {chantier.types?.map((t: string) => (
                 <span key={t} className="text-[11px] font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full">{t}</span>
               ))}
-              {chantier.dossierNoxia && (
-                <span className="text-[11px] font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">Dossier NOXIA</span>
+              {chantier.baremeReduit && (
+                <span className="text-[11px] font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">{libelleBaremeReduit}</span>
               )}
               {isTermine && (isAdminRole(userRole) ? (
                 <button
@@ -1122,45 +1109,6 @@ const ChantierDetail = () => {
           </div>
         </div>
 
-        {/* Galerie Photos */}
-        <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-md border border-gray-100">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-            <div>
-              <h3 className="text-xl font-bold text-primary-dark m-0">Galerie Photos & Suivi</h3>
-              <p className="text-sm text-muted mt-1">Photos du terrain compressées automatiquement.</p>
-            </div>
-            {userRole !== 'COMMERCIAL' && (
-              <div className="flex flex-wrap gap-3">
-                <label className="flex items-center gap-2 px-4 py-2 bg-primary text-white hover:bg-primary-dark font-semibold rounded-lg cursor-pointer transition-colors text-sm shadow-sm">
-                  <Camera size={16} /> Ajouter une photo
-                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
-                </label>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-            {chantier.photos?.map((p: any) => (
-              <div key={p.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-gray-200 bg-gray-50 aspect-square">
-                <img src={assetUrl(p.url)} alt="Chantier" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end">
-                  <div className="p-4 w-full">
-                    <div className="text-white text-xs font-semibold">{new Date(p.createdAt).toLocaleDateString()}</div>
-                    <div className="text-white/80 text-xs truncate">{p.legende || 'Photo'}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {(!chantier.photos || chantier.photos.length === 0) && (
-              <div className="col-span-full flex flex-col items-center justify-center py-16 bg-gray-50/50 rounded-xl border border-dashed border-gray-300">
-                <div className="text-4xl mb-3 opacity-50">📷</div>
-                <div className="text-gray-500 font-medium">Aucune photo pour le moment</div>
-                <div className="text-sm text-gray-400 mt-1">Les photos ajoutées apparaîtront ici.</div>
-              </div>
-            )}
-          </div>
-        </div>
-
       </div>
 
       {/* Modale d'édition du chantier — admins et conducteur responsable (cf. canEditChantier) */}
@@ -1261,8 +1209,8 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0 md:col-span-2">
                 <label className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors w-fit">
-                  <input type="checkbox" name="dossierNoxia" value="true" defaultChecked={!!chantier.dossierNoxia} className="w-4 h-4" />
-                  Dossier NOXIA (barème de commission commerciale réduit)
+                  <input type="checkbox" name="baremeReduit" value="true" defaultChecked={!!chantier.baremeReduit} className="w-4 h-4" />
+                  {libelleBaremeReduit} (barème de commission commerciale réduit)
                 </label>
               </div>
               <div className="md:col-span-2 flex gap-2 mt-2">

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { TrendingUp, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ObjectifBar } from '../components/ObjectifBar';
+import { useModules } from '../modules';
 
 type Period = 'month' | 'quarter' | 'year';
 
@@ -32,6 +33,9 @@ const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé' };
 
 const ResultatCommercial = () => {
+  // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
+  // de société n'est écrit dans l'interface.
+  const { libelleBaremeReduit } = useModules();
   const [period, setPeriod] = useState<Period>('month');
   const [ref, setRef] = useState(() => new Date().toISOString().slice(0, 10));
   const [data, setData] = useState<any>(null);
@@ -117,9 +121,9 @@ const ResultatCommercial = () => {
                 <div className="flex justify-between text-sm"><span className="text-gray-500">Commission</span><strong className="text-purple-600">{fmtEuro(moi.commissionStandard)}</strong></div>
               </div>
               <div className="p-4 rounded-lg bg-amber-50 border border-amber-100">
-                <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-2">Barème NOXIA (8 / 10 / 12,5 %)</div>
-                <div className="flex justify-between text-sm"><span className="text-amber-700/70">Marge</span><strong className="text-gray-800">{fmtEuro(moi.margeNoxia)}</strong></div>
-                <div className="flex justify-between text-sm"><span className="text-amber-700/70">Commission</span><strong className="text-purple-600">{fmtEuro(moi.commissionNoxia)}</strong></div>
+                <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-2">{libelleBaremeReduit}</div>
+                <div className="flex justify-between text-sm"><span className="text-amber-700/70">Marge</span><strong className="text-gray-800">{fmtEuro(moi.margeReduite)}</strong></div>
+                <div className="flex justify-between text-sm"><span className="text-amber-700/70">Commission</span><strong className="text-purple-600">{fmtEuro(moi.commissionReduite)}</strong></div>
               </div>
             </div>
 

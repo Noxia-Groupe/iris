@@ -2,12 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient, Prisma } from '@prisma/client';
-import multer from 'multer';
-import archiver from 'archiver';
 import path from 'path';
 import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
-import bcrypt from 'bcryptjs';
+
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { odooConfigured, odooSearchClients, odooSearchDevis, odooDevisMateriel, odooDevisAdresse, odooSuiviDevis, odooCommandesVendues, type OdooSuiviDevis } from './odoo';
@@ -208,7 +206,7 @@ const requireFinance: express.RequestHandler = (req, res, next) => {
 };
 
 // Un commercial a un accès strictement en lecture à ses propres chantiers : ni création,
-// ni modification (chantiers, achats, heures, photos), et pas d'accès aux statistiques
+// ni modification (chantiers, achats, heures), et pas d'accès aux statistiques
 // globales/conducteur — uniquement à son propre résultat commercial.
 const blockCommercial: express.RequestHandler = (req, res, next) => {
   if ((req as AuthRequest).user?.role === 'COMMERCIAL') {
@@ -323,6 +321,104 @@ async function getParametres(): Promise<Parametres> {
   return decimalToNumber(p) as Parametres;
 }
 
+const COMPANY_TEXT_FIELDS = [
+  'raisonSociale', 'nomCommercial', 'siret', 'tvaIntra', 'adresse', 'codePostal',
+  'ville', 'pays', 'telephone', 'email', 'siteWeb', 'logoUrl', 'prefixeFacture', 'piedFacture',
+] as const;
+const COULEUR_HEX = /^#[0-9a-fA-F]{6}$/;
+
+function companySettingsPayload(body: Record<string, unknown>): Record<string, string | null> {
+  const data: Record<string, string | null> = {};
+  for (const field of COMPANY_TEXT_FIELDS) {
+    if (body[field] === undefined) continue;
+    if (typeof body[field] !== 'string' || body[field].length > 2000) {
+      throw new Error(`Champ société invalide : ${field}`);
+    }
+    data[field] = body[field].trim() || null;
+  }
+  for (const field of ['couleurPrimaire', 'couleurSecondaire'] as const) {
+    if (body[field] === undefined) continue;
+    if (typeof body[field] !== 'string' || !COULEUR_HEX.test(body[field])) {
+      throw new Error(`Couleur invalide : ${field}`);
+    }
+    data[field] = body[field].toLowerCase();
+  }
+  return data;
+}
+
+const EMAIL_SIMPLE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function optionalClientText(value: unknown, field: string, max = 500): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || value.length > max) throw new Error(`Champ client invalide : ${field}`);
+  return value.trim() || null;
+}
+function optionalClientEmail(value: unknown): string | null {
+  const email = optionalClientText(value, 'email', 254);
+  if (email && !EMAIL_SIMPLE.test(email)) throw new Error('Champ client invalide : email');
+  return email?.toLowerCase() || null;
+}
+function optionalBoolean(value: unknown, field: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') throw new Error(`Champ client invalide : ${field}`);
+  return value;
+}
+function clientPayload(body: Record<string, unknown>, creation = false) {
+  const raisonSociale = optionalClientText(body.raisonSociale, 'raisonSociale');
+  if (creation && !raisonSociale) throw new Error('La raison sociale est obligatoire.');
+  // Le SIREN est saisi (et lu sur un Kbis) par groupes de trois : « 123 456 789 ». On le
+  // normalise avant de le valider, sinon la mise en forme habituelle serait refusée.
+  const sirenSaisi = optionalClientText(body.siren, 'siren', 20);
+  const siren = sirenSaisi ? sirenSaisi.replace(/[\s.-]/g, '') : null;
+  if (siren && !/^\d{9}$/.test(siren)) throw new Error('Le SIREN doit contenir 9 chiffres.');
+  const data: Record<string, unknown> = {};
+  if (raisonSociale !== null) data.raisonSociale = raisonSociale;
+  for (const field of ['nomCommercial', 'tvaIntra', 'telephone'] as const) {
+    if (body[field] !== undefined) data[field] = optionalClientText(body[field], field);
+  }
+  if (body.siren !== undefined) data.siren = siren;
+  if (body.email !== undefined) data.email = optionalClientEmail(body.email);
+  const actif = optionalBoolean(body.actif, 'actif');
+  if (actif !== undefined) data.actif = actif;
+  return data;
+}
+function contactPayload(body: Record<string, unknown>, creation = false) {
+  const nom = optionalClientText(body.nom, 'nom');
+  if (creation && !nom) throw new Error('Le nom du contact est obligatoire.');
+  const data: Record<string, unknown> = {};
+  if (nom) data.nom = nom;
+  for (const field of ['prenom', 'fonction', 'telephone'] as const) {
+    if (body[field] !== undefined) data[field] = optionalClientText(body[field], field);
+  }
+  if (body.email !== undefined) data.email = optionalClientEmail(body.email);
+  for (const field of ['principal', 'estDecisionnaire', 'estSignataire'] as const) {
+    const value = optionalBoolean(body[field], field);
+    if (value !== undefined) data[field] = value;
+  }
+  return data;
+}
+function sitePayload(body: Record<string, unknown>, creation = false) {
+  const required = ['nom', 'adresse', 'codePostal', 'ville'] as const;
+  const data: Record<string, unknown> = {};
+  for (const field of [...required, 'complementAdresse', 'pays'] as const) {
+    const value = optionalClientText(body[field], field);
+    if (creation && required.includes(field as any) && !value) throw new Error(`Le champ ${field} est obligatoire.`);
+    if (value !== null) data[field] = value;
+  }
+  for (const field of ['estSiegeSocial', 'estSiteFacturation', 'estSiteIntervention', 'principal'] as const) {
+    const value = optionalBoolean(body[field], field);
+    if (value !== undefined) data[field] = value;
+  }
+  return data;
+}
+
+async function getCompanySettings() {
+  return prisma.companySettings.upsert({
+    where: { id: 'singleton' },
+    update: {},
+    create: { id: 'singleton' },
+  });
+}
+
 // --- Calcul centralisé des métriques d'un chantier (source unique de vérité) ---
 // La marge commerciale n'est calculée que si elle est activée ET pour les profils
 // autorisés à la voir (admin partout ; conducteur responsable sur SA fiche chantier
@@ -353,7 +449,7 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
   // Il n'y a pas de variable sur cette marge pour les conducteurs de travaux (voir la
   // marge ne leur ouvre droit à rien) : seuls les commerciaux ont une rémunération
   // variable, calculée à part sur le barème progressif mensuel du "Système de
-  // rémunération commerciale" (cf. BAREME_COMMERCIAL_* et
+  // rémunération commerciale" (cf. ParametresRemuneration et
   // computeCommissionsParCommercial, utilisés par /api/stats/commerciaux) — sur la
   // marge cumulée du mois du commercial, pas chantier par chantier.
   const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
@@ -374,46 +470,6 @@ function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boole
   };
 }
 
-// Configuration Multer pour le stockage local des photos.
-// process.cwd() (et non __dirname) : le code compilé tourne depuis dist/ (__dirname y
-// pointerait), alors que le volume Docker persistant est monté sur le répertoire de travail
-// du conteneur (/app) — avec __dirname, les photos étaient écrites hors du volume et
-// disparaissaient à chaque redéploiement (conteneur recréé).
-const uploadDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Servir statiquement le dossier uploads
-app.use('/uploads', express.static(uploadDir));
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 Mo max par fichier
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Seules les images sont autorisées.'));
-  }
-});
-
-// Wrapper pour transformer les erreurs Multer (taille/type) en réponses JSON propres
-const uploadPhoto: express.RequestHandler = (req, res, next) => {
-  upload.single('photo')(req, res, (err: unknown) => {
-    if (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : 'Upload invalide' });
-      return;
-    }
-    next();
-  });
-};
-
 // Routes de base (publiques)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -429,32 +485,6 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// Auth Login (publique)
-app.post('/api/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = await prisma.user.findUnique({ where: { email: normalizeEmail(email) } });
-
-    if (!user || !user.password) {
-      return res.status(401).json({ error: 'Identifiants incorrects' });
-    }
-
-    const isValid = await bcrypt.compare(password, user.password);
-    if (!isValid) {
-      return res.status(401).json({ error: 'Identifiants incorrects' });
-    }
-    // Compte désactivé : la connexion est refusée, avec un message explicite (le mot de
-    // passe étant bon, « identifiants incorrects » enverrait l'utilisateur sur une fausse piste).
-    if (!user.actif) {
-      return res.status(403).json({ code: 'COMPTE_DESACTIVE', error: "Ce compte est désactivé. Contactez l'administrateur." });
-    }
-
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, theme: user.theme, accesFinance: user.accesFinance } });
-  } catch (error) {
-    res.status(500).json({ error: 'Erreur lors de la connexion' });
-  }
-});
 
 // Connexion via SSO Microsoft — point d'application de la couche d'autorisation.
 // Une fois l'identité Microsoft VÉRIFIÉE, l'email est confronté à la liste blanche
@@ -478,6 +508,107 @@ app.post('/api/auth/sso', async (req, res) => {
     res.json({ token, user });
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la connexion SSO' });
+  }
+});
+
+// --- Accès de secours (« break-glass ») du super administrateur ---
+// Microsoft Entra ID est la porte d'entrée normale, et la seule pour les comptes de la
+// société. Mais faire dépendre 100 % des accès d'un service extérieur crée une panne
+// unique : tenant Microsoft indisponible, application Azure supprimée ou mal reconfigurée,
+// migration de tenant, compte de direction verrouillé — et plus PERSONNE ne peut entrer,
+// pas même pour réparer. Cette route est la porte de service : elle n'ouvre qu'à UN compte
+// superadmin nommé, avec un secret qui ne vit que dans server/.env sur le VPS.
+//
+// Elle est volontairement plus stricte qu'une connexion normale :
+//   - il faut connaître un secret d'au moins 32 caractères, jamais versionné ;
+//   - le compte visé doit exister, être actif ET être SUPERADMIN ;
+//   - la session ouverte dure 1 h, pas 7 jours (c'est un accès de dépannage) ;
+//   - 5 tentatives par quart d'heure et par IP, puis blocage ;
+//   - chaque tentative, réussie ou non, laisse une trace dans les journaux du conteneur.
+// Sans BREAK_GLASS_EMAIL + BREAK_GLASS_TOKEN dans l'environnement, la route est inactive
+// et répond 503 : une instance qui n'en veut pas n'a rien à désactiver.
+const BREAK_GLASS_EMAIL = normalizeEmail(process.env.BREAK_GLASS_EMAIL || '');
+const BREAK_GLASS_TOKEN = process.env.BREAK_GLASS_TOKEN || '';
+const BREAK_GLASS_MIN_LONGUEUR = 32;
+const BREAK_GLASS_ACTIF = !!BREAK_GLASS_EMAIL && BREAK_GLASS_TOKEN.length >= BREAK_GLASS_MIN_LONGUEUR;
+
+if (BREAK_GLASS_TOKEN && !BREAK_GLASS_ACTIF) {
+  // Un secret trop court est refusé plutôt qu'accepté en silence : le croire actif alors
+  // qu'il ne l'est pas serait le pire des deux mondes le jour où on en a besoin.
+  console.warn(
+    `[SECOURS] Accès de secours INACTIF : BREAK_GLASS_TOKEN doit faire au moins ${BREAK_GLASS_MIN_LONGUEUR} caractères` +
+      (BREAK_GLASS_EMAIL ? '.' : ' et BREAK_GLASS_EMAIL doit être renseigné.')
+  );
+} else if (BREAK_GLASS_ACTIF) {
+  console.log(`[SECOURS] Accès de secours actif pour ${BREAK_GLASS_EMAIL} (session limitée à 1 h).`);
+}
+
+// Comparaison à temps constant. On compare les EMPREINTES et non les secrets eux-mêmes :
+// timingSafeEqual exige deux tampons de même longueur, et hacher d'abord évite à la fois
+// l'exception sur des longueurs différentes et la fuite de la longueur du secret attendu.
+function secretIdentique(fourni: string, attendu: string): boolean {
+  const a = crypto.createHash('sha256').update(fourni).digest();
+  const b = crypto.createHash('sha256').update(attendu).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Limitation du nombre d'essais, en mémoire du processus. Suffisant ici : il n'y a qu'un
+// backend, et un redémarrage qui remettrait les compteurs à zéro n'aide pas un attaquant
+// à deviner 256 bits d'entropie. (Un rate limiting partagé deviendra nécessaire le jour où
+// l'API tournera en plusieurs instances.)
+const BREAK_GLASS_FENETRE_MS = 15 * 60 * 1000;
+const BREAK_GLASS_MAX_ESSAIS = 5;
+const essaisSecours = new Map<string, { count: number; depuis: number }>();
+
+function tropDEssaisSecours(ip: string): boolean {
+  const maintenant = Date.now();
+  const suivi = essaisSecours.get(ip);
+  if (!suivi || maintenant - suivi.depuis > BREAK_GLASS_FENETRE_MS) {
+    essaisSecours.set(ip, { count: 1, depuis: maintenant });
+    return false;
+  }
+  suivi.count += 1;
+  return suivi.count > BREAK_GLASS_MAX_ESSAIS;
+}
+
+// Publie l'existence du mécanisme (pas le secret) pour que la page /secours sache si elle
+// doit s'afficher. Volontairement sans authentification, comme /api/config : savoir qu'une
+// porte de service existe n'aide pas à l'ouvrir.
+app.get('/api/auth/secours/etat', (_req, res) => {
+  res.json({ disponible: BREAK_GLASS_ACTIF });
+});
+
+app.post('/api/auth/secours', async (req, res) => {
+  const ip = req.ip || 'inconnue';
+  if (!BREAK_GLASS_ACTIF) {
+    return res.status(503).json({ code: 'SECOURS_INACTIF', error: "L'accès de secours n'est pas configuré sur cette instance." });
+  }
+  if (tropDEssaisSecours(ip)) {
+    console.warn(`[SECOURS] Trop de tentatives depuis ${ip} — blocage temporaire.`);
+    return res.status(429).json({ error: 'Trop de tentatives. Réessayez dans quinze minutes.' });
+  }
+  const token = String(req.body?.token || '');
+  if (!token || !secretIdentique(token, BREAK_GLASS_TOKEN)) {
+    console.warn(`[SECOURS] Tentative d'accès de secours REFUSÉE depuis ${ip}.`);
+    return res.status(401).json({ error: 'Jeton de secours invalide.' });
+  }
+  try {
+    const user = await prisma.user.findFirst({
+      where: { email: BREAK_GLASS_EMAIL, actif: true, role: ROLE_SUPERADMIN },
+      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
+    });
+    // Le secret seul ne suffit pas : il ouvre un compte précis, qui doit encore exister,
+    // être actif et être superadmin. Un compte rétrogradé ou désactivé ferme la porte.
+    if (!user) {
+      console.warn(`[SECOURS] Jeton valide mais compte ${BREAK_GLASS_EMAIL} absent, inactif ou non superadmin.`);
+      return res.status(403).json({ error: "Le compte de secours n'est pas un super administrateur actif." });
+    }
+    const jeton = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1h' });
+    console.warn(`[SECOURS] ACCÈS DE SECOURS UTILISÉ par ${user.email} depuis ${ip} — session d'une heure.`);
+    essaisSecours.delete(ip);
+    res.json({ token: jeton, user, expiresIn: 3600 });
+  } catch {
+    res.status(500).json({ error: "Erreur lors de l'ouverture de la session de secours." });
   }
 });
 
@@ -619,7 +750,6 @@ app.get('/api/chantiers', requireAuth, async (req, res) => {
         commercial: RESPONSABLE_SELECT,
         achats: true,
         pointages: true,
-        photos: true,
       }
     });
     res.json(chantiers.map((c: any) => serializeChantier(c, params, isAdmin)));
@@ -643,7 +773,6 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
         commercial: RESPONSABLE_SELECT,
         achats: { include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
         pointages: { include: { intervenant: true }, orderBy: { date: 'desc' } },
-        photos: { orderBy: { createdAt: 'desc' } },
       }
     });
     // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
@@ -708,7 +837,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
     }
 
     // Le type de chantier n'est pas un champ texte : au moins une case doit être cochée
-    // (dossierNoxia est une case à part, non concernée par cette règle).
+    // (baremeReduit est une case à part, non concernée par cette règle).
     const types = sanitizeTypes(req.body.types);
     if (types.length === 0) {
       return res.status(400).json({ error: 'Veuillez sélectionner au moins un type de chantier.' });
@@ -730,7 +859,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
         commercialId,
         statut: req.body.statut || "EN_COURS",
         types,
-        dossierNoxia: !!req.body.dossierNoxia,
+        baremeReduit: !!req.body.baremeReduit,
       },
     });
     res.json(chantier);
@@ -810,7 +939,7 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // Facultative (contrairement au numéro de devis) : peut être vidée.
     if ('adresse' in req.body) data.adresse = String(req.body.adresse || '').trim() || null;
     if ('types' in req.body) data.types = sanitizeTypes(req.body.types);
-    if ('dossierNoxia' in req.body) data.dossierNoxia = !!req.body.dossierNoxia;
+    if ('baremeReduit' in req.body) data.baremeReduit = !!req.body.baremeReduit;
 
     const chantier = await prisma.chantier.update({
       where: { id: paramId(req) },
@@ -828,12 +957,12 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
 // Seul un admin peut réouvrir un chantier clôturé (repasser en EN_COURS).
 // Supprime définitivement un chantier — réservé aux administrateurs et superadmins.
 //
-// Un chantier ne vit pas seul : achats, pointages d'heures, photos, lignes de budget et
+// Un chantier ne vit pas seul : achats, pointages d'heures, lignes de budget et
 // affectations du planning y sont rattachés. Les supprimer en silence ferait disparaître
 // des données de gestion sans que personne ne l'ait vu venir. La route procède donc en
 // deux temps : sans `force`, elle REFUSE et renvoie le décompte de ce qui serait détruit,
 // que l'écran affiche pour faire confirmer ; avec `force=1`, elle supprime tout dans une
-// transaction (les photos sont aussi retirées du disque).
+// transaction.
 //
 // Un chantier vierge — créé par erreur, doublon de devis — n'a rien rattaché : il se
 // supprime alors du premier coup, sans seconde confirmation.
@@ -845,15 +974,14 @@ app.delete('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => 
       return res.status(404).json({ error: 'Chantier introuvable.' });
     }
 
-    const [achats, pointages, photos, lignesBudget, affectations] = await Promise.all([
+    const [achats, pointages, lignesBudget, affectations] = await Promise.all([
       prisma.achatReel.count({ where: { chantierId: id } }),
       prisma.pointageHeure.count({ where: { chantierId: id } }),
-      prisma.photoChantier.count({ where: { chantierId: id } }),
       prisma.ligneBudgetPrevisionnel.count({ where: { chantierId: id } }),
       prisma.planningEvent.count({ where: { chantierId: id } }),
     ]);
-    const dependances = { achats, pointages, photos, lignesBudget, affectations };
-    const total = achats + pointages + photos + lignesBudget + affectations;
+    const dependances = { achats, pointages, lignesBudget, affectations };
+    const total = achats + pointages + lignesBudget + affectations;
 
     if (total > 0 && String(req.query.force || '') !== '1') {
       return res.status(409).json({
@@ -861,16 +989,6 @@ app.delete('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => 
         error: 'Ce chantier porte encore des données rattachées.',
         dependances,
       });
-    }
-
-    // Fichiers photo : supprimés du disque AVANT la transaction. Les effacer après coup
-    // laisserait des fichiers orphelins si la transaction échouait ; les effacer avant
-    // laisse au pire une ligne en base sans son fichier — déjà le cas de la purge des
-    // photos, et bien moins gênant que l'inverse.
-    const fichiers = await prisma.photoChantier.findMany({ where: { chantierId: id }, select: { url: true } });
-    for (const photo of fichiers) {
-      const filePath = path.join(process.cwd(), photo.url);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
 
     // Ordre imposé par les clés étrangères : tout ce qui pointe vers le chantier d'abord.
@@ -882,7 +1000,6 @@ app.delete('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => 
         where: { chantierId: id },
         data: { chantierId: null, categorie: 'HORS_CHANTIER', titre: chantier.nom },
       }),
-      prisma.photoChantier.deleteMany({ where: { chantierId: id } }),
       prisma.achatReel.deleteMany({ where: { chantierId: id } }),
       prisma.pointageHeure.deleteMany({ where: { chantierId: id } }),
       prisma.ligneBudgetPrevisionnel.deleteMany({ where: { chantierId: id } }),
@@ -969,10 +1086,8 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
 });
 
 // Users (administration réservée aux admins)
-// La liste des comptes EST la liste blanche d'autorisation SSO : seuls les emails
-// présents ici peuvent se connecter (via SSO Microsoft ou en local si un mot de passe
-// est défini). `hasPassword` distingue un compte local (mot de passe) d'un compte
-// autorisé SSO uniquement (sans mot de passe).
+// La liste des comptes EST la liste blanche d'autorisation Microsoft Entra ID : seuls les
+// emails présents ici peuvent se connecter. L'authentification locale est interdite.
 app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     // Le rôle SUPERADMIN n'existe pas du point de vue d'un ADMIN : les comptes qui le
@@ -982,12 +1097,12 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
     const users = await prisma.user.findMany({
       where: isSuper ? {} : { role: { not: ROLE_SUPERADMIN } },
-      select: { id: true, name: true, email: true, role: true, password: true, estCommercial: true, accesFinance: true, actif: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
       orderBy: { createdAt: 'asc' },
     });
     res.json(users.map((u) => ({
-      id: u.id, name: u.name, email: u.email, role: u.role, hasPassword: !!u.password,
-      estCommercial: u.estCommercial, accesFinance: u.accesFinance, actif: u.actif,
+      id: u.id, name: u.name, email: u.email, role: u.role, estCommercial: u.estCommercial,
+      accesFinance: u.accesFinance, actif: u.actif,
     })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
@@ -995,8 +1110,7 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Autorise un nouveau compte à se connecter (liste blanche SSO / création de compte).
-// Aucun mot de passe n'est défini : le compte se connecte via le SSO Microsoft. Un
-// administrateur peut ensuite lui attribuer un mot de passe local via « Changer Mdp ».
+// Aucun mot de passe n'est défini : le compte se connecte exclusivement via Microsoft Entra ID.
 const ALLOWED_ROLES = [ROLE_SUPERADMIN, 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL'];
 
 // Un compte SUPERADMIN n'est administrable QUE par un superadmin : le créer, lui changer
@@ -1056,7 +1170,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Révoque un compte (retire l'autorisation d'accès). Les références nullables
-// (chantiers dont il est responsable, photos qu'il a prises) sont détachées d'abord.
+// (chantiers dont il est responsable) sont détachées d'abord.
 app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const id = paramId(req);
@@ -1077,7 +1191,6 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     await prisma.$transaction([
       prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
       prisma.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } }),
-      prisma.photoChantier.updateMany({ where: { auteurId: id }, data: { auteurId: null } }),
       prisma.user.delete({ where: { id } }),
     ]);
     res.json({ success: true });
@@ -1207,32 +1320,6 @@ app.patch('/api/users/:id/actif', requireAuth, requireAdmin, async (req, res) =>
   }
 });
 
-app.put('/api/users/:id/password', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caractères.' });
-    }
-    const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
-    if (!target) {
-      return res.status(404).json({ error: 'Utilisateur introuvable.' });
-    }
-    // Réattribuer le mot de passe d'un superadmin, c'est prendre sa place : réservé aux
-    // superadmins (un superadmin peut donc changer le sien et celui de ses pairs).
-    const refus = refuseSuperAdminTarget(req, target.role);
-    if (refus) {
-      return res.status(403).json({ error: refus });
-    }
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({
-      where: { id: target.id },
-      data: { password: hashedPassword }
-    });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Error updating password' });
-  }
-});
 
 // Liste minimale des commerciaux (id + nom), pour peupler les sélecteurs d'affectation
 // (création de chantier, réattribution). Contrairement à /api/users, accessible à tout
@@ -1926,64 +2013,6 @@ app.delete('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => 
   }
 });
 
-// Photos Upload & Purge
-app.post('/api/chantiers/:id/photos', requireAuth, blockCommercial, uploadPhoto, async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-    const url = `/uploads/${req.file.filename}`;
-    const photo = await prisma.photoChantier.create({
-      data: {
-        url,
-        legende: req.body.legende || '',
-        chantierId: paramId(req),
-        auteurId: (req as AuthRequest).user?.id || null
-      }
-    });
-    res.json(photo);
-  } catch (error) {
-    res.status(500).json({ error: 'Error uploading photo' });
-  }
-});
-
-app.delete('/api/chantiers/:id/photos/purge', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const photos = await prisma.photoChantier.findMany({ where: { chantierId: paramId(req) } });
-    for (const p of photos) {
-      const filePath = path.join(process.cwd(), p.url);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
-    await prisma.photoChantier.deleteMany({ where: { chantierId: paramId(req) } });
-    res.json({ message: 'Purge terminée' });
-  } catch (error) {
-    res.status(500).json({ error: 'Error purging photos' });
-  }
-});
-
-app.get('/api/chantiers/:id/photos/export', requireAuth, async (req, res) => {
-  try {
-    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) } });
-    if (!chantier) return res.status(404).json({ error: 'Chantier not found' });
-
-    const photos = await prisma.photoChantier.findMany({ where: { chantierId: paramId(req) } });
-
-    res.attachment(`photos-${chantier.nom.replace(/\s+/g, '_')}.zip`);
-    // @ts-ignore — typage de la lib archiver variable selon les versions (export = function)
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    archive.pipe(res);
-
-    for (const p of photos) {
-      const filePath = path.join(process.cwd(), p.url);
-      if (fs.existsSync(filePath)) {
-        archive.file(filePath, { name: path.basename(filePath) });
-      }
-    }
-    await archive.finalize();
-  } catch (error) {
-    res.status(500).json({ error: 'Error exporting photos' });
-  }
-});
-
 // Clause de sécurisation des commissions : une commission n'est définitivement due
 // que si le chantier est Terminé ET Encaissé (cf. règle 6 du système de rémunération
 // commerciale — annulation/litige/impayé => la commission n'est pas due ou est récupérée).
@@ -2372,6 +2401,602 @@ app.get('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// --- Registre national des entreprises (lecture publique, via le backend) ---
+// Utilisé pour préremplir l'identité de l'instance et, plus tard, les fiches clients.
+// Aucun appel direct navigateur : limite de recherche, délai et sélection explicite restent
+// sous contrôle Iris. Les résultats ne sont jamais persistés sans validation utilisateur.
+app.get('/api/registry/companies', requireAuth, requireAdmin, async (req, res) => {
+  const q = String(req.query.q ?? '').trim();
+  if (q.length < 3 || q.length > 100) {
+    res.status(400).json({ error: 'La recherche doit contenir entre 3 et 100 caractères.' });
+    return;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const upstream = await fetch(`https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(q)}&page=1&per_page=8`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    if (!upstream.ok) throw new Error(`Registre entreprises HTTP ${upstream.status}`);
+    const payload = await upstream.json() as { results?: Array<any> };
+    const companies = (payload.results ?? []).map((company) => {
+      const siege = company.siege ?? {};
+      return {
+        siren: company.siren ?? null,
+        siret: siege.siret ?? null,
+        raisonSociale: company.nom_raison_sociale || company.nom_complet || null,
+        nomCommercial: siege.nom_commercial || null,
+        adresse: siege.adresse || null,
+        codePostal: siege.code_postal || null,
+        ville: siege.libelle_commune || null,
+        activitePrincipale: company.activite_principale || siege.activite_principale || null,
+        etatAdministratif: siege.etat_administratif || null,
+      };
+    });
+    res.json({ companies });
+  } catch (error) {
+    res.status(502).json({ error: 'Le registre des entreprises est temporairement indisponible.' });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
+// --- API d'intégration machine-à-machine (agents et connecteurs) ---
+// Deuxième porte d'entrée de l'application, à côté de Microsoft Entra ID : un agent
+// (Hermes) ou un connecteur n'a pas de compte Microsoft et ne doit pas en avoir. Il
+// s'authentifie avec une clé Iris, dont le secret n'est JAMAIS stocké — seule son
+// empreinte SHA-256 l'est, et la valeur n'est affichée qu'une fois, à sa création.
+//
+// Le SHA-256 nu suffit ici, contrairement à un mot de passe : le secret est tiré de 32
+// octets aléatoires (256 bits d'entropie), il n'est ni mémorisable ni devinable, donc il
+// n'y a rien à ralentir par un bcrypt. Le hachage protège la base, pas la clé.
+const API_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'company:read'] as const;
+type ApiScope = typeof API_SCOPES[number];
+interface ApiRequest extends express.Request { apiKey?: { id: string; nom: string; scopes: string[] }; }
+
+function apiKeyHash(key: string) {
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
+
+const requireApiKey = (scope: ApiScope): express.RequestHandler => async (req, res, next) => {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer iris_') ? header.slice(7) : '';
+  if (!token) return void res.status(401).json({ error: 'Clé API Iris requise' });
+  try {
+    const key = await prisma.apiAccessKey.findUnique({ where: { secretHash: apiKeyHash(token) } });
+    if (!key || !key.actif || key.revoqueLe || (key.expireLe && key.expireLe <= new Date())) {
+      return void res.status(401).json({ error: 'Clé API invalide, expirée ou révoquée' });
+    }
+    if (!key.scopes.includes(scope)) {
+      return void res.status(403).json({ error: `Scope requis : ${scope}` });
+    }
+    (req as ApiRequest).apiKey = { id: key.id, nom: key.nom, scopes: key.scopes };
+    // Trace de dernière utilisation : sans attente ni échec bloquant, elle sert à repérer
+    // une clé oubliée (jamais utilisée) ou toujours vivante avant de la révoquer.
+    void prisma.apiAccessKey.update({ where: { id: key.id }, data: { dernierUsageLe: new Date() } }).catch(() => undefined);
+    next();
+  } catch {
+    res.status(500).json({ error: "Erreur d'authentification de la clé API" });
+  }
+};
+
+function publicApiKey(key: { id: string; nom: string; prefixe: string; scopes: string[]; actif: boolean; expireLe: Date | null; dernierUsageLe: Date | null; creeLe: Date; revoqueLe: Date | null }) {
+  return { id: key.id, nom: key.nom, prefixe: key.prefixe, scopes: key.scopes, actif: key.actif, expireLe: key.expireLe, dernierUsageLe: key.dernierUsageLe, creeLe: key.creeLe, revoqueLe: key.revoqueLe };
+}
+
+app.get('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (_req, res) => {
+  try {
+    const keys = await prisma.apiAccessKey.findMany({ orderBy: { creeLe: 'desc' } });
+    res.json(keys.map(publicApiKey));
+  } catch {
+    res.status(500).json({ error: 'Error fetching API keys' });
+  }
+});
+
+// Liste des scopes disponibles, pour que l'écran d'administration n'ait pas à les
+// dupliquer (une divergence donnerait une case à cocher que le serveur refuserait).
+app.get('/api/admin/api-scopes', requireAuth, requireSuperAdmin, (_req, res) => {
+  res.json({ scopes: API_SCOPES });
+});
+
+app.post('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (req, res) => {
+  const nom = String(req.body?.nom || '').trim();
+  const scopes = Array.isArray(req.body?.scopes)
+    ? req.body.scopes.filter((s: unknown): s is ApiScope => typeof s === 'string' && (API_SCOPES as readonly string[]).includes(s))
+    : [];
+  const expireLe = req.body?.expireLe ? new Date(String(req.body.expireLe)) : null;
+  if (!nom || nom.length > 100 || scopes.length === 0 || (expireLe && Number.isNaN(expireLe.getTime()))) {
+    return res.status(400).json({ error: 'Nom, scopes autorisés et date d’expiration valide requis.' });
+  }
+  try {
+    const secret = `iris_${crypto.randomBytes(32).toString('base64url')}`;
+    const key = await prisma.apiAccessKey.create({
+      data: { nom, prefixe: secret.slice(0, 14), secretHash: apiKeyHash(secret), scopes, expireLe, creeParId: (req as AuthRequest).user!.id },
+    });
+    console.warn(`[API] Clé d'intégration créée : « ${nom} » (${scopes.join(', ')}) par ${(req as AuthRequest).user!.id}`);
+    res.status(201).json({ apiKey: secret, key: publicApiKey(key), warning: 'Copiez cette clé maintenant : elle ne sera plus jamais affichée.' });
+  } catch {
+    res.status(500).json({ error: 'Création de la clé impossible.' });
+  }
+});
+
+app.post('/api/admin/api-keys/:id/revoke', requireAuth, requireSuperAdmin, async (req, res) => {
+  const key = await prisma.apiAccessKey
+    .update({ where: { id: paramId(req) }, data: { actif: false, revoqueLe: new Date() } })
+    .catch(() => null);
+  if (!key) return res.status(404).json({ error: 'Clé API introuvable.' });
+  console.warn(`[API] Clé d'intégration révoquée : « ${key.nom} »`);
+  res.json(publicApiKey(key));
+});
+
+// Identité de la société : lecture seule pour un agent (en-tête de devis, mentions
+// légales d'un document qu'il rédige). L'écriture reste réservée à un superadmin humain.
+app.get('/api/v1/company', requireApiKey('company:read'), async (_req, res) => {
+  try {
+    res.json(await getCompanySettings());
+  } catch {
+    res.status(500).json({ error: 'Error fetching company settings' });
+  }
+});
+
+// --- Référentiel Clients natif Iris ---
+// Les handlers sont écrits UNE fois puis montés sur deux portes d'entrée (cf. routeMixte
+// plus bas) : l'interface, pour un administrateur connecté, et /api/v1, pour une clé
+// d'intégration porteuse du bon scope. Un agent et un humain appliquent ainsi exactement
+// les mêmes règles de validation — il n'existe pas de « chemin agent » plus permissif.
+const clientDetailInclude = {
+  contacts: { orderBy: [{ principal: 'desc' as const }, { nom: 'asc' as const }] },
+  sites: { orderBy: [{ principal: 'desc' as const }, { nom: 'asc' as const }] },
+};
+
+function clientApiError(res: express.Response, error: unknown) {
+  if ((error as { code?: string })?.code === 'P2002') {
+    return res.status(409).json({ error: 'Ce SIREN, ce siège social ou cette adresse de facturation est déjà pris pour ce client.' });
+  }
+  if ((error as { code?: string })?.code === 'P2025') {
+    return res.status(404).json({ error: 'Enregistrement introuvable.' });
+  }
+  const message = error instanceof Error ? error.message : 'Erreur client.';
+  const saisie = message.startsWith('Champ client invalide') || message.includes('obligatoire') || message.includes('SIREN');
+  return res.status(saisie ? 400 : 500).json({ error: saisie ? message : 'Erreur client.' });
+}
+
+// Recherche plein texte simple sur la raison sociale, le nom commercial et le SIREN.
+function clientRecherche(q: string) {
+  if (!q) return {};
+  return {
+    OR: [
+      { raisonSociale: { contains: q, mode: 'insensitive' as const } },
+      { nomCommercial: { contains: q, mode: 'insensitive' as const } },
+      { siren: { contains: q } },
+    ],
+  };
+}
+
+const listerClients: express.RequestHandler = async (req, res) => {
+  const q = String(req.query.q ?? '').trim();
+  const actif = req.query.actif === 'false' ? false : true;
+  try {
+    const clients = await prisma.client.findMany({
+      where: { actif, ...clientRecherche(q) },
+      orderBy: { raisonSociale: 'asc' },
+      take: 200,
+      include: clientDetailInclude,
+    });
+    res.json({ clients });
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const lireClient: express.RequestHandler = async (req, res) => {
+  try {
+    const client = await prisma.client.findUnique({ where: { id: paramId(req) }, include: clientDetailInclude });
+    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    res.json(client);
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const creerClient: express.RequestHandler = async (req, res) => {
+  try {
+    const data = clientPayload((req.body ?? {}) as Record<string, unknown>, true);
+    res.status(201).json(await prisma.client.create({ data: data as never, include: clientDetailInclude }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const modifierClient: express.RequestHandler = async (req, res) => {
+  try {
+    const data = clientPayload((req.body ?? {}) as Record<string, unknown>);
+    res.json(await prisma.client.update({ where: { id: paramId(req) }, data: data as never, include: clientDetailInclude }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+// Désactivation, jamais suppression : un client porte un historique (chantiers, parc
+// installé) qu'une suppression rendrait orphelin.
+const desactiverClient: express.RequestHandler = async (req, res) => {
+  try {
+    res.json(await prisma.client.update({ where: { id: paramId(req) }, data: { actif: false } }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const creerContact: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  try {
+    const data = contactPayload((req.body ?? {}) as Record<string, unknown>, true);
+    // Un seul contact principal par client : poser le drapeau retire l'ancien.
+    if (data.principal) await prisma.clientContact.updateMany({ where: { clientId }, data: { principal: false } });
+    res.status(201).json(await prisma.clientContact.create({ data: { ...data, clientId } as never }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const modifierContact: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  const id = paramId(req);
+  try {
+    const data = contactPayload((req.body ?? {}) as Record<string, unknown>);
+    if (data.principal) await prisma.clientContact.updateMany({ where: { clientId, id: { not: id } }, data: { principal: false } });
+    // updateMany (et non update) : le clientId de l'URL fait partie du filtre, on ne peut
+    // donc pas modifier le contact d'un autre client en devinant son identifiant.
+    const maj = await prisma.clientContact.updateMany({ where: { id, clientId }, data: data as never });
+    if (!maj.count) return res.status(404).json({ error: 'Contact introuvable.' });
+    res.json(await prisma.clientContact.findUnique({ where: { id } }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+// Siège social et adresse de facturation sont uniques par client (index partiels
+// PostgreSQL). Comme pour le contact principal, poser le drapeau retire l'ancien plutôt
+// que de renvoyer un conflit que l'utilisateur devrait résoudre à la main.
+async function libererDrapeauxSite(clientId: string, data: Record<string, unknown>, sauf?: string) {
+  const exclure = sauf ? { id: { not: sauf } } : {};
+  if (data.estSiegeSocial) await prisma.clientSite.updateMany({ where: { clientId, ...exclure }, data: { estSiegeSocial: false } });
+  if (data.estSiteFacturation) await prisma.clientSite.updateMany({ where: { clientId, ...exclure }, data: { estSiteFacturation: false } });
+  if (data.principal) await prisma.clientSite.updateMany({ where: { clientId, ...exclure }, data: { principal: false } });
+}
+
+const creerSite: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  try {
+    const data = sitePayload((req.body ?? {}) as Record<string, unknown>, true);
+    await libererDrapeauxSite(clientId, data);
+    res.status(201).json(await prisma.clientSite.create({ data: { ...data, clientId } as never }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+const modifierSite: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  const id = paramId(req);
+  try {
+    const data = sitePayload((req.body ?? {}) as Record<string, unknown>);
+    await libererDrapeauxSite(clientId, data, id);
+    const maj = await prisma.clientSite.updateMany({ where: { id, clientId }, data: data as never });
+    if (!maj.count) return res.status(404).json({ error: 'Site introuvable.' });
+    res.json(await prisma.clientSite.findUnique({ where: { id } }));
+  } catch (error) {
+    clientApiError(res, error);
+  }
+};
+
+// Monte une même opération sur les deux portes d'entrée de l'application :
+//   - /api/…    : session humaine (Entra ID ou accès de secours), réservée aux admins ;
+//   - /api/v1/… : clé d'intégration (agent, connecteur) portant le scope demandé.
+// Un seul handler pour les deux : impossible qu'un agent contourne une règle appliquée à
+// l'interface, ou qu'une correction ne soit faite que d'un côté.
+type MethodeHttp = 'get' | 'post' | 'put' | 'delete';
+function routeMixte(methode: MethodeHttp, chemin: string, scope: ApiScope, handler: express.RequestHandler) {
+  app[methode](`/api${chemin}`, requireAuth, requireAdmin, handler);
+  app[methode](`/api/v1${chemin}`, requireApiKey(scope), handler);
+}
+
+routeMixte('get', '/clients', 'clients:read', listerClients);
+routeMixte('post', '/clients', 'clients:write', creerClient);
+routeMixte('get', '/clients/:id', 'clients:read', lireClient);
+routeMixte('put', '/clients/:id', 'clients:write', modifierClient);
+routeMixte('delete', '/clients/:id', 'clients:write', desactiverClient);
+routeMixte('post', '/clients/:clientId/contacts', 'clients:write', creerContact);
+routeMixte('put', '/clients/:clientId/contacts/:id', 'clients:write', modifierContact);
+routeMixte('post', '/clients/:clientId/sites', 'clients:write', creerSite);
+routeMixte('put', '/clients/:clientId/sites/:id', 'clients:write', modifierSite);
+
+// --- Catalogue natif Iris ---
+// Trois familles partagent la même forme (référence, nom, prix, TVA, catégorie) et sont
+// donc servies par les mêmes routes, la famille étant un paramètre d'URL.
+//
+// Le typage passe par `Prisma.CataloguePrestationDelegate` volontairement élargi : les
+// trois délégués Prisma ont des signatures génériques DIFFÉRENTES, si bien qu'une union
+// des trois n'est plus appelable (TS2349 — « none of those signatures are compatible with
+// each other »). On fixe donc UN type de délégué de référence pour la table de routage ;
+// les champs propres à chaque famille (durée, stock, fabricant) sont ajoutés ensuite par
+// `catalogueExtraPayload` et validés à l'exécution.
+type CatalogueFamily = 'prestations' | 'articles' | 'equipements';
+type CatalogueDelegate = typeof prisma.cataloguePrestation;
+const catalogueModels: Record<CatalogueFamily, CatalogueDelegate> = {
+  prestations: prisma.cataloguePrestation,
+  articles: prisma.catalogueArticle as unknown as CatalogueDelegate,
+  equipements: prisma.catalogueEquipement as unknown as CatalogueDelegate,
+};
+
+function catalogueFamily(value: string): CatalogueFamily | null {
+  return value === 'prestations' || value === 'articles' || value === 'equipements' ? value : null;
+}
+
+// Nombre positif obligatoire : `Number('')` vaut 0 et `Number('abc')` vaut NaN, on refuse
+// donc explicitement tout ce qui n'est pas un nombre fini positif (prix, TVA, stock).
+function catalogueNombre(value: unknown, champ: string, defaut = 0): number {
+  const n = Number(value ?? defaut);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${champ} invalide.`);
+  return n;
+}
+
+// Champs communs aux trois familles.
+function cataloguePayload(body: Record<string, unknown>) {
+  const reference = String(body.reference || '').trim();
+  const nom = String(body.nom || '').trim();
+  if (!reference || !nom || reference.length > 80 || nom.length > 200) {
+    throw new Error('Référence et nom sont obligatoires.');
+  }
+  return {
+    reference,
+    nom,
+    description: body.description ? String(body.description).trim() : null,
+    categorieId: body.categorieId ? String(body.categorieId) : null,
+    tauxTva: catalogueNombre(body.tauxTva, 'TVA', 20),
+    prixVenteHt: catalogueNombre(body.prixVenteHt, 'Prix de vente'),
+  };
+}
+
+// Champs propres à une famille : une prestation a une durée, un article un stock, un
+// équipement un fabricant (il devient un EquipementInstalle une fois posé chez un client).
+function catalogueExtraPayload(family: CatalogueFamily, body: Record<string, unknown>) {
+  if (family === 'prestations') {
+    return {
+      unite: String(body.unite || 'unité'),
+      dureeIndicativeMin: body.dureeIndicativeMin == null ? null : catalogueNombre(body.dureeIndicativeMin, 'Durée indicative'),
+    };
+  }
+  if (family === 'articles') {
+    return {
+      unite: String(body.unite || 'unité'),
+      prixAchatHt: body.prixAchatHt == null ? null : catalogueNombre(body.prixAchatHt, "Prix d'achat"),
+      stockSuivi: !!body.stockSuivi,
+      stockActuel: catalogueNombre(body.stockActuel, 'Stock'),
+    };
+  }
+  return { fabricant: body.fabricant ? String(body.fabricant).trim() : null };
+}
+
+// Erreur catalogue : 409 sur une référence déjà prise (contrainte unique Prisma P2002),
+// 400 sur une saisie refusée par la validation, 500 sinon.
+function catalogueApiError(res: express.Response, error: unknown) {
+  if ((error as { code?: string })?.code === 'P2002') {
+    return res.status(409).json({ error: 'Cette référence catalogue est déjà utilisée.' });
+  }
+  if (error instanceof Error && !(error as { code?: string }).code) {
+    return res.status(400).json({ error: error.message });
+  }
+  return res.status(500).json({ error: 'Opération catalogue impossible.' });
+}
+
+const listerCategoriesCatalogue: express.RequestHandler = async (_req, res) => {
+  try {
+    res.json(await prisma.catalogueCategorie.findMany({ orderBy: { nom: 'asc' } }));
+  } catch {
+    res.status(500).json({ error: 'Error fetching catalogue categories' });
+  }
+};
+
+const creerCategorieCatalogue: express.RequestHandler = async (req, res) => {
+  const nom = String(req.body?.nom || '').trim();
+  if (!nom || nom.length > 100) return res.status(400).json({ error: 'Nom de catégorie requis.' });
+  try {
+    res.status(201).json(await prisma.catalogueCategorie.create({
+      data: {
+        nom,
+        description: req.body?.description ? String(req.body.description).trim() : null,
+        parentId: req.body?.parentId ? String(req.body.parentId) : null,
+      },
+    }));
+  } catch {
+    res.status(409).json({ error: 'Cette catégorie existe déjà ou sa catégorie parente est invalide.' });
+  }
+};
+
+const listerCatalogue: express.RequestHandler = async (req, res) => {
+  const family = catalogueFamily(String(req.params.family));
+  if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+  try {
+    res.json(decimalToNumber(await catalogueModels[family].findMany({
+      include: { categorie: true },
+      orderBy: { nom: 'asc' },
+    })));
+  } catch {
+    res.status(500).json({ error: 'Error fetching catalogue' });
+  }
+};
+
+const creerFicheCatalogue: express.RequestHandler = async (req, res) => {
+  const family = catalogueFamily(String(req.params.family));
+  if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const data = { ...cataloguePayload(body), ...catalogueExtraPayload(family, body) };
+    res.status(201).json(decimalToNumber(await catalogueModels[family].create({
+      data: data as never,
+      include: { categorie: true },
+    })));
+  } catch (error) {
+    catalogueApiError(res, error);
+  }
+};
+
+// Modification d'une fiche catalogue. Une référence déjà utilisée ailleurs renvoie 409 ;
+// une fiche inexistante renvoie 404 (Prisma P2025).
+const modifierFicheCatalogue: express.RequestHandler = async (req, res) => {
+  const family = catalogueFamily(String(req.params.family));
+  if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const data: Record<string, unknown> = { ...cataloguePayload(body), ...catalogueExtraPayload(family, body) };
+    if (body.actif !== undefined) data.actif = !!body.actif;
+    res.json(decimalToNumber(await catalogueModels[family].update({
+      where: { id: paramId(req) },
+      data: data as never,
+      include: { categorie: true },
+    })));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2025') {
+      return res.status(404).json({ error: 'Fiche catalogue introuvable.' });
+    }
+    catalogueApiError(res, error);
+  }
+};
+
+// Désactivation (jamais de suppression) : une fiche catalogue peut déjà être référencée
+// par un équipement installé ou, demain, par un devis — la retirer casserait l'historique.
+const desactiverFicheCatalogue: express.RequestHandler = async (req, res) => {
+  const family = catalogueFamily(String(req.params.family));
+  if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
+  try {
+    res.json(decimalToNumber(await catalogueModels[family].update({
+      where: { id: paramId(req) },
+      data: { actif: false } as never,
+    })));
+  } catch {
+    res.status(404).json({ error: 'Fiche catalogue introuvable.' });
+  }
+};
+
+// Le catalogue est monté sur les deux portes d'entrée, comme le référentiel clients :
+// un agent doit pouvoir lire les références et les tarifs pour rédiger un devis, et les
+// enrichir sous contrôle d'un scope d'écriture distinct de la lecture.
+routeMixte('get', '/catalogue/categories', 'catalogue:read', listerCategoriesCatalogue);
+routeMixte('post', '/catalogue/categories', 'catalogue:write', creerCategorieCatalogue);
+routeMixte('get', '/catalogue/:family', 'catalogue:read', listerCatalogue);
+routeMixte('post', '/catalogue/:family', 'catalogue:write', creerFicheCatalogue);
+routeMixte('put', '/catalogue/:family/:id', 'catalogue:write', modifierFicheCatalogue);
+routeMixte('delete', '/catalogue/:family/:id', 'catalogue:write', desactiverFicheCatalogue);
+
+// --- Société de l'instance (singleton, hors paramètres métier) ---
+app.get('/api/company', requireAuth, async (_req, res) => {
+  try {
+    res.json(await getCompanySettings());
+  } catch {
+    res.status(500).json({ error: 'Error fetching company settings' });
+  }
+});
+
+app.put('/api/company', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const data = companySettingsPayload(req.body ?? {});
+    const company = await prisma.companySettings.upsert({
+      where: { id: 'singleton' },
+      update: data,
+      create: { id: 'singleton', ...data },
+    });
+    res.json(company);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Error updating company settings';
+    res.status(message.startsWith('Champ société invalide') || message.startsWith('Couleur invalide') ? 400 : 500)
+      .json({ error: message });
+  }
+});
+
+// --- Règles de rémunération commerciale (singleton) ---
+// Lecture ouverte aux administrateurs (l'écran « Mes commerciaux » affiche le barème
+// appliqué), écriture réservée au superadmin : ce sont les règles de paie des commerciaux.
+app.get('/api/parametres/remuneration', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const regles = await getReglesRemuneration();
+    res.json({ ...regles, baremeStandard: serialiseBareme(regles.baremeStandard), baremeReduit: serialiseBareme(regles.baremeReduit) });
+  } catch {
+    res.status(500).json({ error: 'Error fetching remuneration settings' });
+  }
+});
+
+// Valide un barème envoyé par le client. Un barème vide est accepté (aucune commission) ;
+// ce qui est refusé, c'est un barème incohérent, qui produirait des montants faux en
+// silence : taux hors de [0, 100], plafonds non croissants, ou plusieurs tranches non
+// plafonnées — seule la dernière peut l'être, sinon les suivantes ne servent à rien.
+function validerBareme(valeur: unknown, champ: string): TrancheBareme[] {
+  if (!Array.isArray(valeur)) throw new Error(`${champ} : un tableau de tranches est attendu.`);
+  if (valeur.length > 20) throw new Error(`${champ} : 20 tranches au maximum.`);
+  const tranches: TrancheBareme[] = valeur.map((t: any, i: number) => {
+    const taux = Number(t?.taux);
+    if (!Number.isFinite(taux) || taux < 0 || taux > 100) {
+      throw new Error(`${champ}, tranche ${i + 1} : le taux doit être compris entre 0 et 100.`);
+    }
+    const brut = t?.plafond;
+    const plafond = brut === null || brut === undefined || brut === '' ? Infinity : Number(brut);
+    if (plafond !== Infinity && (!Number.isFinite(plafond) || plafond <= 0)) {
+      throw new Error(`${champ}, tranche ${i + 1} : le plafond doit être un montant positif, ou vide pour la dernière tranche.`);
+    }
+    return { plafond, taux };
+  });
+  // Ce contrôle passe AVANT celui de la croissance : deux tranches sans plafond valent
+  // toutes deux Infinity, donc « non croissantes » — un message exact mais incompréhensible
+  // pour qui vient simplement de laisser deux plafonds vides.
+  if (tranches.filter((t) => t.plafond === Infinity).length > 1) {
+    throw new Error(`${champ} : une seule tranche peut être sans plafond, et ce doit être la dernière.`);
+  }
+  for (let i = 1; i < tranches.length; i++) {
+    if (tranches[i].plafond <= tranches[i - 1].plafond) {
+      throw new Error(`${champ} : les plafonds doivent être strictement croissants.`);
+    }
+  }
+  return tranches;
+}
+
+function montantPositif(valeur: unknown, champ: string): number {
+  const n = Number(valeur ?? 0);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${champ} : montant invalide.`);
+  return n;
+}
+
+app.put('/api/parametres/remuneration', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const libelle = String(body.libelleBaremeReduit ?? '').trim();
+    if (!libelle || libelle.length > 80) {
+      return res.status(400).json({ error: 'Le libellé du barème réduit est obligatoire (80 caractères au plus).' });
+    }
+    const data = {
+      baremeStandard: serialiseBareme(validerBareme(body.baremeStandard, 'Barème standard')),
+      baremeReduit: serialiseBareme(validerBareme(body.baremeReduit, 'Barème réduit')),
+      libelleBaremeReduit: libelle,
+      objectifCaMensuel: montantPositif(body.objectifCaMensuel, 'Objectif de CA mensuel'),
+      primeObjectifCa: montantPositif(body.primeObjectifCa, "Prime d'objectif de CA"),
+      objectifMargeMensuel: montantPositif(body.objectifMargeMensuel, 'Objectif de marge mensuel'),
+      primeObjectifMarge: montantPositif(body.primeObjectifMarge, "Prime d'objectif de marge"),
+      primeSuiviAdministratif: montantPositif(body.primeSuiviAdministratif, 'Prime de suivi administratif'),
+    };
+    await prisma.parametresRemuneration.upsert({
+      where: { id: 'singleton' },
+      update: data,
+      create: { id: 'singleton', ...data },
+    });
+    console.warn(`[REMUNERATION] Règles modifiées par ${(req as AuthRequest).user!.id}`);
+    const regles = await getReglesRemuneration();
+    res.json({ ...regles, baremeStandard: serialiseBareme(regles.baremeStandard), baremeReduit: serialiseBareme(regles.baremeReduit) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Enregistrement impossible.';
+    res.status(message.includes('Barème') || message.includes('montant') || message.includes('libellé') ? 400 : 500).json({ error: message });
+  }
+});
+
 // N'écrit QUE margeCommercialeActive : l'activation des modules (planningActif) est
 // réservée au superadmin et passe par PUT /api/modules — un ADMIN ne doit pas pouvoir la
 // modifier, même en glissant le champ dans le corps de cette requête.
@@ -2400,7 +3025,11 @@ app.get('/api/modules', requireAuth, async (req, res) => {
   try {
     const { planningActif } = await getParametres();
     const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
-    res.json({ planningActif: isSuper || planningActif, planningActifGlobal: planningActif });
+    // Le libellé du barème réduit voyage avec les modules : c'est le seul réglage lu par
+    // TOUS les comptes (la route /parametres/remuneration, elle, est réservée aux admins),
+    // et il s'affiche sur la fiche chantier comme sur les écrans commerciaux.
+    const { libelleBaremeReduit } = await getReglesRemuneration();
+    res.json({ planningActif: isSuper || planningActif, planningActifGlobal: planningActif, libelleBaremeReduit });
   } catch (error) {
     res.status(500).json({ error: 'Error fetching modules' });
   }
@@ -2503,7 +3132,7 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
         // Encaissés, rattachés au mois de leur clôture) : ce sont des résultats
         // FINALISÉS du mois, pas un cumul de portefeuille en cours.
         const commerciaux = await prisma.user.findMany({ where: { OR: COMMERCIAL_OR_FILTER }, select: { id: true } });
-        const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params);
+        const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params, await getReglesRemuneration());
         let caTotal = 0, margeTotal = 0, commissionCommercialeTotal = 0;
         for (const agg of Object.values(byCommercial) as any[]) {
           caTotal += agg.caTotal;
@@ -2515,7 +3144,7 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
         result.margePct = caTotal > 0 ? (margeTotal / caTotal) * 100 : 0;
         result.commissionCommercialeTotal = commissionCommercialeTotal;
       } else if (isCommercial) {
-        const { byCommercial } = await computeCommissionsParCommercial([user.id], start, endExclusive, params);
+        const { byCommercial } = await computeCommissionsParCommercial([user.id], start, endExclusive, params, await getReglesRemuneration());
         const mine = byCommercial[user.id];
         result.margeTotal = mine?.margeTotal ?? 0;
         result.commissionTotal = mine?.commissionTotal ?? 0;
@@ -2910,26 +3539,77 @@ app.get('/api/stats/types-chantiers', requireAuth, blockCommercial, async (req, 
 });
 
 // --- Système de rémunération commerciale : barème progressif mensuel ---
-// (cf. document "Système de rémunération commerciale" fourni par la direction).
 // Chaque tranche de marge du MOIS est commissionnée à son propre taux, comme un barème
 // d'impôt progressif : atteindre la tranche haute ne fait pas basculer toute la marge à
 // son taux, seule la fraction qui la dépasse l'est.
-const BAREME_COMMERCIAL_STANDARD = [
-  { plafond: 20000, taux: 16 },
-  { plafond: 30000, taux: 20 },
-  { plafond: Infinity, taux: 25 },
-];
-// Barème réduit pour les dossiers rattachés à NOXIA (cf. Chantier.dossierNoxia).
-const BAREME_COMMERCIAL_NOXIA = [
-  { plafond: 20000, taux: 8 },
-  { plafond: 30000, taux: 10 },
-  { plafond: Infinity, taux: 12.5 },
-];
-const OBJECTIF_CA_MENSUEL = 70000;
-const OBJECTIF_MARGE_MENSUEL = 17000;
-const PRIME_OBJECTIF_CA = 450;
-const PRIME_OBJECTIF_MARGE = 450;
-const PRIME_SUIVI_ADMINISTRATIF = 250;
+//
+// Les taux, seuils et primes NE SONT PLUS ÉCRITS ICI : ils vivent en base
+// (ParametresRemuneration) et s'éditent depuis Administration > Rémunération commerciale.
+// Les inscrire dans le code revenait à livrer à chaque client les règles de rémunération
+// d'une autre société, et à exiger un redéploiement pour changer un taux.
+interface TrancheBareme { plafond: number; taux: number }
+interface ReglesRemuneration {
+  baremeStandard: TrancheBareme[];
+  baremeReduit: TrancheBareme[];
+  libelleBaremeReduit: string;
+  objectifCaMensuel: number;
+  primeObjectifCa: number;
+  objectifMargeMensuel: number;
+  primeObjectifMarge: number;
+  primeSuiviAdministratif: number;
+}
+
+// Valeurs de repli, utilisées uniquement si la ligne de paramètres n'existe pas encore
+// (base créée avant la migration, ou vidée à la main). Volontairement NEUTRES : aucune
+// commission, aucune prime. Mieux vaut un montant nul, visible et corrigible en deux
+// clics, qu'un barème arbitraire qui ferait calculer de fausses rémunérations sans que
+// personne ne s'en aperçoive.
+const REMUNERATION_NEUTRE: ReglesRemuneration = {
+  baremeStandard: [],
+  baremeReduit: [],
+  libelleBaremeReduit: 'Barème réduit',
+  objectifCaMensuel: 0,
+  primeObjectifCa: 0,
+  objectifMargeMensuel: 0,
+  primeObjectifMarge: 0,
+  primeSuiviAdministratif: 0,
+};
+
+// Une tranche stockée avec `plafond: null` est la tranche non plafonnée : JSON ne sait pas
+// représenter Infinity, on le rétablit à la lecture. Les tranches sont triées par plafond
+// croissant, le calcul progressif en dépendant.
+function parseBareme(valeur: unknown): TrancheBareme[] {
+  if (!Array.isArray(valeur)) return [];
+  return valeur
+    .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
+    .map((t) => ({
+      plafond: t.plafond === null || t.plafond === undefined ? Infinity : Number(t.plafond),
+      taux: Number(t.taux),
+    }))
+    .filter((t) => Number.isFinite(t.taux) && t.taux >= 0 && (t.plafond === Infinity || Number.isFinite(t.plafond)))
+    .sort((a, b) => a.plafond - b.plafond);
+}
+
+async function getReglesRemuneration(): Promise<ReglesRemuneration> {
+  const p = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
+  if (!p) return REMUNERATION_NEUTRE;
+  const n = decimalToNumber(p);
+  return {
+    baremeStandard: parseBareme(p.baremeStandard),
+    baremeReduit: parseBareme(p.baremeReduit),
+    libelleBaremeReduit: p.libelleBaremeReduit,
+    objectifCaMensuel: n.objectifCaMensuel,
+    primeObjectifCa: n.primeObjectifCa,
+    objectifMargeMensuel: n.objectifMargeMensuel,
+    primeObjectifMarge: n.primeObjectifMarge,
+    primeSuiviAdministratif: n.primeSuiviAdministratif,
+  };
+}
+
+// Sérialisation inverse, pour l'écriture : Infinity redevient null.
+function serialiseBareme(bareme: TrancheBareme[]) {
+  return bareme.map((t) => ({ plafond: t.plafond === Infinity ? null : t.plafond, taux: t.taux }));
+}
 
 function commissionBaremeProgressif(marge: number, bareme: { plafond: number; taux: number }[]): number {
   if (marge <= 0) return 0;
@@ -2968,7 +3648,7 @@ function dateClotureChantier(c: any): Date | null {
 // administratif) par commercial sur [start, endExclusive[, mois par mois (cf. commentaire
 // de /api/stats/commerciaux). Réutilisé par cette route (détail par chantier) ET par
 // /api/stats/global (total agrégé pour les cartes du tableau de bord).
-async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres) {
+async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres, regles: ReglesRemuneration) {
   const commercialIdSet = new Set(commercialIds);
   const chantiers = decimalToNumber(await prisma.chantier.findMany({
     where: { commercialId: { in: commercialIds } },
@@ -2981,7 +3661,7 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
   });
   const suiviAdminSet = new Set(primesAdmin.filter((p) => p.suiviAdministratif).map((p) => `${p.commercialId}:${p.periode}`));
 
-  const buckets: Record<string, Record<string, { ca: number; margeStandard: number; margeNoxia: number }>> = {};
+  const buckets: Record<string, Record<string, { ca: number; margeStandard: number; margeReduite: number }>> = {};
   for (const c of chantiers) {
     if (!c.commercialId || !commercialIdSet.has(c.commercialId)) continue;
     const dateCloture = dateClotureChantier(c);
@@ -2989,36 +3669,38 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
     const m = computeChantierMetrics(c, params, true);
     const moisKey = dateCloture.toISOString().slice(0, 7);
     buckets[c.commercialId] ??= {};
-    buckets[c.commercialId][moisKey] ??= { ca: 0, margeStandard: 0, margeNoxia: 0 };
+    buckets[c.commercialId][moisKey] ??= { ca: 0, margeStandard: 0, margeReduite: 0 };
     const b = buckets[c.commercialId][moisKey];
     b.ca += c.budgetGlobalVendu;
-    if (c.dossierNoxia) b.margeNoxia += m.margeCommerciale ?? 0;
+    if (c.baremeReduit) b.margeReduite += m.margeCommerciale ?? 0;
     else b.margeStandard += m.margeCommerciale ?? 0;
   }
 
-  const commissionsParMoisGroupe: Record<string, { standard: number; noxia: number }> = {};
+  const commissionsParMoisGroupe: Record<string, { standard: number; reduit: number }> = {};
   const byCommercial: Record<string, any> = {};
   for (const id of commercialIds) {
     const buck = buckets[id] || {};
-    let commissionStandard = 0, commissionNoxia = 0, primeCA = 0, primeMarge = 0, primeAdmin = 0, caTotal = 0, margeTotal = 0, margeStandard = 0, margeNoxia = 0;
+    let commissionStandard = 0, commissionReduite = 0, primeCA = 0, primeMarge = 0, primeAdmin = 0, caTotal = 0, margeTotal = 0, margeStandard = 0, margeReduite = 0;
     for (const [moisKey, b] of Object.entries(buck)) {
-      const cStandard = commissionBaremeProgressif(b.margeStandard, BAREME_COMMERCIAL_STANDARD);
-      const cNoxia = commissionBaremeProgressif(b.margeNoxia, BAREME_COMMERCIAL_NOXIA);
-      commissionsParMoisGroupe[`${id}:${moisKey}`] = { standard: cStandard, noxia: cNoxia };
+      const cStandard = commissionBaremeProgressif(b.margeStandard, regles.baremeStandard);
+      const cReduit = commissionBaremeProgressif(b.margeReduite, regles.baremeReduit);
+      commissionsParMoisGroupe[`${id}:${moisKey}`] = { standard: cStandard, reduit: cReduit };
       commissionStandard += cStandard;
-      commissionNoxia += cNoxia;
+      commissionReduite += cReduit;
       caTotal += b.ca;
       margeStandard += b.margeStandard;
-      margeNoxia += b.margeNoxia;
-      margeTotal += b.margeStandard + b.margeNoxia;
-      if (b.ca >= OBJECTIF_CA_MENSUEL) primeCA += PRIME_OBJECTIF_CA;
-      if (b.margeStandard + b.margeNoxia >= OBJECTIF_MARGE_MENSUEL) primeMarge += PRIME_OBJECTIF_MARGE;
-      if (suiviAdminSet.has(`${id}:${moisKey}`)) primeAdmin += PRIME_SUIVI_ADMINISTRATIF;
+      margeReduite += b.margeReduite;
+      margeTotal += b.margeStandard + b.margeReduite;
+      // Un objectif à 0 n'est pas un objectif atteint d'office : sans seuil défini,
+      // aucune prime n'est due.
+      if (regles.objectifCaMensuel > 0 && b.ca >= regles.objectifCaMensuel) primeCA += regles.primeObjectifCa;
+      if (regles.objectifMargeMensuel > 0 && b.margeStandard + b.margeReduite >= regles.objectifMargeMensuel) primeMarge += regles.primeObjectifMarge;
+      if (suiviAdminSet.has(`${id}:${moisKey}`)) primeAdmin += regles.primeSuiviAdministratif;
     }
-    const commissionBareme = commissionStandard + commissionNoxia;
+    const commissionBareme = commissionStandard + commissionReduite;
     byCommercial[id] = {
-      caTotal, margeTotal, margeStandard, margeNoxia,
-      commissionBareme, commissionStandard, commissionNoxia, primeCA, primeMarge, primeAdmin,
+      caTotal, margeTotal, margeStandard, margeReduite,
+      commissionBareme, commissionStandard, commissionReduite, primeCA, primeMarge, primeAdmin,
       commissionTotal: commissionBareme + primeCA + primeMarge + primeAdmin,
     };
   }
@@ -3049,6 +3731,7 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
       : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
     const params = await getParametres();
+    const regles = await getReglesRemuneration();
 
     const users = await prisma.user.findMany({
       where: isAdmin ? { OR: COMMERCIAL_OR_FILTER } : { id: authUser.id, role: 'COMMERCIAL' },
@@ -3057,7 +3740,7 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
 
     const commercialIds = users.map((u) => u.id);
     const { byCommercial, chantiers, buckets, commissionsParMoisGroupe, moisPeriode, suiviAdminSet } =
-      await computeCommissionsParCommercial(commercialIds, start, endExclusive, params);
+      await computeCommissionsParCommercial(commercialIds, start, endExclusive, params, regles);
 
     const byUser: Record<string, any> = {};
     for (const u of users) {
@@ -3087,8 +3770,8 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
         const groupe = commissionsParMoisGroupe[`${c.commercialId}:${moisKey}`];
         const b = buckets[c.commercialId]?.[moisKey];
         if (groupe && b) {
-          const margeGroupe = c.dossierNoxia ? b.margeNoxia : b.margeStandard;
-          const commissionGroupe = c.dossierNoxia ? groupe.noxia : groupe.standard;
+          const margeGroupe = c.baremeReduit ? b.margeReduite : b.margeStandard;
+          const commissionGroupe = c.baremeReduit ? groupe.reduit : groupe.standard;
           commissionEstimee = margeGroupe > 0 ? commissionGroupe * ((m.margeCommerciale ?? 0) / margeGroupe) : 0;
         }
       }
@@ -3100,7 +3783,7 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
         statut: c.statut,
         dateDebut: c.dateDebut,
         dateFin: c.dateFin,
-        dossierNoxia: c.dossierNoxia,
+        baremeReduit: c.baremeReduit,
         encaisse: c.encaisse,
         dateEncaissement: c.dateEncaissement,
         budgetGlobalVendu: c.budgetGlobalVendu,
@@ -3122,8 +3805,9 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
       period,
       periodStart: start.toISOString().slice(0, 10),
       periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
-      bareme: { standard: BAREME_COMMERCIAL_STANDARD, noxia: BAREME_COMMERCIAL_NOXIA },
-      objectifs: { ca: OBJECTIF_CA_MENSUEL, marge: OBJECTIF_MARGE_MENSUEL, primeCA: PRIME_OBJECTIF_CA, primeMarge: PRIME_OBJECTIF_MARGE, primeAdmin: PRIME_SUIVI_ADMINISTRATIF },
+      bareme: { standard: serialiseBareme(regles.baremeStandard), reduit: serialiseBareme(regles.baremeReduit) },
+      libelleBaremeReduit: regles.libelleBaremeReduit,
+      objectifs: { ca: regles.objectifCaMensuel, marge: regles.objectifMargeMensuel, primeCA: regles.primeObjectifCa, primeMarge: regles.primeObjectifMarge, primeAdmin: regles.primeSuiviAdministratif },
       commerciaux: list,
     });
   } catch (error) {
@@ -3173,28 +3857,22 @@ Rédige un compte-rendu exécutif d'environ 150-200 mots résumant la situation 
 });
 
 // --- Comptes super administrateurs de départ ---
-// Deux comptes doivent TOUJOURS exister avec le rôle SUPERADMIN, quelle que soit
-// l'ancienneté de la base (installation neuve comme base déjà en production) :
-//   - nelson@noxia-groupe.fr : compte de la direction, connexion via le SSO Microsoft
-//     (aucun mot de passe local n'est créé — il n'en a pas besoin) ;
-//   - admin@cybexia.fr : compte local « de base », qui garde son mot de passe existant.
-// La liste est surchargeable via SUPERADMIN_EMAILS (emails séparés par des virgules).
+// La liste vient EXCLUSIVEMENT de SUPERADMIN_EMAILS (emails séparés par des virgules).
+// Aucun email n'est écrit ici : une instance livrée à un client ne doit pas créer d'office
+// un compte d'administration appartenant à l'éditeur.
 // Traitement IDEMPOTENT et non destructif : un compte déjà présent est simplement promu
 // SUPERADMIN (son nom, son mot de passe et ses rattachements sont conservés) ; un compte
 // absent est créé. Aucun compte n'est jamais rétrogradé ici — retirer le rôle superadmin
 // se fait depuis Administration > Utilisateurs, par un superadmin.
-const SUPERADMIN_LOCAL_EMAIL = 'admin@cybexia.fr';
-const DEFAULT_SUPERADMIN_EMAILS = ['nelson@noxia-groupe.fr', SUPERADMIN_LOCAL_EMAIL];
-
-// « nelson@noxia-groupe.fr » -> « Nelson » : nom d'affichage par défaut d'un compte créé
-// automatiquement, que son titulaire ou un superadmin pourra corriger ensuite.
+// « prenom.nom@societe.fr » -> « Prenom Nom » : nom d'affichage par défaut d'un compte
+// créé automatiquement, que son titulaire ou un superadmin pourra corriger ensuite.
 function nameFromEmail(email: string): string {
   const local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
   return local.replace(/\b\w/g, (c) => c.toUpperCase()) || email;
 }
 
 const ensureSuperAdmins = async () => {
-  const emails = (process.env.SUPERADMIN_EMAILS || DEFAULT_SUPERADMIN_EMAILS.join(','))
+  const emails = (process.env.SUPERADMIN_EMAILS || '')
     .split(',')
     .map(normalizeEmail)
     .filter(Boolean);
@@ -3208,23 +3886,14 @@ const ensureSuperAdmins = async () => {
       }
       continue;
     }
-    // Compte local « de base » : on ne lui pose un mot de passe que si ADMIN_PASSWORD est
-    // fourni. Sans cela, aucun mot de passe par défaut n'est inventé (ce serait un accès
-    // ouvert) : le compte existe, autorisé, et un superadmin lui en attribuera un depuis
-    // Administration > Utilisateurs > « Changer Mdp ».
-    const motDePasse = email === SUPERADMIN_LOCAL_EMAIL ? process.env.ADMIN_PASSWORD : undefined;
     await prisma.user.create({
       data: {
         email,
-        name: email === SUPERADMIN_LOCAL_EMAIL ? 'Administrateur' : nameFromEmail(email),
+        name: nameFromEmail(email),
         role: ROLE_SUPERADMIN,
-        password: motDePasse ? await bcrypt.hash(motDePasse, 10) : null,
       },
     });
-    console.log(
-      `Compte super administrateur créé : ${email}` +
-        (motDePasse ? ' (mot de passe local défini)' : " (connexion SSO ; définissez un mot de passe depuis Administration > Utilisateurs si besoin d'un accès local)")
-    );
+    console.log(`Compte super administrateur créé : ${email} (connexion Microsoft Entra ID)`);
   }
 
   const total = await prisma.user.count({ where: { role: ROLE_SUPERADMIN } });
@@ -3238,36 +3907,42 @@ const initDb = async () => {
   // Garantit l'existence de la ligne de paramètres (singleton) dès le démarrage.
   await prisma.parametres.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
 
-  const users = await prisma.user.findMany();
-  if (users.length === 0) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@noxia.com';
-    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
-
-    await prisma.user.create({
-      data: {
-        email: adminEmail,
-        name: 'Administrateur',
-        role: 'ADMIN',
-        password: hashedPassword
-      }
-    });
-    console.log(`Compte administrateur créé : ${adminEmail}`);
-
-    // Créer un conducteur factice pour tester
-    await prisma.user.create({
-      data: {
-        email: 'jean@noxia.com',
-        name: 'Jean Dupont (Conducteur)',
-        role: 'CONDUCTEUR_TRAVAUX',
-        password: await bcrypt.hash('conducteur123', 10)
-      }
-    });
-  }
 };
 
-app.listen(port, async () => {
-  await initDb();
-  await ensureSuperAdmins();
-  console.log(`Server running on port ${port}`);
-});
+// Le serveur n'écoute que lorsque ce fichier est LANCÉ (node dist/index.js). Quand il est
+// simplement importé — c'est le cas des tests d'intégration, qui montent l'application
+// dans le processus de test — on expose `app` sans ouvrir de port : deux suites de tests
+// peuvent alors tourner en parallèle sans se disputer le 3001, et aucun test n'oublie de
+// fermer un serveur derrière lui.
+if (require.main === module) {
+  app.listen(port, async () => {
+    await initDb();
+    await ensureSuperAdmins();
+    console.log(`Server running on port ${port}`);
+  });
+}
+
+// Surface exportée pour les tests. `app` sert aux tests d'intégration HTTP ; les fonctions
+// pures (validation des saisies, barème de commission, empreinte de clé API) sont testées
+// directement, sans base de données ni requête.
+export {
+  app,
+  initDb,
+  ensureSuperAdmins,
+  clientPayload,
+  contactPayload,
+  sitePayload,
+  companySettingsPayload,
+  cataloguePayload,
+  catalogueExtraPayload,
+  catalogueFamily,
+  apiKeyHash,
+  secretIdentique,
+  commissionBaremeProgressif,
+  computeChantierMetrics,
+  decimalToNumber,
+  parseBareme,
+  serialiseBareme,
+  validerBareme,
+  getReglesRemuneration,
+};

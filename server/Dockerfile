@@ -26,9 +26,6 @@ ENV DATABASE_URL="postgresql://user:password@localhost:5432/iris?schema=public"
 RUN npx prisma generate
 RUN npm run build || npx tsc
 
-# Créer le dossier uploads pour les photos
-RUN mkdir -p uploads
-
 # Exposer le port de l'API
 EXPOSE 3001
 

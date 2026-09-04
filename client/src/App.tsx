@@ -18,6 +18,12 @@ import MesCommerciaux from './pages/MesCommerciaux';
 import Planning from './pages/Planning';
 import SuiviFinancier from './pages/SuiviFinancier';
 import PlanningPublic from './pages/PlanningPublic';
+import Clients from './pages/Clients';
+import ClientDetail from './pages/ClientDetail';
+import ApiKeys from './pages/ApiKeys';
+import Societe from './pages/Societe';
+import Catalogue from './pages/Catalogue';
+import Secours from './pages/Secours';
 import { ErrorBoundary } from './ErrorBoundary';
 import { peutVoirFinance, useCurrentUser, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
 import { useModules } from './modules';
@@ -77,12 +83,22 @@ const RouteFinance = () => {
   return peutVoirFinance(utilisateur) ? <SuiviFinancier /> : <Navigate to="/" replace />;
 };
 
+// Identité de la société : consultable par un administrateur, modifiable par le seul
+// super administrateur — c'est aussi ce qu'applique le serveur (PUT /api/company).
+const RouteSociete = () => {
+  const utilisateur = useCurrentUser();
+  return <Societe modifiable={utilisateur?.role === ROLE_SUPERADMIN} />;
+};
+
 function App() {
   return (
     <ErrorBoundary>
       <Router>
         <Routes>
         <Route path="/login" element={<Login />} />
+        {/* Accès de secours : volontairement hors de toute session, puisqu'il sert
+            précisément quand plus aucune connexion Microsoft n'est possible. */}
+        <Route path="/secours" element={<Secours />} />
         <Route path="/acces-refuse" element={<AccesRefuse />} />
         <Route path="/auth/callback" element={<AuthCallbackMsal />} />
         {/* Lien de partage public (sans authentification, cf. module Planning) : hors
@@ -105,6 +121,32 @@ function App() {
         <Route path="/chantiers" element={
           <PrivateRoute>
             <ListeChantiers />
+          </PrivateRoute>
+        } />
+
+        <Route path="/clients" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <Clients />
+          </PrivateRoute>
+        } />
+        <Route path="/clients/:id" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <ClientDetail />
+          </PrivateRoute>
+        } />
+        <Route path="/societe" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <RouteSociete />
+          </PrivateRoute>
+        } />
+        <Route path="/catalogue" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <Catalogue />
+          </PrivateRoute>
+        } />
+        <Route path="/administration/api" element={
+          <PrivateRoute requiredRoles={[ROLE_SUPERADMIN]}>
+            <ApiKeys />
           </PrivateRoute>
         } />
         

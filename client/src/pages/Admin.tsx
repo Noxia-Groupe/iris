@@ -8,30 +8,69 @@ import { refreshModules } from '../modules';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
-// Rendu des tranches d'un barème progressif (JSON.stringify transforme un plafond
-// Infinity en null : la dernière tranche est donc "au-delà de X €", sans borne haute).
-const BaremeTranches = ({ tranches }: { tranches?: { plafond: number | null; taux: number }[] }) => {
-  if (!tranches || tranches.length === 0) return null;
+// Éditeur d'un barème progressif. Une tranche = un plafond et un taux ; la DERNIÈRE peut
+// avoir un plafond vide, ce qui signifie « au-delà, sans borne » (JSON ne représente pas
+// Infinity, le serveur stocke null). Les plafonds doivent rester croissants — le serveur
+// le revérifie et refuse l'enregistrement sinon.
+type Tranche = { plafond: number | string | null; taux: number | string };
+
+const EditeurBareme = ({ titre, tranches, modifiable, accent, onChange }: {
+  titre: string;
+  tranches?: Tranche[];
+  modifiable: boolean;
+  accent?: boolean;
+  onChange: (t: Tranche[]) => void;
+}) => {
+  const lignes = tranches ?? [];
+  const maj = (i: number, champ: 'plafond' | 'taux', valeur: string) => {
+    const copie = lignes.map((t, j) => (j === i ? { ...t, [champ]: valeur } : t));
+    onChange(copie);
+  };
   let plancher = 0;
   return (
-    <ul className="text-sm space-y-1">
-      {tranches.map((t, i) => {
-        const label = plancher === 0
-          ? `Jusqu'à ${fmtEuro(t.plafond ?? 0)}`
-          : t.plafond == null
-            ? `Au-delà de ${fmtEuro(plancher)}`
-            : `De ${fmtEuro(plancher)} à ${fmtEuro(t.plafond)}`;
-        plancher = t.plafond ?? plancher;
-        return (
-          <li key={i} className="flex justify-between gap-4">
-            <span className="text-gray-500">{label}</span>
-            <strong className="text-gray-800">{t.taux} %</strong>
-          </li>
-        );
-      })}
-    </ul>
+    <div className={`p-4 rounded border ${accent ? 'bg-amber-50 border-amber-200' : 'bg-gray-50'}`}>
+      <div className={`text-xs font-bold uppercase tracking-wide mb-3 ${accent ? 'text-amber-700' : 'text-gray-500'}`}>{titre}</div>
+      {lignes.length === 0 && <p className="text-sm text-gray-400 italic mb-3">Aucune tranche : aucune commission ne sera calculée.</p>}
+      <div className="space-y-2">
+        {lignes.map((t, i) => {
+          const plafondCourant = t.plafond === null || t.plafond === '' ? null : Number(t.plafond);
+          const depuis = plancher;
+          plancher = plafondCourant ?? plancher;
+          return (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 w-20 shrink-0">dès {fmtEuro(depuis)}</span>
+              <input
+                type="number" min="0" step="any" className="form-input flex-1" style={{ margin: 0 }}
+                placeholder="sans plafond"
+                value={t.plafond ?? ''}
+                disabled={!modifiable}
+                onChange={(e) => maj(i, 'plafond', e.target.value)}
+              />
+              <input
+                type="number" min="0" max="100" step="any" className="form-input w-24" style={{ margin: 0 }}
+                value={t.taux}
+                disabled={!modifiable}
+                onChange={(e) => maj(i, 'taux', e.target.value)}
+              />
+              <span className="text-sm text-gray-500">%</span>
+              {modifiable && (
+                <button type="button" title="Retirer cette tranche" className="text-red-600 px-2"
+                  onClick={() => onChange(lignes.filter((_, j) => j !== i))}>×</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {modifiable && (
+        <button type="button" className="btn btn-secondary mt-3 text-sm"
+          onClick={() => onChange([...lignes, { plafond: '', taux: 0 }])}>
+          Ajouter une tranche
+        </button>
+      )}
+    </div>
   );
 };
+
 
 // Contenu de référence "Système de rémunération commerciale" (document fourni par la
 // direction, cf. MARGES_COMMERCIAL.pdf) : primes "Boost" par solution vendue et
@@ -98,7 +137,9 @@ const Admin = () => {
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [parametres, setParametres] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
-  const [remunerationCommerciale, setRemunerationCommerciale] = useState<any>(null);
+  const [remuneration, setRemuneration] = useState<any>(null);
+  const [erreurRemuneration, setErreurRemuneration] = useState('');
+  const [messageRemuneration, setMessageRemuneration] = useState('');
   // Commerciaux rattachables à un chantier. Volontairement chargés depuis /commerciaux et
   // non déduits de la liste des comptes : celle-ci ne montre pas les super administrateurs
   // à un simple administrateur, et un superadmin « aussi commercial » doit malgré tout
@@ -170,24 +211,57 @@ const Admin = () => {
         const pRes = await apiFetch('/parametres');
         if (pRes.ok) setParametres(await pRes.json());
 
-        // Bareme/objectifs de la rémunération commerciale : valeurs de référence exposées
-        // en lecture seule (cf. /api/stats/commerciaux), déjà utilisées telles quelles par
-        // les commerciaux dans "Mes commerciaux" / "Résultat commercial".
-        const cRes = await apiFetch('/stats/commerciaux');
-        if (cRes.ok) {
-          const data = await cRes.json();
-          setRemunerationCommerciale({ bareme: data.bareme, objectifs: data.objectifs });
-        }
+        // Règles de rémunération : leur propre route, en lecture pour un admin et en
+        // écriture pour un superadmin (l'ancien écran les lisait dans /stats/commerciaux,
+        // qui ne fait que les refléter).
+        const rRes = await apiFetch('/parametres/remuneration');
+        if (rRes.ok) setRemuneration(await rRes.json());
       }
     } catch (e) {
       console.error(e);
     }
   };
 
+  // Enregistre les règles de rémunération. Les champs numériques transitent en texte
+  // (saisie libre) ; le serveur les valide et renvoie les règles telles qu'il les a
+  // retenues, qui remplacent l'état local — ce qui évite d'afficher une valeur que la
+  // base n'a pas acceptée.
+  const enregistrerRemuneration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErreurRemuneration('');
+    setMessageRemuneration('');
+    try {
+      const res = await apiFetch('/parametres/remuneration', {
+        method: 'PUT',
+        body: JSON.stringify({
+          ...remuneration,
+          baremeStandard: (remuneration.baremeStandard ?? []).map((t: any) => ({
+            plafond: t.plafond === '' || t.plafond === null ? null : Number(t.plafond),
+            taux: Number(t.taux),
+          })),
+          baremeReduit: (remuneration.baremeReduit ?? []).map((t: any) => ({
+            plafond: t.plafond === '' || t.plafond === null ? null : Number(t.plafond),
+            taux: Number(t.taux),
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErreurRemuneration(data.error || 'Enregistrement impossible.');
+        return;
+      }
+      setRemuneration(data);
+      setMessageRemuneration('Règles de rémunération enregistrées.');
+    } catch {
+      setErreurRemuneration('Impossible de joindre le serveur.');
+    }
+  };
+
   const handleParamsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
-    const payload = {
+
+  const payload = {
       margeCommercialeActive: formData.get('margeCommercialeActive') === 'on',
     };
     const res = await apiFetch('/parametres', { method: 'PUT', body: JSON.stringify(payload) });
@@ -313,29 +387,6 @@ const Admin = () => {
     }
   };
 
-  const handlePasswordChange = async (userId: string, userName: string) => {
-    const newPassword = window.prompt(`Entrez le nouveau mot de passe pour ${userName} (minimum 6 caractères) :`);
-    if (!newPassword) return;
-    if (newPassword.length < 6) {
-      alert("Le mot de passe doit faire au moins 6 caractères.");
-      return;
-    }
-    
-    try {
-      const res = await apiFetch(`/users/${userId}/password`, {
-        method: 'PUT',
-        body: JSON.stringify({ newPassword })
-      });
-      if (res.ok) {
-        alert("Mot de passe mis à jour avec succès.");
-      } else {
-        const data = await res.json();
-        alert(data.error || "Erreur lors de la mise à jour du mot de passe.");
-      }
-    } catch (e) {
-      alert("Impossible de joindre le serveur.");
-    }
-  };
 
   // Autorise un nouveau compte (liste blanche SSO). Le compte pourra se connecter
   // via le SSO Microsoft avec le rôle choisi ; sans mot de passe par défaut.
@@ -817,39 +868,77 @@ const Admin = () => {
             </form>
           </div>
 
+          {/* Règles de rémunération commerciale : stockées en base, éditables par un
+              superadmin. Elles étaient auparavant écrites en dur dans le serveur, ce qui
+              imposait un redéploiement pour changer un taux et livrait à chaque client les
+              barèmes d'une autre société. */}
           <div className="card mb-4">
-            <h2 className="mb-2 text-primary-dark">Rémunération Commerciale (barème progressif)</h2>
+            <h2 className="mb-2 text-primary-dark">Rémunération commerciale</h2>
             <p className="text-sm text-muted mb-4">
-              La commission des <strong>commerciaux</strong> ne suit plus un taux réglé par chantier : elle applique
-              désormais un barème progressif sur la marge cumulée du mois (standard, ou réduit pour les dossiers
-              NOXIA), complété par des primes d'objectifs mensuels. Ces valeurs sont pour l'instant fixées côté
-              serveur — écran en lecture seule. Détail par commercial dans le menu « Mes commerciaux ».
+              La commission des <strong>commerciaux</strong> applique un barème progressif sur la marge cumulée
+              du mois : chaque tranche est commissionnée à son propre taux, franchir un plafond ne requalifie que
+              la fraction qui le dépasse. Un second barème s'applique aux chantiers cochés « barème réduit ».
+              Détail par commercial dans le menu « Mes commerciaux ».
+              {!isSuper && <> Seul un super administrateur peut modifier ces règles.</>}
             </p>
-            {remunerationCommerciale ? (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div className="p-4 rounded border bg-gray-50">
-                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Barème standard</div>
-                    <BaremeTranches tranches={remunerationCommerciale.bareme?.standard} />
-                  </div>
-                  <div className="p-4 rounded border bg-amber-50">
-                    <div className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-2">Barème dossiers NOXIA</div>
-                    <BaremeTranches tranches={remunerationCommerciale.bareme?.noxia} />
-                  </div>
+            {remuneration ? (
+              <form onSubmit={enregistrerRemuneration} className="space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <EditeurBareme
+                    titre="Barème standard"
+                    tranches={remuneration.baremeStandard}
+                    modifiable={isSuper}
+                    onChange={(t) => setRemuneration({ ...remuneration, baremeStandard: t })}
+                  />
+                  <EditeurBareme
+                    titre={remuneration.libelleBaremeReduit || 'Barème réduit'}
+                    tranches={remuneration.baremeReduit}
+                    modifiable={isSuper}
+                    accent
+                    onChange={(t) => setRemuneration({ ...remuneration, baremeReduit: t })}
+                  />
                 </div>
-                {remunerationCommerciale.objectifs && (
-                  <div className="p-4 rounded border bg-gray-50">
-                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Objectifs et primes mensuelles</div>
-                    <ul className="text-sm space-y-1 list-disc list-inside text-gray-600">
-                      <li>Objectif CA vendu : <strong className="text-gray-800">{fmtEuro(remunerationCommerciale.objectifs.ca)}</strong> → prime de <strong className="text-gray-800">{remunerationCommerciale.objectifs.primeCA} €</strong></li>
-                      <li>Objectif marge commerciale : <strong className="text-gray-800">{fmtEuro(remunerationCommerciale.objectifs.marge)}</strong> → prime de <strong className="text-gray-800">{remunerationCommerciale.objectifs.primeMarge} €</strong></li>
-                      <li>Suivi administratif (validé manuellement chaque mois, cf. « Mes commerciaux ») → prime de <strong className="text-gray-800">{remunerationCommerciale.objectifs.primeAdmin} €</strong></li>
-                    </ul>
-                  </div>
-                )}
-              </>
+
+                <div className="form-group">
+                  <label className="form-label">Libellé du barème réduit (affiché sur les chantiers et les écrans commerciaux)</label>
+                  <input
+                    className="form-input"
+                    value={remuneration.libelleBaremeReduit ?? ''}
+                    disabled={!isSuper}
+                    onChange={(e) => setRemuneration({ ...remuneration, libelleBaremeReduit: e.target.value })}
+                    placeholder="Ex. Dossier apporté par la société"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {([
+                    ['objectifCaMensuel', 'Objectif de CA mensuel (€)'],
+                    ['primeObjectifCa', 'Prime si objectif CA atteint (€)'],
+                    ['objectifMargeMensuel', 'Objectif de marge mensuel (€)'],
+                    ['primeObjectifMarge', 'Prime si objectif marge atteint (€)'],
+                    ['primeSuiviAdministratif', 'Prime de suivi administratif (€)'],
+                  ] as const).map(([cle, libelle]) => (
+                    <div className="form-group" key={cle}>
+                      <label className="form-label">{libelle}</label>
+                      <input
+                        type="number" min="0" step="any" className="form-input"
+                        value={remuneration[cle] ?? 0}
+                        disabled={!isSuper}
+                        onChange={(e) => setRemuneration({ ...remuneration, [cle]: e.target.value })}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400">
+                  Un objectif laissé à 0 ne déclenche aucune prime : il n'est pas considéré comme atteint d'office.
+                </p>
+
+                {erreurRemuneration && <p className="text-sm text-red-600">{erreurRemuneration}</p>}
+                {messageRemuneration && <p className="text-sm text-emerald-700">{messageRemuneration}</p>}
+                {isSuper && <button className="btn btn-primary">Enregistrer les règles</button>}
+              </form>
             ) : (
-              <p className="text-sm text-gray-400 italic">Chargement du barème...</p>
+              <p className="text-sm text-gray-400 italic">Chargement des règles…</p>
             )}
           </div>
 
@@ -991,7 +1080,7 @@ const Admin = () => {
                 <tr className="bg-gray-50 text-xs uppercase text-gray-500 border-b border-gray-100">
                   <th className="px-4 py-4 font-semibold">Nom</th>
                   <th className="px-4 py-4 font-semibold">Email</th>
-                  <th className="px-4 py-4 font-semibold">Type</th>
+
                   <th className="px-4 py-4 font-semibold">Rôle d'accès</th>
                   <th className="px-4 py-4 font-semibold">Commercial</th>
                   <th className="px-4 py-4 font-semibold">Finance</th>
@@ -1004,11 +1093,7 @@ const Admin = () => {
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
                     <td className="px-4 py-4 text-sm text-gray-600">{u.email}</td>
-                    <td className="px-4 py-4">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded whitespace-nowrap ${u.hasPassword ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {u.hasPassword ? 'Local + SSO' : 'SSO'}
-                      </span>
-                    </td>
+
                     <td className="px-4 py-4">
                       {/* min-w : avec l'ajout des colonnes Commercial/Finance/Actif, le
                           select se comprimait au point de n'afficher que « Cor… ». */}
@@ -1089,14 +1174,6 @@ const Admin = () => {
                       </label>
                     </td>
                     <td className="px-4 py-4 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => handlePasswordChange(u.id, u.name)}
-                        disabled={!peutGererCompte(u)}
-                        title={peutGererCompte(u) ? 'Attribuer un mot de passe local' : MESSAGE_COMPTE_SUPERADMIN}
-                        className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        Changer Mdp
-                      </button>
                       <button
                         onClick={() => handleDeleteUser(u.id, u.name)}
                         disabled={u.email === user?.email || !peutGererCompte(u)}

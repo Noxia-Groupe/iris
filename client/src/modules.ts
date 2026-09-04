@@ -14,12 +14,16 @@ export interface Modules {
   planningActif: boolean;
   /** Réglage global (identique à planningActif sauf pour un superadmin). */
   planningActifGlobal: boolean;
+  /** Nom donné au barème de commission réduit (Administration > Rémunération commerciale).
+   *  Affiché sur la fiche chantier et dans les écrans commerciaux : l'application ne
+   *  connaît aucun libellé métier en dur. */
+  libelleBaremeReduit: string;
 }
 
 const CACHE_KEY = 'modules';
 // Par défaut tout est actif : si l'API est momentanément injoignable, on n'ampute pas
 // l'application d'un module — le serveur refusera de toute façon les appels non autorisés.
-const DEFAUT: Modules = { planningActif: true, planningActifGlobal: true };
+const DEFAUT: Modules = { planningActif: true, planningActifGlobal: true, libelleBaremeReduit: 'Barème réduit' };
 
 export function readCachedModules(): Modules {
   try {
@@ -29,6 +33,7 @@ export function readCachedModules(): Modules {
     return {
       planningActif: parsed.planningActif !== false,
       planningActifGlobal: parsed.planningActifGlobal !== false,
+      libelleBaremeReduit: parsed.libelleBaremeReduit || DEFAUT.libelleBaremeReduit,
     };
   } catch {
     return DEFAUT;
@@ -48,6 +53,7 @@ export async function refreshModules(): Promise<Modules> {
     const modules: Modules = {
       planningActif: data.planningActif !== false,
       planningActifGlobal: data.planningActifGlobal !== false,
+      libelleBaremeReduit: data.libelleBaremeReduit || DEFAUT.libelleBaremeReduit,
     };
     localStorage.setItem(CACHE_KEY, JSON.stringify(modules));
     return modules;
