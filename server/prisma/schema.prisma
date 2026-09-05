@@ -24,7 +24,7 @@ model User {
   // et statistiques/marges dans "Mes commerciaux" (cf. isCommercialLike côté serveur).
   // Sans effet pour les rôles CONDUCTEUR_TRAVAUX/COMMERCIAL (un COMMERCIAL l'est déjà).
   estCommercial Boolean @default(false)
-  // Accès au Suivi financier (rapprochement des paiements Odoo). Indépendant du rôle :
+  // Accès aux données financières (facturation et paiements, à venir). Indépendant du rôle :
   // il s'accorde à n'importe quel compte — conducteur, commercial, administrateur —
   // depuis Administration > Utilisateurs. Un SUPERADMIN y a toujours accès sans avoir
   // besoin de cette case. Seul un superadmin peut l'accorder ou la retirer : ces données
@@ -39,7 +39,6 @@ model User {
   chantiersGeres          Chantier[]                 @relation("ChantierResponsable") // Liaison pour restreindre la vue des chefs de chantier
   chantiersCommercialises Chantier[]                 @relation("ChantierCommercial") // Chantiers vendus par ce commercial
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
-  acquittements           AcquittementDevis[] // Devis Odoo marqués « Vu » dans le Suivi financier
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -59,7 +58,8 @@ model Fournisseur {
 model Chantier {
   id          String    @id @default(uuid())
   nom         String
-  // Numéro du devis de vente Odoo. Format SXXXXX (un S suivi de 5 chiffres) et unicité sont
+  // Référence de l'affaire, reprise du devis Iris dont le chantier est issu (A26-0001).
+  // Format et unicité sont
   // exigés À LA SAISIE (cf. erreurNumeroDevis / numeroDevisDejaPris côté serveur), mais
   // volontairement PAS par une contrainte de base : des chantiers antérieurs portent une
   // valeur libre — deux numéros dans le même champ, par exemple, quand un chantier couvre
@@ -67,9 +67,7 @@ model Chantier {
   // bloquerait la migration ; la règle ne s'applique donc qu'aux nouvelles saisies.
   numeroDevis String?
   client      String
-  // Adresse du site (facultative) — préremplie depuis l'adresse de livraison/facturation
-  // du devis Odoo sélectionné (cf. GET /api/odoo/devis/:id/adresse), toujours corrigible
-  // manuellement. Seule source de vérité pour les affectations "chantier suivi" du
+  // Adresse du site (facultative), saisie librement et toujours corrigible. Seule source de vérité pour les affectations "chantier suivi" du
   // planning d'intervention (cf. PlanningEvent) : jamais dupliquée/surchargée par affectation.
   adresse     String?
   dateDebut   DateTime
@@ -213,7 +211,7 @@ model CompanySettings {
   updatedAt         DateTime @updatedAt
 }
 
-// Référentiel client natif Iris. Il ne dépend pas d'Odoo ni d'un CRM tiers.
+// Référentiel client natif Iris : aucune dépendance à un ERP ou un CRM tiers.
 model Client {
   id                   String               @id @default(uuid())
   raisonSociale        String
@@ -515,7 +513,7 @@ model PlanningEventType {
 
 // Affectation du planning d'intervention (module réservé aux administrateurs) : place un
 // ou plusieurs techniciens (Intervenant) sur un chantier suivi, un chantier/intervention
-// non suivi (ex: SAV — nom libre + client Odoo ou saisie libre), ou un événement
+// non suivi (ex: SAV — nom et client saisis librement), ou un événement
 // personnalisé (congés, formation...). Purement PRÉVISIONNEL : ne crée jamais de
 // PointageHeure — les heures réelles des chantiers restent saisies manuellement dans le
 // Journal des Heures.
@@ -536,7 +534,7 @@ model PlanningEvent {
   // categorie HORS_CHANTIER : nom libre + client + adresse (jamais liés à un enregistrement
   // en base — contrairement à categorie CHANTIER, il n'existe pas de fiche à côté de
   // laquelle stocker/corriger ces informations, elles vivent uniquement sur l'affectation).
-  // adresse préremplie depuis le client Odoo choisi (cf. ClientAutocomplete), corrigible.
+  // adresse saisie librement, corrigible à tout moment.
   titre   String?
   client  String?
   adresse String?
@@ -553,26 +551,6 @@ model PlanningEvent {
   updatedAt DateTime @updatedAt
 }
 
-// Marque « Vu » posée dans le Suivi financier sur un devis de vente Odoo dont le
-// règlement est incomplet mais dont on sait que c'est normal (retenue de garantie, geste
-// commercial, litige clos, écriture ancienne jamais lettrée...). Purement APPLICATIVE :
-// rien n'est jamais écrit dans Odoo, la comptabilité reste la source de vérité. L'effet
-// est un classement — le devis quitte la liste « à traiter » et rejoint les dossiers
-// clos — et la marque se retire d'un clic si elle a été posée par erreur.
-//
-// La clé est le numéro de devis (ex. S00700) et non un identifiant Odoo : c'est le seul
-// repère stable et lisible, partagé avec Chantier.numeroDevis, et il reste valable même
-// pour un devis qui n'a jamais été suivi dans l'application.
-model AcquittementDevis {
-  numeroDevis String  @id
-  motif       String?
-
-  acquitteParId String?
-  acquittePar   User?   @relation(fields: [acquitteParId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
 
 // Prime mensuelle "suivi administratif" (qualité et rigueur) du système de
 // rémunération commerciale — validée manuellement par un administrateur, mois par

@@ -8,7 +8,6 @@ import { GoogleGenAI } from '@google/genai';
 
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { odooConfigured, odooSearchClients, odooSearchDevis, odooDevisMateriel, odooDevisAdresse, odooSuiviDevis, odooCommandesVendues, type OdooSuiviDevis } from './odoo';
 
 dotenv.config();
 
@@ -300,21 +299,18 @@ function peutVoirMontantsVendus(req: express.Request): boolean {
   return isAdminRole((req as AuthRequest).user?.role);
 }
 
-// Suivi financier : accordé au cas par cas, indépendamment du rôle (User.accesFinance,
-// case « Finance » dans Administration > Utilisateurs). Un superadmin y accède toujours,
-// sans avoir besoin de la case. Couvre la consultation comme la pose et le retrait des
-// marques « Vu ».
-function peutVoirFinance(user: { role: string; accesFinance?: boolean | null } | undefined): boolean {
+// Accès aux données financières : accordé au cas par cas, indépendamment du rôle
+// (User.accesFinance, case « Finance » dans Administration > Utilisateurs). Un superadmin
+// y accède toujours, sans avoir besoin de la case.
+//
+// L'autorisation est conservée bien qu'aucun écran ne l'utilise aujourd'hui : elle est
+// native à Iris — pas héritée de l'intégration retirée — et c'est elle qui gardera la
+// facturation (phase 8) puis les paiements et le rapprochement bancaire (phase 9). La
+// retirer imposerait de supprimer la colonne pour la recréer à l'identique deux phases
+// plus loin, en perdant au passage les droits déjà accordés aux utilisateurs.
+export function peutVoirFinance(user: { role: string; accesFinance?: boolean | null } | undefined): boolean {
   return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
 }
-
-const requireFinance: express.RequestHandler = (req, res, next) => {
-  if (!peutVoirFinance((req as AuthRequest).user)) {
-    res.status(403).json({ error: 'Accès au suivi financier non autorisé' });
-    return;
-  }
-  next();
-};
 
 // Un commercial a un accès strictement en lecture à ses propres chantiers : ni création,
 // ni modification (chantiers, achats, heures), et pas d'accès aux statistiques
@@ -362,31 +358,30 @@ const requirePlanningActif: express.RequestHandler = async (req, res, next) => {
   }
 };
 
-// Numéro de devis : un S majuscule suivi d'exactement 5 chiffres (S00700), et un seul par
-// chantier. C'est le format des devis de vente Odoo, et la clé de rapprochement du Suivi
-// financier — un numéro mal formé ou partagé par deux chantiers rend le rapprochement
-// impossible ou ambigu. La saisie est normalisée (espaces retirés, minuscule acceptée)
-// avant contrôle, pour ne pas rejeter un « s00700 » collé depuis Odoo.
-const FORMAT_NUMERO_DEVIS = /^S\d{5}$/;
+// Référence d'affaire portée par le chantier : celle du devis Iris dont il est issu
+// (A26-0001), attribuée par la séquence annuelle à la création du devis et recopiée
+// telle quelle par la conversion. Le format est donc celui qu'Iris émet lui-même —
+// `nouveauNumeroDevis()` en est la seule source. La saisie reste normalisée (espaces
+// retirés, minuscule acceptée) pour qu'une référence recopiée à la main soit acceptée.
+const FORMAT_NUMERO_DEVIS = /^A\d{2}-\d{4,}$/;
 
 function normaliserNumeroDevis(valeur: unknown): string {
   return String(valeur ?? '').trim().toUpperCase();
 }
 
-// Retourne un message d'erreur si le numéro est absent ou mal formé, sinon null.
+// Retourne un message d'erreur si la référence est absente ou mal formée, sinon null.
 function erreurNumeroDevis(numeroDevis: string): string | null {
-  if (!numeroDevis) return 'Veuillez saisir le numéro de devis.';
+  if (!numeroDevis) return 'Veuillez saisir la référence d’affaire.';
   if (!FORMAT_NUMERO_DEVIS.test(numeroDevis)) {
-    return 'Le numéro de devis doit être au format SXXXXX : un S suivi de 5 chiffres (exemple : S00700).';
+    return 'La référence d’affaire doit être au format AAA-NNNN : un A, l’année sur deux chiffres, un tiret et le rang (exemple : A26-0001).';
   }
   return null;
 }
 
-// Vérifie qu'aucun AUTRE chantier ne porte déjà ce numéro. Le contrôle est volontairement
-// applicatif et non porté par un index unique en base : des chantiers antérieurs portent
-// une valeur libre (deux numéros dans le même champ, quand un chantier couvre deux devis
-// du même client) et un index les rendrait immodifiables. La règle ne s'applique donc
-// qu'aux numéros nouvellement saisis.
+// Vérifie qu'aucun AUTRE chantier ne porte déjà cette référence. Le contrôle est
+// volontairement applicatif et non porté par un index unique en base : un chantier peut
+// couvrir deux affaires du même client, et un index rendrait ces cas immodifiables. La
+// règle ne s'applique donc qu'aux références nouvellement saisies.
 async function numeroDevisDejaPris(numeroDevis: string, chantierIdExclu?: string): Promise<boolean> {
   const existant = await prisma.chantier.findFirst({ where: { numeroDevis }, select: { id: true } });
   return !!existant && existant.id !== chantierIdExclu;
@@ -771,75 +766,6 @@ function sanitizeTypes(input: unknown): string[] {
   const arr = Array.isArray(input) ? input : input ? [input] : [];
   return TYPES_CHANTIER.filter((t) => arr.includes(t));
 }
-
-// Recherche de clients Odoo (lecture seule, cf. odoo.ts) pour le champ "Client" d'un
-// chantier. Ne renvoie jamais d'erreur HTTP : odooAvailable:false (Odoo non configuré,
-// injoignable, ou en erreur) laisse simplement l'utilisateur saisir le client en texte
-// libre côté client, sans qu'aucune donnée ne soit jamais écrite dans Odoo.
-app.get('/api/odoo/clients', requireAuth, async (req, res) => {
-  if (!odooConfigured()) return res.json({ odooAvailable: false, clients: [] });
-  try {
-    const clients = await odooSearchClients(String(req.query.q || ''), 20);
-    res.json({ odooAvailable: true, clients });
-  } catch (error) {
-    console.error('Odoo search error:', error);
-    res.json({ odooAvailable: false, clients: [] });
-  }
-});
-
-// Recherche de devis Odoo (lecture seule, cf. odoo.ts) pour préremplir le budget global
-// vendu (HT) d'un chantier à partir de son numéro de devis. Même contrat que
-// /api/odoo/clients ci-dessus : jamais d'erreur HTTP, odooAvailable:false si indisponible,
-// l'utilisateur reste libre de saisir le numéro et le montant à la main.
-// partnerId (optionnel) restreint aux devis du client Odoo déjà sélectionné dans le
-// formulaire, pour ne pas faire chercher le bon devis dans toute la base — la saisie
-// libre du numéro reste toujours possible, filtrée ou non.
-app.get('/api/odoo/devis', requireAuth, async (req, res) => {
-  if (!odooConfigured()) return res.json({ odooAvailable: false, devis: [] });
-  try {
-    const partnerId = req.query.partnerId ? Number(req.query.partnerId) : undefined;
-    const devis = await odooSearchDevis(String(req.query.q || ''), 20, partnerId && !Number.isNaN(partnerId) ? partnerId : undefined);
-    res.json({ odooAvailable: true, devis });
-  } catch (error) {
-    console.error('Odoo search error (devis):', error);
-    res.json({ odooAvailable: false, devis: [] });
-  }
-});
-
-// Sous-total de la section "Matériel" d'un devis Odoo (lecture seule, cf.
-// odoo.ts:odooDevisMateriel) pour préremplir le champ "Dont Matériel" d'un chantier une
-// fois un devis sélectionné. Même contrat que les routes Odoo ci-dessus : jamais d'erreur
-// HTTP, montantMateriel:null si indisponible ou si le devis n'a pas de section "Matériel"
-// — l'utilisateur reste libre de saisir/corriger le montant à la main.
-app.get('/api/odoo/devis/:id/materiel', requireAuth, async (req, res) => {
-  if (!odooConfigured()) return res.json({ odooAvailable: false, montantMateriel: null });
-  try {
-    const devisId = Number(req.params.id);
-    if (Number.isNaN(devisId)) return res.json({ odooAvailable: false, montantMateriel: null });
-    const montantMateriel = await odooDevisMateriel(devisId);
-    res.json({ odooAvailable: true, montantMateriel });
-  } catch (error) {
-    console.error('Odoo search error (devis materiel):', error);
-    res.json({ odooAvailable: false, montantMateriel: null });
-  }
-});
-
-// Adresse du site d'un devis Odoo (lecture seule, cf. odoo.ts:odooDevisAdresse) pour
-// préremplir le champ "Adresse" d'un chantier une fois un devis sélectionné. Même contrat
-// que les routes Odoo ci-dessus : jamais d'erreur HTTP, adresse:null si indisponible —
-// l'utilisateur reste libre de saisir/corriger l'adresse à la main.
-app.get('/api/odoo/devis/:id/adresse', requireAuth, async (req, res) => {
-  if (!odooConfigured()) return res.json({ odooAvailable: false, adresse: null });
-  try {
-    const devisId = Number(req.params.id);
-    if (Number.isNaN(devisId)) return res.json({ odooAvailable: false, adresse: null });
-    const adresse = await odooDevisAdresse(devisId);
-    res.json({ odooAvailable: true, adresse });
-  } catch (error) {
-    console.error('Odoo search error (devis adresse):', error);
-    res.json({ odooAvailable: false, adresse: null });
-  }
-});
 
 // Chantiers — un conducteur ne voit que les chantiers dont il est responsable ;
 // un admin voit tout. Un chantier sans responsable reste invisible aux conducteurs
@@ -1540,7 +1466,7 @@ app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) 
 
 // --- Planning d'intervention (module réservé aux administrateurs) ---
 // Affectation PRÉVISIONNELLE des techniciens : sur un chantier suivi, sur un chantier ou
-// une intervention non suivi (ex: SAV — nom libre + client Odoo ou saisie libre), ou sur
+// une intervention non suivi (ex: SAV — nom et client saisis librement), ou sur
 // un événement personnalisé (type réutilisable avec couleur). Aucun lien avec les heures
 // réelles : le planning n'écrit jamais dans PointageHeure — les heures des chantiers
 // restent saisies manuellement dans le Journal des Heures.
@@ -1618,9 +1544,9 @@ async function validatePlanningEvent(body: Record<string, unknown>): Promise<{ e
     if (!titre) return { error: "Saisissez le nom du chantier ou de l'intervention." };
     data.titre = titre;
     data.client = String(body.client || '').trim() || null;
-    // Adresse du site (facultative), préremplie depuis le client Odoo choisi (cf.
-    // ClientAutocomplete) : contrairement à categorie CHANTIER, il n'existe pas de fiche
-    // chantier à côté de laquelle la stocker — elle vit uniquement sur cette affectation.
+    // Adresse du site (facultative), saisie librement : contrairement à categorie
+    // CHANTIER, il n'existe pas de fiche chantier à côté de laquelle la stocker — elle
+    // vit uniquement sur cette affectation.
     data.adresse = String(body.adresse || '').trim() || null;
   } else {
     const typeEvent = await prisma.planningEventType.findUnique({ where: { id: String(body.typeEventId || '') } });
@@ -2199,343 +2125,6 @@ app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async
     res.status(500).json({ error: 'Error updating prime mensuelle' });
   }
 });
-
-// --- Suivi financier (réservé au superadmin) ---
-// Rapproche les chantiers de l'application avec leur devis de vente Odoo (numeroDevis,
-// ex. S00700) pour répondre à une question que l'application ne sait pas trancher seule :
-// ce chantier a-t-il été payé, et où en est-on ? Les montants viennent d'Odoo (factures et
-// paiements) ; l'état d'avancement (En cours / Terminé) vient de l'application. Un
-// chantier terminé dont il reste à encaisser mérite une relance, un chantier en cours avec
-// un solde ouvert est normal : c'est ce croisement qui donne sa valeur à l'écran.
-//
-// Lecture seule de bout en bout : rien n'est jamais écrit dans Odoo.
-
-const STATUTS_SUIVI = ['EN_COURS', 'TERMINE', 'TOUS'];
-
-// Le bouton « Actualiser » de l'écran passe refresh=1 : c'est le seul moyen de contourner
-// le cache Odoo (cf. odoo.ts), qui évite de réinterroger à chaque affichage des centaines
-// de dossiers clos qui ne bougent plus.
-function rafraichir(req: express.Request): boolean {
-  return String(req.query.refresh || '') === '1';
-}
-
-// Plafond de commandes Odoo remontées par l'écran « Anciens chantiers ». Le parc compte
-// environ 800 affaires ; la marge laissée absorbe la croissance sans jamais laisser une
-// base inattendue produire une réponse démesurée.
-const LIMITE_COMMANDES_ODOO = Number(process.env.ODOO_LIMITE_COMMANDES || 1500);
-
-// Un chantier est « soldé » dès que le restant dû tombe sous le centime : comparer des
-// montants à l'égalité stricte laisserait des chantiers payés affichés comme partiels à
-// cause d'un arrondi de TVA.
-const EPSILON_EUROS = 0.01;
-
-type EtatReglement = 'TROP_PERCU' | 'SOLDE' | 'PARTIEL' | 'AUCUN';
-
-function etatReglement(montantTTC: number, montantPaye: number): EtatReglement {
-  // Encaissé au-delà du montant vendu : ce n'est pas un dossier réglé de plus, c'est une
-  // anomalie à regarder (versement lettré sur la mauvaise commande, avoir jamais émis,
-  // acompte encaissé puis facture annulée). Elle mérite son propre état, pas d'être
-  // confondue avec un « soldé » tranquille.
-  if (montantPaye > montantTTC + EPSILON_EUROS) return 'TROP_PERCU';
-  if (montantTTC > 0 && montantPaye >= montantTTC - EPSILON_EUROS) return 'SOLDE';
-  return montantPaye > EPSILON_EUROS ? 'PARTIEL' : 'AUCUN';
-}
-
-// Indicateurs financiers d'un devis, communs aux chantiers suivis et aux dossiers anciens.
-//
-// L'encaissé retenu est le PLUS ÉLEVÉ de deux lectures de la même réalité :
-//   - l'encaissé comptable, déduit des factures (facturé - restant dû) ;
-//   - la somme des versements rapprochés de la commande.
-// En temps normal les deux coïncident. Ils divergent quand les factures d'une affaire ont
-// été annulées sans être réémises : le compte client retombe à zéro alors que la banque,
-// elle, a bien reçu l'argent — la progression tombait alors à 0 % sur des dossiers
-// intégralement payés. Retenir le maximum fait primer l'argent réellement entré, ce qui
-// est la question posée par cet écran ; `baseProgression` dit laquelle des deux lectures
-// a servi, pour que l'écart soit expliqué et non subi.
-function indicateursSuivi(suivi: OdooSuiviDevis) {
-  // « Dernier versement » = dernier encaissement REÇU : un remboursement au client
-  // (montant négatif) figure bien dans le détail, mais l'annoncer ici comme le dernier
-  // versement donnerait une lecture fausse de l'avancement du règlement.
-  const dernier = suivi.paiements.find((p) => p.montant > 0) || null;
-  const encaisseComptable = suivi.montantPaye;
-  const montantVersements = suivi.paiements.reduce((total, p) => total + p.montant, 0);
-  const montantPaye = Math.max(encaisseComptable, montantVersements);
-  const baseProgression = montantPaye > encaisseComptable + EPSILON_EUROS ? 'VERSEMENTS' : 'FACTURES';
-
-  return {
-    clientOdoo: suivi.clientNom,
-    dateCommande: suivi.dateCommande,
-    etatOdoo: suivi.etatOdoo,
-    montantTTC: suivi.montantTTC,
-    montantHT: suivi.montantHT,
-    montantFacture: suivi.montantFacture,
-    montantPaye,
-    // Les deux lectures sont exposées telles quelles : la fiche les affiche côte à côte
-    // dès qu'elles divergent, plutôt que de laisser croire à une erreur de calcul.
-    encaisseComptable,
-    montantVersements,
-    baseProgression,
-    montantEnAttenteRapprochement: suivi.montantEnAttenteRapprochement,
-    // Négatif = trop-perçu : l'encaissé dépasse le montant vendu.
-    montantRestant: suivi.montantTTC - montantPaye,
-    pourcentagePaye: suivi.montantTTC > 0 ? (montantPaye / suivi.montantTTC) * 100 : 0,
-    etatReglement: etatReglement(suivi.montantTTC, montantPaye),
-    dernierPaiement: dernier ? { date: dernier.date, montant: dernier.montant, reference: dernier.reference } : null,
-    nbPaiements: suivi.paiements.length,
-  };
-}
-
-// Marques « Vu » posées sur des devis, indexées par numéro (cf. modèle AcquittementDevis).
-async function acquittementsParNumero(numeros: string[]) {
-  const lignes = await prisma.acquittementDevis.findMany({
-    where: { numeroDevis: { in: numeros } },
-    include: { acquittePar: { select: { name: true } } },
-  });
-  return new Map(lignes.map((a) => [a.numeroDevis, {
-    le: a.updatedAt,
-    par: a.acquittePar?.name || null,
-    motif: a.motif,
-  }]));
-}
-
-// Vue « ligne » d'un chantier : ce qu'il faut pour la liste, sans le détail des factures
-// et des paiements (réservé à la fiche, cf. GET /api/suivi-financier/:id).
-function serializeSuiviChantier(
-  chantier: { id: string; nom: string; client: string; numeroDevis: string | null; statut: string; dateFin: Date | null },
-  suivi: OdooSuiviDevis | undefined,
-) {
-  const termine = chantier.statut === 'TERMINE';
-  const base = {
-    id: chantier.id,
-    nom: chantier.nom,
-    client: chantier.client,
-    numeroDevis: chantier.numeroDevis,
-    statut: chantier.statut,
-    termine,
-    dateFin: chantier.dateFin,
-  };
-  if (!suivi) {
-    // Devis introuvable côté Odoo (numéro erroné, commande supprimée...) : on l'affiche
-    // quand même, signalé comme non rapproché, plutôt que de le faire disparaître de la liste.
-    return {
-      ...base, odooTrouve: false, clientOdoo: null, dateCommande: null, etatOdoo: '',
-      montantTTC: 0, montantHT: 0, montantFacture: 0, montantPaye: 0, encaisseComptable: 0,
-      montantEnAttenteRapprochement: 0, montantVersements: 0, baseProgression: 'FACTURES' as const,
-      montantRestant: 0, pourcentagePaye: 0, etatReglement: 'AUCUN' as const,
-      dernierPaiement: null, nbPaiements: 0,
-    };
-  }
-  return { ...base, odooTrouve: true, ...indicateursSuivi(suivi) };
-}
-
-// Chantiers rapprochables : ceux qui portent un numéro de devis. Sans ce numéro, aucun
-// rapprochement n'est possible — ils sont exclus, et leur nombre est renvoyé à part pour
-// que l'écran puisse le signaler plutôt que de les passer sous silence.
-const SUIVI_CHANTIER_SELECT = {
-  id: true, nom: true, client: true, numeroDevis: true, statut: true, dateFin: true,
-} as const;
-
-app.get('/api/suivi-financier', requireAuth, requireFinance, async (req, res) => {
-  try {
-    const statut = STATUTS_SUIVI.includes(String(req.query.statut)) ? String(req.query.statut) : 'EN_COURS';
-    const where = {
-      ...(statut === 'TOUS' ? {} : { statut }),
-      numeroDevis: { not: null },
-      NOT: { numeroDevis: '' },
-    };
-    const [chantiers, sansDevis] = await Promise.all([
-      prisma.chantier.findMany({ where, select: SUIVI_CHANTIER_SELECT, orderBy: { nom: 'asc' } }),
-      prisma.chantier.count({
-        where: {
-          ...(statut === 'TOUS' ? {} : { statut }),
-          OR: [{ numeroDevis: null }, { numeroDevis: '' }],
-        },
-      }),
-    ]);
-
-    if (!odooConfigured()) {
-      return res.json({ odooAvailable: false, chantiers: [], sansDevis });
-    }
-
-    const numeros = chantiers.map((c) => (c.numeroDevis || '').trim()).filter(Boolean);
-    const [suivi, acquittements] = await Promise.all([
-      odooSuiviDevis(numeros, { force: rafraichir(req) }),
-      acquittementsParNumero(numeros),
-    ]);
-    res.json({
-      odooAvailable: true,
-      sansDevis,
-      chantiers: chantiers.map((c) => {
-        const numero = (c.numeroDevis || '').trim();
-        return { ...serializeSuiviChantier(c, suivi.get(numero)), acquitte: acquittements.get(numero) || null };
-      }),
-    });
-  } catch (error) {
-    console.error('Suivi financier error:', error);
-    res.status(502).json({ error: "Impossible de récupérer les données financières depuis Odoo pour le moment." });
-  }
-});
-
-// --- Anciens chantiers / dossiers non suivis ---
-// Toutes les affaires VENDUES côté Odoo (state sale ou done) qui n'ont jamais eu de fiche
-// chantier dans l'application : dossiers antérieurs à sa mise en service, petites
-// interventions facturées directement, affaires suivies ailleurs. La comptabilité en garde
-// la trace, l'application non — cet écran est là pour vérifier qu'aucune de ces affaires
-// ne traîne un impayé oublié.
-//
-// Un solde ouvert n'est pas toujours une anomalie (retenue de garantie, geste commercial,
-// écriture ancienne jamais lettrée). D'où la marque « Vu » : elle ne corrige rien, ne
-// touche pas à Odoo, elle range simplement le dossier avec les affaires closes pour que la
-// liste « à traiter » ne montre que ce qui mérite encore une action.
-
-const FILTRES_ANCIENS = ['A_TRAITER', 'VUS', 'TOUS'];
-
-app.get('/api/suivi-financier/anciens', requireAuth, requireFinance, async (req, res) => {
-  try {
-    const filtre = FILTRES_ANCIENS.includes(String(req.query.filtre)) ? String(req.query.filtre) : 'A_TRAITER';
-    if (!odooConfigured()) {
-      return res.json({ odooAvailable: false, commandes: [], total: 0, tronque: false });
-    }
-
-    const [commandes, chantiers] = await Promise.all([
-      odooCommandesVendues(LIMITE_COMMANDES_ODOO, { force: rafraichir(req) }),
-      prisma.chantier.findMany({ where: { NOT: { numeroDevis: null } }, select: { numeroDevis: true } }),
-    ]);
-    // Un devis déjà rattaché à une fiche chantier est traité par l'autre onglet : le faire
-    // apparaître ici aussi ferait douter de quelle liste fait foi.
-    const suivisDansApp = new Set(chantiers.map((c) => (c.numeroDevis || '').trim()).filter(Boolean));
-    const nonSuivis = commandes.filter((c) => !suivisDansApp.has(c.numero));
-
-    const acquittements = await acquittementsParNumero(nonSuivis.map((c) => c.numero));
-    const lignes = nonSuivis.map((c) => {
-      const indicateurs = indicateursSuivi(c);
-      return {
-        numeroDevis: c.numero,
-        ...indicateurs,
-        acquitte: acquittements.get(c.numero) || null,
-        // « À traiter » = pas entièrement réglé ET pas encore marqué vu.
-        aTraiter: indicateurs.etatReglement !== 'SOLDE' && !acquittements.has(c.numero),
-      };
-    });
-
-    const filtrees = lignes.filter((l) => (filtre === 'A_TRAITER' ? l.aTraiter : filtre === 'VUS' ? !!l.acquitte : true));
-    // Ce qui reste à encaisser passe devant, du plus gros solde au plus petit ; les
-    // dossiers réglés ou acquittés suivent, du plus récent au plus ancien.
-    filtrees.sort((a, b) => {
-      if (a.aTraiter !== b.aTraiter) return a.aTraiter ? -1 : 1;
-      if (a.aTraiter) return b.montantRestant - a.montantRestant;
-      return (b.dateCommande || '').localeCompare(a.dateCommande || '');
-    });
-
-    res.json({
-      odooAvailable: true,
-      commandes: filtrees,
-      total: lignes.length,
-      aTraiter: lignes.filter((l) => l.aTraiter).length,
-      vus: lignes.filter((l) => !!l.acquitte).length,
-      // Signale une base plus grande que le plafond de lecture, plutôt que de laisser
-      // croire à une liste exhaustive.
-      tronque: commandes.length >= LIMITE_COMMANDES_ODOO,
-    });
-  } catch (error) {
-    console.error('Suivi financier anciens error:', error);
-    res.status(502).json({ error: "Impossible de récupérer les données financières depuis Odoo pour le moment." });
-  }
-});
-
-// Fiche d'un chantier : les mêmes indicateurs, augmentés du détail des factures émises et
-// de tous les versements qui s'y rattachent.
-app.get('/api/suivi-financier/:id', requireAuth, requireFinance, async (req, res) => {
-  try {
-    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) }, select: SUIVI_CHANTIER_SELECT });
-    if (!chantier) {
-      return res.status(404).json({ error: 'Chantier introuvable.' });
-    }
-    if (!chantier.numeroDevis) {
-      return res.status(400).json({ error: "Ce chantier n'a pas de numéro de devis : aucun rapprochement Odoo n'est possible." });
-    }
-    if (!odooConfigured()) {
-      return res.json({ odooAvailable: false });
-    }
-    const numero = chantier.numeroDevis.trim();
-    const [suivi, acquittements] = await Promise.all([
-      odooSuiviDevis([numero], { force: rafraichir(req) }),
-      acquittementsParNumero([numero]),
-    ]);
-    const devis = suivi.get(numero);
-    res.json({
-      odooAvailable: true,
-      ...serializeSuiviChantier(chantier, devis),
-      acquitte: acquittements.get(numero) || null,
-      factures: devis?.factures || [],
-      paiements: devis?.paiements || [],
-    });
-  } catch (error) {
-    console.error('Suivi financier detail error:', error);
-    res.status(502).json({ error: "Impossible de récupérer les données financières depuis Odoo pour le moment." });
-  }
-});
-
-// Fiche d'un devis non suivi : mêmes indicateurs, plus le détail des factures et des versements.
-app.get('/api/suivi-financier/devis/:numero', requireAuth, requireFinance, async (req, res) => {
-  try {
-    const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
-    if (!numero) return res.status(400).json({ error: 'Numéro de devis manquant.' });
-    if (!odooConfigured()) return res.json({ odooAvailable: false });
-
-    const [suivi, acquittements] = await Promise.all([
-      odooSuiviDevis([numero], { force: rafraichir(req) }),
-      acquittementsParNumero([numero]),
-    ]);
-    const devis = suivi.get(numero);
-    if (!devis) return res.status(404).json({ error: "Ce devis est introuvable dans Odoo." });
-    res.json({
-      odooAvailable: true,
-      numeroDevis: devis.numero,
-      ...indicateursSuivi(devis),
-      acquitte: acquittements.get(numero) || null,
-      factures: devis.factures,
-      paiements: devis.paiements,
-    });
-  } catch (error) {
-    console.error('Suivi financier devis error:', error);
-    res.status(502).json({ error: "Impossible de récupérer les données financières depuis Odoo pour le moment." });
-  }
-});
-
-// --- Marque « Vu » sur un devis ---
-// Purement applicative : elle n'écrit RIEN dans Odoo et ne modifie aucun montant. Elle dit
-// seulement « ce solde ouvert est connu et assumé », ce qui sort le dossier de la liste à
-// traiter. Réversible d'un clic, pour qu'une marque posée par erreur ne fige rien.
-app.put('/api/suivi-financier/acquittements/:numero', requireAuth, requireFinance, async (req, res) => {
-  try {
-    const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
-    if (!numero) return res.status(400).json({ error: 'Numéro de devis manquant.' });
-    const motif = String(req.body?.motif ?? '').trim().slice(0, 500) || null;
-    const acquitteParId = (req as AuthRequest).user!.id;
-    const acquittement = await prisma.acquittementDevis.upsert({
-      where: { numeroDevis: numero },
-      update: { motif, acquitteParId },
-      create: { numeroDevis: numero, motif, acquitteParId },
-      include: { acquittePar: { select: { name: true } } },
-    });
-    res.json({ numeroDevis: numero, acquitte: { le: acquittement.updatedAt, par: acquittement.acquittePar?.name || null, motif: acquittement.motif } });
-  } catch (error) {
-    console.error('Acquittement error:', error);
-    res.status(500).json({ error: "Impossible d'enregistrer la marque « Vu »." });
-  }
-});
-
-app.delete('/api/suivi-financier/acquittements/:numero', requireAuth, requireFinance, async (req, res) => {
-  try {
-    const numero = String(Array.isArray(req.params.numero) ? req.params.numero[0] : req.params.numero).trim();
-    await prisma.acquittementDevis.deleteMany({ where: { numeroDevis: numero } });
-    res.json({ numeroDevis: numero, acquitte: null });
-  } catch (error) {
-    res.status(500).json({ error: "Impossible de retirer la marque « Vu »." });
-  }
-});
-
 
 // Paramètres globaux (admin uniquement)
 app.get('/api/parametres', requireAuth, requireAdmin, async (req, res) => {

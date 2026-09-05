@@ -8,8 +8,6 @@ import {
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
-import { ClientAutocomplete } from '../components/ClientAutocomplete';
-import { DevisAutocomplete } from '../components/DevisAutocomplete';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
@@ -64,7 +62,7 @@ const ChantierDetail = () => {
   // en place — une réaffectation silencieuse à l'occasion d'une correction sans rapport.
   const [editResponsableId, setEditResponsableId] = useState('');
   const [editCommercialId, setEditCommercialId] = useState('');
-  // Préremplissage du budget global vendu et de l'adresse depuis un devis Odoo
+  // Préremplissage du budget global vendu et de l'adresse depuis la référence d'affaire
   // sélectionné (modale d'édition ci-dessous) — champs non contrôlés, on écrit
   // directement dedans.
   const editChantierBudgetRef = useRef<HTMLInputElement>(null);
@@ -1128,26 +1126,23 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Client</label>
-                <ClientAutocomplete required defaultValue={chantier.client} />
+                <input required name="client" defaultValue={chantier.client} className="form-input" placeholder="Nom du client" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">N° de Devis</label>
                 {/* Obligatoire, sauf sur un chantier antérieur créé sans devis : l'exiger
                     ici interdirait toute autre correction sur sa fiche. */}
-                <DevisAutocomplete
+                <input
                   required={!!chantier.numeroDevis}
+                  name="numeroDevis"
                   defaultValue={chantier.numeroDevis || ''}
-                  onMontantFound={(montant) => {
-                    if (editChantierBudgetRef.current) editChantierBudgetRef.current.value = String(montant);
-                  }}
-                  onAdresseFound={(adresse) => {
-                    if (editChantierAdresseRef.current) editChantierAdresseRef.current.value = adresse;
-                  }}
+                  className="form-input"
+                  placeholder="Référence d'affaire (ex : A26-0001)"
                 />
               </div>
               <div className="form-group mb-0 md:col-span-2">
                 <label className="form-label">Adresse du site (optionnel)</label>
-                <input ref={editChantierAdresseRef} name="adresse" defaultValue={chantier.adresse || ''} className="form-input" placeholder="Préremplie depuis le devis sélectionné, ou à saisir librement..." />
+                <input ref={editChantierAdresseRef} name="adresse" defaultValue={chantier.adresse || ''} className="form-input" placeholder="Adresse du site" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Responsable Chantier</label>

@@ -16,7 +16,6 @@ import ResultatCommercial from './pages/ResultatCommercial';
 import Performances from './pages/Performances';
 import MesCommerciaux from './pages/MesCommerciaux';
 import Planning from './pages/Planning';
-import SuiviFinancier from './pages/SuiviFinancier';
 import PlanningPublic from './pages/PlanningPublic';
 import Clients from './pages/Clients';
 import ClientDetail from './pages/ClientDetail';
@@ -26,7 +25,7 @@ import Catalogue from './pages/Catalogue';
 import Secours from './pages/Secours';
 import Devis from './pages/Devis';
 import { ErrorBoundary } from './ErrorBoundary';
-import { peutVoirFinance, useCurrentUser, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
+import { useCurrentUser, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
 import { useModules } from './modules';
 
 // Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
@@ -73,15 +72,6 @@ const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX
 const PlanningRoute = () => {
   const { planningActif } = useModules();
   return planningActif ? <Planning /> : <Navigate to="/" replace />;
-};
-
-// Accès au Suivi financier accordé compte par compte : la page n'est pas atteignable en
-// tapant l'URL sans l'autorisation. Le serveur refuse de toute façon les appels (403).
-const RouteFinance = () => {
-  const utilisateur = useCurrentUser();
-  // Tant que la resynchronisation n'a pas répondu, on s'appuie sur le compte mémorisé —
-  // `useCurrentUser` le renvoie immédiatement, il n'y a donc pas d'état indéterminé.
-  return peutVoirFinance(utilisateur) ? <SuiviFinancier /> : <Navigate to="/" replace />;
 };
 
 // Identité de la société : consultable par un administrateur, modifiable par le seul
@@ -179,13 +169,6 @@ function App() {
         <Route path="/admin" element={
           <PrivateRoute excludedRole="COMMERCIAL">
             <Admin />
-          </PrivateRoute>
-        } />
-
-        {/* Suivi financier : superadmin, ou tout compte autorisé (case « Finance »). */}
-        <Route path="/suivi-financier" element={
-          <PrivateRoute>
-            <RouteFinance />
           </PrivateRoute>
         } />
 
