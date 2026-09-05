@@ -2,7 +2,7 @@
 
 ## Principe directeur
 
-Iris est un ERP **natif**, simple et fluide pour les métiers techniques. Il ne dépend ni d'Odoo ni d'un autre ERP pour les clients, devis, factures, interventions, contrats ou paiements.
+Iris est un ERP **natif**, simple et fluide pour les métiers techniques. Clients, devis, factures, interventions, contrats et paiements vivent dans sa propre base : aucune dépendance à un ERP tiers.
 
 Une action doit toujours répondre à trois questions visibles à l'écran : **pour quel client, sur quel site, et à quelle étape du processus ?**
 

@@ -35,15 +35,17 @@ export interface CurrentUser {
   email?: string;
   role?: string;
   theme?: string;
-  /** Accès au Suivi financier accordé au cas par cas (cf. peutVoirFinance). */
+  /** Accès aux données financières, accordé au cas par cas (cf. peutVoirFinance). */
   accesFinance?: boolean;
 }
 
 /**
- * Accès au Suivi financier : accordé compte par compte depuis Administration >
+ * Accès aux données financières : accordé compte par compte depuis Administration >
  * Utilisateurs, indépendamment du rôle. Un superadmin y accède toujours, sans avoir besoin
- * de l'autorisation. Même règle que peutVoirFinance() côté serveur — ce qui est masqué ici
- * est également refusé par l'API.
+ * de l'autorisation. Même règle que peutVoirFinance() côté serveur.
+ *
+ * Aucun écran ne s'en sert aujourd'hui : l'autorisation attend la facturation (phase 8)
+ * puis les paiements et le rapprochement bancaire (phase 9), qu'elle gardera.
  */
 export function peutVoirFinance(user?: CurrentUser | null): boolean {
   return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
