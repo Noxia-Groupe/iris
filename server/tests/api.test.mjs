@@ -55,7 +55,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.intervenant.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
-    await prisma.user.deleteMany({ where: { email: 'conducteur.test@iris.test' } });
+    await prisma.user.deleteMany({ where: { email: { in: ['conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test'] } } });
   };
 
   before(async () => {
@@ -617,9 +617,26 @@ if (!TEST_DATABASE_URL) {
     test('refuse un devis sans permission, puis l’autorise après attribution individuelle', async () => {
       const corps = { clientId, objet: 'TEST Devis permission', lignes: [{ designation: 'Test', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] };
       assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 403);
+      assert.equal((await request(app).get(`/api/clients/${clientId}`).set('Authorization', `Bearer ${conducteurSession}`)).status, 403);
+      const avant = await request(app).get('/api/me').set('Authorization', `Bearer ${conducteurSession}`);
+      assert.equal(avant.status, 200);
+      assert.equal(avant.body.permissions.includes('devis:read'), false);
       const attribution = await request(app).put(`/api/users/${conducteurId}/permissions`).set('Authorization', `Bearer ${superSession}`).send({ permissions: ['devis:read', 'devis:write', 'clients:read'] });
       assert.equal(attribution.status, 200);
+      const apres = await request(app).get('/api/me').set('Authorization', `Bearer ${conducteurSession}`);
+      assert.equal(apres.body.permissions.includes('devis:read'), true);
+      assert.equal((await request(app).get(`/api/clients/${clientId}`).set('Authorization', `Bearer ${conducteurSession}`)).status, 200);
       assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 201);
+    });
+
+    test('/api/me expose les droits hérités du type de compte, pas seulement les individuels', async () => {
+      const jwt = (await import('jsonwebtoken')).default;
+      const commercial = await prisma.user.create({ data: { email: 'commercial.permissions@iris.test', name: 'TEST Commercial permissions', role: 'COMMERCIAL' } });
+      const session = jwt.sign({ id: commercial.id }, process.env.JWT_SECRET);
+      const me = await request(app).get('/api/me').set('Authorization', `Bearer ${session}`);
+      assert.equal(me.status, 200);
+      // La colonne individuelle est vide : ces droits viennent obligatoirement du type.
+      assert.deepEqual(me.body.permissions, ['chantiers:read', 'clients:read', 'devis:read', 'devis:write']);
     });
 
     test('refuse une permission hors du vocabulaire', async () => {

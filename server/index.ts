@@ -183,8 +183,16 @@ const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
   [ROLE_TECHNICIEN]: ['chantiers:read'],
 };
 
+function permissionsEffectives(user: { role: string; accesFinance?: boolean | null; permissions?: string[] }): string[] {
+  const droits = new Set([...(DEFAULT_USER_PERMISSIONS[user.role] ?? []), ...(user.permissions ?? [])]);
+  if (user.accesFinance) droits.add('finances:read');
+  // Un superadministrateur ne dépend jamais d'une liste fragile de permissions.
+  if (isSuperAdminRole(user.role)) API_SCOPES.forEach((permission) => droits.add(permission));
+  return [...droits].sort();
+}
+
 function hasUserPermission(user: AuthRequest['user'], permission: string): boolean {
-  return !!user && (isSuperAdminRole(user.role) || user.accesFinance && permission === 'finances:read' || DEFAULT_USER_PERMISSIONS[user.role]?.includes(permission) || user.permissions.includes(permission));
+  return !!user && permissionsEffectives(user).includes(permission);
 }
 
 function requirePermission(permission: string): express.RequestHandler {
@@ -641,7 +649,7 @@ app.post('/api/auth/sso', async (req, res) => {
       return res.status(403).json({ code: 'SSO_NOT_AUTHORIZED', error: "Accès refusé : votre compte n'est pas autorisé. Contactez l'administrateur." });
     }
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user });
+    res.json({ token, user: { ...user, permissions: permissionsEffectives(user) } });
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la connexion SSO' });
   }
@@ -742,7 +750,7 @@ app.post('/api/auth/secours', async (req, res) => {
     const jeton = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1h' });
     console.warn(`[SECOURS] ACCÈS DE SECOURS UTILISÉ par ${user.email} depuis ${ip} — session d'une heure.`);
     essaisSecours.delete(ip);
-    res.json({ token: jeton, user, expiresIn: 3600 });
+    res.json({ token: jeton, user: { ...user, permissions: permissionsEffectives(user) }, expiresIn: 3600 });
   } catch {
     res.status(500).json({ error: "Erreur lors de l'ouverture de la session de secours." });
   }
@@ -760,8 +768,8 @@ app.get('/api/me', requireAuth, async (req, res) => {
       select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true, permissions: true },
     });
     if (!user) return res.status(404).json({ error: 'Compte introuvable.' });
-    res.json(user);
-  } catch (error) {
+    res.json({ ...user, permissions: permissionsEffectives(user) });
+  } catch {
     res.status(500).json({ error: 'Error fetching current user' });
   }
 });
@@ -1176,6 +1184,8 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     res.json(users.map((u) => ({
       id: u.id, name: u.name, email: u.email, role: u.role, estCommercial: u.estCommercial,
       accesFinance: u.accesFinance, actif: u.actif,
+      permissions: permissionsEffectives(u),
+      permissionsIndividuelles: u.permissions,
     })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
@@ -2523,7 +2533,7 @@ const archiverEquipementClient: express.RequestHandler = async (req, res) => {
 
 routeMixte('get', '/clients', 'clients:read', listerClients, [requirePermission('clients:read')]);
 routeMixte('post', '/clients', 'clients:write', creerClient);
-routeMixte('get', '/clients/:id', 'clients:read', lireClient);
+routeMixte('get', '/clients/:id', 'clients:read', lireClient, [requirePermission('clients:read')]);
 routeMixte('put', '/clients/:id', 'clients:write', modifierClient);
 routeMixte('delete', '/clients/:id', 'clients:write', desactiverClient);
 routeMixte('post', '/clients/:clientId/contacts', 'clients:write', creerContact);
