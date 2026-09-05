@@ -505,7 +505,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('garantit HT + TVA = TTC avec un taux réduit', async () => {
-      const res = await request(app).post('/api/devis').set('Cookie', session).send({ clientId, objet: 'Rénovation', lignes: [{ designation: 'Fourniture posée', quantite: 1, prixUnitaireHt: 5, tauxTva: 5.5 }] });
+      const res = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({ clientId, objet: 'Rénovation', lignes: [{ designation: 'Fourniture posée', quantite: 1, prixUnitaireHt: 5, tauxTva: 5.5 }] });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       assert.equal(res.body.totalHt + res.body.totalTva, res.body.totalTtc);
       assert.equal(res.body.totalTtc, 5.28);
