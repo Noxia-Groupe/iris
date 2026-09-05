@@ -474,6 +474,43 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
+  describe('Devis versionnés', () => {
+    let session = '';
+    let clientId = '';
+    let devisId = '';
+    let dossierId = '';
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      session = secours.body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
+        .send({ raisonSociale: 'TEST Client devis' });
+      clientId = client.body.id;
+    });
+
+    test('crée un brouillon de devis avec ses lignes et ses totaux calculés', async () => {
+      const res = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Installation contrôle d’accès',
+        lignes: [{ designation: 'Pose lecteur', quantite: 2, prixUnitaireHt: 120, tauxTva: 20 }],
+      });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.version, 1);
+      assert.equal(res.body.statut, 'BROUILLON');
+      assert.equal(res.body.totalHt, 240);
+      assert.equal(res.body.totalTtc, 288);
+      devisId = res.body.id;
+      dossierId = res.body.dossierId;
+    });
+
+    test('révise un devis sans modifier sa version validée', async () => {
+      const res = await request(app).post(`/api/devis/${devisId}/revisions`).set('Authorization', `Bearer ${session}`);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.version, 2);
+      assert.equal(res.body.statut, 'BROUILLON');
+      assert.equal(res.body.dossierId, dossierId);
+    });
+  });
+
   describe('Identité de la société', () => {
     let session = '';
     before(async () => {
