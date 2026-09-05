@@ -902,6 +902,12 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
 });
 
 app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
+  // Depuis Iris, l'ouverture d'une affaire est contractualisée par un devis accepté.
+  // Cette route historique est conservée pour donner une erreur explicite aux anciens clients,
+  // mais ne crée plus de chantier directement.
+  if (process.env.ALLOW_LEGACY_DIRECT_CHANTIER !== 'true') {
+    return res.status(410).json({ error: 'Un chantier est créé uniquement par conversion d’un devis accepté.' });
+  }
   try {
     const authUser = (req as AuthRequest).user!;
     const isAdmin = isAdminRole(authUser.role);
@@ -3092,11 +3098,16 @@ function devisErreur(res: express.Response, error: unknown) {
   if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
-const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true };
+const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true, conversion: true };
+async function nouveauNumeroDevis() {
+  const annee = new Date().getFullYear();
+  const [sequence] = await prisma.$queryRaw<{ dernierNumero: number }[]>(Prisma.sql`INSERT INTO "SequenceAffaire" ("annee", "dernierNumero") VALUES (${annee}, 1) ON CONFLICT ("annee") DO UPDATE SET "dernierNumero" = "SequenceAffaire"."dernierNumero" + 1 RETURNING "dernierNumero"`);
+  return `A${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+}
 const creerDevis: express.RequestHandler = async (req, res) => { try {
   const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
   if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
-  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, lignes: { create: payload.lignesCalculees } }, include: devisInclude });
+  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, lignes: { create: payload.lignesCalculees } }, include: devisInclude });
   res.status(201).json(decimalToNumber(devis));
 } catch (error) { devisErreur(res, error); } };
 const listerDevis: express.RequestHandler = async (_req, res) => { try { res.json(decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } }))); } catch (error) { devisErreur(res, error); } };
@@ -3105,12 +3116,37 @@ const creerRevision: express.RequestHandler = async (req, res) => { try {
   if (!precedent) throw new DevisSaisieError('Devis introuvable.');
   for (let tentative = 0; tentative < 3; tentative++) {
     const version = ((await prisma.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version ?? 0) + 1;
-    try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
+    try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
   }
 } catch (error) { devisErreur(res, error); } };
 routeMixte('get', '/devis', 'devis:read', listerDevis);
 routeMixte('post', '/devis', 'devis:write', creerDevis);
 routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision);
+const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
+  const statut = String((req.body ?? {}).statut || '');
+  if (!['BROUILLON', 'ENVOYE', 'ACCEPTE', 'REFUSE'].includes(statut)) throw new DevisSaisieError('Statut de devis invalide.');
+  const devis = await prisma.devis.update({ where: { id: paramId(req) }, data: { statut }, include: devisInclude });
+  res.json(decimalToNumber(devis));
+} catch (error) { devisErreur(res, error); } };
+routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis);
+
+// Une conversion ne démarre qu'après acceptation. Phase 5 cible le chantier, déjà natif ;
+// les cibles intervention, contrat et facture seront activées par leurs modules respectifs.
+const convertirDevis: express.RequestHandler = async (req, res) => { try {
+  const cible = String((req.body ?? {}).cible || '');
+  if (cible !== 'CHANTIER') throw new DevisSaisieError('Cible de conversion non disponible.');
+  const resultat = await prisma.$transaction(async tx => {
+    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true } });
+    if (!devis) throw new DevisSaisieError('Devis introuvable.');
+    if (devis.statut !== 'ACCEPTE') throw new DevisSaisieError('Seul un devis accepté peut être converti.');
+    if (devis.conversion) throw new DevisSaisieError('Ce devis a déjà été converti.');
+    const chantier = await tx.chantier.create({ data: { nom: devis.objet, client: devis.client.raisonSociale, numeroDevis: devis.numero, dateDebut: new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu: 0, budgetMainOeuvreVendu: devis.totalHt, heuresVendues: 0 } });
+    await tx.devisConversion.create({ data: { devisId: devis.id, cibleType: 'CHANTIER', cibleId: chantier.id } });
+    return chantier;
+  });
+  res.status(201).json(decimalToNumber(resultat));
+} catch (error) { devisErreur(res, error); } };
+routeMixte('post', '/devis/:id/convertir', 'devis:write', convertirDevis);
 
 // --- Société de l'instance (singleton, hors paramètres métier) ---
 app.get('/api/company', requireAuth, async (_req, res) => {
