@@ -101,6 +101,9 @@ model Chantier {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([responsableId])
+  @@index([commercialId])
 }
 
 model Categorie {
@@ -123,6 +126,7 @@ model LigneBudgetPrevisionnel {
   categorie Categorie @relation(fields: [categorieId], references: [id])
 
   @@unique([chantierId, categorieId])
+  @@index([categorieId])
 }
 
 model AchatReel {
@@ -144,6 +148,10 @@ model AchatReel {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([fournisseurId])
+  @@index([chantierId])
+  @@index([categorieId])
 }
 
 model Intervenant {
@@ -169,6 +177,9 @@ model PointageHeure {
   chantier    Chantier    @relation(fields: [chantierId], references: [id])
 
   createdAt DateTime @default(now())
+
+  @@index([intervenantId])
+  @@index([chantierId])
 }
 
 // Paramètres globaux configurables par les administrateurs (singleton).
@@ -305,6 +316,8 @@ model ClientContact {
   estSignataire    Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  @@index([clientId])
 }
 
 // Un client possède plusieurs sites. PostgreSQL garantit via des index partiels
@@ -327,6 +340,8 @@ model ClientSite {
   equipementsInstalles EquipementInstalle[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
+
+  @@index([clientId])
 }
 
 // Règles de rémunération commerciale (singleton), sorties du code pour être éditables par
@@ -403,6 +418,8 @@ model CatalogueCategorie {
   actif       Boolean               @default(true)
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
+
+  @@index([parentId])
 }
 
 // Catalogue natif : les prestations ne portent pas de stock ni de numéro de série.
@@ -549,6 +566,9 @@ model PlanningEvent {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([chantierId])
+  @@index([typeEventId])
 }
 
 
