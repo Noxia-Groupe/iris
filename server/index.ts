@@ -201,6 +201,7 @@ const requireSuperAdmin: express.RequestHandler = (req, res, next) => {
 const API_SCOPES = [
   'clients:read', 'clients:write',
   'catalogue:read', 'catalogue:write',
+  'equipements:read', 'equipements:write',
   'company:read',
   // Domaine chantier : les chantiers eux-mêmes, leurs achats et leurs heures. Un agent
   // qui prépare un devis ou un rapport a besoin des trois, qui décrivent le même objet.
@@ -2789,6 +2790,88 @@ const modifierSite: express.RequestHandler = async (req, res) => {
   }
 };
 
+// --- Parc d'équipements installés ---
+// Le matériel est toujours rattaché à un client ET à l'un de ses sites. Cette double
+// vérification interdit de déplacer un équipement vers le site d'un autre client en
+// devinant un identifiant. L'archivage préserve la série, la garantie et l'historique.
+const equipementInclude = { catalogueEquipement: true, clientSite: true };
+
+function equipementTexte(value: unknown, champ: string, requis = false) {
+  const texte = value == null ? '' : String(value).trim();
+  if (requis && !texte) throw new Error(`${champ} obligatoire.`);
+  if (texte.length > 500) throw new Error(`${champ} invalide.`);
+  return texte || null;
+}
+
+function equipementDate(value: unknown, champ: string) {
+  if (value == null || value === '') return null;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) throw new Error(`${champ} invalide.`);
+  return date;
+}
+
+async function equipementPayload(clientId: string, body: Record<string, unknown>) {
+  const catalogueEquipementId = equipementTexte(body.catalogueEquipementId, 'Modèle équipement', true)!;
+  const clientSiteId = equipementTexte(body.clientSiteId, 'Site', true)!;
+  const [modele, site] = await Promise.all([
+    prisma.catalogueEquipement.findUnique({ where: { id: catalogueEquipementId } }),
+    prisma.clientSite.findFirst({ where: { id: clientSiteId, clientId } }),
+  ]);
+  if (!modele) throw new Error('Modèle équipement introuvable.');
+  if (!site) throw new Error('Le site doit appartenir au client.');
+  return {
+    catalogueEquipementId,
+    clientSiteId,
+    numeroSerie: equipementTexte(body.numeroSerie, 'Numéro de série'),
+    imei: equipementTexte(body.imei, 'IMEI'),
+    adresseMac: equipementTexte(body.adresseMac, 'Adresse MAC'),
+    installeLe: equipementDate(body.installeLe, 'Date d’installation'),
+    garantieJusquAu: equipementDate(body.garantieJusquAu, 'Date de garantie'),
+    notes: equipementTexte(body.notes, 'Notes'),
+  };
+}
+
+function equipementApiError(res: express.Response, error: unknown) {
+  if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Ce numéro de série est déjà enregistré pour ce modèle.' });
+  const message = error instanceof Error ? error.message : 'Opération sur le parc impossible.';
+  if (message.includes('obligatoire') || message.includes('invalide') || message.includes('introuvable') || message.includes('appartenir')) {
+    return res.status(400).json({ error: message });
+  }
+  return res.status(500).json({ error: 'Opération sur le parc impossible.' });
+}
+
+const listerEquipementsClient: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  try {
+    const equipements = await prisma.equipementInstalle.findMany({
+      where: { clientId, ...(req.query.inclureArchives === 'true' ? {} : { statut: { not: 'ARCHIVE' } }) },
+      include: equipementInclude,
+      orderBy: [{ statut: 'asc' }, { createdAt: 'desc' }],
+    });
+    res.json(equipements);
+  } catch (error) {
+    equipementApiError(res, error);
+  }
+};
+
+const creerEquipementClient: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  try {
+    const data = await equipementPayload(clientId, (req.body ?? {}) as Record<string, unknown>);
+    res.status(201).json(await prisma.equipementInstalle.create({ data: { ...data, clientId }, include: equipementInclude }));
+  } catch (error) {
+    equipementApiError(res, error);
+  }
+};
+
+const archiverEquipementClient: express.RequestHandler = async (req, res) => {
+  const clientId = String(req.params.clientId);
+  const id = paramId(req);
+  const maj = await prisma.equipementInstalle.updateMany({ where: { id, clientId }, data: { statut: 'ARCHIVE' } });
+  if (!maj.count) return res.status(404).json({ error: 'Équipement introuvable.' });
+  res.json(await prisma.equipementInstalle.findUnique({ where: { id }, include: equipementInclude }));
+};
+
 routeMixte('get', '/clients', 'clients:read', listerClients);
 routeMixte('post', '/clients', 'clients:write', creerClient);
 routeMixte('get', '/clients/:id', 'clients:read', lireClient);
@@ -2798,6 +2881,9 @@ routeMixte('post', '/clients/:clientId/contacts', 'clients:write', creerContact)
 routeMixte('put', '/clients/:clientId/contacts/:id', 'clients:write', modifierContact);
 routeMixte('post', '/clients/:clientId/sites', 'clients:write', creerSite);
 routeMixte('put', '/clients/:clientId/sites/:id', 'clients:write', modifierSite);
+routeMixte('get', '/clients/:clientId/equipements', 'equipements:read', listerEquipementsClient);
+routeMixte('post', '/clients/:clientId/equipements', 'equipements:write', creerEquipementClient);
+routeMixte('post', '/clients/:clientId/equipements/:id/archiver', 'equipements:write', archiverEquipementClient);
 
 // --- Catalogue natif Iris ---
 // Trois familles partagent la même forme (référence, nom, prix, TVA, catégorie) et sont
