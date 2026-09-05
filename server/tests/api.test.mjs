@@ -55,7 +55,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.intervenant.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
-    await prisma.user.deleteMany({ where: { email: 'conducteur.test@iris.test' } });
+    await prisma.user.deleteMany({ where: { email: { in: ['conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test'] } } });
   };
 
   before(async () => {
@@ -626,6 +626,16 @@ if (!TEST_DATABASE_URL) {
       assert.equal(apres.body.permissions.includes('devis:read'), true);
       assert.equal((await request(app).get(`/api/clients/${clientId}`).set('Authorization', `Bearer ${conducteurSession}`)).status, 200);
       assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 201);
+    });
+
+    test('/api/me expose les droits hérités du type de compte, pas seulement les individuels', async () => {
+      const jwt = (await import('jsonwebtoken')).default;
+      const commercial = await prisma.user.create({ data: { email: 'commercial.permissions@iris.test', name: 'TEST Commercial permissions', role: 'COMMERCIAL' } });
+      const session = jwt.sign({ id: commercial.id }, process.env.JWT_SECRET);
+      const me = await request(app).get('/api/me').set('Authorization', `Bearer ${session}`);
+      assert.equal(me.status, 200);
+      // La colonne individuelle est vide : ces droits viennent obligatoirement du type.
+      assert.deepEqual(me.body.permissions, ['chantiers:read', 'clients:read', 'devis:read', 'devis:write']);
     });
 
     test('refuse une permission hors du vocabulaire', async () => {

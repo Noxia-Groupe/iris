@@ -119,6 +119,8 @@ const ONGLETS_CONDUCTEUR = ['fournisseurs', 'categories'];
 
 const MESSAGE_COMPTE_SUPERADMIN = "Seul un super administrateur peut gérer un compte super administrateur.";
 
+const DROITS_DEVIS = ['devis:read', 'devis:write'];
+
 const Admin = () => {
   // Rôle réel du compte connecté (la page est fermée aux commerciaux, cf. App.tsx),
   // resynchronisé avec le serveur : l'onglet « Modules » d'un compte promu super
@@ -1105,7 +1107,10 @@ const Admin = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {users.map(u => (
+                {users.map(u => {
+                  const aLeDroitDevis = DROITS_DEVIS.every((permission) => (u.permissions || []).includes(permission));
+                  const droitDevisVientDuRole = aLeDroitDevis && !DROITS_DEVIS.every((permission) => (u.permissionsIndividuelles || []).includes(permission));
+                  return (
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
                     <td className="px-4 py-4 text-sm text-gray-600">{u.email}</td>
@@ -1174,7 +1179,7 @@ const Admin = () => {
                     </td>
                     <td className="px-4 py-4">
                       <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <input type="checkbox" checked={['devis:read', 'devis:write'].every((permission) => (u.permissions || []).includes(permission))} disabled={!isSuper || (['devis:read', 'devis:write'].every((permission) => (u.permissions || []).includes(permission)) && !['devis:read', 'devis:write'].every((permission) => (u.permissionsIndividuelles || []).includes(permission)))} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], ['devis:read', 'devis:write'])} className="w-4 h-4" title={['devis:read', 'devis:write'].every((permission) => (u.permissions || []).includes(permission)) && !['devis:read', 'devis:write'].every((permission) => (u.permissionsIndividuelles || []).includes(permission)) ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
+                        <input type="checkbox" checked={aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROITS_DEVIS)} className="w-4 h-4" title={droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
                         <span className="text-xs text-gray-500">Droit devis</span>
                       </label>
                     </td>
@@ -1215,7 +1220,8 @@ const Admin = () => {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
