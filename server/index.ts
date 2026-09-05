@@ -2846,7 +2846,10 @@ const listerEquipementsClient: express.RequestHandler = async (req, res) => {
     const equipements = await prisma.equipementInstalle.findMany({
       where: { clientId, ...(req.query.inclureArchives === 'true' ? {} : { statut: { not: 'ARCHIVE' } }) },
       include: equipementInclude,
-      orderBy: [{ statut: 'asc' }, { createdAt: 'desc' }],
+      // 'desc' plutôt que 'asc' : alphabétiquement ARCHIVE < INSTALLE, un tri croissant
+      // ferait donc remonter le matériel archivé avant le matériel actif dès que
+      // inclureArchives=true est demandé — l'inverse de ce qu'on veut consulter en premier.
+      orderBy: [{ statut: 'desc' }, { createdAt: 'desc' }],
     });
     res.json(equipements);
   } catch (error) {
@@ -2867,9 +2870,13 @@ const creerEquipementClient: express.RequestHandler = async (req, res) => {
 const archiverEquipementClient: express.RequestHandler = async (req, res) => {
   const clientId = String(req.params.clientId);
   const id = paramId(req);
-  const maj = await prisma.equipementInstalle.updateMany({ where: { id, clientId }, data: { statut: 'ARCHIVE' } });
-  if (!maj.count) return res.status(404).json({ error: 'Équipement introuvable.' });
-  res.json(await prisma.equipementInstalle.findUnique({ where: { id }, include: equipementInclude }));
+  try {
+    const maj = await prisma.equipementInstalle.updateMany({ where: { id, clientId }, data: { statut: 'ARCHIVE' } });
+    if (!maj.count) return res.status(404).json({ error: 'Équipement introuvable.' });
+    res.json(await prisma.equipementInstalle.findUnique({ where: { id }, include: equipementInclude }));
+  } catch (error) {
+    equipementApiError(res, error);
+  }
 };
 
 routeMixte('get', '/clients', 'clients:read', listerClients);
