@@ -528,6 +528,8 @@ if (!TEST_DATABASE_URL) {
     test('ne crée un chantier qu’après acceptation, avec la même référence affaire', async () => {
       const avant = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(avant.status, 400);
+      const envoye = await request(app).put(`/api/devis/${devisId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
+      assert.equal(envoye.status, 200);
       const accepte = await request(app).put(`/api/devis/${devisId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
       assert.equal(accepte.status, 200);
       const conversion = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });

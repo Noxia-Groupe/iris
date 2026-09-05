@@ -3085,10 +3085,10 @@ function devisPayload(body: Record<string, unknown>) {
   const lignes = Array.isArray(body.lignes) ? body.lignes : [];
   if (!clientId || !objet || objet.length > 300 || !lignes.length) throw new DevisSaisieError('Client, objet et au moins une ligne sont requis.');
   const lignesCalculees = lignes.map((ligne, ordre) => {
-    const item = ligne as Record<string, unknown>, designation = String(item.designation || '').trim(), quantite = Number(item.quantite), prixUnitaireHt = Number(item.prixUnitaireHt), tauxTva = Number(item.tauxTva ?? 20);
-    if (!designation || !Number.isFinite(quantite) || quantite <= 0 || !Number.isFinite(prixUnitaireHt) || prixUnitaireHt < 0 || !Number.isFinite(tauxTva) || tauxTva < 0) throw new DevisSaisieError('Ligne de devis invalide.');
+    const item = ligne as Record<string, unknown>, designation = String(item.designation || '').trim(), nature = String(item.nature || 'MAIN_OEUVRE'), quantite = Number(item.quantite), prixUnitaireHt = Number(item.prixUnitaireHt), tauxTva = Number(item.tauxTva ?? 20);
+    if (!['MAIN_OEUVRE', 'FOURNITURE'].includes(nature) || !designation || !Number.isFinite(quantite) || quantite <= 0 || !Number.isFinite(prixUnitaireHt) || prixUnitaireHt < 0 || !Number.isFinite(tauxTva) || tauxTva < 0) throw new DevisSaisieError('Ligne de devis invalide.');
     const totalHt = centimes(quantite * prixUnitaireHt), totalTtc = centimes(totalHt * (1 + tauxTva / 100));
-    return { ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
+    return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
   });
   const totalHt = centimes(lignesCalculees.reduce((t, l) => t + l.totalHt, 0)), totalTtc = centimes(lignesCalculees.reduce((t, l) => t + l.totalTtc, 0));
   return { clientId, objet, lignesCalculees, totalHt, totalTva: centimes(totalTtc - totalHt), totalTtc };
@@ -3116,17 +3116,20 @@ const creerRevision: express.RequestHandler = async (req, res) => { try {
   if (!precedent) throw new DevisSaisieError('Devis introuvable.');
   for (let tentative = 0; tentative < 3; tentative++) {
     const version = ((await prisma.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version ?? 0) + 1;
-    try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
+    try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
   }
 } catch (error) { devisErreur(res, error); } };
 routeMixte('get', '/devis', 'devis:read', listerDevis);
 routeMixte('post', '/devis', 'devis:write', creerDevis);
 routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision);
+const TRANSITIONS_DEVIS: Record<string, string[]> = { BROUILLON: ['ENVOYE'], ENVOYE: ['ACCEPTE', 'REFUSE', 'BROUILLON'], ACCEPTE: [], REFUSE: [] };
 const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
   const statut = String((req.body ?? {}).statut || '');
-  if (!['BROUILLON', 'ENVOYE', 'ACCEPTE', 'REFUSE'].includes(statut)) throw new DevisSaisieError('Statut de devis invalide.');
-  const devis = await prisma.devis.update({ where: { id: paramId(req) }, data: { statut }, include: devisInclude });
-  res.json(decimalToNumber(devis));
+  const devis = await prisma.devis.findUnique({ where: { id: paramId(req) } });
+  if (!devis) return void res.status(404).json({ error: 'Devis introuvable.' });
+  if (!TRANSITIONS_DEVIS[devis.statut]?.includes(statut)) throw new DevisSaisieError(`Transition ${devis.statut} → ${statut} interdite.`);
+  const maj = await prisma.devis.update({ where: { id: devis.id }, data: { statut }, include: devisInclude });
+  res.json(decimalToNumber(maj));
 } catch (error) { devisErreur(res, error); } };
 routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis);
 
@@ -3136,12 +3139,15 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   const cible = String((req.body ?? {}).cible || '');
   if (cible !== 'CHANTIER') throw new DevisSaisieError('Cible de conversion non disponible.');
   const resultat = await prisma.$transaction(async tx => {
-    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true } });
+    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, lignes: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
     if (devis.statut !== 'ACCEPTE') throw new DevisSaisieError('Seul un devis accepté peut être converti.');
     if (devis.conversion) throw new DevisSaisieError('Ce devis a déjà été converti.');
-    const chantier = await tx.chantier.create({ data: { nom: devis.objet, client: devis.client.raisonSociale, numeroDevis: devis.numero, dateDebut: new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu: 0, budgetMainOeuvreVendu: devis.totalHt, heuresVendues: 0 } });
-    await tx.devisConversion.create({ data: { devisId: devis.id, cibleType: 'CHANTIER', cibleId: chantier.id } });
+    const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
+    const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
+    const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
+    const chantier = await tx.chantier.create({ data: { nom: devis.objet, client: devis.client.raisonSociale, numeroDevis: devis.numero, dateDebut: new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues } });
+    await tx.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
     return chantier;
   });
   res.status(201).json(decimalToNumber(resultat));
