@@ -359,6 +359,23 @@ const Admin = () => {
     }
   };
 
+  const handleTogglePermission = async (userId: string, permissions: string[], permission: string | string[]) => {
+    const cible = Array.isArray(permission) ? permission : [permission];
+    const toutesActives = cible.every((item) => permissions.includes(item));
+    const suivantes = toutesActives
+      ? permissions.filter((item) => !cible.includes(item))
+      : [...new Set([...permissions, ...cible])];
+    try {
+      const res = await apiFetch(`/users/${userId}/permissions`, { method: 'PUT', body: JSON.stringify({ permissions: suivantes }) });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'Impossible de modifier les permissions individuelles.');
+        return;
+      }
+      fetchData();
+    } catch { alert('Impossible de joindre le serveur.'); }
+  };
+
   // Active ou désactive un compte. Une désactivation vaut départ de l'entreprise : la
   // connexion est refusée et le compte disparaît des listes d'attribution (conducteur
   // responsable, commercial rattaché), MAIS son historique est conservé — les chantiers
@@ -1082,6 +1099,7 @@ const Admin = () => {
                   <th className="px-4 py-4 font-semibold">Rôle d'accès</th>
                   <th className="px-4 py-4 font-semibold">Commercial</th>
                   <th className="px-4 py-4 font-semibold">Finance</th>
+                  <th className="px-4 py-4 font-semibold">Droit devis</th>
                   <th className="px-4 py-4 font-semibold">Actif</th>
                   <th className="px-4 py-4 font-semibold text-right">Actions</th>
                 </tr>
@@ -1153,6 +1171,12 @@ const Admin = () => {
                           <span className="text-xs text-gray-500">{u.accesFinance ? 'Oui' : 'Non'}</span>
                         </label>
                       )}
+                    </td>
+                    <td className="px-4 py-4">
+                      <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <input type="checkbox" checked={['devis:read', 'devis:write'].every((permission) => (u.permissions || []).includes(permission))} disabled={!isSuper} onChange={() => handleTogglePermission(u.id, u.permissions || [], ['devis:read', 'devis:write'])} className="w-4 h-4" title="Autoriser la consultation et la création de devis" />
+                        <span className="text-xs text-gray-500">Droit devis</span>
+                      </label>
                     </td>
                     {/* Compte actif : décocher vaut départ de l'entreprise. La connexion est
                         refusée et le compte sort des listes d'attribution, mais son
