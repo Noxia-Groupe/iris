@@ -617,8 +617,14 @@ if (!TEST_DATABASE_URL) {
     test('refuse un devis sans permission, puis l’autorise après attribution individuelle', async () => {
       const corps = { clientId, objet: 'TEST Devis permission', lignes: [{ designation: 'Test', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] };
       assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 403);
+      const avant = await request(app).get('/api/me').set('Authorization', `Bearer ${conducteurSession}`);
+      assert.equal(avant.status, 200);
+      assert.equal(avant.body.permissions.includes('devis:read'), false);
       const attribution = await request(app).put(`/api/users/${conducteurId}/permissions`).set('Authorization', `Bearer ${superSession}`).send({ permissions: ['devis:read', 'devis:write', 'clients:read'] });
       assert.equal(attribution.status, 200);
+      const apres = await request(app).get('/api/me').set('Authorization', `Bearer ${conducteurSession}`);
+      assert.equal(apres.body.permissions.includes('devis:read'), true);
+      assert.equal((await request(app).get(`/api/clients/${clientId}`).set('Authorization', `Bearer ${conducteurSession}`)).status, 200);
       assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 201);
     });
 
