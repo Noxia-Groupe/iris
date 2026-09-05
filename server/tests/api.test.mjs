@@ -30,6 +30,8 @@ if (!TEST_DATABASE_URL) {
   let cleApi = '';
 
   const nettoyer = async () => {
+    // Les devis dépendent du client ; ils doivent être retirés avant la fiche client.
+    await prisma.devis.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Le parc dépend à la fois du client/site et du catalogue : il part donc en premier.
     await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });

@@ -3070,6 +3070,54 @@ routeMixte('post', '/catalogue/:family', 'catalogue:write', creerFicheCatalogue)
 routeMixte('put', '/catalogue/:family/:id', 'catalogue:write', modifierFicheCatalogue);
 routeMixte('delete', '/catalogue/:family/:id', 'catalogue:write', desactiverFicheCatalogue);
 
+// --- Devis natifs versionnés ---
+function devisPayload(body: Record<string, unknown>) {
+  const clientId = String(body.clientId || '').trim();
+  const objet = String(body.objet || '').trim();
+  const lignes = Array.isArray(body.lignes) ? body.lignes : [];
+  if (!clientId || !objet || objet.length > 300 || lignes.length === 0) throw new Error('Client, objet et au moins une ligne sont requis.');
+  const lignesCalculees = lignes.map((ligne, ordre) => {
+    const item = ligne as Record<string, unknown>;
+    const designation = String(item.designation || '').trim();
+    const quantite = Number(item.quantite);
+    const prixUnitaireHt = Number(item.prixUnitaireHt);
+    const tauxTva = Number(item.tauxTva ?? 20);
+    if (!designation || !Number.isFinite(quantite) || quantite <= 0 || !Number.isFinite(prixUnitaireHt) || prixUnitaireHt < 0 || !Number.isFinite(tauxTva) || tauxTva < 0) throw new Error('Ligne de devis invalide.');
+    const totalHt = quantite * prixUnitaireHt;
+    return { ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc: totalHt * (1 + tauxTva / 100) };
+  });
+  const totalHt = lignesCalculees.reduce((total, ligne) => total + ligne.totalHt, 0);
+  const totalTtc = lignesCalculees.reduce((total, ligne) => total + ligne.totalTtc, 0);
+  return { clientId, objet, lignesCalculees, totalHt, totalTva: totalTtc - totalHt, totalTtc };
+}
+
+function devisErreur(res: express.Response, error: unknown) {
+  const message = error instanceof Error ? error.message : 'Opération devis impossible.';
+  if (message.includes('requis') || message.includes('invalide') || message.includes('introuvable')) return res.status(400).json({ error: message });
+  return res.status(500).json({ error: 'Opération devis impossible.' });
+}
+
+app.post('/api/devis', requireAuth, async (req, res) => {
+  try {
+    const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
+    const client = await prisma.client.findUnique({ where: { id: payload.clientId } });
+    if (!client) throw new Error('Client introuvable.');
+    const dossierId = crypto.randomUUID();
+    const devis = await prisma.devis.create({ data: { dossierId, version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, lignes: { create: payload.lignesCalculees } }, include: { lignes: true, client: true } });
+    res.status(201).json(decimalToNumber(devis));
+  } catch (error) { devisErreur(res, error); }
+});
+
+app.post('/api/devis/:id/revisions', requireAuth, async (req, res) => {
+  try {
+    const precedent = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } } } });
+    if (!precedent) throw new Error('Devis introuvable.');
+    const version = (await prisma.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version! + 1;
+    const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: { lignes: true, client: true } });
+    res.status(201).json(decimalToNumber(devis));
+  } catch (error) { devisErreur(res, error); }
+});
+
 // --- Société de l'instance (singleton, hors paramètres métier) ---
 app.get('/api/company', requireAuth, async (_req, res) => {
   try {
