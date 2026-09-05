@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
-import { ClientAutocomplete } from '../components/ClientAutocomplete';
-import { DevisAutocomplete } from '../components/DevisAutocomplete';
 import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN } from '../roles';
 import { refreshModules } from '../modules';
 
@@ -150,7 +148,7 @@ const Admin = () => {
   // Rôle sélectionné dans le formulaire "Autoriser un compte" — contrôlé uniquement pour
   // afficher la case "estCommercial" quand le rôle choisi est Administrateur.
   const [newUserRole, setNewUserRole] = useState('CONDUCTEUR_TRAVAUX');
-  // Préremplissage du budget global vendu depuis un devis Odoo sélectionné (formulaire
+  // Préremplissage du budget global vendu depuis la référence d'affaire saisie (formulaire
   // de création de chantier ci-dessous) — champ non contrôlé, on écrit directement dedans.
   const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
   // Modules activables (onglet « Modules », superadmin) : état global du Planning.
@@ -515,16 +513,11 @@ const Admin = () => {
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Client</label>
-              <ClientAutocomplete required />
+              <input required name="client" className="form-input" placeholder="Nom du client" />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">N° de Devis</label>
-              <DevisAutocomplete
-                required
-                onMontantFound={(montant) => {
-                  if (nouveauChantierBudgetRef.current) nouveauChantierBudgetRef.current.value = String(montant);
-                }}
-              />
+              <input required name="numeroDevis" className="form-input" placeholder="Référence d'affaire (ex : A26-0001)" />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Responsable Chantier</label>

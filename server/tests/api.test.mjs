@@ -47,6 +47,11 @@ if (!TEST_DATABASE_URL) {
     await prisma.achatReel.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.pointageHeure.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.chantier.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
+    // Un chantier né d'une conversion porte la raison sociale du client dans `client` ; son
+    // `nom` reprend l'objet du devis et n'a donc pas le préfixe TEST. Sans cette ligne,
+    // chaque exécution en laisserait un derrière elle. Elle vient APRÈS les achats et les
+    // heures, qui référencent le chantier.
+    await prisma.chantier.deleteMany({ where: { client: { startsWith: 'TEST ' } } });
     await prisma.intervenant.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
@@ -543,6 +548,58 @@ if (!TEST_DATABASE_URL) {
       const res = await request(app).post('/api/chantiers').set('Authorization', `Bearer ${session}`).send({ nom: 'TEST interdit' });
       assert.equal(res.status, 410);
     });
+
+    // La référence d'affaire d'un chantier issu d'une conversion est celle qu'Iris émet
+    // (A26-0001). Tant que la validation exigeait le format de l'ERP tiers (SXXXXX), ce
+    // champ n'acceptait plus aucune valeur qu'Iris sache produire : le corriger était
+    // impossible sur les chantiers créés par conversion.
+    test('la référence d’affaire se corrige au format qu’Iris émet', async () => {
+      // Affaire dédiée : le test modifie la référence, il ne peut donc pas emprunter
+      // celle d'un autre test sans le rendre dépendant de l'ordre d'exécution.
+      const devis = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, objet: 'TEST Référence', lignes: [{ designation: 'L', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      await request(app).put(`/api/devis/${devis.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
+      await request(app).put(`/api/devis/${devis.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
+      const conversion = await request(app).post(`/api/devis/${devis.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      const chantier = conversion.body;
+      assert.match(chantier.numeroDevis, /^A\d{2}-\d{4,}$/);
+
+      const ancienFormat = await request(app).patch(`/api/chantiers/${chantier.id}`)
+        .set('Authorization', `Bearer ${session}`).send({ numeroDevis: 'S00700' });
+      assert.equal(ancienFormat.status, 400);
+
+      const nouveau = `A${String(new Date().getFullYear()).slice(-2)}-9999`;
+      const accepte = await request(app).patch(`/api/chantiers/${chantier.id}`)
+        .set('Authorization', `Bearer ${session}`).send({ numeroDevis: nouveau });
+      assert.equal(accepte.status, 200, JSON.stringify(accepte.body));
+      assert.equal(accepte.body.numeroDevis, nouveau);
+    });
+  });
+
+  // Iris n'interroge plus aucun ERP tiers : ces routes ont été retirées avec le module de
+  // lecture externe et l'écran de rapprochement qu'elles alimentaient. Le test échoue si
+  // l'une d'elles réapparaît par mégarde.
+  describe('Retrait de l’intégration ERP tierce', () => {
+    let session = '';
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      session = secours.body.token;
+    });
+
+    for (const route of [
+      '/api/odoo/clients',
+      '/api/odoo/devis',
+      '/api/odoo/devis/1/materiel',
+      '/api/odoo/devis/1/adresse',
+      '/api/suivi-financier',
+      '/api/suivi-financier/anciens',
+    ]) {
+      test(`${route} n’existe plus`, async () => {
+        const res = await request(app).get(route).set('Authorization', `Bearer ${session}`);
+        assert.equal(res.status, 404, `${route} répond encore ${res.status}`);
+      });
+    }
   });
 
   describe('Identité de la société', () => {

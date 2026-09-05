@@ -1,36 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Archive, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
-import { TYPES_CHANTIER } from '../chantierTypes';
-import { ClientAutocomplete } from '../components/ClientAutocomplete';
-import { DevisAutocomplete } from '../components/DevisAutocomplete';
 import { isAdminRole, roleLabel } from '../roles';
-import { useModules } from '../modules';
 
 const ListeChantiers = () => {
   const navigate = useNavigate();
-  // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
-  // de société n'est écrit dans l'interface.
-  const { libelleBaremeReduit } = useModules();
   const [chantiers, setChantiers] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [commerciaux, setCommerciaux] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
   const [filterMaterielDepasse, setFilterMaterielDepasse] = useState(false);
   const [filterHeuresDepasse, setFilterHeuresDepasse] = useState(false);
-  // Préremplissage du budget global vendu, du "Dont Matériel" et de l'adresse depuis un
-  // devis Odoo sélectionné (formulaire de création ci-dessous) — champs non contrôlés, on
-  // écrit directement dedans.
-  const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
-  const nouveauChantierMaterielRef = useRef<HTMLInputElement>(null);
-  const nouveauChantierAdresseRef = useRef<HTMLInputElement>(null);
-  // Client Odoo sélectionné dans le formulaire de création : sert à ne proposer, dans le
-  // champ "N° de Devis", que les devis de ce client. Remis à null dès que le champ Client
-  // redevient une saisie libre (cf. ClientAutocomplete.onSelect).
-  const [nouveauChantierClientId, setNouveauChantierClientId] = useState<number | null>(null);
 
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -39,10 +19,6 @@ const ListeChantiers = () => {
 
   useEffect(() => {
     fetchChantiers();
-    // La liste des conducteurs (pour l'affectation) n'est accessible qu'aux admins.
-    if (isAdminRole(userRole)) fetchUsers();
-    // Le commercial rattaché est à choisir dès la création, par l'admin comme le conducteur.
-    if (userRole !== 'COMMERCIAL') fetchCommerciaux();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -55,28 +31,6 @@ const ListeChantiers = () => {
       console.error(e);
     } finally {
       setLoading(false);
-    }
-  };
-
-  // /conducteurs ne renvoie que les comptes actifs : un compte désactivé (départ de
-  // l'entreprise) ne peut plus se voir attribuer un chantier.
-  const fetchUsers = async () => {
-    try {
-      const res = await apiFetch('/conducteurs');
-      const data = await res.json();
-      if (Array.isArray(data)) setUsers(data);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchCommerciaux = async () => {
-    try {
-      const res = await apiFetch('/commerciaux');
-      const data = await res.json();
-      if (Array.isArray(data)) setCommerciaux(data);
-    } catch (e) {
-      console.error(e);
     }
   };
 
@@ -137,37 +91,6 @@ const ListeChantiers = () => {
       if (forced.ok) fetchChantiers();
       else { const f = await forced.json().catch(() => ({})); alert(f.error || 'Erreur lors de la suppression du chantier.'); }
     } catch (e) {
-      alert('Impossible de joindre le serveur.');
-    }
-  };
-
-  // Création d'un chantier (admin et conducteur). Un conducteur en devient le responsable.
-  const handleCreateChantier = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const formData = new FormData(form);
-    // Plusieurs cases "types" partagent le même name : entries() n'en garderait qu'une.
-    const types = formData.getAll('types');
-    // Un groupe de cases à cocher ne peut pas porter l'attribut HTML `required` pour
-    // exiger "au moins une" (il exigerait alors qu'elles soient toutes cochées) : la
-    // vérification se fait donc ici, en JS.
-    if (types.length === 0) {
-      alert('Veuillez sélectionner au moins un type de chantier.');
-      return;
-    }
-    const data = { ...Object.fromEntries(formData.entries()), types };
-    try {
-      const res = await apiFetch('/chantiers', { method: 'POST', body: JSON.stringify(data) });
-      if (res.ok) {
-        form.reset();
-        setNouveauChantierClientId(null);
-        setShowForm(false);
-        fetchChantiers();
-      } else {
-        const d = await res.json();
-        alert(d.error || 'Erreur lors de la création du chantier.');
-      }
-    } catch (err) {
       alert('Impossible de joindre le serveur.');
     }
   };
@@ -351,103 +274,6 @@ const ListeChantiers = () => {
         </div>
       </div>
 
-      {showForm && userRole !== 'COMMERCIAL' && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
-          <h2 className="text-lg font-bold text-primary-dark mb-4">Nouveau chantier</h2>
-          <form onSubmit={handleCreateChantier} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="form-group mb-0">
-              <label className="form-label">Nom du Chantier</label>
-              <input required name="nom" className="form-input" />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Client</label>
-              <ClientAutocomplete required onSelect={(c) => setNouveauChantierClientId(c ? c.id : null)} />
-            </div>
-            {isAdminRole(userRole) ? (
-              <div className="form-group mb-0">
-                <label className="form-label">Conducteur responsable</label>
-                <select required name="responsableId" className="form-input" defaultValue="">
-                  <option value="" disabled>Sélectionner un conducteur...</option>
-                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
-              </div>
-            ) : (
-              <div className="form-group mb-0">
-                <label className="form-label">Conducteur responsable</label>
-                <div className="form-input bg-gray-50 text-gray-500">Vous-même (attribution automatique)</div>
-              </div>
-            )}
-            <div className="form-group mb-0">
-              <label className="form-label">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
-              <select required={commerciaux.length > 0} name="commercialId" className="form-input" defaultValue="">
-                <option value="" disabled>Sélectionner un commercial...</option>
-                {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">N° de Devis</label>
-              <DevisAutocomplete
-                required
-                partnerId={nouveauChantierClientId}
-                onMontantFound={(montant) => {
-                  if (nouveauChantierBudgetRef.current) nouveauChantierBudgetRef.current.value = String(montant);
-                }}
-                onMaterielFound={(montant) => {
-                  if (nouveauChantierMaterielRef.current) nouveauChantierMaterielRef.current.value = String(montant);
-                }}
-                onAdresseFound={(adresse) => {
-                  if (nouveauChantierAdresseRef.current) nouveauChantierAdresseRef.current.value = adresse;
-                }}
-              />
-            </div>
-            <div className="form-group mb-0 md:col-span-2">
-              <label className="form-label">Adresse du site (optionnel)</label>
-              <input ref={nouveauChantierAdresseRef} name="adresse" className="form-input" placeholder="Préremplie depuis le devis sélectionné, ou à saisir librement..." />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Date Début</label>
-              <input required type="date" name="dateDebut" className="form-input" />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Budget Global (€ HT)</label>
-              <input ref={nouveauChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" className="form-input" />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Total Heures Vendues (h)</label>
-              <input required type="number" step="0.5" name="heuresVendues" className="form-input" />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Dont Matériel (€ HT)</label>
-              <input ref={nouveauChantierMaterielRef} required type="number" step="0.01" name="budgetMaterielVendu" className="form-input" />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
-              <input required type="number" step="0.01" name="budgetMainOeuvreVendu" className="form-input" />
-            </div>
-            <div className="form-group mb-0 md:col-span-2">
-              <label className="form-label">Type(s) de chantier (au moins un requis)</label>
-              <div className="flex flex-wrap gap-2">
-                {TYPES_CHANTIER.map((t) => (
-                  <label key={t} className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
-                    <input type="checkbox" name="types" value={t} className="w-4 h-4" />
-                    {t}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="form-group mb-0 md:col-span-2">
-              <label className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors w-fit">
-                <input type="checkbox" name="baremeReduit" value="true" className="w-4 h-4" />
-                {libelleBaremeReduit} (barème de commission commerciale réduit)
-              </label>
-            </div>
-            <div className="md:col-span-2 flex gap-2 mt-2">
-              <button className="btn btn-primary px-8">Créer le chantier</button>
-              <button type="button" onClick={() => setShowForm(false)} className="btn bg-white border">Annuler</button>
-            </div>
-          </form>
-        </div>
-      )}
 
       <div className="flex flex-wrap items-center gap-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <span className="text-sm font-semibold text-gray-500 flex items-center gap-2"><Filter size={16} /> Filtrer :</span>
