@@ -30,6 +30,8 @@ if (!TEST_DATABASE_URL) {
   let cleApi = '';
 
   const nettoyer = async () => {
+    // Le parc dépend à la fois du client/site et du catalogue : il part donc en premier.
+    await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientContact.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.client.deleteMany({ where: { raisonSociale: { startsWith: 'TEST ' } } });
@@ -409,6 +411,66 @@ if (!TEST_DATABASE_URL) {
       const res = await request(app).delete(`/api/catalogue/equipements/${creation.body.id}`).set('Authorization', `Bearer ${session}`);
       assert.equal(res.status, 200);
       assert.equal(res.body.actif, false);
+    });
+  });
+
+  describe('Parc d’équipements installés', () => {
+    let session = '';
+    let clientId = '';
+    let siteId = '';
+    let modeleId = '';
+    let equipementId = '';
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      session = secours.body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
+        .send({ raisonSociale: 'TEST Parc client' });
+      clientId = client.body.id;
+      const site = await request(app).post(`/api/clients/${clientId}/sites`).set('Authorization', `Bearer ${session}`)
+        .send({ nom: 'TEST Site parc', adresse: '1 rue du Parc', codePostal: '14000', ville: 'Caen', estSiteIntervention: true });
+      siteId = site.body.id;
+      const modele = await request(app).post('/api/catalogue/equipements').set('Authorization', `Bearer ${session}`)
+        .send({ reference: 'TEST-PARC-CAM', nom: 'Caméra parc', fabricant: 'Iris', prixVenteHt: 250 });
+      modeleId = modele.body.id;
+    });
+
+    test('installe un équipement sérialisé chez un client et le relit avec sa garantie', async () => {
+      const creation = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
+        .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-001', garantieJusquAu: '2028-09-01', notes: 'Baie principale' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.equal(creation.body.numeroSerie, 'TEST-SN-001');
+      assert.equal(creation.body.statut, 'INSTALLE');
+      assert.equal(creation.body.catalogueEquipement.reference, 'TEST-PARC-CAM');
+      equipementId = creation.body.id;
+
+      const parc = await request(app).get(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`);
+      assert.equal(parc.status, 200);
+      assert.equal(parc.body.length, 1);
+      assert.equal(parc.body[0].clientSite.id, siteId);
+      assert.equal(parc.body[0].garantieJusquAu.slice(0, 10), '2028-09-01');
+    });
+
+    test('refuse un équipement rattaché au site d’un autre client', async () => {
+      const autre = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
+        .send({ raisonSociale: 'TEST Autre client parc' });
+      const autreSite = await request(app).post(`/api/clients/${autre.body.id}/sites`).set('Authorization', `Bearer ${session}`)
+        .send({ nom: 'TEST Site autre client', adresse: '2 rue des Tests', codePostal: '14000', ville: 'Caen' });
+      const res = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
+        .send({ catalogueEquipementId: modeleId, clientSiteId: autreSite.body.id, numeroSerie: 'TEST-SN-002' });
+      assert.equal(res.status, 400);
+      assert.match(res.body.error, /site/i);
+    });
+
+    test('archive sans supprimer l’équipement ni son numéro de série', async () => {
+      const archive = await request(app).post(`/api/clients/${clientId}/equipements/${equipementId}/archiver`).set('Authorization', `Bearer ${session}`);
+      assert.equal(archive.status, 200);
+      assert.equal(archive.body.statut, 'ARCHIVE');
+      assert.equal(archive.body.numeroSerie, 'TEST-SN-001');
+
+      const parc = await request(app).get(`/api/clients/${clientId}/equipements?inclureArchives=true`).set('Authorization', `Bearer ${session}`);
+      assert.equal(parc.status, 200);
+      assert.equal(parc.body.some((e) => e.id === equipementId && e.statut === 'ARCHIVE'), true);
     });
   });
 

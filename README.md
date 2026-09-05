@@ -87,7 +87,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [x] Authentification : Microsoft Entra ID uniquement (suppression connexion locale, mots de passe, seed de comptes locaux)
 - [x] Phase 2 : Paramétrage de l’instance — société (écran + registre des entreprises), modules, profils et rôles ; clés API d’intégration et accès de secours superadmin
 - [x] Phase 3 : Référentiel clients natif — clients, contacts, sites de facturation et d’intervention
-- [ ] Phase 4 : Catalogue — fait : modèles, migrations, catégories, API et écran de gestion ; reste le parc d’équipements installé (`EquipementInstalle` existe en base, sans écran)
+- [x] Phase 4 : Catalogue et parc d’équipements installé — modèles, migrations, catégories, API, écran de gestion, traçabilité série/IMEI/MAC, rattachement client/site, garantie et archivage historique.
 - [ ] Phase 5 : Devis versionnés et conversion contrôlée vers intervention, chantier, contrat ou facture
 - [ ] Phase 6 : Interventions SAV + travaux, planning et application mobile technicien
 - [ ] Phase 7 : Contrats et maintenance cyclique — génération des interventions à planifier avec durée prévisionnelle
