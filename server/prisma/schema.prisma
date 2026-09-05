@@ -101,6 +101,9 @@ model Chantier {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([responsableId])
+  @@index([commercialId])
 }
 
 model Categorie {
@@ -123,6 +126,7 @@ model LigneBudgetPrevisionnel {
   categorie Categorie @relation(fields: [categorieId], references: [id])
 
   @@unique([chantierId, categorieId])
+  @@index([categorieId])
 }
 
 model AchatReel {
@@ -144,6 +148,10 @@ model AchatReel {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([fournisseurId])
+  @@index([chantierId])
+  @@index([categorieId])
 }
 
 model Intervenant {
@@ -169,6 +177,9 @@ model PointageHeure {
   chantier    Chantier    @relation(fields: [chantierId], references: [id])
 
   createdAt DateTime @default(now())
+
+  @@index([intervenantId])
+  @@index([chantierId])
 }
 
 // Paramètres globaux configurables par les administrateurs (singleton).
@@ -549,6 +560,8 @@ model PlanningEvent {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([chantierId])
 }
 
 
