@@ -362,6 +362,25 @@ const Admin = () => {
     }
   };
 
+  // Rattachement hiérarchique d'un collaborateur à un compte « Responsable ». C'est cette
+  // donnée, et elle seule, qui ouvre à un responsable les affaires de son équipe : la
+  // saisie des achats et des heures, et les statistiques de ses conducteurs. Le serveur
+  // applique la même règle — il n'a jamais déduit de périmètre de l'intitulé du rôle.
+  const handleResponsableHierarchique = async (userId: string, responsableHierarchiqueId: string) => {
+    try {
+      const res = await apiFetch(`/users/${userId}/responsable-hierarchique`, {
+        method: 'PATCH',
+        body: JSON.stringify({ responsableHierarchiqueId: responsableHierarchiqueId || null }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'Impossible de modifier le rattachement hiérarchique.');
+        return;
+      }
+      fetchData();
+    } catch { alert('Impossible de joindre le serveur.'); }
+  };
+
   const handleTogglePermission = async (userId: string, permissions: string[], permission: string | string[]) => {
     const cible = Array.isArray(permission) ? permission : [permission];
     const toutesActives = cible.every((item) => permissions.includes(item));
@@ -1100,6 +1119,7 @@ const Admin = () => {
                   <th className="px-4 py-4 font-semibold">Email</th>
 
                   <th className="px-4 py-4 font-semibold">Rôle d'accès</th>
+                  <th className="px-4 py-4 font-semibold">Responsable</th>
                   <th className="px-4 py-4 font-semibold">Commercial</th>
                   <th className="px-4 py-4 font-semibold">Finance</th>
                   <th className="px-4 py-4 font-semibold">Droit devis</th>
@@ -1109,6 +1129,9 @@ const Admin = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {users.map(u => {
+                  // Seul un compte « Responsable » actif peut superviser une équipe : le
+                  // serveur refuse tout autre rattachement, la liste reflète cette règle.
+                  const responsablesDisponibles = users.filter((r) => r.role === 'RESPONSABLE' && r.actif !== false && r.id !== u.id);
                   const aLeDroitDevis = DROITS_DEVIS.every((permission) => (u.permissions || []).includes(permission));
                   const droitDevisVientDuRole = aLeDroitDevis && !DROITS_DEVIS.every((permission) => (u.permissionsIndividuelles || []).includes(permission));
                   return (
@@ -1140,6 +1163,29 @@ const Admin = () => {
                         <option value="ADMIN">Administrateur</option>
                         {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
                       </select>
+                    </td>
+                    {/* Rattachement hiérarchique : sans lui, un compte « Responsable »
+                        n'a de périmètre que ses propres affaires. Il se déclare ici, il
+                        ne se devine nulle part. */}
+                    <td className="px-4 py-4">
+                      {responsablesDisponibles.length === 0 ? (
+                        <span className="text-gray-300" title="Aucun compte « Responsable » actif à qui rattacher ce collaborateur.">—</span>
+                      ) : (
+                        <select
+                          className="form-input py-1 px-3 text-sm rounded min-w-[10rem]"
+                          value={u.responsableHierarchiqueId || ''}
+                          disabled={!peutGererCompte(u)}
+                          onChange={(e) => handleResponsableHierarchique(u.id, e.target.value)}
+                          title={peutGererCompte(u)
+                            ? 'Responsable qui supervise ce collaborateur (périmètre de lecture, de saisie et de statistiques)'
+                            : MESSAGE_COMPTE_SUPERADMIN}
+                        >
+                          <option value="">Aucun</option>
+                          {responsablesDisponibles.map((r) => (
+                            <option key={r.id} value={r.id}>{r.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                     <td className="px-4 py-4">
                       {isAdminRole(u.role) ? (

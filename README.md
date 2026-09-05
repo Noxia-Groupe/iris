@@ -39,12 +39,44 @@ d'administration n'est créé.
 
 Les listes du domaine chantier (chantiers, achats, heures) ne renvoient que ce que le
 demandeur a le droit de voir : un conducteur ses chantiers, un commercial ceux qu'il a
-vendus, un administrateur l'ensemble. Une clé d'intégration, qui n'a pas de rôle, est
+vendus, un responsable ceux de l'équipe qui lui est explicitement rattachée, un
+administrateur l'ensemble. Une clé d'intégration, qui n'a pas de rôle, est
 cadrée par ses scopes — `chantiers:read` pour le domaine, `finances:read` pour y ajouter
 les montants vendus et la marge.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.
+
+## Périmètre d'écriture du suivi Travaux
+
+Les achats et les heures d'une affaire font son coût réel, ses heures consommées et donc
+sa marge : ce ne sont pas des lignes de journal anodines. Leur écriture (saisie,
+correction, suppression) est réservée à trois profils, affaire par affaire :
+
+- un **administrateur**, partout ;
+- le **conducteur de travaux** désigné responsable de l'affaire ;
+- le **responsable hiérarchique** dont l'équipe déclarée conduit l'affaire
+  (cf. [`docs/MODELE-DROITS-COMPTES.md`](docs/MODELE-DROITS-COMPTES.md)).
+
+Tout le reste — technicien, comptable, commercial, assistante commerciale, clé
+d'intégration — lit selon son périmètre mais n'écrit pas. Une affaire hors périmètre
+répond « introuvable », comme partout ailleurs : son existence n'est pas révélée.
+
+Trois invariants complètent ce contrôle :
+
+- **montants et heures validés** : un nombre non fini, une chaîne vide, une date
+  impossible ou une valeur négative sont refusés (400) au lieu d'être écrits ou de
+  provoquer une erreur technique ; un montant négatif minorait le coût du chantier et
+  gonflait d'autant sa marge ;
+- **pas d'écriture inter-affaires** : une correction ne déplace jamais une ligne vers une
+  autre affaire — il faut la supprimer et la ressaisir, soit deux écritures tracées ;
+- **piste d'audit** : chaque écriture laisse une entrée horodatée et nominative
+  (`JournalSaisieChantier`) avec l'état avant et après, relisible sur
+  `GET /api/chantiers/:id/journal-saisies` par ceux qui ont le droit d'écrire sur
+  l'affaire. Le journal est en ajout seul : aucune route ne le modifie ni ne l'efface.
+
+L'écran **Travaux** qui regroupera ces saisies après sélection d'une affaire est livré
+avec sa phase métier ; cette sécurisation porte sur le serveur et ses invariants.
 
 ## Hors périmètre
 

@@ -116,7 +116,10 @@ async function verifyMicrosoftIdentity(req: express.Request): Promise<string | n
 
 // --- Middlewares d'authentification / autorisation ---
 interface AuthRequest extends express.Request {
-  user?: { id: string; role: string; accesFinance: boolean; permissions: string[] };
+  // `name` et `email` ne servent à aucune autorisation : ils sont relus ici pour être
+  // figés dans la piste d'audit des saisies (cf. JournalSaisieChantier), qui doit rester
+  // lisible même après révocation du compte de l'auteur.
+  user?: { id: string; role: string; name: string; email: string; accesFinance: boolean; permissions: string[] };
 }
 
 // Le jeton n'authentifie QUE l'identité : le rôle est systématiquement relu en base, il
@@ -137,7 +140,7 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
     return;
   }
   try {
-    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, accesFinance: true, permissions: true, actif: true } });
+    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, name: true, email: true, accesFinance: true, permissions: true, actif: true } });
     if (!user) {
       res.status(401).json({ error: 'Compte introuvable ou révoqué' });
       return;
@@ -148,7 +151,7 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
       res.status(401).json({ code: 'COMPTE_DESACTIVE', error: 'Ce compte est désactivé.' });
       return;
     }
-    (req as AuthRequest).user = { id: user.id, role: user.role, accesFinance: user.accesFinance, permissions: user.permissions };
+    (req as AuthRequest).user = { id: user.id, role: user.role, name: user.name, email: user.email, accesFinance: user.accesFinance, permissions: user.permissions };
     next();
   } catch {
     res.status(500).json({ error: 'Error resolving authenticated user' });
@@ -308,18 +311,62 @@ function routeMixte(
 //   - session humaine : le RÔLE décide. Un administrateur voit tout ; un conducteur de
 //     travaux, les chantiers dont il est responsable ; un commercial, ceux qu'il a vendus.
 //     C'est exactement la règle qu'applique déjà GET /api/chantiers.
+//   - responsable : son périmètre est celui des collaborateurs qui lui sont EXPLICITEMENT
+//     rattachés (User.responsableHierarchiqueId), plus ses propres affaires. Il n'est
+//     jamais déduit du seul intitulé « Responsable » : sans rattachement déclaré, un
+//     responsable ne voit que ce dont il est lui-même conducteur — c'est la décision
+//     métier (cf. docs/MODELE-DROITS-COMPTES.md), pas une limitation temporaire.
 //   - clé d'intégration : le SCOPE décide. Une clé ne représente personne en particulier,
 //     elle n'a donc pas de rôle à interroger ; porter `chantiers:read` vaut autorisation
 //     sur le domaine, et c'est au superadmin de ne délivrer que les scopes utiles.
 //
 // Renvoie un filtre Prisma applicable à un champ `chantier` imbriqué comme à un chantier
 // racine ; `{}` signifie « aucune restriction ».
-function perimetreChantiers(req: express.Request): Prisma.ChantierWhereInput {
+async function perimetreChantiers(req: express.Request): Promise<Prisma.ChantierWhereInput> {
   if ((req as ApiRequest).apiKey) return {};
   const user = (req as AuthRequest).user;
   if (!user || isAdminRole(user.role)) return {};
   if (user.role === 'COMMERCIAL') return { commercialId: user.id };
+  if (user.role === ROLE_RESPONSABLE) {
+    return { responsableId: { in: await perimetreResponsable(user.id) } };
+  }
   return { responsableId: user.id };
+}
+
+// Collaborateurs explicitement rattachés à un responsable, lui-même inclus. C'est la
+// SEULE source du périmètre hiérarchique : la liste vient de la table des comptes, jamais
+// d'un rôle. Un compte désactivé y reste — les affaires qu'il a conduites avant son
+// départ appartiennent toujours au périmètre de son responsable.
+async function perimetreResponsable(responsableId: string): Promise<string[]> {
+  const equipe = await prisma.user.findMany({
+    where: { responsableHierarchiqueId: responsableId },
+    select: { id: true },
+  });
+  return [responsableId, ...equipe.map((collaborateur) => collaborateur.id)];
+}
+
+// Écriture du suivi Travaux (achats, heures) sur une affaire donnée. La lecture se règle
+// par un filtre de liste ; l'écriture, elle, se décide affaire par affaire :
+//
+//   - administrateur : partout ;
+//   - conducteur de travaux : sur les affaires dont IL est le responsable désigné ;
+//   - responsable : sur les affaires conduites par son équipe déclarée (cf. ci-dessus) ;
+//   - tout le reste — technicien, comptable, commercial, assistante, clé d'intégration —
+//     n'écrit pas. Une clé n'est rattachée à personne : aucun scope ne peut donc dire
+//     « cette affaire est la sienne », et `chantiers:read` ne porte que la lecture.
+//
+// Avant ce contrôle, TOUT compte non-commercial connecté pouvait saisir, corriger et
+// supprimer des achats et des heures sur N'IMPORTE QUELLE affaire : un technicien
+// déplaçait des coûts et des marges sur les chantiers d'un autre conducteur.
+async function peutEcrireSurAffaire(req: express.Request, chantier: { responsableId: string | null }): Promise<boolean> {
+  if ((req as ApiRequest).apiKey) return false;
+  const user = (req as AuthRequest).user;
+  if (!user) return false;
+  if (isAdminRole(user.role)) return true;
+  if (!chantier.responsableId) return false;
+  if (user.role === 'CONDUCTEUR_TRAVAUX') return chantier.responsableId === user.id;
+  if (user.role === ROLE_RESPONSABLE) return (await perimetreResponsable(user.id)).includes(chantier.responsableId);
+  return false;
 }
 
 // Le chantier tel qu'il accompagne un achat ou un pointage : de quoi l'identifier, rien
@@ -815,7 +862,7 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
   try {
     const params = await getParametres();
     const chantiers = await prisma.chantier.findMany({
-      where: perimetreChantiers(req),
+      where: await perimetreChantiers(req),
       include: {
         responsable: RESPONSABLE_SELECT,
         commercial: RESPONSABLE_SELECT,
@@ -1178,7 +1225,7 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
     const users = await prisma.user.findMany({
       where: isSuper ? {} : { role: { not: ROLE_SUPERADMIN } },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true, responsableHierarchiqueId: true },
       orderBy: { createdAt: 'asc' },
     });
     res.json(users.map((u) => ({
@@ -1186,6 +1233,7 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
       accesFinance: u.accesFinance, actif: u.actif,
       permissions: permissionsEffectives(u),
       permissionsIndividuelles: u.permissions,
+      responsableHierarchiqueId: u.responsableHierarchiqueId,
     })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
@@ -1195,6 +1243,9 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
 // Autorise un nouveau compte à se connecter (liste blanche SSO / création de compte).
 // Aucun mot de passe n'est défini : le compte se connecte exclusivement via Microsoft Entra ID.
 const ALLOWED_ROLES = [ROLE_SUPERADMIN, 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL', ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE];
+
+// Champs d'un compte renvoyés par les routes d'administration.
+const USER_ADMIN_SELECT = { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true, responsableHierarchiqueId: true } as const;
 
 // Un compte SUPERADMIN n'est administrable QUE par un superadmin : le créer, lui changer
 // de rôle, lui réattribuer un mot de passe ou le révoquer sont autant de moyens, pour un
@@ -1301,16 +1352,25 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
     if (!isSuperAdminRole(role) && (await isLastSuperAdmin(target.id))) {
       return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
     }
-    const user = await prisma.user.update({
-      where: { id: target.id },
-      // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
-      // compte quitte ces rôles, pour ne pas laisser un état orphelin qui réapparaîtrait
-      // s'il y revenait plus tard sans qu'on l'ait explicitement redemandé.
-      // accesFinance n'est PAS touché : il ne dépend pas du rôle, un conducteur comme un
-      // commercial peut le conserver en changeant de fonction.
-      data: isAdminRole(role) ? { role } : { role, estCommercial: false },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
-    });
+    // Un compte qui cesse d'être RESPONSABLE perd son équipe déclarée : la garder en base
+    // la ferait silencieusement revivre s'il retrouvait le rôle plus tard, alors que
+    // personne n'aurait redéclaré ce rattachement — même raison que pour "estCommercial".
+    const perdSonEquipe = target.role === ROLE_RESPONSABLE && role !== ROLE_RESPONSABLE;
+    const [user] = await prisma.$transaction([
+      prisma.user.update({
+        where: { id: target.id },
+        // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
+        // compte quitte ces rôles, pour ne pas laisser un état orphelin qui réapparaîtrait
+        // s'il y revenait plus tard sans qu'on l'ait explicitement redemandé.
+        // accesFinance n'est PAS touché : il ne dépend pas du rôle, un conducteur comme un
+        // commercial peut le conserver en changeant de fonction.
+        data: isAdminRole(role) ? { role } : { role, estCommercial: false },
+        select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
+      }),
+      ...(perdSonEquipe
+        ? [prisma.user.updateMany({ where: { responsableHierarchiqueId: target.id }, data: { responsableHierarchiqueId: null } })]
+        : []),
+    ]);
     res.json(user);
   } catch (error) {
     res.status(500).json({ error: 'Error updating user role' });
@@ -1344,6 +1404,68 @@ app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req
     res.status(500).json({ error: 'Error updating estCommercial' });
   }
 });
+
+// Rattachement hiérarchique d'un collaborateur à un compte RESPONSABLE. C'est cette
+// donnée — et elle seule — qui définit le périmètre d'un responsable : les affaires qu'il
+// peut lire, celles sur lesquelles il peut saisir des achats et des heures, et les
+// statistiques de conducteurs qu'il reçoit (cf. perimetreResponsable). Sans elle, le rôle
+// « Responsable » ne donne accès à rien de plus qu'un conducteur.
+//
+// Réservé aux administrateurs : accorder à quelqu'un la supervision d'une équipe est un
+// acte d'organisation, pas un réglage que l'intéressé peut se faire à lui-même.
+app.patch('/api/users/:id/responsable-hierarchique', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+    if (!target) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    const refus = refuseSuperAdminTarget(req, target.role);
+    if (refus) {
+      return res.status(403).json({ error: refus });
+    }
+
+    const responsableId = String(req.body.responsableHierarchiqueId ?? '').trim();
+    if (!responsableId) {
+      const user = await prisma.user.update({ where: { id: target.id }, data: { responsableHierarchiqueId: null }, select: USER_ADMIN_SELECT });
+      return res.json(user);
+    }
+    if (responsableId === target.id) {
+      return res.status(400).json({ error: 'Un compte ne peut pas être son propre responsable.' });
+    }
+    const responsable = await prisma.user.findUnique({ where: { id: responsableId }, select: { id: true, role: true, actif: true } });
+    // Seul un compte portant le rôle RESPONSABLE peut superviser une équipe : le
+    // périmètre commercial (directeur commercial → commerciaux) relève d'une phase
+    // distincte et n'est pas ouvert ici.
+    if (!responsable || !responsable.actif || responsable.role !== ROLE_RESPONSABLE) {
+      return res.status(400).json({ error: 'Le responsable désigné doit être un compte « Responsable » actif.' });
+    }
+    // Une boucle (A supervise B qui supervise A) rendrait le périmètre incalculable et
+    // ferait tourner indéfiniment toute remontée de hiérarchie ultérieure.
+    if (await creeUneBoucleHierarchique(target.id, responsable.id)) {
+      return res.status(400).json({ error: 'Ce rattachement créerait une boucle hiérarchique.' });
+    }
+
+    const user = await prisma.user.update({ where: { id: target.id }, data: { responsableHierarchiqueId: responsable.id }, select: USER_ADMIN_SELECT });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Impossible de modifier le rattachement hiérarchique.' });
+  }
+});
+
+// Vrai si rattacher `cibleId` à `responsableId` refermait la chaîne sur elle-même. La
+// remontée est bornée : elle protège aussi d'une boucle déjà présente en base.
+async function creeUneBoucleHierarchique(cibleId: string, responsableId: string): Promise<boolean> {
+  let courant: string | null = responsableId;
+  for (let profondeur = 0; courant && profondeur < 20; profondeur++) {
+    if (courant === cibleId) return true;
+    const parent: { responsableHierarchiqueId: string | null } | null = await prisma.user.findUnique({
+      where: { id: courant },
+      select: { responsableHierarchiqueId: true },
+    });
+    courant = parent?.responsableHierarchiqueId ?? null;
+  }
+  return false;
+}
 
 // Permissions individuelles : complètent le type de compte sans retirer ses droits par
 // défaut. Seul un superadministrateur peut les accorder ou les retirer.
@@ -1940,22 +2062,149 @@ app.delete('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, re
   }
 });
 
-// Un chantier clôturé (TERMINE) devient en lecture seule pour les conducteurs : ils ne
-// peuvent plus y ajouter d'heures ou de dépenses ; un admin garde un accès total (c'est
-// lui seul qui peut d'ailleurs réouvrir un chantier clôturé, cf. PATCH .../statut).
-// Envoie la réponse d'erreur et retourne null si l'écriture est refusée.
-async function assertChantierWritable(req: express.Request, res: express.Response, chantierId: string) {
-  const isAdmin = isAdminRole((req as AuthRequest).user?.role);
-  const chantier = await prisma.chantier.findUnique({ where: { id: chantierId } });
-  if (!chantier) {
-    res.status(404).json({ error: 'Chantier introuvable' });
+// --- Saisies du suivi Travaux : contrôles communs aux achats et aux heures ---
+//
+// Les achats et les heures d'une affaire ne sont pas des lignes de journal anodines :
+// elles font le coût réel, les heures consommées et donc la marge du chantier. Trois
+// invariants les encadrent, appliqués ici pour les six routes d'écriture (création,
+// correction, suppression d'un achat ou d'un pointage) :
+//
+//   1. qui écrit : seulement un administrateur, le conducteur responsable de l'affaire,
+//      ou le responsable hiérarchique dont l'équipe déclarée la conduit
+//      (cf. peutEcrireSurAffaire) ;
+//   2. ce qui est écrit : montants et heures valides, jamais négatifs, rattachements
+//      existants, date réelle (cf. lireNombre / lireDate) ;
+//   3. ce qui reste : chaque écriture laisse une trace horodatée et nominative
+//      (cf. journaliserSaisie), la ligne corrigée ne conservant rien de sa valeur passée.
+
+// Capacités des colonnes Decimal du schéma. Au-delà, PostgreSQL rejette l'écriture par
+// une erreur technique (500) : les refuser ici en fait un refus métier explicite (400).
+const MONTANT_MAX = 9_999_999_999.99; // AchatReel.montantHT — Decimal(12, 2)
+const HEURES_MAX = 99_999_999.99; // PointageHeure.nbrHeures — Decimal(10, 2)
+
+type Lecture<T> = { ok: true; valeur: T } | { ok: false; erreur: string };
+
+// Nombre saisi sur une affaire (montant d'un achat, nombre d'heures d'un pointage).
+// `parseFloat(req.body.x)` acceptait tout : une chaîne vide et "abc" donnaient NaN — donc
+// une erreur 500 opaque à la création, et un silencieux 0 à la correction (`|| 0`) — et
+// surtout une valeur NÉGATIVE passait telle quelle, minorant le coût réel du chantier et
+// gonflant d'autant sa marge.
+function lireNombre(valeur: unknown, libelle: string, max: number, zeroAutorise: boolean): Lecture<number> {
+  if (valeur === null || valeur === undefined || String(valeur).trim() === '') return { ok: false, erreur: `${libelle} est requis.` };
+  const nombre = Number(valeur);
+  if (!Number.isFinite(nombre)) return { ok: false, erreur: `${libelle} doit être un nombre.` };
+  if (nombre < 0) return { ok: false, erreur: `${libelle} ne peut pas être négatif.` };
+  if (!zeroAutorise && nombre === 0) return { ok: false, erreur: `${libelle} doit être supérieur à zéro.` };
+  if (nombre > max) return { ok: false, erreur: `${libelle} dépasse la valeur maximale autorisée.` };
+  // Les colonnes sont en Decimal(_, 2) : arrondir ici rend la valeur stockée prévisible,
+  // plutôt que de laisser PostgreSQL trancher sur une saisie à trois décimales.
+  return { ok: true, valeur: Math.round(nombre * 100) / 100 };
+}
+
+// Un montant d'achat peut valoir 0 (matériel remplacé sans frais, mais tracé) ; un
+// pointage de 0 heure n'enregistre rien et n'a donc pas de raison d'exister.
+const lireMontant = (valeur: unknown) => lireNombre(valeur, 'Le montant HT', MONTANT_MAX, true);
+const lireHeures = (valeur: unknown) => lireNombre(valeur, 'Le nombre d’heures', HEURES_MAX, false);
+
+// `new Date("n'importe quoi")` ne lève pas : il produit une date invalide, que Prisma
+// refuse ensuite en erreur 500. Le contrôle est fait ici, avec un message utilisable.
+function lireDate(valeur: unknown, libelle: string): Lecture<Date> {
+  const date = new Date(String(valeur ?? ''));
+  if (isNaN(date.getTime())) return { ok: false, erreur: `${libelle} est invalide.` };
+  return { ok: true, valeur: date };
+}
+
+// Écriture inter-affaires : ni une correction d'achat ni une correction de pointage ne
+// déplacent la ligne d'un chantier à un autre. Le faire transférerait un coût déjà
+// contrôlé vers une affaire sur laquelle l'auteur n'a peut-être aucun droit, et sur
+// laquelle le contrôle de périmètre n'aurait jamais été exécuté. Une erreur de chantier
+// se corrige en supprimant la ligne et en la ressaisissant au bon endroit — deux
+// écritures, deux traces.
+function refuseChangementAffaire(body: unknown): string | null {
+  if (body && typeof body === 'object' && 'chantierId' in body) {
+    return 'Une saisie ne peut pas changer d’affaire : supprimez-la et ressaisissez-la sur la bonne affaire.';
+  }
+  return null;
+}
+
+// L'affaire visée par une écriture, ou null si l'écriture est refusée (la réponse
+// d'erreur a alors déjà été envoyée).
+//
+// Un compte hors périmètre reçoit 404, et non 403 : c'est la règle déjà appliquée par
+// GET et PATCH /api/chantiers/:id — on ne révèle pas l'existence d'une affaire à qui n'y
+// a pas droit. Le message ne distingue pas « inexistante » de « hors périmètre », sans
+// quoi l'énumération redeviendrait possible.
+async function assertAffaireEcrivable(req: express.Request, res: express.Response, chantierId: unknown) {
+  const id = String(chantierId ?? '');
+  const chantier = id ? await prisma.chantier.findUnique({ where: { id } }) : null;
+  if (!chantier || !(await peutEcrireSurAffaire(req, chantier))) {
+    res.status(404).json({ error: 'Affaire introuvable ou hors de votre périmètre.' });
     return null;
   }
-  if (!isAdmin && chantier.statut !== 'EN_COURS') {
+  // Un chantier clôturé (TERMINE) devient en lecture seule pour les conducteurs : ils ne
+  // peuvent plus y ajouter d'heures ou de dépenses ; un admin garde un accès total (c'est
+  // lui seul qui peut d'ailleurs réouvrir un chantier clôturé, cf. PATCH .../statut).
+  if (!isAdminRole((req as AuthRequest).user?.role) && chantier.statut !== 'EN_COURS') {
     res.status(403).json({ error: 'Ce chantier est clôturé : impossible d\'y ajouter une dépense ou des heures.' });
     return null;
   }
   return chantier;
+}
+
+// --- Piste d'audit des saisies ---
+// Ce que la ligne elle-même ne garde pas : qui a écrit, quand, et quelle valeur a été
+// remplacée. L'entrée est créée dans la MÊME transaction que l'écriture — une saisie sans
+// trace, ou une trace sans saisie, ne peuvent pas exister.
+type CibleSaisie = 'ACHAT' | 'HEURE';
+type ActionSaisie = 'CREATION' | 'CORRECTION' | 'SUPPRESSION';
+
+// Instantané métier d'une ligne, tel qu'il est figé dans le journal. Les Decimal sont
+// convertis en nombres et les dates en ISO : le journal doit rester relisible sans
+// dépendre du typage Prisma du jour.
+function instantaneAchat(achat: any) {
+  const a = decimalToNumber(achat);
+  return {
+    date: new Date(a.date).toISOString(),
+    description: a.description,
+    montantHT: a.montantHT,
+    numeroFacture: a.numeroFacture ?? null,
+    fournisseurId: a.fournisseurId,
+    categorieId: a.categorieId,
+    chantierId: a.chantierId,
+  };
+}
+
+function instantaneHeure(pointage: any) {
+  const p = decimalToNumber(pointage);
+  return {
+    date: new Date(p.date).toISOString(),
+    nbrHeures: p.nbrHeures,
+    tauxHoraireApplique: p.tauxHoraireApplique,
+    commentaire: p.commentaire ?? null,
+    intervenantId: p.intervenantId,
+    chantierId: p.chantierId,
+  };
+}
+
+function journaliserSaisie(
+  tx: Prisma.TransactionClient,
+  req: express.Request,
+  entree: { chantierId: string; cible: CibleSaisie; cibleId: string; action: ActionSaisie; avant?: unknown; apres?: unknown },
+) {
+  const auteur = (req as AuthRequest).user!;
+  return tx.journalSaisieChantier.create({
+    data: {
+      chantierId: entree.chantierId,
+      cible: entree.cible,
+      cibleId: entree.cibleId,
+      action: entree.action,
+      auteurId: auteur.id,
+      auteurNom: auteur.name,
+      auteurEmail: auteur.email,
+      avant: (entree.avant ?? Prisma.DbNull) as Prisma.InputJsonValue,
+      apres: (entree.apres ?? Prisma.DbNull) as Prisma.InputJsonValue,
+    },
+  });
 }
 
 // Achats
@@ -1969,7 +2218,7 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
 const listerAchats: express.RequestHandler = async (req, res) => {
   try {
     res.json(decimalToNumber(await prisma.achatReel.findMany({
-      where: { chantier: perimetreChantiers(req) },
+      where: { chantier: await perimetreChantiers(req) },
       include: {
         chantier: { select: CHANTIER_LITE_SELECT },
         categorie: true,
@@ -1984,39 +2233,75 @@ const listerAchats: express.RequestHandler = async (req, res) => {
 
 app.post('/api/achats', requireAuth, blockCommercial, async (req, res) => {
   try {
-    if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
-    res.json(await prisma.achatReel.create({
-      data: {
-        date: new Date(req.body.date).toISOString(),
-        fournisseurId: req.body.fournisseurId,
-        numeroFacture: req.body.numeroFacture || null,
-        description: req.body.description,
-        montantHT: parseFloat(req.body.montantHT),
-        chantierId: req.body.chantierId,
-        categorieId: req.body.categorieId
-      }
-    }));
+    const chantier = await assertAffaireEcrivable(req, res, req.body.chantierId);
+    if (!chantier) return;
+
+    const date = lireDate(req.body.date, 'La date de l’achat');
+    if (!date.ok) return res.status(400).json({ error: date.erreur });
+    const montant = lireMontant(req.body.montantHT);
+    if (!montant.ok) return res.status(400).json({ error: montant.erreur });
+    const description = String(req.body.description ?? '').trim();
+    if (!description) return res.status(400).json({ error: 'La description de l’achat est requise.' });
+
+    // Rattachements vérifiés avant l'écriture : sans ce contrôle, un identifiant inconnu
+    // ne se voyait qu'à la violation de clé étrangère, renvoyée en erreur 500.
+    const fournisseur = await prisma.fournisseur.findUnique({ where: { id: String(req.body.fournisseurId ?? '') } });
+    if (!fournisseur) return res.status(404).json({ error: 'Fournisseur introuvable.' });
+    const categorie = await prisma.categorie.findUnique({ where: { id: String(req.body.categorieId ?? '') } });
+    if (!categorie) return res.status(404).json({ error: 'Catégorie introuvable.' });
+
+    const achat = await prisma.$transaction(async (tx) => {
+      const cree = await tx.achatReel.create({
+        data: {
+          date: date.valeur,
+          fournisseurId: fournisseur.id,
+          numeroFacture: String(req.body.numeroFacture ?? '').trim() || null,
+          description,
+          montantHT: montant.valeur,
+          chantierId: chantier.id,
+          categorieId: categorie.id,
+        },
+      });
+      await journaliserSaisie(tx, req, {
+        chantierId: chantier.id, cible: 'ACHAT', cibleId: cree.id, action: 'CREATION', apres: instantaneAchat(cree),
+      });
+      return cree;
+    });
+    res.json(decimalToNumber(achat));
   } catch (error) {
     res.status(500).json({ error: 'Error creating achat' });
   }
 });
 
 // Correction d'un achat déjà saisi (erreur de montant, de fournisseur, de catégorie...) —
-// mêmes droits que la saisie (tout compte non-commercial, sur un chantier EN_COURS ou
-// n'importe quel chantier pour un admin, cf. assertChantierWritable). Ne permet pas de
-// changer le chantier de l'achat, comme pour PATCH /api/heures/:id.
+// mêmes droits que la saisie (cf. assertAffaireEcrivable), sur l'affaire d'origine
+// uniquement (cf. refuseChangementAffaire). L'état d'avant est conservé au journal.
 app.patch('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const achatId = paramId(req);
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
     if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
-    if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
+    const changementAffaire = refuseChangementAffaire(req.body);
+    if (changementAffaire) return res.status(400).json({ error: changementAffaire });
+    if (!(await assertAffaireEcrivable(req, res, achat.chantierId))) return;
 
     const data: Record<string, unknown> = {};
-    if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
-    if ('numeroFacture' in req.body) data.numeroFacture = req.body.numeroFacture || null;
-    if ('description' in req.body) data.description = req.body.description;
-    if ('montantHT' in req.body) data.montantHT = parseFloat(req.body.montantHT) || 0;
+    if ('date' in req.body) {
+      const date = lireDate(req.body.date, 'La date de l’achat');
+      if (!date.ok) return res.status(400).json({ error: date.erreur });
+      data.date = date.valeur;
+    }
+    if ('numeroFacture' in req.body) data.numeroFacture = String(req.body.numeroFacture ?? '').trim() || null;
+    if ('description' in req.body) {
+      const description = String(req.body.description ?? '').trim();
+      if (!description) return res.status(400).json({ error: 'La description de l’achat est requise.' });
+      data.description = description;
+    }
+    if ('montantHT' in req.body) {
+      const montant = lireMontant(req.body.montantHT);
+      if (!montant.ok) return res.status(400).json({ error: montant.erreur });
+      data.montantHT = montant.valeur;
+    }
     if ('fournisseurId' in req.body) {
       const fournisseur = await prisma.fournisseur.findUnique({ where: { id: String(req.body.fournisseurId) } });
       if (!fournisseur) return res.status(404).json({ error: 'Fournisseur introuvable.' });
@@ -2028,22 +2313,35 @@ app.patch('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
       data.categorieId = categorie.id;
     }
 
-    res.json(await prisma.achatReel.update({ where: { id: achatId }, data }));
+    const modifie = await prisma.$transaction(async (tx) => {
+      const apres = await tx.achatReel.update({ where: { id: achatId }, data });
+      await journaliserSaisie(tx, req, {
+        chantierId: achat.chantierId, cible: 'ACHAT', cibleId: achatId, action: 'CORRECTION',
+        avant: instantaneAchat(achat), apres: instantaneAchat(apres),
+      });
+      return apres;
+    });
+    res.json(decimalToNumber(modifie));
   } catch (error) {
     res.status(500).json({ error: 'Error updating achat' });
   }
 });
 
 // Suppression d'un achat saisi par erreur (doublon, mauvais chantier...) — mêmes droits
-// que la correction ci-dessus (PATCH), cf. assertChantierWritable.
+// que la correction ci-dessus (PATCH). La ligne disparaît, sa trace non.
 app.delete('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const achatId = paramId(req);
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
     if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
-    if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
+    if (!(await assertAffaireEcrivable(req, res, achat.chantierId))) return;
 
-    await prisma.achatReel.delete({ where: { id: achatId } });
+    await prisma.$transaction(async (tx) => {
+      await tx.achatReel.delete({ where: { id: achatId } });
+      await journaliserSaisie(tx, req, {
+        chantierId: achat.chantierId, cible: 'ACHAT', cibleId: achatId, action: 'SUPPRESSION', avant: instantaneAchat(achat),
+      });
+    });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting achat' });
@@ -2055,7 +2353,7 @@ app.delete('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => 
 const listerHeures: express.RequestHandler = async (req, res) => {
   try {
     res.json(decimalToNumber(await prisma.pointageHeure.findMany({
-      where: { chantier: perimetreChantiers(req) },
+      where: { chantier: await perimetreChantiers(req) },
       include: {
         chantier: { select: CHANTIER_LITE_SELECT },
         intervenant: true,
@@ -2074,41 +2372,63 @@ routeMixte('get', '/heures', 'chantiers:read', listerHeures, []);
 
 app.post('/api/heures', requireAuth, blockCommercial, async (req, res) => {
   try {
-    const intervenant = await prisma.intervenant.findUnique({ where: { id: req.body.intervenantId } });
-    if (!intervenant) return res.status(404).json({ error: 'Intervenant not found' });
-    if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
+    const chantier = await assertAffaireEcrivable(req, res, req.body.chantierId);
+    if (!chantier) return;
 
-    res.json(await prisma.pointageHeure.create({
-      data: {
-        date: new Date(req.body.date).toISOString(),
-        intervenantId: req.body.intervenantId,
-        chantierId: req.body.chantierId,
-        nbrHeures: parseFloat(req.body.nbrHeures),
-        tauxHoraireApplique: intervenant.tauxHoraireCharge,
-        commentaire: req.body.commentaire || null
-      }
-    }));
+    const intervenant = await prisma.intervenant.findUnique({ where: { id: String(req.body.intervenantId ?? '') } });
+    if (!intervenant) return res.status(404).json({ error: 'Intervenant introuvable.' });
+    const date = lireDate(req.body.date, 'La date du pointage');
+    if (!date.ok) return res.status(400).json({ error: date.erreur });
+    const heures = lireHeures(req.body.nbrHeures);
+    if (!heures.ok) return res.status(400).json({ error: heures.erreur });
+
+    const pointage = await prisma.$transaction(async (tx) => {
+      const cree = await tx.pointageHeure.create({
+        data: {
+          date: date.valeur,
+          intervenantId: intervenant.id,
+          chantierId: chantier.id,
+          nbrHeures: heures.valeur,
+          tauxHoraireApplique: intervenant.tauxHoraireCharge,
+          commentaire: String(req.body.commentaire ?? '').trim() || null,
+        },
+      });
+      await journaliserSaisie(tx, req, {
+        chantierId: chantier.id, cible: 'HEURE', cibleId: cree.id, action: 'CREATION', apres: instantaneHeure(cree),
+      });
+      return cree;
+    });
+    res.json(decimalToNumber(pointage));
   } catch (error) {
     res.status(500).json({ error: 'Error creating pointage' });
   }
 });
 
 // Correction d'un pointage d'heures déjà saisi (erreur de date, d'intervenant, de nombre
-// d'heures...) — mêmes droits que la saisie (tout compte non-commercial, sur un chantier
-// EN_COURS ou n'importe quel chantier pour un admin, cf. assertChantierWritable). Ne
-// permet pas de changer le chantier du pointage : ce n'est pas une réaffectation, juste
-// une correction de saisie sur le chantier d'origine.
+// d'heures...) — mêmes droits que la saisie (cf. assertAffaireEcrivable). Ne permet pas de
+// changer le chantier du pointage : ce n'est pas une réaffectation, juste une correction
+// de saisie sur le chantier d'origine (cf. refuseChangementAffaire).
 app.patch('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const pointageId = paramId(req);
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
     if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
-    if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
+    const changementAffaire = refuseChangementAffaire(req.body);
+    if (changementAffaire) return res.status(400).json({ error: changementAffaire });
+    if (!(await assertAffaireEcrivable(req, res, pointage.chantierId))) return;
 
     const data: Record<string, unknown> = {};
-    if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
-    if ('nbrHeures' in req.body) data.nbrHeures = parseFloat(req.body.nbrHeures) || 0;
-    if ('commentaire' in req.body) data.commentaire = req.body.commentaire || null;
+    if ('date' in req.body) {
+      const date = lireDate(req.body.date, 'La date du pointage');
+      if (!date.ok) return res.status(400).json({ error: date.erreur });
+      data.date = date.valeur;
+    }
+    if ('nbrHeures' in req.body) {
+      const heures = lireHeures(req.body.nbrHeures);
+      if (!heures.ok) return res.status(400).json({ error: heures.erreur });
+      data.nbrHeures = heures.valeur;
+    }
+    if ('commentaire' in req.body) data.commentaire = String(req.body.commentaire ?? '').trim() || null;
     // Changer l'intervenant réapplique son taux horaire chargé ACTUEL (même logique qu'à
     // la création) : le taux figé de l'ancien intervenant n'a pas de sens pour le nouveau.
     if ('intervenantId' in req.body && req.body.intervenantId !== pointage.intervenantId) {
@@ -2118,25 +2438,59 @@ app.patch('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
       data.tauxHoraireApplique = intervenant.tauxHoraireCharge;
     }
 
-    res.json(await prisma.pointageHeure.update({ where: { id: pointageId }, data }));
+    const modifie = await prisma.$transaction(async (tx) => {
+      const apres = await tx.pointageHeure.update({ where: { id: pointageId }, data });
+      await journaliserSaisie(tx, req, {
+        chantierId: pointage.chantierId, cible: 'HEURE', cibleId: pointageId, action: 'CORRECTION',
+        avant: instantaneHeure(pointage), apres: instantaneHeure(apres),
+      });
+      return apres;
+    });
+    res.json(decimalToNumber(modifie));
   } catch (error) {
     res.status(500).json({ error: 'Error updating pointage' });
   }
 });
 
 // Suppression d'un pointage saisi par erreur (doublon, mauvais chantier...) — mêmes
-// droits que la correction ci-dessus (PATCH), cf. assertChantierWritable.
+// droits que la correction ci-dessus (PATCH). La ligne disparaît, sa trace non.
 app.delete('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const pointageId = paramId(req);
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
     if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
-    if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
+    if (!(await assertAffaireEcrivable(req, res, pointage.chantierId))) return;
 
-    await prisma.pointageHeure.delete({ where: { id: pointageId } });
+    await prisma.$transaction(async (tx) => {
+      await tx.pointageHeure.delete({ where: { id: pointageId } });
+      await journaliserSaisie(tx, req, {
+        chantierId: pointage.chantierId, cible: 'HEURE', cibleId: pointageId, action: 'SUPPRESSION', avant: instantaneHeure(pointage),
+      });
+    });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting pointage' });
+  }
+});
+
+// Piste d'audit d'une affaire : qui a saisi, corrigé ou supprimé quoi, et quand. Ouverte
+// à ceux qui peuvent écrire sur l'affaire (cf. peutEcrireSurAffaire) : ce sont eux qui
+// produisent ces écritures et à qui l'on demande des comptes dessus. Un compte hors
+// périmètre reçoit le même 404 qu'ailleurs, sans distinguer l'affaire inexistante.
+app.get('/api/chantiers/:id/journal-saisies', requireAuth, async (req, res) => {
+  try {
+    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) }, select: { id: true, responsableId: true } });
+    if (!chantier || !(await peutEcrireSurAffaire(req, chantier))) {
+      return res.status(404).json({ error: 'Affaire introuvable ou hors de votre périmètre.' });
+    }
+    const entrees = await prisma.journalSaisieChantier.findMany({
+      where: { chantierId: chantier.id },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+    res.json(entrees);
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching journal des saisies' });
   }
 });
 
@@ -2977,13 +3331,10 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
       : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
 
-    const where = isAdmin
-      ? {}
-      : isCommercial
-        ? { commercialId: user.id }
-        : { responsableId: user.id };
+    // Même périmètre que les listes et les journaux : un responsable y retrouve les
+    // affaires de son équipe déclarée, pas les siennes seules (cf. perimetreChantiers).
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
-      where,
+      where: await perimetreChantiers(req),
       include: { achats: true, pointages: true },
     }));
 
@@ -3066,7 +3417,32 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
   }
 });
 
-// Statistiques par conducteur de travaux (admin uniquement) : marge/CA, avance/retard
+// Statistiques des conducteurs : à qui, et sur quel périmètre.
+//
+// Un administrateur les voit toutes. Un RESPONSABLE y a droit sur les conducteurs qui lui
+// sont EXPLICITEMENT rattachés (User.responsableHierarchiqueId) — pas sur les autres, et
+// pas parce que son rôle s'appelle « Responsable ». Sans rattachement déclaré, la liste
+// qu'il reçoit est vide : ces statistiques portent des coûts, des marges et des manques à
+// gagner par affaire, elles ne sortent jamais du périmètre de celui qui les demande.
+const requireStatsConducteurs: express.RequestHandler = (req, res, next) => {
+  const role = (req as AuthRequest).user?.role;
+  if (!isAdminRole(role) && role !== ROLE_RESPONSABLE) {
+    res.status(403).json({ error: 'Accès réservé aux administrateurs et aux responsables.' });
+    return;
+  }
+  next();
+};
+
+// Conducteurs de travaux visibles par le demandeur : tous pour un administrateur, ceux de
+// son équipe déclarée pour un responsable.
+async function conducteursVisibles(req: express.Request) {
+  const user = (req as AuthRequest).user!;
+  const where: Prisma.UserWhereInput = { role: 'CONDUCTEUR_TRAVAUX' };
+  if (!isAdminRole(user.role)) where.id = { in: await perimetreResponsable(user.id) };
+  return prisma.user.findMany({ where, select: { id: true, name: true, email: true } });
+}
+
+// Statistiques par conducteur de travaux (périmètre ci-dessus) : marge/CA, avance/retard
 // sur les chantiers en cours (heures et matériel), et taux d'objectifs respectés sur
 // les chantiers terminés (livrés sans dépassement).
 // NB : pas de "taux de remplissage heures" ici (heures réalisées / heures vendues) —
@@ -3074,11 +3450,14 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
 // chantier fini en avance y ferait mécaniquement baisser le score, un chantier en
 // dérive le ferait monter. L'assiduité de saisie a sa propre route ci-dessous
 // (GET /stats/conducteurs/assiduite), basée sur le rythme réel de saisie.
-app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/stats/conducteurs', requireAuth, requireStatsConducteurs, async (req, res) => {
   try {
     const params = await getParametres();
-    const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX' }, select: { id: true, name: true, email: true } });
+    const users = await conducteursVisibles(req);
+    // Les chantiers sont chargés sur le périmètre demandé, et non filtrés après coup :
+    // aucun coût ni aucune marge hors périmètre ne traverse le serveur.
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
+      where: { responsableId: { in: users.map((u) => u.id) } },
       include: { achats: true, pointages: true },
     }));
 
@@ -3177,7 +3556,8 @@ function weekBoundsFrom(weekParam: unknown): { monday: Date; friday: Date; satur
 
 const JOURS_OUVRES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
 
-// Assiduité de saisie des conducteurs (admin uniquement), semaine civile lundi-vendredi.
+// Assiduité de saisie des conducteurs (même périmètre que la route précédente),
+// semaine civile lundi-vendredi.
 // Mesure leur usage réel de l'application — et non l'avancement de leurs chantiers :
 // jours où ils ont saisi au moins une heure, volume saisi par jour, et à quelle heure
 // de la journée ils saisissent habituellement (basé sur `createdAt`, l'instant de
@@ -3185,10 +3565,10 @@ const JOURS_OUVRES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
 // Un conducteur est associé aux pointages des chantiers dont IL est responsable (il n'y
 // a pas d'auteur direct sur un pointage ; en pratique, un conducteur ne saisit que sur
 // ses propres chantiers en cours, cf. POST /heures).
-app.get('/api/stats/conducteurs/assiduite', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/stats/conducteurs/assiduite', requireAuth, requireStatsConducteurs, async (req, res) => {
   try {
     const { monday, friday, saturdayExclusive } = weekBoundsFrom(req.query.week);
-    const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX' }, select: { id: true, name: true, email: true } });
+    const users = await conducteursVisibles(req);
     const userIds = users.map((u) => u.id);
 
     const pointages = decimalToNumber(await prisma.pointageHeure.findMany({
@@ -3413,20 +3793,18 @@ app.get('/api/stats/fournisseurs', requireAuth, blockCommercial, async (req, res
 });
 
 // Nombre de chantiers par type (un chantier peut avoir plusieurs types), mois civil /
-// année civile, navigable. Un conducteur ne voit que ses propres chantiers (même
-// périmètre que partout ailleurs) ; un admin voit tous les chantiers. Basé sur la date
-// de démarrage du chantier (dateDebut).
+// année civile, navigable. Périmètre commun à toute l'application (cf. perimetreChantiers) :
+// un conducteur ne voit que ses chantiers, un responsable ceux de son équipe déclarée, un
+// admin tous. Basé sur la date de démarrage du chantier (dateDebut).
 app.get('/api/stats/types-chantiers', requireAuth, blockCommercial, async (req, res) => {
   try {
-    const authUser = (req as AuthRequest).user!;
-    const isAdmin = isAdminRole(authUser.role);
     const period = req.query.period === 'year' ? 'year' : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
 
     const chantiers = await prisma.chantier.findMany({
       where: {
         dateDebut: { gte: start, lt: endExclusive },
-        ...(isAdmin ? {} : { responsableId: authUser.id }),
+        ...(await perimetreChantiers(req)),
       },
       select: { types: true },
     });

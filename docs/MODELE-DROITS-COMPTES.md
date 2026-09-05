@@ -30,7 +30,33 @@ Les permissions réutilisent le vocabulaire technique existant (`devis:read`, `d
 | `TECHNICIEN` | Lire les chantiers en cours sans prix ; consulter maintenance récurrente ; sur les SAV qui lui sont affectés, commenter, renseigner la résolution et clôturer. | Aucun montant, aucune marge, aucun paramétrage ou pilotage. |
 | `COMPTABLE` | Gérer le périmètre comptable natif : devis/chantiers utiles à la comptabilité, puis factures, avoirs, comptes bancaires, rapprochements, relances, envois et export expert-comptable. | Les capacités non encore livrées restent indisponibles : aucune route ou écran fictif. |
 | `DIRECTEUR_COMMERCIAL` | Tous les droits du commercial, visibilité sur les affaires/devis/statistiques de son équipe, objectifs mensuels, trimestriels, semestriels et annuels. | Périmètre limité à son équipe commerciale ; il ne devient pas administrateur général. |
-| `RESPONSABLE` | Supervision de techniciens et/ou conducteurs rattachés ; lecture de leur travail et statistiques. | Périmètre limité aux collaborateurs explicitement rattachés. |
+| `RESPONSABLE` | Supervision des collaborateurs explicitement rattachés : lecture de leurs affaires, saisie et correction des achats et heures sur celles-ci, statistiques de leurs conducteurs. | Périmètre limité aux collaborateurs explicitement rattachés. Sans rattachement déclaré, il ne voit que ses propres affaires. |
+
+## Périmètre hiérarchique d'un responsable
+
+Le périmètre d'un compte `RESPONSABLE` est porté par une donnée, `User.responsableHierarchiqueId` :
+chaque collaborateur désigne le responsable qui le supervise, depuis **Administration >
+Utilisateurs**, colonne « Responsable ». Il n'est jamais déduit du rôle — un compte
+« Responsable » sans rattachement déclaré ne voit et n'écrit que sur ses propres affaires.
+
+Ce que ce rattachement ouvre, une fois déclaré :
+
+| Capacité | Portée |
+|---|---|
+| Lecture des affaires, achats et heures | Affaires conduites par lui-même ou par un collaborateur rattaché. |
+| Saisie, correction et suppression d'achats et d'heures | Les mêmes affaires, et uniquement celles-ci. |
+| Statistiques des conducteurs (résultats et assiduité) | Les seuls conducteurs rattachés ; aucun coût ni marge au-delà. |
+
+Garde-fous appliqués par le serveur :
+
+- seul un compte `RESPONSABLE` actif peut être désigné responsable d'un collaborateur ;
+- un compte ne peut pas être son propre responsable, ni fermer une boucle hiérarchique ;
+- perdre le rôle `RESPONSABLE` détache l'équipe : elle ne réapparaît pas si le rôle est
+  rendu plus tard, il faut la redéclarer ;
+- l'attribution est réservée aux administrateurs.
+
+Le périmètre commercial (directeur commercial → commerciaux) n'est pas ouvert par cette
+donnée : il relève de la phase de commissionnement, avec ses propres règles.
 
 ## Règles d'implémentation
 

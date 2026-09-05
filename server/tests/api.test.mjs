@@ -55,7 +55,11 @@ if (!TEST_DATABASE_URL) {
     await prisma.intervenant.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
-    await prisma.user.deleteMany({ where: { email: { in: ['conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test'] } } });
+    await prisma.user.deleteMany({ where: { email: { in: [
+      'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
+      'travaux.conducteur.a@iris.test', 'travaux.conducteur.b@iris.test',
+      'travaux.responsable@iris.test', 'travaux.technicien@iris.test',
+    ] } } });
   };
 
   before(async () => {
@@ -642,6 +646,254 @@ if (!TEST_DATABASE_URL) {
     test('refuse une permission hors du vocabulaire', async () => {
       const res = await request(app).put(`/api/users/${conducteurId}/permissions`).set('Authorization', `Bearer ${superSession}`).send({ permissions: ['invente:write'] });
       assert.equal(res.status, 400);
+    });
+  });
+
+  // Sécurisation du suivi Travaux (achats et heures) : qui a le droit d'écrire sur une
+  // affaire, ce qu'il a le droit d'y écrire, et ce que l'écriture laisse derrière elle.
+  //
+  // Ces trois questions n'avaient aucune réponse côté serveur : TOUT compte connecté non
+  // commercial pouvait saisir, corriger et supprimer des achats et des heures sur
+  // N'IMPORTE QUELLE affaire, avec n'importe quel montant, y compris négatif, et sans
+  // qu'il en reste la moindre trace.
+  describe('Suivi Travaux : écritures, périmètres et intégrité des coûts', () => {
+    let superSession = '';
+    let sessionConducteurA = '';
+    let sessionConducteurB = '';
+    let sessionResponsable = '';
+    let sessionTechnicien = '';
+    let conducteurAId = '';
+    let conducteurBId = '';
+    let responsableId = '';
+    let technicienId = '';
+    let affaireA = '';
+    let affaireB = '';
+    let categorieId = '';
+    let fournisseurId = '';
+    let intervenantId = '';
+
+    const achat = (chantierId, extra = {}) => ({
+      date: '2026-09-01', description: 'TEST achat travaux', montantHT: 250,
+      chantierId, categorieId, fournisseurId, ...extra,
+    });
+    const heure = (chantierId, extra = {}) => ({
+      date: '2026-09-01', nbrHeures: 7, chantierId, intervenantId, ...extra,
+    });
+
+    before(async () => {
+      const jwt = (await import('jsonwebtoken')).default;
+      superSession = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+
+      const compte = async (email, name, role) => {
+        const user = await prisma.user.upsert({
+          where: { email }, update: { role, actif: true, responsableHierarchiqueId: null }, create: { email, name, role },
+        });
+        return [user.id, jwt.sign({ id: user.id }, process.env.JWT_SECRET)];
+      };
+      [conducteurAId, sessionConducteurA] = await compte('travaux.conducteur.a@iris.test', 'TEST Conducteur A', 'CONDUCTEUR_TRAVAUX');
+      [conducteurBId, sessionConducteurB] = await compte('travaux.conducteur.b@iris.test', 'TEST Conducteur B', 'CONDUCTEUR_TRAVAUX');
+      [responsableId, sessionResponsable] = await compte('travaux.responsable@iris.test', 'TEST Responsable', 'RESPONSABLE');
+      [technicienId, sessionTechnicien] = await compte('travaux.technicien@iris.test', 'TEST Technicien', 'TECHNICIEN');
+
+      const chantier = (nom, responsable) => prisma.chantier.create({
+        data: { nom, client: 'TEST Client travaux', dateDebut: new Date(), budgetGlobalVendu: 50000, responsableId: responsable },
+      });
+      affaireA = (await chantier('TEST Affaire du conducteur A', conducteurAId)).id;
+      affaireB = (await chantier('TEST Affaire du conducteur B', conducteurBId)).id;
+
+      categorieId = (await prisma.categorie.upsert({ where: { nom: 'TEST Catégorie travaux' }, update: {}, create: { nom: 'TEST Catégorie travaux' } })).id;
+      fournisseurId = (await prisma.fournisseur.upsert({ where: { nom: 'TEST Fournisseur travaux' }, update: {}, create: { nom: 'TEST Fournisseur travaux' } })).id;
+      intervenantId = (await prisma.intervenant.create({ data: { nom: 'TEST Intervenant travaux', role: 'Technicien', tauxHoraireCharge: 45 } })).id;
+    });
+
+    test('un conducteur saisit sur SON affaire, jamais sur celle d’un autre', async () => {
+      const sienAchat = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteurA}`).send(achat(affaireA));
+      assert.equal(sienAchat.status, 200);
+      const sienneHeure = await request(app).post('/api/heures').set('Authorization', `Bearer ${sessionConducteurA}`).send(heure(affaireA));
+      assert.equal(sienneHeure.status, 200);
+
+      // Le défaut d'origine : ces deux appels réussissaient et déplaçaient un coût et des
+      // heures sur l'affaire d'un autre conducteur.
+      const autreAchat = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteurA}`).send(achat(affaireB));
+      assert.equal(autreAchat.status, 404);
+      const autreHeure = await request(app).post('/api/heures').set('Authorization', `Bearer ${sessionConducteurA}`).send(heure(affaireB));
+      assert.equal(autreHeure.status, 404);
+      assert.equal(await prisma.achatReel.count({ where: { chantierId: affaireB } }), 0);
+      assert.equal(await prisma.pointageHeure.count({ where: { chantierId: affaireB } }), 0);
+    });
+
+    test('un technicien n’écrit sur aucune affaire', async () => {
+      const res = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionTechnicien}`).send(achat(affaireA));
+      assert.equal(res.status, 404);
+      const heures = await request(app).post('/api/heures').set('Authorization', `Bearer ${sessionTechnicien}`).send(heure(affaireA));
+      assert.equal(heures.status, 404);
+    });
+
+    test('un responsable n’écrit que sur les affaires de son équipe DÉCLARÉE', async () => {
+      // Le rôle seul ne donne rien : sans rattachement explicite, le périmètre est vide.
+      const avant = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionResponsable}`).send(achat(affaireA));
+      assert.equal(avant.status, 404);
+
+      const rattachement = await request(app).patch(`/api/users/${conducteurAId}/responsable-hierarchique`)
+        .set('Authorization', `Bearer ${superSession}`).send({ responsableHierarchiqueId: responsableId });
+      assert.equal(rattachement.status, 200);
+      assert.equal(rattachement.body.responsableHierarchiqueId, responsableId);
+
+      const apres = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionResponsable}`).send(achat(affaireA));
+      assert.equal(apres.status, 200);
+      // Le conducteur B n'est pas de son équipe : son affaire lui reste fermée.
+      const horsEquipe = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionResponsable}`).send(achat(affaireB));
+      assert.equal(horsEquipe.status, 404);
+    });
+
+    test('le rattachement hiérarchique refuse un non-responsable, l’auto-rattachement et les boucles', async () => {
+      const versConducteur = await request(app).patch(`/api/users/${technicienId}/responsable-hierarchique`)
+        .set('Authorization', `Bearer ${superSession}`).send({ responsableHierarchiqueId: conducteurBId });
+      assert.equal(versConducteur.status, 400);
+
+      const surSoi = await request(app).patch(`/api/users/${responsableId}/responsable-hierarchique`)
+        .set('Authorization', `Bearer ${superSession}`).send({ responsableHierarchiqueId: responsableId });
+      assert.equal(surSoi.status, 400);
+
+      // Le responsable est déjà au-dessus du conducteur A : l'inverse refermerait la chaîne.
+      await prisma.user.update({ where: { id: conducteurAId }, data: { role: 'RESPONSABLE' } });
+      const boucle = await request(app).patch(`/api/users/${responsableId}/responsable-hierarchique`)
+        .set('Authorization', `Bearer ${superSession}`).send({ responsableHierarchiqueId: conducteurAId });
+      assert.equal(boucle.status, 400);
+      await prisma.user.update({ where: { id: conducteurAId }, data: { role: 'CONDUCTEUR_TRAVAUX' } });
+    });
+
+    test('un compte qui cesse d’être responsable perd son équipe déclarée', async () => {
+      const versConducteur = await request(app).patch(`/api/users/${responsableId}/role`)
+        .set('Authorization', `Bearer ${superSession}`).send({ role: 'CONDUCTEUR_TRAVAUX' });
+      assert.equal(versConducteur.status, 200);
+      const detache = await prisma.user.findUnique({ where: { id: conducteurAId }, select: { responsableHierarchiqueId: true } });
+      assert.equal(detache.responsableHierarchiqueId, null, 'le rattachement ne doit pas survivre à la perte du rôle');
+
+      // Remis en place pour les tests suivants (périmètre de lecture et statistiques).
+      await request(app).patch(`/api/users/${responsableId}/role`).set('Authorization', `Bearer ${superSession}`).send({ role: 'RESPONSABLE' });
+      await request(app).patch(`/api/users/${conducteurAId}/responsable-hierarchique`)
+        .set('Authorization', `Bearer ${superSession}`).send({ responsableHierarchiqueId: responsableId });
+    });
+
+    test('les montants et les heures invalides ou négatifs sont refusés', async () => {
+      const refuse = async (chemin, corps) => {
+        const res = await request(app).post(chemin).set('Authorization', `Bearer ${sessionConducteurA}`).send(corps);
+        assert.equal(res.status, 400, `${chemin} a accepté ${JSON.stringify(corps)}`);
+      };
+      // Un montant négatif minorait le coût réel du chantier et gonflait d'autant sa marge.
+      await refuse('/api/achats', achat(affaireA, { montantHT: -100 }));
+      await refuse('/api/achats', achat(affaireA, { montantHT: 'abc' }));
+      await refuse('/api/achats', achat(affaireA, { montantHT: '' }));
+      await refuse('/api/achats', achat(affaireA, { date: 'pas une date' }));
+      await refuse('/api/achats', achat(affaireA, { description: '   ' }));
+      await refuse('/api/heures', heure(affaireA, { nbrHeures: -3 }));
+      await refuse('/api/heures', heure(affaireA, { nbrHeures: 0 }));
+      await refuse('/api/heures', heure(affaireA, { nbrHeures: 'sept' }));
+      await refuse('/api/heures', heure(affaireA, { date: '' }));
+
+      // Rien de tout cela n'a été écrit.
+      const somme = await prisma.achatReel.aggregate({ where: { chantierId: affaireA }, _min: { montantHT: true } });
+      assert.ok(Number(somme._min.montantHT) >= 0, 'aucun montant négatif ne doit exister');
+    });
+
+    test('une correction ne déplace pas une saisie vers une autre affaire', async () => {
+      const cree = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteurA}`).send(achat(affaireA));
+      assert.equal(cree.status, 200);
+      const deplacement = await request(app).patch(`/api/achats/${cree.body.id}`)
+        .set('Authorization', `Bearer ${sessionConducteurA}`).send({ chantierId: affaireB, montantHT: 300 });
+      assert.equal(deplacement.status, 400);
+      const inchange = await prisma.achatReel.findUnique({ where: { id: cree.body.id } });
+      assert.equal(inchange.chantierId, affaireA);
+      assert.equal(Number(inchange.montantHT), 250, 'un refus ne doit rien enregistrer au passage');
+    });
+
+    test('une correction ou une suppression par un tiers est refusée', async () => {
+      const cree = await request(app).post('/api/heures').set('Authorization', `Bearer ${sessionConducteurA}`).send(heure(affaireA));
+      assert.equal(cree.status, 200);
+      const correction = await request(app).patch(`/api/heures/${cree.body.id}`)
+        .set('Authorization', `Bearer ${sessionConducteurB}`).send({ nbrHeures: 99 });
+      assert.equal(correction.status, 404);
+      const suppression = await request(app).delete(`/api/heures/${cree.body.id}`).set('Authorization', `Bearer ${sessionConducteurB}`);
+      assert.equal(suppression.status, 404);
+      assert.ok(await prisma.pointageHeure.findUnique({ where: { id: cree.body.id } }), 'le pointage doit être intact');
+    });
+
+    test('chaque écriture laisse une trace nominative avec son état d’avant', async () => {
+      const cree = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteurA}`).send(achat(affaireA, { montantHT: 120 }));
+      assert.equal(cree.status, 200);
+      const corrige = await request(app).patch(`/api/achats/${cree.body.id}`).set('Authorization', `Bearer ${sessionConducteurA}`).send({ montantHT: 180 });
+      assert.equal(corrige.status, 200);
+      const supprime = await request(app).delete(`/api/achats/${cree.body.id}`).set('Authorization', `Bearer ${sessionConducteurA}`);
+      assert.equal(supprime.status, 200);
+
+      const journal = await request(app).get(`/api/chantiers/${affaireA}/journal-saisies`).set('Authorization', `Bearer ${sessionConducteurA}`);
+      assert.equal(journal.status, 200);
+      const trace = journal.body.filter((e) => e.cibleId === cree.body.id);
+      assert.deepEqual(trace.map((e) => e.action).sort(), ['CORRECTION', 'CREATION', 'SUPPRESSION']);
+      for (const entree of trace) {
+        assert.equal(entree.auteurEmail, 'travaux.conducteur.a@iris.test');
+        assert.equal(entree.chantierId, affaireA);
+      }
+      const correction = trace.find((e) => e.action === 'CORRECTION');
+      assert.equal(correction.avant.montantHT, 120, 'la valeur remplacée doit rester lisible');
+      assert.equal(correction.apres.montantHT, 180);
+      // La ligne est supprimée : seul le journal garde ce qu'elle valait.
+      assert.equal(trace.find((e) => e.action === 'SUPPRESSION').avant.montantHT, 180);
+    });
+
+    test('le journal d’audit reste fermé à qui ne peut pas écrire sur l’affaire', async () => {
+      const tiers = await request(app).get(`/api/chantiers/${affaireA}/journal-saisies`).set('Authorization', `Bearer ${sessionConducteurB}`);
+      assert.equal(tiers.status, 404);
+      const technicien = await request(app).get(`/api/chantiers/${affaireA}/journal-saisies`).set('Authorization', `Bearer ${sessionTechnicien}`);
+      assert.equal(technicien.status, 404);
+      const admin = await request(app).get(`/api/chantiers/${affaireA}/journal-saisies`).set('Authorization', `Bearer ${superSession}`);
+      assert.equal(admin.status, 200);
+    });
+
+    test('le périmètre de lecture d’un responsable couvre son équipe, et rien d’au-delà', async () => {
+      await prisma.achatReel.create({ data: { date: new Date(), description: 'TEST achat B', montantHT: 400, chantierId: affaireB, categorieId, fournisseurId } });
+
+      const achats = await request(app).get('/api/achats').set('Authorization', `Bearer ${sessionResponsable}`);
+      assert.equal(achats.status, 200);
+      const affaires = new Set(achats.body.map((a) => a.chantier?.id));
+      assert.ok(affaires.has(affaireA), 'l’affaire de son équipe doit être visible');
+      assert.equal(affaires.has(affaireB), false, 'une affaire hors équipe ne doit pas apparaître');
+
+      const chantiers = await request(app).get('/api/chantiers').set('Authorization', `Bearer ${sessionResponsable}`);
+      const vus = new Set(chantiers.body.map((c) => c.id));
+      assert.ok(vus.has(affaireA) && !vus.has(affaireB));
+    });
+
+    test('les statistiques des conducteurs s’arrêtent au périmètre du responsable', async () => {
+      const res = await request(app).get('/api/stats/conducteurs').set('Authorization', `Bearer ${sessionResponsable}`);
+      assert.equal(res.status, 200);
+      const ids = res.body.map((c) => c.id);
+      assert.ok(ids.includes(conducteurAId), 'son conducteur doit être présent');
+      assert.equal(ids.includes(conducteurBId), false, 'aucun coût ni marge hors périmètre');
+
+      const assiduite = await request(app).get('/api/stats/conducteurs/assiduite').set('Authorization', `Bearer ${sessionResponsable}`);
+      assert.equal(assiduite.status, 200);
+      assert.equal(assiduite.body.conducteurs.some((c) => c.id === conducteurBId), false);
+
+      // Un administrateur garde la vue complète.
+      const admin = await request(app).get('/api/stats/conducteurs').set('Authorization', `Bearer ${superSession}`);
+      const idsAdmin = admin.body.map((c) => c.id);
+      assert.ok(idsAdmin.includes(conducteurAId) && idsAdmin.includes(conducteurBId));
+
+      // Un technicien n'a pas accès à ces statistiques.
+      const technicien = await request(app).get('/api/stats/conducteurs').set('Authorization', `Bearer ${sessionTechnicien}`);
+      assert.equal(technicien.status, 403);
+    });
+
+    test('une affaire clôturée n’accepte plus de saisie d’un conducteur', async () => {
+      await prisma.chantier.update({ where: { id: affaireA }, data: { statut: 'TERMINE' } });
+      const res = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteurA}`).send(achat(affaireA));
+      assert.equal(res.status, 403);
+      // L'administrateur, lui, garde la main (c'est lui qui rouvre une affaire clôturée).
+      const admin = await request(app).post('/api/achats').set('Authorization', `Bearer ${superSession}`).send(achat(affaireA));
+      assert.equal(admin.status, 200);
+      await prisma.chantier.update({ where: { id: affaireA }, data: { statut: 'EN_COURS' } });
     });
   });
 

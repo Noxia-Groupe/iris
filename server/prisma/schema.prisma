@@ -40,12 +40,24 @@ model User {
   // restent rattachés, contrairement à une révocation qui les détache. Réversible.
   actif         Boolean @default(true)
 
+  // Rattachement hiérarchique EXPLICITE : le compte RESPONSABLE qui supervise ce
+  // collaborateur. C'est la seule définition du périmètre d'un responsable — il n'est
+  // jamais déduit de l'intitulé du rôle, sans quoi tout compte marqué « Responsable »
+  // superviserait l'entreprise entière. Tant qu'aucun collaborateur ne lui est rattaché,
+  // un responsable n'a de périmètre que ses propres affaires.
+  responsableHierarchiqueId String?
+  responsableHierarchique   User?   @relation("EquipeHierarchique", fields: [responsableHierarchiqueId], references: [id], onDelete: SetNull)
+  collaborateurs            User[]  @relation("EquipeHierarchique")
+
   chantiersGeres          Chantier[]                 @relation("ChantierResponsable") // Liaison pour restreindre la vue des chefs de chantier
   chantiersCommercialises Chantier[]                 @relation("ChantierCommercial") // Chantiers vendus par ce commercial
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
+  saisiesChantier         JournalSaisieChantier[]    @relation("JournalSaisieAuteur") // Écritures d'achats/heures dont ce compte est l'auteur
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([responsableHierarchiqueId])
 }
 
 model Fournisseur {
@@ -102,6 +114,7 @@ model Chantier {
   achats         AchatReel[]
   pointages      PointageHeure[]
   planningEvents PlanningEvent[]
+  journalSaisies JournalSaisieChantier[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -184,6 +197,43 @@ model PointageHeure {
 
   @@index([intervenantId])
   @@index([chantierId])
+}
+
+/// Piste d'audit des écritures du suivi Travaux (achats et heures).
+///
+/// Ces saisies alimentent les coûts, les heures et les marges d'une affaire : une
+/// correction ou une suppression y déplace de l'argent. Le journal conserve donc QUI a
+/// écrit, SUR QUELLE affaire, et l'état avant/après — la ligne corrigée, elle, ne garde
+/// aucune trace de sa valeur précédente. C'est un journal en ajout seul : aucune route
+/// ne le modifie ni ne l'efface, il ne disparaît qu'avec l'affaire elle-même.
+model JournalSaisieChantier {
+  id String @id @default(uuid())
+
+  chantierId String
+  chantier   Chantier @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+
+  cible   String // ACHAT | HEURE
+  cibleId String
+  action  String // CREATION | CORRECTION | SUPPRESSION
+
+  // L'auteur est détaché (et non le journal supprimé) si son compte est révoqué : la
+  // trace de l'écriture survit au départ de la personne qui l'a faite.
+  auteurId String?
+  auteur   User?   @relation("JournalSaisieAuteur", fields: [auteurId], references: [id], onDelete: SetNull)
+  // Nom et email figés au moment de l'écriture : ils restent lisibles même après
+  // révocation du compte, alors que la relation ci-dessus devient nulle.
+  auteurNom   String
+  auteurEmail String
+
+  // Valeurs métier avant et après l'écriture (montant, heures, date, rattachements).
+  // `avant` est nul à la création, `apres` est nul à la suppression.
+  avant Json?
+  apres Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([chantierId, createdAt])
+  @@index([cible, cibleId])
 }
 
 // Paramètres globaux configurables par les administrateurs (singleton).
