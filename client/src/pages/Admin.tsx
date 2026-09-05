@@ -1174,7 +1174,7 @@ const Admin = () => {
                     </td>
                     <td className="px-4 py-4">
                       <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <input type="checkbox" checked={['devis:read', 'devis:write'].every((permission) => (u.permissions || []).includes(permission))} disabled={!isSuper} onChange={() => handleTogglePermission(u.id, u.permissions || [], ['devis:read', 'devis:write'])} className="w-4 h-4" title="Autoriser la consultation et la création de devis" />
+                        <input type="checkbox" checked={['devis:read', 'devis:write'].every((permission) => (u.permissions || []).includes(permission))} disabled={!isSuper || (['devis:read', 'devis:write'].every((permission) => (u.permissions || []).includes(permission)) && !['devis:read', 'devis:write'].every((permission) => (u.permissionsIndividuelles || []).includes(permission)))} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], ['devis:read', 'devis:write'])} className="w-4 h-4" title={['devis:read', 'devis:write'].every((permission) => (u.permissions || []).includes(permission)) && !['devis:read', 'devis:write'].every((permission) => (u.permissionsIndividuelles || []).includes(permission)) ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
                         <span className="text-xs text-gray-500">Droit devis</span>
                       </label>
                     </td>

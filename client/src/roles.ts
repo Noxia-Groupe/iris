@@ -65,10 +65,7 @@ export function peutVoirFinance(user?: CurrentUser | null): boolean {
 
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */
 export function peutAccederAuxDevis(user?: CurrentUser | null): boolean {
-  if (!user) return false;
-  return isAdminRole(user.role)
-    || [ROLE_COMMERCIAL, ROLE_ASSISTANTE_COMMERCIALE, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL].includes(user.role || '')
-    || (user.permissions || []).includes('devis:read');
+  return !!user && (isSuperAdminRole(user.role) || (user.permissions || []).includes('devis:read'));
 }
 
 /** Compte connecté tel que stocké au login (localStorage), ou null. */
