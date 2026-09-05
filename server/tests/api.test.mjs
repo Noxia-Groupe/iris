@@ -602,6 +602,32 @@ if (!TEST_DATABASE_URL) {
     }
   });
 
+  describe('Permissions individuelles', () => {
+    let superSession = '', conducteurSession = '', conducteurId = '', clientId = '';
+    before(async () => {
+      const jwt = (await import('jsonwebtoken')).default;
+      await prisma.user.deleteMany({ where: { email: 'permissions@iris.test' } });
+      const conducteur = await prisma.user.create({ data: { email: 'permissions@iris.test', name: 'TEST Permissions', role: 'CONDUCTEUR_TRAVAUX' } });
+      conducteurId = conducteur.id;
+      conducteurSession = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      superSession = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      clientId = (await request(app).post('/api/clients').set('Authorization', `Bearer ${superSession}`).send({ raisonSociale: 'TEST Client permissions' })).body.id;
+    });
+
+    test('refuse un devis sans permission, puis l’autorise après attribution individuelle', async () => {
+      const corps = { clientId, objet: 'TEST Devis permission', lignes: [{ designation: 'Test', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] };
+      assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 403);
+      const attribution = await request(app).put(`/api/users/${conducteurId}/permissions`).set('Authorization', `Bearer ${superSession}`).send({ permissions: ['devis:read', 'devis:write', 'clients:read'] });
+      assert.equal(attribution.status, 200);
+      assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 201);
+    });
+
+    test('refuse une permission hors du vocabulaire', async () => {
+      const res = await request(app).put(`/api/users/${conducteurId}/permissions`).set('Authorization', `Bearer ${superSession}`).send({ permissions: ['invente:write'] });
+      assert.equal(res.status, 400);
+    });
+  });
+
   describe('Identité de la société', () => {
     let session = '';
     before(async () => {
