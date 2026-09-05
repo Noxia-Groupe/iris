@@ -252,6 +252,7 @@ model Devis {
 
   @@unique([dossierId, version])
   @@index([clientId])
+  @@index([numero])
 }
 
 model DevisLigne {
