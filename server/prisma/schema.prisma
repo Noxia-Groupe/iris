@@ -226,8 +226,45 @@ model Client {
   contacts             ClientContact[]
   sites                ClientSite[]
   equipementsInstalles EquipementInstalle[]
+  devis                Devis[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
+}
+
+// Devis natif versionné. Un dossier garde les révisions d'une même proposition ; une
+// révision est immuable dès qu'elle est envoyée ou acceptée, la modification crée la suivante.
+model Devis {
+  id                 String       @id @default(uuid())
+  dossierId          String
+  version            Int
+  clientId           String
+  client             Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  objet              String
+  statut             String       @default("BROUILLON")
+  totalHt            Decimal      @db.Decimal(12, 2)
+  totalTva           Decimal      @db.Decimal(12, 2)
+  totalTtc           Decimal      @db.Decimal(12, 2)
+  lignes             DevisLigne[]
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@unique([dossierId, version])
+  @@index([clientId])
+}
+
+model DevisLigne {
+  id              String   @id @default(uuid())
+  devisId         String
+  devis           Devis    @relation(fields: [devisId], references: [id], onDelete: Cascade)
+  ordre           Int
+  designation     String
+  quantite        Decimal  @db.Decimal(12, 3)
+  prixUnitaireHt  Decimal  @db.Decimal(12, 2)
+  tauxTva         Decimal  @db.Decimal(5, 2)
+  totalHt         Decimal  @db.Decimal(12, 2)
+  totalTtc        Decimal  @db.Decimal(12, 2)
+
+  @@unique([devisId, ordre])
 }
 
 // Contact métier d'un client : peut être associé ultérieurement aux interventions,

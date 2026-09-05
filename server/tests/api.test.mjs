@@ -30,6 +30,8 @@ if (!TEST_DATABASE_URL) {
   let cleApi = '';
 
   const nettoyer = async () => {
+    // Les devis dépendent du client ; ils doivent être retirés avant la fiche client.
+    await prisma.devis.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Le parc dépend à la fois du client/site et du catalogue : il part donc en premier.
     await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
@@ -471,6 +473,50 @@ if (!TEST_DATABASE_URL) {
       const parc = await request(app).get(`/api/clients/${clientId}/equipements?inclureArchives=true`).set('Authorization', `Bearer ${session}`);
       assert.equal(parc.status, 200);
       assert.equal(parc.body.some((e) => e.id === equipementId && e.statut === 'ARCHIVE'), true);
+    });
+  });
+
+  describe('Devis versionnés', () => {
+    let session = '';
+    let clientId = '';
+    let devisId = '';
+    let dossierId = '';
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      session = secours.body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
+        .send({ raisonSociale: 'TEST Client devis' });
+      clientId = client.body.id;
+    });
+
+    test('crée un brouillon de devis avec ses lignes et ses totaux calculés', async () => {
+      const res = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Installation contrôle d’accès',
+        lignes: [{ designation: 'Pose lecteur', quantite: 2, prixUnitaireHt: 120, tauxTva: 20 }],
+      });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.version, 1);
+      assert.equal(res.body.statut, 'BROUILLON');
+      assert.equal(res.body.totalHt, 240);
+      assert.equal(res.body.totalTtc, 288);
+      devisId = res.body.id;
+      dossierId = res.body.dossierId;
+    });
+
+    test('garantit HT + TVA = TTC avec un taux réduit', async () => {
+      const res = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({ clientId, objet: 'Rénovation', lignes: [{ designation: 'Fourniture posée', quantite: 1, prixUnitaireHt: 5, tauxTva: 5.5 }] });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.totalHt + res.body.totalTva, res.body.totalTtc);
+      assert.equal(res.body.totalTtc, 5.28);
+    });
+
+    test('révise un devis sans modifier sa version validée', async () => {
+      const res = await request(app).post(`/api/devis/${devisId}/revisions`).set('Authorization', `Bearer ${session}`);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.version, 2);
+      assert.equal(res.body.statut, 'BROUILLON');
+      assert.equal(res.body.dossierId, dossierId);
     });
   });
 
