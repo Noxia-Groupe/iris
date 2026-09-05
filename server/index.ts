@@ -59,7 +59,7 @@ async function resolveAuthorizedSsoUser(email: string) {
   if (!normalized) return null;
   return prisma.user.findFirst({
     where: { email: normalized, actif: true },
-    select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
+    select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true, permissions: true },
   });
 }
 
@@ -173,11 +173,12 @@ const ROLE_RESPONSABLE = 'RESPONSABLE';
 // existants ; SAV, maintenance, facturation, banques et objectifs seront ajoutés avec
 // leurs routes métier, jamais anticipés par des accès fictifs.
 const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
-  ADMIN: ['devis:read', 'devis:write', 'chantiers:read', 'finances:read'],
-  COMMERCIAL: ['devis:read', 'devis:write', 'chantiers:read'],
-  [ROLE_ASSISTANTE_COMMERCIALE]: ['devis:read', 'devis:write', 'chantiers:read'],
-  [ROLE_COMPTABLE]: ['devis:read', 'devis:write', 'chantiers:read', 'finances:read'],
-  [ROLE_DIRECTEUR_COMMERCIAL]: ['devis:read', 'devis:write', 'chantiers:read'],
+  ADMIN: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  CONDUCTEUR_TRAVAUX: ['chantiers:read'],
+  COMMERCIAL: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  [ROLE_ASSISTANTE_COMMERCIALE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  [ROLE_COMPTABLE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  [ROLE_DIRECTEUR_COMMERCIAL]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_RESPONSABLE]: ['chantiers:read'],
   [ROLE_TECHNICIEN]: ['chantiers:read'],
 };
@@ -730,7 +731,7 @@ app.post('/api/auth/secours', async (req, res) => {
   try {
     const user = await prisma.user.findFirst({
       where: { email: BREAK_GLASS_EMAIL, actif: true, role: ROLE_SUPERADMIN },
-      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
+      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true, permissions: true },
     });
     // Le secret seul ne suffit pas : il ouvre un compte précis, qui doit encore exister,
     // être actif et être superadmin. Un compte rétrogradé ou désactivé ferme la porte.
@@ -756,7 +757,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
     const authUser = (req as AuthRequest).user!;
     const user = await prisma.user.findUnique({
       where: { id: authUser.id },
-      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
+      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true, permissions: true },
     });
     if (!user) return res.status(404).json({ error: 'Compte introuvable.' });
     res.json(user);
@@ -2520,7 +2521,7 @@ const archiverEquipementClient: express.RequestHandler = async (req, res) => {
   }
 };
 
-routeMixte('get', '/clients', 'clients:read', listerClients);
+routeMixte('get', '/clients', 'clients:read', listerClients, [requirePermission('clients:read')]);
 routeMixte('post', '/clients', 'clients:write', creerClient);
 routeMixte('get', '/clients/:id', 'clients:read', lireClient);
 routeMixte('put', '/clients/:id', 'clients:write', modifierClient);

@@ -25,7 +25,7 @@ import Catalogue from './pages/Catalogue';
 import Secours from './pages/Secours';
 import Devis from './pages/Devis';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
+import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
 import { useModules } from './modules';
 
 // Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
@@ -74,6 +74,11 @@ const PlanningRoute = () => {
   return planningActif ? <Planning /> : <Navigate to="/" replace />;
 };
 
+const RouteDevis = () => {
+  const utilisateur = useCurrentUser();
+  return peutAccederAuxDevis(utilisateur) ? <Devis /> : <Navigate to="/" replace />;
+};
+
 // Identité de la société : consultable par un administrateur, modifiable par le seul
 // super administrateur — c'est aussi ce qu'applique le serveur (PUT /api/company).
 const RouteSociete = () => {
@@ -116,8 +121,8 @@ function App() {
         } />
 
         <Route path="/devis" element={
-          <PrivateRoute requiredRoles={ROLES_ADMIN}>
-            <Devis />
+          <PrivateRoute>
+            <RouteDevis />
           </PrivateRoute>
         } />
         <Route path="/clients" element={
