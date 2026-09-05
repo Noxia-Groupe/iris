@@ -504,7 +504,14 @@ if (!TEST_DATABASE_URL) {
       dossierId = res.body.dossierId;
     });
 
-    test('révise un devis sans modifier sa version validée', async () => {
+    it('garantit HT + TVA = TTC avec un taux réduit', async () => {
+      const res = await request(app).post('/api/devis').set('Cookie', session).send({ clientId, objet: 'Rénovation', lignes: [{ designation: 'Fourniture posée', quantite: 1, prixUnitaireHt: 5, tauxTva: 5.5 }] });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.totalHt + res.body.totalTva, res.body.totalTtc);
+      assert.equal(res.body.totalTtc, 5.27);
+    });
+
+    it('révise un devis sans modifier sa version validée', async () => {
       const res = await request(app).post(`/api/devis/${devisId}/revisions`).set('Authorization', `Bearer ${session}`);
       assert.equal(res.status, 201, JSON.stringify(res.body));
       assert.equal(res.body.version, 2);
