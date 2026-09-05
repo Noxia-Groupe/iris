@@ -24,6 +24,7 @@ import ApiKeys from './pages/ApiKeys';
 import Societe from './pages/Societe';
 import Catalogue from './pages/Catalogue';
 import Secours from './pages/Secours';
+import Devis from './pages/Devis';
 import { ErrorBoundary } from './ErrorBoundary';
 import { peutVoirFinance, useCurrentUser, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
 import { useModules } from './modules';
@@ -124,6 +125,11 @@ function App() {
           </PrivateRoute>
         } />
 
+        <Route path="/devis" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <Devis />
+          </PrivateRoute>
+        } />
         <Route path="/clients" element={
           <PrivateRoute requiredRoles={ROLES_ADMIN}>
             <Clients />
