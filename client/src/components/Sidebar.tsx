@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Building2, BookOpen, Landmark, KeyRound, FileText } from 'lucide-react';
 import { applyTheme } from '../theme';
-import { isAdminRole, isSuperAdminRole, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
+import { isAdminRole, isSuperAdminRole, peutAccederAuxDevis, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
 import './Sidebar.css';
 
@@ -44,7 +44,7 @@ const Sidebar = () => {
           Liste des Chantiers
         </NavLink>
         
-        {isAdmin && (
+        {peutAccederAuxDevis(user) && (
           <NavLink to="/devis" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <FileText size={20} />
             Devis

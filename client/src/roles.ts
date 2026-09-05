@@ -9,6 +9,11 @@ export const ROLE_SUPERADMIN = 'SUPERADMIN';
 export const ROLE_ADMIN = 'ADMIN';
 export const ROLE_CONDUCTEUR = 'CONDUCTEUR_TRAVAUX';
 export const ROLE_COMMERCIAL = 'COMMERCIAL';
+export const ROLE_ASSISTANTE_COMMERCIALE = 'ASSISTANTE_COMMERCIALE';
+export const ROLE_TECHNICIEN = 'TECHNICIEN';
+export const ROLE_COMPTABLE = 'COMPTABLE';
+export const ROLE_DIRECTEUR_COMMERCIAL = 'DIRECTEUR_COMMERCIAL';
+export const ROLE_RESPONSABLE = 'RESPONSABLE';
 
 /** Un SUPERADMIN possède TOUS les droits d'un ADMIN, plus ceux réservés à la direction. */
 export function isAdminRole(role?: string | null): boolean {
@@ -25,6 +30,11 @@ export function roleLabel(role?: string | null): string {
     case ROLE_SUPERADMIN: return 'Super Admin';
     case ROLE_ADMIN: return 'Admin';
     case ROLE_COMMERCIAL: return 'Commercial';
+    case ROLE_ASSISTANTE_COMMERCIALE: return 'Assistante commerciale';
+    case ROLE_TECHNICIEN: return 'Technicien';
+    case ROLE_COMPTABLE: return 'Comptable';
+    case ROLE_DIRECTEUR_COMMERCIAL: return 'Directeur commercial';
+    case ROLE_RESPONSABLE: return 'Responsable';
     default: return 'Conducteur';
   }
 }
@@ -37,6 +47,8 @@ export interface CurrentUser {
   theme?: string;
   /** Accès aux données financières, accordé au cas par cas (cf. peutVoirFinance). */
   accesFinance?: boolean;
+  /** Permissions individuelles relues depuis /api/me. */
+  permissions?: string[];
 }
 
 /**
@@ -49,6 +61,14 @@ export interface CurrentUser {
  */
 export function peutVoirFinance(user?: CurrentUser | null): boolean {
   return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
+}
+
+/** Accès interface aux devis ; le serveur applique toujours la permission réelle. */
+export function peutAccederAuxDevis(user?: CurrentUser | null): boolean {
+  if (!user) return false;
+  return isAdminRole(user.role)
+    || [ROLE_COMMERCIAL, ROLE_ASSISTANTE_COMMERCIALE, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL].includes(user.role || '')
+    || (user.permissions || []).includes('devis:read');
 }
 
 /** Compte connecté tel que stocké au login (localStorage), ou null. */

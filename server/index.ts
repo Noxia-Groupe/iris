@@ -59,7 +59,7 @@ async function resolveAuthorizedSsoUser(email: string) {
   if (!normalized) return null;
   return prisma.user.findFirst({
     where: { email: normalized, actif: true },
-    select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
+    select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true, permissions: true },
   });
 }
 
@@ -116,7 +116,7 @@ async function verifyMicrosoftIdentity(req: express.Request): Promise<string | n
 
 // --- Middlewares d'authentification / autorisation ---
 interface AuthRequest extends express.Request {
-  user?: { id: string; role: string; accesFinance: boolean };
+  user?: { id: string; role: string; accesFinance: boolean; permissions: string[] };
 }
 
 // Le jeton n'authentifie QUE l'identité : le rôle est systématiquement relu en base, il
@@ -137,7 +137,7 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
     return;
   }
   try {
-    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, accesFinance: true, actif: true } });
+    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, accesFinance: true, permissions: true, actif: true } });
     if (!user) {
       res.status(401).json({ error: 'Compte introuvable ou révoqué' });
       return;
@@ -148,7 +148,7 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
       res.status(401).json({ code: 'COMPTE_DESACTIVE', error: 'Ce compte est désactivé.' });
       return;
     }
-    (req as AuthRequest).user = { id: user.id, role: user.role, accesFinance: user.accesFinance };
+    (req as AuthRequest).user = { id: user.id, role: user.role, accesFinance: user.accesFinance, permissions: user.permissions };
     next();
   } catch {
     res.status(500).json({ error: 'Error resolving authenticated user' });
@@ -163,6 +163,36 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
 // peut ni se promouvoir superadmin, ni modifier/supprimer un compte superadmin — sans quoi
 // la séparation entre les deux rôles n'aurait aucune valeur.
 const ROLE_SUPERADMIN = 'SUPERADMIN';
+const ROLE_ASSISTANTE_COMMERCIALE = 'ASSISTANTE_COMMERCIALE';
+const ROLE_TECHNICIEN = 'TECHNICIEN';
+const ROLE_COMPTABLE = 'COMPTABLE';
+const ROLE_DIRECTEUR_COMMERCIAL = 'DIRECTEUR_COMMERCIAL';
+const ROLE_RESPONSABLE = 'RESPONSABLE';
+
+// Droits par défaut des types de compte. Ils restent volontairement limités aux modules
+// existants ; SAV, maintenance, facturation, banques et objectifs seront ajoutés avec
+// leurs routes métier, jamais anticipés par des accès fictifs.
+const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
+  ADMIN: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  CONDUCTEUR_TRAVAUX: ['chantiers:read'],
+  COMMERCIAL: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  [ROLE_ASSISTANTE_COMMERCIALE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  [ROLE_COMPTABLE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  [ROLE_DIRECTEUR_COMMERCIAL]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
+  [ROLE_RESPONSABLE]: ['chantiers:read'],
+  [ROLE_TECHNICIEN]: ['chantiers:read'],
+};
+
+function hasUserPermission(user: AuthRequest['user'], permission: string): boolean {
+  return !!user && (isSuperAdminRole(user.role) || user.accesFinance && permission === 'finances:read' || DEFAULT_USER_PERMISSIONS[user.role]?.includes(permission) || user.permissions.includes(permission));
+}
+
+function requirePermission(permission: string): express.RequestHandler {
+  return (req, res, next) => {
+    if (!hasUserPermission((req as AuthRequest).user, permission)) return void res.status(403).json({ error: `Permission requise : ${permission}` });
+    next();
+  };
+}
 
 function isAdminRole(role: string | undefined | null): boolean {
   return role === 'ADMIN' || role === ROLE_SUPERADMIN;
@@ -701,7 +731,7 @@ app.post('/api/auth/secours', async (req, res) => {
   try {
     const user = await prisma.user.findFirst({
       where: { email: BREAK_GLASS_EMAIL, actif: true, role: ROLE_SUPERADMIN },
-      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
+      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true, permissions: true },
     });
     // Le secret seul ne suffit pas : il ouvre un compte précis, qui doit encore exister,
     // être actif et être superadmin. Un compte rétrogradé ou désactivé ferme la porte.
@@ -727,7 +757,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
     const authUser = (req as AuthRequest).user!;
     const user = await prisma.user.findUnique({
       where: { id: authUser.id },
-      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true },
+      select: { id: true, name: true, email: true, role: true, theme: true, accesFinance: true, permissions: true },
     });
     if (!user) return res.status(404).json({ error: 'Compte introuvable.' });
     res.json(user);
@@ -1140,7 +1170,7 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
     const users = await prisma.user.findMany({
       where: isSuper ? {} : { role: { not: ROLE_SUPERADMIN } },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
       orderBy: { createdAt: 'asc' },
     });
     res.json(users.map((u) => ({
@@ -1154,7 +1184,7 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
 
 // Autorise un nouveau compte à se connecter (liste blanche SSO / création de compte).
 // Aucun mot de passe n'est défini : le compte se connecte exclusivement via Microsoft Entra ID.
-const ALLOWED_ROLES = [ROLE_SUPERADMIN, 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL'];
+const ALLOWED_ROLES = [ROLE_SUPERADMIN, 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL', ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE];
 
 // Un compte SUPERADMIN n'est administrable QUE par un superadmin : le créer, lui changer
 // de rôle, lui réattribuer un mot de passe ou le révoquer sont autant de moyens, pour un
@@ -1204,7 +1234,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     }
     const user = await prisma.user.create({
       data: { email, name, role, estCommercial, accesFinance }, // pas de mot de passe : accès via SSO Microsoft
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
     });
     res.status(201).json({ ...user, hasPassword: false });
   } catch (error) {
@@ -1269,7 +1299,7 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       // accesFinance n'est PAS touché : il ne dépend pas du rôle, un conducteur comme un
       // commercial peut le conserver en changeant de fonction.
       data: isAdminRole(role) ? { role } : { role, estCommercial: false },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true }
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
     });
     res.json(user);
   } catch (error) {
@@ -1297,12 +1327,28 @@ app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req
     const user = await prisma.user.update({
       where: { id: target.id },
       data: { estCommercial: !!req.body.estCommercial },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
     });
     res.json(user);
   } catch (error) {
     res.status(500).json({ error: 'Error updating estCommercial' });
   }
+});
+
+// Permissions individuelles : complètent le type de compte sans retirer ses droits par
+// défaut. Seul un superadministrateur peut les accorder ou les retirer.
+app.put('/api/users/:id/permissions', requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+    if (!target) return void res.status(404).json({ error: 'Utilisateur introuvable.' });
+    const rawPermissions: unknown[] | null = Array.isArray(req.body?.permissions) ? req.body.permissions : null;
+    const permissions: string[] | null = rawPermissions ? [...new Set(rawPermissions.map((permission) => String(permission)))] : null;
+    if (!permissions || permissions.some((permission) => !(API_SCOPES as readonly string[]).includes(permission))) {
+      return void res.status(400).json({ error: 'Liste de permissions invalide.' });
+    }
+    const user = await prisma.user.update({ where: { id: target.id }, data: { permissions }, select: { id: true, name: true, email: true, role: true, permissions: true } });
+    res.json(user);
+  } catch { res.status(500).json({ error: 'Impossible de modifier les permissions individuelles.' }); }
 });
 
 // Bascule l'accès au Suivi financier d'un compte, quel que soit son rôle. RÉSERVÉ AU
@@ -1318,7 +1364,7 @@ app.patch('/api/users/:id/acces-finance', requireAuth, requireSuperAdmin, async 
     const user = await prisma.user.update({
       where: { id: target.id },
       data: { accesFinance: !!req.body.accesFinance },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
     });
     res.json(user);
   } catch (error) {
@@ -1355,7 +1401,7 @@ app.patch('/api/users/:id/actif', requireAuth, requireAdmin, async (req, res) =>
     const user = await prisma.user.update({
       where: { id: target.id },
       data: { actif },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, actif: true },
+      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
     });
     res.json(user);
   } catch (error) {
@@ -2475,7 +2521,7 @@ const archiverEquipementClient: express.RequestHandler = async (req, res) => {
   }
 };
 
-routeMixte('get', '/clients', 'clients:read', listerClients);
+routeMixte('get', '/clients', 'clients:read', listerClients, [requirePermission('clients:read')]);
 routeMixte('post', '/clients', 'clients:write', creerClient);
 routeMixte('get', '/clients/:id', 'clients:read', lireClient);
 routeMixte('put', '/clients/:id', 'clients:write', modifierClient);
@@ -2708,9 +2754,9 @@ const creerRevision: express.RequestHandler = async (req, res) => { try {
     try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
   }
 } catch (error) { devisErreur(res, error); } };
-routeMixte('get', '/devis', 'devis:read', listerDevis);
-routeMixte('post', '/devis', 'devis:write', creerDevis);
-routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision);
+routeMixte('get', '/devis', 'devis:read', listerDevis, [requirePermission('devis:read')]);
+routeMixte('post', '/devis', 'devis:write', creerDevis, [requirePermission('devis:write')]);
+routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision, [requirePermission('devis:write')]);
 const TRANSITIONS_DEVIS: Record<string, string[]> = { BROUILLON: ['ENVOYE'], ENVOYE: ['ACCEPTE', 'REFUSE', 'BROUILLON'], ACCEPTE: [], REFUSE: [] };
 const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
   const statut = String((req.body ?? {}).statut || '');
@@ -2720,7 +2766,7 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
   const maj = await prisma.devis.update({ where: { id: devis.id }, data: { statut }, include: devisInclude });
   res.json(decimalToNumber(maj));
 } catch (error) { devisErreur(res, error); } };
-routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis);
+routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requirePermission('devis:write')]);
 
 // Une conversion ne démarre qu'après acceptation. Phase 5 cible le chantier, déjà natif ;
 // les cibles intervention, contrat et facture seront activées par leurs modules respectifs.
@@ -2741,7 +2787,7 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   });
   res.status(201).json(decimalToNumber(resultat));
 } catch (error) { devisErreur(res, error); } };
-routeMixte('post', '/devis/:id/convertir', 'devis:write', convertirDevis);
+routeMixte('post', '/devis/:id/convertir', 'devis:write', convertirDevis, [requirePermission('devis:write')]);
 
 // --- Société de l'instance (singleton, hors paramètres métier) ---
 app.get('/api/company', requireAuth, async (_req, res) => {
