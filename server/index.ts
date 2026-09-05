@@ -202,6 +202,7 @@ const API_SCOPES = [
   'clients:read', 'clients:write',
   'catalogue:read', 'catalogue:write',
   'equipements:read', 'equipements:write',
+  'devis:read', 'devis:write',
   'company:read',
   // Domaine chantier : les chantiers eux-mêmes, leurs achats et leurs heures. Un agent
   // qui prépare un devis ou un rapport a besoin des trois, qui décrivent le même objet.
@@ -3071,52 +3072,45 @@ routeMixte('put', '/catalogue/:family/:id', 'catalogue:write', modifierFicheCata
 routeMixte('delete', '/catalogue/:family/:id', 'catalogue:write', desactiverFicheCatalogue);
 
 // --- Devis natifs versionnés ---
+class DevisSaisieError extends Error {}
+const centimes = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 function devisPayload(body: Record<string, unknown>) {
-  const clientId = String(body.clientId || '').trim();
-  const objet = String(body.objet || '').trim();
+  const clientId = String(body.clientId || '').trim(), objet = String(body.objet || '').trim();
   const lignes = Array.isArray(body.lignes) ? body.lignes : [];
-  if (!clientId || !objet || objet.length > 300 || lignes.length === 0) throw new Error('Client, objet et au moins une ligne sont requis.');
+  if (!clientId || !objet || objet.length > 300 || !lignes.length) throw new DevisSaisieError('Client, objet et au moins une ligne sont requis.');
   const lignesCalculees = lignes.map((ligne, ordre) => {
-    const item = ligne as Record<string, unknown>;
-    const designation = String(item.designation || '').trim();
-    const quantite = Number(item.quantite);
-    const prixUnitaireHt = Number(item.prixUnitaireHt);
-    const tauxTva = Number(item.tauxTva ?? 20);
-    if (!designation || !Number.isFinite(quantite) || quantite <= 0 || !Number.isFinite(prixUnitaireHt) || prixUnitaireHt < 0 || !Number.isFinite(tauxTva) || tauxTva < 0) throw new Error('Ligne de devis invalide.');
-    const totalHt = quantite * prixUnitaireHt;
-    return { ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc: totalHt * (1 + tauxTva / 100) };
+    const item = ligne as Record<string, unknown>, designation = String(item.designation || '').trim(), quantite = Number(item.quantite), prixUnitaireHt = Number(item.prixUnitaireHt), tauxTva = Number(item.tauxTva ?? 20);
+    if (!designation || !Number.isFinite(quantite) || quantite <= 0 || !Number.isFinite(prixUnitaireHt) || prixUnitaireHt < 0 || !Number.isFinite(tauxTva) || tauxTva < 0) throw new DevisSaisieError('Ligne de devis invalide.');
+    const totalHt = centimes(quantite * prixUnitaireHt), totalTtc = centimes(totalHt * (1 + tauxTva / 100));
+    return { ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
   });
-  const totalHt = lignesCalculees.reduce((total, ligne) => total + ligne.totalHt, 0);
-  const totalTtc = lignesCalculees.reduce((total, ligne) => total + ligne.totalTtc, 0);
-  return { clientId, objet, lignesCalculees, totalHt, totalTva: totalTtc - totalHt, totalTtc };
+  const totalHt = centimes(lignesCalculees.reduce((t, l) => t + l.totalHt, 0)), totalTtc = centimes(lignesCalculees.reduce((t, l) => t + l.totalTtc, 0));
+  return { clientId, objet, lignesCalculees, totalHt, totalTva: centimes(totalTtc - totalHt), totalTtc };
 }
-
 function devisErreur(res: express.Response, error: unknown) {
-  const message = error instanceof Error ? error.message : 'Opération devis impossible.';
-  if (message.includes('requis') || message.includes('invalide') || message.includes('introuvable')) return res.status(400).json({ error: message });
-  return res.status(500).json({ error: 'Opération devis impossible.' });
+  if (error instanceof DevisSaisieError) return res.status(400).json({ error: error.message });
+  if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
+  console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
-
-app.post('/api/devis', requireAuth, async (req, res) => {
-  try {
-    const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
-    const client = await prisma.client.findUnique({ where: { id: payload.clientId } });
-    if (!client) throw new Error('Client introuvable.');
-    const dossierId = crypto.randomUUID();
-    const devis = await prisma.devis.create({ data: { dossierId, version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, lignes: { create: payload.lignesCalculees } }, include: { lignes: true, client: true } });
-    res.status(201).json(decimalToNumber(devis));
-  } catch (error) { devisErreur(res, error); }
-});
-
-app.post('/api/devis/:id/revisions', requireAuth, async (req, res) => {
-  try {
-    const precedent = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } } } });
-    if (!precedent) throw new Error('Devis introuvable.');
-    const version = (await prisma.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version! + 1;
-    const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: { lignes: true, client: true } });
-    res.status(201).json(decimalToNumber(devis));
-  } catch (error) { devisErreur(res, error); }
-});
+const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true };
+const creerDevis: express.RequestHandler = async (req, res) => { try {
+  const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
+  if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
+  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, lignes: { create: payload.lignesCalculees } }, include: devisInclude });
+  res.status(201).json(decimalToNumber(devis));
+} catch (error) { devisErreur(res, error); } };
+const listerDevis: express.RequestHandler = async (_req, res) => { try { res.json(decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } }))); } catch (error) { devisErreur(res, error); } };
+const creerRevision: express.RequestHandler = async (req, res) => { try {
+  const precedent = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: devisInclude });
+  if (!precedent) throw new DevisSaisieError('Devis introuvable.');
+  for (let tentative = 0; tentative < 3; tentative++) {
+    const version = ((await prisma.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version ?? 0) + 1;
+    try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
+  }
+} catch (error) { devisErreur(res, error); } };
+routeMixte('get', '/devis', 'devis:read', listerDevis);
+routeMixte('post', '/devis', 'devis:write', creerDevis);
+routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision);
 
 // --- Société de l'instance (singleton, hors paramètres métier) ---
 app.get('/api/company', requireAuth, async (_req, res) => {
