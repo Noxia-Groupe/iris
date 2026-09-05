@@ -30,6 +30,10 @@ model User {
   // besoin de cette case. Seul un superadmin peut l'accorder ou la retirer : ces données
   // (encaissements, impayés, montants clients) relèvent de la direction.
   accesFinance  Boolean @default(false)
+  // Permissions accordées individuellement en complément des droits par défaut du type
+  // de compte. Elles ne retirent jamais un droit du type ; un retrait explicite sera une
+  // évolution distincte, pour préserver les accès historiques lors de la migration.
+  permissions   String[] @default([])
   // Compte actif. Désactiver vaut départ de l'entreprise : la connexion est refusée et le
   // compte disparaît des listes d'attribution (conducteur responsable, commercial
   // rattaché), MAIS tout son historique est conservé — les chantiers qu'il a suivis lui

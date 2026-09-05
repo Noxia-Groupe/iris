@@ -1041,6 +1041,11 @@ const Admin = () => {
                 <select name="role" value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)} className="form-input">
                   <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
                   <option value="COMMERCIAL">Commercial</option>
+                  <option value="ASSISTANTE_COMMERCIALE">Assistante commerciale</option>
+                  <option value="TECHNICIEN">Technicien</option>
+                  <option value="COMPTABLE">Comptable</option>
+                  <option value="DIRECTEUR_COMMERCIAL">Directeur commercial</option>
+                  <option value="RESPONSABLE">Responsable</option>
                   <option value="ADMIN">Administrateur</option>
                   {/* Seul un super administrateur peut en désigner un autre. */}
                   {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
@@ -1103,6 +1108,11 @@ const Admin = () => {
                       >
                         <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
                         <option value="COMMERCIAL">Commercial</option>
+                  <option value="ASSISTANTE_COMMERCIALE">Assistante commerciale</option>
+                  <option value="TECHNICIEN">Technicien</option>
+                  <option value="COMPTABLE">Comptable</option>
+                  <option value="DIRECTEUR_COMMERCIAL">Directeur commercial</option>
+                  <option value="RESPONSABLE">Responsable</option>
                         <option value="ADMIN">Administrateur</option>
                         {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
                       </select>
