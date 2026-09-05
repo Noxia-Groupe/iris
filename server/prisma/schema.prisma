@@ -316,6 +316,8 @@ model ClientContact {
   estSignataire    Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  @@index([clientId])
 }
 
 // Un client possède plusieurs sites. PostgreSQL garantit via des index partiels
@@ -338,6 +340,8 @@ model ClientSite {
   equipementsInstalles EquipementInstalle[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
+
+  @@index([clientId])
 }
 
 // Règles de rémunération commerciale (singleton), sorties du code pour être éditables par
@@ -414,6 +418,8 @@ model CatalogueCategorie {
   actif       Boolean               @default(true)
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
+
+  @@index([parentId])
 }
 
 // Catalogue natif : les prestations ne portent pas de stock ni de numéro de série.
@@ -562,6 +568,7 @@ model PlanningEvent {
   updatedAt DateTime @updatedAt
 
   @@index([chantierId])
+  @@index([typeEventId])
 }
 
 

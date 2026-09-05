@@ -25,3 +25,15 @@ CREATE INDEX "PointageHeure_chantierId_idx" ON "PointageHeure"("chantierId");
 -- CreateIndex
 CREATE INDEX "PlanningEvent_chantierId_idx" ON "PlanningEvent"("chantierId");
 
+-- CreateIndex
+CREATE INDEX "ClientContact_clientId_idx" ON "ClientContact"("clientId");
+
+-- CreateIndex
+CREATE INDEX "ClientSite_clientId_idx" ON "ClientSite"("clientId");
+
+-- CreateIndex
+CREATE INDEX "CatalogueCategorie_parentId_idx" ON "CatalogueCategorie"("parentId");
+
+-- CreateIndex
+CREATE INDEX "PlanningEvent_typeEventId_idx" ON "PlanningEvent"("typeEventId");
+
