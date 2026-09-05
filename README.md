@@ -6,23 +6,7 @@
 **Déploiement** : une instance Iris dédiée par société cliente, avec sa propre base PostgreSQL
 
 ## Vision
-Base technique reprise de marge, en cours de refonte module par module. ERP pour métiers techniques : interventions SAV, interventions travaux, facturation récurrente, abonnements télécom (4G/fibre), financeurs (Grenke, LPB), raccordement bancaire automatique, web app mobile pour techniciens, branding personnalisé (couleurs + logo) et identité légale de la société exploitante. Une installation Iris correspond à une seule société : déploiement à la demande, sans inscription publique ni mutualisation de base de données.
-
-## Différences avec marge (audit anti-amalgame)
-| Élément | Marge | Iris |
-|---|---|---|
-| Nom du projet | marge | iris |
-| Conteneurs Docker | marge_db / marge_backend / marge_frontend | iris_db / iris_backend / iris_frontend |
-| Base PG | marge | iris |
-| Utilisateur PG | marge | iris |
-| Auth | Microsoft (adaptable) | Microsoft (adaptable par client) |
-| Client cible | chantier unique | une société par installation Iris |
-| Branding | fixe | personnalisable pour la société installée |
-| Facturation | suivi financier chantier | récurrente + abonnements + financeurs |
-| Rapprochement bancaire | non présent | prévu (Bridge / Powens / Budget Insight) |
-| Web app mobile techno | non | prévue (planning + rapport intervention + signature) |
-| Propriété logiciel | Noxia-Groupe | Noxia-Groupe (non open source client) |
-| VPS | CommercePro 46.202.129.169 | VPS ou stack Docker dédiée par client, base PostgreSQL propre |
+Iris est un ERP français pour métiers techniques : interventions SAV et travaux, facturation récurrente, abonnements télécom (4G/fibre), financeurs, raccordement bancaire automatique, web app mobile pour techniciens, branding personnalisé (couleurs + logo) et identité légale de la société exploitante. Une installation Iris correspond à une seule société : déploiement à la demande, sans inscription publique ni mutualisation de base de données.
 
 ## Modules prévus
 
@@ -64,10 +48,10 @@ ne puisse être appliquée d'un seul côté.
 
 ## Hors périmètre
 
-- **Dépôt et galerie de photos.** Héritée de marge, la galerie photos de chantier a été
-  retirée : Iris n'a pas vocation à héberger des médias, ni sur le suivi de chantier, ni
-  sur les modules à venir. Cela supprime du même coup un volume disque à sauvegarder, un
-  service de fichiers statiques et une route d'envoi de fichiers à sécuriser.
+- **Dépôt et galerie de photos.** La galerie photos de chantier a été retirée : Iris n'a
+  pas vocation à héberger des médias, ni sur le suivi de chantier, ni sur les modules à
+  venir. Cela supprime du même coup un volume disque à sauvegarder, un service de fichiers
+  statiques et une route d'envoi de fichiers à sécuriser.
 
 ## Authentification
 Microsoft Entra ID uniquement — adaptée par client futur (tenant client). Pas de page d'inscription publique, de connexion locale ni de mot de passe applicatif. L'application SPA utilise MSAL ; le backend vérifie la signature Microsoft (JWKS/RS256), l'issuer et l'audience avant d'appliquer sa liste blanche locale. Utilisateurs créés par un admin du tenant.
@@ -88,8 +72,8 @@ remplacer — voir [`docs/ACCES-SANS-MICROSOFT.md`](docs/ACCES-SANS-MICROSOFT.md
 - Ne pas créer de secret client pour ce flux SPA. Aucun secret Microsoft ne doit être ajouté au dépôt.
 
 ## Stack technique
-- Backend : TypeScript / Node (serveur existant marge)
-- Frontend : React / Vite (client existant marge)
+- Backend : TypeScript / Node
+- Frontend : React / Vite
 - Base : PostgreSQL 16 (dockerisé)
 - Déploiement : Docker Compose sur VPS CommercePro 46.202.129.169
 - Réseaux : `noxia-network` + `nginx-proxy` (NPM) + `backup-net` (pgBackWeb)
@@ -98,8 +82,8 @@ remplacer — voir [`docs/ACCES-SANS-MICROSOFT.md`](docs/ACCES-SANS-MICROSOFT.md
 Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtiennent un accès à leur instance sans accès au code source. Chaque client dispose de son propre déploiement et de sa propre base de données ; aucune donnée métier n'est partagée entre sociétés.
 
 ## Roadmap (ordre de travail)
-- [x] Phase 0 : Nettoyage marge → iris (docker-compose, `.env.example`, guide de déploiement)
-- [ ] Phase 1 : Audit final anti-liens marge dans le code source (grep complet)
+- [x] Phase 0 : Nettoyage initial et renommage du projet Iris
+- [x] Phase 1 : Audit final des liens hérités — configuration, identité technique, documentation et branding vérifiés ; aucun lien technique actif conservé.
 - [x] Authentification : Microsoft Entra ID uniquement (suppression connexion locale, mots de passe, seed de comptes locaux)
 - [x] Phase 2 : Paramétrage de l’instance — société (écran + registre des entreprises), modules, profils et rôles ; clés API d’intégration et accès de secours superadmin
 - [x] Phase 3 : Référentiel clients natif — clients, contacts, sites de facturation et d’intervention
@@ -127,11 +111,16 @@ via `TEST_DATABASE_URL` et s'annoncent ignorés sans elle — voir
 Un test qui relit le code source en texte n'en est pas un : il reste vert sur une branche
 qui ne compile même pas. Cette règle est la seule qui compte ici.
 
-## Détail audit anti-amalgame (à vérifier sur le code source)
-- [ ] `grep -r "marge" server/ client/ --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist`
-- [ ] Vérifier variables d'environnement `.env.example`, `.env` (déjà renommé)
-- [ ] Vérifier références DB dans `prisma/schema.prisma` et migrations
-- [ ] Vérifier noms de services dans `docker-compose.yml` (déjà renommé)
-- [ ] Vérifier `package.json` (nom du projet)
-- [ ] Vérifier `.agents` dans `client/` ou `server/` (références internes marge)
-- [ ] Vérifier `brand/` (logo marge à remplacer par branding neutre / personnalisé client)
+## Audit de clôture des liens hérités
+
+Contrôlé le 04/09/2026 sur la branche dédiée `chore/phase-1-anti-amalgame-final` :
+
+- [x] Recherche complète des anciennes identités techniques (nom de dépôt, services et conteneurs Docker, base PostgreSQL, variables d'environnement, URL de connexion et comptes de démonstration) : aucune occurrence active.
+- [x] `docker-compose.yml`, `.env.example` et `server/.env.example` : services, base et utilisateur PostgreSQL nommés `iris`.
+- [x] `server/prisma/schema.prisma` et migrations : aucune liaison technique active à une ancienne instance.
+- [x] `package.json` : aucune identité d'ancien produit exposée.
+- [x] `.agents/` : aucune instruction utile au projet Iris ne renvoie vers une ancienne application.
+- [x] `brand/` : uniquement des éléments de marque Noxia/CybexIA ; l'identité finale reste configurable par instance.
+- [x] Documentation courante nettoyée des comparaisons et libellés historiques.
+
+Les occurrences restantes du mot français « marge » sont intentionnelles : elles désignent la marge commerciale, les commissions et les règles métier d'Iris.
