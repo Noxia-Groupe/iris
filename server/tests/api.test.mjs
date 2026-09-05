@@ -30,6 +30,8 @@ if (!TEST_DATABASE_URL) {
   let cleApi = '';
 
   const nettoyer = async () => {
+    // Une conversion garde le lien vers le devis : elle part avant le devis et sa fiche client.
+    await prisma.devisConversion.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     // Les devis dépendent du client ; ils doivent être retirés avant la fiche client.
     await prisma.devis.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Le parc dépend à la fois du client/site et du catalogue : il part donc en premier.
@@ -481,6 +483,7 @@ if (!TEST_DATABASE_URL) {
     let clientId = '';
     let devisId = '';
     let dossierId = '';
+    let numero = '';
 
     before(async () => {
       const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
@@ -500,8 +503,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal(res.body.statut, 'BROUILLON');
       assert.equal(res.body.totalHt, 240);
       assert.equal(res.body.totalTtc, 288);
+      assert.match(res.body.numero, /^A\d{2}-\d{4,}$/);
       devisId = res.body.id;
       dossierId = res.body.dossierId;
+      numero = res.body.numero;
     });
 
     test('garantit HT + TVA = TTC avec un taux réduit', async () => {
@@ -517,6 +522,26 @@ if (!TEST_DATABASE_URL) {
       assert.equal(res.body.version, 2);
       assert.equal(res.body.statut, 'BROUILLON');
       assert.equal(res.body.dossierId, dossierId);
+      assert.equal(res.body.numero, numero);
+    });
+
+    test('ne crée un chantier qu’après acceptation, avec la même référence affaire', async () => {
+      const avant = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+      assert.equal(avant.status, 400);
+      const envoye = await request(app).put(`/api/devis/${devisId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
+      assert.equal(envoye.status, 200);
+      const accepte = await request(app).put(`/api/devis/${devisId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
+      assert.equal(accepte.status, 200);
+      const conversion = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      assert.equal(conversion.body.numeroDevis, numero);
+      const doublon = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+      assert.equal(doublon.status, 400);
+    });
+
+    test('refuse la création directe historique d’un chantier', async () => {
+      const res = await request(app).post('/api/chantiers').set('Authorization', `Bearer ${session}`).send({ nom: 'TEST interdit' });
+      assert.equal(res.status, 410);
     });
   });
 
