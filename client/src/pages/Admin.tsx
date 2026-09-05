@@ -119,7 +119,8 @@ const ONGLETS_CONDUCTEUR = ['fournisseurs', 'categories'];
 
 const MESSAGE_COMPTE_SUPERADMIN = "Seul un super administrateur peut gérer un compte super administrateur.";
 
-const DROITS_DEVIS = ['devis:read', 'devis:write'];
+// Le droit d'établir un devis comprend le référentiel minimal nécessaire pour choisir le client.
+const DROITS_DEVIS = ['devis:read', 'devis:write', 'clients:read'];
 
 const Admin = () => {
   // Rôle réel du compte connecté (la page est fermée aux commerciaux, cf. App.tsx),
