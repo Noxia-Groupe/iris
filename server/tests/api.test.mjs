@@ -258,6 +258,9 @@ if (!TEST_DATABASE_URL) {
     let sessionConducteur = '';
     let idChantierA = '';
     let idChantierB = '';
+    let idCategorie = '';
+    let idFournisseur = '';
+    let idIntervenant = '';
 
     before(async () => {
       const res = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
@@ -288,6 +291,10 @@ if (!TEST_DATABASE_URL) {
         data: { nom: 'TEST Intervenant', role: 'Technicien', tauxHoraireCharge: 40 },
       });
 
+      idCategorie = categorie.id;
+      idFournisseur = fournisseur.id;
+      idIntervenant = intervenant.id;
+
       for (const chantierId of [idChantierA, idChantierB]) {
         await prisma.achatReel.create({
           data: { date: new Date(), description: 'TEST achat', montantHT: 1000, chantierId, categorieId: categorie.id, fournisseurId: fournisseur.id },
@@ -309,6 +316,21 @@ if (!TEST_DATABASE_URL) {
       assert.equal(heures.status, 200);
       const chantiersHeures = new Set(heures.body.map((h) => h.chantier?.id));
       assert.equal(chantiersHeures.has(idChantierB), false);
+    });
+
+    test('un conducteur ne peut écrire que dans son chantier et avec des valeurs positives', async () => {
+      const achatInterdit = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierB, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST interdit', montantHT: 10,
+      });
+      assert.equal(achatInterdit.status, 404);
+      const achatNegatif = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST négatif', montantHT: -10,
+      });
+      assert.equal(achatNegatif.status, 400);
+      const heuresInterdites = await request(app).post('/api/heures').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierB, intervenantId: idIntervenant, date: '2026-09-05', nbrHeures: 2,
+      });
+      assert.equal(heuresInterdites.status, 404);
     });
 
     test('aucune ligne ne transporte les montants vendus du chantier', async () => {

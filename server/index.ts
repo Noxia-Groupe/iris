@@ -350,6 +350,14 @@ export function peutVoirFinance(user: { role: string; accesFinance?: boolean | n
   return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
 }
 
+// Écriture de suivi Travaux : réservée aux administrateurs, conducteurs affectés et
+// responsables affectés (la hiérarchie élargie attend son modèle explicite).
+const requireTravauxWrite: express.RequestHandler = (req, res, next) => {
+  const role = (req as AuthRequest).user?.role;
+  if (isAdminRole(role) || role === 'CONDUCTEUR_TRAVAUX' || role === ROLE_RESPONSABLE) return next();
+  res.status(403).json({ error: 'Accès réservé au suivi Travaux.' });
+};
+
 // Un commercial a un accès strictement en lecture à ses propres chantiers : ni création,
 // ni modification (chantiers, achats, heures), et pas d'accès aux statistiques
 // globales/conducteur — uniquement à son propre résultat commercial.
@@ -1944,10 +1952,20 @@ app.delete('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, re
 // peuvent plus y ajouter d'heures ou de dépenses ; un admin garde un accès total (c'est
 // lui seul qui peut d'ailleurs réouvrir un chantier clôturé, cf. PATCH .../statut).
 // Envoie la réponse d'erreur et retourne null si l'écriture est refusée.
+// Sans hiérarchie d'équipe modélisée, le seul périmètre explicite disponible est
+// `responsableId`. Un responsable hiérarchique sera autorisé lorsque son rattachement
+// persistant existera ; son seul intitulé de rôle ne suffit jamais à élargir l'accès.
 async function assertChantierWritable(req: express.Request, res: express.Response, chantierId: string) {
-  const isAdmin = isAdminRole((req as AuthRequest).user?.role);
+  const user = (req as AuthRequest).user;
+  const isAdmin = isAdminRole(user?.role);
   const chantier = await prisma.chantier.findUnique({ where: { id: chantierId } });
   if (!chantier) {
+    res.status(404).json({ error: 'Chantier introuvable' });
+    return null;
+  }
+  const roleOperationnel = user?.role === 'CONDUCTEUR_TRAVAUX' || user?.role === ROLE_RESPONSABLE;
+  if (!isAdmin && (!roleOperationnel || chantier.responsableId !== user?.id)) {
+    // Même réponse qu'un chantier absent afin de ne pas révéler une affaire hors périmètre.
     res.status(404).json({ error: 'Chantier introuvable' });
     return null;
   }
@@ -1956,6 +1974,11 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
     return null;
   }
   return chantier;
+}
+
+function nombrePositif(value: unknown): number | null {
+  const nombre = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+  return Number.isFinite(nombre) && nombre > 0 ? nombre : null;
 }
 
 // Achats
@@ -1982,8 +2005,10 @@ const listerAchats: express.RequestHandler = async (req, res) => {
   }
 };
 
-app.post('/api/achats', requireAuth, blockCommercial, async (req, res) => {
+app.post('/api/achats', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
+    const montantHT = nombrePositif(req.body.montantHT);
+    if (montantHT === null) return res.status(400).json({ error: 'Le montant HT doit être un nombre strictement positif.' });
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
     res.json(await prisma.achatReel.create({
       data: {
@@ -1991,7 +2016,7 @@ app.post('/api/achats', requireAuth, blockCommercial, async (req, res) => {
         fournisseurId: req.body.fournisseurId,
         numeroFacture: req.body.numeroFacture || null,
         description: req.body.description,
-        montantHT: parseFloat(req.body.montantHT),
+        montantHT,
         chantierId: req.body.chantierId,
         categorieId: req.body.categorieId
       }
@@ -2005,7 +2030,7 @@ app.post('/api/achats', requireAuth, blockCommercial, async (req, res) => {
 // mêmes droits que la saisie (tout compte non-commercial, sur un chantier EN_COURS ou
 // n'importe quel chantier pour un admin, cf. assertChantierWritable). Ne permet pas de
 // changer le chantier de l'achat, comme pour PATCH /api/heures/:id.
-app.patch('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
+app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
     const achatId = paramId(req);
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
@@ -2016,7 +2041,11 @@ app.patch('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
     if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
     if ('numeroFacture' in req.body) data.numeroFacture = req.body.numeroFacture || null;
     if ('description' in req.body) data.description = req.body.description;
-    if ('montantHT' in req.body) data.montantHT = parseFloat(req.body.montantHT) || 0;
+    if ('montantHT' in req.body) {
+      const montantHT = nombrePositif(req.body.montantHT);
+      if (montantHT === null) return res.status(400).json({ error: 'Le montant HT doit être un nombre strictement positif.' });
+      data.montantHT = montantHT;
+    }
     if ('fournisseurId' in req.body) {
       const fournisseur = await prisma.fournisseur.findUnique({ where: { id: String(req.body.fournisseurId) } });
       if (!fournisseur) return res.status(404).json({ error: 'Fournisseur introuvable.' });
@@ -2036,7 +2065,7 @@ app.patch('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
 
 // Suppression d'un achat saisi par erreur (doublon, mauvais chantier...) — mêmes droits
 // que la correction ci-dessus (PATCH), cf. assertChantierWritable.
-app.delete('/api/achats/:id', requireAuth, blockCommercial, async (req, res) => {
+app.delete('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
     const achatId = paramId(req);
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
@@ -2072,8 +2101,10 @@ const listerHeures: express.RequestHandler = async (req, res) => {
 routeMixte('get', '/achats', 'chantiers:read', listerAchats, []);
 routeMixte('get', '/heures', 'chantiers:read', listerHeures, []);
 
-app.post('/api/heures', requireAuth, blockCommercial, async (req, res) => {
+app.post('/api/heures', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
+    const nbrHeures = nombrePositif(req.body.nbrHeures);
+    if (nbrHeures === null) return res.status(400).json({ error: 'Le nombre d’heures doit être strictement positif.' });
     const intervenant = await prisma.intervenant.findUnique({ where: { id: req.body.intervenantId } });
     if (!intervenant) return res.status(404).json({ error: 'Intervenant not found' });
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
@@ -2083,7 +2114,7 @@ app.post('/api/heures', requireAuth, blockCommercial, async (req, res) => {
         date: new Date(req.body.date).toISOString(),
         intervenantId: req.body.intervenantId,
         chantierId: req.body.chantierId,
-        nbrHeures: parseFloat(req.body.nbrHeures),
+        nbrHeures,
         tauxHoraireApplique: intervenant.tauxHoraireCharge,
         commentaire: req.body.commentaire || null
       }
@@ -2098,7 +2129,7 @@ app.post('/api/heures', requireAuth, blockCommercial, async (req, res) => {
 // EN_COURS ou n'importe quel chantier pour un admin, cf. assertChantierWritable). Ne
 // permet pas de changer le chantier du pointage : ce n'est pas une réaffectation, juste
 // une correction de saisie sur le chantier d'origine.
-app.patch('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
+app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
     const pointageId = paramId(req);
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
@@ -2107,7 +2138,11 @@ app.patch('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
 
     const data: Record<string, unknown> = {};
     if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
-    if ('nbrHeures' in req.body) data.nbrHeures = parseFloat(req.body.nbrHeures) || 0;
+    if ('nbrHeures' in req.body) {
+      const nbrHeures = nombrePositif(req.body.nbrHeures);
+      if (nbrHeures === null) return res.status(400).json({ error: 'Le nombre d’heures doit être strictement positif.' });
+      data.nbrHeures = nbrHeures;
+    }
     if ('commentaire' in req.body) data.commentaire = req.body.commentaire || null;
     // Changer l'intervenant réapplique son taux horaire chargé ACTUEL (même logique qu'à
     // la création) : le taux figé de l'ancien intervenant n'a pas de sens pour le nouveau.
@@ -2126,7 +2161,7 @@ app.patch('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
 
 // Suppression d'un pointage saisi par erreur (doublon, mauvais chantier...) — mêmes
 // droits que la correction ci-dessus (PATCH), cf. assertChantierWritable.
-app.delete('/api/heures/:id', requireAuth, blockCommercial, async (req, res) => {
+app.delete('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
     const pointageId = paramId(req);
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
@@ -3731,45 +3766,11 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
   }
 });
 
-// IA Analysis
-app.post('/api/chantiers/:id/analyze', requireAuth, async (req, res) => {
-  try {
-    if (!ai) {
-      return res.status(403).json({ error: "L'IA n'est pas activée (GEMINI_API_KEY manquante)." });
-    }
-
-    // Collect all data for the prompt
-    const chantierRaw = await prisma.chantier.findUnique({
-      where: { id: paramId(req) },
-      include: { pointages: { include: { intervenant: true } }, achats: true }
-    });
-
-    if (!chantierRaw) return res.status(404).json({ error: 'Chantier introuvable' });
-
-    const chantier = decimalToNumber(chantierRaw);
-    let heuresRealisees = 0;
-    chantier.pointages.forEach((p: { nbrHeures: number }) => heuresRealisees += p.nbrHeures);
-    const totalAchats = chantier.achats.reduce((acc: number, a: { montantHT: number }) => acc + a.montantHT, 0);
-
-    const prompt = `En tant qu'expert en gestion de chantier, analyse ce dossier:
-Nom: ${chantier.nom} (Client: ${chantier.client})
-Statut: ${chantier.statut}
-Budget Vendu: ${chantier.budgetGlobalVendu} €
-Budget Matériel Prévu: ${chantier.budgetMaterielVendu} € / Réel: ${totalAchats} €
-Heures Prévues: ${chantier.heuresVendues} h / Réelles: ${heuresRealisees} h
-
-Rédige un compte-rendu exécutif d'environ 150-200 mots résumant la situation financière (marge brute), l'avancement temporel, et donne 1 ou 2 recommandations concrètes pour le conducteur de travaux. Utilise un formatage Markdown propre et professionnel.`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
-
-    res.json({ report: response.text });
-  } catch (error) {
-    console.error("AI Error:", error);
-    res.status(500).json({ error: 'Erreur lors de la génération IA' });
-  }
+// Analyse IA désactivée jusqu'à la phase qui définira périmètre, minimisation des données,
+// consentement et journal d'audit. Il est dangereux de transmettre coûts/marges à un tiers
+// sans ces garanties. La route est conservée seulement pour renvoyer un statut explicite.
+app.post('/api/chantiers/:id/analyze', requireAuth, (_req, res) => {
+  res.status(410).json({ error: "L'analyse IA de chantier n'est pas encore disponible." });
 });
 
 // --- Comptes super administrateurs de départ ---
