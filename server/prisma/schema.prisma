@@ -290,6 +290,7 @@ model Client {
   sites                ClientSite[]
   equipementsInstalles EquipementInstalle[]
   devis                Devis[]
+  interventions        Intervention[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 }
@@ -378,6 +379,32 @@ model DevisConversion {
   createdAt DateTime @default(now())
 
   @@index([cibleType, cibleId])
+}
+
+// Compteur annuel atomique des références d'intervention : I26-0001, I26-0002…
+model SequenceIntervention {
+  annee         Int @id
+  dernierNumero Int @default(0)
+}
+
+// Dossier SAV natif. Le planning reste une projection prévisionnelle : il ne remplace pas
+// l'intervention, son client, son statut ni sa trace métier.
+model Intervention {
+  id             String   @id @default(uuid())
+  reference      String   @unique
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  titre          String
+  description    String?
+  priorite       String   @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
+  statut         String   @default("A_PLANIFIER") // A_PLANIFIER | PLANIFIEE | EN_COURS | TERMINEE | ANNULEE
+  dateSouhaitee  DateTime?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([clientId, statut])
+  @@index([statut, dateSouhaitee])
 }
 
 // Compteur annuel atomique des références d'affaires : A26-0001, A26-0002…

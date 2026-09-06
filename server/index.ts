@@ -641,6 +641,39 @@ function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boole
   };
 }
 
+// --- Interventions SAV natives ---
+// Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
+// antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
+app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const titre = String(req.body?.titre || '').trim();
+    const clientId = String(req.body?.clientId || '');
+    const description = req.body?.description == null ? null : String(req.body.description).trim() || null;
+    const priorite = String(req.body?.priorite || 'NORMALE');
+    if (!titre) return res.status(400).json({ error: 'Le titre de l’intervention est obligatoire.' });
+    if (!['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'].includes(priorite)) return res.status(400).json({ error: 'Priorité d’intervention invalide.' });
+    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
+    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
+    if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
+    const annee = new Date().getUTCFullYear();
+    const intervention = await prisma.$transaction(async (tx) => {
+      const sequence = await tx.sequenceIntervention.upsert({
+        where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
+      });
+      const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+      return tx.intervention.create({
+        data: { reference, clientId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
+        include: { client: { select: { id: true, raisonSociale: true } } },
+      });
+    });
+    res.status(201).json(decimalToNumber(intervention));
+  } catch (error) {
+    console.error('Erreur création intervention SAV', error);
+    res.status(500).json({ error: 'Erreur lors de la création de l’intervention.' });
+  }
+});
+
 // Routes de base (publiques)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

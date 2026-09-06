@@ -38,6 +38,8 @@ if (!TEST_DATABASE_URL) {
     await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientContact.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    // Les interventions SAV dépendent du client ; elles partent avant la fiche client.
+    await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.client.deleteMany({ where: { raisonSociale: { startsWith: 'TEST ' } } });
     await prisma.cataloguePrestation.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.catalogueArticle.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
@@ -919,6 +921,28 @@ if (!TEST_DATABASE_URL) {
       // La duplication, elle, relève du droit devis et non de l'administration.
       const duplicata = await request(app).post(`/api/devis/${devis.id}/duplication`).set('Authorization', `Bearer ${sessionConducteur}`);
       assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+    });
+  });
+
+  describe('Interventions SAV', () => {
+    let session = '';
+    let clientId = '';
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      clientId = (await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
+        .send({ raisonSociale: 'TEST Client intervention' })).body.id;
+    });
+
+    test('crée une intervention SAV avec une référence annuelle stable', async () => {
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Alarme déclenchée', description: 'Le client signale un déclenchement intempestif.', priorite: 'HAUTE', dateSouhaitee: '06-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.match(creation.body.reference, /^I26-\d{4}$/);
+      assert.equal(creation.body.statut, 'A_PLANIFIER');
+      assert.equal(creation.body.priorite, 'HAUTE');
+      assert.equal(creation.body.client.id, clientId);
     });
   });
 
