@@ -4,14 +4,10 @@ import dotenv from 'dotenv';
 import { PrismaClient, Prisma } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
-import { GoogleGenAI } from '@google/genai';
-
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
 dotenv.config();
-
-const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
 const app = express();
 const prisma = new PrismaClient();
@@ -631,12 +627,11 @@ function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boole
 // Routes de base (publiques)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// Configuration globale (publique : état de l'IA et paramètres SSO côté client).
+// Configuration publique nécessaire au client SSO.
 // clientId et tenantId ne sont PAS secrets pour une SPA MSAL (ils figurent dans le
 // bundle front) : on peut les exposer pour configurer la connexion Microsoft.
 app.get('/api/config', (req, res) => {
   res.json({
-    aiEnabled: !!process.env.GEMINI_API_KEY,
     ssoConfigured: SSO_CONFIGURED,
     ssoClientId: AZURE_CLIENT_ID || null,
     ssoTenantId: AZURE_TENANT_ID || null,
@@ -1982,8 +1977,13 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
   return chantier;
 }
 
-function nombrePositif(value: unknown): number | null {
-  const nombre = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+function nombreDecimalPositif(value: unknown, maxIntegerDigits: number): number | null {
+  // Ne jamais laisser PostgreSQL arrondir silencieusement une valeur métier : l'échelle des
+  // colonnes est de deux décimales. La notation scientifique est aussi refusée.
+  const texte = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  const expression = new RegExp(`^\\d{1,${maxIntegerDigits}}(?:[,.]\\d{1,2})?$`);
+  if (!expression.test(texte)) return null;
+  const nombre = Number(texte.replace(',', '.'));
   return Number.isFinite(nombre) && nombre > 0 ? nombre : null;
 }
 
@@ -2013,7 +2013,7 @@ const listerAchats: express.RequestHandler = async (req, res) => {
 
 app.post('/api/achats', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
-    const montantHT = nombrePositif(req.body.montantHT);
+    const montantHT = nombreDecimalPositif(req.body.montantHT, 10);
     if (montantHT === null) return res.status(400).json({ error: 'Le montant HT doit être un nombre strictement positif.' });
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
     res.json(await prisma.achatReel.create({
@@ -2048,7 +2048,7 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
     if ('numeroFacture' in req.body) data.numeroFacture = req.body.numeroFacture || null;
     if ('description' in req.body) data.description = req.body.description;
     if ('montantHT' in req.body) {
-      const montantHT = nombrePositif(req.body.montantHT);
+      const montantHT = nombreDecimalPositif(req.body.montantHT, 10);
       if (montantHT === null) return res.status(400).json({ error: 'Le montant HT doit être un nombre strictement positif.' });
       data.montantHT = montantHT;
     }
@@ -2109,7 +2109,7 @@ routeMixte('get', '/heures', 'chantiers:read', listerHeures, []);
 
 app.post('/api/heures', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
-    const nbrHeures = nombrePositif(req.body.nbrHeures);
+    const nbrHeures = nombreDecimalPositif(req.body.nbrHeures, 8);
     if (nbrHeures === null) return res.status(400).json({ error: 'Le nombre d’heures doit être strictement positif.' });
     const intervenant = await prisma.intervenant.findUnique({ where: { id: req.body.intervenantId } });
     if (!intervenant) return res.status(404).json({ error: 'Intervenant not found' });
@@ -2145,7 +2145,7 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
     const data: Record<string, unknown> = {};
     if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
     if ('nbrHeures' in req.body) {
-      const nbrHeures = nombrePositif(req.body.nbrHeures);
+      const nbrHeures = nombreDecimalPositif(req.body.nbrHeures, 8);
       if (nbrHeures === null) return res.status(400).json({ error: 'Le nombre d’heures doit être strictement positif.' });
       data.nbrHeures = nbrHeures;
     }
