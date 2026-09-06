@@ -34,6 +34,11 @@ model User {
   // de compte. Elles ne retirent jamais un droit du type ; un retrait explicite sera une
   // évolution distincte, pour préserver les accès historiques lors de la migration.
   permissions   String[] @default([])
+  // Rattachement hiérarchique explicite, indépendant du rôle : un collaborateur relève
+  // d'un responsable déterminé (sûreté, informatique, télécom…).
+  responsableId String?
+  responsable   User? @relation("ResponsableCollaborateurs", fields: [responsableId], references: [id])
+  collaborateurs User[] @relation("ResponsableCollaborateurs")
   // Compte actif. Désactiver vaut départ de l'entreprise : la connexion est refusée et le
   // compte disparaît des listes d'attribution (conducteur responsable, commercial
   // rattaché), MAIS tout son historique est conservé — les chantiers qu'il a suivis lui
@@ -46,6 +51,8 @@ model User {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([responsableId])
 }
 
 model Fournisseur {
@@ -152,7 +159,13 @@ model AchatReel {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  createdById String?
+  updatedById String?
+  archivedAt DateTime?
+  archivedById String?
+  motifArchivage String?
 
+  @@index([archivedAt])
   @@index([fournisseurId])
   @@index([chantierId])
   @@index([categorieId])
@@ -181,7 +194,14 @@ model PointageHeure {
   chantier    Chantier    @relation(fields: [chantierId], references: [id])
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdById String?
+  updatedById String?
+  archivedAt DateTime?
+  archivedById String?
+  motifArchivage String?
 
+  @@index([archivedAt])
   @@index([intervenantId])
   @@index([chantierId])
 }

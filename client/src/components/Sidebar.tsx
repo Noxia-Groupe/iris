@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Building2, BookOpen, Landmark, KeyRound, FileText } from 'lucide-react';
 import { applyTheme } from '../theme';
-import { isAdminRole, isSuperAdminRole, peutAccederAuxDevis, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
+import { isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutVoirStatistiques, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
 import './Sidebar.css';
 
@@ -79,7 +79,7 @@ const Sidebar = () => {
           </NavLink>
         )}
 
-        {!isCommercial && (
+        {peutVoirStatistiques(user) && (
           <NavLink to="/statistiques" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <PieChart size={20} />
             Statistiques
