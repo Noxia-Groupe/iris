@@ -44,7 +44,8 @@ if (!TEST_DATABASE_URL) {
     await prisma.catalogueEquipement.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.apiAccessKey.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     // Domaine chantier : l'ordre suit les clés étrangères — les lignes rattachées d'abord.
-    await prisma.journalSaisieChantier.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
+    const chantierIds = (await prisma.chantier.findMany({ where: { nom: { startsWith: 'TEST ' } }, select: { id: true } })).map((chantier) => chantier.id);
+    await prisma.journalSaisieChantier.deleteMany({ where: { chantierId: { in: chantierIds } } });
     await prisma.achatReel.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.pointageHeure.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.chantier.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
