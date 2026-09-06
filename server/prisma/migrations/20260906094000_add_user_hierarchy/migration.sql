@@ -21,3 +21,5 @@ ALTER TABLE "PointageHeure"
   ADD COLUMN "archivedById" TEXT,
   ADD COLUMN "motifArchivage" TEXT;
 CREATE INDEX "PointageHeure_archivedAt_idx" ON "PointageHeure"("archivedAt");
+-- Prisma @updatedAt est piloté par le client, sans DEFAULT en base.
+ALTER TABLE "PointageHeure" ALTER COLUMN "updatedAt" DROP DEFAULT;
