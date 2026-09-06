@@ -1088,6 +1088,12 @@ const ChantierDetail = () => {
                       <pre className="overflow-auto rounded bg-emerald-50 p-2 text-emerald-900">Après : {JSON.stringify(entree.apres)}</pre>
                     </div>
                   )}
+                  {entree.action === 'CREATION' && entree.apres && (
+                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs enregistrées : {JSON.stringify(entree.apres)}</pre>
+                  )}
+                  {entree.action === 'ARCHIVAGE' && entree.avant && (
+                    <pre className="mt-2 overflow-auto rounded bg-amber-50 p-2 text-xs text-amber-900">Valeurs archivées : {JSON.stringify(entree.avant)}</pre>
+                  )}
                 </div>
               ))}
             </div>
