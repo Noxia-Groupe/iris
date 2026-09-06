@@ -25,7 +25,7 @@ import Catalogue from './pages/Catalogue';
 import Secours from './pages/Secours';
 import Devis from './pages/Devis';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_SUPERADMIN } from './roles';
+import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN } from './roles';
 import { useModules } from './modules';
 
 // Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
@@ -190,7 +190,7 @@ function App() {
         } />
 
         <Route path="/statistiques" element={
-          <PrivateRoute excludedRole="COMMERCIAL">
+          <PrivateRoute requiredRoles={[ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_RESPONSABLE, ROLE_CONDUCTEUR]}>
             <Statistiques />
           </PrivateRoute>
         } />

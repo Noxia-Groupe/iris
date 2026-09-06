@@ -258,6 +258,9 @@ if (!TEST_DATABASE_URL) {
     let sessionConducteur = '';
     let idChantierA = '';
     let idChantierB = '';
+    let idCategorie = '';
+    let idFournisseur = '';
+    let idIntervenant = '';
 
     before(async () => {
       const res = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
@@ -288,6 +291,10 @@ if (!TEST_DATABASE_URL) {
         data: { nom: 'TEST Intervenant', role: 'Technicien', tauxHoraireCharge: 40 },
       });
 
+      idCategorie = categorie.id;
+      idFournisseur = fournisseur.id;
+      idIntervenant = intervenant.id;
+
       for (const chantierId of [idChantierA, idChantierB]) {
         await prisma.achatReel.create({
           data: { date: new Date(), description: 'TEST achat', montantHT: 1000, chantierId, categorieId: categorie.id, fournisseurId: fournisseur.id },
@@ -311,6 +318,41 @@ if (!TEST_DATABASE_URL) {
       assert.equal(chantiersHeures.has(idChantierB), false);
     });
 
+    test('un conducteur ne peut écrire que dans son chantier et avec des valeurs positives', async () => {
+      const achatInterdit = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierB, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST interdit', montantHT: 10,
+      });
+      assert.equal(achatInterdit.status, 404);
+      const achatNegatif = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST négatif', montantHT: -10,
+      });
+      assert.equal(achatNegatif.status, 400);
+      for (const date of ['', 'not-a-date', '2026-02-31', '31-02-2026', '2026-13-01']) {
+        const invalide = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+          chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date, description: 'TEST date', montantHT: 10,
+        });
+        assert.equal(invalide.status, 400, `date ${date} doit être refusée`);
+      }
+      const dateFrancaise = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST date française', montantHT: 10,
+      });
+      assert.equal(dateFrancaise.status, 200);
+      const achatGratuit = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST remplacement sous garantie', montantHT: 0,
+      });
+      assert.equal(achatGratuit.status, 200);
+      for (const montantHT of ['0.001', '1.999', '1e-3', '99999999999']) {
+        const invalide = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+          chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST précision', montantHT,
+        });
+        assert.equal(invalide.status, 400, `montant ${montantHT} doit être refusé`);
+      }
+      const heuresInterdites = await request(app).post('/api/heures').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierB, intervenantId: idIntervenant, date: '2026-09-05', nbrHeures: 2,
+      });
+      assert.equal(heuresInterdites.status, 404);
+    });
+
     test('aucune ligne ne transporte les montants vendus du chantier', async () => {
       // Le défaut d'origine : `include: { chantier: true }` renvoyait l'enregistrement
       // entier. Un administrateur y a droit ailleurs, mais pas ici — ces journaux n'ont
@@ -326,6 +368,23 @@ if (!TEST_DATABASE_URL) {
           assert.equal(ligne.chantier?.heuresVendues, undefined, `${chemin} expose heuresVendues`);
         }
       }
+    });
+
+    test('un archivage sort une écriture des journaux et laisse une trace immutable', async () => {
+      const creation = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST archive', montantHT: 500,
+      });
+      assert.equal(creation.status, 200);
+      const correction = await request(app).patch(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 50 });
+      assert.equal(correction.status, 200);
+      const archive = await request(app).delete(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+      assert.equal(archive.status, 200);
+      const journal = await request(app).get('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(journal.body.some((a) => a.id === creation.body.id), false);
+      const traces = await prisma.journalSaisieChantier.findMany({ where: { cibleId: creation.body.id }, orderBy: { createdAt: 'asc' } });
+      assert.equal(traces.length, 3);
+      assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').avant.montantHT), 500);
+      assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
     });
 
     test('un administrateur voit bien toutes les lignes', async () => {

@@ -63,6 +63,11 @@ export function peutVoirFinance(user?: CurrentUser | null): boolean {
   return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
 }
 
+/** Statistiques Travaux : admin global, responsable équipe, conducteur sur ses affaires. Les commerciaux ont leur écran Résultat commercial dédié. */
+export function peutVoirStatistiques(user?: CurrentUser | null): boolean {
+  return !!user && (isAdminRole(user.role) || user.role === ROLE_RESPONSABLE || user.role === ROLE_CONDUCTEUR);
+}
+
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */
 export function peutAccederAuxDevis(user?: CurrentUser | null): boolean {
   return !!user && (isSuperAdminRole(user.role) || (user.permissions || []).includes('devis:read'));

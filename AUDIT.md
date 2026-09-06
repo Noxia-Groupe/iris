@@ -8,7 +8,7 @@
 ## Vue d'ensemble
 
 Bonne base : architecture client/serveur propre, modèle Prisma cohérent, dockerisation,
-standby IA bien pensé. Mais l'application avait deux problèmes **bloquants** (l'UI
+La fonction d'analyse IA directe a été retirée : Iris ne contacte aucun fournisseur LLM externe. Toute future assistance devra passer par un connecteur Hermes Agent sécurisé, dans une phase dédiée. Mais l'application avait deux problèmes **bloquants** (l'UI
 n'était en réalité pas stylée, et la sécurité de l'API était quasi inexistante) et
 présente plusieurs écarts par rapport à la vision cible.
 
@@ -122,11 +122,11 @@ centralisé côté serveur ; un conducteur ne reçoit plus ces champs (voir §6)
 |---|---|
 | Stats **globales / par chantier / par conducteur** | Le Dashboard ne montre qu'**un** chantier sélectionné. Onglet « Performances » = placeholder. Pas de vue agrégée ni de classement conducteurs. |
 | **Marge commerciale paramétrable par les admins** | Calculée d'une seule façon, affichée d'office aux admins, non protégée côté serveur. Aucun paramètre (toggle d'affichage, mode de calcul, coefficients). |
-| **Rapport IA complet** | ✅ Standby bien géré (`ai = key ? … : null` + `/api/config`). Prompt minimal (150-200 mots) — à enrichir (tendances, dépassements par poste, photos). |
+| **Connecteur Hermes Agent sécurisé** | À concevoir dans une phase dédiée : authentification de service, permissions minimales, périmètre de données, journal d’audit et confirmations d’actions. Aucun LLM externe n’est intégré. |
 | **SSO Microsoft 365** | Couche d'autorisation en place : liste blanche d'emails + rôle (Administration > Utilisateurs), gate `resolveAuthorizedSsoUser`, page « accès refusé ». Reste à câbler : le flux OAuth Microsoft lui-même (`verifyMicrosoftIdentity`, activé via `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`). |
 | Budget **prévu par poste** | `LigneBudgetPrevisionnel` existe dans le schéma mais n'est jamais utilisé. |
 
-**À garder (bons points)** : standby IA conditionné à l'env, compression d'image avant
+**À garder (bons points)** : compression d'image avant
 upload (bon pour le mobile terrain), exports PDF/ZIP, séparation matériel/main-d'œuvre,
 guide de déploiement détaillé.
 
@@ -151,7 +151,7 @@ guide de déploiement détaillé.
    dans docker-compose.
 8. ✅ **Montants en `Decimal`** (NUMERIC) au lieu de `Float` : stockage exact, converti
    en nombres à la frontière de l'API (front inchangé).
-9. Typage TS strict, toasts, tests/CI, enrichissement du rapport IA, SSO réel,
+9. Typage TS strict, toasts, tests/CI, connecteur Hermes Agent sécurisé (phase dédiée), SSO réel,
    exploitation de `LigneBudgetPrevisionnel`, pagination, rate limiting login.
 
 ---

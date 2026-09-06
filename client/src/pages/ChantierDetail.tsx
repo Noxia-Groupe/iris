@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import html2pdf from 'html2pdf.js';
 import {
-  ArrowLeft, Calendar, User, FileDown, Sparkles,
+  ArrowLeft, Calendar, User, FileDown,
   Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, X, MapPin, Search,
 } from 'lucide-react';
 import { apiFetch } from '../api';
@@ -41,9 +41,6 @@ const ChantierDetail = () => {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
-  const [aiEnabled, setAiEnabled] = useState(false);
-  const [aiReport, setAiReport] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
   const [commerciaux, setCommerciaux] = useState<any[]>([]);
@@ -101,20 +98,10 @@ const ChantierDetail = () => {
 
   useEffect(() => {
     fetchChantier();
-    fetchConfig();
-    setAiReport(null);
     setEditingCommercial(false);
     setEditingChantier(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  const fetchConfig = async () => {
-    try {
-      const res = await apiFetch('/config');
-      const data = await res.json();
-      setAiEnabled(data.aiEnabled);
-    } catch (e) { console.error(e); }
-  };
 
   // Liste des commerciaux, pour le sélecteur d'affectation (admin ou conducteur
   // responsable uniquement — cf. rendu de la section Commercial ci-dessous).
@@ -300,10 +287,11 @@ const ChantierDetail = () => {
   };
 
   const handleDeleteAchat = async (achatId: string) => {
-    if (!confirm('Supprimer définitivement cet achat ?')) return;
+    const motifArchivage = window.prompt("Motif de l'archivage de cet achat ?")?.trim();
+    if (!motifArchivage) return;
     setSavingAchat(true);
     try {
-      const res = await apiFetch(`/achats/${achatId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/achats/${achatId}`, { method: 'DELETE', body: JSON.stringify({ motifArchivage }) });
       if (res.ok) {
         fetchChantier();
       } else {
@@ -318,10 +306,11 @@ const ChantierDetail = () => {
   };
 
   const handleDeletePointage = async (pointageId: string) => {
-    if (!confirm('Supprimer définitivement ce pointage ?')) return;
+    const motifArchivage = window.prompt("Motif de l'archivage de ce pointage ?")?.trim();
+    if (!motifArchivage) return;
     setSavingPointage(true);
     try {
-      const res = await apiFetch(`/heures/${pointageId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/heures/${pointageId}`, { method: 'DELETE', body: JSON.stringify({ motifArchivage }) });
       if (res.ok) {
         fetchChantier();
       } else {
@@ -347,21 +336,6 @@ const ChantierDetail = () => {
       console.error(e);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGenerateAI = async () => {
-    if (!id) return;
-    setAiLoading(true);
-    try {
-      const res = await apiFetch(`/chantiers/${id}/analyze`, { method: 'POST' });
-      const data = await res.json();
-      if (data.report) setAiReport(data.report);
-      else alert(data.error || 'Erreur IA');
-    } catch (e) {
-      alert("Erreur de connexion à l'IA");
-    } finally {
-      setAiLoading(false);
     }
   };
 
@@ -576,16 +550,6 @@ const ChantierDetail = () => {
                 <Pencil size={16} /> Modifier
               </button>
             )}
-            {aiEnabled && (
-              <button
-                onClick={handleGenerateAI}
-                disabled={aiLoading}
-                className={`flex items-center gap-2 ${aiLoading ? 'bg-indigo-300' : 'bg-indigo-600 hover:bg-indigo-700'} text-white px-4 py-2 rounded-lg font-semibold transition-colors shadow-sm text-sm`}
-              >
-                <Sparkles size={16} className={aiLoading ? 'animate-spin' : ''} />
-                {aiLoading ? 'Génération...' : 'Rapport IA'}
-              </button>
-            )}
             <button onClick={handleExportPDF} className="flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors shadow-sm text-sm">
               <FileDown size={16} /> PDF
             </button>
@@ -713,17 +677,6 @@ const ChantierDetail = () => {
               <div className="text-2xl font-black text-orange-600 z-10">{chantier.budgetMainOeuvreVendu.toLocaleString()} €</div>
             </div>
           </div>
-
-          {/* Zone Rapport IA */}
-          {aiReport && (
-            <div className="mb-8 p-6 bg-indigo-50 border border-indigo-100 rounded-xl shadow-sm">
-              <div className="flex items-center gap-2 mb-4">
-                <Sparkles size={20} className="text-indigo-600" />
-                <h3 className="text-lg font-bold text-indigo-900 m-0">Synthèse Intelligente (IA)</h3>
-              </div>
-              <div className="text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">{aiReport}</div>
-            </div>
-          )}
 
           {/* Marge Commerciale (admin, ou conducteur responsable sur sa fiche chantier — cf.
               GET /api/chantiers/:id côté serveur —, si activée dans les paramètres) */}
