@@ -44,6 +44,8 @@ if (!TEST_DATABASE_URL) {
     await prisma.catalogueEquipement.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.apiAccessKey.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     // Domaine chantier : l'ordre suit les clés étrangères — les lignes rattachées d'abord.
+    const chantierIds = (await prisma.chantier.findMany({ where: { nom: { startsWith: 'TEST ' } }, select: { id: true } })).map((chantier) => chantier.id);
+    await prisma.journalSaisieChantier.deleteMany({ where: { chantierId: { in: chantierIds } } });
     await prisma.achatReel.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.pointageHeure.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.chantier.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
@@ -386,6 +388,17 @@ if (!TEST_DATABASE_URL) {
       assert.equal(traces.length, 3);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').avant.montantHT), 500);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
+    });
+
+    test('le journal d’audit respecte le périmètre du conducteur', async () => {
+      // Une trace ne doit pas devenir une porte latérale vers un chantier non rattaché.
+      await prisma.journalSaisieChantier.create({
+        data: { chantierId: idChantierB, cible: 'ACHAT', cibleId: 'test-hors-perimetre', action: 'CREATION', auteurNom: 'TEST Admin' },
+      });
+      const interdit = await request(app).get(`/api/chantiers/${idChantierB}/journal-saisies`).set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(interdit.status, 404);
+      const autorise = await request(app).get(`/api/chantiers/${idChantierA}/journal-saisies`).set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(autorise.status, 200);
     });
 
     test('un administrateur voit bien toutes les lignes', async () => {
@@ -867,6 +880,25 @@ if (!TEST_DATABASE_URL) {
       assert.notEqual(duplicata.body.numero, devis.numero, 'le duplicata a son propre numéro d’affaire');
       assert.notEqual(duplicata.body.dossierId, devis.dossierId);
       assert.equal(duplicata.body.origineDevisId, devis.id, 'le lien vers l’origine est conservé');
+    });
+
+    test('le journal de saisie expose les valeurs avant/après sur le chantier autorisé', async () => {
+      const devis = await devisAccepte('TEST Affaire journal Travaux');
+      const chantier = (await convertir(devis.id)).body;
+      const achat = await request(app).post('/api/achats').set('Authorization', `Bearer ${session}`)
+        .send({ chantierId: chantier.id, categorieId, fournisseurId, date: '01-09-2026', description: 'TEST achat journal', montantHT: 500 });
+      assert.equal(achat.status, 200, JSON.stringify(achat.body));
+      const correction = await request(app).patch(`/api/achats/${achat.body.id}`).set('Authorization', `Bearer ${session}`)
+        .send({ montantHT: 50 });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+
+      const journal = await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body.length, 2);
+      const correctionJournal = journal.body.find((entree) => entree.action === 'CORRECTION');
+      assert.equal(correctionJournal.avant.montantHT, 500);
+      assert.equal(correctionJournal.apres.montantHT, 50);
+      assert.equal(correctionJournal.auteurNom, 'Secours');
     });
 
     test('seul un administrateur annule un devis ou constate un acompte', async () => {

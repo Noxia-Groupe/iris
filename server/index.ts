@@ -895,6 +895,26 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Journal append-only des saisies Travaux. Il est lisible uniquement dans le même périmètre
+// que la fiche chantier : une trace ne doit jamais devenir une porte latérale vers une affaire.
+app.get('/api/chantiers/:id/journal-saisies', requireAuth, async (req, res) => {
+  try {
+    const chantierId = paramId(req);
+    const chantier = await prisma.chantier.findFirst({
+      where: { id: chantierId, ...perimetreChantiers(req) },
+      select: { id: true },
+    });
+    if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
+    const entrees = await prisma.journalSaisieChantier.findMany({
+      where: { chantierId },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(decimalToNumber(entrees));
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching journal des saisies' });
+  }
+});
+
 // L'ouverture d'une affaire est contractualisée par un devis accepté : la conversion en
 // est la seule porte (cf. POST /api/devis/:id/convertir). Cette route historique ne créait
 // déjà plus rien, sauf si la variable d'environnement ALLOW_LEGACY_DIRECT_CHANTIER était
@@ -975,7 +995,16 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
       if (key in req.body) data[key] = parseFloat(req.body[key]) || 0;
     }
     for (const key of dateFields) {
-      if (key in req.body && req.body[key]) data[key] = new Date(req.body[key]).toISOString();
+      if (key in req.body) {
+        if (!req.body[key]) {
+          // dateFin est facultative ; la vider explicitement conserve ce comportement.
+          if (key === 'dateFin') data[key] = null;
+          continue;
+        }
+        const date = dateIsoStricte(req.body[key]);
+        if (!date) return res.status(400).json({ error: `La ${key === 'dateDebut' ? 'date de début' : 'date de fin'} doit être valide au format JJ-MM-AAAA.` });
+        data[key] = date;
+      }
     }
     // Facultative (contrairement au numéro de devis) : peut être vidée.
     if ('adresse' in req.body) data.adresse = String(req.body.adresse || '').trim() || null;

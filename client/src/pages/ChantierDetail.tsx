@@ -12,8 +12,12 @@ import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
 
-// Date ISO (avec ou sans heure) -> "YYYY-MM-DD" attendu par <input type="date">.
-const toDateInputValue = (d: string | null | undefined) => (d ? d.slice(0, 10) : '');
+// Date ISO (avec ou sans heure) -> format métier français JJ-MM-AAAA.
+const toDateFrancaise = (d: string | null | undefined) => {
+  if (!d) return '';
+  const [annee, mois, jour] = d.slice(0, 10).split('-');
+  return `${jour}-${mois}-${annee}`;
+};
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
 const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
@@ -38,6 +42,7 @@ const ChantierDetail = () => {
   // de société n'est écrit dans l'interface.
   const { libelleBaremeReduit } = useModules();
   const [chantier, setChantier] = useState<any>(null);
+  const [journalSaisies, setJournalSaisies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -332,6 +337,11 @@ const ChantierDetail = () => {
       if (res.status === 404) { setNotFound(true); return; }
       const data = await res.json();
       setChantier(data);
+      const journalRes = await apiFetch(`/chantiers/${id}/journal-saisies`);
+      if (journalRes.ok) {
+        const journal = await journalRes.json();
+        setJournalSaisies(Array.isArray(journal) ? journal : []);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -866,7 +876,7 @@ const ChantierDetail = () => {
                       onSubmit={(e) => handleAchatSubmit(e, a.id)}
                       className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 px-6 py-3 bg-gray-50"
                     >
-                      <input required type="date" name="date" defaultValue={toDateInputValue(a.date)} className="form-input text-sm" />
+                      <input required type="text" inputMode="numeric" pattern="\\d{2}-\\d{2}-\\d{4}" placeholder="JJ-MM-AAAA" name="date" defaultValue={toDateFrancaise(a.date)} className="form-input text-sm" />
                       <input required type="number" step="0.01" name="montantHT" defaultValue={a.montantHT} placeholder="Montant HT" className="form-input text-sm" />
                       <select required name="fournisseurId" defaultValue={a.fournisseurId} className="form-input text-sm">
                         {fournisseurs.length === 0 && <option value={a.fournisseurId}>{a.fournisseur?.nom}</option>}
@@ -1001,7 +1011,7 @@ const ChantierDetail = () => {
                       onSubmit={(e) => handlePointageSubmit(e, p.id)}
                       className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 px-6 py-3 bg-gray-50"
                     >
-                      <input required type="date" name="date" defaultValue={toDateInputValue(p.date)} className="form-input text-sm" />
+                      <input required type="text" inputMode="numeric" pattern="\\d{2}-\\d{2}-\\d{4}" placeholder="JJ-MM-AAAA" name="date" defaultValue={toDateFrancaise(p.date)} className="form-input text-sm" />
                       <select required name="intervenantId" defaultValue={p.intervenantId} className="form-input text-sm">
                         {intervenants.length === 0 && <option value={p.intervenantId}>{p.intervenant?.nom}</option>}
                         {intervenants.map((i) => <option key={i.id} value={i.id}>{i.nom} ({i.role})</option>)}
@@ -1059,6 +1069,40 @@ const ChantierDetail = () => {
             )}
           </div>
         </div>
+
+        <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h2 className="font-bold text-primary-dark">Journal d’audit des saisies</h2>
+            <p className="text-sm text-gray-500 mt-1">Historique immuable des créations, corrections et archivages du chantier.</p>
+          </div>
+          {journalSaisies.length === 0 ? (
+            <p className="px-6 py-5 text-sm italic text-gray-400">Aucune saisie à tracer pour ce chantier.</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {journalSaisies.map((entree) => (
+                <div key={entree.id} className="px-6 py-4 text-sm">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <strong>{entree.cible === 'ACHAT' ? 'Achat' : 'Heures'} — {entree.action.toLowerCase()}</strong>
+                    <span className="text-gray-500">{fmtDate(entree.createdAt)} · {entree.auteurNom}</span>
+                  </div>
+                  {entree.motif && <p className="mt-1 text-gray-600">Motif : {entree.motif}</p>}
+                  {entree.action === 'CORRECTION' && (
+                    <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
+                      <pre className="overflow-auto rounded bg-red-50 p-2 text-red-900">Avant : {JSON.stringify(entree.avant)}</pre>
+                      <pre className="overflow-auto rounded bg-emerald-50 p-2 text-emerald-900">Après : {JSON.stringify(entree.apres)}</pre>
+                    </div>
+                  )}
+                  {entree.action === 'CREATION' && entree.apres && (
+                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs enregistrées : {JSON.stringify(entree.apres)}</pre>
+                  )}
+                  {entree.action === 'ARCHIVAGE' && entree.avant && (
+                    <pre className="mt-2 overflow-auto rounded bg-amber-50 p-2 text-xs text-amber-900">Valeurs archivées : {JSON.stringify(entree.avant)}</pre>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
       </div>
 
@@ -1122,11 +1166,11 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Date Début</label>
-                <input required type="date" name="dateDebut" defaultValue={toDateInputValue(chantier.dateDebut)} className="form-input" />
+                <input required type="text" inputMode="numeric" pattern="\\d{2}-\\d{2}-\\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" defaultValue={toDateFrancaise(chantier.dateDebut)} className="form-input" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Date Fin</label>
-                <input type="date" name="dateFin" defaultValue={toDateInputValue(chantier.dateFin)} className="form-input" />
+                <input type="text" inputMode="numeric" pattern="\\d{2}-\\d{2}-\\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" defaultValue={toDateFrancaise(chantier.dateFin)} className="form-input" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
