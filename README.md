@@ -88,7 +88,9 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [x] Phase 2 : Paramétrage de l’instance — société (écran + registre des entreprises), modules, profils et rôles ; clés API d’intégration et accès de secours superadmin
 - [x] Phase 3 : Référentiel clients natif — clients, contacts, sites de facturation et d’intervention
 - [x] Phase 4 : Catalogue et parc d’équipements installé — modèles, migrations, catégories, API, écran de gestion, traçabilité série/IMEI/MAC, rattachement client/site, garantie et archivage historique.
-- [ ] Phase 5 : Devis versionnés et conversion contrôlée vers intervention, chantier, contrat ou facture
+- [~] Phase 5 : Devis versionnés et conversion contrôlée — socle livré : références d’affaires annuelles, révisions, statuts, conversion après acceptation, permissions effectives et contrôles clients/devis. Reste à livrer : parcours métier complet et éléments aval réellement disponibles.
+- [ ] Socle transversal avant Phase 6 : sécurité du suivi Travaux (issue #16) — périmètre d’écriture achats/heures, intégrité des valeurs, statistiques cloisonnées ; écran Travaux livré dans une PR ultérieure.
+- [ ] Commissionnement commercial configurable (issue #15) — profils versionnés et individualisables, attributions hiérarchiques, historique non rétroactif ; dépend du socle Travaux sécurisé.
 - [ ] Phase 6 : Interventions SAV + travaux, planning et application mobile technicien
 - [ ] Phase 7 : Contrats et maintenance cyclique — génération des interventions à planifier avec durée prévisionnelle
 - [ ] Phase 8 : Facturation française, exports comptables et conformité facturation électronique
