@@ -358,6 +358,12 @@ const requireTravauxWrite: express.RequestHandler = (req, res, next) => {
   res.status(403).json({ error: 'Accès réservé au suivi Travaux.' });
 };
 
+const requireTravauxRead: express.RequestHandler = (req, res, next) => {
+  const role = (req as AuthRequest).user?.role;
+  if (isAdminRole(role) || role === 'CONDUCTEUR_TRAVAUX' || role === ROLE_RESPONSABLE) return next();
+  res.status(403).json({ error: 'Accès réservé au suivi Travaux.' });
+};
+
 // Un commercial a un accès strictement en lecture à ses propres chantiers : ni création,
 // ni modification (chantiers, achats, heures), et pas d'accès aux statistiques
 // globales/conducteur — uniquement à son propre résultat commercial.
@@ -3368,14 +3374,14 @@ function periodBounds(period: 'week' | 'month' | 'quarter' | 'year', refParam: u
 // Classement des intervenants par heures travaillées (semaine civile / mois civil /
 // année civile, navigable) — visible par les conducteurs ET les admins. Basé sur la
 // date du travail effectué (`date`), pas l'instant de saisie.
-app.get('/api/stats/intervenants', requireAuth, blockCommercial, async (req, res) => {
+app.get('/api/stats/intervenants', requireAuth, requireTravauxRead, async (req, res) => {
   try {
     const period = (['week', 'month', 'year'] as const).includes(req.query.period as any) ? (req.query.period as 'week' | 'month' | 'year') : 'week';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
 
     const intervenants = await prisma.intervenant.findMany({ select: { id: true, nom: true, role: true } });
     const pointages = decimalToNumber(await prisma.pointageHeure.findMany({
-      where: { date: { gte: start, lt: endExclusive } },
+      where: { date: { gte: start, lt: endExclusive }, chantier: perimetreChantiers(req) },
       select: { intervenantId: true, nbrHeures: true, tauxHoraireApplique: true },
     }));
 
@@ -3403,23 +3409,17 @@ app.get('/api/stats/intervenants', requireAuth, blockCommercial, async (req, res
   }
 });
 
-// Total des achats par fournisseur (mois civil / année civile, navigable) — visible par
-// les conducteurs ET les admins.
-//
-// Agrégat volontairement calculé sur TOUS les chantiers, contrairement au Journal des
-// Achats désormais restreint au périmètre du demandeur : ce que la route renvoie est un
-// cumul par fournisseur, sans montant vendu, sans marge et sans rattachement à un
-// chantier — de l'information d'approvisionnement, utile à un conducteur pour situer ses
-// volumes. Restreindre ce cumul changerait le sens de l'écran sans rien protéger de plus ;
-// c'est un choix produit, pas un oubli du filtrage appliqué ailleurs.
-app.get('/api/stats/fournisseurs', requireAuth, blockCommercial, async (req, res) => {
+// Total des achats par fournisseur (mois civil / année civile, navigable), limité au
+// périmètre chantier du demandeur. Les administrateurs gardent une vue globale ; un
+// conducteur ou responsable ne peut pas déduire le volume d'achat d'affaires d'autrui.
+app.get('/api/stats/fournisseurs', requireAuth, requireTravauxRead, async (req, res) => {
   try {
     const period = req.query.period === 'year' ? 'year' : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
 
     const fournisseurs = await prisma.fournisseur.findMany({ select: { id: true, nom: true } });
     const achats = decimalToNumber(await prisma.achatReel.findMany({
-      where: { date: { gte: start, lt: endExclusive } },
+      where: { date: { gte: start, lt: endExclusive }, chantier: perimetreChantiers(req) },
       select: { fournisseurId: true, montantHT: true },
     }));
 
@@ -3451,17 +3451,15 @@ app.get('/api/stats/fournisseurs', requireAuth, blockCommercial, async (req, res
 // année civile, navigable. Un conducteur ne voit que ses propres chantiers (même
 // périmètre que partout ailleurs) ; un admin voit tous les chantiers. Basé sur la date
 // de démarrage du chantier (dateDebut).
-app.get('/api/stats/types-chantiers', requireAuth, blockCommercial, async (req, res) => {
+app.get('/api/stats/types-chantiers', requireAuth, requireTravauxRead, async (req, res) => {
   try {
-    const authUser = (req as AuthRequest).user!;
-    const isAdmin = isAdminRole(authUser.role);
     const period = req.query.period === 'year' ? 'year' : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
 
     const chantiers = await prisma.chantier.findMany({
       where: {
         dateDebut: { gte: start, lt: endExclusive },
-        ...(isAdmin ? {} : { responsableId: authUser.id }),
+        ...perimetreChantiers(req),
       },
       select: { types: true },
     });
