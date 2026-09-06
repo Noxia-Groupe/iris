@@ -38,6 +38,7 @@ const ChantierDetail = () => {
   // de société n'est écrit dans l'interface.
   const { libelleBaremeReduit } = useModules();
   const [chantier, setChantier] = useState<any>(null);
+  const [journalSaisies, setJournalSaisies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -332,6 +333,11 @@ const ChantierDetail = () => {
       if (res.status === 404) { setNotFound(true); return; }
       const data = await res.json();
       setChantier(data);
+      const journalRes = await apiFetch(`/chantiers/${id}/journal-saisies`);
+      if (journalRes.ok) {
+        const journal = await journalRes.json();
+        setJournalSaisies(Array.isArray(journal) ? journal : []);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -1059,6 +1065,34 @@ const ChantierDetail = () => {
             )}
           </div>
         </div>
+
+        <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h2 className="font-bold text-primary-dark">Journal d’audit des saisies</h2>
+            <p className="text-sm text-gray-500 mt-1">Historique immuable des créations, corrections et archivages du chantier.</p>
+          </div>
+          {journalSaisies.length === 0 ? (
+            <p className="px-6 py-5 text-sm italic text-gray-400">Aucune saisie à tracer pour ce chantier.</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {journalSaisies.map((entree) => (
+                <div key={entree.id} className="px-6 py-4 text-sm">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <strong>{entree.cible === 'ACHAT' ? 'Achat' : 'Heures'} — {entree.action.toLowerCase()}</strong>
+                    <span className="text-gray-500">{fmtDate(entree.createdAt)} · {entree.auteurNom}</span>
+                  </div>
+                  {entree.motif && <p className="mt-1 text-gray-600">Motif : {entree.motif}</p>}
+                  {entree.action === 'CORRECTION' && (
+                    <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
+                      <pre className="overflow-auto rounded bg-red-50 p-2 text-red-900">Avant : {JSON.stringify(entree.avant)}</pre>
+                      <pre className="overflow-auto rounded bg-emerald-50 p-2 text-emerald-900">Après : {JSON.stringify(entree.apres)}</pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
       </div>
 

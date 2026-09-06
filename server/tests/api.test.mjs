@@ -869,6 +869,25 @@ if (!TEST_DATABASE_URL) {
       assert.equal(duplicata.body.origineDevisId, devis.id, 'le lien vers l’origine est conservé');
     });
 
+    test('le journal de saisie expose les valeurs avant/après sur le chantier autorisé', async () => {
+      const devis = await devisAccepte('TEST Affaire journal Travaux');
+      const chantier = (await convertir(devis.id)).body;
+      const achat = await request(app).post('/api/achats').set('Authorization', `Bearer ${session}`)
+        .send({ chantierId: chantier.id, categorieId, fournisseurId, date: '01-09-2026', description: 'TEST achat journal', montantHT: 500 });
+      assert.equal(achat.status, 200, JSON.stringify(achat.body));
+      const correction = await request(app).patch(`/api/achats/${achat.body.id}`).set('Authorization', `Bearer ${session}`)
+        .send({ montantHT: 50 });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+
+      const journal = await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body.length, 2);
+      const correctionJournal = journal.body.find((entree) => entree.action === 'CORRECTION');
+      assert.equal(correctionJournal.avant.montantHT, 500);
+      assert.equal(correctionJournal.apres.montantHT, 50);
+      assert.equal(correctionJournal.auteurNom, 'Accès de secours');
+    });
+
     test('seul un administrateur annule un devis ou constate un acompte', async () => {
       const jwt = (await import('jsonwebtoken')).default;
       const conducteur = await prisma.user.upsert({

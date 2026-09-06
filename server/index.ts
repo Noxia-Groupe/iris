@@ -895,6 +895,26 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Journal append-only des saisies Travaux. Il est lisible uniquement dans le même périmètre
+// que la fiche chantier : une trace ne doit jamais devenir une porte latérale vers une affaire.
+app.get('/api/chantiers/:id/journal-saisies', requireAuth, async (req, res) => {
+  try {
+    const chantierId = paramId(req);
+    const chantier = await prisma.chantier.findFirst({
+      where: { id: chantierId, ...perimetreChantiers(req) },
+      select: { id: true },
+    });
+    if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
+    const entrees = await prisma.journalSaisieChantier.findMany({
+      where: { chantierId },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(decimalToNumber(entrees));
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching journal des saisies' });
+  }
+});
+
 // L'ouverture d'une affaire est contractualisée par un devis accepté : la conversion en
 // est la seule porte (cf. POST /api/devis/:id/convertir). Cette route historique ne créait
 // déjà plus rien, sauf si la variable d'environnement ALLOW_LEGACY_DIRECT_CHANTIER était
