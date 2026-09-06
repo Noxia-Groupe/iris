@@ -7,10 +7,14 @@
 
 ## Vue d'ensemble
 
-Bonne base : architecture client/serveur propre, modèle Prisma cohérent, dockerisation,
-La fonction d'analyse IA directe a été retirée : Iris ne contacte aucun fournisseur LLM externe. Toute future assistance devra passer par un connecteur Hermes Agent sécurisé, dans une phase dédiée. Mais l'application avait deux problèmes **bloquants** (l'UI
-n'était en réalité pas stylée, et la sécurité de l'API était quasi inexistante) et
-présente plusieurs écarts par rapport à la vision cible.
+Bonne base : architecture client/serveur propre, modèle Prisma cohérent, dockerisation.
+Mais l'application avait deux problèmes **bloquants** (l'UI n'était en réalité pas stylée,
+et la sécurité de l'API était quasi inexistante) et présentait plusieurs écarts par rapport
+à la vision cible.
+
+L'analyse IA directe qui figurait ici parmi les bons points a depuis été retirée : Iris ne
+contacte aucun fournisseur LLM externe. Toute assistance future passera par un connecteur
+Hermes Agent sécurisé, dans une phase dédiée.
 
 ---
 
