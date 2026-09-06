@@ -1977,6 +1977,21 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
   return chantier;
 }
 
+function dateIsoStricte(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  // Le format métier français est JJ-MM-AAAA. YYYY-MM-DD reste accepté uniquement pour
+  // compatibilité avec les champs HTML <input type="date"> et les données existantes.
+  const match = /^(?:(\d{2})-(\d{2})-(\d{4})|(\d{4})-(\d{2})-(\d{2}))$/.exec(value);
+  if (!match) return null;
+  const [, jourFr, moisFr, anneeFr, anneeIso, moisIso, jourIso] = match;
+  const annee = Number(anneeFr || anneeIso);
+  const mois = Number(moisFr || moisIso);
+  const jour = Number(jourFr || jourIso);
+  const date = new Date(Date.UTC(annee, mois - 1, jour));
+  if (date.getUTCFullYear() !== annee || date.getUTCMonth() !== mois - 1 || date.getUTCDate() !== jour) return null;
+  return date.toISOString();
+}
+
 function nombreDecimalPositif(value: unknown, maxIntegerDigits: number): number | null {
   // Ne jamais laisser PostgreSQL arrondir silencieusement une valeur métier : l'échelle des
   // colonnes est de deux décimales. La notation scientifique est aussi refusée.
@@ -2013,12 +2028,14 @@ const listerAchats: express.RequestHandler = async (req, res) => {
 
 app.post('/api/achats', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
+    const date = dateIsoStricte(req.body.date);
+    if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' });
     const montantHT = nombreDecimalPositif(req.body.montantHT, 10);
     if (montantHT === null) return res.status(400).json({ error: 'Le montant HT doit être un nombre strictement positif.' });
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
     res.json(await prisma.achatReel.create({
       data: {
-        date: new Date(req.body.date).toISOString(),
+        date,
         fournisseurId: req.body.fournisseurId,
         numeroFacture: req.body.numeroFacture || null,
         description: req.body.description,
@@ -2044,7 +2061,11 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
     if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
 
     const data: Record<string, unknown> = {};
-    if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
+    if ('date' in req.body) {
+      const date = dateIsoStricte(req.body.date);
+      if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' });
+      data.date = date;
+    }
     if ('numeroFacture' in req.body) data.numeroFacture = req.body.numeroFacture || null;
     if ('description' in req.body) data.description = req.body.description;
     if ('montantHT' in req.body) {
@@ -2109,6 +2130,8 @@ routeMixte('get', '/heures', 'chantiers:read', listerHeures, []);
 
 app.post('/api/heures', requireAuth, requireTravauxWrite, async (req, res) => {
   try {
+    const date = dateIsoStricte(req.body.date);
+    if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' });
     const nbrHeures = nombreDecimalPositif(req.body.nbrHeures, 8);
     if (nbrHeures === null) return res.status(400).json({ error: 'Le nombre d’heures doit être strictement positif.' });
     const intervenant = await prisma.intervenant.findUnique({ where: { id: req.body.intervenantId } });
@@ -2117,7 +2140,7 @@ app.post('/api/heures', requireAuth, requireTravauxWrite, async (req, res) => {
 
     res.json(await prisma.pointageHeure.create({
       data: {
-        date: new Date(req.body.date).toISOString(),
+        date,
         intervenantId: req.body.intervenantId,
         chantierId: req.body.chantierId,
         nbrHeures,
@@ -2143,7 +2166,11 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
     if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
 
     const data: Record<string, unknown> = {};
-    if ('date' in req.body) data.date = new Date(req.body.date).toISOString();
+    if ('date' in req.body) {
+      const date = dateIsoStricte(req.body.date);
+      if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' });
+      data.date = date;
+    }
     if ('nbrHeures' in req.body) {
       const nbrHeures = nombreDecimalPositif(req.body.nbrHeures, 8);
       if (nbrHeures === null) return res.status(400).json({ error: 'Le nombre d’heures doit être strictement positif.' });

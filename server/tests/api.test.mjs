@@ -327,6 +327,16 @@ if (!TEST_DATABASE_URL) {
         chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST négatif', montantHT: -10,
       });
       assert.equal(achatNegatif.status, 400);
+      for (const date of ['', 'not-a-date', '2026-02-31', '31-02-2026', '2026-13-01']) {
+        const invalide = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+          chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date, description: 'TEST date', montantHT: 10,
+        });
+        assert.equal(invalide.status, 400, `date ${date} doit être refusée`);
+      }
+      const dateFrancaise = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST date française', montantHT: 10,
+      });
+      assert.equal(dateFrancaise.status, 200);
       for (const montantHT of [0, '0.001', '1.999', '1e-3', '99999999999']) {
         const invalide = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
           chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST précision', montantHT,

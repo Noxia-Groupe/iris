@@ -31,7 +31,7 @@ services:
       - NODE_ENV=production
       # URL de connexion construite à partir des identifiants du service "db".
       - DATABASE_URL=postgresql://${POSTGRES_USER:-iris}:${POSTGRES_PASSWORD:-iris_password}@db:5432/${POSTGRES_DB:-iris}?schema=public
-    # Secrets applicatifs (JWT_SECRET obligatoire en prod, GEMINI_API_KEY, ADMIN_*).
+    # Secrets applicatifs (JWT_SECRET obligatoire en prod, paramètres SSO et accès de secours).
     env_file:
       - ./server/.env
     depends_on:

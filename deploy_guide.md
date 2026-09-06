@@ -83,9 +83,6 @@ ADMIN_PASSWORD="un_mot_de_passe_robuste"
 # chaque démarrage. Vide = liste par défaut (nelson@noxia-groupe.fr, admin@cybexia.fr).
 SUPERADMIN_EMAILS=""
 
-# Optionnel : clé API Google Gemini (laissez vide pour désactiver le rapport IA)
-GEMINI_API_KEY=""
-
 PORT=3001
 ```
 
