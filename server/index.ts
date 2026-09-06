@@ -995,7 +995,16 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
       if (key in req.body) data[key] = parseFloat(req.body[key]) || 0;
     }
     for (const key of dateFields) {
-      if (key in req.body && req.body[key]) data[key] = new Date(req.body[key]).toISOString();
+      if (key in req.body) {
+        if (!req.body[key]) {
+          // dateFin est facultative ; la vider explicitement conserve ce comportement.
+          if (key === 'dateFin') data[key] = null;
+          continue;
+        }
+        const date = dateIsoStricte(req.body[key]);
+        if (!date) return res.status(400).json({ error: `La ${key === 'dateDebut' ? 'date de début' : 'date de fin'} doit être valide au format JJ-MM-AAAA.` });
+        data[key] = date;
+      }
     }
     // Facultative (contrairement au numéro de devis) : peut être vidée.
     if ('adresse' in req.body) data.adresse = String(req.body.adresse || '').trim() || null;
