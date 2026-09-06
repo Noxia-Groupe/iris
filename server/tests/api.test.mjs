@@ -44,6 +44,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.catalogueEquipement.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.apiAccessKey.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     // Domaine chantier : l'ordre suit les clés étrangères — les lignes rattachées d'abord.
+    await prisma.journalSaisieChantier.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.achatReel.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.pointageHeure.deleteMany({ where: { chantier: { nom: { startsWith: 'TEST ' } } } });
     await prisma.chantier.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
@@ -386,6 +387,17 @@ if (!TEST_DATABASE_URL) {
       assert.equal(traces.length, 3);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').avant.montantHT), 500);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
+    });
+
+    test('le journal d’audit respecte le périmètre du conducteur', async () => {
+      // Une trace ne doit pas devenir une porte latérale vers un chantier non rattaché.
+      await prisma.journalSaisieChantier.create({
+        data: { chantierId: idChantierB, cible: 'ACHAT', cibleId: 'test-hors-perimetre', action: 'CREATION', auteurNom: 'TEST Admin' },
+      });
+      const interdit = await request(app).get(`/api/chantiers/${idChantierB}/journal-saisies`).set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(interdit.status, 404);
+      const autorise = await request(app).get(`/api/chantiers/${idChantierA}/journal-saisies`).set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(autorise.status, 200);
     });
 
     test('un administrateur voit bien toutes les lignes', async () => {
