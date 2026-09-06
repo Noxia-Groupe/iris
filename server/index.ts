@@ -314,7 +314,17 @@ function routeMixte(
 //
 // Renvoie un filtre Prisma applicable à un champ `chantier` imbriqué comme à un chantier
 // racine ; `{}` signifie « aucune restriction ».
+// Une affaire ANNULÉE sort du périmètre de tout le monde, administrateurs compris : elle
+// n'a plus à peser sur une liste, un coût, une marge ou une commission. Elle n'est pas
+// perdue pour autant — GET /api/chantiers/:id la rend toujours, avec le motif de son
+// annulation, et c'est bien là qu'on va la chercher quand on veut comprendre.
+const AFFAIRE_NON_ANNULEE = { statut: { not: 'ANNULE' } } as const;
+
 function perimetreChantiers(req: express.Request): Prisma.ChantierWhereInput {
+  return { ...AFFAIRE_NON_ANNULEE, ...perimetreDemandeur(req) };
+}
+
+function perimetreDemandeur(req: express.Request): Prisma.ChantierWhereInput {
   if ((req as ApiRequest).apiKey) return {};
   const user = (req as AuthRequest).user;
   if (!user || isAdminRole(user.role)) return {};
@@ -467,7 +477,7 @@ function decimalToNumber(value: any): any {
 }
 
 // --- Paramètres globaux (singleton) ---
-interface Parametres { margeCommercialeActive: boolean; planningActif: boolean }
+interface Parametres { margeCommercialeActive: boolean; planningActif: boolean; tauxAcompteDefaut: number }
 
 // Retourne les paramètres avec les Decimal convertis en nombres.
 // upsert atomique (INSERT ... ON CONFLICT) pour éviter toute race entre requêtes
@@ -885,89 +895,14 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/chantiers', requireAuth, blockCommercial, async (req, res) => {
-  // Depuis Iris, l'ouverture d'une affaire est contractualisée par un devis accepté.
-  // Cette route historique est conservée pour donner une erreur explicite aux anciens clients,
-  // mais ne crée plus de chantier directement.
-  if (process.env.ALLOW_LEGACY_DIRECT_CHANTIER !== 'true') {
-    return res.status(410).json({ error: 'Un chantier est créé uniquement par conversion d’un devis accepté.' });
-  }
-  try {
-    const authUser = (req as AuthRequest).user!;
-    const isAdmin = isAdminRole(authUser.role);
-    // Un conducteur qui crée un chantier en devient automatiquement le responsable ;
-    // un admin doit obligatoirement désigner un responsable (sinon le chantier créé
-    // resterait invisible à tout conducteur, cf. filtrage ci-dessus).
-    let responsableId: string;
-    if (isAdmin) {
-      responsableId = String(req.body.responsableId || '');
-      if (!responsableId) {
-        return res.status(400).json({ error: 'Veuillez sélectionner le conducteur responsable de ce chantier.' });
-      }
-      // Un compte désactivé n'apparaît plus dans les listes d'attribution : il ne peut pas
-      // davantage être désigné responsable d'un nouveau chantier (son historique, lui, reste).
-      const responsable = await prisma.user.findUnique({ where: { id: responsableId }, select: { id: true, actif: true } });
-      if (!responsable || !responsable.actif) {
-        return res.status(400).json({ error: 'Conducteur responsable introuvable.' });
-      }
-    } else {
-      responsableId = authUser.id;
-    }
-
-    // Commercial rattaché : obligatoire dès la création (par l'admin ou le conducteur),
-    // sauf si aucun compte commercial n'est encore autorisé dans l'application — sinon
-    // la création de chantiers serait bloquée tant qu'aucun commercial n'existe.
-    let commercialId: string | null = null;
-    if (req.body.commercialId) {
-      const commercial = await prisma.user.findUnique({ where: { id: String(req.body.commercialId) } });
-      if (!commercial || !isCommercialLike(commercial) || !commercial.actif) {
-        return res.status(400).json({ error: 'Commercial introuvable.' });
-      }
-      commercialId = commercial.id;
-    } else if ((await prisma.user.count({ where: { OR: COMMERCIAL_OR_FILTER } })) > 0) {
-      return res.status(400).json({ error: 'Veuillez sélectionner le commercial rattaché à ce chantier.' });
-    }
-
-    const numeroDevis = normaliserNumeroDevis(req.body.numeroDevis);
-    const erreurDevis = erreurNumeroDevis(numeroDevis);
-    if (erreurDevis) {
-      return res.status(400).json({ error: erreurDevis });
-    }
-    if (await numeroDevisDejaPris(numeroDevis)) {
-      return res.status(409).json({ error: `Le devis ${numeroDevis} est déjà rattaché à un autre chantier.` });
-    }
-
-    // Le type de chantier n'est pas un champ texte : au moins une case doit être cochée
-    // (baremeReduit est une case à part, non concernée par cette règle).
-    const types = sanitizeTypes(req.body.types);
-    if (types.length === 0) {
-      return res.status(400).json({ error: 'Veuillez sélectionner au moins un type de chantier.' });
-    }
-
-    const chantier = await prisma.chantier.create({
-      data: {
-        nom: req.body.nom,
-        client: req.body.client,
-        adresse: String(req.body.adresse || '').trim() || null,
-        numeroDevis,
-        dateDebut: new Date(req.body.dateDebut).toISOString(),
-        dateFin: req.body.dateFin ? new Date(req.body.dateFin).toISOString() : null,
-        budgetGlobalVendu: parseFloat(req.body.budgetGlobalVendu) || 0,
-        budgetMaterielVendu: parseFloat(req.body.budgetMaterielVendu) || 0,
-        budgetMainOeuvreVendu: parseFloat(req.body.budgetMainOeuvreVendu) || 0,
-        heuresVendues: parseFloat(req.body.heuresVendues) || 0,
-        responsableId,
-        commercialId,
-        statut: req.body.statut || "EN_COURS",
-        types,
-        baremeReduit: !!req.body.baremeReduit,
-      },
-    });
-    res.json(chantier);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error creating chantier' });
-  }
+// L'ouverture d'une affaire est contractualisée par un devis accepté : la conversion en
+// est la seule porte (cf. POST /api/devis/:id/convertir). Cette route historique ne créait
+// déjà plus rien, sauf si la variable d'environnement ALLOW_LEGACY_DIRECT_CHANTIER était
+// posée — une échappatoire qui permettait de fabriquer une affaire sans devis, donc sans
+// numéro d'affaire, sans montant vendu contrôlé et sans rien à annuler en cas d'erreur.
+// Elle est retirée : il ne reste que le message.
+app.post('/api/chantiers', requireAuth, blockCommercial, (_req, res) => {
+  res.status(410).json({ error: 'Un chantier est créé uniquement par conversion d’un devis accepté.' });
 });
 
 // Update Chantier (pour le statut, le budget, etc.) — champs en liste blanche (anti mass-assignment).
@@ -980,10 +915,15 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     const authUser = (req as AuthRequest).user!;
     const existant = await prisma.chantier.findUnique({
       where: { id: paramId(req) },
-      select: { id: true, numeroDevis: true, responsableId: true },
+      select: { id: true, numeroDevis: true, responsableId: true, statut: true },
     });
     if (!existant || (!isAdminRole(authUser.role) && existant.responsableId !== authUser.id)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
+    }
+    // Une affaire annulée est close : la corriger reviendrait à la faire revivre sans que
+    // le devis annulé, lui, ait bougé.
+    if (existant.statut === 'ANNULE') {
+      return res.status(409).json({ error: 'Cette affaire est annulée : elle n’est plus modifiable.' });
     }
 
     // 'statut' n'est modifiable ici que par un admin : la clôture et surtout la RÉOUVERTURE
@@ -1056,62 +996,19 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
 // clôturer, uniquement ses propres chantiers en cours) : une fois TERMINE, il ne
 // peut plus y ajouter d'heures ou de dépenses (cf. POST /achats et /heures).
 // Seul un admin peut réouvrir un chantier clôturé (repasser en EN_COURS).
-// Supprime définitivement un chantier — réservé aux administrateurs et superadmins.
+// Un chantier ne se supprime plus, et ne s'archive pas non plus par lui-même.
 //
-// Un chantier ne vit pas seul : achats, pointages d'heures, lignes de budget et
-// affectations du planning y sont rattachés. Les supprimer en silence ferait disparaître
-// des données de gestion sans que personne ne l'ait vu venir. La route procède donc en
-// deux temps : sans `force`, elle REFUSE et renvoie le décompte de ce qui serait détruit,
-// que l'écran affiche pour faire confirmer ; avec `force=1`, elle supprime tout dans une
-// transaction.
+// Il n'existe que par la conversion d'un devis accepté : c'est cette conversion qui vaut
+// validation définitive du devis. Revenir dessus n'est donc pas une opération de chantier
+// mais une opération de devis — l'annulation (cf. POST /api/devis/:id/annulation), qui
+// exige un motif, archive le chantier lié et se refuse dès qu'une heure ou un achat a été
+// saisi. Supprimer le chantier ici court-circuiterait ce contrôle et laisserait le devis
+// converti pointer vers une affaire disparue.
 //
-// Un chantier vierge — créé par erreur, doublon de devis — n'a rien rattaché : il se
-// supprime alors du premier coup, sans seconde confirmation.
-app.delete('/api/chantiers/:id', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const id = paramId(req);
-    const chantier = await prisma.chantier.findUnique({ where: { id }, select: { id: true, nom: true } });
-    if (!chantier) {
-      return res.status(404).json({ error: 'Chantier introuvable.' });
-    }
-
-    const [achats, pointages, lignesBudget, affectations] = await Promise.all([
-      prisma.achatReel.count({ where: { chantierId: id } }),
-      prisma.pointageHeure.count({ where: { chantierId: id } }),
-      prisma.ligneBudgetPrevisionnel.count({ where: { chantierId: id } }),
-      prisma.planningEvent.count({ where: { chantierId: id } }),
-    ]);
-    const dependances = { achats, pointages, lignesBudget, affectations };
-    const total = achats + pointages + lignesBudget + affectations;
-
-    if (total > 0 && String(req.query.force || '') !== '1') {
-      return res.status(409).json({
-        code: 'CHANTIER_NON_VIDE',
-        error: 'Ce chantier porte encore des données rattachées.',
-        dependances,
-      });
-    }
-
-    // Ordre imposé par les clés étrangères : tout ce qui pointe vers le chantier d'abord.
-    // Les affectations du planning ne sont pas supprimées mais DÉTACHÉES : une intervention
-    // planifiée reste un fait du planning (des techniciens y étaient affectés), elle devient
-    // simplement une intervention hors chantier suivi, qui garde le nom du chantier.
-    await prisma.$transaction([
-      prisma.planningEvent.updateMany({
-        where: { chantierId: id },
-        data: { chantierId: null, categorie: 'HORS_CHANTIER', titre: chantier.nom },
-      }),
-      prisma.achatReel.deleteMany({ where: { chantierId: id } }),
-      prisma.pointageHeure.deleteMany({ where: { chantierId: id } }),
-      prisma.ligneBudgetPrevisionnel.deleteMany({ where: { chantierId: id } }),
-      prisma.chantier.delete({ where: { id } }),
-    ]);
-
-    res.json({ success: true, nom: chantier.nom, dependances });
-  } catch (error) {
-    console.error('Suppression chantier:', error);
-    res.status(500).json({ error: 'Impossible de supprimer ce chantier.' });
-  }
+// La route est conservée pour renvoyer cette explication aux clients existants plutôt
+// qu'un 404 muet.
+app.delete('/api/chantiers/:id', requireAuth, requireAdmin, (_req, res) => {
+  res.status(410).json({ error: 'Un chantier ne se supprime pas : annulez le devis dont il est issu (une note explicative est exigée).' });
 });
 
 app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req, res) => {
@@ -1126,6 +1023,11 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req,
     const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) } });
     if (!chantier || (!isAdmin && chantier.responsableId !== authUser.id)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
+    }
+    // On ne rouvre pas, ni ne clôture, une affaire annulée : sa fin est déjà écrite, avec
+    // son motif. La sortir de cet état supposerait d'annuler l'annulation, ce qui n'existe pas.
+    if (chantier.statut === 'ANNULE') {
+      return res.status(409).json({ error: 'Cette affaire est annulée : son statut ne change plus.' });
     }
 
     if (!isAdmin && (nextStatut !== 'TERMINE' || chantier.statut !== 'EN_COURS')) {
@@ -1982,6 +1884,12 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
   if (!isAdmin && !estConducteurDeLAffaire && !estResponsableDeLEquipe) {
     // Même réponse qu'un chantier absent afin de ne pas révéler une affaire hors périmètre.
     res.status(404).json({ error: 'Chantier introuvable' });
+    return null;
+  }
+  // Une affaire annulée n'accepte plus rien de personne : le verrou d'annulation garantit
+  // qu'elle était vierge, une écriture postérieure la ferait ressusciter en silence.
+  if (chantier.statut === 'ANNULE') {
+    res.status(409).json({ error: 'Cette affaire est annulée : plus aucune saisie n’y est possible.' });
     return null;
   }
   if (!isAdmin && chantier.statut !== 'EN_COURS') {
@@ -2857,6 +2765,9 @@ routeMixte('delete', '/catalogue/:family/:id', 'catalogue:write', desactiverFich
 
 // --- Devis natifs versionnés ---
 class DevisSaisieError extends Error {}
+// Refus qui ne vient pas de la saisie mais de l'état de l'affaire : la requête est bien
+// formée, c'est le monde qui s'y oppose. 409, pas 400.
+class DevisConflitError extends Error {}
 const centimes = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 function devisPayload(body: Record<string, unknown>) {
   const clientId = String(body.clientId || '').trim(), objet = String(body.objet || '').trim();
@@ -2873,6 +2784,7 @@ function devisPayload(body: Record<string, unknown>) {
 }
 function devisErreur(res: express.Response, error: unknown) {
   if (error instanceof DevisSaisieError) return res.status(400).json({ error: error.message });
+  if (error instanceof DevisConflitError) return res.status(409).json({ error: error.message });
   if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
@@ -2885,7 +2797,16 @@ async function nouveauNumeroDevis() {
 const creerDevis: express.RequestHandler = async (req, res) => { try {
   const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
   if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
-  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, lignes: { create: payload.lignesCalculees } }, include: devisInclude });
+  // L'acompte se décide sur le devis INITIAL. Son taux est figé ici, à partir du paramètre
+  // du jour : un devis émis en janvier garde son taux de janvier, quoi qu'il advienne du
+  // réglage global — c'est la non-rétroactivité posée pour toutes les règles chiffrées.
+  const acompteExige = !!(req.body ?? {}).acompteExige;
+  const { tauxAcompteDefaut } = await getParametres();
+  const tauxAcompte = acompteExige
+    ? (nombreDecimalNonNegatif((req.body ?? {}).tauxAcompte, 3) ?? Number(tauxAcompteDefaut))
+    : null;
+  if (tauxAcompte !== null && tauxAcompte > 100) throw new DevisSaisieError('Le taux d’acompte ne peut pas dépasser 100 %.');
+  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, acompteExige, tauxAcompte, lignes: { create: payload.lignesCalculees } }, include: devisInclude });
   res.status(201).json(decimalToNumber(devis));
 } catch (error) { devisErreur(res, error); } };
 const listerDevis: express.RequestHandler = async (_req, res) => { try { res.json(decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } }))); } catch (error) { devisErreur(res, error); } };
@@ -2894,18 +2815,43 @@ const creerRevision: express.RequestHandler = async (req, res) => { try {
   if (!precedent) throw new DevisSaisieError('Devis introuvable.');
   for (let tentative = 0; tentative < 3; tentative++) {
     const version = ((await prisma.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version ?? 0) + 1;
-    try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, lignes: { create: precedent.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
+    try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte, lignes: { create: precedent.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
   }
 } catch (error) { devisErreur(res, error); } };
 routeMixte('get', '/devis', 'devis:read', listerDevis, [requirePermission('devis:read')]);
 routeMixte('post', '/devis', 'devis:write', creerDevis, [requirePermission('devis:write')]);
 routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision, [requirePermission('devis:write')]);
-const TRANSITIONS_DEVIS: Record<string, string[]> = { BROUILLON: ['ENVOYE'], ENVOYE: ['ACCEPTE', 'REFUSE', 'BROUILLON'], ACCEPTE: [], REFUSE: [] };
+// Cycle de vie d'un devis. `ANNULE` ne figure dans aucune liste de destinations : on n'y
+// entre que par la route d'annulation, qui exige un motif et vérifie le chantier lié — et
+// on n'en sort jamais. `EN_ATTENTE_ACOMPTE` est le choix explicite fait après acceptation :
+// ouvrir le chantier tout de suite, ou attendre l'acompte. Un devis peut y revenir tant
+// que l'acompte n'est pas constaté, mais pas une fois le chantier ouvert.
+const TRANSITIONS_DEVIS: Record<string, string[]> = {
+  BROUILLON: ['ENVOYE'],
+  ENVOYE: ['ACCEPTE', 'REFUSE', 'BROUILLON'],
+  ACCEPTE: ['EN_ATTENTE_ACOMPTE'],
+  EN_ATTENTE_ACOMPTE: ['ACCEPTE'],
+  REFUSE: [],
+  ANNULE: [],
+};
+
+// Un devis dont le chantier existe déjà est figé : sa seule évolution possible est
+// l'annulation, qui passe par sa propre route.
+function refusStatutFige(devis: { statut: string; conversion?: unknown }): string | null {
+  if (devis.statut === 'ANNULE') return 'Ce devis est annulé : son statut ne peut plus changer.';
+  if (devis.conversion) return 'Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus.';
+  return null;
+}
 const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
   const statut = String((req.body ?? {}).statut || '');
-  const devis = await prisma.devis.findUnique({ where: { id: paramId(req) } });
+  const devis = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: { conversion: true } });
   if (!devis) return void res.status(404).json({ error: 'Devis introuvable.' });
+  const fige = refusStatutFige(devis);
+  if (fige) throw new DevisSaisieError(fige);
   if (!TRANSITIONS_DEVIS[devis.statut]?.includes(statut)) throw new DevisSaisieError(`Transition ${devis.statut} → ${statut} interdite.`);
+  // Passer en attente d'acompte n'a de sens que si le devis en exige un.
+  if (statut === 'EN_ATTENTE_ACOMPTE' && !devis.acompteExige) throw new DevisSaisieError('Ce devis n’exige pas d’acompte.');
+  if (statut === 'ACCEPTE' && devis.statut === 'EN_ATTENTE_ACOMPTE' && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte de ce devis n’a pas encore été constaté.');
   const maj = await prisma.devis.update({ where: { id: devis.id }, data: { statut }, include: devisInclude });
   res.json(decimalToNumber(maj));
 } catch (error) { devisErreur(res, error); } };
@@ -2919,8 +2865,14 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   const resultat = await prisma.$transaction(async tx => {
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, lignes: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
+    if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé : il ne peut plus ouvrir de chantier.');
+    if (devis.statut === 'EN_ATTENTE_ACOMPTE') throw new DevisSaisieError('Ce devis attend son acompte : le chantier ne peut pas encore être ouvert.');
     if (devis.statut !== 'ACCEPTE') throw new DevisSaisieError('Seul un devis accepté peut être converti.');
     if (devis.conversion) throw new DevisSaisieError('Ce devis a déjà été converti.');
+    // Verrou de fond, indépendant du statut : un devis qui exige un acompte n'ouvre pas de
+    // chantier tant que sa réception n'a pas été constatée. Le statut peut être manipulé,
+    // pas ce fait.
+    if (devis.acompteExige && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte exigé par ce devis n’a pas été constaté : le chantier ne peut pas être ouvert.');
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
     const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
@@ -2931,6 +2883,114 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   res.status(201).json(decimalToNumber(resultat));
 } catch (error) { devisErreur(res, error); } };
 routeMixte('post', '/devis/:id/convertir', 'devis:write', convertirDevis, [requirePermission('devis:write')]);
+
+// --- Constatation de l'acompte ---
+// Tant que le module paiements (phase 9) n'existe pas, la réception d'un acompte se
+// constate à la main : date, montant et référence du règlement, par un administrateur.
+// Le rapprochement bancaire alimentera ces mêmes champs plus tard sans changer la règle.
+// Réservée aux administrateurs : constater un encaissement débloque l'ouverture d'un
+// chantier, ce n'est pas un geste que celui qui a vendu l'affaire se rend à lui-même.
+app.post('/api/devis/:id/acompte', requireAuth, requireAdmin, async (req, res) => { try {
+  const devis = await prisma.devis.findUnique({ where: { id: paramId(req) } });
+  if (!devis) return void res.status(404).json({ error: 'Devis introuvable.' });
+  if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé.');
+  if (!devis.acompteExige) throw new DevisSaisieError('Ce devis n’exige pas d’acompte.');
+  if (devis.acompteRecuLe) throw new DevisSaisieError('L’acompte de ce devis a déjà été constaté.');
+
+  const recuLe = dateIsoStricte((req.body ?? {}).recuLe);
+  if (!recuLe) throw new DevisSaisieError('La date de réception doit être valide au format JJ-MM-AAAA.');
+  const montant = nombreDecimalNonNegatif((req.body ?? {}).montant, 10);
+  if (montant === null) throw new DevisSaisieError('Le montant de l’acompte doit être un nombre strictement positif.');
+  const reference = String((req.body ?? {}).reference ?? '').trim();
+  if (!reference) throw new DevisSaisieError('La référence du règlement est requise.');
+
+  const maj = await prisma.devis.update({
+    where: { id: devis.id },
+    data: {
+      acompteRecuLe: recuLe, acompteMontant: montant, acompteReference: reference,
+      acompteConstateParId: (req as AuthRequest).user!.id,
+      // Constater l'acompte remet le devis en état d'être converti.
+      statut: devis.statut === 'EN_ATTENTE_ACOMPTE' ? 'ACCEPTE' : devis.statut,
+    },
+    include: devisInclude,
+  });
+  res.json(decimalToNumber(maj));
+} catch (error) { devisErreur(res, error); } });
+
+// --- Annulation d'un devis, et archivage du chantier qui en est issu ---
+// C'est le SEUL chemin qui revient sur une affaire ouverte par erreur : un chantier ne se
+// supprime plus (cf. DELETE /api/chantiers/:id). Réservée aux administrateurs, elle exige
+// un motif, et elle est refusée dès qu'une heure ou un achat a été saisi sur le chantier —
+// à ce stade l'affaire a commencé à vivre, on ne l'efface pas, on la mène à son terme.
+//
+// Le chantier n'est pas détruit mais archivé : il sort des listes, des coûts, des marges et
+// des commissions, et conserve la raison de son annulation. Une annulation ne s'annule pas ;
+// la reprise passe par la duplication du devis (cf. POST /devis/:id/duplication).
+app.post('/api/devis/:id/annulation', requireAuth, requireAdmin, async (req, res) => { try {
+  const motif = String((req.body ?? {}).motif ?? '').trim();
+  if (!motif) throw new DevisSaisieError('Un motif d’annulation est obligatoire.');
+
+  const resultat = await prisma.$transaction(async tx => {
+    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { conversion: true } });
+    if (!devis) throw new DevisSaisieError('Devis introuvable.');
+    if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est déjà annulé.');
+
+    let chantierArchive: string | null = null;
+    if (devis.conversion?.cibleType === 'CHANTIER') {
+      const chantierId = devis.conversion.cibleId;
+      // Le verrou porte sur les écritures VIVANTES : une ligne déjà archivée n'engage rien.
+      const [heures, achats] = await Promise.all([
+        tx.pointageHeure.count({ where: { chantierId, archivedAt: null } }),
+        tx.achatReel.count({ where: { chantierId, archivedAt: null } }),
+      ]);
+      if (heures > 0 || achats > 0) {
+        throw new DevisConflitError(
+          `Annulation impossible : ce chantier porte déjà ${heures} pointage(s) d’heures et ${achats} achat(s). Une affaire commencée ne s’annule pas.`,
+        );
+      }
+      await tx.chantier.update({
+        where: { id: chantierId },
+        data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: (req as AuthRequest).user!.id, motifAnnulation: motif },
+      });
+      chantierArchive = chantierId;
+    }
+
+    const maj = await tx.devis.update({
+      where: { id: devis.id },
+      data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: (req as AuthRequest).user!.id, motifAnnulation: motif },
+      include: devisInclude,
+    });
+    return { devis: maj, chantierArchive };
+  });
+  res.json({ devis: decimalToNumber(resultat.devis), chantierArchive: resultat.chantierArchive });
+} catch (error) { devisErreur(res, error); } });
+
+// --- Duplication ---
+// Reprend un devis à l'identique — client, objet, lignes, option d'acompte — avec son
+// PROPRE numéro d'affaire et un dossier neuf. C'est la voie de reprise après une annulation :
+// on ne ressuscite pas un devis annulé, on en refait un. Le duplicata repart en BROUILLON,
+// donc à renvoyer et à faire réaccepter : dupliquer ne contourne pas l'accord du client.
+// Le lien vers l'origine évite de retrouver deux devis jumeaux sans savoir lequel remplace
+// l'autre. Le taux d'acompte est relu depuis les paramètres du jour : un duplicata est un
+// devis neuf, il suit la politique en vigueur au moment où il est émis.
+app.post('/api/devis/:id/duplication', requireAuth, requirePermission('devis:write'), async (req, res) => { try {
+  const source = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: devisInclude });
+  if (!source) return void res.status(404).json({ error: 'Devis introuvable.' });
+  const { tauxAcompteDefaut } = await getParametres();
+  const duplicata = await prisma.devis.create({
+    data: {
+      dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1,
+      clientId: source.clientId, objet: source.objet,
+      totalHt: source.totalHt, totalTva: source.totalTva, totalTtc: source.totalTtc,
+      acompteExige: source.acompteExige,
+      tauxAcompte: source.acompteExige ? tauxAcompteDefaut : null,
+      origineDevisId: source.id,
+      lignes: { create: source.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) },
+    },
+    include: devisInclude,
+  });
+  res.status(201).json(decimalToNumber(duplicata));
+} catch (error) { devisErreur(res, error); } });
 
 // --- Société de l'instance (singleton, hors paramètres métier) ---
 app.get('/api/company', requireAuth, async (_req, res) => {
@@ -3044,9 +3104,18 @@ app.put('/api/parametres/remuneration', requireAuth, requireSuperAdmin, async (r
 // modifier, même en glissant le champ dans le corps de cette requête.
 app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const data = {
+    const data: Record<string, unknown> = {
       margeCommercialeActive: !!req.body.margeCommercialeActive,
     };
+    // Politique d'acompte de la société : jamais en dur dans le code, éditable ici.
+    // Ne s'applique qu'aux devis émis ensuite (cf. Devis.tauxAcompte, figé à l'émission).
+    if ('tauxAcompteDefaut' in req.body) {
+      const taux = nombreDecimalNonNegatif(req.body.tauxAcompteDefaut, 3, true);
+      if (taux === null || taux > 100) {
+        return res.status(400).json({ error: 'Le taux d’acompte par défaut doit être un pourcentage compris entre 0 et 100.' });
+      }
+      data.tauxAcompteDefaut = taux;
+    }
     const p = await prisma.parametres.upsert({
       where: { id: 'singleton' },
       update: data,
@@ -3322,7 +3391,7 @@ app.get('/api/stats/conducteurs/assiduite', requireAuth, requireTravauxRead, asy
       where: {
         archivedAt: null,
         createdAt: { gte: monday, lt: saturdayExclusive },
-        chantier: { responsableId: { in: userIds } },
+        chantier: { ...AFFAIRE_NON_ANNULEE, responsableId: { in: userIds } },
       },
       select: { nbrHeures: true, createdAt: true, chantier: { select: { responsableId: true } } },
     }));
@@ -3687,7 +3756,8 @@ function dateClotureChantier(c: any): Date | null {
 async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres, regles: ReglesRemuneration) {
   const commercialIdSet = new Set(commercialIds);
   const chantiers = decimalToNumber(await prisma.chantier.findMany({
-    where: { commercialId: { in: commercialIds } },
+    // Une affaire annulée n'a jamais existé commercialement : ni CA, ni marge, ni commission.
+    where: { ...AFFAIRE_NON_ANNULEE, commercialId: { in: commercialIds } },
     include: { achats: { where: { archivedAt: null } }, pointages: { where: { archivedAt: null } } },
   }));
 
