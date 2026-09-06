@@ -171,6 +171,23 @@ model AchatReel {
   @@index([categorieId])
 }
 
+model JournalSaisieChantier {
+  id         String   @id @default(uuid())
+  chantierId String
+  cible      String   // ACHAT | HEURE
+  cibleId    String
+  action     String   // CREATION | CORRECTION | ARCHIVAGE
+  auteurId   String?
+  auteurNom  String
+  avant      Json?
+  apres      Json?
+  motif      String?
+  createdAt  DateTime @default(now())
+
+  @@index([chantierId, createdAt])
+  @@index([cible, cibleId, createdAt])
+}
+
 model Intervenant {
   id                String  @id @default(uuid())
   nom               String

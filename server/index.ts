@@ -112,7 +112,7 @@ async function verifyMicrosoftIdentity(req: express.Request): Promise<string | n
 
 // --- Middlewares d'authentification / autorisation ---
 interface AuthRequest extends express.Request {
-  user?: { id: string; role: string; accesFinance: boolean; permissions: string[]; equipeIds: string[] };
+  user?: { id: string; name: string; role: string; accesFinance: boolean; permissions: string[]; equipeIds: string[] };
 }
 
 // Le jeton n'authentifie QUE l'identité : le rôle est systématiquement relu en base, il
@@ -133,7 +133,7 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
     return;
   }
   try {
-    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, accesFinance: true, permissions: true, actif: true } });
+    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, name: true, role: true, accesFinance: true, permissions: true, actif: true } });
     if (!user) {
       res.status(401).json({ error: 'Compte introuvable ou révoqué' });
       return;
@@ -147,7 +147,7 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
     const equipeIds = user.role === ROLE_RESPONSABLE
       ? (await prisma.user.findMany({ where: { responsableId: user.id, actif: true }, select: { id: true } })).map((collaborateur) => collaborateur.id)
       : [];
-    (req as AuthRequest).user = { id: user.id, role: user.role, accesFinance: user.accesFinance, permissions: user.permissions, equipeIds };
+    (req as AuthRequest).user = { id: user.id, name: user.name, role: user.role, accesFinance: user.accesFinance, permissions: user.permissions, equipeIds };
     next();
   } catch {
     res.status(500).json({ error: 'Error resolving authenticated user' });
@@ -358,10 +358,10 @@ const requireTravauxWrite: express.RequestHandler = (req, res, next) => {
   res.status(403).json({ error: 'Accès réservé au suivi Travaux.' });
 };
 
-// Statistiques Travaux : vue globale administration et vue d'équipe responsable.
+// Statistiques Travaux : administration globale, responsable équipe déclarée, conducteur périmètre propre.
 const requireTravauxRead: express.RequestHandler = (req, res, next) => {
   const role = (req as AuthRequest).user?.role;
-  if (isAdminRole(role) || role === ROLE_RESPONSABLE) return next();
+  if (isAdminRole(role) || role === ROLE_RESPONSABLE || role === 'CONDUCTEUR_TRAVAUX') return next();
   res.status(403).json({ error: 'Accès réservé au suivi Travaux.' });
 };
 
@@ -583,8 +583,9 @@ async function getCompanySettings() {
 // autorisés à la voir (admin partout ; conducteur responsable sur SA fiche chantier
 // uniquement, cf. GET /api/chantiers/:id — pas sur la liste ni le tableau de bord).
 function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: boolean) {
-  const achats: any[] = chantier.achats || [];
-  const pointages: any[] = chantier.pointages || [];
+  // Défense en profondeur : une archive ne doit jamais déformer un coût, une marge ou une commission.
+  const achats: any[] = (chantier.achats || []).filter((a: any) => !a.archivedAt);
+  const pointages: any[] = (chantier.pointages || []).filter((p: any) => !p.archivedAt);
 
   const materielReel = achats.reduce((s: number, a: any) => s + a.montantHT, 0);
   let heuresRealisees = 0;
@@ -833,8 +834,8 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
       include: {
         responsable: RESPONSABLE_SELECT,
         commercial: RESPONSABLE_SELECT,
-        achats: true,
-        pointages: true,
+        achats: { where: { archivedAt: null } },
+        pointages: { where: { archivedAt: null } },
       }
     });
     const voitMontants = peutVoirMontantsVendus(req);
@@ -860,12 +861,16 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
       include: {
         responsable: RESPONSABLE_SELECT,
         commercial: RESPONSABLE_SELECT,
-        achats: { include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
-        pointages: { include: { intervenant: true }, orderBy: { date: 'desc' } },
+        achats: { where: { archivedAt: null }, include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
+        pointages: { where: { archivedAt: null }, include: { intervenant: true }, orderBy: { date: 'desc' } },
       }
     });
     // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
-    const isOwner = !!chantier && (chantier.responsableId === authUser.id || chantier.commercialId === authUser.id);
+    const isOwner = !!chantier && (
+      chantier.commercialId === authUser.id ||
+      chantier.responsableId === authUser.id ||
+      (authUser.role === ROLE_RESPONSABLE && !!chantier.responsableId && authUser.equipeIds.includes(chantier.responsableId))
+    );
     if (!chantier || (!isAdmin && !isOwner)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
     }
@@ -1969,8 +1974,11 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
     res.status(404).json({ error: 'Chantier introuvable' });
     return null;
   }
-  const roleOperationnel = user?.role === 'CONDUCTEUR_TRAVAUX' || user?.role === ROLE_RESPONSABLE;
-  if (!isAdmin && (!roleOperationnel || chantier.responsableId !== user?.id)) {
+  const estConducteurDeLAffaire = user?.role === 'CONDUCTEUR_TRAVAUX' && chantier.responsableId === user.id;
+  const estResponsableDeLEquipe = user?.role === ROLE_RESPONSABLE
+    && !!chantier.responsableId
+    && (chantier.responsableId === user.id || user.equipeIds.includes(chantier.responsableId));
+  if (!isAdmin && !estConducteurDeLAffaire && !estResponsableDeLEquipe) {
     // Même réponse qu'un chantier absent afin de ne pas révéler une affaire hors périmètre.
     res.status(404).json({ error: 'Chantier introuvable' });
     return null;
@@ -1997,6 +2005,30 @@ function dateIsoStricte(value: unknown): string | null {
   const date = new Date(Date.UTC(annee, mois - 1, jour));
   if (date.getUTCFullYear() !== annee || date.getUTCMonth() !== mois - 1 || date.getUTCDate() !== jour) return null;
   return date.toISOString();
+}
+
+function valeurJournal(value: unknown): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(decimalToNumber(value))) as Record<string, unknown>;
+}
+
+async function journaliserSaisieTravaux(
+  tx: any,
+  req: AuthRequest,
+  cible: 'ACHAT' | 'HEURE',
+  action: 'CREATION' | 'CORRECTION' | 'ARCHIVAGE',
+  cibleId: string,
+  chantierId: string,
+  avant: unknown,
+  apres: unknown,
+  motif?: string,
+) {
+  const user = req.user!;
+  await tx.journalSaisieChantier.create({ data: {
+    chantierId, cible, cibleId, action, auteurId: user.id, auteurNom: user.name,
+    avant: avant ? valeurJournal(avant) : undefined,
+    apres: apres ? valeurJournal(apres) : undefined,
+    motif: motif || null,
+  } });
 }
 
 function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number, zeroAutorise = false): number | null {
@@ -2040,18 +2072,18 @@ app.post('/api/achats', requireAuth, requireTravauxWrite, async (req, res) => {
     const montantHT = nombreDecimalNonNegatif(req.body.montantHT, 10, true);
     if (montantHT === null) return res.status(400).json({ error: 'Le montant HT doit être un nombre positif ou nul.' });
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
-    res.json(await prisma.achatReel.create({
-      data: {
-        date,
-        fournisseurId: req.body.fournisseurId,
-        numeroFacture: req.body.numeroFacture || null,
-        description: req.body.description,
-        montantHT,
-        chantierId: req.body.chantierId,
-        categorieId: req.body.categorieId,
-        createdById: (req as AuthRequest).user!.id
-      }
-    }));
+    const cree = await prisma.$transaction(async (tx) => {
+      const achat = await tx.achatReel.create({
+        data: {
+          date, fournisseurId: req.body.fournisseurId, numeroFacture: req.body.numeroFacture || null,
+          description: req.body.description, montantHT, chantierId: req.body.chantierId,
+          categorieId: req.body.categorieId, createdById: (req as AuthRequest).user!.id,
+        }
+      });
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'CREATION', achat.id, achat.chantierId, null, achat);
+      return achat;
+    });
+    res.json(cree);
   } catch (error) {
     res.status(500).json({ error: 'Error creating achat' });
   }
@@ -2093,7 +2125,12 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
     }
 
     data.updatedById = (req as AuthRequest).user!.id;
-    res.json(await prisma.achatReel.update({ where: { id: achatId }, data }));
+    const resultat = await prisma.$transaction(async (tx) => {
+      const misAJour = await tx.achatReel.update({ where: { id: achatId }, data });
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'CORRECTION', achatId, achat.chantierId, achat, misAJour);
+      return misAJour;
+    });
+    res.json(resultat);
   } catch (error) {
     res.status(500).json({ error: 'Error updating achat' });
   }
@@ -2110,7 +2147,10 @@ app.delete('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res)
 
     const motifArchivage = typeof req.body?.motifArchivage === 'string' ? req.body.motifArchivage.trim() : '';
     if (!motifArchivage) return res.status(400).json({ error: 'Un motif d’archivage est obligatoire.' });
-    await prisma.achatReel.update({ where: { id: achatId }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
+    await prisma.$transaction(async (tx) => {
+      const archive = await tx.achatReel.update({ where: { id: achatId }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'ARCHIVAGE', achatId, achat.chantierId, achat, archive, motifArchivage);
+    });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting achat' });
@@ -2149,17 +2189,18 @@ app.post('/api/heures', requireAuth, requireTravauxWrite, async (req, res) => {
     if (!intervenant) return res.status(404).json({ error: 'Intervenant not found' });
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
 
-    res.json(await prisma.pointageHeure.create({
-      data: {
-        date,
-        intervenantId: req.body.intervenantId,
-        chantierId: req.body.chantierId,
-        nbrHeures,
-        tauxHoraireApplique: intervenant.tauxHoraireCharge,
-        commentaire: req.body.commentaire || null,
-        createdById: (req as AuthRequest).user!.id
-      }
-    }));
+    const cree = await prisma.$transaction(async (tx) => {
+      const pointage = await tx.pointageHeure.create({
+        data: {
+          date, intervenantId: req.body.intervenantId, chantierId: req.body.chantierId,
+          nbrHeures, tauxHoraireApplique: intervenant.tauxHoraireCharge,
+          commentaire: req.body.commentaire || null, createdById: (req as AuthRequest).user!.id,
+        }
+      });
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'CREATION', pointage.id, pointage.chantierId, null, pointage);
+      return pointage;
+    });
+    res.json(cree);
   } catch (error) {
     res.status(500).json({ error: 'Error creating pointage' });
   }
@@ -2199,7 +2240,12 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
     }
 
     data.updatedById = (req as AuthRequest).user!.id;
-    res.json(await prisma.pointageHeure.update({ where: { id: pointageId }, data }));
+    const resultat = await prisma.$transaction(async (tx) => {
+      const misAJour = await tx.pointageHeure.update({ where: { id: pointageId }, data });
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'CORRECTION', pointageId, pointage.chantierId, pointage, misAJour);
+      return misAJour;
+    });
+    res.json(resultat);
   } catch (error) {
     res.status(500).json({ error: 'Error updating pointage' });
   }
@@ -2216,7 +2262,10 @@ app.delete('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res)
 
     const motifArchivage = typeof req.body?.motifArchivage === 'string' ? req.body.motifArchivage.trim() : '';
     if (!motifArchivage) return res.status(400).json({ error: 'Un motif d’archivage est obligatoire.' });
-    await prisma.pointageHeure.update({ where: { id: pointageId }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
+    await prisma.$transaction(async (tx) => {
+      const archive = await tx.pointageHeure.update({ where: { id: pointageId }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'ARCHIVAGE', pointageId, pointage.chantierId, pointage, archive, motifArchivage);
+    });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting pointage' });
@@ -3060,14 +3109,10 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
       : 'month';
     const { start, endExclusive } = periodBounds(period, req.query.ref);
 
-    const where = isAdmin
-      ? {}
-      : isCommercial
-        ? { commercialId: user.id }
-        : { responsableId: user.id };
+    const where = perimetreChantiers(req);
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
       where,
-      include: { achats: true, pointages: true },
+      include: { achats: { where: { archivedAt: null } }, pointages: { where: { archivedAt: null } } },
     }));
 
     let nbEnCours = 0;
@@ -3157,12 +3202,15 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
 // chantier fini en avance y ferait mécaniquement baisser le score, un chantier en
 // dérive le ferait monter. L'assiduité de saisie a sa propre route ci-dessous
 // (GET /stats/conducteurs/assiduite), basée sur le rythme réel de saisie.
-app.get('/api/stats/conducteurs', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, res) => {
   try {
+    const authUser = (req as AuthRequest).user!;
+    if (!isAdminRole(authUser.role) && authUser.role !== ROLE_RESPONSABLE) return res.status(403).json({ error: 'Accès réservé à l’administration et aux responsables.' });
     const params = await getParametres();
-    const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX' }, select: { id: true, name: true, email: true } });
+    const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX', ...(authUser.role === ROLE_RESPONSABLE ? { id: { in: authUser.equipeIds } } : {}) }, select: { id: true, name: true, email: true } });
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
-      include: { achats: true, pointages: true },
+      where: perimetreChantiers(req),
+      include: { achats: { where: { archivedAt: null } }, pointages: { where: { archivedAt: null } } },
     }));
 
     const byUser: Record<string, any> = {};
@@ -3260,22 +3308,18 @@ function weekBoundsFrom(weekParam: unknown): { monday: Date; friday: Date; satur
 
 const JOURS_OUVRES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
 
-// Assiduité de saisie des conducteurs (admin uniquement), semaine civile lundi-vendredi.
-// Mesure leur usage réel de l'application — et non l'avancement de leurs chantiers :
-// jours où ils ont saisi au moins une heure, volume saisi par jour, et à quelle heure
-// de la journée ils saisissent habituellement (basé sur `createdAt`, l'instant de
-// saisie — pas `date`, qui est la date du travail effectué et n'a pas d'heure fiable).
-// Un conducteur est associé aux pointages des chantiers dont IL est responsable (il n'y
-// a pas d'auteur direct sur un pointage ; en pratique, un conducteur ne saisit que sur
-// ses propres chantiers en cours, cf. POST /heures).
-app.get('/api/stats/conducteurs/assiduite', requireAuth, requireAdmin, async (req, res) => {
+// Assiduité : administration globale, responsable limité à ses conducteurs directs.
+app.get('/api/stats/conducteurs/assiduite', requireAuth, requireTravauxRead, async (req, res) => {
   try {
+    const authUser = (req as AuthRequest).user!;
+    if (!isAdminRole(authUser.role) && authUser.role !== ROLE_RESPONSABLE) return res.status(403).json({ error: 'Accès réservé à l’administration et aux responsables.' });
     const { monday, friday, saturdayExclusive } = weekBoundsFrom(req.query.week);
-    const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX' }, select: { id: true, name: true, email: true } });
+    const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX', ...(authUser.role === ROLE_RESPONSABLE ? { id: { in: authUser.equipeIds } } : {}) }, select: { id: true, name: true, email: true } });
     const userIds = users.map((u) => u.id);
 
     const pointages = decimalToNumber(await prisma.pointageHeure.findMany({
       where: {
+        archivedAt: null,
         createdAt: { gte: monday, lt: saturdayExclusive },
         chantier: { responsableId: { in: userIds } },
       },
@@ -3423,7 +3467,7 @@ app.get('/api/stats/intervenants', requireAuth, requireTravauxRead, async (req, 
 
     const intervenants = await prisma.intervenant.findMany({ select: { id: true, nom: true, role: true } });
     const pointages = decimalToNumber(await prisma.pointageHeure.findMany({
-      where: { date: { gte: start, lt: endExclusive }, chantier: perimetreChantiers(req) },
+      where: { archivedAt: null, date: { gte: start, lt: endExclusive }, chantier: perimetreChantiers(req) },
       select: { intervenantId: true, nbrHeures: true, tauxHoraireApplique: true },
     }));
 
@@ -3451,9 +3495,9 @@ app.get('/api/stats/intervenants', requireAuth, requireTravauxRead, async (req, 
   }
 });
 
-// Total des achats par fournisseur (mois civil / année civile, navigable). Cumul global
-// d'approvisionnement sans prix de vente, marge ou rattachement à une affaire : c'est un
-// choix produit explicite, distinct des statistiques chantiers cloisonnées.
+// Total des achats par fournisseur (mois civil / année civile, navigable). Cumul GLOBAL,
+// y compris pour conducteurs et responsables : utile avec l'encours fournisseur, il ne révèle
+// aucune affaire, prix de vente, marge ou rattachement chantier. Ne pas appliquer le périmètre.
 app.get('/api/stats/fournisseurs', requireAuth, requireTravauxRead, async (req, res) => {
   try {
     const period = req.query.period === 'year' ? 'year' : 'month';
@@ -3461,7 +3505,7 @@ app.get('/api/stats/fournisseurs', requireAuth, requireTravauxRead, async (req, 
 
     const fournisseurs = await prisma.fournisseur.findMany({ select: { id: true, nom: true } });
     const achats = decimalToNumber(await prisma.achatReel.findMany({
-      where: { date: { gte: start, lt: endExclusive } },
+      where: { archivedAt: null, date: { gte: start, lt: endExclusive } },
       select: { fournisseurId: true, montantHT: true },
     }));
 
@@ -3643,7 +3687,7 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
   const commercialIdSet = new Set(commercialIds);
   const chantiers = decimalToNumber(await prisma.chantier.findMany({
     where: { commercialId: { in: commercialIds } },
-    include: { achats: true, pointages: true },
+    include: { achats: { where: { archivedAt: null } }, pointages: { where: { archivedAt: null } } },
   }));
 
   const moisPeriode = moisKeysDansPeriode(start, endExclusive);

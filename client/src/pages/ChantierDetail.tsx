@@ -287,10 +287,11 @@ const ChantierDetail = () => {
   };
 
   const handleDeleteAchat = async (achatId: string) => {
-    if (!confirm('Supprimer définitivement cet achat ?')) return;
+    const motifArchivage = window.prompt("Motif de l'archivage de cet achat ?")?.trim();
+    if (!motifArchivage) return;
     setSavingAchat(true);
     try {
-      const res = await apiFetch(`/achats/${achatId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/achats/${achatId}`, { method: 'DELETE', body: JSON.stringify({ motifArchivage }) });
       if (res.ok) {
         fetchChantier();
       } else {
@@ -305,10 +306,11 @@ const ChantierDetail = () => {
   };
 
   const handleDeletePointage = async (pointageId: string) => {
-    if (!confirm('Supprimer définitivement ce pointage ?')) return;
+    const motifArchivage = window.prompt("Motif de l'archivage de ce pointage ?")?.trim();
+    if (!motifArchivage) return;
     setSavingPointage(true);
     try {
-      const res = await apiFetch(`/heures/${pointageId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/heures/${pointageId}`, { method: 'DELETE', body: JSON.stringify({ motifArchivage }) });
       if (res.ok) {
         fetchChantier();
       } else {

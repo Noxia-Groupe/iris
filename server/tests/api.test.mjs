@@ -370,6 +370,23 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('un archivage sort une écriture des journaux et laisse une trace immutable', async () => {
+      const creation = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST archive', montantHT: 500,
+      });
+      assert.equal(creation.status, 200);
+      const correction = await request(app).patch(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 50 });
+      assert.equal(correction.status, 200);
+      const archive = await request(app).delete(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+      assert.equal(archive.status, 200);
+      const journal = await request(app).get('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(journal.body.some((a) => a.id === creation.body.id), false);
+      const traces = await prisma.journalSaisieChantier.findMany({ where: { cibleId: creation.body.id }, orderBy: { createdAt: 'asc' } });
+      assert.equal(traces.length, 3);
+      assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').avant.montantHT), 500);
+      assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
+    });
+
     test('un administrateur voit bien toutes les lignes', async () => {
       // Le filtrage ne doit pas amputer ceux qui ont légitimement la vue complète.
       const achats = await request(app).get('/api/achats').set('Authorization', `Bearer ${session}`);
