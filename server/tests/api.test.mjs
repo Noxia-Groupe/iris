@@ -885,7 +885,7 @@ if (!TEST_DATABASE_URL) {
       const correctionJournal = journal.body.find((entree) => entree.action === 'CORRECTION');
       assert.equal(correctionJournal.avant.montantHT, 500);
       assert.equal(correctionJournal.apres.montantHT, 50);
-      assert.equal(correctionJournal.auteurNom, 'Accès de secours');
+      assert.equal(correctionJournal.auteurNom, 'Secours');
     });
 
     test('seul un administrateur annule un devis ou constate un acompte', async () => {
