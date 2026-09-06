@@ -145,7 +145,8 @@ const requireAuth: express.RequestHandler = async (req, res, next) => {
       return;
     }
     const equipeIds = user.role === ROLE_RESPONSABLE
-      ? (await prisma.user.findMany({ where: { responsableId: user.id, actif: true }, select: { id: true } })).map((collaborateur) => collaborateur.id)
+      // Les collaborateurs inactifs restent inclus : leur historique chantier ne disparaît pas du périmètre hiérarchique.
+      ? (await prisma.user.findMany({ where: { responsableHierarchiqueId: user.id }, select: { id: true } })).map((collaborateur) => collaborateur.id)
       : [];
     (req as AuthRequest).user = { id: user.id, name: user.name, role: user.role, accesFinance: user.accesFinance, permissions: user.permissions, equipeIds };
     next();

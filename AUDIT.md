@@ -8,7 +8,7 @@
 ## Vue d'ensemble
 
 Bonne base : architecture client/serveur propre, modèle Prisma cohérent, dockerisation,
-standby IA bien pensé. Mais l'application avait deux problèmes **bloquants** (l'UI
+La fonction d'analyse IA directe a été retirée : Iris ne contacte aucun fournisseur LLM externe. Toute future assistance devra passer par un connecteur Hermes Agent sécurisé, dans une phase dédiée. Mais l'application avait deux problèmes **bloquants** (l'UI
 n'était en réalité pas stylée, et la sécurité de l'API était quasi inexistante) et
 présente plusieurs écarts par rapport à la vision cible.
 

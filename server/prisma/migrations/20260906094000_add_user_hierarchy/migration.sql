@@ -1,8 +1,8 @@
 -- Rattachement hiérarchique explicite des collaborateurs.
-ALTER TABLE "User" ADD COLUMN "responsableId" TEXT;
-CREATE INDEX "User_responsableId_idx" ON "User"("responsableId");
-ALTER TABLE "User" ADD CONSTRAINT "User_responsableId_fkey"
-  FOREIGN KEY ("responsableId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "User" ADD COLUMN "responsableHierarchiqueId" TEXT;
+CREATE INDEX "User_responsableHierarchiqueId_idx" ON "User"("responsableHierarchiqueId");
+ALTER TABLE "User" ADD CONSTRAINT "User_responsableHierarchiqueId_fkey"
+  FOREIGN KEY ("responsableHierarchiqueId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- Piste d'audit et archivage non destructif des écritures Travaux.
 ALTER TABLE "AchatReel"

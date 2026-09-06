@@ -36,8 +36,8 @@ model User {
   permissions   String[] @default([])
   // Rattachement hiérarchique explicite, indépendant du rôle : un collaborateur relève
   // d'un responsable déterminé (sûreté, informatique, télécom…).
-  responsableId String?
-  responsable   User? @relation("ResponsableCollaborateurs", fields: [responsableId], references: [id])
+  responsableHierarchiqueId String?
+  responsableHierarchique   User? @relation("ResponsableCollaborateurs", fields: [responsableHierarchiqueId], references: [id])
   collaborateurs User[] @relation("ResponsableCollaborateurs")
   // Compte actif. Désactiver vaut départ de l'entreprise : la connexion est refusée et le
   // compte disparaît des listes d'attribution (conducteur responsable, commercial
@@ -52,7 +52,7 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([responsableId])
+  @@index([responsableHierarchiqueId])
 }
 
 model Fournisseur {
