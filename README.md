@@ -46,6 +46,40 @@ les montants vendus et la marge.
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.
 
+## Cycle de vie d'une affaire
+
+Une affaire n'existe que par un devis. La conversion d'un devis accepté crée le chantier
+et vaut, par le même geste, validation définitive du devis — il n'y a pas d'autre porte :
+`POST /api/chantiers` répond 410, et un chantier ne se supprime plus.
+
+```text
+BROUILLON → ENVOYÉ → ACCEPTÉ ─┬─ valider ───────────────────────→ chantier ouvert
+                              └─ en attente d'acompte → acompte constaté → chantier ouvert
+
+ACCEPTÉ ou converti ──[annulation administrateur + motif]──→ ANNULÉ (terminal)
+                                                             ↳ chantier archivé, motif conservé
+```
+
+**Acompte.** Une case sur le devis initial conditionne l'ouverture du chantier à la
+réception d'un acompte. Le taux par défaut se règle dans **Administration > Marges**, et
+chaque devis **fige le sien à l'émission** : changer la politique de la société ne réécrit
+aucun devis déjà émis, même règle de non-rétroactivité que les barèmes de commission. Tant
+que le module paiements n'existe pas, un administrateur constate la réception à la main
+(date, montant, référence) ; le rapprochement bancaire alimentera ces mêmes champs plus
+tard sans changer la règle.
+
+**Annulation.** C'est le seul retour en arrière possible sur une affaire ouverte par
+erreur. Réservée aux administrateurs, elle exige un motif, **archive** le chantier lié au
+lieu de le détruire — sa raison doit rester lisible — et elle est **refusée dès qu'une
+heure ou un achat y a été saisi** : une affaire commencée se mène à son terme, elle ne
+s'efface pas. Une affaire archivée sort des listes, des coûts, des marges et des
+commissions, n'accepte plus aucune écriture, mais reste consultable avec son motif.
+
+**Reprise.** On n'annule pas une annulation. La reprise passe par la duplication du devis :
+même client, même objet, mêmes lignes, mais un numéro d'affaire neuf et un retour en
+brouillon — dupliquer ne contourne pas l'accord du client. Le duplicata garde le lien vers
+le devis dont il est issu.
+
 ## Hors périmètre
 
 - **Dépôt et galerie de photos.** La galerie photos de chantier a été retirée : Iris n'a
@@ -88,7 +122,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [x] Phase 2 : Paramétrage de l’instance — société (écran + registre des entreprises), modules, profils et rôles ; clés API d’intégration et accès de secours superadmin
 - [x] Phase 3 : Référentiel clients natif — clients, contacts, sites de facturation et d’intervention
 - [x] Phase 4 : Catalogue et parc d’équipements installé — modèles, migrations, catégories, API, écran de gestion, traçabilité série/IMEI/MAC, rattachement client/site, garantie et archivage historique.
-- [ ] Phase 5 : Devis versionnés et conversion contrôlée — socle livré : références d’affaires annuelles, révisions, statuts, conversion après acceptation, permissions effectives et contrôles clients/devis. Reste à livrer : parcours métier complet et éléments aval réellement disponibles.
+- [ ] Phase 5 : Devis versionnés et conversion contrôlée — socle livré : références d’affaires annuelles, révisions, statuts, conversion après acceptation, permissions effectives, contrôles clients/devis, et cycle de vie complet de l’affaire (acompte conditionnant l’ouverture du chantier, annulation tracée avec archivage, duplication). Reste à livrer : les cibles de conversion aval — intervention, contrat, facture — quand leurs modules existeront.
 - [ ] Socle transversal avant Phase 6 : sécurité du suivi Travaux (issue #16) — périmètre d’écriture achats/heures, intégrité des valeurs, statistiques cloisonnées ; écran Travaux livré dans une PR ultérieure.
 - [ ] Commissionnement commercial configurable (issue #15) — profils versionnés et individualisables, attributions hiérarchiques, historique non rétroactif ; dépend du socle Travaux sécurisé.
 - [ ] Phase 6 : Interventions SAV + travaux, planning et application mobile technicien

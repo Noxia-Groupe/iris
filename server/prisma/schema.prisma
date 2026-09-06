@@ -99,6 +99,13 @@ model Chantier {
   encaisse         Boolean   @default(false)
   dateEncaissement DateTime?
 
+  // Archivage sur annulation du devis dont le chantier est issu. Le chantier n'est jamais
+  // détruit — sa raison d'archivage doit rester lisible — mais il sort des listes, des
+  // coûts, des marges et des commissions, exactement comme une écriture archivée.
+  annuleLe         DateTime?
+  annuleParId      String?
+  motifAnnulation  String?
+
   responsableId String?
   responsable   User?   @relation("ChantierResponsable", fields: [responsableId], references: [id])
 
@@ -234,6 +241,12 @@ model Parametres {
   // d'événements restent en base et réapparaissent à la réactivation. Le superadmin, lui,
   // continue d'y accéder pour préparer/consulter le planning pendant la désactivation.
   planningActif          Boolean @default(true)
+  // Taux d'acompte proposé par défaut à la création d'un devis, en pourcentage du TTC.
+  // Comme les barèmes de rémunération, il vit en base et s'édite depuis l'administration :
+  // changer la politique d'acompte d'une société ne doit jamais demander un redéploiement.
+  // Le devis fige SA valeur à l'émission (cf. Devis.tauxAcompte) — modifier ce paramètre
+  // n'a donc aucun effet rétroactif sur les devis déjà émis.
+  tauxAcompteDefaut      Decimal @default(30) @db.Decimal(5, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -297,12 +310,44 @@ model Devis {
   totalTtc           Decimal      @db.Decimal(12, 2)
   lignes             DevisLigne[]
   conversion         DevisConversion?
+
+  // --- Acompte conditionnant l'ouverture du chantier ---
+  // Coché sur le devis initial : tant que l'acompte n'est pas constaté, la conversion en
+  // chantier est refusée. Le TAUX est figé ici à l'émission, à partir du paramètre global :
+  // le modifier plus tard ne réécrit aucun devis déjà émis (même non-rétroactivité que les
+  // commissions). Les trois champs de constatation sont saisis à la main tant que le module
+  // paiements (phase 9) n'existe pas ; le rapprochement bancaire les alimentera ensuite
+  // sans changer la règle.
+  acompteExige         Boolean   @default(false)
+  tauxAcompte          Decimal?  @db.Decimal(5, 2)
+  acompteRecuLe        DateTime?
+  acompteMontant       Decimal?  @db.Decimal(12, 2)
+  acompteReference     String?
+  acompteConstateParId String?
+
+  // --- Annulation, terminale ---
+  // Un chantier ne se supprime plus : la seule façon de revenir sur une affaire ouverte par
+  // erreur est d'annuler son devis, ce qui archive le chantier lié. Réservée aux
+  // administrateurs, motif obligatoire, et refusée dès qu'une heure ou un achat a été saisi.
+  // On n'annule pas une annulation : la reprise passe par une duplication.
+  annuleLe             DateTime?
+  annuleParId          String?
+  motifAnnulation      String?
+
+  // --- Duplication ---
+  // Le devis neuf qui reprend un devis à l'identique, avec son propre numéro. Le lien vers
+  // l'origine évite de retrouver deux devis jumeaux sans savoir que l'un remplace l'autre.
+  origineDevisId       String?
+  origineDevis         Devis?    @relation("DevisDuplication", fields: [origineDevisId], references: [id], onDelete: SetNull)
+  duplicatas           Devis[]   @relation("DevisDuplication")
+
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
   @@unique([dossierId, version])
   @@index([clientId])
   @@index([numero])
+  @@index([origineDevisId])
 }
 
 model DevisLigne {

@@ -55,7 +55,8 @@ if (!TEST_DATABASE_URL) {
     await prisma.intervenant.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
-    await prisma.user.deleteMany({ where: { email: { in: ['conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test'] } } });
+    await prisma.user.deleteMany({ where: { email: { in: [
+      'cycle.conducteur@iris.test','conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test'] } } });
   };
 
   before(async () => {
@@ -701,6 +702,191 @@ if (!TEST_DATABASE_URL) {
     test('refuse une permission hors du vocabulaire', async () => {
       const res = await request(app).put(`/api/users/${conducteurId}/permissions`).set('Authorization', `Bearer ${superSession}`).send({ permissions: ['invente:write'] });
       assert.equal(res.status, 400);
+    });
+  });
+
+  // Cycle de vie d'une affaire : c'est la conversion d'un devis accepté qui ouvre le
+  // chantier, et l'annulation du devis qui revient dessus. Un chantier ne se supprime plus.
+  describe('Cycle de vie du devis : acompte, annulation, duplication', () => {
+    let session = '';
+    let clientId = '';
+    let categorieId = '';
+    let fournisseurId = '';
+    let intervenantId = '';
+
+    // Amène un devis neuf jusqu'au statut ACCEPTE, avec ou sans acompte exigé.
+    const devisAccepte = async (objet, extra = {}) => {
+      const cree = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }], ...extra,
+      });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      await request(app).put(`/api/devis/${cree.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
+      await request(app).put(`/api/devis/${cree.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
+      return cree.body;
+    };
+    const convertir = (id) => request(app).post(`/api/devis/${id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      clientId = (await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client cycle' })).body.id;
+      categorieId = (await prisma.categorie.upsert({ where: { nom: 'TEST Catégorie cycle' }, update: {}, create: { nom: 'TEST Catégorie cycle' } })).id;
+      fournisseurId = (await prisma.fournisseur.upsert({ where: { nom: 'TEST Fournisseur cycle' }, update: {}, create: { nom: 'TEST Fournisseur cycle' } })).id;
+      intervenantId = (await prisma.intervenant.create({ data: { nom: 'TEST Intervenant cycle', role: 'Technicien', tauxHoraireCharge: 40 } })).id;
+    });
+
+    test('un chantier ne se crée ni ne se supprime directement', async () => {
+      const creation = await request(app).post('/api/chantiers').set('Authorization', `Bearer ${session}`)
+        .send({ nom: 'TEST direct', client: 'TEST', dateDebut: '2026-09-01' });
+      assert.equal(creation.status, 410, 'la création directe reste fermée');
+
+      const devis = await devisAccepte('TEST Affaire supprimable');
+      const chantier = await convertir(devis.id);
+      assert.equal(chantier.status, 201, JSON.stringify(chantier.body));
+      const suppression = await request(app).delete(`/api/chantiers/${chantier.body.id}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(suppression.status, 410, 'la suppression d’un chantier n’existe plus');
+      assert.ok(await prisma.chantier.findUnique({ where: { id: chantier.body.id } }), 'le chantier est toujours là');
+    });
+
+    test('l’acompte exigé retient l’ouverture du chantier jusqu’à sa constatation', async () => {
+      const devis = await devisAccepte('TEST Affaire avec acompte', { acompteExige: true });
+      assert.equal(devis.acompteExige, true);
+      assert.equal(devis.tauxAcompte, 30, 'le taux par défaut du paramétrage est figé sur le devis');
+
+      const trop_tot = await convertir(devis.id);
+      assert.equal(trop_tot.status, 400, 'pas de chantier tant que l’acompte n’est pas là');
+
+      const attente = await request(app).put(`/api/devis/${devis.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'EN_ATTENTE_ACOMPTE' });
+      assert.equal(attente.status, 200);
+      assert.equal(attente.body.statut, 'EN_ATTENTE_ACOMPTE');
+
+      for (const corps of [{}, { recuLe: 'hier', montant: 60, reference: 'VIR-1' }, { recuLe: '01-09-2026', montant: -60, reference: 'VIR-1' }, { recuLe: '01-09-2026', montant: 60, reference: '  ' }]) {
+        const refus = await request(app).post(`/api/devis/${devis.id}/acompte`).set('Authorization', `Bearer ${session}`).send(corps);
+        assert.equal(refus.status, 400, `constatation acceptée à tort : ${JSON.stringify(corps)}`);
+      }
+
+      const acompte = await request(app).post(`/api/devis/${devis.id}/acompte`).set('Authorization', `Bearer ${session}`)
+        .send({ recuLe: '01-09-2026', montant: 72, reference: 'VIR-2026-09' });
+      assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
+      assert.equal(acompte.body.statut, 'ACCEPTE', 'la constatation remet le devis en état d’être converti');
+      assert.equal(acompte.body.acompteMontant, 72);
+
+      const ouvert = await convertir(devis.id);
+      assert.equal(ouvert.status, 201, JSON.stringify(ouvert.body));
+
+      const rejoue = await request(app).post(`/api/devis/${devis.id}/acompte`).set('Authorization', `Bearer ${session}`)
+        .send({ recuLe: '02-09-2026', montant: 10, reference: 'VIR-DOUBLON' });
+      assert.equal(rejoue.status, 400, 'un acompte ne se constate pas deux fois');
+    });
+
+    test('changer le taux par défaut ne réécrit aucun devis déjà émis', async () => {
+      const avant = await devisAccepte('TEST Affaire taux figé', { acompteExige: true });
+      assert.equal(avant.tauxAcompte, 30);
+      const maj = await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`)
+        .send({ margeCommercialeActive: true, tauxAcompteDefaut: 50 });
+      assert.equal(maj.status, 200);
+      assert.equal(maj.body.tauxAcompteDefaut, 50);
+
+      const apres = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Affaire taux neuf', acompteExige: true,
+        lignes: [{ designation: 'Pose', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
+      });
+      assert.equal(apres.body.tauxAcompte, 50, 'un devis neuf suit la politique du jour');
+      const inchange = await prisma.devis.findUnique({ where: { id: avant.id } });
+      assert.equal(Number(inchange.tauxAcompte), 30, 'le devis déjà émis garde son taux');
+
+      const hors_bornes = await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`)
+        .send({ margeCommercialeActive: true, tauxAcompteDefaut: 140 });
+      assert.equal(hors_bornes.status, 400);
+      await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`).send({ margeCommercialeActive: true, tauxAcompteDefaut: 30 });
+    });
+
+    test('une affaire commencée ne s’annule pas', async () => {
+      const devis = await devisAccepte('TEST Affaire commencée');
+      const chantier = (await convertir(devis.id)).body;
+      await prisma.pointageHeure.create({ data: { date: new Date(), nbrHeures: 3, tauxHoraireApplique: 40, chantierId: chantier.id, intervenantId } });
+
+      const refus = await request(app).post(`/api/devis/${devis.id}/annulation`).set('Authorization', `Bearer ${session}`).send({ motif: 'erreur de saisie' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /pointage/);
+      assert.equal((await prisma.devis.findUnique({ where: { id: devis.id } })).statut, 'ACCEPTE', 'le devis n’a pas bougé');
+      assert.equal((await prisma.chantier.findUnique({ where: { id: chantier.id } })).statut, 'EN_COURS');
+    });
+
+    test('un achat suffit lui aussi à verrouiller l’annulation', async () => {
+      const devis = await devisAccepte('TEST Affaire approvisionnée');
+      const chantier = (await convertir(devis.id)).body;
+      await prisma.achatReel.create({ data: { date: new Date(), description: 'TEST matériel', montantHT: 500, chantierId: chantier.id, categorieId, fournisseurId } });
+
+      const refus = await request(app).post(`/api/devis/${devis.id}/annulation`).set('Authorization', `Bearer ${session}`).send({ motif: 'client renonce' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /achat/);
+    });
+
+    test('annuler un devis archive son chantier et conserve le motif', async () => {
+      const devis = await devisAccepte('TEST Affaire annulable');
+      const chantier = (await convertir(devis.id)).body;
+
+      const sansMotif = await request(app).post(`/api/devis/${devis.id}/annulation`).set('Authorization', `Bearer ${session}`).send({});
+      assert.equal(sansMotif.status, 400, 'le motif est obligatoire');
+
+      const annulation = await request(app).post(`/api/devis/${devis.id}/annulation`).set('Authorization', `Bearer ${session}`)
+        .send({ motif: 'affaire ouverte sur le mauvais client' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal(annulation.body.devis.statut, 'ANNULE');
+      assert.equal(annulation.body.chantierArchive, chantier.id);
+
+      const archive = await prisma.chantier.findUnique({ where: { id: chantier.id } });
+      assert.equal(archive.statut, 'ANNULE');
+      assert.equal(archive.motifAnnulation, 'affaire ouverte sur le mauvais client');
+      assert.ok(archive.annuleParId, 'l’auteur de l’annulation est conservé');
+
+      // L'affaire sort des listes et des statistiques, mais reste consultable.
+      const liste = await request(app).get('/api/chantiers').set('Authorization', `Bearer ${session}`);
+      assert.equal(liste.body.some((c) => c.id === chantier.id), false, 'une affaire annulée quitte la liste');
+      const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(fiche.status, 200, 'la fiche reste lisible pour comprendre l’annulation');
+      assert.equal(fiche.body.motifAnnulation, 'affaire ouverte sur le mauvais client');
+
+      // Plus rien ne s'écrit dessus, et le devis est figé.
+      const saisie = await request(app).post('/api/achats').set('Authorization', `Bearer ${session}`)
+        .send({ chantierId: chantier.id, categorieId, fournisseurId, date: '01-09-2026', description: 'TEST tardif', montantHT: 10 });
+      assert.equal(saisie.status, 409, JSON.stringify(saisie.body));
+      const reconversion = await convertir(devis.id);
+      assert.equal(reconversion.status, 400, 'un devis annulé n’ouvre plus de chantier');
+      const doubleAnnulation = await request(app).post(`/api/devis/${devis.id}/annulation`).set('Authorization', `Bearer ${session}`).send({ motif: 'encore' });
+      assert.equal(doubleAnnulation.status, 400, 'on n’annule pas une annulation');
+
+      // La reprise passe par une duplication : même contenu, numéro neuf, brouillon.
+      const duplicata = await request(app).post(`/api/devis/${devis.id}/duplication`).set('Authorization', `Bearer ${session}`);
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.equal(duplicata.body.statut, 'BROUILLON');
+      assert.equal(duplicata.body.version, 1);
+      assert.equal(duplicata.body.objet, 'TEST Affaire annulable');
+      assert.equal(duplicata.body.totalTtc, 240);
+      assert.equal(duplicata.body.lignes.length, 1);
+      assert.notEqual(duplicata.body.numero, devis.numero, 'le duplicata a son propre numéro d’affaire');
+      assert.notEqual(duplicata.body.dossierId, devis.dossierId);
+      assert.equal(duplicata.body.origineDevisId, devis.id, 'le lien vers l’origine est conservé');
+    });
+
+    test('seul un administrateur annule un devis ou constate un acompte', async () => {
+      const jwt = (await import('jsonwebtoken')).default;
+      const conducteur = await prisma.user.upsert({
+        where: { email: 'cycle.conducteur@iris.test' },
+        update: { role: 'CONDUCTEUR_TRAVAUX', actif: true, permissions: ['devis:read', 'devis:write', 'clients:read'] },
+        create: { email: 'cycle.conducteur@iris.test', name: 'TEST Conducteur cycle', role: 'CONDUCTEUR_TRAVAUX', permissions: ['devis:read', 'devis:write', 'clients:read'] },
+      });
+      const sessionConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const devis = await devisAccepte('TEST Affaire droits', { acompteExige: true });
+
+      const annulation = await request(app).post(`/api/devis/${devis.id}/annulation`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motif: 'essai' });
+      assert.equal(annulation.status, 403);
+      const acompte = await request(app).post(`/api/devis/${devis.id}/acompte`).set('Authorization', `Bearer ${sessionConducteur}`)
+        .send({ recuLe: '01-09-2026', montant: 10, reference: 'X' });
+      assert.equal(acompte.status, 403);
+      // La duplication, elle, relève du droit devis et non de l'administration.
+      const duplicata = await request(app).post(`/api/devis/${devis.id}/duplication`).set('Authorization', `Bearer ${sessionConducteur}`);
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
     });
   });
 

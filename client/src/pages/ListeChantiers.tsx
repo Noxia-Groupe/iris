@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Archive, RotateCcw, Filter, Trash2 } from 'lucide-react';
+import { Archive, RotateCcw, Filter } from 'lucide-react';
 import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
 import { isAdminRole, roleLabel } from '../roles';
@@ -59,41 +59,6 @@ const ListeChantiers = () => {
     }
   };
 
-  // Supprime définitivement un chantier — réservé aux admins. Le serveur refuse d'abord
-  // (409) si des données y sont rattachées et renvoie leur décompte : on l'affiche pour
-  // faire confirmer en connaissance de cause, puis on rappelle avec force=1. Un chantier
-  // vierge, lui, part en une seule confirmation.
-  const handleSupprimer = async (id: string, nom: string) => {
-    if (!confirm(`Supprimer définitivement « ${nom} » ?\n\nCette action est irréversible.`)) return;
-    try {
-      const res = await apiFetch(`/chantiers/${id}`, { method: 'DELETE' });
-      if (res.ok) { fetchChantiers(); return; }
-
-      const data = await res.json().catch(() => ({}));
-      if (res.status !== 409 || !data.dependances) {
-        alert(data.error || 'Erreur lors de la suppression du chantier.');
-        return;
-      }
-
-      const d = data.dependances;
-      const detail = [
-        d.achats && `${d.achats} achat${d.achats > 1 ? 's' : ''}`,
-        d.pointages && `${d.pointages} pointage${d.pointages > 1 ? 's' : ''} d'heures`,
-        d.lignesBudget && `${d.lignesBudget} ligne${d.lignesBudget > 1 ? 's' : ''} de budget`,
-      ].filter(Boolean).join('\n· ');
-      const planning = d.affectations
-        ? `\n\n${d.affectations} affectation${d.affectations > 1 ? 's' : ''} du planning ${d.affectations > 1 ? 'seront détachées' : 'sera détachée'} du chantier, sans être supprimée${d.affectations > 1 ? 's' : ''}.`
-        : '';
-
-      if (!confirm(`« ${nom} » porte encore :\n· ${detail}${planning}\n\nTout sera définitivement supprimé. Confirmer ?`)) return;
-
-      const forced = await apiFetch(`/chantiers/${id}?force=1`, { method: 'DELETE' });
-      if (forced.ok) fetchChantiers();
-      else { const f = await forced.json().catch(() => ({})); alert(f.error || 'Erreur lors de la suppression du chantier.'); }
-    } catch (e) {
-      alert('Impossible de joindre le serveur.');
-    }
-  };
 
   if (loading) return (
     <div className="flex items-center justify-center h-full">
@@ -187,19 +152,10 @@ const ListeChantiers = () => {
                           <RotateCcw size={14} /> Réouvrir
                         </button>
                       )}
-                      {isAdminRole(userRole) && (
-                        <>
-                          {/* Suppression définitive du chantier : libellé explicite
-                              plutôt qu'une corbeille muette, l'action est irréversible. */}
-                          <button
-                            onClick={() => handleSupprimer(c.id, c.nom)}
-                            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors"
-                            title="Supprimer définitivement le chantier"
-                          >
-                            <Trash2 size={14} /> Supprimer
-                          </button>
-                        </>
-                      )}
+                      {/* Un chantier ne se supprime plus : il n'existe que par la
+                          conversion d'un devis accepté, et c'est l'annulation de ce devis
+                          — motif obligatoire, refusée dès la première heure ou le premier
+                          achat — qui l'archive. L'action est donc sur l'écran Devis. */}
                     </div>
                   </td>
                 </tr>

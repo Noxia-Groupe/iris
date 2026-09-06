@@ -264,6 +264,7 @@ const Admin = () => {
 
   const payload = {
       margeCommercialeActive: formData.get('margeCommercialeActive') === 'on',
+      tauxAcompteDefaut: formData.get('tauxAcompteDefaut'),
     };
     const res = await apiFetch('/parametres', { method: 'PUT', body: JSON.stringify(payload) });
     if (res.ok) {
@@ -872,10 +873,23 @@ const Admin = () => {
             <p className="text-sm text-muted mb-4">
               Réglages globaux. La marge commerciale est calculée côté serveur et n'est visible que par les administrateurs.
             </p>
-            <form key={parametres ? 'loaded' : 'loading'} onSubmit={handleParamsSubmit} className="flex flex-col sm:flex-row gap-6 sm:items-center sm:justify-between">
-              <label className="flex items-center gap-2 cursor-pointer">
+            <form key={parametres ? 'loaded' : 'loading'} onSubmit={handleParamsSubmit} className="space-y-4">
+              <label className="flex items-center gap-2 cursor-pointer w-fit">
                 <input type="checkbox" name="margeCommercialeActive" defaultChecked={parametres?.margeCommercialeActive ?? true} className="w-4 h-4" />
                 <span className="text-sm font-semibold text-gray-700">Activer l'affichage et le calcul de la marge commerciale</span>
+              </label>
+              {/* Politique d'acompte de la société. Elle ne vit pas dans le code : la
+                  changer ici suffit. Elle ne s'applique qu'aux devis émis ENSUITE — chaque
+                  devis fige son taux à l'émission, comme les barèmes de commission. */}
+              <label className="flex items-center gap-3 w-fit">
+                <span className="text-sm font-semibold text-gray-700">Taux d'acompte proposé par défaut</span>
+                <input
+                  type="number" name="tauxAcompteDefaut" min="0" max="100" step="0.01"
+                  defaultValue={parametres?.tauxAcompteDefaut ?? 30}
+                  className="form-input w-28" style={{ margin: 0 }}
+                  title="Proposé à la création d'un devis exigeant un acompte. Sans effet sur les devis déjà émis."
+                />
+                <span className="text-sm text-gray-500">% du TTC</span>
               </label>
               <button className="btn btn-primary">Enregistrer</button>
             </form>
