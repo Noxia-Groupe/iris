@@ -934,6 +934,26 @@ if (!TEST_DATABASE_URL) {
         .send({ raisonSociale: 'TEST Client intervention' })).body.id;
     });
 
+    test('bloque les transitions de statut incohérentes', async () => {
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Transition SAV', priorite: 'NORMALE',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+
+      const planification = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${session}`)
+        .send({ statut: 'PLANIFIEE' });
+      assert.equal(planification.status, 200, JSON.stringify(planification.body));
+      assert.equal(planification.body.statut, 'PLANIFIEE');
+
+      const annulation = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${session}`)
+        .send({ statut: 'ANNULEE' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+
+      const reprise = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${session}`)
+        .send({ statut: 'EN_COURS' });
+      assert.equal(reprise.status, 409, JSON.stringify(reprise.body));
+    });
+
     test('crée une intervention SAV avec une référence annuelle stable', async () => {
       const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({
         clientId, titre: 'TEST Alarme déclenchée', description: 'Le client signale un déclenchement intempestif.', priorite: 'HAUTE', dateSouhaitee: '06-09-2026',

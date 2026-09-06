@@ -674,6 +674,35 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
   }
 });
 
+// Cycle de vie volontairement fermé : une intervention annulée ou terminée ne peut pas
+// être "réouverte" silencieusement, afin de préserver l'historique SAV. Une reprise doit
+// créer un nouveau dossier relié au même client (lot dédié avec motif de reprise).
+app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const statut = String(req.body?.statut || '');
+    const transitions: Record<string, string[]> = {
+      A_PLANIFIER: ['PLANIFIEE', 'ANNULEE'],
+      PLANIFIEE: ['EN_COURS', 'ANNULEE'],
+      EN_COURS: ['TERMINEE', 'ANNULEE'],
+      TERMINEE: [],
+      ANNULEE: [],
+    };
+    if (!Object.prototype.hasOwnProperty.call(transitions, statut)) return res.status(400).json({ error: 'Statut d’intervention invalide.' });
+    const intervention = await prisma.intervention.findUnique({ where: { id: paramId(req) } });
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    if (!transitions[intervention.statut]?.includes(statut)) {
+      return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
+    }
+    const updated = await prisma.intervention.update({
+      where: { id: intervention.id }, data: { statut }, include: { client: { select: { id: true, raisonSociale: true } } },
+    });
+    res.json(decimalToNumber(updated));
+  } catch (error) {
+    console.error('Erreur transition intervention SAV', error);
+    res.status(500).json({ error: 'Erreur lors de la transition de l’intervention.' });
+  }
+});
+
 // Routes de base (publiques)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
