@@ -180,19 +180,23 @@ model AchatReel {
 }
 
 model JournalSaisieChantier {
-  id         String   @id @default(uuid())
-  chantierId String
-  cible      String   // ACHAT | HEURE
-  cibleId    String
-  action     String   // CREATION | CORRECTION | ARCHIVAGE
-  auteurId   String?
-  auteurNom  String
-  avant      Json?
-  apres      Json?
-  motif      String?
-  createdAt  DateTime @default(now())
+  id             String   @id @default(uuid())
+  // Un journal couvre les écritures Travaux et les dossiers SAV : un seul objet append-only,
+  // mais une cible métier explicite et un seul parent renseigné à la fois.
+  chantierId     String?
+  interventionId String?
+  cible          String   // ACHAT | HEURE | INTERVENTION
+  cibleId        String
+  action         String   // CREATION | CORRECTION | ARCHIVAGE | CHANGEMENT_STATUT
+  auteurId       String?
+  auteurNom      String
+  avant          Json?
+  apres          Json?
+  motif          String?
+  createdAt      DateTime @default(now())
 
   @@index([chantierId, createdAt])
+  @@index([interventionId, createdAt])
   @@index([cible, cibleId, createdAt])
 }
 

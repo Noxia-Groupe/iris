@@ -956,6 +956,23 @@ if (!TEST_DATABASE_URL) {
       assert.equal(mutation.status, 404, JSON.stringify(mutation.body));
     });
 
+    test('journalise de façon immuable chaque changement de statut SAV', async () => {
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, titre: 'TEST Journal SAV' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const transition = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${session}`)
+        .send({ statut: 'PLANIFIEE' });
+      assert.equal(transition.status, 200, JSON.stringify(transition.body));
+
+      const journal = await request(app).get(`/api/interventions/${creation.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body.some((entree) => entree.action === 'CREATION' && entree.apres?.reference === creation.body.reference), true);
+      const changement = journal.body.find((entree) => entree.action === 'CHANGEMENT_STATUT');
+      assert.equal(changement.avant.statut, 'A_PLANIFIER');
+      assert.equal(changement.apres.statut, 'PLANIFIEE');
+      assert.equal(changement.auteurId, creation.body.createdById);
+    });
+
     test('la projection planning ouvre et referme l’accès au dossier SAV', async () => {
       const jour = new Date().toISOString().slice(0, 10);
       const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Dossier planifié SAV' });

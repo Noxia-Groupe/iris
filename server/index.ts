@@ -642,6 +642,17 @@ function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boole
 }
 
 // --- Interventions SAV natives ---
+async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRequest, action: string, intervention: unknown, avant?: unknown, motif?: string) {
+  const user = req.user!;
+  const cibleId = String((intervention as { id: string }).id);
+  await tx.journalSaisieChantier.create({ data: {
+    chantierId: null, interventionId: cibleId, cible: 'INTERVENTION', cibleId, action,
+    auteurId: user.id, auteurNom: user.name,
+    avant: avant ? valeurJournal(avant) as Prisma.InputJsonValue : undefined,
+    apres: valeurJournal(intervention) as Prisma.InputJsonValue, motif: motif || null,
+  } });
+}
+
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
 app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
@@ -662,10 +673,12 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
         where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
       });
       const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-      return tx.intervention.create({
+      const cree = await tx.intervention.create({
         data: { reference, clientId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
         include: { client: { select: { id: true, raisonSociale: true } } },
       });
+      await journaliserIntervention(tx, req, 'CREATION', cree);
+      return cree;
     });
     res.status(201).json(decimalToNumber(intervention));
   } catch (error) {
@@ -697,6 +710,20 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
   }
 });
 
+// Journal append-only du dossier SAV, soumis au même filtre de non-divulgation que les
+// mutations. Les traces sont ordonnées de la plus récente à la plus ancienne.
+app.get('/api/interventions/:id/journal-saisies', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    const entrees = await prisma.journalSaisieChantier.findMany({ where: { interventionId: intervention.id }, orderBy: { createdAt: 'desc' } });
+    res.json(decimalToNumber(entrees));
+  } catch (error) {
+    console.error('Erreur journal intervention SAV', error);
+    res.status(500).json({ error: 'Erreur lors de la lecture du journal de l’intervention.' });
+  }
+});
+
 // Cycle de vie volontairement fermé : une intervention annulée ou terminée ne peut pas
 // être "réouverte" silencieusement, afin de préserver l'historique SAV. Une reprise doit
 // créer un nouveau dossier relié au même client (lot dédié avec motif de reprise).
@@ -716,8 +743,12 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
     if (!transitions[intervention.statut]?.includes(statut)) {
       return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
     }
-    const updated = await prisma.intervention.update({
-      where: { id: intervention.id }, data: { statut }, include: { client: { select: { id: true, raisonSociale: true } } },
+    const updated = await prisma.$transaction(async (tx) => {
+      const modifiee = await tx.intervention.update({
+        where: { id: intervention.id }, data: { statut }, include: { client: { select: { id: true, raisonSociale: true } } },
+      });
+      await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, intervention);
+      return modifiee;
     });
     res.json(decimalToNumber(updated));
   } catch (error) {
