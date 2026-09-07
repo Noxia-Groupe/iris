@@ -24,6 +24,7 @@ import Societe from './pages/Societe';
 import Catalogue from './pages/Catalogue';
 import Secours from './pages/Secours';
 import Devis from './pages/Devis';
+import Interventions from './pages/Interventions';
 import { ErrorBoundary } from './ErrorBoundary';
 import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN } from './roles';
 import { useModules } from './modules';
@@ -123,6 +124,11 @@ function App() {
         <Route path="/devis" element={
           <PrivateRoute>
             <RouteDevis />
+          </PrivateRoute>
+        } />
+        <Route path="/interventions" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <Interventions />
           </PrivateRoute>
         } />
         <Route path="/clients" element={

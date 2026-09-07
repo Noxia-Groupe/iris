@@ -48,6 +48,7 @@ model User {
   chantiersGeres          Chantier[]                 @relation("ChantierResponsable") // Liaison pour restreindre la vue des chefs de chantier
   chantiersCommercialises Chantier[]                 @relation("ChantierCommercial") // Chantiers vendus par ce commercial
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
+  profilIntervenant       Intervenant?               @relation("IntervenantCompte")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -197,12 +198,17 @@ model JournalSaisieChantier {
 
 model Intervenant {
   id                String  @id @default(uuid())
+  // Lien explicite au compte applicatif. Null pour les intervenants historiques/externe,
+  // auxquels aucun accès Iris ne peut être attribué par déduction de nom.
+  userId            String? @unique
+  user              User?   @relation("IntervenantCompte", fields: [userId], references: [id], onDelete: SetNull)
   nom               String
   role              String
   tauxHoraireCharge Decimal @db.Decimal(10, 2)
 
   pointages      PointageHeure[]
   planningEvents PlanningEvent[] @relation("PlanningEventIntervenants")
+  affectationsIntervention InterventionAffectation[]
 }
 
 model PointageHeure {
@@ -290,6 +296,7 @@ model Client {
   sites                ClientSite[]
   equipementsInstalles EquipementInstalle[]
   devis                Devis[]
+  interventions        Intervention[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 }
@@ -378,6 +385,48 @@ model DevisConversion {
   createdAt DateTime @default(now())
 
   @@index([cibleType, cibleId])
+}
+
+// Compteur annuel atomique des références d'intervention : I26-0001, I26-0002…
+model SequenceIntervention {
+  annee         Int @id
+  dernierNumero Int @default(0)
+}
+
+// Dossier SAV natif. Le planning reste une projection prévisionnelle : il ne remplace pas
+// l'intervention, son client, son statut ni sa trace métier.
+model Intervention {
+  id             String   @id @default(uuid())
+  reference      String   @unique
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  titre          String
+  description    String?
+  priorite       String   @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
+  statut         String   @default("A_PLANIFIER") // A_PLANIFIER | PLANIFIEE | EN_COURS | TERMINEE | ANNULEE
+  dateSouhaitee  DateTime?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  affectations   InterventionAffectation[]
+  planningEvent  PlanningEvent?
+
+  @@index([clientId, statut])
+  @@index([statut, dateSouhaitee])
+}
+
+// Affectation explicite, jamais déduite d'un nom : c'est la clé de cloisonnement du
+// parcours technicien et la future source des projections dans le planning.
+model InterventionAffectation {
+  id              String       @id @default(uuid())
+  interventionId  String
+  intervenantId   String
+  intervention    Intervention @relation(fields: [interventionId], references: [id], onDelete: Cascade)
+  intervenant     Intervenant  @relation(fields: [intervenantId], references: [id], onDelete: Restrict)
+  createdAt       DateTime     @default(now())
+
+  @@unique([interventionId, intervenantId])
+  @@index([intervenantId])
 }
 
 // Compteur annuel atomique des références d'affaires : A26-0001, A26-0002…
@@ -647,6 +696,11 @@ model PlanningEvent {
   typeEvent   PlanningEventType? @relation(fields: [typeEventId], references: [id])
 
   commentaire String?
+
+  // Projection unique d'un dossier SAV : le planning ne duplique plus son titre, client ou
+  // ses techniciens. Les événements libres HORS_CHANTIER demeurent utilisables hors SAV.
+  interventionId String? @unique
+  intervention   Intervention? @relation(fields: [interventionId], references: [id], onDelete: Cascade)
 
   intervenants Intervenant[] @relation("PlanningEventIntervenants")
 
