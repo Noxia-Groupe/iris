@@ -37,10 +37,11 @@ if (!TEST_DATABASE_URL) {
     await prisma.devis.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Le parc dépend à la fois du client/site et du catalogue : il part donc en premier.
     await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    // Les interventions SAV portent éventuellement un site/contact : elles partent avant
+    // ces fiches afin de respecter les clés étrangères RESTRICT.
+    await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientContact.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
-    // Les interventions SAV dépendent du client ; elles partent avant la fiche client.
-    await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.client.deleteMany({ where: { raisonSociale: { startsWith: 'TEST ' } } });
     await prisma.cataloguePrestation.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.catalogueArticle.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
@@ -62,7 +63,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.user.deleteMany({ where: { email: { in: [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test',
     ] } } });
   };
 
@@ -954,6 +955,65 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await voitLeDossier(technicien.jeton, creation.body.id), false);
       const mutation = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${technicien.jeton}`).send({ statut: 'PLANIFIEE' });
       assert.equal(mutation.status, 404, JSON.stringify(mutation.body));
+    });
+
+    test('journalise de façon immuable chaque changement de statut SAV', async () => {
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, titre: 'TEST Journal SAV' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const transition = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${session}`)
+        .send({ statut: 'PLANIFIEE' });
+      assert.equal(transition.status, 200, JSON.stringify(transition.body));
+
+      const journal = await request(app).get(`/api/interventions/${creation.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body.some((entree) => entree.action === 'CREATION' && entree.apres?.reference === creation.body.reference), true);
+      const changement = journal.body.find((entree) => entree.action === 'CHANGEMENT_STATUT');
+      assert.equal(changement.avant.statut, 'A_PLANIFIER');
+      assert.equal(changement.apres.statut, 'PLANIFIEE');
+      // Les deux instantanés sont contractuels et doivent rester comparables : une forme
+      // différente ferait lire une transition comme un ajout de données au dossier.
+      assert.deepEqual(Object.keys(changement.avant).sort(), Object.keys(changement.apres).sort());
+      assert.equal(changement.auteurId, creation.body.createdById);
+    });
+
+    test('la base impose un unique parent pour chaque trace de journal', async () => {
+      await assert.rejects(() => prisma.journalSaisieChantier.create({ data: {
+        chantierId: null, interventionId: null, cible: 'INTERVENTION', cibleId: 'TEST-parent-absent', action: 'CREATION', auteurNom: 'TEST',
+      } }));
+      await assert.rejects(() => prisma.journalSaisieChantier.create({ data: {
+        chantierId: 'TEST-chantier-inexistant', interventionId: 'TEST-intervention-inexistante', cible: 'INTERVENTION', cibleId: 'TEST-double-parent', action: 'CREATION', auteurNom: 'TEST',
+      } }));
+    });
+
+    test('ferme le journal d’un dossier à un technicien non affecté', async () => {
+      const technicien = await compteTechnicienSav('sav.journal@iris.test', 'TEST Intervenant SAV journal');
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, titre: 'TEST Dossier journal fermé', description: 'Détail confidentiel.' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      assert.equal(await voitLeDossier(technicien.jeton, dossier.body.id), false);
+      // Le journal porte l'instantané complet d'un dossier : il ne doit jamais révéler les
+      // données d'une intervention que le technicien ne peut pas voir dans sa liste.
+      const journal = await request(app).get(`/api/interventions/${dossier.body.id}/journal-saisies`).set('Authorization', `Bearer ${technicien.jeton}`);
+      assert.equal(journal.status, 404, JSON.stringify(journal.body));
+    });
+
+    test('rattache un site et un contact appartenant au client du dossier SAV', async () => {
+      const site = await prisma.clientSite.create({ data: { clientId, nom: 'TEST Site SAV', adresse: '1 rue du Test', codePostal: '75001', ville: 'Paris' } });
+      const contact = await prisma.clientContact.create({ data: { clientId, nom: 'TEST Contact SAV' } });
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, siteId: site.id, contactId: contact.id, titre: 'TEST Rattachements SAV' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.equal(creation.body.site.id, site.id);
+      assert.equal(creation.body.contact.id, contact.id);
+    });
+
+    test('refuse un site ou contact rattaché à un autre client', async () => {
+      const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST Client étranger SAV', actif: true } });
+      const siteEtranger = await prisma.clientSite.create({ data: { clientId: autreClient.id, nom: 'TEST Site étranger', adresse: '2 rue du Test', codePostal: '69001', ville: 'Lyon' } });
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, siteId: siteEtranger.id, titre: 'TEST Cloisonnement client SAV' });
+      assert.equal(creation.status, 404, JSON.stringify(creation.body));
     });
 
     test('la projection planning ouvre et referme l’accès au dossier SAV', async () => {

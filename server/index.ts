@@ -642,6 +642,17 @@ function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boole
 }
 
 // --- Interventions SAV natives ---
+async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRequest, action: string, intervention: unknown, avant?: unknown, motif?: string) {
+  const user = req.user!;
+  const cibleId = String((intervention as { id: string }).id);
+  await tx.journalSaisieChantier.create({ data: {
+    chantierId: null, interventionId: cibleId, cible: 'INTERVENTION', cibleId, action,
+    auteurId: user.id, auteurNom: user.name,
+    avant: avant ? valeurJournal(avant) as Prisma.InputJsonValue : undefined,
+    apres: valeurJournal(intervention) as Prisma.InputJsonValue, motif: motif || null,
+  } });
+}
+
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
 app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
@@ -654,6 +665,14 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
     if (!['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'].includes(priorite)) return res.status(400).json({ error: 'Priorité d’intervention invalide.' });
     const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const siteId = req.body?.siteId ? String(req.body.siteId) : null;
+    const contactId = req.body?.contactId ? String(req.body.contactId) : null;
+    if (siteId && !await prisma.clientSite.findFirst({ where: { id: siteId, clientId }, select: { id: true } })) {
+      return res.status(404).json({ error: 'Site introuvable pour ce client.' });
+    }
+    if (contactId && !await prisma.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
+      return res.status(404).json({ error: 'Contact introuvable pour ce client.' });
+    }
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
     if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
     const annee = new Date().getUTCFullYear();
@@ -662,10 +681,12 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
         where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
       });
       const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-      return tx.intervention.create({
-        data: { reference, clientId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
-        include: { client: { select: { id: true, raisonSociale: true } } },
+      const cree = await tx.intervention.create({
+        data: { reference, clientId, siteId, contactId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true },
       });
+      await journaliserIntervention(tx, req, 'CREATION', cree);
+      return cree;
     });
     res.status(201).json(decimalToNumber(intervention));
   } catch (error) {
@@ -687,13 +708,27 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
           inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
         ],
       },
-      include: { client: { select: { id: true, raisonSociale: true } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
+      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(interventions));
   } catch (error) {
     console.error('Erreur liste interventions SAV', error);
     res.status(500).json({ error: 'Erreur lors de la lecture des interventions.' });
+  }
+});
+
+// Journal append-only du dossier SAV, soumis au même filtre de non-divulgation que les
+// mutations. Les traces sont ordonnées de la plus récente à la plus ancienne.
+app.get('/api/interventions/:id/journal-saisies', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    const entrees = await prisma.journalSaisieChantier.findMany({ where: { interventionId: intervention.id }, orderBy: { createdAt: 'desc' } });
+    res.json(decimalToNumber(entrees));
+  } catch (error) {
+    console.error('Erreur journal intervention SAV', error);
+    res.status(500).json({ error: 'Erreur lors de la lecture du journal de l’intervention.' });
   }
 });
 
@@ -711,13 +746,22 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
       ANNULEE: [],
     };
     if (!Object.prototype.hasOwnProperty.call(transitions, statut)) return res.status(400).json({ error: 'Statut d’intervention invalide.' });
-    const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) } });
+    // Le journal compare avant/apres : les deux instantanés doivent avoir la même forme,
+    // sinon une simple transition se lit comme si le client venait d'être ajouté au dossier.
+    const intervention = await prisma.intervention.findFirst({
+      where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) },
+      include: { client: { select: { id: true, raisonSociale: true } } },
+    });
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
     if (!transitions[intervention.statut]?.includes(statut)) {
       return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
     }
-    const updated = await prisma.intervention.update({
-      where: { id: intervention.id }, data: { statut }, include: { client: { select: { id: true, raisonSociale: true } } },
+    const updated = await prisma.$transaction(async (tx) => {
+      const modifiee = await tx.intervention.update({
+        where: { id: intervention.id }, data: { statut }, include: { client: { select: { id: true, raisonSociale: true } } },
+      });
+      await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, intervention);
+      return modifiee;
     });
     res.json(decimalToNumber(updated));
   } catch (error) {

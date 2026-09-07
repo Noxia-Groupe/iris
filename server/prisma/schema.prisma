@@ -180,19 +180,23 @@ model AchatReel {
 }
 
 model JournalSaisieChantier {
-  id         String   @id @default(uuid())
-  chantierId String
-  cible      String   // ACHAT | HEURE
-  cibleId    String
-  action     String   // CREATION | CORRECTION | ARCHIVAGE
-  auteurId   String?
-  auteurNom  String
-  avant      Json?
-  apres      Json?
-  motif      String?
-  createdAt  DateTime @default(now())
+  id             String   @id @default(uuid())
+  // Un journal couvre les écritures Travaux et les dossiers SAV : un seul objet append-only,
+  // mais une cible métier explicite et un seul parent renseigné à la fois.
+  chantierId     String?
+  interventionId String?
+  cible          String   // ACHAT | HEURE | INTERVENTION
+  cibleId        String
+  action         String   // CREATION | CORRECTION | ARCHIVAGE | CHANGEMENT_STATUT
+  auteurId       String?
+  auteurNom      String
+  avant          Json?
+  apres          Json?
+  motif          String?
+  createdAt      DateTime @default(now())
 
   @@index([chantierId, createdAt])
+  @@index([interventionId, createdAt])
   @@index([cible, cibleId, createdAt])
 }
 
@@ -400,6 +404,10 @@ model Intervention {
   reference      String   @unique
   clientId       String
   client         Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  siteId         String?
+  site           ClientSite? @relation("InterventionSite", fields: [siteId], references: [id], onDelete: Restrict)
+  contactId      String?
+  contact        ClientContact? @relation("InterventionContact", fields: [contactId], references: [id], onDelete: Restrict)
   titre          String
   description    String?
   priorite       String   @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
@@ -412,6 +420,8 @@ model Intervention {
   planningEvent  PlanningEvent?
 
   @@index([clientId, statut])
+  @@index([siteId])
+  @@index([contactId])
   @@index([statut, dateSouhaitee])
 }
 
@@ -449,6 +459,7 @@ model ClientContact {
   principal        Boolean  @default(false)
   estDecisionnaire Boolean  @default(false)
   estSignataire    Boolean  @default(false)
+  interventions    Intervention[] @relation("InterventionContact")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -472,6 +483,7 @@ model ClientSite {
   estSiteFacturation   Boolean              @default(false)
   estSiteIntervention  Boolean              @default(false)
   principal            Boolean              @default(false)
+  interventions        Intervention[]       @relation("InterventionSite")
   equipementsInstalles EquipementInstalle[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
