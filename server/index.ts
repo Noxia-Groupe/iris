@@ -715,7 +715,7 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
           inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
         ],
       },
-      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true, rapports: { select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
+      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true, rapports: { select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } }, signature: { select: { id: true, signataire: true, empreinte: true, accepteLe: true } } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(interventions));
@@ -755,6 +755,25 @@ app.post('/api/interventions/:id/rapports', requireAuth, blockCommercial, async 
   } catch (error) {
     console.error('Erreur compte rendu intervention SAV', error);
     res.status(500).json({ error: 'Erreur lors de l’enregistrement du compte rendu.' });
+  }
+});
+
+// Attestation électronique : le signataire confirme le texte figé du rapport. L'empreinte
+// rend toute altération ultérieure vérifiable ; une signature existe au plus une fois.
+app.post('/api/interventions/rapports/:rapportId/signature', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
+    if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) return res.status(400).json({ error: 'Le signataire et sa confirmation explicite sont obligatoires.' });
+    const rapport = await prisma.interventionRapport.findFirst({ where: { id: String(req.params.rapportId), intervention: { statut: 'EN_COURS', ...getInterventionFilterForUser(req.user!) } }, select: { id: true, contenu: true, signature: { select: { id: true } } } });
+    if (!rapport) return res.status(404).json({ error: 'Compte rendu introuvable.' });
+    if (rapport.signature) return res.status(409).json({ error: 'Ce compte rendu est déjà signé.' });
+    const empreinte = crypto.createHash('sha256').update(`${rapport.id}\n${rapport.contenu}\n${signataire}`, 'utf8').digest('hex');
+    const signature = await prisma.interventionSignature.create({ data: { rapportId: rapport.id, signataire, empreinte }, select: { id: true, signataire: true, empreinte: true, accepteLe: true } });
+    res.status(201).json(signature);
+  } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte rendu est déjà signé.' });
+    console.error('Erreur signature intervention SAV', error);
+    res.status(500).json({ error: 'Erreur lors de la signature du compte rendu.' });
   }
 });
 

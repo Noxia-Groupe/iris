@@ -1045,10 +1045,16 @@ if (!TEST_DATABASE_URL) {
       assert.equal(rapport.status, 201, JSON.stringify(rapport.body));
       assert.equal(rapport.body.auteurId, undefined); // l’API n’expose pas l’identifiant interne de l’auteur
       assert.equal(rapport.body.contenu, 'TEST Intervention réalisée : détecteur repositionné et essai concluant.');
+      const signature = await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
+        .send({ signataire: 'TEST Client signataire', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.match(signature.body.empreinte, /^[a-f0-9]{64}$/);
+      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`).send({ signataire: 'TEST Client signataire', confirme: true })).status, 409);
       const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`);
       const relu = liste.body.find((item) => item.id === dossier.body.id);
       assert.equal(relu.rapports.length, 1);
       assert.equal(relu.rapports[0].contenu, rapport.body.contenu);
+      assert.equal(relu.rapports[0].signature.signataire, 'TEST Client signataire');
     });
 
     test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {

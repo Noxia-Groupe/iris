@@ -454,10 +454,25 @@ model InterventionRapport {
   auteurId       String
   auteur         User         @relation(fields: [auteurId], references: [id], onDelete: Restrict)
   contenu        String
+  signature      InterventionSignature?
   createdAt      DateTime     @default(now())
 
   @@index([interventionId, createdAt])
   @@index([auteurId])
+}
+
+// Attestation électronique client d'un compte rendu : consentement explicite, signataire,
+// horodatage et empreinte SHA-256 du contenu figé. Aucun dessin ou fichier n'est requis.
+model InterventionSignature {
+  id          String              @id @default(uuid())
+  rapportId   String              @unique
+  rapport     InterventionRapport @relation(fields: [rapportId], references: [id], onDelete: Restrict)
+  signataire  String
+  empreinte   String
+  accepteLe   DateTime            @default(now())
+  createdAt   DateTime            @default(now())
+
+  @@index([accepteLe])
 }
 
 // Compteur annuel atomique des références d'affaires : A26-0001, A26-0002…
