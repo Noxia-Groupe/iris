@@ -715,7 +715,7 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
           inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
         ],
       },
-      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
+      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true, rapports: { select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(interventions));

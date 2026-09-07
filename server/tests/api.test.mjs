@@ -1045,6 +1045,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal(rapport.status, 201, JSON.stringify(rapport.body));
       assert.equal(rapport.body.auteurId, undefined); // l’API n’expose pas l’identifiant interne de l’auteur
       assert.equal(rapport.body.contenu, 'TEST Intervention réalisée : détecteur repositionné et essai concluant.');
+      const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`);
+      const relu = liste.body.find((item) => item.id === dossier.body.id);
+      assert.equal(relu.rapports.length, 1);
+      assert.equal(relu.rapports[0].contenu, rapport.body.contenu);
     });
 
     test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {
