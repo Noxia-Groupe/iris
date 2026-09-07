@@ -804,13 +804,22 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
   }
 });
 
-// --- Cloisonnement des interventions par affectation explicite ---
-// Hors administration, l'accès à un dossier SAV vient d'une affectation explicite, jamais
-// d'un rôle : un compte non administrateur ne voit que les interventions sur lesquelles son
-// profil intervenant est affecté. Le périmètre hiérarchique reste un lot ultérieur de Phase 6.
-function getInterventionFilterForUser(authUser: { id: string; role: string }) {
+// Hors administration, l'accès SAV reste ancré dans une relation persistante : affectation
+// explicite pour le technicien, responsable d'affaire pour le conducteur et équipe déclarée
+// pour le responsable. Un rôle seul ne donne jamais accès à un dossier sans rattachement.
+function getInterventionFilterForUser(authUser: { id: string; role: string; equipeIds?: string[] }) {
   if (authUser.role === 'SUPERADMIN' || authUser.role === 'ADMIN') return {};
-  return { affectations: { some: { intervenant: { userId: authUser.id } } } };
+  const parAffectation = { affectations: { some: { intervenant: { userId: authUser.id } } } };
+  if (authUser.role === 'CONDUCTEUR_TRAVAUX') {
+    return { OR: [parAffectation, { chantier: { responsableId: authUser.id, annuleLe: null } }] };
+  }
+  if (authUser.role === ROLE_RESPONSABLE) {
+    return { OR: [
+      parAffectation,
+      { chantier: { responsableId: { in: [authUser.id, ...(authUser.equipeIds || [])] }, annuleLe: null } },
+    ] };
+  }
+  return parAffectation;
 }
 
 // Une affectation SAV gouverne la visibilité du dossier. Elle doit donc toujours évoluer

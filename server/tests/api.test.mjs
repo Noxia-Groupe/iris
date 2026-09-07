@@ -1032,6 +1032,21 @@ if (!TEST_DATABASE_URL) {
       assert.equal(creation.status, 404, JSON.stringify(creation.body));
     });
 
+    test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {
+      const conducteur = await prisma.user.create({ data: { email: 'sav.conducteur@iris.test', name: 'TEST Conducteur SAV', role: 'CONDUCTEUR_TRAVAUX' } });
+      const responsable = await prisma.user.create({ data: { email: 'sav.responsable@iris.test', name: 'TEST Responsable SAV', role: 'RESPONSABLE' } });
+      await prisma.user.update({ where: { id: conducteur.id }, data: { responsableHierarchiqueId: responsable.id } });
+      const client = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier périmètre SAV', client: client.raisonSociale, dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, chantierId: chantier.id, titre: 'TEST Intervention périmètre équipe' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      const sessionConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const sessionResponsable = jwt.sign({ id: responsable.id }, process.env.JWT_SECRET);
+      assert.equal(await voitLeDossier(sessionConducteur, dossier.body.id), true);
+      assert.equal(await voitLeDossier(sessionResponsable, dossier.body.id), true);
+    });
+
     test('la projection planning ouvre et referme l’accès au dossier SAV', async () => {
       const jour = new Date().toISOString().slice(0, 10);
       const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Dossier planifié SAV' });
