@@ -792,7 +792,6 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
       ANNULEE: [],
     };
     if (!Object.prototype.hasOwnProperty.call(transitions, statut)) return res.status(400).json({ error: 'Statut d’intervention invalide.' });
-    if (req.user?.role === ROLE_TECHNICIEN && !['EN_COURS', 'TERMINEE'].includes(statut)) return res.status(403).json({ error: 'Un technicien peut uniquement démarrer ou terminer son intervention.' });
     // Le journal compare avant/apres : les deux instantanés doivent avoir la même forme,
     // sinon une simple transition se lit comme si le client venait d'être ajouté au dossier.
     const intervention = await prisma.intervention.findFirst({
@@ -800,6 +799,7 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
       include: { client: { select: { id: true, raisonSociale: true } } },
     });
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    if (req.user?.role === ROLE_TECHNICIEN && !['EN_COURS', 'TERMINEE'].includes(statut)) return res.status(403).json({ error: 'Un technicien peut uniquement démarrer ou terminer son intervention.' });
     if (!transitions[intervention.statut]?.includes(statut)) {
       return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
     }
