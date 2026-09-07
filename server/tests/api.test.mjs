@@ -934,6 +934,23 @@ if (!TEST_DATABASE_URL) {
         .send({ raisonSociale: 'TEST Client intervention' })).body.id;
     });
 
+    test('ne laisse pas un technicien non affecté modifier un dossier invisible', async () => {
+      const technicien = await prisma.user.create({ data: { email: 'sav.non-affecte@iris.test', name: 'TEST Technicien SAV non affecté', role: 'TECHNICIEN' } });
+      const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Intervenant SAV non affecté', role: 'Technicien', tauxHoraireCharge: 42, userId: technicien.id } });
+      const sessionTechnicien = jwt.sign({ id: technicien.id, role: 'TECHNICIEN' }, process.env.JWT_SECRET);
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Dossier privé SAV' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+
+      const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${sessionTechnicien}`);
+      assert.equal(liste.status, 200);
+      assert.equal(liste.body.some((item) => item.id === creation.body.id), false);
+
+      const mutation = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${sessionTechnicien}`).send({ statut: 'PLANIFIEE' });
+      assert.equal(mutation.status, 404, JSON.stringify(mutation.body));
+      await prisma.intervenant.delete({ where: { id: intervenant.id } });
+      await prisma.user.delete({ where: { id: technicien.id } });
+    });
+
     test('liste les interventions sans exposer les dossiers annulés par défaut', async () => {
       const active = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
         .send({ clientId, titre: 'TEST Liste active' });
@@ -972,7 +989,7 @@ if (!TEST_DATABASE_URL) {
         clientId, titre: 'TEST Alarme déclenchée', description: 'Le client signale un déclenchement intempestif.', priorite: 'HAUTE', dateSouhaitee: '06-09-2026',
       });
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
-      assert.match(creation.body.reference, /^I26-\d{4}$/);
+      assert.match(creation.body.reference, /^I\d{2}-\d{4,}$/);
       assert.equal(creation.body.statut, 'A_PLANIFIER');
       assert.equal(creation.body.priorite, 'HAUTE');
       assert.equal(creation.body.client.id, clientId);

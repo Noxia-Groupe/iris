@@ -711,7 +711,7 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
       ANNULEE: [],
     };
     if (!Object.prototype.hasOwnProperty.call(transitions, statut)) return res.status(400).json({ error: 'Statut d’intervention invalide.' });
-    const intervention = await prisma.intervention.findUnique({ where: { id: paramId(req) } });
+    const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) } });
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
     if (!transitions[intervention.statut]?.includes(statut)) {
       return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
@@ -743,8 +743,7 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
         update: { ...data, intervenants: { set: intervenantIds!.map((intervenantId) => ({ id: intervenantId })) } } as never,
         include: PLANNING_EVENT_INCLUDE,
       });
-      await tx.interventionAffectation.deleteMany({ where: { interventionId: id } });
-      await tx.interventionAffectation.createMany({ data: intervenantIds!.map((intervenantId) => ({ interventionId: id, intervenantId })) });
+      await synchroniserAffectationsIntervention(tx, id, intervenantIds!);
       return planning;
     });
     res.json(event);
@@ -757,13 +756,18 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
 // --- Cloisonnement des interventions par affectation explicite ---
 // Un technicien voit uniquement ses interventions affectées ; un conducteur / responsable
 // voit ses chantiers et les interventions liées au périmètre hiérarchique explicite.
-function getInterventionFilterForUser(authUser: { id: string; role: string; responsableHierarchiqueId?: string | null }) {
+function getInterventionFilterForUser(authUser: { id: string; role: string }) {
   if (authUser.role === 'SUPERADMIN' || authUser.role === 'ADMIN') return {};
-  return {
-    affectations: {
-      some: { intervenant: { userId: authUser.id } },
-    },
-  };
+  return { affectations: { some: { intervenant: { userId: authUser.id } } } };
+}
+
+// Une affectation SAV gouverne la visibilité du dossier. Elle doit donc toujours évoluer
+// atomiquement avec les intervenants de sa projection planning.
+async function synchroniserAffectationsIntervention(tx: any, interventionId: string, intervenantIds: string[]) {
+  await tx.interventionAffectation.deleteMany({ where: { interventionId } });
+  if (intervenantIds.length) {
+    await tx.interventionAffectation.createMany({ data: intervenantIds.map((intervenantId) => ({ interventionId, intervenantId })) });
+  }
 }
 
 // Routes de base (publiques)
@@ -1766,10 +1770,14 @@ app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlann
     };
     const { error, data, intervenantIds } = await validatePlanningEvent(merged);
     if (error) return res.status(400).json({ error });
-    const event = await prisma.planningEvent.update({
-      where: { id: existing.id },
-      data: { ...data, intervenants: { set: intervenantIds!.map((id) => ({ id })) } } as never,
-      include: PLANNING_EVENT_INCLUDE,
+    const event = await prisma.$transaction(async (tx) => {
+      const updated = await tx.planningEvent.update({
+        where: { id: existing.id },
+        data: { ...data, intervenants: { set: intervenantIds!.map((id) => ({ id })) } } as never,
+        include: PLANNING_EVENT_INCLUDE,
+      });
+      if (existing.interventionId) await synchroniserAffectationsIntervention(tx, existing.interventionId, intervenantIds!);
+      return updated;
     });
     res.json(event);
   } catch (error) {
@@ -1781,6 +1789,9 @@ app.delete('/api/planning/events/:id', requireAuth, blockCommercial, requirePlan
   try {
     const existing = await prisma.planningEvent.findUnique({ where: { id: paramId(req) } });
     if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
+    if (existing.interventionId) {
+      return res.status(409).json({ error: 'Suppression impossible : cette projection est liée à une intervention SAV. Modifiez ou annulez le dossier SAV.' });
+    }
     await prisma.planningEvent.delete({ where: { id: existing.id } });
     res.json({ success: true });
   } catch (error) {
