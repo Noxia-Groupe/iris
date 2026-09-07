@@ -4,6 +4,8 @@ import { apiFetch } from '../api';
 import { isAdminRole, useCurrentUser } from '../roles';
 
 type Client = { id: string; raisonSociale: string };
+type ClientDetail = Client & { sites: { id: string; nom: string; ville: string }[]; contacts: { id: string; prenom?: string | null; nom: string }[] };
+type Chantier = { id: string; nom: string; client: string; numeroDevis?: string | null };
 type Intervention = {
   id: string; reference: string; titre: string; description?: string | null; priorite: string; statut: string;
   dateSouhaitee?: string | null; client: Client;
@@ -25,6 +27,8 @@ const formatDate = (value?: string | null) => value ? new Date(value).toLocaleDa
 export default function Interventions() {
   const [interventions, setInterventions] = useState<Intervention[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [chantiers, setChantiers] = useState<Chantier[]>([]);
+  const [clientFormulaire, setClientFormulaire] = useState<ClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [error, setError] = useState('');
@@ -40,9 +44,10 @@ export default function Interventions() {
       if (!interventionsRes.ok) throw new Error(interventionData.error || 'Impossible de charger les interventions.');
       setInterventions(Array.isArray(interventionData) ? interventionData : []);
       if (peutCreer) {
-        const clientsRes = await apiFetch('/clients');
-        const clientData = await clientsRes.json();
+        const [clientsRes, chantiersRes] = await Promise.all([apiFetch('/clients'), apiFetch('/chantiers')]);
+        const [clientData, chantierData] = await Promise.all([clientsRes.json(), chantiersRes.json()]);
         if (clientsRes.ok) setClients(Array.isArray(clientData) ? clientData : (clientData.clients || []));
+        if (chantiersRes.ok) setChantiers(Array.isArray(chantierData) ? chantierData : []);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de chargement.');
@@ -51,6 +56,15 @@ export default function Interventions() {
     }
   };
   useEffect(() => { void load(); }, []);
+
+  const choisirClient = async (clientId: string) => {
+    setClientFormulaire(null);
+    if (!clientId) return;
+    const res = await apiFetch(`/clients/${clientId}`);
+    const data = await res.json();
+    if (!res.ok) return setError(data.error || 'Client introuvable.');
+    setClientFormulaire(data as ClientDetail);
+  };
 
   const create = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setError('');
@@ -87,7 +101,8 @@ export default function Interventions() {
     {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{error}</div>}
     {formOpen && <form onSubmit={create} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
       <h2 className="font-semibold">Nouvelle intervention SAV</h2>
-      <select required name="clientId" className="form-input" defaultValue=""><option value="" disabled>Client concerné</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.raisonSociale}</option>)}</select>
+      <select required name="clientId" className="form-input" defaultValue="" onChange={(event) => void choisirClient(event.target.value)}><option value="" disabled>Client concerné</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.raisonSociale}</option>)}</select>
+      {clientFormulaire && <div className="grid gap-3 sm:grid-cols-3"><select name="siteId" className="form-input" defaultValue=""><option value="">Site (facultatif)</option>{clientFormulaire.sites.map((site) => <option key={site.id} value={site.id}>{site.nom} — {site.ville}</option>)}</select><select name="contactId" className="form-input" defaultValue=""><option value="">Contact (facultatif)</option>{clientFormulaire.contacts.map((contact) => <option key={contact.id} value={contact.id}>{[contact.prenom, contact.nom].filter(Boolean).join(' ')}</option>)}</select><select name="chantierId" className="form-input" defaultValue=""><option value="">Affaire / chantier (facultatif)</option>{chantiers.filter((chantier) => chantier.client === clientFormulaire.raisonSociale).map((chantier) => <option key={chantier.id} value={chantier.id}>{chantier.numeroDevis ? `${chantier.numeroDevis} — ` : ''}{chantier.nom}</option>)}</select></div>}
       <input required name="titre" maxLength={200} className="form-input" placeholder="Objet de la demande" />
       <textarea name="description" className="form-input" placeholder="Description de la demande" />
       <div className="grid gap-3 sm:grid-cols-2"><select name="priorite" className="form-input" defaultValue="NORMALE">{Object.entries(libellePriorite).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input name="dateSouhaitee" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date souhaitée (JJ-MM-AAAA)" className="form-input" /></div>
