@@ -739,6 +739,25 @@ app.get('/api/interventions/:id/journal-saisies', requireAuth, blockCommercial, 
   }
 });
 
+// Les comptes rendus terrain sont des écritures append-only : un technicien affecté ne peut
+// les ajouter que pendant une intervention en cours, jamais les modifier ou les effacer.
+app.post('/api/interventions/:id/rapports', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const contenu = typeof req.body?.contenu === 'string' ? req.body.contenu.trim() : '';
+    if (contenu.length < 3 || contenu.length > 5000) return res.status(400).json({ error: 'Le compte rendu doit contenir entre 3 et 5 000 caractères.' });
+    const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), statut: 'EN_COURS', ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    const rapport = await prisma.interventionRapport.create({
+      data: { interventionId: intervention.id, auteurId: req.user!.id, contenu },
+      select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } } },
+    });
+    res.status(201).json(rapport);
+  } catch (error) {
+    console.error('Erreur compte rendu intervention SAV', error);
+    res.status(500).json({ error: 'Erreur lors de l’enregistrement du compte rendu.' });
+  }
+});
+
 // Cycle de vie volontairement fermé : une intervention annulée ou terminée ne peut pas
 // être "réouverte" silencieusement, afin de préserver l'historique SAV. Une reprise doit
 // créer un nouveau dossier relié au même client (lot dédié avec motif de reprise).

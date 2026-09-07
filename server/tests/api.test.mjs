@@ -63,7 +63,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.user.deleteMany({ where: { email: { in: [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test',
     ] } } });
   };
 
@@ -1030,6 +1030,21 @@ if (!TEST_DATABASE_URL) {
       const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
         .send({ clientId, chantierId: chantier.id, titre: 'TEST Cloisonnement affaire SAV' });
       assert.equal(creation.status, 404, JSON.stringify(creation.body));
+    });
+
+    test('permet au technicien affecté de consigner un compte rendu terrain', async () => {
+      const technicien = await compteTechnicienSav('sav.rapport@iris.test', 'TEST Intervenant SAV rapport');
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, titre: 'TEST Rapport terrain SAV' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      await prisma.interventionAffectation.create({ data: { interventionId: dossier.body.id, intervenantId: technicien.intervenantId } });
+      await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'PLANIFIEE' });
+      await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'EN_COURS' });
+      const rapport = await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`)
+        .send({ contenu: 'TEST Intervention réalisée : détecteur repositionné et essai concluant.' });
+      assert.equal(rapport.status, 201, JSON.stringify(rapport.body));
+      assert.equal(rapport.body.auteurId, undefined); // l’API n’expose pas l’identifiant interne de l’auteur
+      assert.equal(rapport.body.contenu, 'TEST Intervention réalisée : détecteur repositionné et essai concluant.');
     });
 
     test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {

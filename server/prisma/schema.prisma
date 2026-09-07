@@ -49,6 +49,7 @@ model User {
   chantiersCommercialises Chantier[]                 @relation("ChantierCommercial") // Chantiers vendus par ce commercial
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
   profilIntervenant       Intervenant?               @relation("IntervenantCompte")
+  rapportsIntervention    InterventionRapport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -420,6 +421,7 @@ model Intervention {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   affectations   InterventionAffectation[]
+  rapports       InterventionRapport[]
   planningEvent  PlanningEvent?
 
   @@index([clientId, statut])
@@ -441,6 +443,21 @@ model InterventionAffectation {
 
   @@unique([interventionId, intervenantId])
   @@index([intervenantId])
+}
+
+// Compte rendu terrain append-only : une intervention garde ses constats tels qu'ils ont été
+// saisis, avec leur auteur et leur date. Les corrections futures créent une nouvelle trace.
+model InterventionRapport {
+  id             String       @id @default(uuid())
+  interventionId String
+  intervention   Intervention @relation(fields: [interventionId], references: [id], onDelete: Cascade)
+  auteurId       String
+  auteur         User         @relation(fields: [auteurId], references: [id], onDelete: Restrict)
+  contenu        String
+  createdAt      DateTime     @default(now())
+
+  @@index([interventionId, createdAt])
+  @@index([auteurId])
 }
 
 // Compteur annuel atomique des références d'affaires : A26-0001, A26-0002…
