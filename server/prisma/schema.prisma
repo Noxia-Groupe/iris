@@ -409,6 +409,7 @@ model Intervention {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   affectations   InterventionAffectation[]
+  planningEvent  PlanningEvent?
 
   @@index([clientId, statut])
   @@index([statut, dateSouhaitee])
@@ -695,6 +696,11 @@ model PlanningEvent {
   typeEvent   PlanningEventType? @relation(fields: [typeEventId], references: [id])
 
   commentaire String?
+
+  // Projection unique d'un dossier SAV : le planning ne duplique plus son titre, client ou
+  // ses techniciens. Les événements libres HORS_CHANTIER demeurent utilisables hors SAV.
+  interventionId String? @unique
+  intervention   Intervention? @relation(fields: [interventionId], references: [id], onDelete: Cascade)
 
   intervenants Intervenant[] @relation("PlanningEventIntervenants")
 

@@ -726,6 +726,34 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
   }
 });
 
+// Crée ou met à jour l'unique projection prévisionnelle d'un dossier SAV. La fiche
+// Intervention reste la source de vérité et les mêmes techniciens sont synchronisés dans
+// InterventionAffectation, afin qu'un planning ne donne jamais accès à un dossier sans affectation.
+app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+  try {
+    const id = paramId(req);
+    const intervention = await prisma.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    const { error, data, intervenantIds } = await validatePlanningEvent({ ...req.body, categorie: 'HORS_CHANTIER', titre: intervention.titre, client: intervention.client.raisonSociale });
+    if (error) return res.status(400).json({ error });
+    const event = await prisma.$transaction(async (tx) => {
+      const planning = await tx.planningEvent.upsert({
+        where: { interventionId: id },
+        create: { ...data, interventionId: id, intervenants: { connect: intervenantIds!.map((intervenantId) => ({ id: intervenantId })) } } as never,
+        update: { ...data, intervenants: { set: intervenantIds!.map((intervenantId) => ({ id: intervenantId })) } } as never,
+        include: PLANNING_EVENT_INCLUDE,
+      });
+      await tx.interventionAffectation.deleteMany({ where: { interventionId: id } });
+      await tx.interventionAffectation.createMany({ data: intervenantIds!.map((intervenantId) => ({ interventionId: id, intervenantId })) });
+      return planning;
+    });
+    res.json(event);
+  } catch (error) {
+    console.error('Erreur de planification SAV', error);
+    res.status(500).json({ error: 'Erreur lors de la planification de l’intervention.' });
+  }
+});
+
 // --- Cloisonnement des interventions par affectation explicite ---
 // Un technicien voit uniquement ses interventions affectées ; un conducteur / responsable
 // voit ses chantiers et les interventions liées au périmètre hiérarchique explicite.
