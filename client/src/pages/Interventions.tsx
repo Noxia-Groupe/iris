@@ -12,6 +12,12 @@ const libelleStatut: Record<string, string> = {
   A_PLANIFIER: 'À planifier', PLANIFIEE: 'Planifiée', EN_COURS: 'En cours', TERMINEE: 'Terminée', ANNULEE: 'Annulée',
 };
 const libellePriorite: Record<string, string> = { BASSE: 'Basse', NORMALE: 'Normale', HAUTE: 'Haute', URGENTE: 'Urgente' };
+const transitions: Record<string, { statut: string; libelle: string }[]> = {
+  A_PLANIFIER: [{ statut: 'PLANIFIEE', libelle: 'Planifier' }, { statut: 'ANNULEE', libelle: 'Annuler' }],
+  PLANIFIEE: [{ statut: 'EN_COURS', libelle: 'Démarrer' }, { statut: 'ANNULEE', libelle: 'Annuler' }],
+  EN_COURS: [{ statut: 'TERMINEE', libelle: 'Terminer' }, { statut: 'ANNULEE', libelle: 'Annuler' }],
+  TERMINEE: [], ANNULEE: [],
+};
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleDateString('fr-FR') : 'Non renseignée';
 
 export default function Interventions() {
@@ -48,6 +54,14 @@ export default function Interventions() {
     setFormOpen(false); await load();
   };
 
+  const transition = async (id: string, statut: string) => {
+    setError('');
+    const res = await apiFetch(`/interventions/${id}/statut`, { method: 'PATCH', body: JSON.stringify({ statut }) });
+    const data = await res.json();
+    if (!res.ok) return setError(data.error || 'Transition impossible.');
+    await load();
+  };
+
   return <div className="space-y-6">
     <div className="flex items-start justify-between gap-4">
       <div><h1 className="text-2xl font-bold text-gray-900">Interventions SAV</h1><p className="text-gray-500">Demandes clients et interventions en cours. Le planning reste une projection prévisionnelle.</p></div>
@@ -62,6 +76,6 @@ export default function Interventions() {
       <div className="grid gap-3 sm:grid-cols-2"><select name="priorite" className="form-input" defaultValue="NORMALE">{Object.entries(libellePriorite).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input name="dateSouhaitee" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date souhaitée (JJ-MM-AAAA)" className="form-input" /></div>
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer</button><button className="btn btn-secondary" type="button" onClick={() => setFormOpen(false)}>Annuler</button></div>
     </form>}
-    {loading ? <p className="text-gray-500">Chargement…</p> : interventions.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucune intervention active.</div> : <div className="grid gap-3">{interventions.map((item) => <article key={item.id} className="rounded-xl border bg-white p-5 shadow-sm"><div className="flex justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">{item.reference}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale} · Souhaitée le {formatDate(item.dateSouhaitee)}</p></div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>{item.description && <p className="mt-3 text-sm text-gray-600">{item.description}</p>}</article>)}</div>}
+    {loading ? <p className="text-gray-500">Chargement…</p> : interventions.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucune intervention active.</div> : <div className="grid gap-3">{interventions.map((item) => <article key={item.id} className="rounded-xl border bg-white p-5 shadow-sm"><div className="flex justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">{item.reference}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale} · Souhaitée le {formatDate(item.dateSouhaitee)}</p></div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>{item.description && <p className="mt-3 text-sm text-gray-600">{item.description}</p>}<div className="mt-4 flex flex-wrap gap-2">{(transitions[item.statut] || []).map((action) => <button key={action.statut} type="button" onClick={() => void transition(item.id, action.statut)} className={action.statut === 'ANNULEE' ? 'btn btn-secondary text-red-700' : 'btn btn-primary'}>{action.libelle}</button>)}</div></article>)}</div>}
   </div>;
 }
