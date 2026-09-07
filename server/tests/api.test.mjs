@@ -65,7 +65,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.user.deleteMany({ where: { email: { in: [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test',
     ] } } });
   };
 
@@ -1047,6 +1047,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal(rapport.status, 201, JSON.stringify(rapport.body));
       assert.equal(rapport.body.auteurId, undefined); // l’API n’expose pas l’identifiant interne de l’auteur
       assert.equal(rapport.body.contenu, 'TEST Intervention réalisée : détecteur repositionné et essai concluant.');
+      const intrus = await compteTechnicienSav('sav.intrus@iris.test', 'TEST Intervenant SAV intrus');
+      assert.equal(await voitLeDossier(intrus.jeton, dossier.body.id), false);
+      assert.equal((await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${intrus.jeton}`).send({ contenu: 'TEST Rapport hors périmètre.' })).status, 404);
+      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${intrus.jeton}`).send({ signataire: 'TEST Usurpation', confirme: true })).status, 404);
       const signature = await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
         .send({ signataire: 'TEST Client signataire', confirme: true });
       assert.equal(signature.status, 201, JSON.stringify(signature.body));
@@ -1072,6 +1076,8 @@ if (!TEST_DATABASE_URL) {
       const sessionResponsable = jwt.sign({ id: responsable.id }, process.env.JWT_SECRET);
       assert.equal(await voitLeDossier(sessionConducteur, dossier.body.id), true);
       assert.equal(await voitLeDossier(sessionResponsable, dossier.body.id), true);
+      const tiers = await prisma.user.create({ data: { email: 'sav.tiers@iris.test', name: 'TEST Conducteur SAV tiers', role: 'CONDUCTEUR_TRAVAUX' } });
+      assert.equal(await voitLeDossier(jwt.sign({ id: tiers.id }, process.env.JWT_SECRET), dossier.body.id), false);
     });
 
     test('la projection planning ouvre et referme l’accès au dossier SAV', async () => {

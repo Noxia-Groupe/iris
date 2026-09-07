@@ -103,6 +103,7 @@ export default function Interventions() {
     const res = await apiFetch(`/interventions/${id}/rapports`, { method: 'POST', body: JSON.stringify({ contenu }) });
     const data = await res.json();
     if (!res.ok) return setError(data.error || 'Enregistrement du compte rendu impossible.');
+    await load();
   };
 
   return <div className="space-y-6">

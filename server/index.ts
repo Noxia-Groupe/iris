@@ -758,8 +758,9 @@ app.post('/api/interventions/:id/rapports', requireAuth, blockCommercial, async 
   }
 });
 
-// Attestation électronique : le signataire confirme le texte figé du rapport. L'empreinte
-// rend toute altération ultérieure vérifiable ; une signature existe au plus une fois.
+// Attestation électronique : le signataire confirme le texte figé du rapport. L'empreinte SHA-256
+// facilite l'identification du contenu signé, mais n'est pas à elle seule une preuve cryptographique
+// d'intégrité ni une signature qualifiée.
 app.post('/api/interventions/rapports/:rapportId/signature', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
   try {
     const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
@@ -791,6 +792,7 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
       ANNULEE: [],
     };
     if (!Object.prototype.hasOwnProperty.call(transitions, statut)) return res.status(400).json({ error: 'Statut d’intervention invalide.' });
+    if (req.user?.role === ROLE_TECHNICIEN && !['EN_COURS', 'TERMINEE'].includes(statut)) return res.status(403).json({ error: 'Un technicien peut uniquement démarrer ou terminer son intervention.' });
     // Le journal compare avant/apres : les deux instantanés doivent avoir la même forme,
     // sinon une simple transition se lit comme si le client venait d'être ajouté au dossier.
     const intervention = await prisma.intervention.findFirst({
