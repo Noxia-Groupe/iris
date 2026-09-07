@@ -1016,6 +1016,22 @@ if (!TEST_DATABASE_URL) {
       assert.equal(creation.status, 404, JSON.stringify(creation.body));
     });
 
+    test('rattache un chantier appartenant au même client que le dossier SAV', async () => {
+      const client = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV lié', client: client.raisonSociale, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, chantierId: chantier.id, titre: 'TEST Intervention liée à affaire' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.equal(creation.body.chantier.id, chantier.id);
+    });
+
+    test('refuse un chantier d’un autre client', async () => {
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV étranger', client: 'TEST Autre client SAV', dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, chantierId: chantier.id, titre: 'TEST Cloisonnement affaire SAV' });
+      assert.equal(creation.status, 404, JSON.stringify(creation.body));
+    });
+
     test('la projection planning ouvre et referme l’accès au dossier SAV', async () => {
       const jour = new Date().toISOString().slice(0, 10);
       const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Dossier planifié SAV' });

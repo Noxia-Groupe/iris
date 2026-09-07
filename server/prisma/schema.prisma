@@ -117,6 +117,7 @@ model Chantier {
   achats         AchatReel[]
   pointages      PointageHeure[]
   planningEvents PlanningEvent[]
+  interventions  Intervention[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -408,6 +409,8 @@ model Intervention {
   site           ClientSite? @relation("InterventionSite", fields: [siteId], references: [id], onDelete: Restrict)
   contactId      String?
   contact        ClientContact? @relation("InterventionContact", fields: [contactId], references: [id], onDelete: Restrict)
+  chantierId     String?
+  chantier       Chantier? @relation(fields: [chantierId], references: [id], onDelete: Restrict)
   titre          String
   description    String?
   priorite       String   @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
@@ -422,6 +425,7 @@ model Intervention {
   @@index([clientId, statut])
   @@index([siteId])
   @@index([contactId])
+  @@index([chantierId])
   @@index([statut, dateSouhaitee])
 }
 

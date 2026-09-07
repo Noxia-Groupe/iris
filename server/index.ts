@@ -663,15 +663,22 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
     const priorite = String(req.body?.priorite || 'NORMALE');
     if (!titre) return res.status(400).json({ error: 'Le titre de l’intervention est obligatoire.' });
     if (!['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'].includes(priorite)) return res.status(400).json({ error: 'Priorité d’intervention invalide.' });
-    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
+    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
     const siteId = req.body?.siteId ? String(req.body.siteId) : null;
     const contactId = req.body?.contactId ? String(req.body.contactId) : null;
+    const chantierId = req.body?.chantierId ? String(req.body.chantierId) : null;
     if (siteId && !await prisma.clientSite.findFirst({ where: { id: siteId, clientId }, select: { id: true } })) {
       return res.status(404).json({ error: 'Site introuvable pour ce client.' });
     }
     if (contactId && !await prisma.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
       return res.status(404).json({ error: 'Contact introuvable pour ce client.' });
+    }
+    // Chantier.client est un champ historique libre : le rattachement SAV ne l'infère pas.
+    // Il n'est autorisé que lorsque sa raison sociale correspond exactement au client natif.
+    const clientNom = client.raisonSociale;
+    if (chantierId && !await prisma.chantier.findFirst({ where: { id: chantierId, client: clientNom, annuleLe: null }, select: { id: true } })) {
+      return res.status(404).json({ error: 'Chantier introuvable pour ce client.' });
     }
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
     if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
@@ -682,8 +689,8 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
       });
       const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
       const cree = await tx.intervention.create({
-        data: { reference, clientId, siteId, contactId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
-        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true },
+        data: { reference, clientId, siteId, contactId, chantierId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
       });
       await journaliserIntervention(tx, req, 'CREATION', cree);
       return cree;
@@ -708,7 +715,7 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
           inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
         ],
       },
-      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
+      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(interventions));
