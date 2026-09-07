@@ -665,6 +665,14 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
     if (!['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'].includes(priorite)) return res.status(400).json({ error: 'Priorité d’intervention invalide.' });
     const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const siteId = req.body?.siteId ? String(req.body.siteId) : null;
+    const contactId = req.body?.contactId ? String(req.body.contactId) : null;
+    if (siteId && !await prisma.clientSite.findFirst({ where: { id: siteId, clientId }, select: { id: true } })) {
+      return res.status(404).json({ error: 'Site introuvable pour ce client.' });
+    }
+    if (contactId && !await prisma.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
+      return res.status(404).json({ error: 'Contact introuvable pour ce client.' });
+    }
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
     if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
     const annee = new Date().getUTCFullYear();
@@ -674,8 +682,8 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
       });
       const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
       const cree = await tx.intervention.create({
-        data: { reference, clientId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
-        include: { client: { select: { id: true, raisonSociale: true } } },
+        data: { reference, clientId, siteId, contactId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true },
       });
       await journaliserIntervention(tx, req, 'CREATION', cree);
       return cree;
@@ -700,7 +708,7 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
           inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
         ],
       },
-      include: { client: { select: { id: true, raisonSociale: true } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
+      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(interventions));

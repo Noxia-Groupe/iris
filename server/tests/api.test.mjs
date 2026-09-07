@@ -973,6 +973,24 @@ if (!TEST_DATABASE_URL) {
       assert.equal(changement.auteurId, creation.body.createdById);
     });
 
+    test('rattache un site et un contact appartenant au client du dossier SAV', async () => {
+      const site = await prisma.clientSite.create({ data: { clientId, nom: 'TEST Site SAV', adresse: '1 rue du Test', codePostal: '75001', ville: 'Paris' } });
+      const contact = await prisma.clientContact.create({ data: { clientId, nom: 'TEST Contact SAV' } });
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, siteId: site.id, contactId: contact.id, titre: 'TEST Rattachements SAV' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.equal(creation.body.site.id, site.id);
+      assert.equal(creation.body.contact.id, contact.id);
+    });
+
+    test('refuse un site ou contact rattaché à un autre client', async () => {
+      const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST Client étranger SAV', actif: true } });
+      const siteEtranger = await prisma.clientSite.create({ data: { clientId: autreClient.id, nom: 'TEST Site étranger', adresse: '2 rue du Test', codePostal: '69001', ville: 'Lyon' } });
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, siteId: siteEtranger.id, titre: 'TEST Cloisonnement client SAV' });
+      assert.equal(creation.status, 404, JSON.stringify(creation.body));
+    });
+
     test('la projection planning ouvre et referme l’accès au dossier SAV', async () => {
       const jour = new Date().toISOString().slice(0, 10);
       const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Dossier planifié SAV' });
