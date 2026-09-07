@@ -25,6 +25,7 @@ if (!TEST_DATABASE_URL) {
   const request = (await import('supertest')).default;
   const { app, initDb, ensureSuperAdmins } = await import('../dist/index.js');
   const { PrismaClient } = await import('@prisma/client');
+  const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
 
   let cleApi = '';
