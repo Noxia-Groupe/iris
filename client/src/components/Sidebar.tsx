@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Building2, BookOpen, Landmark, KeyRound, FileText, Wrench } from 'lucide-react';
 import { applyTheme } from '../theme';
-import { isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutVoirStatistiques, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR } from '../roles';
+import { isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutVoirStatistiques, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
 import './Sidebar.css';
 
@@ -14,6 +14,7 @@ const Sidebar = () => {
   const isCommercial = userRole === ROLE_COMMERCIAL;
   const isAdmin = isAdminRole(userRole);
   const isSuperAdmin = isSuperAdminRole(userRole);
+  const peutVoirInterventions = isAdmin || userRole === ROLE_CONDUCTEUR || userRole === ROLE_RESPONSABLE || userRole === ROLE_TECHNICIEN;
   // Planning : masqué pour tous les comptes (administrateurs compris) quand un superadmin
   // a désactivé le module depuis Administration > Modules.
   const { planningActif } = useModules();
@@ -51,7 +52,7 @@ const Sidebar = () => {
           </NavLink>
         )}
 
-        {isAdmin && (
+        {peutVoirInterventions && (
           <NavLink to="/interventions" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <Wrench size={20} />
             Interventions SAV
