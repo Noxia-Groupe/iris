@@ -674,6 +674,23 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
   }
 });
 
+// Les annulations sont historiques : elles n'encombrent pas l'exploitation courante, mais
+// restent explicitement consultables avec ?inclureAnnulees=true (administration/contrôle).
+app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const inclureAnnulees = req.query.inclureAnnulees === 'true';
+    const interventions = await prisma.intervention.findMany({
+      where: inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
+      include: { client: { select: { id: true, raisonSociale: true } } },
+      orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
+    });
+    res.json(decimalToNumber(interventions));
+  } catch (error) {
+    console.error('Erreur liste interventions SAV', error);
+    res.status(500).json({ error: 'Erreur lors de la lecture des interventions.' });
+  }
+});
+
 // Cycle de vie volontairement fermé : une intervention annulée ou terminée ne peut pas
 // être "réouverte" silencieusement, afin de préserver l'historique SAV. Une reprise doit
 // créer un nouveau dossier relié au même client (lot dédié avec motif de reprise).

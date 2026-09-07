@@ -934,6 +934,19 @@ if (!TEST_DATABASE_URL) {
         .send({ raisonSociale: 'TEST Client intervention' })).body.id;
     });
 
+    test('liste les interventions sans exposer les dossiers annulés par défaut', async () => {
+      const active = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, titre: 'TEST Liste active' });
+      const cancelled = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, titre: 'TEST Liste annulée' });
+      await request(app).patch(`/api/interventions/${cancelled.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ANNULEE' });
+
+      const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${session}`);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      assert.equal(liste.body.some((item) => item.id === active.body.id), true);
+      assert.equal(liste.body.some((item) => item.id === cancelled.body.id), false);
+    });
+
     test('bloque les transitions de statut incohérentes', async () => {
       const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({
         clientId, titre: 'TEST Transition SAV', priorite: 'NORMALE',
