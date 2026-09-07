@@ -679,9 +679,15 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
 app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
   try {
     const inclureAnnulees = req.query.inclureAnnulees === 'true';
+    const filtre = getInterventionFilterForUser(req.user!);
     const interventions = await prisma.intervention.findMany({
-      where: inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
-      include: { client: { select: { id: true, raisonSociale: true } } },
+      where: {
+        AND: [
+          filtre,
+          inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
+        ],
+      },
+      include: { client: { select: { id: true, raisonSociale: true } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(interventions));
@@ -719,6 +725,18 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
     res.status(500).json({ error: 'Erreur lors de la transition de l’intervention.' });
   }
 });
+
+// --- Cloisonnement des interventions par affectation explicite ---
+// Un technicien voit uniquement ses interventions affectées ; un conducteur / responsable
+// voit ses chantiers et les interventions liées au périmètre hiérarchique explicite.
+function getInterventionFilterForUser(authUser: { id: string; role: string; responsableHierarchiqueId?: string | null }) {
+  if (authUser.role === 'SUPERADMIN' || authUser.role === 'ADMIN') return {};
+  return {
+    affectations: {
+      some: { intervenant: { userId: authUser.id } },
+    },
+  };
+}
 
 // Routes de base (publiques)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
