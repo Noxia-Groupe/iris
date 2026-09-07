@@ -5,3 +5,8 @@ ALTER TABLE "JournalSaisieChantier" ALTER COLUMN "chantierId" DROP NOT NULL;
 ALTER TABLE "JournalSaisieChantier" ADD COLUMN "interventionId" TEXT;
 CREATE INDEX "JournalSaisieChantier_interventionId_createdAt_idx"
   ON "JournalSaisieChantier"("interventionId", "createdAt");
+
+-- Une trace appartient à un chantier OU à une intervention : jamais aux deux, jamais à aucun.
+-- La contrainte de base protège l'append-only même face à une future écriture incorrecte.
+ALTER TABLE "JournalSaisieChantier" ADD CONSTRAINT "JournalSaisieChantier_parent_unique_check"
+  CHECK (("chantierId" IS NOT NULL) <> ("interventionId" IS NOT NULL));
