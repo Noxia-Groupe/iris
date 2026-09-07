@@ -754,8 +754,9 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
 });
 
 // --- Cloisonnement des interventions par affectation explicite ---
-// Un technicien voit uniquement ses interventions affectées ; un conducteur / responsable
-// voit ses chantiers et les interventions liées au périmètre hiérarchique explicite.
+// Hors administration, l'accès à un dossier SAV vient d'une affectation explicite, jamais
+// d'un rôle : un compte non administrateur ne voit que les interventions sur lesquelles son
+// profil intervenant est affecté. Le périmètre hiérarchique reste un lot ultérieur de Phase 6.
 function getInterventionFilterForUser(authUser: { id: string; role: string }) {
   if (authUser.role === 'SUPERADMIN' || authUser.role === 'ADMIN') return {};
   return { affectations: { some: { intervenant: { userId: authUser.id } } } };
@@ -763,7 +764,7 @@ function getInterventionFilterForUser(authUser: { id: string; role: string }) {
 
 // Une affectation SAV gouverne la visibilité du dossier. Elle doit donc toujours évoluer
 // atomiquement avec les intervenants de sa projection planning.
-async function synchroniserAffectationsIntervention(tx: any, interventionId: string, intervenantIds: string[]) {
+async function synchroniserAffectationsIntervention(tx: Prisma.TransactionClient, interventionId: string, intervenantIds: string[]) {
   await tx.interventionAffectation.deleteMany({ where: { interventionId } });
   if (intervenantIds.length) {
     await tx.interventionAffectation.createMany({ data: intervenantIds.map((intervenantId) => ({ interventionId, intervenantId })) });
@@ -1575,16 +1576,20 @@ app.put('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) => 
   }
 });
 
-// Supprimer un intervenant. Bloqué s'il possède des pointages (historique préservé).
-// Ses affectations du planning d'intervention sont purement prévisionnelles : il en est
-// simplement retiré (cascade de la table de liaison), et celles dont il était le SEUL
-// technicien sont supprimées — une affectation sans personne n'aurait plus de sens.
+// Supprimer un intervenant. Bloqué s'il possède des pointages (historique préservé) ou
+// des affectations SAV (elles gouvernent l'accès aux dossiers, ce n'est pas du prévisionnel).
+// Ses affectations de planning restent, elles, purement prévisionnelles : il en est simplement
+// retiré, et celles dont il était le seul technicien sont supprimées.
 app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const id = paramId(req);
     const used = await prisma.pointageHeure.count({ where: { intervenantId: id } });
     if (used > 0) {
       return res.status(409).json({ error: `Suppression impossible : cet intervenant a ${used} pointage(s) d'heures dans l'historique.` });
+    }
+    const affecte = await prisma.interventionAffectation.count({ where: { intervenantId: id } });
+    if (affecte > 0) {
+      return res.status(409).json({ error: `Suppression impossible : cet intervenant est affecté à ${affecte} intervention(s) SAV.` });
     }
     const affectationsSolo = await prisma.planningEvent.findMany({
       where: { intervenants: { some: { id }, every: { id } } },

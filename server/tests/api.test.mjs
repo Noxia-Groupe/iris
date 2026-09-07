@@ -61,7 +61,9 @@ if (!TEST_DATABASE_URL) {
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.user.deleteMany({ where: { email: { in: [
-      'cycle.conducteur@iris.test','conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test'] } } });
+      'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test',
+    ] } } });
   };
 
   before(async () => {
@@ -928,6 +930,16 @@ if (!TEST_DATABASE_URL) {
   describe('Interventions SAV', () => {
     let session = '';
     let clientId = '';
+    const compteTechnicienSav = async (email, nom) => {
+      const compte = await prisma.user.create({ data: { email, name: nom, role: 'TECHNICIEN' } });
+      const intervenant = await prisma.intervenant.create({ data: { nom, role: 'Technicien', tauxHoraireCharge: 42, userId: compte.id } });
+      return { jeton: jwt.sign({ id: compte.id }, process.env.JWT_SECRET), intervenantId: intervenant.id };
+    };
+    const voitLeDossier = async (jeton, interventionId) => {
+      const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${jeton}`);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      return liste.body.some((item) => item.id === interventionId);
+    };
 
     before(async () => {
       session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
@@ -936,20 +948,33 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('ne laisse pas un technicien non affecté modifier un dossier invisible', async () => {
-      const technicien = await prisma.user.create({ data: { email: 'sav.non-affecte@iris.test', name: 'TEST Technicien SAV non affecté', role: 'TECHNICIEN' } });
-      const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Intervenant SAV non affecté', role: 'Technicien', tauxHoraireCharge: 42, userId: technicien.id } });
-      const sessionTechnicien = jwt.sign({ id: technicien.id, role: 'TECHNICIEN' }, process.env.JWT_SECRET);
+      const technicien = await compteTechnicienSav('sav.non-affecte@iris.test', 'TEST Intervenant SAV non affecté');
       const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Dossier privé SAV' });
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
-
-      const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${sessionTechnicien}`);
-      assert.equal(liste.status, 200);
-      assert.equal(liste.body.some((item) => item.id === creation.body.id), false);
-
-      const mutation = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${sessionTechnicien}`).send({ statut: 'PLANIFIEE' });
+      assert.equal(await voitLeDossier(technicien.jeton, creation.body.id), false);
+      const mutation = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${technicien.jeton}`).send({ statut: 'PLANIFIEE' });
       assert.equal(mutation.status, 404, JSON.stringify(mutation.body));
-      await prisma.intervenant.delete({ where: { id: intervenant.id } });
-      await prisma.user.delete({ where: { id: technicien.id } });
+    });
+
+    test('la projection planning ouvre et referme l’accès au dossier SAV', async () => {
+      const jour = new Date().toISOString().slice(0, 10);
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Dossier planifié SAV' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      const premier = await compteTechnicienSav('sav.premier@iris.test', 'TEST Intervenant SAV premier');
+      const second = await compteTechnicienSav('sav.second@iris.test', 'TEST Intervenant SAV second');
+      const planification = await request(app).put(`/api/interventions/${dossier.body.id}/planning`).set('Authorization', `Bearer ${session}`).send({ dateDebut: jour, creneau: 'JOURNEE', intervenantIds: [premier.intervenantId] });
+      assert.equal(planification.status, 200, JSON.stringify(planification.body));
+      assert.equal(await voitLeDossier(premier.jeton, dossier.body.id), true);
+      assert.equal(await voitLeDossier(second.jeton, dossier.body.id), false);
+      const remplacement = await request(app).patch(`/api/planning/events/${planification.body.id}`).set('Authorization', `Bearer ${session}`).send({ intervenantIds: [second.intervenantId] });
+      assert.equal(remplacement.status, 200, JSON.stringify(remplacement.body));
+      assert.equal(await voitLeDossier(premier.jeton, dossier.body.id), false);
+      assert.equal(await voitLeDossier(second.jeton, dossier.body.id), true);
+      const suppression = await request(app).delete(`/api/planning/events/${planification.body.id}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(suppression.status, 409, JSON.stringify(suppression.body));
+      assert.equal(await voitLeDossier(second.jeton, dossier.body.id), true);
+      const suppressionIntervenant = await request(app).delete(`/api/intervenants/${second.intervenantId}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(suppressionIntervenant.status, 409, JSON.stringify(suppressionIntervenant.body));
     });
 
     test('liste les interventions sans exposer les dossiers annulés par défaut', async () => {
