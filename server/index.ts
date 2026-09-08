@@ -692,6 +692,44 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
   }
 });
 
+app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const resultat = await prisma.$transaction(async (tx) => {
+      const contrat = await tx.contratMaintenance.findFirst({
+        where: { id: paramId(req), statut: 'ACTIF' },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
+      });
+      if (!contrat) return null;
+      const existante = await tx.intervention.findFirst({
+        where: { contratMaintenanceId: contrat.id, echeanceContrat: contrat.prochaineEcheance },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
+      });
+      if (existante) return { intervention: existante, creee: false };
+      const annee = new Date().getUTCFullYear();
+      const sequence = await tx.sequenceIntervention.upsert({
+        where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
+      });
+      const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+      const intervention = await tx.intervention.create({
+        data: {
+          reference, clientId: contrat.clientId, siteId: contrat.siteId, contratMaintenanceId: contrat.id,
+          echeanceContrat: contrat.prochaineEcheance, titre: `Maintenance préventive — ${contrat.titre}`,
+          description: `Intervention prévisionnelle issue du contrat. Durée prévue : ${contrat.dureePrevisionnelleMinutes} minutes.`,
+          dateSouhaitee: contrat.prochaineEcheance, createdById: req.user!.id,
+        },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
+      });
+      await journaliserIntervention(tx, req, 'CREATION_CONTRAT', intervention);
+      return { intervention, creee: true };
+    });
+    if (!resultat) return res.status(404).json({ error: 'Contrat de maintenance actif introuvable.' });
+    res.status(resultat.creee ? 201 : 200).json(decimalToNumber(resultat.intervention));
+  } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Une intervention existe déjà pour cette échéance.' });
+    res.status(500).json({ error: 'Génération de l’intervention prévisionnelle impossible.' });
+  }
+});
+
 app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
   try {
     const titre = String(req.body?.titre || '').trim();

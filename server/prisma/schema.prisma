@@ -411,6 +411,7 @@ model ContratMaintenance {
   createdById                 String?
   createdAt                   DateTime    @default(now())
   updatedAt                   DateTime    @updatedAt
+  interventions               Intervention[]
 
   @@index([clientId, statut])
   @@index([siteId])
@@ -436,6 +437,9 @@ model Intervention {
   contact        ClientContact? @relation("InterventionContact", fields: [contactId], references: [id], onDelete: Restrict)
   chantierId     String?
   chantier       Chantier? @relation(fields: [chantierId], references: [id], onDelete: Restrict)
+  contratMaintenanceId String?
+  contratMaintenance   ContratMaintenance? @relation(fields: [contratMaintenanceId], references: [id], onDelete: Restrict)
+  echeanceContrat      DateTime?
   titre          String
   description    String?
   priorite       String   @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
@@ -452,6 +456,8 @@ model Intervention {
   @@index([siteId])
   @@index([contactId])
   @@index([chantierId])
+  @@index([contratMaintenanceId])
+  @@unique([contratMaintenanceId, echeanceContrat])
   @@index([statut, dateSouhaitee])
 }
 

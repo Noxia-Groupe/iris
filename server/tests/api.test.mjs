@@ -1153,6 +1153,7 @@ if (!TEST_DATABASE_URL) {
     let session = '';
     let clientId = '';
     let siteId = '';
+    let contratId = '';
 
     before(async () => {
       session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
@@ -1171,11 +1172,23 @@ if (!TEST_DATABASE_URL) {
         clientId, siteId, titre: 'TEST Maintenance incendie', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026',
       });
       assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      contratId = contrat.body.id;
       assert.equal(contrat.body.statut, 'ACTIF');
       assert.equal(contrat.body.client.id, clientId);
       assert.equal(contrat.body.site.id, siteId);
       assert.equal(contrat.body.periodiciteMois, 6);
       assert.equal(contrat.body.dureePrevisionnelleMinutes, 120);
+    });
+
+    test('génère une seule intervention prévisionnelle par échéance de contrat', async () => {
+      const premier = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(premier.status, 201, JSON.stringify(premier.body));
+      assert.equal(premier.body.statut, 'A_PLANIFIER');
+      assert.equal(premier.body.client.id, clientId);
+      assert.equal(premier.body.site.id, siteId);
+      const second = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(second.status, 200, JSON.stringify(second.body));
+      assert.equal(second.body.id, premier.body.id);
     });
   });
 
