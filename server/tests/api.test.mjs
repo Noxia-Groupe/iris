@@ -42,6 +42,9 @@ if (!TEST_DATABASE_URL) {
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
     await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    const contratIds = (await prisma.contratMaintenance.findMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } }, select: { id: true } })).map((contrat) => contrat.id);
+    await prisma.journalSaisieChantier.deleteMany({ where: { contratMaintenanceId: { in: contratIds } } });
+    await prisma.contratMaintenance.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientContact.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.client.deleteMany({ where: { raisonSociale: { startsWith: 'TEST ' } } });
@@ -65,7 +68,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.user.deleteMany({ where: { email: { in: [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'contrat.conducteur@iris.test',
     ] } } });
   };
 
@@ -1145,6 +1148,137 @@ if (!TEST_DATABASE_URL) {
       assert.equal(creation.body.statut, 'A_PLANIFIER');
       assert.equal(creation.body.priorite, 'HAUTE');
       assert.equal(creation.body.client.id, clientId);
+    });
+  });
+
+  describe('Contrats de maintenance cyclique', () => {
+    let session = '';
+    let clientId = '';
+    let siteId = '';
+    let contratId = '';
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
+        .send({ raisonSociale: 'TEST Client contrat maintenance' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      clientId = client.body.id;
+      const site = await request(app).post(`/api/clients/${clientId}/sites`).set('Authorization', `Bearer ${session}`)
+        .send({ nom: 'TEST Site maintenance', adresse: '1 rue des Tests', codePostal: '75001', ville: 'Paris', estSiteIntervention: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      siteId = site.body.id;
+    });
+
+    test('crée un contrat actif rattaché à son client et son site', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Maintenance incendie', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      contratId = contrat.body.id;
+      assert.equal(contrat.body.statut, 'ACTIF');
+      assert.equal(contrat.body.client.id, clientId);
+      assert.equal(contrat.body.site.id, siteId);
+      assert.equal(contrat.body.periodiciteMois, 6);
+      assert.equal(contrat.body.dureePrevisionnelleMinutes, 120);
+    });
+
+    test('réserve toutes les routes contrat à l’administration et ferme les contournements', async () => {
+      const conducteur = await prisma.user.create({ data: { email: 'contrat.conducteur@iris.test', name: 'TEST Conducteur contrat', role: 'CONDUCTEUR_TRAVAUX' } });
+      const sessionConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const routesProtegees = [
+        request(app).get('/api/contrats-maintenance'),
+        request(app).post('/api/contrats-maintenance').send({ clientId, titre: 'TEST Contrat interdit', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026' }),
+        request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).send({ statut: 'SUSPENDU' }),
+        request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`),
+        request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`),
+      ];
+      for (const route of routesProtegees) assert.equal((await route.set('Authorization', `Bearer ${sessionConducteur}`)).status, 403);
+
+      const autreClient = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client contrat étranger' });
+      const siteEtranger = await request(app).post(`/api/clients/${autreClient.body.id}/sites`).set('Authorization', `Bearer ${session}`)
+        .send({ nom: 'TEST Site étranger contrat', adresse: '2 rue du Test', codePostal: '69001', ville: 'Lyon' });
+      const refusSite = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, siteId: siteEtranger.body.id, titre: 'TEST Contrat site étranger', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026' });
+      assert.equal(refusSite.status, 404, JSON.stringify(refusSite.body));
+
+      for (const invalide of [{ periodiciteMois: 0 }, { periodiciteMois: 61 }, { dureePrevisionnelleMinutes: 5 }, { dureePrevisionnelleMinutes: 2000 }, { titre: 'ab' }]) {
+        const refus = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`)
+          .send({ clientId, titre: 'TEST Contrat bornes', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026', ...invalide });
+        assert.equal(refus.status, 400, `${JSON.stringify(invalide)} → ${JSON.stringify(refus.body)}`);
+      }
+
+      const clientInactif = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client contrat inactif' });
+      await prisma.client.update({ where: { id: clientInactif.body.id }, data: { actif: false } });
+      const refusInactif = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`)
+        .send({ clientId: clientInactif.body.id, titre: 'TEST Contrat client inactif', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026' });
+      assert.equal(refusInactif.status, 404, JSON.stringify(refusInactif.body));
+    });
+
+    test('génère une seule intervention prévisionnelle par échéance de contrat', async () => {
+      const premier = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(premier.status, 201, JSON.stringify(premier.body));
+      assert.equal(premier.body.statut, 'A_PLANIFIER');
+      assert.equal(premier.body.client.id, clientId);
+      assert.equal(premier.body.site.id, siteId);
+      const second = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(second.status, 200, JSON.stringify(second.body));
+      assert.equal(second.body.id, premier.body.id);
+    });
+
+    test('clôture une échéance avant de préparer la suivante', async () => {
+      const intervention = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(intervention.status, 200, JSON.stringify(intervention.body));
+      // L'échéance ne bouge pas tant que son intervention n'est pas effectivement terminée.
+      const avancementPremature = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+      assert.equal(avancementPremature.status, 409, JSON.stringify(avancementPremature.body));
+      for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
+        const transition = await request(app).patch(`/api/interventions/${intervention.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      }
+      const avance = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+      assert.equal(avance.status, 200, JSON.stringify(avance.body));
+      assert.equal(new Date(avance.body.prochaineEcheance).toISOString().slice(0, 10), '2027-03-08');
+      const secondeTentative = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+      assert.equal(secondeTentative.status, 409, JSON.stringify(secondeTentative.body));
+    });
+
+    test('conserve le jour contractuel après un mois court', async () => {
+      const contrat31 = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Maintenance au 31', periodiciteMois: 1, dureePrevisionnelleMinutes: 60, dateDebut: '31-01-2027',
+      });
+      assert.equal(contrat31.status, 201, JSON.stringify(contrat31.body));
+      const echeanceFevrier = new Date('2027-02-28T00:00:00.000Z');
+      await prisma.contratMaintenance.update({ where: { id: contrat31.body.id }, data: { prochaineEcheance: echeanceFevrier } });
+      await prisma.intervention.create({ data: {
+        reference: `TEST-I-31-${Date.now()}`, clientId, siteId, contratMaintenanceId: contrat31.body.id, echeanceContrat: echeanceFevrier,
+        titre: 'TEST Intervention échéance courte', statut: 'TERMINEE', dateSouhaitee: echeanceFevrier,
+      } });
+      const avance = await request(app).post(`/api/contrats-maintenance/${contrat31.body.id}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+      assert.equal(avance.status, 200, JSON.stringify(avance.body));
+      assert.equal(new Date(avance.body.prochaineEcheance).toISOString().slice(0, 10), '2027-03-31');
+    });
+
+    test('suspend le contrat et bloque la génération tant qu’il n’est pas réactivé', async () => {
+      const suspension = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'SUSPENDU', motif: 'Client indisponible pendant travaux' });
+      assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+      assert.equal(suspension.body.statut, 'SUSPENDU');
+      const journal = await request(app).get(`/api/contrats-maintenance/${contratId}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body[0].action, 'SUSPENSION');
+      assert.equal(journal.body[0].motif, 'Client indisponible pendant travaux');
+      assert.ok(journal.body[0].auteurNom);
+      assert.ok(journal.body[0].createdAt);
+      const sansMotif = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE' });
+      assert.equal(sansMotif.status, 400, JSON.stringify(sansMotif.body));
+      const generationRefusee = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generationRefusee.status, 404, JSON.stringify(generationRefusee.body));
+      const reactivation = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      assert.equal(reactivation.body.statut, 'ACTIF');
+      const cloture = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'Fin contractuelle confirmée' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      const repriseInterdite = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
+      assert.equal(repriseInterdite.status, 409, JSON.stringify(repriseInterdite.body));
     });
   });
 
