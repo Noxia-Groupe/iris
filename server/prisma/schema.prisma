@@ -426,7 +426,8 @@ model FactureLigne {
   factureId      String
   facture        Facture @relation(fields: [factureId], references: [id], onDelete: Restrict)
   ordre          Int
-  designation    String
+  designation      String
+  nature           String   @default("PRESTATION") // PRESTATION | ARTICLE : ventilation comptable configurable
   quantite       Decimal @db.Decimal(12, 3)
   prixUnitaireHt Decimal @db.Decimal(12, 2)
   tauxTva        Decimal @db.Decimal(5, 2)

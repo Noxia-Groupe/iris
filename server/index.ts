@@ -690,10 +690,11 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
       const quantite = nombreDecimalNonNegatif(ligne?.quantite, 10);
       const prixUnitaireHt = nombreDecimalNonNegatif(ligne?.prixUnitaireHt, 10);
       const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3);
-      if (!designation || designation.length > 500 || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new Error('Ligne de facture invalide.');
+      const nature = String(ligne?.nature || 'PRESTATION');
+      if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new Error('Ligne de facture invalide.');
       const totalHt = centimes(quantite * prixUnitaireHt);
       const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
-      return { ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
+      return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
     });
     const totalHt = centimes(lignes.reduce((s: number, ligne: { totalHt: number }) => s + ligne.totalHt, 0));
     const totalTtc = centimes(lignes.reduce((s: number, ligne: { totalTtc: number }) => s + ligne.totalTtc, 0));
