@@ -766,15 +766,16 @@ const csvComptable = (v: unknown) => {
 };
 app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (_req, res) => {
   try {
-    const regles = await prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }); const r = new Map(regles.map(x => [x.cle, x]));
+    const [regles, reglesTva] = await Promise.all([prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }), prisma.regleTvaComptable.findMany({ include: { compte: true } })]); const r = new Map(regles.map(x => [x.cle, x])); const tvaParTaux = new Map(reglesTva.filter(x => x.compte.actif).map(x => [Number(x.taux), x.compte]));
     const manquantes = CLES_COMPTABLES.filter(cle => cle === 'JOURNAL_VENTES' ? !r.get(cle)?.journal : !r.get(cle)?.compte?.actif);
     if (manquantes.length) return res.status(409).json({ error: 'Export bloqué : paramétrage comptable incomplet.', manquantes });
     const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE'] } }, include: { client: true, lignes: true }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
-    const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit'];
-    for (const f of factures) { const date = f.dateEmission.toISOString().slice(0, 10).replace(/-/g, ''); const libelle = `Facture ${f.numero} — ${f.clientRaisonSociale}`;
+    const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
+    if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
+    const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit']; for (const f of factures) { const date = f.dateEmission.toISOString().slice(0, 10).replace(/-/g, ''); const libelle = `Facture ${f.numero} — ${f.clientRaisonSociale}`;
       lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, r.get('CLIENT')!.compte!.code, r.get('CLIENT')!.compte!.libelle, libelle, Number(f.totalTtc).toFixed(2), '0.00'].map(csvComptable).join(';'));
       for (const nature of ['PRESTATION', 'ARTICLE']) { const ht = f.lignes.filter(l => l.nature === nature).reduce((s, l) => s + Number(l.totalHt), 0); if (ht) { const cle = nature === 'PRESTATION' ? 'VENTE_PRESTATION' : 'VENTE_ARTICLE'; lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, r.get(cle)!.compte!.code, r.get(cle)!.compte!.libelle, libelle, '0.00', ht.toFixed(2)].map(csvComptable).join(';')); } }
-      const tva = Number(f.totalTva); if (tva) lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, r.get('TVA_COLLECTEE')!.compte!.code, r.get('TVA_COLLECTEE')!.compte!.libelle, libelle, '0.00', tva.toFixed(2)].map(csvComptable).join(';'));
+      for (const taux of [...new Set(f.lignes.map(l => Number(l.tauxTva)))]) { const tva = f.lignes.filter(l => Number(l.tauxTva) === taux).reduce((s, l) => s + (Number(l.totalTtc) - Number(l.totalHt)), 0); if (tva) { const compteTva = tvaParTaux.get(taux)!; lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, compteTva.code, compteTva.libelle, libelle, '0.00', tva.toFixed(2)].map(csvComptable).join(';')); } }
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="export-ventes.csv"'); res.send(`\uFEFF${lignes.join('\n')}\n`);
   } catch { res.status(500).json({ error: 'Export comptable impossible.' }); }
