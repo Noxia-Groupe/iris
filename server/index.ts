@@ -741,12 +741,18 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, 
   try { const cle = String(req.params.cle || ''); if (!CLES_COMPTABLES.includes(cle)) return res.status(400).json({ error: 'Règle comptable inconnue.' });
     const compteId = req.body?.compteId ? String(req.body.compteId) : null; const journal = req.body?.journal == null ? null : String(req.body.journal).trim() || null;
     if (cle === 'JOURNAL_VENTES' ? !journal : !compteId) return res.status(400).json({ error: 'Paramétrage de règle incomplet.' });
-    if (compteId && !await prisma.compteComptable.findFirst({ where: { id: compteId, actif: true } })) return res.status(404).json({ error: 'Compte comptable actif introuvable.' });
+    if (journal && !/^[A-Z0-9]{1,8}$/.test(journal)) return res.status(400).json({ error: 'Le code journal doit compter au plus 8 caractères alphanumériques majuscules.' });
+    const compte = compteId ? await prisma.compteComptable.findFirst({ where: { id: compteId, actif: true } }) : null;
+    if (compteId && !compte) return res.status(404).json({ error: 'Compte comptable actif introuvable.' });
+    if (compte && NATURES_ATTENDUES[cle] && !NATURES_ATTENDUES[cle].includes(compte.nature)) return res.status(400).json({ error: `Cette règle attend un compte de nature ${NATURES_ATTENDUES[cle].join(' ou ')}.` });
     const regle = await prisma.regleComptable.upsert({ where: { cle }, create: { cle, compteId, journal }, update: { compteId, journal }, include: { compte: true } }); res.json(regle);
   } catch { res.status(500).json({ error: 'Mise à jour du paramétrage impossible.' }); }
 });
 
-const csvComptable = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+const csvComptable = (v: unknown) => {
+  const texte = String(v ?? ''); const formule = /^[=+@\t\r]/.test(texte) || (texte.startsWith('-') && !Number.isFinite(Number(texte)));
+  return `"${(formule ? `'${texte}` : texte).replace(/"/g, '""')}"`;
+};
 app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (_req, res) => {
   try {
     const regles = await prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }); const r = new Map(regles.map(x => [x.cle, x]));
