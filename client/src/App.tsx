@@ -33,6 +33,7 @@ import { useModules } from './modules';
 // ADMIN, il doit donc figurer partout où l'ADMIN était jusqu'ici seul admis.
 const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
 const ROLES_INTERVENTIONS = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
+const ROLES_TRAVAUX = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE];
 
 const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX.Element, requiredRoles?: string[], excludedRole?: string }) => {
   const token = localStorage.getItem('token');
@@ -159,13 +160,13 @@ function App() {
         } />
         
         <Route path="/achats" element={
-          <PrivateRoute excludedRole="COMMERCIAL">
+          <PrivateRoute requiredRoles={ROLES_TRAVAUX}>
             <Achats />
           </PrivateRoute>
         } />
 
         <Route path="/heures" element={
-          <PrivateRoute excludedRole="COMMERCIAL">
+          <PrivateRoute requiredRoles={ROLES_TRAVAUX}>
             <Heures />
           </PrivateRoute>
         } />

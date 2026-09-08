@@ -37,6 +37,7 @@ const ChantierDetail = () => {
   const userStr = localStorage.getItem('user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
   const userRole = currentUser?.role || 'CONDUCTEUR_TRAVAUX';
+  const peutEcrireTravaux = isAdminRole(userRole) || userRole === 'CONDUCTEUR_TRAVAUX' || userRole === 'RESPONSABLE';
 
   // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
   // de société n'est écrit dans l'interface.
@@ -301,7 +302,7 @@ const ChantierDetail = () => {
         fetchChantier();
       } else {
         const d = await res.json();
-        alert(d.error || "Erreur lors de la suppression de l'achat.");
+        alert(d.error || "Erreur lors de l’archivage de l'achat.");
       }
     } catch (e) {
       alert('Impossible de joindre le serveur.');
@@ -320,7 +321,7 @@ const ChantierDetail = () => {
         fetchChantier();
       } else {
         const d = await res.json();
-        alert(d.error || 'Erreur lors de la suppression du pointage.');
+        alert(d.error || 'Erreur lors de l’archivage du pointage.');
       }
     } catch (e) {
       alert('Impossible de joindre le serveur.');
@@ -906,7 +907,7 @@ const ChantierDetail = () => {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="font-bold text-gray-800 whitespace-nowrap">{fmtEuro(a.montantHT)}</div>
-                        {userRole !== 'COMMERCIAL' && (
+                        {peutEcrireTravaux && (
                           <>
                             <button
                               onClick={() => startEditAchat(a.id)}
@@ -919,7 +920,7 @@ const ChantierDetail = () => {
                               onClick={() => handleDeleteAchat(a.id)}
                               disabled={savingAchat}
                               className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Supprimer cet achat"
+                              title="Archiver cet achat"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1036,7 +1037,7 @@ const ChantierDetail = () => {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="font-bold text-gray-800 whitespace-nowrap">{fmtHeures(p.nbrHeures)}</div>
-                        {userRole !== 'COMMERCIAL' && (
+                        {peutEcrireTravaux && (
                           <>
                             <button
                               onClick={() => startEditPointage(p.id)}
@@ -1049,7 +1050,7 @@ const ChantierDetail = () => {
                               onClick={() => handleDeletePointage(p.id)}
                               disabled={savingPointage}
                               className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Supprimer ce pointage"
+                              title="Archiver ce pointage"
                             >
                               <Trash2 size={14} />
                             </button>

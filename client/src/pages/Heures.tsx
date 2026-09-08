@@ -43,7 +43,10 @@ const Heures = () => {
       .reduce((acc, h) => acc + h.nbrHeures, 0);
   };
 
-  const todayDate = new Date().toISOString().split('T')[0];
+  const todayDate = () => {
+    const aujourdHui = new Date();
+    return `${String(aujourdHui.getDate()).padStart(2, '0')}-${String(aujourdHui.getMonth() + 1).padStart(2, '0')}-${aujourdHui.getFullYear()}`;
+  };
 
   // Un chantier terminé ne peut plus recevoir d'heures : il ne figure pas dans le
   // sélecteur, pour personne (les admins corrigent l'historique depuis la fiche du
@@ -86,7 +89,7 @@ const Heures = () => {
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           <div className="flex flex-col">
             <label className="text-sm font-semibold text-gray-600 mb-1">Date</label>
-            <input required type="date" name="date" defaultValue={todayDate} className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" />
+            <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" name="date" defaultValue={todayDate()} placeholder="JJ-MM-AAAA" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" />
           </div>
           
           <div className="flex flex-col">
@@ -143,7 +146,7 @@ const Heures = () => {
             <div key={h.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2">
               <div className="flex justify-between items-start border-b border-gray-50 pb-2">
                 <span className="font-bold text-gray-800">{h.chantier?.nom}</span>
-                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{new Date(h.date).toLocaleDateString()}</span>
+                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{new Date(h.date).toLocaleDateString('fr-FR')}</span>
               </div>
               <div className="flex justify-between items-center mt-1">
                 <div className="flex items-center gap-2">
@@ -178,7 +181,7 @@ const Heures = () => {
             <tbody className="divide-y divide-gray-100">
               {heures.slice().reverse().map(h => (
                 <tr key={h.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 text-sm text-gray-600">{new Date(h.date).toLocaleDateString()}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{new Date(h.date).toLocaleDateString('fr-FR')}</td>
                   <td className="px-6 py-4 font-semibold text-gray-800">{h.chantier?.nom}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{h.intervenant?.nom}</td>
                   <td className="px-6 py-4 font-bold text-primary">{h.nbrHeures}h</td>
