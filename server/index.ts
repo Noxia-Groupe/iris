@@ -684,6 +684,7 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const dateEcheance = dateIsoStricte(req.body?.dateEcheance);
     if (!dateEmission || !dateEcheance) return res.status(400).json({ error: 'Les dates doivent être valides au format JJ-MM-AAAA.' });
     if (dateEcheance < dateEmission) return res.status(400).json({ error: 'L’échéance ne peut pas précéder la date d’émission.' });
+    if (new Date(dateEmission) > new Date()) return res.status(400).json({ error: "La date d’émission ne peut pas être future." });
     const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
     const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
@@ -776,6 +777,8 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
       const annee = facture.dateEmission.getUTCFullYear();
+      const plusRecente = await tx.sequenceFacture.findFirst({ orderBy: { annee: 'desc' }, select: { annee: true } });
+      if (plusRecente && annee < plusRecente.annee) return { erreur: 'CHRONOLOGY' as const };
       const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
       const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
       const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
