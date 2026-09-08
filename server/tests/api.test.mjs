@@ -1204,6 +1204,17 @@ if (!TEST_DATABASE_URL) {
       const secondeTentative = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
       assert.equal(secondeTentative.status, 409, JSON.stringify(secondeTentative.body));
     });
+
+    test('suspend le contrat et bloque la génération tant qu’il n’est pas réactivé', async () => {
+      const suspension = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'SUSPENDU' });
+      assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+      assert.equal(suspension.body.statut, 'SUSPENDU');
+      const generationRefusee = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generationRefusee.status, 404, JSON.stringify(generationRefusee.body));
+      const reactivation = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      assert.equal(reactivation.body.statut, 'ACTIF');
+    });
   });
 
   describe('Identité de la société', () => {

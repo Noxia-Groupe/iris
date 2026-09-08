@@ -692,6 +692,15 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
   }
 });
 
+app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, async (req, res) => {
+  const statut = String(req.body?.statut || '');
+  if (!['ACTIF', 'SUSPENDU', 'TERMINE'].includes(statut)) return res.status(400).json({ error: 'Statut de contrat invalide.' });
+  const contrat = await prisma.contratMaintenance.updateMany({ where: { id: paramId(req) }, data: { statut } });
+  if (contrat.count === 0) return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
+  const maj = await prisma.contratMaintenance.findUnique({ where: { id: paramId(req) } });
+  res.json(decimalToNumber(maj));
+});
+
 app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
