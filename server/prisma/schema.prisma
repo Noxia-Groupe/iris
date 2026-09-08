@@ -454,6 +454,7 @@ model CompteComptable {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   regles    RegleComptable[]
+  reglesTva RegleTvaComptable[]
 }
 
 model RegleComptable {
@@ -463,6 +464,17 @@ model RegleComptable {
   compte    CompteComptable? @relation(fields: [compteId], references: [id], onDelete: Restrict)
   journal   String?
   updatedAt DateTime         @updatedAt
+
+  @@index([compteId])
+}
+
+// Une TVA est ventilée par taux : indispensable à la déclaration CA3.
+model RegleTvaComptable {
+  id       String           @id @default(uuid())
+  taux     Decimal          @unique @db.Decimal(5, 2)
+  compteId String
+  compte   CompteComptable  @relation(fields: [compteId], references: [id], onDelete: Restrict)
+  updatedAt DateTime        @updatedAt
 
   @@index([compteId])
 }
