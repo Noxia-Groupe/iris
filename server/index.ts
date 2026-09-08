@@ -750,6 +750,16 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, 
   } catch { res.status(500).json({ error: 'Mise à jour du paramétrage impossible.' }); }
 });
 
+app.put('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req, res) => {
+  try { const taux = nombreDecimalNonNegatif(req.params.taux, 3, true); const compteId = String(req.body?.compteId || '');
+    if (taux === null || taux > 100) return res.status(400).json({ error: 'Taux de TVA invalide.' });
+    const compte = await prisma.compteComptable.findFirst({ where: { id: compteId, actif: true } });
+    if (!compte) return res.status(404).json({ error: 'Compte TVA actif introuvable.' });
+    if (compte.nature !== 'TVA') return res.status(400).json({ error: 'Une règle TVA attend un compte de nature TVA.' });
+    res.json(await prisma.regleTvaComptable.upsert({ where: { taux }, create: { taux, compteId }, update: { compteId }, include: { compte: true } }));
+  } catch { res.status(500).json({ error: 'Mise à jour de la règle TVA impossible.' }); }
+});
+
 const csvComptable = (v: unknown) => {
   const texte = String(v ?? ''); const formule = /^[=+@\t\r]/.test(texte) || (texte.startsWith('-') && !Number.isFinite(Number(texte)));
   return `"${(formule ? `'${texte}` : texte).replace(/"/g, '""')}"`;
