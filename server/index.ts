@@ -687,9 +687,9 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });
     const lignes = lignesBrutes.map((ligne: any, ordre: number) => {
       const designation = String(ligne?.designation || '').trim();
-      const quantite = nombreDecimalNonNegatif(ligne?.quantite, 3);
-      const prixUnitaireHt = nombreDecimalNonNegatif(ligne?.prixUnitaireHt, 2);
-      const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 2);
+      const quantite = nombreDecimalNonNegatif(ligne?.quantite, 10);
+      const prixUnitaireHt = nombreDecimalNonNegatif(ligne?.prixUnitaireHt, 10);
+      const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3);
       if (!designation || designation.length > 500 || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new Error('Ligne de facture invalide.');
       const totalHt = centimes(quantite * prixUnitaireHt);
       const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
