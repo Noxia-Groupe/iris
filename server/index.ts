@@ -692,6 +692,30 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
   }
 });
 
+app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const resultat = await prisma.$transaction(async (tx) => {
+      const contrat = await tx.contratMaintenance.findFirst({ where: { id: paramId(req), statut: 'ACTIF' } });
+      if (!contrat) return { erreur: 'NOT_FOUND' as const };
+      const intervention = await tx.intervention.findFirst({
+        where: { contratMaintenanceId: contrat.id, echeanceContrat: contrat.prochaineEcheance },
+        select: { id: true, statut: true },
+      });
+      if (!intervention || intervention.statut !== 'TERMINEE') return { erreur: 'NOT_READY' as const };
+      const prochaineEcheance = ajouterMoisUTC(contrat.prochaineEcheance, contrat.periodiciteMois);
+      const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { prochaineEcheance } });
+      return { contrat: maj };
+    });
+    if ('erreur' in resultat) {
+      if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Contrat de maintenance actif introuvable.' });
+      return res.status(409).json({ error: 'L’échéance ne peut avancer qu’après la fin de son intervention.' });
+    }
+    res.json(decimalToNumber(resultat.contrat));
+  } catch (error) {
+    res.status(500).json({ error: 'Mise à jour de l’échéance impossible.' });
+  }
+});
+
 app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
@@ -2260,6 +2284,15 @@ function dateIsoStricte(value: unknown): string | null {
   const date = new Date(Date.UTC(annee, mois - 1, jour));
   if (date.getUTCFullYear() !== annee || date.getUTCMonth() !== mois - 1 || date.getUTCDate() !== jour) return null;
   return date.toISOString();
+}
+
+function ajouterMoisUTC(date: Date, nombreDeMois: number): Date {
+  // On conserve le jour d'échéance autant que le mois cible le permet (31 janvier → 28 février).
+  const jour = date.getUTCDate();
+  const cible = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + nombreDeMois, 1));
+  const dernierJour = new Date(Date.UTC(cible.getUTCFullYear(), cible.getUTCMonth() + 1, 0)).getUTCDate();
+  cible.setUTCDate(Math.min(jour, dernierJour));
+  return cible;
 }
 
 function valeurJournal(value: unknown): Record<string, unknown> {

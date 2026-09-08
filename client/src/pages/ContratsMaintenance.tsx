@@ -70,6 +70,15 @@ export default function ContratsMaintenance() {
     setSucces(res.status === 201 ? `Intervention ${data.reference} créée à planifier.` : `L’intervention ${data.reference} existe déjà pour cette échéance.`);
   };
 
+  const avancerEcheance = async (contrat: Contrat) => {
+    setErreur(''); setSucces('');
+    const res = await apiFetch(`/contrats-maintenance/${contrat.id}/avancer-echeance`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) return setErreur(data.error || 'Avancement de l’échéance impossible.');
+    setSucces(`Nouvelle échéance préparée pour le ${formatDate(data.prochaineEcheance)}.`);
+    await charger();
+  };
+
   return <div className="space-y-6">
     <div className="flex items-start justify-between gap-4">
       <div><h1 className="text-2xl font-bold text-gray-900">Contrats de maintenance</h1><p className="text-gray-500">Les échéances contractuelles génèrent des dossiers d’intervention à planifier. Le planning reste une projection.</p></div>
@@ -85,7 +94,7 @@ export default function ContratsMaintenance() {
       <div className="grid gap-3 sm:grid-cols-3"><input required name="dateDebut" defaultValue={dateFrancaiseDuJour()} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Début (JJ-MM-AAAA)" /><input required name="periodiciteMois" type="number" min="1" max="60" defaultValue="12" className="form-input" placeholder="Périodicité (mois)" /><input required name="dureePrevisionnelleMinutes" type="number" min="15" max="1440" defaultValue="60" className="form-input" placeholder="Durée (minutes)" /></div>
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer le contrat</button><button className="btn btn-secondary" type="button" onClick={() => { setFormulaireOuvert(false); setClientSelectionne(null); }}>Annuler</button></div>
     </form>}
-    {chargement ? <p className="text-gray-500">Chargement…</p> : contrats.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucun contrat de maintenance.</div> : <div className="grid gap-3">{contrats.map((contrat) => <article key={contrat.id} className="rounded-xl border bg-white p-5 shadow-sm"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div><h2 className="font-semibold text-gray-900">{contrat.titre}</h2><p className="mt-1 text-sm text-gray-600">{contrat.client.raisonSociale}{contrat.site ? ` · ${contrat.site.nom} (${contrat.site.ville})` : ''}</p><p className="mt-2 text-sm text-gray-500">Début : {formatDate(contrat.dateDebut)} · Échéance : {formatDate(contrat.prochaineEcheance)} · Tous les {contrat.periodiciteMois} mois · {contrat.dureePrevisionnelleMinutes} min prévues</p></div><div className="flex items-center gap-3"><span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">{libelleStatut[contrat.statut] || contrat.statut}</span>{contrat.statut === 'ACTIF' && <button className="btn btn-secondary flex items-center gap-2" onClick={() => void generer(contrat)}><CalendarPlus size={17} /> Générer l’intervention</button>}</div></div></article>)}</div>}
+    {chargement ? <p className="text-gray-500">Chargement…</p> : contrats.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucun contrat de maintenance.</div> : <div className="grid gap-3">{contrats.map((contrat) => <article key={contrat.id} className="rounded-xl border bg-white p-5 shadow-sm"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div><h2 className="font-semibold text-gray-900">{contrat.titre}</h2><p className="mt-1 text-sm text-gray-600">{contrat.client.raisonSociale}{contrat.site ? ` · ${contrat.site.nom} (${contrat.site.ville})` : ''}</p><p className="mt-2 text-sm text-gray-500">Début : {formatDate(contrat.dateDebut)} · Échéance : {formatDate(contrat.prochaineEcheance)} · Tous les {contrat.periodiciteMois} mois · {contrat.dureePrevisionnelleMinutes} min prévues</p></div><div className="flex items-center gap-3"><span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">{libelleStatut[contrat.statut] || contrat.statut}</span>{contrat.statut === 'ACTIF' && <><button className="btn btn-secondary flex items-center gap-2" onClick={() => void generer(contrat)}><CalendarPlus size={17} /> Générer l’intervention</button><button className="btn btn-secondary flex items-center gap-2" onClick={() => void avancerEcheance(contrat)}><RefreshCw size={17} /> Échéance suivante</button></>}</div></div></article>)}</div>}
     <button className="text-sm text-gray-500 underline" onClick={() => void charger()}><RefreshCw className="mr-1 inline" size={14} />Actualiser la liste</button>
   </div>;
 }

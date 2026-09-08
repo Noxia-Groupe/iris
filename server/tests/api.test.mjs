@@ -1190,6 +1190,20 @@ if (!TEST_DATABASE_URL) {
       assert.equal(second.status, 200, JSON.stringify(second.body));
       assert.equal(second.body.id, premier.body.id);
     });
+
+    test('clôture une échéance avant de préparer la suivante', async () => {
+      const intervention = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(intervention.status, 200, JSON.stringify(intervention.body));
+      for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
+        const transition = await request(app).patch(`/api/interventions/${intervention.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      }
+      const avance = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+      assert.equal(avance.status, 200, JSON.stringify(avance.body));
+      assert.equal(new Date(avance.body.prochaineEcheance).toISOString().slice(0, 10), '2027-03-08');
+      const secondeTentative = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+      assert.equal(secondeTentative.status, 409, JSON.stringify(secondeTentative.body));
+    });
   });
 
   describe('Identité de la société', () => {
