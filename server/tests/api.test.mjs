@@ -42,6 +42,8 @@ if (!TEST_DATABASE_URL) {
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
     await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    const contratIds = (await prisma.contratMaintenance.findMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } }, select: { id: true } })).map((contrat) => contrat.id);
+    await prisma.journalSaisieChantier.deleteMany({ where: { contratMaintenanceId: { in: contratIds } } });
     await prisma.contratMaintenance.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientContact.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
@@ -1240,15 +1242,43 @@ if (!TEST_DATABASE_URL) {
       assert.equal(secondeTentative.status, 409, JSON.stringify(secondeTentative.body));
     });
 
+    test('conserve le jour contractuel après un mois court', async () => {
+      const contrat31 = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Maintenance au 31', periodiciteMois: 1, dureePrevisionnelleMinutes: 60, dateDebut: '31-01-2027',
+      });
+      assert.equal(contrat31.status, 201, JSON.stringify(contrat31.body));
+      const echeanceFevrier = new Date('2027-02-28T00:00:00.000Z');
+      await prisma.contratMaintenance.update({ where: { id: contrat31.body.id }, data: { prochaineEcheance: echeanceFevrier } });
+      await prisma.intervention.create({ data: {
+        reference: `TEST-I-31-${Date.now()}`, clientId, siteId, contratMaintenanceId: contrat31.body.id, echeanceContrat: echeanceFevrier,
+        titre: 'TEST Intervention échéance courte', statut: 'TERMINEE', dateSouhaitee: echeanceFevrier,
+      } });
+      const avance = await request(app).post(`/api/contrats-maintenance/${contrat31.body.id}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+      assert.equal(avance.status, 200, JSON.stringify(avance.body));
+      assert.equal(new Date(avance.body.prochaineEcheance).toISOString().slice(0, 10), '2027-03-31');
+    });
+
     test('suspend le contrat et bloque la génération tant qu’il n’est pas réactivé', async () => {
-      const suspension = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'SUSPENDU' });
+      const suspension = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'SUSPENDU', motif: 'Client indisponible pendant travaux' });
       assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
       assert.equal(suspension.body.statut, 'SUSPENDU');
+      const journal = await request(app).get(`/api/contrats-maintenance/${contratId}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body[0].action, 'SUSPENSION');
+      assert.equal(journal.body[0].motif, 'Client indisponible pendant travaux');
+      assert.ok(journal.body[0].auteurNom);
+      assert.ok(journal.body[0].createdAt);
+      const sansMotif = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE' });
+      assert.equal(sansMotif.status, 400, JSON.stringify(sansMotif.body));
       const generationRefusee = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(generationRefusee.status, 404, JSON.stringify(generationRefusee.body));
       const reactivation = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
       assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
       assert.equal(reactivation.body.statut, 'ACTIF');
+      const cloture = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'Fin contractuelle confirmée' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      const repriseInterdite = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
+      assert.equal(repriseInterdite.status, 409, JSON.stringify(repriseInterdite.body));
     });
   });
 

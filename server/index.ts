@@ -653,6 +653,18 @@ async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRe
   } });
 }
 
+async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE', contrat: unknown, avant: unknown, motif?: string) {
+  const user = req.user!;
+  const cibleId = String((contrat as { id: string }).id);
+  await tx.journalSaisieChantier.create({ data: {
+    chantierId: null, interventionId: null, contratMaintenanceId: cibleId, cible: 'CONTRAT', cibleId, action,
+    auteurId: user.id, auteurNom: user.name,
+    avant: valeurJournal(avant) as Prisma.InputJsonValue,
+    apres: valeurJournal(contrat) as Prisma.InputJsonValue,
+    motif: motif || null,
+  } });
+}
+
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
 // Contrats de maintenance : le contrat est le document source du cycle. Le planning ne sera
@@ -663,6 +675,17 @@ app.get('/api/contrats-maintenance', requireAuth, requireAdmin, async (_req, res
     orderBy: [{ prochaineEcheance: 'asc' }, { createdAt: 'desc' }],
   });
   res.json(decimalToNumber(contrats));
+});
+
+app.get('/api/contrats-maintenance/:id/journal-saisies', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const contrat = await prisma.contratMaintenance.findUnique({ where: { id: paramId(req) }, select: { id: true } });
+    if (!contrat) return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
+    const entrees = await prisma.journalSaisieChantier.findMany({ where: { contratMaintenanceId: contrat.id }, orderBy: { createdAt: 'desc' } });
+    res.json(decimalToNumber(entrees));
+  } catch (error) {
+    res.status(500).json({ error: 'Lecture du journal du contrat impossible.' });
+  }
 });
 
 app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
@@ -694,13 +717,32 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
   }
 });
 
-app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, async (req, res) => {
-  const statut = String(req.body?.statut || '');
-  if (!['ACTIF', 'SUSPENDU', 'TERMINE'].includes(statut)) return res.status(400).json({ error: 'Statut de contrat invalide.' });
-  const contrat = await prisma.contratMaintenance.updateMany({ where: { id: paramId(req) }, data: { statut } });
-  if (contrat.count === 0) return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
-  const maj = await prisma.contratMaintenance.findUnique({ where: { id: paramId(req) } });
-  res.json(decimalToNumber(maj));
+app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const statut = String(req.body?.statut || '');
+    const motif = typeof req.body?.motif === 'string' ? req.body.motif.trim() : '';
+    if (!['ACTIF', 'SUSPENDU', 'TERMINE'].includes(statut)) return res.status(400).json({ error: 'Statut de contrat invalide.' });
+    if (['SUSPENDU', 'TERMINE'].includes(statut) && motif.length < 3) return res.status(400).json({ error: 'Un motif d’au moins 3 caractères est obligatoire.' });
+    const resultat = await prisma.$transaction(async (tx) => {
+      const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
+      if (!contrat) return { erreur: 'NOT_FOUND' as const };
+      if (contrat.statut === 'TERMINE') return { erreur: 'TERMINE' as const };
+      const autorise = (contrat.statut === 'ACTIF' && ['SUSPENDU', 'TERMINE'].includes(statut)) || (contrat.statut === 'SUSPENDU' && ['ACTIF', 'TERMINE'].includes(statut));
+      if (!autorise) return { erreur: 'TRANSITION' as const };
+      const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { statut } });
+      const action = statut === 'SUSPENDU' ? 'SUSPENSION' : statut === 'TERMINE' ? 'CLOTURE' : 'REACTIVATION';
+      await journaliserContrat(tx, req, action, maj, contrat, motif || undefined);
+      return { contrat: maj };
+    });
+    if ('erreur' in resultat) {
+      if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
+      if (resultat.erreur === 'TERMINE') return res.status(409).json({ error: 'Un contrat clos ne se rouvre pas : signez un nouveau contrat.' });
+      return res.status(409).json({ error: 'Transition de statut de contrat incohérente.' });
+    }
+    res.json(decimalToNumber(resultat.contrat));
+  } catch (error) {
+    res.status(500).json({ error: 'Mise à jour du statut du contrat impossible.' });
+  }
 });
 
 app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req, res) => {
@@ -713,7 +755,7 @@ app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireA
         select: { id: true, statut: true },
       });
       if (!intervention || intervention.statut !== 'TERMINEE') return { erreur: 'NOT_READY' as const };
-      const prochaineEcheance = ajouterMoisUTC(contrat.prochaineEcheance, contrat.periodiciteMois);
+      const prochaineEcheance = echeanceSuivante(contrat.dateDebut, contrat.prochaineEcheance, contrat.periodiciteMois);
       const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { prochaineEcheance } });
       return { contrat: maj };
     });
@@ -2304,6 +2346,15 @@ function ajouterMoisUTC(date: Date, nombreDeMois: number): Date {
   const dernierJour = new Date(Date.UTC(cible.getUTCFullYear(), cible.getUTCMonth() + 1, 0)).getUTCDate();
   cible.setUTCDate(Math.min(jour, dernierJour));
   return cible;
+}
+
+function echeanceSuivante(dateDebut: Date, echeanceCourante: Date, periodiciteMois: number): Date {
+  // Le jour de la visite est contractuel : repartir de l'origine restaure le 31 (ou le 29 février)
+  // dès que le mois cible le permet, au lieu de le raboter définitivement après un mois court.
+  const moisEcoules = (echeanceCourante.getUTCFullYear() - dateDebut.getUTCFullYear()) * 12
+    + (echeanceCourante.getUTCMonth() - dateDebut.getUTCMonth());
+  const periodesEcoulees = Math.max(0, Math.round(moisEcoules / periodiciteMois));
+  return ajouterMoisUTC(dateDebut, (periodesEcoulees + 1) * periodiciteMois);
 }
 
 function valeurJournal(value: unknown): Record<string, unknown> {
