@@ -43,7 +43,10 @@ const Heures = () => {
       .reduce((acc, h) => acc + h.nbrHeures, 0);
   };
 
-  const todayDate = new Date().toISOString().split('T')[0];
+  const todayDate = () => {
+    const aujourdHui = new Date();
+    return `${String(aujourdHui.getDate()).padStart(2, '0')}-${String(aujourdHui.getMonth() + 1).padStart(2, '0')}-${aujourdHui.getFullYear()}`;
+  };
 
   // Un chantier terminé ne peut plus recevoir d'heures : il ne figure pas dans le
   // sélecteur, pour personne (les admins corrigent l'historique depuis la fiche du
@@ -86,7 +89,7 @@ const Heures = () => {
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           <div className="flex flex-col">
             <label className="text-sm font-semibold text-gray-600 mb-1">Date</label>
-            <input required type="date" name="date" defaultValue={todayDate} className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" />
+            <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" name="date" defaultValue={todayDate()} placeholder="JJ-MM-AAAA" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" />
           </div>
           
           <div className="flex flex-col">
