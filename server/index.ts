@@ -704,6 +704,28 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
   }
 });
 
+app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const resultat = await prisma.$transaction(async (tx) => {
+      const facture = await tx.facture.findUnique({ where: { id: paramId(req) } });
+      if (!facture) return { erreur: 'NOT_FOUND' as const };
+      if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
+      const annee = facture.dateEmission.getUTCFullYear();
+      const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
+      const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
+      const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
+      const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+      const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date() }, include: factureInclude });
+      return { facture: maj };
+    });
+    if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seul un brouillon peut être émis.' });
+    res.json(decimalToNumber(resultat.facture));
+  } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Numérotation de facture déjà attribuée, veuillez réessayer.' });
+    res.status(500).json({ error: 'Émission de facture impossible.' });
+  }
+});
+
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
 // Contrats de maintenance : le contrat est le document source du cycle. Le planning ne sera
