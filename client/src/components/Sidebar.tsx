@@ -68,6 +68,13 @@ const Sidebar = () => {
         )}
 
         {isAdmin && (
+          <NavLink to="/factures" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <FileText size={20} />
+            Factures
+          </NavLink>
+        )}
+
+        {isAdmin && (
           <NavLink to="/clients" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <Building2 size={20} />
             Clients
