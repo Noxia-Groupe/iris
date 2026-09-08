@@ -716,6 +716,19 @@ app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res
     const compte = await prisma.compteComptable.create({ data: { code, libelle, nature } }); res.status(201).json(compte);
   } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte existe déjà.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
 });
+app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req, res) => {
+  const lignes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
+  if (!lignes.length || lignes.length > 5000) return res.status(400).json({ error: 'Le plan doit contenir entre 1 et 5 000 lignes.' });
+  const vus = new Set<string>(); const erreurs: { ligne: number; erreur: string }[] = [];
+  const comptes = lignes.map((ligne: any, index: number) => {
+    const code = String(ligne?.code || '').trim(), libelle = String(ligne?.libelle || '').trim(), nature = String(ligne?.nature || '');
+    if (!/^\d{3,12}$/.test(code) || !libelle || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) erreurs.push({ ligne: index + 1, erreur: 'Code, libellé ou nature invalide.' });
+    if (vus.has(code)) erreurs.push({ ligne: index + 1, erreur: 'Code dupliqué dans le fichier.' }); vus.add(code); return { code, libelle, nature };
+  });
+  if (erreurs.length) return res.status(400).json({ error: 'Import refusé : corrigez les lignes signalées.', erreurs });
+  try { const resultat = await prisma.compteComptable.createMany({ data: comptes, skipDuplicates: true }); res.status(201).json({ importes: resultat.count, ignores: comptes.length - resultat.count }); }
+  catch { res.status(500).json({ error: 'Import du plan comptable impossible.' }); }
+});
 app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, res) => {
   try { const cle = String(req.params.cle || ''); if (!CLES_COMPTABLES.includes(cle)) return res.status(400).json({ error: 'Règle comptable inconnue.' });
     const compteId = req.body?.compteId ? String(req.body.compteId) : null; const journal = req.body?.journal == null ? null : String(req.body.journal).trim() || null;
