@@ -37,6 +37,8 @@ if (!TEST_DATABASE_URL) {
     await prisma.devis.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Le parc dépend à la fois du client/site et du catalogue : il part donc en premier.
     await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    // Les attestations dépendent des rapports ; elles partent avant les interventions.
+    await prisma.interventionSignature.deleteMany({ where: { rapport: { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } } } });
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
     await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
@@ -63,7 +65,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.user.deleteMany({ where: { email: { in: [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test',
     ] } } });
   };
 
@@ -1014,6 +1016,70 @@ if (!TEST_DATABASE_URL) {
       const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
         .send({ clientId, siteId: siteEtranger.id, titre: 'TEST Cloisonnement client SAV' });
       assert.equal(creation.status, 404, JSON.stringify(creation.body));
+    });
+
+    test('rattache un chantier appartenant au même client que le dossier SAV', async () => {
+      const client = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV lié', client: client.raisonSociale, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, chantierId: chantier.id, titre: 'TEST Intervention liée à affaire' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.equal(creation.body.chantier.id, chantier.id);
+    });
+
+    test('refuse un chantier d’un autre client', async () => {
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV étranger', client: 'TEST Autre client SAV', dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, chantierId: chantier.id, titre: 'TEST Cloisonnement affaire SAV' });
+      assert.equal(creation.status, 404, JSON.stringify(creation.body));
+    });
+
+    test('permet au technicien affecté de consigner un compte rendu terrain', async () => {
+      const technicien = await compteTechnicienSav('sav.rapport@iris.test', 'TEST Intervenant SAV rapport');
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, titre: 'TEST Rapport terrain SAV' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      await prisma.interventionAffectation.create({ data: { interventionId: dossier.body.id, intervenantId: technicien.intervenantId } });
+      await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'PLANIFIEE' });
+      await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'EN_COURS' });
+      const rapport = await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`)
+        .send({ contenu: 'TEST Intervention réalisée : détecteur repositionné et essai concluant.' });
+      assert.equal(rapport.status, 201, JSON.stringify(rapport.body));
+      assert.equal(rapport.body.auteurId, undefined); // l’API n’expose pas l’identifiant interne de l’auteur
+      assert.equal(rapport.body.contenu, 'TEST Intervention réalisée : détecteur repositionné et essai concluant.');
+      const intrus = await compteTechnicienSav('sav.intrus@iris.test', 'TEST Intervenant SAV intrus');
+      assert.equal(await voitLeDossier(intrus.jeton, dossier.body.id), false);
+      assert.equal((await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${intrus.jeton}`).send({ contenu: 'TEST Rapport hors périmètre.' })).status, 404);
+      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${intrus.jeton}`).send({ signataire: 'TEST Usurpation', confirme: true })).status, 404);
+      // La signature demeure possible après clôture : le client peut signer après le départ du technicien.
+      assert.equal((await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${technicien.jeton}`).send({ statut: 'TERMINEE' })).status, 200);
+      const signature = await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
+        .send({ signataire: 'TEST Client signataire', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.match(signature.body.empreinte, /^[a-f0-9]{64}$/);
+      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`).send({ signataire: 'TEST Client signataire', confirme: true })).status, 409);
+      const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`);
+      const relu = liste.body.find((item) => item.id === dossier.body.id);
+      assert.equal(relu.rapports.length, 1);
+      assert.equal(relu.rapports[0].contenu, rapport.body.contenu);
+      assert.equal(relu.rapports[0].signature.signataire, 'TEST Client signataire');
+    });
+
+    test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {
+      const conducteur = await prisma.user.create({ data: { email: 'sav.conducteur@iris.test', name: 'TEST Conducteur SAV', role: 'CONDUCTEUR_TRAVAUX' } });
+      const responsable = await prisma.user.create({ data: { email: 'sav.responsable@iris.test', name: 'TEST Responsable SAV', role: 'RESPONSABLE' } });
+      await prisma.user.update({ where: { id: conducteur.id }, data: { responsableHierarchiqueId: responsable.id } });
+      const client = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier périmètre SAV', client: client.raisonSociale, dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
+        .send({ clientId, chantierId: chantier.id, titre: 'TEST Intervention périmètre équipe' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      const sessionConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const sessionResponsable = jwt.sign({ id: responsable.id }, process.env.JWT_SECRET);
+      assert.equal(await voitLeDossier(sessionConducteur, dossier.body.id), true);
+      assert.equal(await voitLeDossier(sessionResponsable, dossier.body.id), true);
+      const tiers = await prisma.user.create({ data: { email: 'sav.tiers@iris.test', name: 'TEST Conducteur SAV tiers', role: 'CONDUCTEUR_TRAVAUX' } });
+      assert.equal(await voitLeDossier(jwt.sign({ id: tiers.id }, process.env.JWT_SECRET), dossier.body.id), false);
     });
 
     test('la projection planning ouvre et referme l’accès au dossier SAV', async () => {

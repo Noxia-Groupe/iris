@@ -26,12 +26,13 @@ import Secours from './pages/Secours';
 import Devis from './pages/Devis';
 import Interventions from './pages/Interventions';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN } from './roles';
+import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
 import { useModules } from './modules';
 
 // Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
 // ADMIN, il doit donc figurer partout où l'ADMIN était jusqu'ici seul admis.
 const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
+const ROLES_INTERVENTIONS = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
 
 const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX.Element, requiredRoles?: string[], excludedRole?: string }) => {
   const token = localStorage.getItem('token');
@@ -127,7 +128,7 @@ function App() {
           </PrivateRoute>
         } />
         <Route path="/interventions" element={
-          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+          <PrivateRoute requiredRoles={ROLES_INTERVENTIONS}>
             <Interventions />
           </PrivateRoute>
         } />

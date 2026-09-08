@@ -49,6 +49,7 @@ model User {
   chantiersCommercialises Chantier[]                 @relation("ChantierCommercial") // Chantiers vendus par ce commercial
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
   profilIntervenant       Intervenant?               @relation("IntervenantCompte")
+  rapportsIntervention    InterventionRapport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -117,6 +118,7 @@ model Chantier {
   achats         AchatReel[]
   pointages      PointageHeure[]
   planningEvents PlanningEvent[]
+  interventions  Intervention[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -408,6 +410,8 @@ model Intervention {
   site           ClientSite? @relation("InterventionSite", fields: [siteId], references: [id], onDelete: Restrict)
   contactId      String?
   contact        ClientContact? @relation("InterventionContact", fields: [contactId], references: [id], onDelete: Restrict)
+  chantierId     String?
+  chantier       Chantier? @relation(fields: [chantierId], references: [id], onDelete: Restrict)
   titre          String
   description    String?
   priorite       String   @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
@@ -417,11 +421,13 @@ model Intervention {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   affectations   InterventionAffectation[]
+  rapports       InterventionRapport[]
   planningEvent  PlanningEvent?
 
   @@index([clientId, statut])
   @@index([siteId])
   @@index([contactId])
+  @@index([chantierId])
   @@index([statut, dateSouhaitee])
 }
 
@@ -437,6 +443,36 @@ model InterventionAffectation {
 
   @@unique([interventionId, intervenantId])
   @@index([intervenantId])
+}
+
+// Compte rendu terrain append-only : une intervention garde ses constats tels qu'ils ont été
+// saisis, avec leur auteur et leur date. Les corrections futures créent une nouvelle trace.
+model InterventionRapport {
+  id             String       @id @default(uuid())
+  interventionId String
+  intervention   Intervention @relation(fields: [interventionId], references: [id], onDelete: Cascade)
+  auteurId       String
+  auteur         User         @relation(fields: [auteurId], references: [id], onDelete: Restrict)
+  contenu        String
+  signature      InterventionSignature?
+  createdAt      DateTime     @default(now())
+
+  @@index([interventionId, createdAt])
+  @@index([auteurId])
+}
+
+// Attestation électronique client d'un compte rendu : consentement explicite, signataire,
+// horodatage et empreinte SHA-256 du contenu figé. Aucun dessin ou fichier n'est requis.
+model InterventionSignature {
+  id          String              @id @default(uuid())
+  rapportId   String              @unique
+  rapport     InterventionRapport @relation(fields: [rapportId], references: [id], onDelete: Restrict)
+  signataire  String
+  empreinte   String
+  accepteLe   DateTime            @default(now())
+  createdAt   DateTime            @default(now())
+
+  @@index([accepteLe])
 }
 
 // Compteur annuel atomique des références d'affaires : A26-0001, A26-0002…

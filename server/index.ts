@@ -663,15 +663,22 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
     const priorite = String(req.body?.priorite || 'NORMALE');
     if (!titre) return res.status(400).json({ error: 'Le titre de l’intervention est obligatoire.' });
     if (!['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'].includes(priorite)) return res.status(400).json({ error: 'Priorité d’intervention invalide.' });
-    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
+    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
     const siteId = req.body?.siteId ? String(req.body.siteId) : null;
     const contactId = req.body?.contactId ? String(req.body.contactId) : null;
+    const chantierId = req.body?.chantierId ? String(req.body.chantierId) : null;
     if (siteId && !await prisma.clientSite.findFirst({ where: { id: siteId, clientId }, select: { id: true } })) {
       return res.status(404).json({ error: 'Site introuvable pour ce client.' });
     }
     if (contactId && !await prisma.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
       return res.status(404).json({ error: 'Contact introuvable pour ce client.' });
+    }
+    // Chantier.client est un champ historique libre : le rattachement SAV ne l'infère pas.
+    // Il n'est autorisé que lorsque sa raison sociale correspond exactement au client natif.
+    const clientNom = client.raisonSociale;
+    if (chantierId && !await prisma.chantier.findFirst({ where: { id: chantierId, client: clientNom, annuleLe: null }, select: { id: true } })) {
+      return res.status(404).json({ error: 'Chantier introuvable pour ce client.' });
     }
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
     if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
@@ -682,8 +689,8 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
       });
       const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
       const cree = await tx.intervention.create({
-        data: { reference, clientId, siteId, contactId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
-        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true },
+        data: { reference, clientId, siteId, contactId, chantierId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
       });
       await journaliserIntervention(tx, req, 'CREATION', cree);
       return cree;
@@ -708,7 +715,7 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
           inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
         ],
       },
-      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
+      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true, rapports: { select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } }, signature: { select: { id: true, signataire: true, empreinte: true, accepteLe: true } } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(interventions));
@@ -729,6 +736,46 @@ app.get('/api/interventions/:id/journal-saisies', requireAuth, blockCommercial, 
   } catch (error) {
     console.error('Erreur journal intervention SAV', error);
     res.status(500).json({ error: 'Erreur lors de la lecture du journal de l’intervention.' });
+  }
+});
+
+// Les comptes rendus terrain sont des écritures append-only : un technicien affecté ne peut
+// les ajouter que pendant une intervention en cours, jamais les modifier ou les effacer.
+app.post('/api/interventions/:id/rapports', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const contenu = typeof req.body?.contenu === 'string' ? req.body.contenu.trim() : '';
+    if (contenu.length < 3 || contenu.length > 5000) return res.status(400).json({ error: 'Le compte rendu doit contenir entre 3 et 5 000 caractères.' });
+    const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), statut: 'EN_COURS', ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    const rapport = await prisma.interventionRapport.create({
+      data: { interventionId: intervention.id, auteurId: req.user!.id, contenu },
+      select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } } },
+    });
+    res.status(201).json(rapport);
+  } catch (error) {
+    console.error('Erreur compte rendu intervention SAV', error);
+    res.status(500).json({ error: 'Erreur lors de l’enregistrement du compte rendu.' });
+  }
+});
+
+// Attestation électronique : le signataire confirme le texte figé du rapport. L'empreinte SHA-256
+// facilite l'identification du contenu signé, mais n'est pas à elle seule une preuve cryptographique
+// d'intégrité ni une signature qualifiée.
+app.post('/api/interventions/rapports/:rapportId/signature', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
+    if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) return res.status(400).json({ error: 'Le signataire et sa confirmation explicite sont obligatoires.' });
+    const rapport = await prisma.interventionRapport.findFirst({ where: { id: String(req.params.rapportId), intervention: getInterventionFilterForUser(req.user!) }, select: { id: true, contenu: true, intervention: { select: { statut: true } }, signature: { select: { id: true } } } });
+    if (!rapport) return res.status(404).json({ error: 'Compte rendu introuvable.' });
+    if (rapport.intervention.statut === 'ANNULEE') return res.status(409).json({ error: 'La signature est impossible sur une intervention annulée.' });
+    if (rapport.signature) return res.status(409).json({ error: 'Ce compte rendu est déjà signé.' });
+    const empreinte = crypto.createHash('sha256').update(`${rapport.id}\n${rapport.contenu}\n${signataire}`, 'utf8').digest('hex');
+    const signature = await prisma.interventionSignature.create({ data: { rapportId: rapport.id, signataire, empreinte }, select: { id: true, signataire: true, empreinte: true, accepteLe: true } });
+    res.status(201).json(signature);
+  } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte rendu est déjà signé.' });
+    console.error('Erreur signature intervention SAV', error);
+    res.status(500).json({ error: 'Erreur lors de la signature du compte rendu.' });
   }
 });
 
@@ -753,6 +800,7 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
       include: { client: { select: { id: true, raisonSociale: true } } },
     });
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    if (req.user?.role === ROLE_TECHNICIEN && !['EN_COURS', 'TERMINEE'].includes(statut)) return res.status(403).json({ error: 'Un technicien peut uniquement démarrer ou terminer son intervention.' });
     if (!transitions[intervention.statut]?.includes(statut)) {
       return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
     }
@@ -797,13 +845,22 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
   }
 });
 
-// --- Cloisonnement des interventions par affectation explicite ---
-// Hors administration, l'accès à un dossier SAV vient d'une affectation explicite, jamais
-// d'un rôle : un compte non administrateur ne voit que les interventions sur lesquelles son
-// profil intervenant est affecté. Le périmètre hiérarchique reste un lot ultérieur de Phase 6.
-function getInterventionFilterForUser(authUser: { id: string; role: string }) {
+// Hors administration, l'accès SAV reste ancré dans une relation persistante : affectation
+// explicite pour le technicien, responsable d'affaire pour le conducteur et équipe déclarée
+// pour le responsable. Un rôle seul ne donne jamais accès à un dossier sans rattachement.
+function getInterventionFilterForUser(authUser: { id: string; role: string; equipeIds?: string[] }) {
   if (authUser.role === 'SUPERADMIN' || authUser.role === 'ADMIN') return {};
-  return { affectations: { some: { intervenant: { userId: authUser.id } } } };
+  const parAffectation = { affectations: { some: { intervenant: { userId: authUser.id } } } };
+  if (authUser.role === 'CONDUCTEUR_TRAVAUX') {
+    return { OR: [parAffectation, { chantier: { responsableId: authUser.id, annuleLe: null } }] };
+  }
+  if (authUser.role === ROLE_RESPONSABLE) {
+    return { OR: [
+      parAffectation,
+      { chantier: { responsableId: { in: [authUser.id, ...(authUser.equipeIds || [])] }, annuleLe: null } },
+    ] };
+  }
+  return parAffectation;
 }
 
 // Une affectation SAV gouverne la visibilité du dossier. Elle doit donc toujours évoluer
