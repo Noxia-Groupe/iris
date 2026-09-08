@@ -15,6 +15,7 @@ const Sidebar = () => {
   const isAdmin = isAdminRole(userRole);
   const isSuperAdmin = isSuperAdminRole(userRole);
   const peutVoirInterventions = isAdmin || userRole === ROLE_CONDUCTEUR || userRole === ROLE_RESPONSABLE || userRole === ROLE_TECHNICIEN;
+  const peutVoirTravaux = isAdmin || userRole === ROLE_CONDUCTEUR || userRole === ROLE_RESPONSABLE;
   // Planning : masqué pour tous les comptes (administrateurs compris) quand un superadmin
   // a désactivé le module depuis Administration > Modules.
   const { planningActif } = useModules();
@@ -73,14 +74,14 @@ const Sidebar = () => {
           </NavLink>
         )}
 
-        {!isCommercial && (
+        {peutVoirTravaux && (
           <NavLink to="/achats" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <ShoppingCart size={20} />
             Journal des Achats
           </NavLink>
         )}
 
-        {!isCommercial && (
+        {peutVoirTravaux && (
           <NavLink to="/heures" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <Clock size={20} />
             Journal des Heures
