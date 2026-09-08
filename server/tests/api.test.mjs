@@ -1051,6 +1051,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await voitLeDossier(intrus.jeton, dossier.body.id), false);
       assert.equal((await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${intrus.jeton}`).send({ contenu: 'TEST Rapport hors périmètre.' })).status, 404);
       assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${intrus.jeton}`).send({ signataire: 'TEST Usurpation', confirme: true })).status, 404);
+      // La signature demeure possible après clôture : le client peut signer après le départ du technicien.
+      assert.equal((await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${technicien.jeton}`).send({ statut: 'TERMINEE' })).status, 200);
       const signature = await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
         .send({ signataire: 'TEST Client signataire', confirme: true });
       assert.equal(signature.status, 201, JSON.stringify(signature.body));

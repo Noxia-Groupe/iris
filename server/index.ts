@@ -765,8 +765,9 @@ app.post('/api/interventions/rapports/:rapportId/signature', requireAuth, blockC
   try {
     const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
     if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) return res.status(400).json({ error: 'Le signataire et sa confirmation explicite sont obligatoires.' });
-    const rapport = await prisma.interventionRapport.findFirst({ where: { id: String(req.params.rapportId), intervention: { statut: 'EN_COURS', ...getInterventionFilterForUser(req.user!) } }, select: { id: true, contenu: true, signature: { select: { id: true } } } });
+    const rapport = await prisma.interventionRapport.findFirst({ where: { id: String(req.params.rapportId), intervention: getInterventionFilterForUser(req.user!) }, select: { id: true, contenu: true, intervention: { select: { statut: true } }, signature: { select: { id: true } } } });
     if (!rapport) return res.status(404).json({ error: 'Compte rendu introuvable.' });
+    if (rapport.intervention.statut === 'ANNULEE') return res.status(409).json({ error: 'La signature est impossible sur une intervention annulée.' });
     if (rapport.signature) return res.status(409).json({ error: 'Ce compte rendu est déjà signé.' });
     const empreinte = crypto.createHash('sha256').update(`${rapport.id}\n${rapport.contenu}\n${signataire}`, 'utf8').digest('hex');
     const signature = await prisma.interventionSignature.create({ data: { rapportId: rapport.id, signataire, empreinte }, select: { id: true, signataire: true, empreinte: true, accepteLe: true } });
