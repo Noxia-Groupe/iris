@@ -120,7 +120,7 @@ const Achats = () => {
           <tbody>
             {achats.map(a => (
               <tr key={a.id} style={{borderBottom: '1px solid var(--color-border)'}}>
-                <td style={{padding: '8px'}}>{new Date(a.date).toLocaleDateString()}</td>
+                <td style={{padding: '8px'}}>{new Date(a.date).toLocaleDateString('fr-FR')}</td>
                 <td style={{padding: '8px'}}>{a.chantier?.nom}</td>
                 <td style={{padding: '8px'}}>{a.fournisseur?.nom}</td>
                 <td style={{padding: '8px'}}>{a.numeroFacture || '-'}</td>
