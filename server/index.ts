@@ -667,6 +667,9 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 
 // --- Facturation française native ---
 const factureInclude = { client: { select: { id: true, raisonSociale: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+const PLAFOND_MONTANT = 9_999_999_999.99;
+class FactureInvalideError extends Error {}
+
 app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
   try {
     const factures = await prisma.facture.findMany({ include: factureInclude, orderBy: [{ dateEmission: 'desc' }, { createdAt: 'desc' }] });
@@ -681,15 +684,15 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const dateEcheance = dateIsoStricte(req.body?.dateEcheance);
     if (!dateEmission || !dateEcheance) return res.status(400).json({ error: 'Les dates doivent être valides au format JJ-MM-AAAA.' });
     if (dateEcheance < dateEmission) return res.status(400).json({ error: 'L’échéance ne peut pas précéder la date d’émission.' });
-    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
+    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
     const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
     if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });
     const lignes = lignesBrutes.map((ligne: any, ordre: number) => {
       const designation = String(ligne?.designation || '').trim();
-      const quantite = nombreDecimalNonNegatif(ligne?.quantite, 10);
-      const prixUnitaireHt = nombreDecimalNonNegatif(ligne?.prixUnitaireHt, 10);
-      const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3);
+      const quantite = nombreDecimalNonNegatif(ligne?.quantite, 9, false, 3);
+      const prixUnitaireHt = nombreDecimalNonNegatif(ligne?.prixUnitaireHt, 10, true);
+      const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3, true);
       const nature = String(ligne?.nature || 'PRESTATION');
       if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new Error('Ligne de facture invalide.');
       const totalHt = centimes(quantite * prixUnitaireHt);
@@ -698,7 +701,7 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     });
     const totalHt = centimes(lignes.reduce((s: number, ligne: { totalHt: number }) => s + ligne.totalHt, 0));
     const totalTtc = centimes(lignes.reduce((s: number, ligne: { totalTtc: number }) => s + ligne.totalTtc, 0));
-    const facture = await prisma.facture.create({ data: { clientId, dateEmission, dateEcheance, totalHt, totalTva: centimes(totalTtc - totalHt), totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+    const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, dateEmission, dateEcheance, totalHt, totalTva: centimes(totalTtc - totalHt), totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
     res.status(201).json(decimalToNumber(facture));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Création de facture impossible.' });
@@ -2494,11 +2497,10 @@ async function journaliserSaisieTravaux(
   } });
 }
 
-function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number, zeroAutorise = false): number | null {
-  // Ne jamais laisser PostgreSQL arrondir silencieusement une valeur métier : l'échelle des
-  // colonnes est de deux décimales. La notation scientifique est aussi refusée.
+function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number, zeroAutorise = false, maxDecimales = 2): number | null {
+  // Ne jamais laisser PostgreSQL arrondir silencieusement une valeur métier ; notation scientifique refusée.
   const texte = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
-  const expression = new RegExp(`^\\d{1,${maxIntegerDigits}}(?:[,.]\\d{1,2})?$`);
+  const expression = new RegExp(`^\\d{1,${maxIntegerDigits}}(?:[,.]\\d{1,${maxDecimales}})?$`);
   if (!expression.test(texte)) return null;
   const nombre = Number(texte.replace(',', '.'));
   return Number.isFinite(nombre) && (nombre > 0 || (zeroAutorise && nombre === 0)) ? nombre : null;

@@ -405,6 +405,8 @@ model Facture {
   annee         Int?
   clientId      String
   client        Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  // Identité figée à la création : renommer la fiche client ne réécrit jamais une facture émise.
+  clientRaisonSociale String
   statut        String         @default("BROUILLON") // BROUILLON | EMISE | REGLEE | ANNULEE
   dateEmission  DateTime
   dateEcheance  DateTime
