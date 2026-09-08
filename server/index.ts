@@ -665,6 +665,45 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
   } });
 }
 
+// --- Facturation française native ---
+const factureInclude = { client: { select: { id: true, raisonSociale: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const factures = await prisma.facture.findMany({ include: factureInclude, orderBy: [{ dateEmission: 'desc' }, { createdAt: 'desc' }] });
+    res.json(decimalToNumber(factures));
+  } catch (error) { res.status(500).json({ error: 'Lecture des factures impossible.' }); }
+});
+
+app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const clientId = String(req.body?.clientId || '');
+    const dateEmission = dateIsoStricte(req.body?.dateEmission);
+    const dateEcheance = dateIsoStricte(req.body?.dateEcheance);
+    if (!dateEmission || !dateEcheance) return res.status(400).json({ error: 'Les dates doivent être valides au format JJ-MM-AAAA.' });
+    if (dateEcheance < dateEmission) return res.status(400).json({ error: 'L’échéance ne peut pas précéder la date d’émission.' });
+    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
+    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
+    if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });
+    const lignes = lignesBrutes.map((ligne: any, ordre: number) => {
+      const designation = String(ligne?.designation || '').trim();
+      const quantite = nombreDecimalNonNegatif(ligne?.quantite, 3);
+      const prixUnitaireHt = nombreDecimalNonNegatif(ligne?.prixUnitaireHt, 2);
+      const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 2);
+      if (!designation || designation.length > 500 || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new Error('Ligne de facture invalide.');
+      const totalHt = centimes(quantite * prixUnitaireHt);
+      const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
+      return { ordre, designation, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
+    });
+    const totalHt = centimes(lignes.reduce((s: number, ligne: { totalHt: number }) => s + ligne.totalHt, 0));
+    const totalTtc = centimes(lignes.reduce((s: number, ligne: { totalTtc: number }) => s + ligne.totalTtc, 0));
+    const facture = await prisma.facture.create({ data: { clientId, dateEmission, dateEcheance, totalHt, totalTva: centimes(totalTtc - totalHt), totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+    res.status(201).json(decimalToNumber(facture));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Création de facture impossible.' });
+  }
+});
+
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
 // Contrats de maintenance : le contrat est le document source du cycle. Le planning ne sera

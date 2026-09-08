@@ -41,6 +41,8 @@ if (!TEST_DATABASE_URL) {
     await prisma.interventionSignature.deleteMany({ where: { rapport: { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } } } });
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
+    await prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
+    await prisma.facture.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     const contratIds = (await prisma.contratMaintenance.findMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } }, select: { id: true } })).map((contrat) => contrat.id);
     await prisma.journalSaisieChantier.deleteMany({ where: { contratMaintenanceId: { in: contratIds } } });
@@ -1212,6 +1214,19 @@ if (!TEST_DATABASE_URL) {
       const refusInactif = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`)
         .send({ clientId: clientInactif.body.id, titre: 'TEST Contrat client inactif', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026' });
       assert.equal(refusInactif.status, 404, JSON.stringify(refusInactif.body));
+    });
+
+    test('crée une facture brouillon avec des lignes fiscales figées', async () => {
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [{ designation: 'TEST Maintenance', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      assert.equal(facture.body.statut, 'BROUILLON');
+      assert.equal(facture.body.numero, null, 'La numérotation légale est attribuée à l’émission, pas au brouillon.');
+      assert.equal(facture.body.totalHt, 200);
+      assert.equal(facture.body.totalTva, 40);
+      assert.equal(facture.body.totalTtc, 240);
     });
 
     test('génère une seule intervention prévisionnelle par échéance de contrat', async () => {
