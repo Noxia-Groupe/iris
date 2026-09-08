@@ -1251,6 +1251,20 @@ if (!TEST_DATABASE_URL) {
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
       assert.equal(emission.body.statut, 'EMISE');
       assert.match(emission.body.numero, /\d{4}/, 'Une facture émise porte une numérotation annuelle.');
+      const configuration = await request(app).get('/api/comptabilite').set('Authorization', `Bearer ${session}`);
+      assert.equal(configuration.status, 200, JSON.stringify(configuration.body));
+      const compte = (code) => configuration.body.comptes.find((c) => c.code === code);
+      await Promise.all([
+        request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ compteId: compte('411000').id }),
+        request(app).put('/api/comptabilite/regles/TVA_COLLECTEE').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id }),
+        request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: compte('706100').id }),
+        request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', `Bearer ${session}`).send({ compteId: compte('706100').id }),
+        request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'VTE' }),
+      ]);
+      const exportComptable = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      assert.equal(exportComptable.status, 200, exportComptable.text);
+      assert.match(exportComptable.text, /JournalCode;EcritureDate/);
+      assert.match(exportComptable.text, /706100/);
     });
 
     test('génère une seule intervention prévisionnelle par échéance de contrat', async () => {
