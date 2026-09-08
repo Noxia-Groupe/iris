@@ -441,6 +441,29 @@ model SequenceFacture {
   dernierNumero Int @default(0)
 }
 
+// Référentiel comptable par instance : il démarre vide et se paramètre/importera selon le cabinet.
+model CompteComptable {
+  id        String  @id @default(uuid())
+  code      String  @unique
+  libelle   String
+  nature    String  // ACTIF | PASSIF | PRODUIT | CHARGE | TVA
+  actif     Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  regles    RegleComptable[]
+}
+
+model RegleComptable {
+  id        String           @id @default(uuid())
+  cle       String           @unique // CLIENT | TVA_COLLECTEE | VENTE_PRESTATION | VENTE_ARTICLE | JOURNAL_VENTES
+  compteId  String?
+  compte    CompteComptable? @relation(fields: [compteId], references: [id], onDelete: Restrict)
+  journal   String?
+  updatedAt DateTime         @updatedAt
+
+  @@index([compteId])
+}
+
 // Contrat de maintenance natif : son échéance est un engagement métier, distinct du planning.
 // Les interventions générées y seront rattachées afin de garantir l'idempotence du cycle.
 model ContratMaintenance {

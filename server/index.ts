@@ -704,6 +704,27 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
   }
 });
 
+// Paramétrage comptable : aucun compte n'est préchargé. L'export devra refuser toute règle absente.
+const CLES_COMPTABLES = ['CLIENT', 'TVA_COLLECTEE', 'VENTE_PRESTATION', 'VENTE_ARTICLE', 'JOURNAL_VENTES'];
+app.get('/api/comptabilite', requireAuth, requireAdmin, async (_req, res) => {
+  try { const [comptes, regles] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } })]); res.json(decimalToNumber({ comptes, regles })); }
+  catch { res.status(500).json({ error: 'Lecture du paramétrage comptable impossible.' }); }
+});
+app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res) => {
+  try { const code = String(req.body?.code || '').trim(), libelle = String(req.body?.libelle || '').trim(), nature = String(req.body?.nature || '');
+    if (!/^\d{3,12}$/.test(code) || !libelle || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
+    const compte = await prisma.compteComptable.create({ data: { code, libelle, nature } }); res.status(201).json(compte);
+  } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte existe déjà.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
+});
+app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, res) => {
+  try { const cle = String(req.params.cle || ''); if (!CLES_COMPTABLES.includes(cle)) return res.status(400).json({ error: 'Règle comptable inconnue.' });
+    const compteId = req.body?.compteId ? String(req.body.compteId) : null; const journal = req.body?.journal == null ? null : String(req.body.journal).trim() || null;
+    if (cle === 'JOURNAL_VENTES' ? !journal : !compteId) return res.status(400).json({ error: 'Paramétrage de règle incomplet.' });
+    if (compteId && !await prisma.compteComptable.findFirst({ where: { id: compteId, actif: true } })) return res.status(404).json({ error: 'Compte comptable actif introuvable.' });
+    const regle = await prisma.regleComptable.upsert({ where: { cle }, create: { cle, compteId, journal }, update: { compteId, journal }, include: { compte: true } }); res.json(regle);
+  } catch { res.status(500).json({ error: 'Mise à jour du paramétrage impossible.' }); }
+});
+
 app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
