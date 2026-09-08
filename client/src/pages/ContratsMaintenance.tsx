@@ -11,7 +11,12 @@ type Contrat = {
 
 const formatDate = (value: string) => new Date(value).toLocaleDateString('fr-FR');
 const libelleStatut: Record<string, string> = { ACTIF: 'Actif', BROUILLON: 'Brouillon', SUSPENDU: 'Suspendu', TERMINE: 'Terminé' };
-const dateFrancaiseDuJour = () => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris' }).format(new Date());
+const dateFrancaiseDuJour = () => {
+  // Le champ exige JJ-MM-AAAA : Intl rend des séparateurs localisés (souvent /), incompatibles
+  // avec son propre pattern. La date technique reste convertie exclusivement par le serveur.
+  const maintenant = new Date();
+  return `${String(maintenant.getDate()).padStart(2, '0')}-${String(maintenant.getMonth() + 1).padStart(2, '0')}-${maintenant.getFullYear()}`;
+};
 
 export default function ContratsMaintenance() {
   const [contrats, setContrats] = useState<Contrat[]>([]);

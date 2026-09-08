@@ -675,7 +675,9 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
     if (!Number.isInteger(periodiciteMois) || periodiciteMois < 1 || periodiciteMois > 60) return res.status(400).json({ error: 'La périodicité doit être comprise entre 1 et 60 mois.' });
     if (!Number.isInteger(dureePrevisionnelleMinutes) || dureePrevisionnelleMinutes < 15 || dureePrevisionnelleMinutes > 1440) return res.status(400).json({ error: 'La durée prévisionnelle doit être comprise entre 15 et 1 440 minutes.' });
     if (!dateDebut) return res.status(400).json({ error: 'La date de début doit être valide au format JJ-MM-AAAA.' });
-    const client = await prisma.client.findUnique({ where: { id: String(req.body?.clientId || '') }, select: { id: true } });
+    // Même règle que la création directe d’intervention : un client désactivé n'ouvre plus
+    // de dossier par le contrat, qui ne doit jamais devenir une porte de contournement.
+    const client = await prisma.client.findFirst({ where: { id: String(req.body?.clientId || ''), actif: true }, select: { id: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
     const siteId = typeof req.body?.siteId === 'string' && req.body.siteId ? req.body.siteId : null;
     if (siteId) {
