@@ -303,6 +303,7 @@ model Client {
   equipementsInstalles EquipementInstalle[]
   devis                Devis[]
   interventions        Intervention[]
+  contratsMaintenance  ContratMaintenance[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 }
@@ -391,6 +392,29 @@ model DevisConversion {
   createdAt DateTime @default(now())
 
   @@index([cibleType, cibleId])
+}
+
+// Contrat de maintenance natif : son échéance est un engagement métier, distinct du planning.
+// Les interventions générées y seront rattachées afin de garantir l'idempotence du cycle.
+model ContratMaintenance {
+  id                          String      @id @default(uuid())
+  clientId                    String
+  client                      Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  siteId                      String?
+  site                        ClientSite? @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  titre                       String
+  statut                      String      @default("ACTIF") // BROUILLON | ACTIF | SUSPENDU | TERMINE
+  periodiciteMois             Int
+  dureePrevisionnelleMinutes  Int
+  dateDebut                   DateTime
+  prochaineEcheance           DateTime
+  createdById                 String?
+  createdAt                   DateTime    @default(now())
+  updatedAt                   DateTime    @updatedAt
+
+  @@index([clientId, statut])
+  @@index([siteId])
+  @@index([statut, prochaineEcheance])
 }
 
 // Compteur annuel atomique des références d'intervention : I26-0001, I26-0002…
@@ -520,6 +544,7 @@ model ClientSite {
   estSiteIntervention  Boolean              @default(false)
   principal            Boolean              @default(false)
   interventions        Intervention[]       @relation("InterventionSite")
+  contratsMaintenance  ContratMaintenance[]
   equipementsInstalles EquipementInstalle[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt

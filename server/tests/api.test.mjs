@@ -39,6 +39,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Les attestations dépendent des rapports ; elles partent avant les interventions.
     await prisma.interventionSignature.deleteMany({ where: { rapport: { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } } } });
+    await prisma.contratMaintenance.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
     await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
@@ -1145,6 +1146,36 @@ if (!TEST_DATABASE_URL) {
       assert.equal(creation.body.statut, 'A_PLANIFIER');
       assert.equal(creation.body.priorite, 'HAUTE');
       assert.equal(creation.body.client.id, clientId);
+    });
+  });
+
+  describe('Contrats de maintenance cyclique', () => {
+    let session = '';
+    let clientId = '';
+    let siteId = '';
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
+        .send({ raisonSociale: 'TEST Client contrat maintenance' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      clientId = client.body.id;
+      const site = await request(app).post(`/api/clients/${clientId}/sites`).set('Authorization', `Bearer ${session}`)
+        .send({ nom: 'TEST Site maintenance', adresse: '1 rue des Tests', codePostal: '75001', ville: 'Paris', estSiteIntervention: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      siteId = site.body.id;
+    });
+
+    test('crée un contrat actif rattaché à son client et son site', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Maintenance incendie', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      assert.equal(contrat.body.statut, 'ACTIF');
+      assert.equal(contrat.body.client.id, clientId);
+      assert.equal(contrat.body.site.id, siteId);
+      assert.equal(contrat.body.periodiciteMois, 6);
+      assert.equal(contrat.body.dureePrevisionnelleMinutes, 120);
     });
   });
 

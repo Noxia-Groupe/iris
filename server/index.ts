@@ -655,6 +655,43 @@ async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRe
 
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
+// Contrats de maintenance : le contrat est le document source du cycle. Le planning ne sera
+// qu'une projection des interventions qu'il génère ; aucune échéance n'est inférée d'un écran.
+app.get('/api/contrats-maintenance', requireAuth, requireAdmin, async (_req, res) => {
+  const contrats = await prisma.contratMaintenance.findMany({
+    include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
+    orderBy: [{ prochaineEcheance: 'asc' }, { createdAt: 'desc' }],
+  });
+  res.json(decimalToNumber(contrats));
+});
+
+app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const titre = typeof req.body?.titre === 'string' ? req.body.titre.trim() : '';
+    const periodiciteMois = Number(req.body?.periodiciteMois);
+    const dureePrevisionnelleMinutes = Number(req.body?.dureePrevisionnelleMinutes);
+    const dateDebut = dateIsoStricte(req.body?.dateDebut);
+    if (titre.length < 3 || titre.length > 200) return res.status(400).json({ error: 'Le titre du contrat doit contenir entre 3 et 200 caractères.' });
+    if (!Number.isInteger(periodiciteMois) || periodiciteMois < 1 || periodiciteMois > 60) return res.status(400).json({ error: 'La périodicité doit être comprise entre 1 et 60 mois.' });
+    if (!Number.isInteger(dureePrevisionnelleMinutes) || dureePrevisionnelleMinutes < 15 || dureePrevisionnelleMinutes > 1440) return res.status(400).json({ error: 'La durée prévisionnelle doit être comprise entre 15 et 1 440 minutes.' });
+    if (!dateDebut) return res.status(400).json({ error: 'La date de début doit être valide au format JJ-MM-AAAA.' });
+    const client = await prisma.client.findUnique({ where: { id: String(req.body?.clientId || '') }, select: { id: true } });
+    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const siteId = typeof req.body?.siteId === 'string' && req.body.siteId ? req.body.siteId : null;
+    if (siteId) {
+      const site = await prisma.clientSite.findFirst({ where: { id: siteId, clientId: client.id }, select: { id: true } });
+      if (!site) return res.status(404).json({ error: 'Site introuvable.' });
+    }
+    const contrat = await prisma.contratMaintenance.create({
+      data: { clientId: client.id, siteId, titre, periodiciteMois, dureePrevisionnelleMinutes, dateDebut, prochaineEcheance: dateDebut, createdById: req.user!.id },
+      include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
+    });
+    res.status(201).json(decimalToNumber(contrat));
+  } catch (error) {
+    res.status(500).json({ error: 'Création du contrat de maintenance impossible.' });
+  }
+});
+
 app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
   try {
     const titre = String(req.body?.titre || '').trim();
