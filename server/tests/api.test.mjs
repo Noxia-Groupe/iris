@@ -1255,6 +1255,11 @@ if (!TEST_DATABASE_URL) {
       for (const route of routes) assert.equal((await route().set('Authorization', `Bearer ${token}`)).status, 403);
     });
 
+    test('refuse une date d’émission future', async () => {
+      const reponse = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, dateEmission: '01-01-2099', dateEcheance: '01-02-2099', lignes: [{ designation: 'TEST future', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(reponse.status, 400); assert.match(reponse.body.error, /future/i);
+    });
+
     test('attribue un numéro annuel seulement lors de l’émission', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST Émission facture', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
