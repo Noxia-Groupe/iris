@@ -1234,6 +1234,12 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.status, 404, JSON.stringify(facture.body));
     });
 
+    test('refuse de facturer une affaire annulée', async () => {
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Affaire annulée', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01T00:00:00.000Z'), statut: 'ANNULE', budgetGlobalVendu: 100 } });
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CHANTIER', chantierId: chantier.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST affaire annulée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(facture.status, 409, JSON.stringify(facture.body));
+    });
+
     test('expose la traçabilité d’une facture hors affaire motivée', async () => {
       const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Refacturation de frais', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST frais', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(facture.status, 201, JSON.stringify(facture.body));
