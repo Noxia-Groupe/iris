@@ -1299,6 +1299,11 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.facture.findUnique({ where: { id: ancienne.body.id } })).numero, null);
     });
 
+    test('calcule la TVA sur la base HT cumulée par taux', async () => {
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: Array.from({ length: 100 }, (_, index) => ({ designation: `TEST arrondi ${index}`, quantite: 1, prixUnitaireHt: 1.99, tauxTva: 20 })) });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body)); assert.equal(facture.body.totalHt, 199); assert.equal(facture.body.totalTva, 39.8); assert.equal(facture.body.totalTtc, 238.8);
+    });
+
     test('génère une seule intervention prévisionnelle par échéance de contrat', async () => {
       const premier = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(premier.status, 201, JSON.stringify(premier.body));
