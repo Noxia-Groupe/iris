@@ -1293,8 +1293,8 @@ if (!TEST_DATABASE_URL) {
     test('liste les versions légales pour l’administration', async () => {
       const reponse = await request(app).get('/api/mentions-legales').set('Authorization', `Bearer ${session}`);
       assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
-      assert.equal(reponse.body.length, 1);
-      assert.equal(reponse.body[0].actif, true);
+      assert.equal(reponse.body.length, 2);
+      assert.equal(reponse.body.find((version) => version.actif)?.version, 1);
     });
 
     test('refuse l’émission sans mentions légales publiées', async () => {
