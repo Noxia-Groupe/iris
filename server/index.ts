@@ -1559,9 +1559,11 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // 'statut' n'est modifiable ici que par un admin : la clôture et surtout la RÉOUVERTURE
     // d'un chantier obéissent à des règles propres (cf. PATCH /api/chantiers/:id/statut, où
     // un conducteur peut clôturer mais jamais rouvrir). L'ouvrir ici les contournerait.
+    // Le client est issu du devis accepté et de son clientId relationnel : l'éditer ici
+    // désynchroniserait le libellé historique et la clé utilisée par la facturation.
     const allowed = isAdminRole(authUser.role)
-      ? ['nom', 'client', 'numeroDevis', 'statut', 'responsableId']
-      : ['nom', 'client', 'numeroDevis', 'responsableId'];
+      ? ['nom', 'numeroDevis', 'statut', 'responsableId']
+      : ['nom', 'numeroDevis', 'responsableId'];
     const numericFields = ['budgetGlobalVendu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu', 'heuresVendues'];
     const dateFields = ['dateDebut', 'dateFin'];
 
