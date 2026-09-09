@@ -682,6 +682,21 @@ app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
   } catch (error) { res.status(500).json({ error: 'Lecture des factures impossible.' }); }
 });
 
+app.get('/api/factures/:id/tracabilite', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: {
+      client: { select: { id: true, raisonSociale: true } },
+      chantier: { select: { id: true, nom: true, numeroDevis: true, statut: true } },
+      intervention: { select: { id: true, reference: true, titre: true, chantierId: true, contratMaintenanceId: true } },
+      contratMaintenance: { select: { id: true, titre: true, siteId: true } },
+    } });
+    if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
+    const chantierId = facture.chantierId || facture.intervention?.chantierId || null;
+    const devis = chantierId ? await prisma.devisConversion.findFirst({ where: { cibleType: 'CHANTIER', cibleId: chantierId }, include: { devis: { select: { id: true, numero: true, objet: true } } } }) : null;
+    res.json(decimalToNumber({ facture, devis: devis?.devis || null }));
+  } catch { res.status(500).json({ error: 'Lecture de la traçabilité impossible.' }); }
+});
+
 app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const clientId = String(req.body?.clientId || '');

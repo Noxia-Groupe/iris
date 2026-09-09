@@ -1232,6 +1232,15 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.status, 404, JSON.stringify(facture.body));
     });
 
+    test('expose la traçabilité d’une facture hors affaire motivée', async () => {
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Refacturation de frais', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST frais', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      const trace = await request(app).get(`/api/factures/${facture.body.id}/tracabilite`).set('Authorization', `Bearer ${session}`);
+      assert.equal(trace.status, 200, JSON.stringify(trace.body));
+      assert.equal(trace.body.facture.origine, 'HORS_AFFAIRE');
+      assert.equal(trace.body.facture.motifHorsAffaire, 'Refacturation de frais');
+    });
+
     test('crée une facture brouillon avec des lignes fiscales figées', async () => {
       const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
         clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
