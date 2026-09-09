@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import PDFDocument from 'pdfkit';
 
 dotenv.config();
 
@@ -667,6 +668,51 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 
 // --- Facturation française native ---
 const factureInclude = { client: { select: { id: true, raisonSociale: true } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+
+function formatMontantFacture(valeur: unknown) {
+  return `${Number(valeur).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
+function formatDateFacture(valeur: Date | string) {
+  return new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC' }).format(new Date(valeur));
+}
+
+async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const pdf = new PDFDocument({ size: 'A4', margin: 48, info: { Title: `Facture ${facture.numero}` } });
+    const morceaux: Buffer[] = [];
+    pdf.on('data', (morceau: Buffer) => morceaux.push(morceau));
+    pdf.on('end', () => resolve(Buffer.concat(morceaux)));
+    pdf.on('error', reject);
+    const ligne = (texte: string, options: Record<string, unknown> = {}) => pdf.text(texte, options as any);
+    ligne(societe.raisonSociale || 'Société', { fontSize: 18 });
+    ligne([societe.adresse, [societe.codePostal, societe.ville].filter(Boolean).join(' '), societe.email].filter(Boolean).join('\n'), { fontSize: 9 });
+    pdf.moveDown();
+    ligne(`FACTURE ${facture.numero}`, { fontSize: 18, align: 'right' });
+    ligne(`Émise le ${formatDateFacture(facture.dateEmission)} · Échéance : ${formatDateFacture(facture.dateEcheance)}`, { align: 'right' });
+    pdf.moveDown();
+    ligne('Client', { fontSize: 11 });
+    ligne(facture.clientRaisonSociale, { fontSize: 12 });
+    pdf.moveDown();
+    ligne('Désignation                                           Qté        PU HT        TVA        Total HT', { fontSize: 9 });
+    for (const item of facture.lignes) {
+      ligne(`${item.designation}  |  ${item.quantite}  |  ${formatMontantFacture(item.prixUnitaireHt)}  |  ${Number(item.tauxTva)} %  |  ${formatMontantFacture(item.totalHt)}`, { fontSize: 9 });
+    }
+    pdf.moveDown();
+    ligne(`Total HT : ${formatMontantFacture(facture.totalHt)}`, { align: 'right' });
+    ligne(`TVA : ${formatMontantFacture(facture.totalTva)}`, { align: 'right' });
+    ligne(`Total TTC : ${formatMontantFacture(facture.totalTtc)}`, { align: 'right', fontSize: 12 });
+    pdf.moveDown();
+    const legal = facture.mentionsLegalesVersion;
+    ligne(`Mentions légales — version ${legal.version}`, { fontSize: 10 });
+    ligne(legal.mentions, { fontSize: 8 });
+    ligne('CGV', { fontSize: 10 });
+    ligne(legal.cgv, { fontSize: 8 });
+    ligne(`Pénalités : ${legal.penalites}`, { fontSize: 8 });
+    if (legal.escompte) ligne(`Escompte : ${legal.escompte}`, { fontSize: 8 });
+    pdf.end();
+  });
+}
 const PLAFOND_MONTANT = 9_999_999_999.99;
 class FactureInvalideError extends Error {}
 
@@ -684,10 +730,15 @@ app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
 
 app.get('/api/factures/:id/document.pdf', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, select: { statut: true } });
+    const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: factureInclude });
     if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
     if (facture.statut !== 'EMISE') return res.status(409).json({ error: 'Le document est disponible uniquement pour une facture émise.' });
-    return res.status(501).json({ error: 'Génération du document en cours de mise en œuvre.' });
+    if (!facture.mentionsLegalesVersion) return res.status(409).json({ error: 'Les mentions légales figées sont introuvables.' });
+    const pdf = await rendreDocumentFacturePdf(decimalToNumber(facture), await getCompanySettings());
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${facture.numero}.pdf"`);
+    res.setHeader('Content-Length', pdf.length);
+    return res.send(pdf);
   } catch { return res.status(500).json({ error: 'Lecture du document de facture impossible.' }); }
 });
 

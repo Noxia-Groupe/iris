@@ -1444,6 +1444,16 @@ if (!TEST_DATABASE_URL) {
       assert.equal(document.status, 409, JSON.stringify(document.body));
     });
 
+    test('génère un document PDF pour une facture émise', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST document émis', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST document émis', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      assert.equal(document.status, 200, document.text);
+      assert.match(document.headers['content-type'] || '', /application\/pdf/);
+      assert.ok(document.body.subarray(0, 5).equals(Buffer.from('%PDF-')));
+    });
+
     test('refuse d’émettre une facture antérieure à la dernière déjà numérotée', async () => {
       const brouillon = (dateEmission, dateEcheance) => request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission, dateEcheance, lignes: [{ designation: 'TEST chronologie', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       const emettre = (id) => request(app).post(`/api/factures/${id}/emettre`).set('Authorization', `Bearer ${session}`);
