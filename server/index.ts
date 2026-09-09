@@ -702,7 +702,11 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
       return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
     });
     const totalHt = centimes(lignes.reduce((s: number, ligne: { totalHt: number }) => s + ligne.totalHt, 0));
-    const totalTtc = centimes(lignes.reduce((s: number, ligne: { totalTtc: number }) => s + ligne.totalTtc, 0));
+    // La TVA légale s'arrondit sur la base HT cumulée de chaque taux, jamais ligne par ligne.
+    const tauxDistincts: number[] = [...new Set<number>(lignes.map((l: { tauxTva: number }) => l.tauxTva))];
+    const totalTva = centimes(tauxDistincts.reduce((s: number, taux: number) => s + centimes(lignes.filter((l: { tauxTva: number }) => l.tauxTva === taux).reduce((base: number, l: { totalHt: number }) => base + l.totalHt, 0) * taux / 100), 0));
+    for (const taux of tauxDistincts) { const groupe = lignes.filter((l: { tauxTva: number }) => l.tauxTva === taux); const tva = centimes(groupe.reduce((base: number, l: { totalHt: number }) => base + l.totalHt, 0) * taux / 100); groupe.forEach((l: { totalHt: number; totalTtc: number }) => { l.totalTtc = l.totalHt; }); groupe[groupe.length - 1].totalTtc = centimes(groupe[groupe.length - 1].totalHt + tva); }
+    const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
     const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, dateEmission, dateEcheance, totalHt, totalTva: centimes(totalTtc - totalHt), totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
     res.status(201).json(decimalToNumber(facture));
@@ -713,8 +717,8 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
 });
 
 // Paramétrage comptable : aucun compte n'est préchargé. L'export devra refuser toute règle absente.
-const CLES_COMPTABLES = ['CLIENT', 'TVA_COLLECTEE', 'VENTE_PRESTATION', 'VENTE_ARTICLE', 'JOURNAL_VENTES'];
-const NATURES_ATTENDUES: Record<string, string[]> = { CLIENT: ['ACTIF'], TVA_COLLECTEE: ['TVA'], VENTE_PRESTATION: ['PRODUIT'], VENTE_ARTICLE: ['PRODUIT'] };
+const CLES_COMPTABLES = ['CLIENT', 'VENTE_PRESTATION', 'VENTE_ARTICLE', 'JOURNAL_VENTES'];
+const NATURES_ATTENDUES: Record<string, string[]> = { CLIENT: ['ACTIF'], VENTE_PRESTATION: ['PRODUIT'], VENTE_ARTICLE: ['PRODUIT'] };
 app.get('/api/comptabilite', requireAuth, requireAdmin, async (_req, res) => {
   try { const [comptes, regles, reglesTva] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } }), prisma.regleTvaComptable.findMany({ include: { compte: true }, orderBy: { taux: 'asc' } })]); res.json(decimalToNumber({ comptes, regles, reglesTva })); }
   catch { res.status(500).json({ error: 'Lecture du paramétrage comptable impossible.' }); }
@@ -781,6 +785,8 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
   } catch { res.status(500).json({ error: 'Export comptable impossible.' }); }
 });
 
+const dateFrancaise = (date: Date) => date.toISOString().slice(0, 10).split('-').reverse().join('-');
+
 app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
@@ -788,8 +794,8 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
       const annee = facture.dateEmission.getUTCFullYear();
-      const plusRecente = await tx.sequenceFacture.findFirst({ orderBy: { annee: 'desc' }, select: { annee: true } });
-      if (plusRecente && annee < plusRecente.annee) return { erreur: 'CHRONOLOGY' as const };
+      const derniereEmise = await tx.facture.findFirst({ where: { numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
+      if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
       const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
       const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
       const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
@@ -797,7 +803,11 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date() }, include: factureInclude });
       return { facture: maj };
     });
-    if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seul un brouillon peut être émis.' });
+    if ('erreur' in resultat) {
+      if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
+      if (resultat.erreur === 'CHRONOLOGY') return res.status(409).json({ error: `La numérotation est chronologique : la dernière facture émise porte la date du ${dateFrancaise(resultat.limite)}. Ce brouillon ne peut plus être numéroté.` });
+      return res.status(409).json({ error: 'Seul un brouillon peut être émis.' });
+    }
     res.json(decimalToNumber(resultat.facture));
   } catch (error) {
     if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Numérotation de facture déjà attribuée, veuillez réessayer.' });
