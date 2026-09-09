@@ -1300,6 +1300,12 @@ if (!TEST_DATABASE_URL) {
       assert.equal(versions.body.find((version) => version.actif)?.version, 2);
     });
 
+    test('interdit de modifier le contenu d’une version publiée', async () => {
+      await assert.rejects(() => prisma.mentionsLegalesVersion.update({ where: { version: 2 }, data: { cgv: 'TEST tentative de modification interdite' } }));
+      const version = await prisma.mentionsLegalesVersion.findUnique({ where: { version: 2 } });
+      assert.equal(version.cgv, 'TEST CGV version 2');
+    });
+
     test('liste les versions légales pour l’administration', async () => {
       const reponse = await request(app).get('/api/mentions-legales').set('Authorization', `Bearer ${session}`);
       assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
