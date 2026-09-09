@@ -1508,10 +1508,13 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     // responsable voit désormais la marge commerciale et le budget vendu comme un admin —
     // pas le commercial, qui a sa propre vue "Résultat commercial" à l'échelle du mois.
     const canSeeMarge = isAdmin || (authUser.role === 'CONDUCTEUR_TRAVAUX' && chantier.responsableId === authUser.id);
-    const detail = serializeChantier(chantier, params, canSeeMarge) as Record<string, unknown>;
+    // `serializeChantier` étale son entrée : sortir les factures avant sérialisation
+    // évite toute fuite de montants vers les rôles qui ne voient pas la marge.
+    const { factures, ...chantierSansFactures } = chantier;
+    const detail = serializeChantier(chantierSansFactures, params, canSeeMarge) as Record<string, unknown>;
     if (canSeeMarge) {
-      const totalFactureHt = chantier.factures.reduce((somme, facture) => somme + Number(facture.totalHt), 0);
-      detail.facturation = decimalToNumber({ factures: chantier.factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
+      const totalFactureHt = factures.reduce((somme, facture) => somme + Number(facture.totalHt), 0);
+      detail.facturation = decimalToNumber({ factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
     }
     res.json(detail);
   } catch (error) {
@@ -1559,7 +1562,7 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     const authUser = (req as AuthRequest).user!;
     const existant = await prisma.chantier.findUnique({
       where: { id: paramId(req) },
-      select: { id: true, numeroDevis: true, responsableId: true, statut: true },
+      select: { id: true, clientId: true, numeroDevis: true, responsableId: true, statut: true },
     });
     if (!existant || (!isAdminRole(authUser.role) && existant.responsableId !== authUser.id)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
@@ -1573,17 +1576,26 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // 'statut' n'est modifiable ici que par un admin : la clôture et surtout la RÉOUVERTURE
     // d'un chantier obéissent à des règles propres (cf. PATCH /api/chantiers/:id/statut, où
     // un conducteur peut clôturer mais jamais rouvrir). L'ouvrir ici les contournerait.
-    // Le client est issu du devis accepté et de son clientId relationnel : l'éditer ici
-    // désynchroniserait le libellé historique et la clé utilisée par la facturation.
+    // Les affaires historiques non appariées par la migration doivent pouvoir être réparées
+    // sans modifier leur libellé client historique. Après la première facture, ce lien est figé.
     const allowed = isAdminRole(authUser.role)
-      ? ['nom', 'numeroDevis', 'statut', 'responsableId']
+      ? ['nom', 'numeroDevis', 'statut', 'responsableId', 'clientId']
       : ['nom', 'numeroDevis', 'responsableId'];
     const numericFields = ['budgetGlobalVendu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu', 'heuresVendues'];
     const dateFields = ['dateDebut', 'dateFin'];
 
     const data: Record<string, unknown> = {};
     for (const key of allowed) {
-      if (key !== 'responsableId' && key !== 'numeroDevis' && key in req.body) data[key] = req.body[key];
+      if (key !== 'responsableId' && key !== 'numeroDevis' && key !== 'clientId' && key in req.body) data[key] = req.body[key];
+    }
+    if (isAdminRole(authUser.role) && 'clientId' in req.body) {
+      const cibleId = String(req.body.clientId || '');
+      const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true } });
+      if (!cible) return res.status(404).json({ error: 'Client introuvable.' });
+      if (existant.clientId !== cibleId && await prisma.facture.count({ where: { chantierId: existant.id } })) {
+        return res.status(409).json({ error: 'Une affaire déjà facturée ne change pas de client.' });
+      }
+      data.clientId = cibleId;
     }
     // Format et unicité du numéro de devis : mêmes règles qu'à la création, mais appliquées
     // SEULEMENT si le numéro change réellement. Des chantiers antérieurs portent une valeur
