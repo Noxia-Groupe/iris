@@ -1281,6 +1281,10 @@ if (!TEST_DATABASE_URL) {
         request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', `Bearer ${session}`).send({ compteId: compte('706100').id }),
         request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'VTE' }),
       ]);
+      await Promise.all([
+        request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ compteId: compte('706100').id }).then(r => assert.equal(r.status, 400)),
+        request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'X'.repeat(300) }).then(r => assert.equal(r.status, 400)),
+      ]);
       const exportComptable = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportComptable.status, 200, exportComptable.text);
       assert.match(exportComptable.text, /JournalCode;EcritureDate/);
