@@ -57,6 +57,7 @@ const ChantierDetail = () => {
   // au conducteur responsable ; le serveur (PATCH /api/chantiers/:id) refuse déjà la requête
   // à quiconque d'autre.
   const [conducteurs, setConducteurs] = useState<any[]>([]);
+  const [clients, setClients] = useState<any[]>([]);
   const [editingChantier, setEditingChantier] = useState(false);
   const [savingChantier, setSavingChantier] = useState(false);
   // Responsable et commercial de la modale : champs CONTRÔLÉS, contrairement aux autres.
@@ -172,6 +173,7 @@ const ChantierDetail = () => {
   const startEditChantier = () => {
     if (conducteurs.length === 0) fetchConducteurs();
     if (commerciaux.length === 0) fetchCommerciaux();
+    if (isAdminRole(userRole) && clients.length === 0) apiFetch('/clients').then(res => res.ok ? res.json() : []).then(data => { if (Array.isArray(data)) setClients(data); }).catch(() => {});
     setEditResponsableId(chantier?.responsable?.id || '');
     setEditCommercialId(chantier?.commercial?.id || '');
     setEditingChantier(true);
@@ -1132,7 +1134,12 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Client</label>
-                <input required name="client" defaultValue={chantier.client} className="form-input" placeholder="Nom du client" />
+                {isAdminRole(userRole) ? (
+                  <select required name="clientId" defaultValue={chantier.clientId || ''} className="form-input">
+                    <option value="" disabled>Sélectionner la fiche client…</option>
+                    {clients.map(client => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
+                  </select>
+                ) : <input readOnly value={chantier.client} className="form-input bg-gray-50" />}
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">N° de Devis</label>
