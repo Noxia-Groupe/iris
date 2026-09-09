@@ -1442,6 +1442,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
         commercial: RESPONSABLE_SELECT,
         achats: { where: { archivedAt: null }, include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
         pointages: { where: { archivedAt: null }, include: { intervenant: true }, orderBy: { date: 'desc' } },
+        factures: { where: { statut: 'EMISE' }, select: { id: true, numero: true, dateEmission: true, totalHt: true, totalTtc: true, origine: true } },
       }
     });
     // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
@@ -1457,7 +1458,10 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     // responsable voit désormais la marge commerciale et le budget vendu comme un admin —
     // pas le commercial, qui a sa propre vue "Résultat commercial" à l'échelle du mois.
     const canSeeMarge = isAdmin || (authUser.role === 'CONDUCTEUR_TRAVAUX' && chantier.responsableId === authUser.id);
-    res.json(serializeChantier(chantier, params, canSeeMarge));
+    const detail = serializeChantier(chantier, params, canSeeMarge) as Record<string, unknown>;
+    const totalFactureHt = chantier.factures.reduce((somme, facture) => somme + Number(facture.totalHt), 0);
+    detail.facturation = decimalToNumber({ factures: chantier.factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
+    res.json(detail);
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantier' });
   }
