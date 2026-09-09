@@ -1285,6 +1285,11 @@ if (!TEST_DATABASE_URL) {
       await prisma.regleTvaComptable.deleteMany({ where: { taux: 20 } });
       const exportSansTva = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportSansTva.status, 409); assert.deepEqual(exportSansTva.body.tauxManquants, [20]);
+      await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id });
+      await prisma.client.update({ where: { id: clientId }, data: { raisonSociale: 'TEST Client contrat maintenance renommé' } });
+      const exportFige = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      assert.equal(exportFige.status, 200); assert.match(exportFige.text, /TEST Client contrat maintenance/); assert.doesNotMatch(exportFige.text, /renommé/);
+      await prisma.client.update({ where: { id: clientId }, data: { raisonSociale: 'TEST Client contrat maintenance' } });
     });
 
     test('refuse d’émettre une facture antérieure à la dernière déjà numérotée', async () => {
