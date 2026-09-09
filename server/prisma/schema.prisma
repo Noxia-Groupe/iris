@@ -431,6 +431,7 @@ model Facture {
   mentionsLegalesVersionId String?
   mentionsLegalesVersion   MentionsLegalesVersion? @relation(fields: [mentionsLegalesVersionId], references: [id], onDelete: Restrict)
   lignes        FactureLigne[]
+  journal       JournalFacture[]
   createdById   String?
   emisLe        DateTime?
   createdAt     DateTime       @default(now())
@@ -442,6 +443,18 @@ model Facture {
   @@index([interventionId])
   @@index([contratMaintenanceId])
   @@index([mentionsLegalesVersionId])
+}
+
+model JournalFacture {
+  id        String   @id @default(uuid())
+  factureId String
+  facture   Facture  @relation(fields: [factureId], references: [id], onDelete: Cascade)
+  acteurId  String?
+  action    String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([factureId, createdAt])
 }
 
 model FactureLigne {

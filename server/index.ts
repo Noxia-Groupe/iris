@@ -682,6 +682,15 @@ app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
   } catch (error) { res.status(500).json({ error: 'Lecture des factures impossible.' }); }
 });
 
+app.get('/api/factures/:id/journal', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const factureId = String(req.params.id);
+    const facture = await prisma.facture.findUnique({ where: { id: factureId }, select: { id: true } });
+    if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
+    res.json(await prisma.journalFacture.findMany({ where: { factureId }, orderBy: { createdAt: 'asc' } }));
+  } catch { res.status(500).json({ error: 'Lecture du journal de facture impossible.' }); }
+});
+
 app.get('/api/factures/:id/tracabilite', requireAuth, requireAdmin, async (req, res) => {
   try {
     const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: {
@@ -743,7 +752,11 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const totalTva = centimes(tauxUtilises(lignes).reduce((somme: number, taux: number) => somme + tvaDuTaux(lignes, taux), 0));
     const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
-    const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+    const facture = await prisma.$transaction(async (tx) => {
+      const creee = await tx.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+      await tx.journalFacture.create({ data: { factureId: creee.id, acteurId: req.user!.id, action: 'CREATION_BROUILLON', detail: `Origine ${origine}` } });
+      return creee;
+    });
     res.status(201).json(decimalToNumber(facture));
   } catch (error) {
     if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
@@ -871,6 +884,7 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
       const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
       const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date(), mentionsLegalesVersionId: mentions.id }, include: factureInclude });
+      await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: (req as AuthRequest).user!.id, action: 'EMISSION', detail: `Numéro ${numero}, version légale ${mentions.id}` } });
       return { facture: maj };
     });
     if ('erreur' in resultat) {
