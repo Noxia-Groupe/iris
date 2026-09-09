@@ -53,7 +53,6 @@ if (!TEST_DATABASE_URL) {
     await prisma.contratMaintenance.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientContact.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
-    await prisma.client.deleteMany({ where: { raisonSociale: { startsWith: 'TEST ' } } });
     await prisma.cataloguePrestation.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.catalogueArticle.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.catalogueEquipement.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
@@ -69,6 +68,7 @@ if (!TEST_DATABASE_URL) {
     // chaque exécution en laisserait un derrière elle. Elle vient APRÈS les achats et les
     // heures, qui référencent le chantier.
     await prisma.chantier.deleteMany({ where: { client: { startsWith: 'TEST ' } } });
+    await prisma.client.deleteMany({ where: { raisonSociale: { startsWith: 'TEST ' } } });
     await prisma.intervenant.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
