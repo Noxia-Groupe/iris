@@ -1282,6 +1282,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal(exportComptable.status, 200, exportComptable.text);
       assert.match(exportComptable.text, /JournalCode;EcritureDate/);
       assert.match(exportComptable.text, /706100/);
+      await prisma.regleTvaComptable.deleteMany({ where: { taux: 20 } });
+      const exportSansTva = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      assert.equal(exportSansTva.status, 409); assert.deepEqual(exportSansTva.body.tauxManquants, [20]);
     });
 
     test('génère une seule intervention prévisionnelle par échéance de contrat', async () => {
