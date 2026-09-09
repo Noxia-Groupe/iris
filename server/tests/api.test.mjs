@@ -1289,6 +1289,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal(exportComptable.status, 200, exportComptable.text);
       assert.match(exportComptable.text, /JournalCode;EcritureDate/);
       assert.match(exportComptable.text, /706100/);
+      const lignesPiece = exportComptable.text.split('\n').filter(ligne => ligne.includes(emission.body.numero));
+      const montant = (ligne, index) => Number(ligne.split(';')[index].replace(/"/g, ''));
+      assert.equal(lignesPiece.reduce((somme, ligne) => somme + montant(ligne, 6), 0).toFixed(2), lignesPiece.reduce((somme, ligne) => somme + montant(ligne, 7), 0).toFixed(2));
+      assert.ok(exportComptable.text.split('\n').some(ligne => ligne.includes('445710')), 'une ligne de TVA doit être exportée');
       const journal = await prisma.regleComptable.findUnique({ where: { cle: 'JOURNAL_VENTES' } });
       await prisma.regleComptable.delete({ where: { cle: 'JOURNAL_VENTES' } });
       const exportIncomplet = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
