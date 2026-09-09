@@ -1287,6 +1287,18 @@ if (!TEST_DATABASE_URL) {
       assert.equal(exportSansTva.status, 409); assert.deepEqual(exportSansTva.body.tauxManquants, [20]);
     });
 
+    test('refuse d’émettre une facture antérieure à la dernière déjà numérotée', async () => {
+      const brouillon = (dateEmission, dateEcheance) => request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, dateEmission, dateEcheance, lignes: [{ designation: 'TEST chronologie', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      const emettre = (id) => request(app).post(`/api/factures/${id}/emettre`).set('Authorization', `Bearer ${session}`);
+      const reference = await emettre((await brouillon('08-09-2026', '08-10-2026')).body.id);
+      assert.equal(reference.status, 200, JSON.stringify(reference.body));
+      assert.equal((await emettre((await brouillon('08-09-2026', '08-10-2026')).body.id)).status, 200);
+      const ancienne = await brouillon('02-01-2026', '31-12-2026');
+      const refus = await emettre(ancienne.body.id);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body)); assert.match(refus.body.error, /chronologique/i); assert.match(refus.body.error, /08-09-2026/);
+      assert.equal((await prisma.facture.findUnique({ where: { id: ancienne.body.id } })).numero, null);
+    });
+
     test('génère une seule intervention prévisionnelle par échéance de contrat', async () => {
       const premier = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(premier.status, 201, JSON.stringify(premier.body));
