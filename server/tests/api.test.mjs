@@ -1290,11 +1290,21 @@ if (!TEST_DATABASE_URL) {
       assert.equal(reponse.body.actif, false);
     });
 
+    test('publie une version légale et remplace l’active', async () => {
+      const reponse = await request(app).post('/api/mentions-legales/2/publier').set('Authorization', `Bearer ${session}`);
+      assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      assert.equal(reponse.body.actif, true);
+      assert.ok(reponse.body.publieeLe);
+      const versions = await request(app).get('/api/mentions-legales').set('Authorization', `Bearer ${session}`);
+      assert.equal(versions.body.filter((version) => version.actif).length, 1);
+      assert.equal(versions.body.find((version) => version.actif)?.version, 2);
+    });
+
     test('liste les versions légales pour l’administration', async () => {
       const reponse = await request(app).get('/api/mentions-legales').set('Authorization', `Bearer ${session}`);
       assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
       assert.equal(reponse.body.length, 2);
-      assert.equal(reponse.body.find((version) => version.actif)?.version, 1);
+      assert.equal(reponse.body.find((version) => version.actif)?.version, 2);
     });
 
     test('refuse l’émission sans mentions légales publiées', async () => {

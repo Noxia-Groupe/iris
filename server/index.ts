@@ -822,6 +822,21 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
 
 const dateFrancaise = (date: Date) => date.toISOString().slice(0, 10).split('-').reverse().join('-');
 
+app.post('/api/mentions-legales/:version/publier', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const version = Number(req.params.version);
+    if (!Number.isInteger(version) || version < 1) return res.status(400).json({ error: 'Version légale invalide.' });
+    const publiee = await prisma.$transaction(async (tx) => {
+      const cible = await tx.mentionsLegalesVersion.findUnique({ where: { version } });
+      if (!cible) return null;
+      await tx.mentionsLegalesVersion.updateMany({ where: { actif: true }, data: { actif: false } });
+      return tx.mentionsLegalesVersion.update({ where: { version }, data: { actif: true, publieeLe: new Date() } });
+    });
+    if (!publiee) return res.status(404).json({ error: 'Version légale introuvable.' });
+    res.json(publiee);
+  } catch { res.status(500).json({ error: 'Publication de la version légale impossible.' }); }
+});
+
 app.post('/api/mentions-legales', requireAuth, requireAdmin, async (req, res) => {
   try {
     const mentions = String(req.body?.mentions || '').trim(), cgv = String(req.body?.cgv || '').trim(), penalites = String(req.body?.penalites || '').trim();
