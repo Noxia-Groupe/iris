@@ -75,7 +75,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.user.deleteMany({ where: { email: { in: [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ] } } });
   };
 
@@ -632,6 +632,7 @@ if (!TEST_DATABASE_URL) {
       const conversion = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
       assert.equal(conversion.body.numeroDevis, numero);
+      assert.ok((await prisma.chantier.findUnique({ where: { id: conversion.body.id } })).clientId, 'la conversion doit rattacher l’affaire à son client');
       const doublon = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(doublon.status, 400);
     });
@@ -1412,6 +1413,25 @@ if (!TEST_DATABASE_URL) {
       assert.equal(brouillon.status, 201); assert.equal((await request(app).post(`/api/factures/${facture.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 409);
       await prisma.mentionsLegalesVersion.delete({ where: { id: brouillon.body.id } });
       for (const active of actives) await prisma.mentionsLegalesVersion.update({ where: { id: active.id }, data: { actif: true } });
+    });
+
+    test('ne divulgue pas la facturation d’une affaire à qui ne voit pas la marge', async () => {
+      const commercial = await prisma.user.create({ data: { email: 'phase8bis.commercial@iris.test', name: 'TEST Commercial phase8bis', role: 'COMMERCIAL' } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Affaire facturée', client: 'TEST Client contrat maintenance', clientId, dateDebut: new Date(), budgetGlobalVendu: 50000, commercialId: commercial.id } });
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CHANTIER', chantierId: chantier.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST facturation affaire', quantite: 1, prixUnitaireHt: 12345.67, tauxTva: 20 }] });
+      assert.equal((await request(app).post(`/api/factures/${facture.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const vueCommercial = await request(app).get(`/api/chantiers/${chantier.id}`).set('Authorization', `Bearer ${jwt.sign({ id: commercial.id }, process.env.JWT_SECRET)}`);
+      assert.equal(vueCommercial.status, 200); assert.equal(vueCommercial.body.facturation, undefined); assert.equal(vueCommercial.body.factures, undefined);
+      assert.equal(/12345\.67|14814\.8/.test(JSON.stringify(vueCommercial.body)), false);
+    });
+
+    test('répare le client d’une affaire héritée mais le fige après facturation', async () => {
+      const orpheline = await prisma.chantier.create({ data: { nom: 'TEST Affaire héritée', client: 'TEST Libellé libre', dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      assert.equal((await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId })).status, 200);
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CHANTIER', chantierId: orpheline.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST affaire réparée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(facture.status, 201); assert.equal((await request(app).post(`/api/factures/${facture.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const autre = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client déplacement' });
+      assert.equal((await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId: autre.body.id })).status, 409);
     });
 
     test('refuse d’émettre une facture antérieure à la dernière déjà numérotée', async () => {
