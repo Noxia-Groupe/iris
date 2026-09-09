@@ -1289,7 +1289,7 @@ if (!TEST_DATABASE_URL) {
       await prisma.mentionsLegalesVersion.deleteMany({});
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(emission.status, 409, JSON.stringify(emission.body));
-      await prisma.mentionsLegalesVersion.create({ data: { version: 1, mentions: 'TEST Mentions légales', cgv: 'TEST Conditions générales', penalites: 'TEST Pénalités de retard', actif: true, publieeLe: new Date() });
+      await prisma.mentionsLegalesVersion.create({ data: { version: 1, mentions: 'TEST Mentions légales', cgv: 'TEST Conditions générales', penalites: 'TEST Pénalités de retard', actif: true, publieeLe: new Date() } });
     });
 
     test('attribue un numéro annuel seulement lors de l’émission', async () => {
