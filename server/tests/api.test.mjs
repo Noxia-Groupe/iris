@@ -42,6 +42,7 @@ if (!TEST_DATABASE_URL) {
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
     await prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
+    await prisma.journalFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     await prisma.facture.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.mentionsLegalesVersion.deleteMany({});
     await prisma.regleComptable.deleteMany({});
