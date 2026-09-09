@@ -822,6 +822,13 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
 
 const dateFrancaise = (date: Date) => date.toISOString().slice(0, 10).split('-').reverse().join('-');
 
+app.get('/api/mentions-legales', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const versions = await prisma.mentionsLegalesVersion.findMany({ orderBy: { version: 'desc' } });
+    res.json(versions);
+  } catch { res.status(500).json({ error: 'Lecture des mentions légales impossible.' }); }
+});
+
 app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {

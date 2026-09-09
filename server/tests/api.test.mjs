@@ -1283,6 +1283,13 @@ if (!TEST_DATABASE_URL) {
       assert.equal(reponse.status, 400); assert.match(reponse.body.error, /future/i);
     });
 
+    test('liste les versions légales pour l’administration', async () => {
+      const reponse = await request(app).get('/api/mentions-legales').set('Authorization', `Bearer ${session}`);
+      assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      assert.equal(reponse.body.length, 1);
+      assert.equal(reponse.body[0].actif, true);
+    });
+
     test('refuse l’émission sans mentions légales publiées', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Facture en attente de paramétrage', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST mentions absentes', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
