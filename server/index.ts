@@ -692,6 +692,23 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     if (new Date(dateEmission) > new Date()) return res.status(400).json({ error: "La date d’émission ne peut pas être future." });
     const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const origine = String(req.body?.origine || '');
+    const chantierId = req.body?.chantierId ? String(req.body.chantierId) : null;
+    const interventionId = req.body?.interventionId ? String(req.body.interventionId) : null;
+    const contratMaintenanceId = req.body?.contratMaintenanceId ? String(req.body.contratMaintenanceId) : null;
+    const motifHorsAffaire = String(req.body?.motifHorsAffaire || '').trim() || null;
+    const rattachements = [chantierId, interventionId, contratMaintenanceId].filter(Boolean);
+    if (!['CHANTIER', 'INTERVENTION', 'CONTRAT', 'HORS_AFFAIRE'].includes(origine) || (origine === 'HORS_AFFAIRE' ? rattachements.length !== 0 || !motifHorsAffaire || motifHorsAffaire.length < 3 : rattachements.length !== 1)) return res.status(400).json({ error: 'L’origine de la facture doit être déclarée et cohérente.' });
+    if ((origine === 'CHANTIER' && !chantierId) || (origine === 'INTERVENTION' && !interventionId) || (origine === 'CONTRAT' && !contratMaintenanceId)) return res.status(400).json({ error: 'Le rattachement ne correspond pas à l’origine déclarée.' });
+    // Ne jamais déduire l'appartenance par un libellé : les trois origines portent un clientId explicite.
+    // Une origine étrangère ou inexistante répond 404 afin de ne pas divulguer son existence.
+    if (origine === 'CHANTIER') {
+      const chantier = await prisma.chantier.findFirst({ where: { id: chantierId!, clientId }, select: { id: true, statut: true } });
+      if (!chantier) return res.status(404).json({ error: 'Affaire facturable introuvable.' });
+      if (chantier.statut === 'ANNULE') return res.status(409).json({ error: 'Une affaire annulée ne peut pas être facturée.' });
+    }
+    if (origine === 'INTERVENTION' && !await prisma.intervention.findFirst({ where: { id: interventionId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Intervention facturable introuvable.' });
+    if (origine === 'CONTRAT' && !await prisma.contratMaintenance.findFirst({ where: { id: contratMaintenanceId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Contrat facturable introuvable.' });
     const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
     if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });
     const lignes = lignesBrutes.map((ligne: any, ordre: number) => {
@@ -711,7 +728,7 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const totalTva = centimes(tauxUtilises(lignes).reduce((somme: number, taux: number) => somme + tvaDuTaux(lignes, taux), 0));
     const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
-    const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+    const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
     res.status(201).json(decimalToNumber(facture));
   } catch (error) {
     if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
@@ -3469,7 +3486,7 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
     const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
-    const chantier = await tx.chantier.create({ data: { nom: devis.objet, client: devis.client.raisonSociale, numeroDevis: devis.numero, dateDebut: new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues } });
+    const chantier = await tx.chantier.create({ data: { nom: devis.objet, client: devis.client.raisonSociale, clientId: devis.clientId, numeroDevis: devis.numero, dateDebut: new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues } });
     await tx.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
     return chantier;
   });

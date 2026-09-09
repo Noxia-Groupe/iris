@@ -80,6 +80,9 @@ model Chantier {
   // bloquerait la migration ; la règle ne s'applique donc qu'aux nouvelles saisies.
   numeroDevis String?
   client      String
+  // Lien relationnel ajouté pour les flux aval (facture, traçabilité) ; le libellé historique reste affichable.
+  clientId    String?
+  clientFiche Client? @relation("ChantierClient", fields: [clientId], references: [id], onDelete: Restrict)
   // Adresse du site (facultative), saisie librement et toujours corrigible. Seule source de vérité pour les affectations "chantier suivi" du
   // planning d'intervention (cf. PlanningEvent) : jamais dupliquée/surchargée par affectation.
   adresse     String?
@@ -119,6 +122,7 @@ model Chantier {
   pointages      PointageHeure[]
   planningEvents PlanningEvent[]
   interventions  Intervention[]
+  factures       Facture[] @relation("FactureChantier")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -306,6 +310,7 @@ model Client {
   devis                Devis[]
   interventions        Intervention[]
   contratsMaintenance  ContratMaintenance[]
+  chantiers            Chantier[] @relation("ChantierClient")
   factures             Facture[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
@@ -413,6 +418,15 @@ model Facture {
   totalHt       Decimal        @db.Decimal(12, 2)
   totalTva      Decimal        @db.Decimal(12, 2)
   totalTtc      Decimal        @db.Decimal(12, 2)
+  // Une facture porte toujours une origine explicite : affaire, SAV, contrat ou exception motivée.
+  origine              String
+  chantierId           String?
+  chantier             Chantier? @relation("FactureChantier", fields: [chantierId], references: [id], onDelete: Restrict)
+  interventionId       String?
+  intervention         Intervention? @relation("FactureIntervention", fields: [interventionId], references: [id], onDelete: Restrict)
+  contratMaintenanceId String?
+  contratMaintenance   ContratMaintenance? @relation("FactureContratMaintenance", fields: [contratMaintenanceId], references: [id], onDelete: Restrict)
+  motifHorsAffaire     String?
   lignes        FactureLigne[]
   createdById   String?
   emisLe        DateTime?
@@ -497,6 +511,7 @@ model ContratMaintenance {
   createdAt                   DateTime    @default(now())
   updatedAt                   DateTime    @updatedAt
   interventions               Intervention[]
+  factures                    Facture[] @relation("FactureContratMaintenance")
 
   @@index([clientId, statut])
   @@index([siteId])
@@ -536,6 +551,7 @@ model Intervention {
   affectations   InterventionAffectation[]
   rapports       InterventionRapport[]
   planningEvent  PlanningEvent?
+  factures       Facture[] @relation("FactureIntervention")
 
   @@index([clientId, statut])
   @@index([siteId])
