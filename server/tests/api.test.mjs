@@ -44,6 +44,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     await prisma.facture.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.regleComptable.deleteMany({});
+    await prisma.regleTvaComptable.deleteMany({});
     await prisma.compteComptable.deleteMany({});
     await prisma.sequenceFacture.deleteMany({});
     await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
