@@ -1267,6 +1267,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
       assert.equal(emission.body.statut, 'EMISE');
       assert.match(emission.body.numero, /\d{4}/, 'Une facture émise porte une numérotation annuelle.');
+      const reemission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(reemission.status, 409, JSON.stringify(reemission.body));
+      assert.equal((await prisma.facture.findUnique({ where: { id: brouillon.body.id } })).numero, emission.body.numero);
       const configuration = await request(app).get('/api/comptabilite').set('Authorization', `Bearer ${session}`);
       assert.equal(configuration.status, 200, JSON.stringify(configuration.body));
       const compte = (code) => configuration.body.comptes.find((c) => c.code === code);
