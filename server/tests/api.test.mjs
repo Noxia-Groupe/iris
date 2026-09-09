@@ -1339,6 +1339,7 @@ if (!TEST_DATABASE_URL) {
       const journalFacture = await request(app).get(`/api/factures/${brouillon.body.id}/journal`).set('Authorization', `Bearer ${session}`);
       assert.equal(journalFacture.status, 200, JSON.stringify(journalFacture.body));
       assert.deepEqual(journalFacture.body.map((entree) => entree.action), ['CREATION_BROUILLON', 'EMISSION']);
+      await assert.rejects(() => prisma.facture.update({ where: { id: brouillon.body.id }, data: { motifHorsAffaire: 'TEST tentative de modification' } }));
       assert.match(emission.body.numero, /\d{4}/, 'Une facture émise porte une numérotation annuelle.');
       const reemission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(reemission.status, 409, JSON.stringify(reemission.body));
