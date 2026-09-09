@@ -716,7 +716,7 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
 const CLES_COMPTABLES = ['CLIENT', 'TVA_COLLECTEE', 'VENTE_PRESTATION', 'VENTE_ARTICLE', 'JOURNAL_VENTES'];
 const NATURES_ATTENDUES: Record<string, string[]> = { CLIENT: ['ACTIF'], TVA_COLLECTEE: ['TVA'], VENTE_PRESTATION: ['PRODUIT'], VENTE_ARTICLE: ['PRODUIT'] };
 app.get('/api/comptabilite', requireAuth, requireAdmin, async (_req, res) => {
-  try { const [comptes, regles] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } })]); res.json(decimalToNumber({ comptes, regles })); }
+  try { const [comptes, regles, reglesTva] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } }), prisma.regleTvaComptable.findMany({ include: { compte: true }, orderBy: { taux: 'asc' } })]); res.json(decimalToNumber({ comptes, regles, reglesTva })); }
   catch { res.status(500).json({ error: 'Lecture du paramétrage comptable impossible.' }); }
 });
 app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res) => {
