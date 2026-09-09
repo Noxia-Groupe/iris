@@ -306,6 +306,7 @@ model Client {
   devis                Devis[]
   interventions        Intervention[]
   contratsMaintenance  ContratMaintenance[]
+  factures             Facture[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 }
@@ -394,6 +395,88 @@ model DevisConversion {
   createdAt DateTime @default(now())
 
   @@index([cibleType, cibleId])
+}
+
+// Facture française native : les montants et lignes sont figés dès l'émission. Le numéro
+// légal est volontairement attribué à l'émission, jamais à un brouillon abandonné.
+model Facture {
+  id            String         @id @default(uuid())
+  numero        String?        @unique
+  annee         Int?
+  clientId      String
+  client        Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  // Identité figée à la création : renommer la fiche client ne réécrit jamais une facture émise.
+  clientRaisonSociale String
+  statut        String         @default("BROUILLON") // BROUILLON | EMISE | REGLEE | ANNULEE
+  dateEmission  DateTime
+  dateEcheance  DateTime
+  totalHt       Decimal        @db.Decimal(12, 2)
+  totalTva      Decimal        @db.Decimal(12, 2)
+  totalTtc      Decimal        @db.Decimal(12, 2)
+  lignes        FactureLigne[]
+  createdById   String?
+  emisLe        DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([clientId, statut])
+  @@index([statut, dateEcheance])
+}
+
+model FactureLigne {
+  id             String  @id @default(uuid())
+  factureId      String
+  facture        Facture @relation(fields: [factureId], references: [id], onDelete: Restrict)
+  ordre          Int
+  designation      String
+  nature           String   @default("PRESTATION") // PRESTATION | ARTICLE : ventilation comptable configurable
+  quantite       Decimal @db.Decimal(12, 3)
+  prixUnitaireHt Decimal @db.Decimal(12, 2)
+  tauxTva        Decimal @db.Decimal(5, 2)
+  totalHt        Decimal @db.Decimal(12, 2)
+  totalTtc       Decimal @db.Decimal(12, 2)
+
+  @@unique([factureId, ordre])
+}
+
+model SequenceFacture {
+  annee         Int @id
+  dernierNumero Int @default(0)
+}
+
+// Référentiel comptable par instance : il démarre vide et se paramètre/importera selon le cabinet.
+model CompteComptable {
+  id        String  @id @default(uuid())
+  code      String  @unique
+  libelle   String
+  nature    String  // ACTIF | PASSIF | PRODUIT | CHARGE | TVA
+  actif     Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  regles    RegleComptable[]
+  reglesTva RegleTvaComptable[]
+}
+
+model RegleComptable {
+  id        String           @id @default(uuid())
+  cle       String           @unique // CLIENT | TVA_COLLECTEE | VENTE_PRESTATION | VENTE_ARTICLE | JOURNAL_VENTES
+  compteId  String?
+  compte    CompteComptable? @relation(fields: [compteId], references: [id], onDelete: Restrict)
+  journal   String?
+  updatedAt DateTime         @updatedAt
+
+  @@index([compteId])
+}
+
+// Une TVA est ventilée par taux : indispensable à la déclaration CA3.
+model RegleTvaComptable {
+  id       String           @id @default(uuid())
+  taux     Decimal          @unique @db.Decimal(5, 2)
+  compteId String
+  compte   CompteComptable  @relation(fields: [compteId], references: [id], onDelete: Restrict)
+  updatedAt DateTime        @updatedAt
+
+  @@index([compteId])
 }
 
 // Contrat de maintenance natif : son échéance est un engagement métier, distinct du planning.

@@ -665,6 +665,159 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
   } });
 }
 
+// --- Facturation française native ---
+const factureInclude = { client: { select: { id: true, raisonSociale: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+const PLAFOND_MONTANT = 9_999_999_999.99;
+class FactureInvalideError extends Error {}
+
+type LigneTaxable = { tauxTva: unknown; totalHt: unknown };
+const tauxUtilises = (lignes: LigneTaxable[]) => [...new Set(lignes.map(ligne => Number(ligne.tauxTva)))];
+const baseHtDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(lignes.filter(ligne => Number(ligne.tauxTva) === taux).reduce((somme, ligne) => somme + Number(ligne.totalHt), 0));
+const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(baseHtDuTaux(lignes, taux) * taux / 100);
+
+app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const factures = await prisma.facture.findMany({ include: factureInclude, orderBy: [{ dateEmission: 'desc' }, { createdAt: 'desc' }] });
+    res.json(decimalToNumber(factures));
+  } catch (error) { res.status(500).json({ error: 'Lecture des factures impossible.' }); }
+});
+
+app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const clientId = String(req.body?.clientId || '');
+    const dateEmission = dateIsoStricte(req.body?.dateEmission);
+    const dateEcheance = dateIsoStricte(req.body?.dateEcheance);
+    if (!dateEmission || !dateEcheance) return res.status(400).json({ error: 'Les dates doivent être valides au format JJ-MM-AAAA.' });
+    if (dateEcheance < dateEmission) return res.status(400).json({ error: 'L’échéance ne peut pas précéder la date d’émission.' });
+    if (new Date(dateEmission) > new Date()) return res.status(400).json({ error: "La date d’émission ne peut pas être future." });
+    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
+    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
+    if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });
+    const lignes = lignesBrutes.map((ligne: any, ordre: number) => {
+      const designation = String(ligne?.designation || '').trim();
+      const quantite = nombreDecimalNonNegatif(ligne?.quantite, 9, false, 3);
+      const prixUnitaireHt = nombreDecimalNonNegatif(ligne?.prixUnitaireHt, 10, true);
+      const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3, true);
+      const nature = String(ligne?.nature || 'PRESTATION');
+      if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new FactureInvalideError('Ligne de facture invalide.');
+      const totalHt = centimes(quantite * prixUnitaireHt);
+      const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
+      if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de ligne hors des limites acceptées.');
+      return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
+    });
+    const totalHt = centimes(lignes.reduce((s: number, ligne: { totalHt: number }) => s + ligne.totalHt, 0));
+    // La TVA légale s'arrondit sur la base HT cumulée de chaque taux, jamais ligne par ligne.
+    const totalTva = centimes(tauxUtilises(lignes).reduce((somme: number, taux: number) => somme + tvaDuTaux(lignes, taux), 0));
+    const totalTtc = centimes(totalHt + totalTva);
+    if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
+    const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+    res.status(201).json(decimalToNumber(facture));
+  } catch (error) {
+    if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
+    res.status(500).json({ error: 'Création de facture impossible.' });
+  }
+});
+
+// Paramétrage comptable : aucun compte n'est préchargé. L'export devra refuser toute règle absente.
+const CLES_COMPTABLES = ['CLIENT', 'VENTE_PRESTATION', 'VENTE_ARTICLE', 'JOURNAL_VENTES'];
+const NATURES_ATTENDUES: Record<string, string[]> = { CLIENT: ['ACTIF'], VENTE_PRESTATION: ['PRODUIT'], VENTE_ARTICLE: ['PRODUIT'] };
+app.get('/api/comptabilite', requireAuth, requireAdmin, async (_req, res) => {
+  try { const [comptes, regles, reglesTva] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } }), prisma.regleTvaComptable.findMany({ include: { compte: true }, orderBy: { taux: 'asc' } })]); res.json(decimalToNumber({ comptes, regles, reglesTva })); }
+  catch { res.status(500).json({ error: 'Lecture du paramétrage comptable impossible.' }); }
+});
+app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res) => {
+  try { const code = String(req.body?.code || '').trim(), libelle = String(req.body?.libelle || '').trim(), nature = String(req.body?.nature || '');
+    if (!/^\d{3,12}$/.test(code) || !libelle || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
+    const compte = await prisma.compteComptable.create({ data: { code, libelle, nature } }); res.status(201).json(compte);
+  } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte existe déjà.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
+});
+app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req, res) => {
+  const lignes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
+  if (!lignes.length || lignes.length > 5000) return res.status(400).json({ error: 'Le plan doit contenir entre 1 et 5 000 lignes.' });
+  const vus = new Set<string>(); const erreurs: { ligne: number; erreur: string }[] = [];
+  const comptes = lignes.map((ligne: any, index: number) => {
+    const code = String(ligne?.code || '').trim(), libelle = String(ligne?.libelle || '').trim(), nature = String(ligne?.nature || '');
+    if (!/^\d{3,12}$/.test(code) || !libelle || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) erreurs.push({ ligne: index + 1, erreur: 'Code, libellé ou nature invalide.' });
+    if (vus.has(code)) erreurs.push({ ligne: index + 1, erreur: 'Code dupliqué dans le fichier.' }); vus.add(code); return { code, libelle, nature };
+  });
+  if (erreurs.length) return res.status(400).json({ error: 'Import refusé : corrigez les lignes signalées.', erreurs });
+  try { const resultat = await prisma.compteComptable.createMany({ data: comptes, skipDuplicates: true }); res.status(201).json({ importes: resultat.count, ignores: comptes.length - resultat.count }); }
+  catch { res.status(500).json({ error: 'Import du plan comptable impossible.' }); }
+});
+app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, res) => {
+  try { const cle = String(req.params.cle || ''); if (!CLES_COMPTABLES.includes(cle)) return res.status(400).json({ error: 'Règle comptable inconnue.' });
+    const compteId = req.body?.compteId ? String(req.body.compteId) : null; const journal = req.body?.journal == null ? null : String(req.body.journal).trim() || null;
+    if (cle === 'JOURNAL_VENTES' ? !journal : !compteId) return res.status(400).json({ error: 'Paramétrage de règle incomplet.' });
+    if (journal && !/^[A-Z0-9]{1,8}$/.test(journal)) return res.status(400).json({ error: 'Le code journal doit compter au plus 8 caractères alphanumériques majuscules.' });
+    const compte = compteId ? await prisma.compteComptable.findFirst({ where: { id: compteId, actif: true } }) : null;
+    if (compteId && !compte) return res.status(404).json({ error: 'Compte comptable actif introuvable.' });
+    if (compte && NATURES_ATTENDUES[cle] && !NATURES_ATTENDUES[cle].includes(compte.nature)) return res.status(400).json({ error: `Cette règle attend un compte de nature ${NATURES_ATTENDUES[cle].join(' ou ')}.` });
+    const regle = await prisma.regleComptable.upsert({ where: { cle }, create: { cle, compteId, journal }, update: { compteId, journal }, include: { compte: true } }); res.json(regle);
+  } catch { res.status(500).json({ error: 'Mise à jour du paramétrage impossible.' }); }
+});
+
+app.put('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req, res) => {
+  try { const taux = nombreDecimalNonNegatif(req.params.taux, 3, true); const compteId = String(req.body?.compteId || '');
+    if (taux === null || taux > 100) return res.status(400).json({ error: 'Taux de TVA invalide.' });
+    const compte = await prisma.compteComptable.findFirst({ where: { id: compteId, actif: true } });
+    if (!compte) return res.status(404).json({ error: 'Compte TVA actif introuvable.' });
+    if (compte.nature !== 'TVA') return res.status(400).json({ error: 'Une règle TVA attend un compte de nature TVA.' });
+    res.json(await prisma.regleTvaComptable.upsert({ where: { taux }, create: { taux, compteId }, update: { compteId }, include: { compte: true } }));
+  } catch { res.status(500).json({ error: 'Mise à jour de la règle TVA impossible.' }); }
+});
+
+const csvComptable = (v: unknown) => {
+  const texte = String(v ?? ''); const formule = /^[=+@\t\r]/.test(texte) || (texte.startsWith('-') && !Number.isFinite(Number(texte)));
+  return `"${(formule ? `'${texte}` : texte).replace(/"/g, '""')}"`;
+};
+app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const [regles, reglesTva] = await Promise.all([prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }), prisma.regleTvaComptable.findMany({ include: { compte: true } })]); const r = new Map(regles.map(x => [x.cle, x])); const tvaParTaux = new Map(reglesTva.filter(x => x.compte.actif).map(x => [Number(x.taux), x.compte]));
+    const manquantes = CLES_COMPTABLES.filter(cle => cle === 'JOURNAL_VENTES' ? !r.get(cle)?.journal : !r.get(cle)?.compte?.actif);
+    if (manquantes.length) return res.status(409).json({ error: 'Export bloqué : paramétrage comptable incomplet.', manquantes });
+    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE'] } }, include: { client: true, lignes: true }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
+    const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
+    if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
+    const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit']; for (const f of factures) { const date = f.dateEmission.toISOString().slice(0, 10).replace(/-/g, ''); const libelle = `Facture ${f.numero} — ${f.clientRaisonSociale}`;
+      lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, r.get('CLIENT')!.compte!.code, r.get('CLIENT')!.compte!.libelle, libelle, Number(f.totalTtc).toFixed(2), '0.00'].map(csvComptable).join(';'));
+      for (const nature of ['PRESTATION', 'ARTICLE']) { const ht = f.lignes.filter(l => l.nature === nature).reduce((s, l) => s + Number(l.totalHt), 0); if (ht) { const cle = nature === 'PRESTATION' ? 'VENTE_PRESTATION' : 'VENTE_ARTICLE'; lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, r.get(cle)!.compte!.code, r.get(cle)!.compte!.libelle, libelle, '0.00', ht.toFixed(2)].map(csvComptable).join(';')); } }
+      for (const taux of tauxUtilises(f.lignes)) { const tva = tvaDuTaux(f.lignes, taux); if (tva) { const compteTva = tvaParTaux.get(taux)!; lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, compteTva.code, compteTva.libelle, libelle, '0.00', tva.toFixed(2)].map(csvComptable).join(';')); } }
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="export-ventes.csv"'); res.send(`\uFEFF${lignes.join('\n')}\n`);
+  } catch { res.status(500).json({ error: 'Export comptable impossible.' }); }
+});
+
+const dateFrancaise = (date: Date) => date.toISOString().slice(0, 10).split('-').reverse().join('-');
+
+app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const resultat = await prisma.$transaction(async (tx) => {
+      const facture = await tx.facture.findUnique({ where: { id: paramId(req) } });
+      if (!facture) return { erreur: 'NOT_FOUND' as const };
+      if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
+      const annee = facture.dateEmission.getUTCFullYear();
+      const derniereEmise = await tx.facture.findFirst({ where: { numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
+      if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
+      const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
+      const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
+      const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
+      const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+      const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date() }, include: factureInclude });
+      return { facture: maj };
+    });
+    if ('erreur' in resultat) {
+      if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
+      if (resultat.erreur === 'CHRONOLOGY') return res.status(409).json({ error: `La numérotation est chronologique : la dernière facture émise porte la date du ${dateFrancaise(resultat.limite)}. Ce brouillon ne peut plus être numéroté.` });
+      return res.status(409).json({ error: 'Seul un brouillon peut être émis.' });
+    }
+    res.json(decimalToNumber(resultat.facture));
+  } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Numérotation de facture déjà attribuée, veuillez réessayer.' });
+    res.status(500).json({ error: 'Émission de facture impossible.' });
+  }
+});
+
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
 // Contrats de maintenance : le contrat est le document source du cycle. Le planning ne sera
@@ -2381,11 +2534,10 @@ async function journaliserSaisieTravaux(
   } });
 }
 
-function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number, zeroAutorise = false): number | null {
-  // Ne jamais laisser PostgreSQL arrondir silencieusement une valeur métier : l'échelle des
-  // colonnes est de deux décimales. La notation scientifique est aussi refusée.
+function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number, zeroAutorise = false, maxDecimales = 2): number | null {
+  // Ne jamais laisser PostgreSQL arrondir silencieusement une valeur métier ; notation scientifique refusée.
   const texte = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
-  const expression = new RegExp(`^\\d{1,${maxIntegerDigits}}(?:[,.]\\d{1,2})?$`);
+  const expression = new RegExp(`^\\d{1,${maxIntegerDigits}}(?:[,.]\\d{1,${maxDecimales}})?$`);
   if (!expression.test(texte)) return null;
   const nombre = Number(texte.replace(',', '.'));
   return Number.isFinite(nombre) && (nombre > 0 || (zeroAutorise && nombre === 0)) ? nombre : null;
