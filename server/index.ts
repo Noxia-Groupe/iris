@@ -670,6 +670,11 @@ const factureInclude = { client: { select: { id: true, raisonSociale: true } }, 
 const PLAFOND_MONTANT = 9_999_999_999.99;
 class FactureInvalideError extends Error {}
 
+type LigneTaxable = { tauxTva: unknown; totalHt: unknown };
+const tauxUtilises = (lignes: LigneTaxable[]) => [...new Set(lignes.map(ligne => Number(ligne.tauxTva)))];
+const baseHtDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(lignes.filter(ligne => Number(ligne.tauxTva) === taux).reduce((somme, ligne) => somme + Number(ligne.totalHt), 0));
+const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(baseHtDuTaux(lignes, taux) * taux / 100);
+
 app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
   try {
     const factures = await prisma.facture.findMany({ include: factureInclude, orderBy: [{ dateEmission: 'desc' }, { createdAt: 'desc' }] });
@@ -703,12 +708,10 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     });
     const totalHt = centimes(lignes.reduce((s: number, ligne: { totalHt: number }) => s + ligne.totalHt, 0));
     // La TVA légale s'arrondit sur la base HT cumulée de chaque taux, jamais ligne par ligne.
-    const tauxDistincts: number[] = [...new Set<number>(lignes.map((l: { tauxTva: number }) => l.tauxTva))];
-    const totalTva = centimes(tauxDistincts.reduce((s: number, taux: number) => s + centimes(lignes.filter((l: { tauxTva: number }) => l.tauxTva === taux).reduce((base: number, l: { totalHt: number }) => base + l.totalHt, 0) * taux / 100), 0));
-    for (const taux of tauxDistincts) { const groupe = lignes.filter((l: { tauxTva: number }) => l.tauxTva === taux); const tva = centimes(groupe.reduce((base: number, l: { totalHt: number }) => base + l.totalHt, 0) * taux / 100); groupe.forEach((l: { totalHt: number; totalTtc: number }) => { l.totalTtc = l.totalHt; }); groupe[groupe.length - 1].totalTtc = centimes(groupe[groupe.length - 1].totalHt + tva); }
+    const totalTva = centimes(tauxUtilises(lignes).reduce((somme: number, taux: number) => somme + tvaDuTaux(lignes, taux), 0));
     const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
-    const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, dateEmission, dateEcheance, totalHt, totalTva: centimes(totalTtc - totalHt), totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+    const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
     res.status(201).json(decimalToNumber(facture));
   } catch (error) {
     if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
@@ -779,7 +782,7 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
     const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit']; for (const f of factures) { const date = f.dateEmission.toISOString().slice(0, 10).replace(/-/g, ''); const libelle = `Facture ${f.numero} — ${f.clientRaisonSociale}`;
       lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, r.get('CLIENT')!.compte!.code, r.get('CLIENT')!.compte!.libelle, libelle, Number(f.totalTtc).toFixed(2), '0.00'].map(csvComptable).join(';'));
       for (const nature of ['PRESTATION', 'ARTICLE']) { const ht = f.lignes.filter(l => l.nature === nature).reduce((s, l) => s + Number(l.totalHt), 0); if (ht) { const cle = nature === 'PRESTATION' ? 'VENTE_PRESTATION' : 'VENTE_ARTICLE'; lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, r.get(cle)!.compte!.code, r.get(cle)!.compte!.libelle, libelle, '0.00', ht.toFixed(2)].map(csvComptable).join(';')); } }
-      for (const taux of [...new Set(f.lignes.map(l => Number(l.tauxTva)))]) { const tva = f.lignes.filter(l => Number(l.tauxTva) === taux).reduce((s, l) => s + (Number(l.totalTtc) - Number(l.totalHt)), 0); if (tva) { const compteTva = tvaParTaux.get(taux)!; lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, compteTva.code, compteTva.libelle, libelle, '0.00', tva.toFixed(2)].map(csvComptable).join(';')); } }
+      for (const taux of tauxUtilises(f.lignes)) { const tva = tvaDuTaux(f.lignes, taux); if (tva) { const compteTva = tvaParTaux.get(taux)!; lignes.push([r.get('JOURNAL_VENTES')!.journal, date, f.numero, compteTva.code, compteTva.libelle, libelle, '0.00', tva.toFixed(2)].map(csvComptable).join(';')); } }
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="export-ventes.csv"'); res.send(`\uFEFF${lignes.join('\n')}\n`);
   } catch { res.status(500).json({ error: 'Export comptable impossible.' }); }
