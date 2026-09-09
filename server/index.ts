@@ -1495,8 +1495,10 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     // pas le commercial, qui a sa propre vue "Résultat commercial" à l'échelle du mois.
     const canSeeMarge = isAdmin || (authUser.role === 'CONDUCTEUR_TRAVAUX' && chantier.responsableId === authUser.id);
     const detail = serializeChantier(chantier, params, canSeeMarge) as Record<string, unknown>;
-    const totalFactureHt = chantier.factures.reduce((somme, facture) => somme + Number(facture.totalHt), 0);
-    detail.facturation = decimalToNumber({ factures: chantier.factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
+    if (canSeeMarge) {
+      const totalFactureHt = chantier.factures.reduce((somme, facture) => somme + Number(facture.totalHt), 0);
+      detail.facturation = decimalToNumber({ factures: chantier.factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
+    }
     res.json(detail);
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantier' });
