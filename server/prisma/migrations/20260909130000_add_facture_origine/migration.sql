@@ -11,6 +11,7 @@ ALTER TABLE "Facture" ADD COLUMN "interventionId" TEXT;
 ALTER TABLE "Facture" ADD COLUMN "contratMaintenanceId" TEXT;
 ALTER TABLE "Facture" ADD COLUMN "motifHorsAffaire" TEXT;
 UPDATE "Facture" SET "motifHorsAffaire" = 'Facture historique antérieure au rattachement à l’affaire.' WHERE "origine" = 'HORS_AFFAIRE';
+ALTER TABLE "Facture" ALTER COLUMN "origine" DROP DEFAULT;
 
 ALTER TABLE "Facture" ADD CONSTRAINT "Facture_chantierId_fkey" FOREIGN KEY ("chantierId") REFERENCES "Chantier"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "Facture" ADD CONSTRAINT "Facture_interventionId_fkey" FOREIGN KEY ("interventionId") REFERENCES "Intervention"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

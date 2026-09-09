@@ -127,6 +127,7 @@ model Chantier {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([clientId])
   @@index([responsableId])
   @@index([commercialId])
 }
@@ -435,6 +436,9 @@ model Facture {
 
   @@index([clientId, statut])
   @@index([statut, dateEcheance])
+  @@index([chantierId])
+  @@index([interventionId])
+  @@index([contratMaintenanceId])
 }
 
 model FactureLigne {
