@@ -57,6 +57,7 @@ const ChantierDetail = () => {
   // au conducteur responsable ; le serveur (PATCH /api/chantiers/:id) refuse déjà la requête
   // à quiconque d'autre.
   const [conducteurs, setConducteurs] = useState<any[]>([]);
+  const [clients, setClients] = useState<any[]>([]);
   const [editingChantier, setEditingChantier] = useState(false);
   const [savingChantier, setSavingChantier] = useState(false);
   // Responsable et commercial de la modale : champs CONTRÔLÉS, contrairement aux autres.
@@ -172,6 +173,8 @@ const ChantierDetail = () => {
   const startEditChantier = () => {
     if (conducteurs.length === 0) fetchConducteurs();
     if (commerciaux.length === 0) fetchCommerciaux();
+    // GET /api/clients renvoie { clients: [...] } : lire les deux formes évite un select vide.
+    if (isAdminRole(userRole) && clients.length === 0) apiFetch('/clients').then(res => res.ok ? res.json() : null).then(data => { const liste = Array.isArray(data) ? data : data?.clients; if (Array.isArray(liste)) setClients(liste); }).catch(() => {});
     setEditResponsableId(chantier?.responsable?.id || '');
     setEditCommercialId(chantier?.commercial?.id || '');
     setEditingChantier(true);
@@ -670,6 +673,14 @@ const ChantierDetail = () => {
               </div>
             )}
 
+            {chantier.facturation && (
+              <div className="bg-emerald-50 p-5 rounded-xl border border-emerald-100 flex flex-col justify-center">
+                <div className="text-xs font-bold text-emerald-700 uppercase tracking-widest mb-1">Facturé HT</div>
+                <div className="text-2xl font-black text-emerald-800">{fmtEuro(chantier.facturation.totalFactureHt)}</div>
+                <div className="mt-1 text-xs text-emerald-700">Reste à facturer : {fmtEuro(chantier.facturation.resteAFacturerHt)}</div>
+              </div>
+            )}
+
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-16 h-16 bg-green-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Matériel Prévu</div>
@@ -1124,7 +1135,12 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Client</label>
-                <input required name="client" defaultValue={chantier.client} className="form-input" placeholder="Nom du client" />
+                {isAdminRole(userRole) ? (
+                  <select required name="clientId" defaultValue={chantier.clientId || ''} className="form-input">
+                    <option value="" disabled>Sélectionner la fiche client…</option>
+                    {clients.map(client => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
+                  </select>
+                ) : <input readOnly value={chantier.client} className="form-input bg-gray-50" />}
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">N° de Devis</label>

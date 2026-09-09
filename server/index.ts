@@ -666,7 +666,7 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 }
 
 // --- Facturation française native ---
-const factureInclude = { client: { select: { id: true, raisonSociale: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+const factureInclude = { client: { select: { id: true, raisonSociale: true } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
 const PLAFOND_MONTANT = 9_999_999_999.99;
 class FactureInvalideError extends Error {}
 
@@ -682,6 +682,30 @@ app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
   } catch (error) { res.status(500).json({ error: 'Lecture des factures impossible.' }); }
 });
 
+app.get('/api/factures/:id/journal', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const factureId = String(req.params.id);
+    const facture = await prisma.facture.findUnique({ where: { id: factureId }, select: { id: true } });
+    if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
+    res.json(await prisma.journalFacture.findMany({ where: { factureId }, orderBy: { createdAt: 'asc' } }));
+  } catch { res.status(500).json({ error: 'Lecture du journal de facture impossible.' }); }
+});
+
+app.get('/api/factures/:id/tracabilite', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: {
+      client: { select: { id: true, raisonSociale: true } },
+      chantier: { select: { id: true, nom: true, numeroDevis: true, statut: true } },
+      intervention: { select: { id: true, reference: true, titre: true, chantierId: true, contratMaintenanceId: true } },
+      contratMaintenance: { select: { id: true, titre: true, siteId: true } },
+    } });
+    if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
+    const chantierId = facture.chantierId || facture.intervention?.chantierId || null;
+    const devis = chantierId ? await prisma.devisConversion.findFirst({ where: { cibleType: 'CHANTIER', cibleId: chantierId }, include: { devis: { select: { id: true, numero: true, objet: true } } } }) : null;
+    res.json(decimalToNumber({ facture, devis: devis?.devis || null }));
+  } catch { res.status(500).json({ error: 'Lecture de la traçabilité impossible.' }); }
+});
+
 app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const clientId = String(req.body?.clientId || '');
@@ -692,6 +716,23 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     if (new Date(dateEmission) > new Date()) return res.status(400).json({ error: "La date d’émission ne peut pas être future." });
     const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const origine = String(req.body?.origine || '');
+    const chantierId = req.body?.chantierId ? String(req.body.chantierId) : null;
+    const interventionId = req.body?.interventionId ? String(req.body.interventionId) : null;
+    const contratMaintenanceId = req.body?.contratMaintenanceId ? String(req.body.contratMaintenanceId) : null;
+    const motifHorsAffaire = String(req.body?.motifHorsAffaire || '').trim() || null;
+    const rattachements = [chantierId, interventionId, contratMaintenanceId].filter(Boolean);
+    if (!['CHANTIER', 'INTERVENTION', 'CONTRAT', 'HORS_AFFAIRE'].includes(origine) || (origine === 'HORS_AFFAIRE' ? rattachements.length !== 0 || !motifHorsAffaire || motifHorsAffaire.length < 3 : rattachements.length !== 1)) return res.status(400).json({ error: 'L’origine de la facture doit être déclarée et cohérente.' });
+    if ((origine === 'CHANTIER' && !chantierId) || (origine === 'INTERVENTION' && !interventionId) || (origine === 'CONTRAT' && !contratMaintenanceId)) return res.status(400).json({ error: 'Le rattachement ne correspond pas à l’origine déclarée.' });
+    // Ne jamais déduire l'appartenance par un libellé : les trois origines portent un clientId explicite.
+    // Une origine étrangère ou inexistante répond 404 afin de ne pas divulguer son existence.
+    if (origine === 'CHANTIER') {
+      const chantier = await prisma.chantier.findFirst({ where: { id: chantierId!, clientId }, select: { id: true, statut: true } });
+      if (!chantier) return res.status(404).json({ error: 'Affaire facturable introuvable.' });
+      if (chantier.statut === 'ANNULE') return res.status(409).json({ error: 'Une affaire annulée ne peut pas être facturée.' });
+    }
+    if (origine === 'INTERVENTION' && !await prisma.intervention.findFirst({ where: { id: interventionId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Intervention facturable introuvable.' });
+    if (origine === 'CONTRAT' && !await prisma.contratMaintenance.findFirst({ where: { id: contratMaintenanceId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Contrat facturable introuvable.' });
     const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
     if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });
     const lignes = lignesBrutes.map((ligne: any, ordre: number) => {
@@ -711,7 +752,11 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const totalTva = centimes(tauxUtilises(lignes).reduce((somme: number, taux: number) => somme + tvaDuTaux(lignes, taux), 0));
     const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
-    const facture = await prisma.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+    const facture = await prisma.$transaction(async (tx) => {
+      const creee = await tx.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+      await tx.journalFacture.create({ data: { factureId: creee.id, acteurId: req.user!.id, action: 'CREATION_BROUILLON', detail: `Origine ${origine}` } });
+      return creee;
+    });
     res.status(201).json(decimalToNumber(facture));
   } catch (error) {
     if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
@@ -790,6 +835,39 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
 
 const dateFrancaise = (date: Date) => date.toISOString().slice(0, 10).split('-').reverse().join('-');
 
+app.post('/api/mentions-legales/:version/publier', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const version = Number(req.params.version);
+    if (!Number.isInteger(version) || version < 1) return res.status(400).json({ error: 'Version légale invalide.' });
+    const publiee = await prisma.$transaction(async (tx) => {
+      const cible = await tx.mentionsLegalesVersion.findUnique({ where: { version } });
+      if (!cible) return null;
+      await tx.mentionsLegalesVersion.updateMany({ where: { actif: true }, data: { actif: false } });
+      return tx.mentionsLegalesVersion.update({ where: { version }, data: { actif: true, publieeLe: new Date() } });
+    });
+    if (!publiee) return res.status(404).json({ error: 'Version légale introuvable.' });
+    res.json(publiee);
+  } catch { res.status(500).json({ error: 'Publication de la version légale impossible.' }); }
+});
+
+app.post('/api/mentions-legales', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const mentions = String(req.body?.mentions || '').trim(), cgv = String(req.body?.cgv || '').trim(), penalites = String(req.body?.penalites || '').trim();
+    const escompte = String(req.body?.escompte || '').trim() || null;
+    if (!mentions || !cgv || !penalites) return res.status(400).json({ error: 'Les mentions, CGV et pénalités sont obligatoires.' });
+    const derniere = await prisma.mentionsLegalesVersion.aggregate({ _max: { version: true } });
+    const version = await prisma.mentionsLegalesVersion.create({ data: { version: (derniere._max.version || 0) + 1, mentions, cgv, penalites, escompte } });
+    res.status(201).json(version);
+  } catch { res.status(500).json({ error: 'Création de la version légale impossible.' }); }
+});
+
+app.get('/api/mentions-legales', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const versions = await prisma.mentionsLegalesVersion.findMany({ orderBy: { version: 'desc' } });
+    res.json(versions);
+  } catch { res.status(500).json({ error: 'Lecture des mentions légales impossible.' }); }
+});
+
 app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
@@ -799,16 +877,20 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       const annee = facture.dateEmission.getUTCFullYear();
       const derniereEmise = await tx.facture.findFirst({ where: { numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
       if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
+      const mentions = await tx.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } });
+      if (!mentions) return { erreur: 'LEGAL_MENTIONS_MISSING' as const };
       const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
       const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
       const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
       const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-      const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date() }, include: factureInclude });
+      const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date(), mentionsLegalesVersionId: mentions.id }, include: factureInclude });
+      await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: (req as AuthRequest).user!.id, action: 'EMISSION', detail: `Numéro ${numero}, version légale ${mentions.id}` } });
       return { facture: maj };
     });
     if ('erreur' in resultat) {
       if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
       if (resultat.erreur === 'CHRONOLOGY') return res.status(409).json({ error: `La numérotation est chronologique : la dernière facture émise porte la date du ${dateFrancaise(resultat.limite)}. Ce brouillon ne peut plus être numéroté.` });
+      if (resultat.erreur === 'LEGAL_MENTIONS_MISSING') return res.status(409).json({ error: 'Aucune version publiée des mentions légales et CGV n’est active. Publiez-en une avant d’émettre une facture.' });
       return res.status(409).json({ error: 'Seul un brouillon peut être émis.' });
     }
     res.json(decimalToNumber(resultat.facture));
@@ -1410,6 +1492,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
         commercial: RESPONSABLE_SELECT,
         achats: { where: { archivedAt: null }, include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
         pointages: { where: { archivedAt: null }, include: { intervenant: true }, orderBy: { date: 'desc' } },
+        factures: { where: { statut: 'EMISE' }, select: { id: true, numero: true, dateEmission: true, totalHt: true, totalTtc: true, origine: true } },
       }
     });
     // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
@@ -1425,7 +1508,15 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     // responsable voit désormais la marge commerciale et le budget vendu comme un admin —
     // pas le commercial, qui a sa propre vue "Résultat commercial" à l'échelle du mois.
     const canSeeMarge = isAdmin || (authUser.role === 'CONDUCTEUR_TRAVAUX' && chantier.responsableId === authUser.id);
-    res.json(serializeChantier(chantier, params, canSeeMarge));
+    // `serializeChantier` étale son entrée : sortir les factures avant sérialisation
+    // évite toute fuite de montants vers les rôles qui ne voient pas la marge.
+    const { factures, ...chantierSansFactures } = chantier;
+    const detail = serializeChantier(chantierSansFactures, params, canSeeMarge) as Record<string, unknown>;
+    if (canSeeMarge) {
+      const totalFactureHt = factures.reduce((somme, facture) => somme + Number(facture.totalHt), 0);
+      detail.facturation = decimalToNumber({ factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
+    }
+    res.json(detail);
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantier' });
   }
@@ -1471,7 +1562,7 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     const authUser = (req as AuthRequest).user!;
     const existant = await prisma.chantier.findUnique({
       where: { id: paramId(req) },
-      select: { id: true, numeroDevis: true, responsableId: true, statut: true },
+      select: { id: true, clientId: true, numeroDevis: true, responsableId: true, statut: true },
     });
     if (!existant || (!isAdminRole(authUser.role) && existant.responsableId !== authUser.id)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
@@ -1485,15 +1576,26 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // 'statut' n'est modifiable ici que par un admin : la clôture et surtout la RÉOUVERTURE
     // d'un chantier obéissent à des règles propres (cf. PATCH /api/chantiers/:id/statut, où
     // un conducteur peut clôturer mais jamais rouvrir). L'ouvrir ici les contournerait.
+    // Les affaires historiques non appariées par la migration doivent pouvoir être réparées
+    // sans modifier leur libellé client historique. Après la première facture, ce lien est figé.
     const allowed = isAdminRole(authUser.role)
-      ? ['nom', 'client', 'numeroDevis', 'statut', 'responsableId']
-      : ['nom', 'client', 'numeroDevis', 'responsableId'];
+      ? ['nom', 'numeroDevis', 'statut', 'responsableId', 'clientId']
+      : ['nom', 'numeroDevis', 'responsableId'];
     const numericFields = ['budgetGlobalVendu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu', 'heuresVendues'];
     const dateFields = ['dateDebut', 'dateFin'];
 
     const data: Record<string, unknown> = {};
     for (const key of allowed) {
-      if (key !== 'responsableId' && key !== 'numeroDevis' && key in req.body) data[key] = req.body[key];
+      if (key !== 'responsableId' && key !== 'numeroDevis' && key !== 'clientId' && key in req.body) data[key] = req.body[key];
+    }
+    if (isAdminRole(authUser.role) && 'clientId' in req.body) {
+      const cibleId = String(req.body.clientId || '');
+      const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true } });
+      if (!cible) return res.status(404).json({ error: 'Client introuvable.' });
+      if (existant.clientId !== cibleId && await prisma.facture.count({ where: { chantierId: existant.id } })) {
+        return res.status(409).json({ error: 'Une affaire déjà facturée ne change pas de client.' });
+      }
+      data.clientId = cibleId;
     }
     // Format et unicité du numéro de devis : mêmes règles qu'à la création, mais appliquées
     // SEULEMENT si le numéro change réellement. Des chantiers antérieurs portent une valeur
@@ -3469,7 +3571,7 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
     const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
-    const chantier = await tx.chantier.create({ data: { nom: devis.objet, client: devis.client.raisonSociale, numeroDevis: devis.numero, dateDebut: new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues } });
+    const chantier = await tx.chantier.create({ data: { nom: devis.objet, client: devis.client.raisonSociale, clientId: devis.clientId, numeroDevis: devis.numero, dateDebut: new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues } });
     await tx.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
     return chantier;
   });

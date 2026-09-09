@@ -28,6 +28,7 @@ import Interventions from './pages/Interventions';
 import ContratsMaintenance from './pages/ContratsMaintenance';
 import Factures from './pages/Factures';
 import Comptabilite from './pages/Comptabilite';
+import MentionsLegales from './pages/MentionsLegales';
 import { ErrorBoundary } from './ErrorBoundary';
 import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
 import { useModules } from './modules';
@@ -144,6 +145,11 @@ function App() {
         <Route path="/factures" element={
           <PrivateRoute requiredRoles={ROLES_ADMIN}>
             <Factures />
+          </PrivateRoute>
+        } />
+        <Route path="/mentions-legales" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <MentionsLegales />
           </PrivateRoute>
         } />
         <Route path="/comptabilite" element={
