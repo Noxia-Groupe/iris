@@ -448,7 +448,7 @@ model Facture {
 model JournalFacture {
   id        String   @id @default(uuid())
   factureId String
-  facture   Facture  @relation(fields: [factureId], references: [id], onDelete: Cascade)
+  facture   Facture  @relation(fields: [factureId], references: [id], onDelete: Restrict)
   acteurId  String?
   action    String
   detail    String?
