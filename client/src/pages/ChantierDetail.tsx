@@ -173,7 +173,8 @@ const ChantierDetail = () => {
   const startEditChantier = () => {
     if (conducteurs.length === 0) fetchConducteurs();
     if (commerciaux.length === 0) fetchCommerciaux();
-    if (isAdminRole(userRole) && clients.length === 0) apiFetch('/clients').then(res => res.ok ? res.json() : []).then(data => { if (Array.isArray(data)) setClients(data); }).catch(() => {});
+    // GET /api/clients renvoie { clients: [...] } : lire les deux formes évite un select vide.
+    if (isAdminRole(userRole) && clients.length === 0) apiFetch('/clients').then(res => res.ok ? res.json() : null).then(data => { const liste = Array.isArray(data) ? data : data?.clients; if (Array.isArray(liste)) setClients(liste); }).catch(() => {});
     setEditResponsableId(chantier?.responsable?.id || '');
     setEditCommercialId(chantier?.commercial?.id || '');
     setEditingChantier(true);
