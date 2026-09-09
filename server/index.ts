@@ -831,16 +831,19 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       const annee = facture.dateEmission.getUTCFullYear();
       const derniereEmise = await tx.facture.findFirst({ where: { numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
       if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
+      const mentions = await tx.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } });
+      if (!mentions) return { erreur: 'LEGAL_MENTIONS_MISSING' as const };
       const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
       const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
       const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
       const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-      const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date() }, include: factureInclude });
+      const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date(), mentionsLegalesVersionId: mentions.id }, include: factureInclude });
       return { facture: maj };
     });
     if ('erreur' in resultat) {
       if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
       if (resultat.erreur === 'CHRONOLOGY') return res.status(409).json({ error: `La numérotation est chronologique : la dernière facture émise porte la date du ${dateFrancaise(resultat.limite)}. Ce brouillon ne peut plus être numéroté.` });
+      if (resultat.erreur === 'LEGAL_MENTIONS_MISSING') return res.status(409).json({ error: 'Aucune version publiée des mentions légales et CGV n’est active. Publiez-en une avant d’émettre une facture.' });
       return res.status(409).json({ error: 'Seul un brouillon peut être émis.' });
     }
     res.json(decimalToNumber(resultat.facture));

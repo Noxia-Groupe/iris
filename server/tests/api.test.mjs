@@ -43,6 +43,7 @@ if (!TEST_DATABASE_URL) {
     // ces fiches afin de respecter les clés étrangères RESTRICT.
     await prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     await prisma.facture.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    await prisma.mentionsLegalesVersion.deleteMany({});
     await prisma.regleComptable.deleteMany({});
     await prisma.regleTvaComptable.deleteMany({});
     await prisma.compteComptable.deleteMany({});
@@ -84,6 +85,7 @@ if (!TEST_DATABASE_URL) {
     // Une exécution précédente interrompue a pu laisser des enregistrements : on part
     // toujours d'un état propre, sinon la suite n'est rejouable qu'une fois.
     await nettoyer();
+    await prisma.mentionsLegalesVersion.create({ data: { version: 1, mentions: 'TEST Mentions légales', cgv: 'TEST Conditions générales', penalites: 'TEST Pénalités de retard', actif: true, publieeLe: new Date() } });
   });
 
   after(async () => {
@@ -1279,6 +1281,15 @@ if (!TEST_DATABASE_URL) {
     test('refuse une date d’émission future', async () => {
       const reponse = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '01-01-2099', dateEcheance: '01-02-2099', lignes: [{ designation: 'TEST future', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(reponse.status, 400); assert.match(reponse.body.error, /future/i);
+    });
+
+    test('refuse l’émission sans mentions légales publiées', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Facture en attente de paramétrage', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST mentions absentes', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      await prisma.mentionsLegalesVersion.deleteMany({});
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 409, JSON.stringify(emission.body));
+      await prisma.mentionsLegalesVersion.create({ data: { version: 1, mentions: 'TEST Mentions légales', cgv: 'TEST Conditions générales', penalites: 'TEST Pénalités de retard', actif: true, publieeLe: new Date() });
     });
 
     test('attribue un numéro annuel seulement lors de l’émission', async () => {

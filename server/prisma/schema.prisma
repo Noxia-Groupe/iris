@@ -428,6 +428,8 @@ model Facture {
   contratMaintenanceId String?
   contratMaintenance   ContratMaintenance? @relation("FactureContratMaintenance", fields: [contratMaintenanceId], references: [id], onDelete: Restrict)
   motifHorsAffaire     String?
+  mentionsLegalesVersionId String?
+  mentionsLegalesVersion   MentionsLegalesVersion? @relation(fields: [mentionsLegalesVersionId], references: [id], onDelete: Restrict)
   lignes        FactureLigne[]
   createdById   String?
   emisLe        DateTime?
@@ -439,6 +441,7 @@ model Facture {
   @@index([chantierId])
   @@index([interventionId])
   @@index([contratMaintenanceId])
+  @@index([mentionsLegalesVersionId])
 }
 
 model FactureLigne {
@@ -455,6 +458,19 @@ model FactureLigne {
   totalTtc       Decimal @db.Decimal(12, 2)
 
   @@unique([factureId, ordre])
+}
+
+model MentionsLegalesVersion {
+  id        String    @id @default(uuid())
+  version   Int       @unique
+  mentions  String
+  cgv       String
+  penalites String
+  escompte  String?
+  actif     Boolean   @default(false)
+  publieeLe DateTime?
+  createdAt DateTime  @default(now())
+  factures  Facture[]
 }
 
 model SequenceFacture {
