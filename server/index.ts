@@ -682,6 +682,15 @@ app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
   } catch (error) { res.status(500).json({ error: 'Lecture des factures impossible.' }); }
 });
 
+app.get('/api/factures/:id/document.pdf', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, select: { statut: true } });
+    if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
+    if (facture.statut !== 'EMISE') return res.status(409).json({ error: 'Le document est disponible uniquement pour une facture émise.' });
+    return res.status(501).json({ error: 'Génération du document en cours de mise en œuvre.' });
+  } catch { return res.status(500).json({ error: 'Lecture du document de facture impossible.' }); }
+});
+
 app.get('/api/factures/:id/journal', requireAuth, requireAdmin, async (req, res) => {
   try {
     const factureId = String(req.params.id);

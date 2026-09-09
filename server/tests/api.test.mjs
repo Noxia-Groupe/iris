@@ -1437,6 +1437,13 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId: autre.body.id })).status, 409);
     });
 
+    test('refuse le document PDF d’une facture brouillon', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST document brouillon', dateEmission: '09-09-2026', dateEcheance: '09-10-2026', lignes: [{ designation: 'TEST document brouillon', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      assert.equal(document.status, 409, JSON.stringify(document.body));
+    });
+
     test('refuse d’émettre une facture antérieure à la dernière déjà numérotée', async () => {
       const brouillon = (dateEmission, dateEcheance) => request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission, dateEcheance, lignes: [{ designation: 'TEST chronologie', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       const emettre = (id) => request(app).post(`/api/factures/${id}/emettre`).set('Authorization', `Bearer ${session}`);
