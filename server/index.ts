@@ -822,6 +822,17 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
 
 const dateFrancaise = (date: Date) => date.toISOString().slice(0, 10).split('-').reverse().join('-');
 
+app.post('/api/mentions-legales', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const mentions = String(req.body?.mentions || '').trim(), cgv = String(req.body?.cgv || '').trim(), penalites = String(req.body?.penalites || '').trim();
+    const escompte = String(req.body?.escompte || '').trim() || null;
+    if (!mentions || !cgv || !penalites) return res.status(400).json({ error: 'Les mentions, CGV et pénalités sont obligatoires.' });
+    const derniere = await prisma.mentionsLegalesVersion.aggregate({ _max: { version: true } });
+    const version = await prisma.mentionsLegalesVersion.create({ data: { version: (derniere._max.version || 0) + 1, mentions, cgv, penalites, escompte } });
+    res.status(201).json(version);
+  } catch { res.status(500).json({ error: 'Création de la version légale impossible.' }); }
+});
+
 app.get('/api/mentions-legales', requireAuth, requireAdmin, async (_req, res) => {
   try {
     const versions = await prisma.mentionsLegalesVersion.findMany({ orderBy: { version: 'desc' } });

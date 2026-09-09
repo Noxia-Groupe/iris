@@ -1283,6 +1283,13 @@ if (!TEST_DATABASE_URL) {
       assert.equal(reponse.status, 400); assert.match(reponse.body.error, /future/i);
     });
 
+    test('crée une version légale brouillon distincte', async () => {
+      const reponse = await request(app).post('/api/mentions-legales').set('Authorization', `Bearer ${session}`).send({ mentions: 'TEST Mentions version 2', cgv: 'TEST CGV version 2', penalites: 'TEST Pénalités version 2', escompte: 'Sans escompte' });
+      assert.equal(reponse.status, 201, JSON.stringify(reponse.body));
+      assert.equal(reponse.body.version, 2);
+      assert.equal(reponse.body.actif, false);
+    });
+
     test('liste les versions légales pour l’administration', async () => {
       const reponse = await request(app).get('/api/mentions-legales').set('Authorization', `Bearer ${session}`);
       assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
