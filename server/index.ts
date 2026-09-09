@@ -666,7 +666,7 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 }
 
 // --- Facturation française native ---
-const factureInclude = { client: { select: { id: true, raisonSociale: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+const factureInclude = { client: { select: { id: true, raisonSociale: true } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
 const PLAFOND_MONTANT = 9_999_999_999.99;
 class FactureInvalideError extends Error {}
 
