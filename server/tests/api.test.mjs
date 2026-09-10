@@ -1476,7 +1476,9 @@ if (!TEST_DATABASE_URL) {
     test('régénère le PDF historique avec le client et les mentions figés', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST gel PDF', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST gel PDF', quantite: 1, prixUnitaireHt: 30, tauxTva: 20 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
-      assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const nomClientFige = emission.body.clientRaisonSociale;
       const ancienneVersion = await prisma.mentionsLegalesVersion.findFirst({ where: { actif: true }, select: { version: true, mentions: true } });
       assert.ok(ancienneVersion);
       await prisma.client.update({ where: { id: clientId }, data: { raisonSociale: 'TEST Client renommé après émission' } });
@@ -1486,7 +1488,7 @@ if (!TEST_DATABASE_URL) {
       const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
       assert.equal(document.status, 200, document.text);
       const lecteurPdf = new PDFParse({ data: document.body }); const contenuPdf = await lecteurPdf.getText(); await lecteurPdf.destroy();
-      assert.match(contenuPdf.text, /TEST Client facture/);
+      assert.ok(contenuPdf.text.includes(nomClientFige));
       assert.doesNotMatch(contenuPdf.text, /TEST Client renommé après émission/);
       assert.match(contenuPdf.text, new RegExp(ancienneVersion.mentions));
       assert.doesNotMatch(contenuPdf.text, /TEST Nouvelles mentions/);
