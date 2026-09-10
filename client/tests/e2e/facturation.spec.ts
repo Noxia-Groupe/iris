@@ -49,6 +49,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[name="motifHorsAffaire"]').fill('Parcours émission');
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
+    await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle annuel');
     const prix = page.locator('input[aria-label="Prix unitaire HT ligne 1"]');
     await prix.click();
     await prix.pressSequentially('480,50', { delay: 10 });
