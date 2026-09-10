@@ -7,6 +7,7 @@
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
 import test, { after, before, describe } from 'node:test';
+import { PDFParse } from 'pdf-parse';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 
@@ -1465,6 +1466,11 @@ if (!TEST_DATABASE_URL) {
       assert.equal(document.status, 200, document.text);
       assert.match(document.headers['content-type'] || '', /application\/pdf/);
       assert.ok(document.body.subarray(0, 5).equals(Buffer.from('%PDF-')));
+      const lecteurPdf = new PDFParse({ data: document.body });
+      const contenuPdf = await lecteurPdf.getText();
+      await lecteurPdf.destroy();
+      assert.match(contenuPdf.text, /TEST document émis/);
+      assert.match(contenuPdf.text, /Mentions légales/);
     });
 
     test('ventile la TVA par taux dans le document PDF', async () => {
@@ -1475,6 +1481,12 @@ if (!TEST_DATABASE_URL) {
       assert.equal(document.status, 200, document.text);
       assert.match(document.headers['content-type'] || '', /application\/pdf/);
       assert.ok(document.body.subarray(0, 5).equals(Buffer.from('%PDF-')));
+      const lecteurPdf = new PDFParse({ data: document.body });
+      const contenuPdf = await lecteurPdf.getText();
+      await lecteurPdf.destroy();
+      assert.match(contenuPdf.text, /TVA 10 %/);
+      assert.match(contenuPdf.text, /TVA 20 %/);
+      assert.match(contenuPdf.text, /20,00 €/);
     });
 
     test('calcule la TVA sur la base HT cumulée par taux', async () => {
