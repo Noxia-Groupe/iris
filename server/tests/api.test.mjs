@@ -1394,7 +1394,18 @@ if (!TEST_DATABASE_URL) {
       await prisma.regleTvaComptable.deleteMany({ where: { taux: 20 } });
       const exportSansTva = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportSansTva.status, 409); assert.deepEqual(exportSansTva.body.tauxManquants, [20]);
+      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id })).status, 200);
+      const diagSansTva = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+      const tvaDecouverte = diagSansTva.body.controles.find((controle) => controle.cle === 'TVA');
+      assert.equal(tvaDecouverte.pret, false, JSON.stringify(tvaDecouverte));
+      assert.equal(tvaDecouverte.bloquant, true, 'Un taux facturé sans compte bloque comme l’export.');
+      assert.match(tvaDecouverte.detail, /20 %/);
+      assert.equal(diagSansTva.body.pret, false, JSON.stringify(diagSansTva.body.controles));
+      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
       await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id });
+      const diagAvecTva = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+      const tvaCouverte = diagAvecTva.body.controles.find((controle) => controle.cle === 'TVA');
+      assert.equal(tvaCouverte.pret, true, JSON.stringify(tvaCouverte)); assert.equal(tvaCouverte.bloquant, false);
       await prisma.client.update({ where: { id: clientId }, data: { raisonSociale: 'TEST Client contrat maintenance renommé' } });
       const exportFige = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportFige.status, 200); assert.match(exportFige.text, /TEST Client contrat maintenance/); assert.doesNotMatch(exportFige.text, /renommé/);
@@ -1591,6 +1602,26 @@ if (!TEST_DATABASE_URL) {
       const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(refus.status, 409, JSON.stringify(refus.body)); assert.match(refus.body.error, /adresse de facturation/i);
       const enBase = await prisma.facture.findUnique({ where: { id: brouillon.body.id } }); assert.equal(enBase.numero, null); assert.equal(enBase.statut, 'BROUILLON');
+    });
+
+    test('protège l’autoliquidation BTP et signale les clients sans site sans barrage', async () => {
+      const diagnostic = () => request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+      const controle = (corps, cle) => corps.controles.find((item) => item.cle === cle);
+      const avant = await diagnostic();
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST client sans site diagnostic' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      const apres = await diagnostic();
+      assert.equal(controle(apres.body, 'ADRESSES_CLIENTS').pret, false);
+      assert.equal(controle(apres.body, 'ADRESSES_CLIENTS').bloquant, false);
+      assert.equal(apres.body.pret, avant.body.pret);
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId: client.body.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST autoliquidation', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST sous-traitance', quantite: 1, prixUnitaireHt: 5000, tauxTva: 0 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      await request(app).post(`/api/clients/${client.body.id}/sites`).set('Authorization', `Bearer ${session}`).send({ nom: 'TEST site', adresse: '1 rue du Test', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const tva = controle((await diagnostic()).body, 'TVA');
+      assert.equal(tva.bloquant, false); assert.doesNotMatch(tva.detail, /0 %.*facturé/i);
     });
 
     test('calcule la TVA sur la base HT cumulée par taux', async () => {
