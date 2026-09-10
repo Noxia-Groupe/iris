@@ -669,12 +669,18 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 // --- Facturation française native ---
 const factureInclude = { client: { select: { id: true, raisonSociale: true } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
 
+// L'adresse du client est sélectionnée depuis son site de facturation, puis figée à l'émission.
+const SITE_FACTURATION_ORDRE = [{ estSiteFacturation: 'desc' as const }, { principal: 'desc' as const }, { estSiegeSocial: 'desc' as const }, { nom: 'asc' as const }];
+function formaterAdresseFacturation(site: { adresse: string; complementAdresse: string | null; codePostal: string; ville: string; pays: string }) {
+  return [site.adresse, site.complementAdresse, `${site.codePostal} ${site.ville}`.trim(), site.pays && site.pays !== 'France' ? site.pays : null].filter(Boolean).join('\n');
+}
+
 function formatMontantFacture(valeur: unknown) {
   return `${Number(valeur).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 }
 
 function formatDateFacture(valeur: Date | string) {
-  return new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC' }).format(new Date(valeur));
+  return new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC' }).format(new Date(valeur)).replace(/\//g, '-');
 }
 
 async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buffer> {
@@ -684,39 +690,46 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
     pdf.on('data', (morceau: Buffer) => morceaux.push(morceau));
     pdf.on('end', () => resolve(Buffer.concat(morceaux)));
     pdf.on('error', reject);
-    const ligne = (texte: string, options: Record<string, unknown> = {}) => pdf.text(texte, options as any);
+    // PDFKit règle la taille sur le document : une option « fontSize » passée à text() est ignorée.
+    const ligne = (texte: string, options: { taille?: number } & Record<string, unknown> = {}) => {
+      const { taille, ...reste } = options;
+      if (taille) pdf.fontSize(taille);
+      return pdf.text(texte, reste as any);
+    };
+    const legal = facture.mentionsLegalesVersion;
     const couleurPrimaire = /^#[0-9a-f]{6}$/i.test(societe.couleurPrimaire || '') ? societe.couleurPrimaire : '#1e3a8a';
+    const colonnes = (a: string, b: string, c: string, d: string, e: string) => a.slice(0, 36).padEnd(38) + b.padStart(8) + c.padStart(13) + d.padStart(8) + e.padStart(13);
+
+    // L'identité de l'émetteur est portée par la version légale figée à l'émission, jamais par les paramètres vivants.
     pdf.fillColor(couleurPrimaire);
-    ligne(societe.raisonSociale || 'Société', { fontSize: 18 });
+    ligne(`FACTURE ${facture.numero}`, { taille: 18 });
     pdf.fillColor('#000000');
-    ligne([societe.adresse, [societe.codePostal, societe.ville].filter(Boolean).join(' '), societe.email, societe.siret && `SIRET : ${societe.siret}`, societe.tvaIntra && `TVA intracommunautaire : ${societe.tvaIntra}`].filter(Boolean).join('\n'), { fontSize: 9 });
+    ligne(`Émise le ${formatDateFacture(facture.dateEmission)} · Échéance : ${formatDateFacture(facture.dateEcheance)}`, { taille: 10 });
     pdf.moveDown();
-    ligne(`FACTURE ${facture.numero}`, { fontSize: 18, align: 'right' });
-    ligne(`Émise le ${formatDateFacture(facture.dateEmission)} · Échéance : ${formatDateFacture(facture.dateEcheance)}`, { align: 'right' });
+    ligne('Émetteur', { taille: 11 });
+    ligne(legal.mentions, { taille: 9 });
     pdf.moveDown();
-    ligne('Client', { fontSize: 11 });
-    ligne(facture.clientRaisonSociale, { fontSize: 12 });
+    ligne('Client', { taille: 11 });
+    ligne(facture.clientRaisonSociale, { taille: 12 });
+    ligne(facture.clientAdresse, { taille: 9 });
     pdf.moveDown();
-    ligne('Désignation                                           Qté        PU HT        TVA        Total HT', { fontSize: 9 });
+    pdf.font('Courier');
+    ligne(colonnes('Désignation', 'Qté', 'PU HT', 'TVA', 'Total HT'), { taille: 9 });
     for (const item of facture.lignes) {
-      ligne(`${item.designation}  |  ${item.quantite}  |  ${formatMontantFacture(item.prixUnitaireHt)}  |  ${Number(item.tauxTva)} %  |  ${formatMontantFacture(item.totalHt)}`, { fontSize: 9 });
+      ligne(colonnes(String(item.designation), String(item.quantite), formatMontantFacture(item.prixUnitaireHt), `${Number(item.tauxTva)} %`, formatMontantFacture(item.totalHt)), { taille: 9 });
     }
+    pdf.font('Helvetica');
     pdf.moveDown();
     const tvaParTaux = tauxUtilises(facture.lignes).sort((a, b) => a - b).map(taux => ({ taux, ht: baseHtDuTaux(facture.lignes, taux), tva: tvaDuTaux(facture.lignes, taux) }));
-    ligne(`Total HT : ${formatMontantFacture(facture.totalHt)}`, { align: 'right' });
-    for (const cumul of tvaParTaux) {
-      ligne(`TVA ${cumul.taux} % sur ${formatMontantFacture(cumul.ht)} : ${formatMontantFacture(cumul.tva)}`, { align: 'right' });
-    }
-    ligne(`TVA totale : ${formatMontantFacture(facture.totalTva)}`, { align: 'right' });
-    ligne(`Total TTC : ${formatMontantFacture(facture.totalTtc)}`, { align: 'right', fontSize: 12 });
+    ligne(`Total HT : ${formatMontantFacture(facture.totalHt)}`, { taille: 10, align: 'right' });
+    for (const cumul of tvaParTaux) ligne(`TVA ${cumul.taux} % sur ${formatMontantFacture(cumul.ht)} : ${formatMontantFacture(cumul.tva)}`, { taille: 10, align: 'right' });
+    ligne(`TVA totale : ${formatMontantFacture(facture.totalTva)}`, { taille: 10, align: 'right' });
+    ligne(`Total TTC : ${formatMontantFacture(facture.totalTtc)}`, { taille: 13, align: 'right' });
     pdf.moveDown();
-    const legal = facture.mentionsLegalesVersion;
-    ligne(`Mentions légales — version ${legal.version}`, { fontSize: 10 });
-    ligne(legal.mentions, { fontSize: 8 });
-    ligne('CGV', { fontSize: 10 });
-    ligne(legal.cgv, { fontSize: 8 });
-    ligne(`Pénalités : ${legal.penalites}`, { fontSize: 8 });
-    if (legal.escompte) ligne(`Escompte : ${legal.escompte}`, { fontSize: 8 });
+    ligne(`Mentions légales et CGV — version ${legal.version}`, { taille: 10 });
+    ligne(legal.cgv, { taille: 8 });
+    ligne(`Pénalités : ${legal.penalites}`, { taille: 8 });
+    if (legal.escompte) ligne(`Escompte : ${legal.escompte}`, { taille: 8 });
     pdf.end();
   });
 }
@@ -741,6 +754,7 @@ app.get('/api/factures/:id/document.pdf', requireAuth, requireAdmin, async (req,
     if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
     if (facture.statut !== 'EMISE') return res.status(409).json({ error: 'Le document est disponible uniquement pour une facture émise.' });
     if (!facture.mentionsLegalesVersion) return res.status(409).json({ error: 'Les mentions légales figées sont introuvables.' });
+    if (!facture.clientAdresse) return res.status(409).json({ error: 'L’adresse de facturation figée est absente de cette facture : le document ne peut pas être imprimé sans cette mention obligatoire.' });
     const pdf = await rendreDocumentFacturePdf(decimalToNumber(facture), await getCompanySettings());
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${facture.numero}.pdf"`);
@@ -946,11 +960,13 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
       const mentions = await tx.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } });
       if (!mentions) return { erreur: 'LEGAL_MENTIONS_MISSING' as const };
+      const siteFacturation = await tx.clientSite.findFirst({ where: { clientId: facture.clientId }, orderBy: SITE_FACTURATION_ORDRE });
+      if (!siteFacturation) return { erreur: 'CLIENT_ADRESSE_MISSING' as const };
       const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
       const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
       const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
       const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-      const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date(), mentionsLegalesVersionId: mentions.id }, include: factureInclude });
+      const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date(), mentionsLegalesVersionId: mentions.id, clientAdresse: formaterAdresseFacturation(siteFacturation) }, include: factureInclude });
       await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: (req as AuthRequest).user!.id, action: 'EMISSION', detail: `Numéro ${numero}, version légale ${mentions.id}` } });
       return { facture: maj };
     });
@@ -958,6 +974,7 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
       if (resultat.erreur === 'CHRONOLOGY') return res.status(409).json({ error: `La numérotation est chronologique : la dernière facture émise porte la date du ${dateFrancaise(resultat.limite)}. Ce brouillon ne peut plus être numéroté.` });
       if (resultat.erreur === 'LEGAL_MENTIONS_MISSING') return res.status(409).json({ error: 'Aucune version publiée des mentions légales et CGV n’est active. Publiez-en une avant d’émettre une facture.' });
+      if (resultat.erreur === 'CLIENT_ADRESSE_MISSING') return res.status(409).json({ error: 'Ce client n’a aucun site : l’adresse de facturation est une mention obligatoire. Créez-lui un site de facturation avant d’émettre.' });
       return res.status(409).json({ error: 'Seul un brouillon peut être émis.' });
     }
     res.json(decimalToNumber(resultat.facture));

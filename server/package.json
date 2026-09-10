@@ -14,7 +14,6 @@
   "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "@types/pdfkit": "^0.17.6",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -28,6 +27,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.0.1",
+    "@types/pdfkit": "^0.17.6",
     "@types/supertest": "^7.2.1",
     "pdf-parse": "^2.4.5",
     "prisma": "^5.22.0",

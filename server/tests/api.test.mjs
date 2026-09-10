@@ -1394,7 +1394,7 @@ if (!TEST_DATABASE_URL) {
       const conducteur = await prisma.user.create({ data: { email: 'phase8bis.conducteur@iris.test', name: 'TEST Conducteur phase8bis', role: 'CONDUCTEUR_TRAVAUX' } });
       const token = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
       const routes = [
-        () => request(app).get('/api/factures/inexistante/tracabilite'), () => request(app).get('/api/factures/inexistante/journal'), () => request(app).get('/api/mentions-legales'),
+        () => request(app).get('/api/factures/inexistante/tracabilite'), () => request(app).get('/api/factures/inexistante/journal'), () => request(app).get('/api/factures/inexistante/document.pdf'), () => request(app).get('/api/mentions-legales'),
         () => request(app).post('/api/mentions-legales').send({ mentions: 'TEST interdit', cgv: 'TEST interdit', penalites: 'TEST interdit' }), () => request(app).post('/api/mentions-legales/1/publier'),
       ];
       for (const route of routes) assert.equal((await route().set('Authorization', `Bearer ${token}`)).status, 403);
@@ -1443,6 +1443,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
       assert.equal(document.status, 409, JSON.stringify(document.body));
+      assert.match(document.body.error, /facture émise/i);
     });
 
     test('refuse d’émettre une facture antérieure à la dernière déjà numérotée', async () => {
@@ -1462,7 +1463,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`).send();
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
-      await prisma.companySettings.upsert({ where: { id: 'singleton' }, create: { id: 'singleton', raisonSociale: 'TEST Société PDF', siret: 'TEST-SIRET-PDF', couleurPrimaire: '#123456', couleurSecondaire: '#f0a000' }, update: { raisonSociale: 'TEST Société PDF', siret: 'TEST-SIRET-PDF', couleurPrimaire: '#123456', couleurSecondaire: '#f0a000' } });
+      const legalFige = emission.body.mentionsLegalesVersion;
+      assert.ok(legalFige, JSON.stringify(emission.body));
+      await prisma.companySettings.upsert({ where: { id: 'singleton' }, create: { id: 'singleton', raisonSociale: 'TEST Société vivante', siret: 'TEST-SIRET-VIVANT', couleurPrimaire: '#123456' }, update: { raisonSociale: 'TEST Société vivante', siret: 'TEST-SIRET-VIVANT', couleurPrimaire: '#123456' } });
       const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
       assert.equal(document.status, 200, document.text);
       assert.match(document.headers['content-type'] || '', /application\/pdf/);
@@ -1471,9 +1474,13 @@ if (!TEST_DATABASE_URL) {
       const contenuPdf = await lecteurPdf.getText();
       await lecteurPdf.destroy();
       assert.match(contenuPdf.text, /TEST document émis/);
-      assert.match(contenuPdf.text, /TEST Société PDF/);
-      assert.match(contenuPdf.text, /TEST-SIRET-PDF/);
-      assert.match(contenuPdf.text, /Mentions légales/);
+      assert.match(contenuPdf.text, new RegExp(legalFige.mentions));
+      assert.match(contenuPdf.text, new RegExp(`version ${legalFige.version}`));
+      assert.doesNotMatch(contenuPdf.text, /TEST Société vivante|TEST-SIRET-VIVANT/);
+      const zlib = await import('node:zlib'); const tailles = new Set();
+      for (let curseur = 0; ;) { const debut = document.body.indexOf('stream', curseur); if (debut < 0) break; const fin = document.body.indexOf('endstream', debut); if (fin < 0) break; let corps = debut + 6; while (document.body[corps] === 13 || document.body[corps] === 10) corps += 1; try { for (const trouve of zlib.inflateSync(document.body.subarray(corps, fin)).toString('latin1').matchAll(/\/F\d+\s+([\d.]+)\s+Tf/g)) tailles.add(trouve[1]); } catch {} curseur = fin + 9; }
+      assert.ok(tailles.size >= 4, `Hiérarchie typographique absente : ${[...tailles].join(', ')}`);
+      assert.match(contenuPdf.text, /Mentions légales et CGV/);
     });
 
     test('régénère le PDF historique avec le client et les mentions figés', async () => {
@@ -1511,6 +1518,42 @@ if (!TEST_DATABASE_URL) {
       assert.match(contenuPdf.text, /TVA 10 %/);
       assert.match(contenuPdf.text, /TVA 20 %/);
       assert.match(contenuPdf.text, /20,00 €/);
+    });
+
+    test('fige l’adresse de facturation du client dans le document PDF', async () => {
+      const clientAdresse = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client adresse facture' });
+      assert.equal(clientAdresse.status, 201, JSON.stringify(clientAdresse.body));
+      const creerSite = corps => request(app).post(`/api/clients/${clientAdresse.body.id}/sites`).set('Authorization', `Bearer ${session}`).send(corps);
+      assert.equal((await creerSite({ nom: 'A Site de chantier', adresse: '1 rue Ignorée', codePostal: '13001', ville: 'Marseille', estSiteIntervention: true })).status, 201);
+      const facturation = await creerSite({ nom: 'Z Adresse de facturation', adresse: '7 quai de la Facturation', complementAdresse: 'Bâtiment C', codePostal: '69002', ville: 'Lyon', estSiteFacturation: true });
+      assert.equal(facturation.status, 201, JSON.stringify(facturation.body));
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId: clientAdresse.body.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST adresse obligatoire', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST adresse obligatoire', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      assert.equal(emission.body.clientAdresse, '7 quai de la Facturation\nBâtiment C\n69002 Lyon');
+      await prisma.clientSite.update({ where: { id: facturation.body.id }, data: { adresse: '99 avenue du Déménagement', complementAdresse: null, codePostal: '75009', ville: 'Paris' } });
+      const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      const lecteurPdf = new PDFParse({ data: document.body }); const contenuPdf = await lecteurPdf.getText(); await lecteurPdf.destroy();
+      assert.equal(document.status, 200, document.text); assert.match(contenuPdf.text, /7 quai de la Facturation/); assert.match(contenuPdf.text, /Bâtiment C/); assert.match(contenuPdf.text, /69002 Lyon/);
+      assert.doesNotMatch(contenuPdf.text, /1 rue Ignorée|99 avenue du Déménagement/);
+      await assert.rejects(() => prisma.facture.update({ where: { id: brouillon.body.id }, data: { clientAdresse: '99 avenue du Déménagement' } }));
+      await assert.rejects(() => prisma.facture.update({ where: { id: brouillon.body.id }, data: { clientRaisonSociale: 'TEST Client réécrit' } }));
+    });
+
+    test('refuse le document d’une facture émise sans mentions figées', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST document sans mentions', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST document sans mentions', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      await prisma.facture.update({ where: { id: brouillon.body.id }, data: { mentionsLegalesVersionId: null } });
+      const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      assert.equal(document.status, 409, JSON.stringify(document.body)); assert.match(document.body.error, /mentions légales/i);
+    });
+
+    test('refuse d’émettre une facture pour un client sans adresse de facturation', async () => {
+      const clientSansSite = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client sans site' });
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId: clientSansSite.body.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST adresse absente', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST adresse absente', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body)); assert.match(refus.body.error, /adresse de facturation/i);
+      const enBase = await prisma.facture.findUnique({ where: { id: brouillon.body.id } }); assert.equal(enBase.numero, null); assert.equal(enBase.statut, 'BROUILLON');
     });
 
     test('calcule la TVA sur la base HT cumulée par taux', async () => {

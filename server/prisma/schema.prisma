@@ -413,6 +413,8 @@ model Facture {
   client        Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
   // Identité figée à la création : renommer la fiche client ne réécrit jamais une facture émise.
   clientRaisonSociale String
+  // Adresse de facturation figée à l'émission : mention obligatoire du document français.
+  clientAdresse       String?
   statut        String         @default("BROUILLON") // BROUILLON | EMISE | REGLEE | ANNULEE
   dateEmission  DateTime
   dateEcheance  DateTime
