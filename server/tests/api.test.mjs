@@ -1520,6 +1520,22 @@ if (!TEST_DATABASE_URL) {
       assert.match(contenuPdf.text, /20,00 €/);
     });
 
+    test('imprime les montants à quatre chiffres et les désignations longues sans les altérer', async () => {
+      const designation = 'TEST Remplacement de la centrale incendie type 4 du bâtiment B, câblage et mise en service comprise';
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST rendu montants', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation, quantite: 1, prixUnitaireHt: 1234.56, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body)); assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`); const lecteurPdf = new PDFParse({ data: document.body }); const contenuPdf = await lecteurPdf.getText(); await lecteurPdf.destroy();
+      assert.match(contenuPdf.text, /1 234,56 €/); assert.match(contenuPdf.text, /Total TTC : 1 481,47 €/); assert.doesNotMatch(contenuPdf.text, /\d \/\d/);
+      for (const mot of designation.split(' ')) assert.ok(contenuPdf.text.includes(mot), `Désignation tronquée : ${mot}`);
+    });
+
+    test('refuse le document PDF d’une facture antérieure au gel de l’adresse', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST adresse héritée', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST adresse héritée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      const mentions = await prisma.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } }); assert.ok(mentions);
+      await prisma.facture.update({ where: { id: brouillon.body.id }, data: { statut: 'EMISE', annee: 2026, numero: `TEST-HERITEE-${Date.now()}`, emisLe: new Date(), mentionsLegalesVersionId: mentions.id } });
+      const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`); assert.equal(document.status, 409, document.text); assert.match(document.body.error, /adresse de facturation/i);
+    });
+
     test('fige l’adresse de facturation du client dans le document PDF', async () => {
       const clientAdresse = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client adresse facture' });
       assert.equal(clientAdresse.status, 201, JSON.stringify(clientAdresse.body));

@@ -690,15 +690,30 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
     pdf.on('data', (morceau: Buffer) => morceaux.push(morceau));
     pdf.on('end', () => resolve(Buffer.concat(morceaux)));
     pdf.on('error', reject);
-    // PDFKit règle la taille sur le document : une option « fontSize » passée à text() est ignorée.
+    // Les polices standards PDFKit sont WinAnsi : normaliser les caractères typographiques non encodables avant impression.
+    const winAnsi = (texte: string) => [...String(texte)].map((caractere) => {
+      const code = caractere.codePointAt(0);
+      if (code === 0x2007 || code === 0x2009 || code === 0x202f) return ' ';
+      if (code === 0x2011) return '-';
+      return caractere;
+    }).join('');
     const ligne = (texte: string, options: { taille?: number } & Record<string, unknown> = {}) => {
       const { taille, ...reste } = options;
       if (taille) pdf.fontSize(taille);
-      return pdf.text(texte, reste as any);
+      return pdf.text(winAnsi(texte), reste as any);
+    };
+    const replier = (texte: string, largeur: number) => {
+      const lignes: string[] = []; let courante = '';
+      for (let mot of String(texte).split(/\s+/).filter(Boolean)) {
+        while (mot.length > largeur) { if (courante) { lignes.push(courante); courante = ''; } lignes.push(mot.slice(0, largeur)); mot = mot.slice(largeur); }
+        const essai = courante ? `${courante} ${mot}` : mot;
+        if (essai.length <= largeur) courante = essai; else { lignes.push(courante); courante = mot; }
+      }
+      if (courante || !lignes.length) lignes.push(courante); return lignes;
     };
     const legal = facture.mentionsLegalesVersion;
     const couleurPrimaire = /^#[0-9a-f]{6}$/i.test(societe.couleurPrimaire || '') ? societe.couleurPrimaire : '#1e3a8a';
-    const colonnes = (a: string, b: string, c: string, d: string, e: string) => a.slice(0, 36).padEnd(38) + b.padStart(8) + c.padStart(13) + d.padStart(8) + e.padStart(13);
+    const colonnes = (a: string, b: string, c: string, d: string, e: string) => a.padEnd(38) + b.padStart(8) + c.padStart(13) + d.padStart(8) + e.padStart(13);
 
     // L'identité de l'émetteur est portée par la version légale figée à l'émission, jamais par les paramètres vivants.
     pdf.fillColor(couleurPrimaire);
@@ -716,7 +731,9 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
     pdf.font('Courier');
     ligne(colonnes('Désignation', 'Qté', 'PU HT', 'TVA', 'Total HT'), { taille: 9 });
     for (const item of facture.lignes) {
-      ligne(colonnes(String(item.designation), String(item.quantite), formatMontantFacture(item.prixUnitaireHt), `${Number(item.tauxTva)} %`, formatMontantFacture(item.totalHt)), { taille: 9 });
+      const [premiere, ...suite] = replier(String(item.designation), 36);
+      ligne(colonnes(premiere, String(item.quantite), formatMontantFacture(item.prixUnitaireHt), `${Number(item.tauxTva)} %`, formatMontantFacture(item.totalHt)), { taille: 9 });
+      for (const reste of suite) ligne(reste, { taille: 9 });
     }
     pdf.font('Helvetica');
     pdf.moveDown();
