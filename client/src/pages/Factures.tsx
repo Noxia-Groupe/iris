@@ -6,7 +6,7 @@ type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
 type NatureLigne = 'PRESTATION' | 'ARTICLE';
 type Source = { id: string; nom?: string; titre?: string; reference?: string; clientId?: string; client?: Client };
-type Ligne = { designation: string; nature: NatureLigne; quantite: number; prixUnitaireHt: number; tauxTva: number };
+type Ligne = { designation: string; nature: NatureLigne; quantite: string; prixUnitaireHt: string; tauxTva: string };
 type Facture = {
   id: string;
   numero: string | null;
@@ -22,12 +22,13 @@ type Facture = {
   lignes: Ligne[];
 };
 
-const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 0, tauxTva: 20 });
+const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: '1', prixUnitaireHt: '', tauxTva: '20' });
+const nombreFr = (valeur: string): number | null => { const normalise = valeur.trim().replace(',', '.'); return /^\d+(\.\d+)?$/.test(normalise) ? Number(normalise) : null; };
 const dateFrancaiseDuJour = () => {
   const d = new Date();
   return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
 };
-const formatDate = (date: string) => new Date(date).toLocaleDateString('fr-FR');
+const formatDate = (date: string) => new Date(date).toLocaleDateString('fr-FR', { timeZone: 'UTC' }).replace(/\//g, '-');
 const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 
 export default function Factures() {
@@ -88,12 +89,15 @@ export default function Factures() {
     setErreur('');
     setSucces('');
     const form = new FormData(event.currentTarget);
+    const lignesConverties = lignes.map((ligne) => ({ ...ligne, quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
+    const fautive = lignesConverties.findIndex((ligne) => ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.tauxTva === null || ligne.tauxTva > 100);
+    if (fautive >= 0) return setErreur(`Ligne ${fautive + 1} : la quantité doit être supérieure à zéro, le prix et le taux de TVA doivent être des nombres (la virgule est acceptée, le taux ne dépasse pas 100).`);
     const payload: Record<string, unknown> = {
       clientId: form.get('clientId'),
       origine,
       dateEmission: form.get('dateEmission'),
       dateEcheance: form.get('dateEcheance'),
-      lignes,
+      lignes: lignesConverties,
     };
     if (origine === 'CHANTIER') payload.chantierId = form.get('chantierId');
     if (origine === 'INTERVENTION') payload.interventionId = form.get('interventionId');
@@ -217,9 +221,9 @@ export default function Factures() {
                   <option value="PRESTATION">Prestation</option>
                   <option value="ARTICLE">Article</option>
                 </select>
-                <input required type="number" min="0.001" step="0.001" className="form-input sm:col-span-1" value={ligne.quantite} onChange={(e) => modifierLigne(index, 'quantite', Number(e.target.value))} placeholder="Qté" aria-label={`Quantité ligne ${index + 1}`} />
-                <input required type="number" min="0" step="0.01" className="form-input sm:col-span-2" value={ligne.prixUnitaireHt} onChange={(e) => modifierLigne(index, 'prixUnitaireHt', Number(e.target.value))} placeholder="PU HT" aria-label={`Prix unitaire HT ligne ${index + 1}`} />
-                <input required type="number" min="0" max="100" step="0.01" className="form-input sm:col-span-1" value={ligne.tauxTva} onChange={(e) => modifierLigne(index, 'tauxTva', Number(e.target.value))} placeholder="TVA %" aria-label={`TVA ligne ${index + 1}`} />
+                <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.quantite} onChange={(e) => modifierLigne(index, 'quantite', e.target.value)} placeholder="Qté" aria-label={`Quantité ligne ${index + 1}`} />
+                <input required inputMode="decimal" className="form-input sm:col-span-2" value={ligne.prixUnitaireHt} onChange={(e) => modifierLigne(index, 'prixUnitaireHt', e.target.value)} placeholder="PU HT" aria-label={`Prix unitaire HT ligne ${index + 1}`} />
+                <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.tauxTva} onChange={(e) => modifierLigne(index, 'tauxTva', e.target.value)} placeholder="TVA %" aria-label={`TVA ligne ${index + 1}`} />
                 <button type="button" className="btn btn-secondary sm:col-span-2" disabled={lignes.length === 1} onClick={() => supprimerLigne(index)} title={lignes.length === 1 ? 'Une facture doit conserver au moins une ligne' : 'Supprimer cette ligne'}>
                   <Trash2 size={16} /> Supprimer
                 </button>
