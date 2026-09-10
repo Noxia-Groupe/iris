@@ -1265,6 +1265,22 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.body.totalTtc, 240);
     });
 
+    test('expose à l’administration les prérequis pour facturer', async () => {
+      const reponse = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+      assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      assert.equal(reponse.body.pret, false);
+      const plan = reponse.body.controles.find((controle) => controle.cle === 'PLAN_COMPTABLE');
+      assert.equal(plan.bloquant, true); assert.equal(plan.route, '/comptabilite');
+      const mentions = reponse.body.controles.find((controle) => controle.cle === 'MENTIONS_LEGALES');
+      assert.equal(mentions.route, '/mentions-legales');
+      const prefixe = reponse.body.controles.find((controle) => controle.cle === 'PREFIXE_FACTURE');
+      assert.equal(prefixe.bloquant, false); assert.equal(prefixe.route, null);
+      const tva = reponse.body.controles.find((controle) => controle.cle === 'TVA');
+      assert.equal(tva.pret, false); assert.equal(tva.bloquant, false, 'Sans taux facturé non couvert, le manque de compte TVA ne bloque pas.');
+      assert.match(tva.detail, /0 %/);
+      assert.ok(reponse.body.controles.some((controle) => controle.cle === 'ADRESSES_CLIENTS' && controle.bloquant === false));
+    });
+
     test('paramètre un compte comptable sans imposer de plan préchargé', async () => {
       const compte = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '706100', libelle: 'Prestations techniques', nature: 'PRODUIT' });
       assert.equal(compte.status, 201, JSON.stringify(compte.body));
@@ -1283,7 +1299,7 @@ if (!TEST_DATABASE_URL) {
     test('réserve factures et comptabilité à l’administration', async () => {
       const conducteur = await prisma.user.create({ data: { email: 'facture.conducteur@iris.test', name: 'TEST Conducteur facture', role: 'CONDUCTEUR_TRAVAUX' } });
       const token = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
-      const routes = [() => request(app).get('/api/factures'), () => request(app).post('/api/factures').send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }), () => request(app).get('/api/factures/export-comptable.csv'), () => request(app).get('/api/comptabilite'), () => request(app).post('/api/comptabilite/comptes').send({ code: '999999', libelle: 'TEST interdit', nature: 'PRODUIT' }), () => request(app).post('/api/comptabilite/importer').send({ lignes: [{ code: '999998', libelle: 'TEST interdit', nature: 'PRODUIT' }] }), () => request(app).post('/api/factures/inexistante/emettre'), () => request(app).put('/api/comptabilite/regles/CLIENT').send({ compteId: 'peu-importe' }), () => request(app).put('/api/comptabilite/tva/20').send({ compteId: 'peu-importe' })];
+      const routes = [() => request(app).get('/api/factures'), () => request(app).post('/api/factures').send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }), () => request(app).get('/api/factures/export-comptable.csv'), () => request(app).get('/api/facturation/prete-a-facturer'), () => request(app).get('/api/comptabilite'), () => request(app).post('/api/comptabilite/comptes').send({ code: '999999', libelle: 'TEST interdit', nature: 'PRODUIT' }), () => request(app).post('/api/comptabilite/importer').send({ lignes: [{ code: '999998', libelle: 'TEST interdit', nature: 'PRODUIT' }] }), () => request(app).post('/api/factures/inexistante/emettre'), () => request(app).put('/api/comptabilite/regles/CLIENT').send({ compteId: 'peu-importe' }), () => request(app).put('/api/comptabilite/tva/20').send({ compteId: 'peu-importe' })];
       for (const route of routes) assert.equal((await route().set('Authorization', `Bearer ${token}`)).status, 403);
     });
 
@@ -1378,7 +1394,18 @@ if (!TEST_DATABASE_URL) {
       await prisma.regleTvaComptable.deleteMany({ where: { taux: 20 } });
       const exportSansTva = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportSansTva.status, 409); assert.deepEqual(exportSansTva.body.tauxManquants, [20]);
+      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id })).status, 200);
+      const diagSansTva = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+      const tvaDecouverte = diagSansTva.body.controles.find((controle) => controle.cle === 'TVA');
+      assert.equal(tvaDecouverte.pret, false, JSON.stringify(tvaDecouverte));
+      assert.equal(tvaDecouverte.bloquant, true, 'Un taux facturé sans compte bloque comme l’export.');
+      assert.match(tvaDecouverte.detail, /20 %/);
+      assert.equal(diagSansTva.body.pret, false, JSON.stringify(diagSansTva.body.controles));
+      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
       await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id });
+      const diagAvecTva = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+      const tvaCouverte = diagAvecTva.body.controles.find((controle) => controle.cle === 'TVA');
+      assert.equal(tvaCouverte.pret, true, JSON.stringify(tvaCouverte)); assert.equal(tvaCouverte.bloquant, false);
       await prisma.client.update({ where: { id: clientId }, data: { raisonSociale: 'TEST Client contrat maintenance renommé' } });
       const exportFige = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportFige.status, 200); assert.match(exportFige.text, /TEST Client contrat maintenance/); assert.doesNotMatch(exportFige.text, /renommé/);
@@ -1575,6 +1602,35 @@ if (!TEST_DATABASE_URL) {
       const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(refus.status, 409, JSON.stringify(refus.body)); assert.match(refus.body.error, /adresse de facturation/i);
       const enBase = await prisma.facture.findUnique({ where: { id: brouillon.body.id } }); assert.equal(enBase.numero, null); assert.equal(enBase.statut, 'BROUILLON');
+    });
+
+    test('protège l’autoliquidation BTP et signale les clients sans site sans barrage', async () => {
+      const diagnostic = () => request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+      const controle = (corps, cle) => corps.controles.find((item) => item.cle === cle);
+      const avant = await diagnostic();
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST client sans site diagnostic' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      const apres = await diagnostic();
+      assert.equal(controle(apres.body, 'ADRESSES_CLIENTS').pret, false);
+      assert.equal(controle(apres.body, 'ADRESSES_CLIENTS').bloquant, false);
+      assert.equal(apres.body.pret, avant.body.pret);
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId: client.body.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST autoliquidation', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST sous-traitance', quantite: 1, prixUnitaireHt: 5000, tauxTva: 0 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      await request(app).post(`/api/clients/${client.body.id}/sites`).set('Authorization', `Bearer ${session}`).send({ nom: 'TEST site', adresse: '1 rue du Test', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const compteTva = await prisma.compteComptable.findFirst({ where: { nature: 'TVA', actif: true } });
+      assert.ok(compteTva);
+      const exportAvant = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      const aCouvrir = exportAvant.status === 409 ? (exportAvant.body.tauxManquants || []) : [];
+      for (const taux of aCouvrir) assert.equal((await request(app).put(`/api/comptabilite/tva/${taux}`).set('Authorization', `Bearer ${session}`).send({ compteId: compteTva.id })).status, 200);
+      const diagCouvert = await diagnostic();
+      const tva = controle(diagCouvert.body, 'TVA');
+      assert.equal(tva.bloquant, false); assert.doesNotMatch(tva.detail, /0 %.*facturé/i);
+      assert.equal(controle(diagCouvert.body, 'PREFIXE_FACTURE').pret, false);
+      assert.equal(diagCouvert.body.pret, true, JSON.stringify(diagCouvert.body.controles));
+      for (const taux of aCouvrir) await prisma.regleTvaComptable.deleteMany({ where: { taux } });
     });
 
     test('calcule la TVA sur la base HT cumulée par taux', async () => {

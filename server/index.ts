@@ -867,6 +867,35 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
 // Paramétrage comptable : aucun compte n'est préchargé. L'export devra refuser toute règle absente.
 const CLES_COMPTABLES = ['CLIENT', 'VENTE_PRESTATION', 'VENTE_ARTICLE', 'JOURNAL_VENTES'];
 const NATURES_ATTENDUES: Record<string, string[]> = { CLIENT: ['ACTIF'], VENTE_PRESTATION: ['PRODUIT'], VENTE_ARTICLE: ['PRODUIT'] };
+app.get('/api/facturation/prete-a-facturer', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const [settings, comptes, regles, reglesTva, tauxFactures, mentions, clientsSansSite] = await Promise.all([
+      getCompanySettings(), prisma.compteComptable.count({ where: { actif: true } }),
+      prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }),
+      prisma.regleTvaComptable.findMany({ where: { compte: { actif: true } }, select: { taux: true } }),
+      prisma.factureLigne.findMany({ where: { facture: { statut: { in: ['EMISE', 'REGLEE'] } } }, distinct: ['tauxTva'], select: { tauxTva: true } }),
+      prisma.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } }),
+      prisma.client.count({ where: { actif: true, sites: { none: {} } } }),
+    ]);
+    const parCle = new Map(regles.map(regle => [regle.cle, regle]));
+    const reglesOk = CLES_COMPTABLES.every(cle => cle === 'JOURNAL_VENTES' ? Boolean(parCle.get(cle)?.journal) : Boolean(parCle.get(cle)?.compte?.actif));
+    const tauxCouverts = new Set(reglesTva.map(regle => Number(regle.taux)));
+    const tauxManquants = [...new Set(tauxFactures.map(ligne => Number(ligne.tauxTva)))].filter(taux => taux !== 0 && !tauxCouverts.has(taux)).sort((a, b) => a - b);
+    // L'export ne refuse que les taux non nuls déjà facturés sans compte. Le 0 % d'une
+    // autoliquidation BTP est donc exempt : imposer un compte TVA dans ce cas créerait un faux barrage.
+    const tvaOk = tauxCouverts.size > 0 && tauxManquants.length === 0;
+    const prefixe = (settings.prefixeFacture || '').trim();
+    const controles = [
+      { cle: 'PLAN_COMPTABLE', bloquant: true, pret: comptes > 0, libelle: 'Plan comptable', detail: comptes > 0 ? `${comptes} compte(s) actif(s).` : 'Importez ou créez au moins un compte.', route: '/comptabilite' },
+      { cle: 'REGLES_COMPTABLES', bloquant: true, pret: reglesOk, libelle: 'Règles comptables', detail: reglesOk ? 'Les règles client, ventes et journal sont renseignées.' : 'Renseignez les comptes client, ventes et le journal.', route: '/comptabilite' },
+      { cle: 'TVA', bloquant: tauxManquants.length > 0, pret: tvaOk, libelle: 'Règles TVA', detail: tauxManquants.length ? `Aucun compte TVA pour ${tauxManquants.map(taux => `${taux} %`).join(', ')} — ce taux est déjà facturé, l’export comptable sera refusé.` : !tauxCouverts.size ? 'Aucun compte TVA associé. Une entreprise qui ne facture qu’à 0 % (autoliquidation BTP) n’en a pas besoin ; sinon, associez un compte avant la première facture à un taux non nul.' : `${tauxCouverts.size} taux configuré(s) ; tous les taux déjà facturés sont couverts.`, route: '/comptabilite' },
+      { cle: 'MENTIONS_LEGALES', bloquant: true, pret: Boolean(mentions), libelle: 'Mentions légales et CGV', detail: mentions ? 'Une version publiée est active.' : 'Publiez une version légale validée.', route: '/mentions-legales' },
+      { cle: 'PREFIXE_FACTURE', bloquant: false, pret: Boolean(prefixe), libelle: 'Préfixe de facture', detail: prefixe ? `Préfixe actuel : ${prefixe}.` : 'Aucun préfixe défini : les numéros utiliseront « F » par défaut.', route: null },
+      { cle: 'ADRESSES_CLIENTS', bloquant: false, pret: clientsSansSite === 0, libelle: 'Adresses de facturation', detail: clientsSansSite === 0 ? 'Tous les clients actifs portent au moins un site.' : `${clientsSansSite} client(s) actif(s) sans aucun site : l’émission de leurs factures sera refusée.`, route: '/clients' },
+    ];
+    res.json({ pret: controles.every(controle => !controle.bloquant || controle.pret), controles });
+  } catch { res.status(500).json({ error: 'Lecture des prérequis de facturation impossible.' }); }
+});
 app.get('/api/comptabilite', requireAuth, requireAdmin, async (_req, res) => {
   try { const [comptes, regles, reglesTva] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } }), prisma.regleTvaComptable.findMany({ include: { compte: true }, orderBy: { taux: 'asc' } })]); res.json(decimalToNumber({ comptes, regles, reglesTva })); }
   catch { res.status(500).json({ error: 'Lecture du paramétrage comptable impossible.' }); }

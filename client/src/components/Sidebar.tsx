@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Building2, BookOpen, Landmark, KeyRound, FileText, Wrench } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Clock, Settings, LogOut, FolderOpen, PieChart, TrendingUp, Activity, Award, CalendarDays, Building2, BookOpen, Landmark, KeyRound, FileText, Wrench, CheckCircle2 } from 'lucide-react';
 import { applyTheme } from '../theme';
 import { isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutVoirStatistiques, useCurrentUser, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
@@ -64,6 +64,13 @@ const Sidebar = () => {
           <NavLink to="/contrats-maintenance" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
             <FileText size={20} />
             Contrats maintenance
+          </NavLink>
+        )}
+
+        {isAdmin && (
+          <NavLink to="/prete-a-facturer" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+            <CheckCircle2 size={20} />
+            Prêt à facturer
           </NavLink>
         )}
 
