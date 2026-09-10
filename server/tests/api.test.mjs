@@ -1527,6 +1527,11 @@ if (!TEST_DATABASE_URL) {
       const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`); const lecteurPdf = new PDFParse({ data: document.body }); const contenuPdf = await lecteurPdf.getText(); await lecteurPdf.destroy();
       assert.match(contenuPdf.text, /1 234,56 €/); assert.match(contenuPdf.text, /Total TTC : 1 481,47 €/); assert.doesNotMatch(contenuPdf.text, /\d \/\d/);
       for (const mot of designation.split(' ')) assert.ok(contenuPdf.text.includes(mot), `Désignation tronquée : ${mot}`);
+      const million = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST colonnes larges', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST lot unique', quantite: 1, prixUnitaireHt: 1234567.89, tauxTva: 20 }] });
+      assert.equal(million.status, 201, JSON.stringify(million.body)); assert.equal((await request(app).post(`/api/factures/${million.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const docMillion = await request(app).get(`/api/factures/${million.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`); assert.equal(docMillion.status, 200, docMillion.text);
+      const lecteurMillion = new PDFParse({ data: docMillion.body }); const contenuMillion = await lecteurMillion.getText(); await lecteurMillion.destroy();
+      assert.match(contenuMillion.text, /TEST lot unique 1 1 234 567,89 € 20 % 1 234 567,89 €/); assert.doesNotMatch(contenuMillion.text, /11 234 567,89 €/);
     });
 
     test('refuse le document PDF d’une facture antérieure au gel de l’adresse', async () => {

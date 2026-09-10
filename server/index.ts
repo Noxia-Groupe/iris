@@ -713,7 +713,9 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
     };
     const legal = facture.mentionsLegalesVersion;
     const couleurPrimaire = /^#[0-9a-f]{6}$/i.test(societe.couleurPrimaire || '') ? societe.couleurPrimaire : '#1e3a8a';
-    const colonnes = (a: string, b: string, c: string, d: string, e: string) => a.padEnd(38) + b.padStart(8) + c.padStart(13) + d.padStart(8) + e.padStart(13);
+    // Une valeur large ne doit jamais se coller à la colonne précédente : on garde au moins un séparateur.
+    const colonne = (valeur: string, largeur: number) => (valeur.length >= largeur ? ` ${valeur}` : valeur.padStart(largeur));
+    const colonnes = (a: string, b: string, c: string, d: string, e: string) => a.padEnd(38) + colonne(b, 9) + colonne(c, 16) + colonne(d, 8) + colonne(e, 16);
 
     // L'identité de l'émetteur est portée par la version légale figée à l'émission, jamais par les paramètres vivants.
     pdf.fillColor(couleurPrimaire);
