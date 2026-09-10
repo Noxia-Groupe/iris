@@ -1265,6 +1265,14 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.body.totalTtc, 240);
     });
 
+    test('expose à l’administration les prérequis pour facturer', async () => {
+      const reponse = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+      assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      assert.equal(reponse.body.pret, false);
+      assert.ok(reponse.body.controles.some((controle) => controle.cle === 'PLAN_COMPTABLE' && controle.route === '/comptabilite'));
+      assert.ok(reponse.body.controles.some((controle) => controle.cle === 'MENTIONS_LEGALES' && controle.route === '/mentions-legales'));
+    });
+
     test('paramètre un compte comptable sans imposer de plan préchargé', async () => {
       const compte = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '706100', libelle: 'Prestations techniques', nature: 'PRODUIT' });
       assert.equal(compte.status, 201, JSON.stringify(compte.body));
