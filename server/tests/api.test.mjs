@@ -1275,6 +1275,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal(mentions.route, '/mentions-legales');
       const prefixe = reponse.body.controles.find((controle) => controle.cle === 'PREFIXE_FACTURE');
       assert.equal(prefixe.bloquant, false); assert.equal(prefixe.route, null);
+      const tva = reponse.body.controles.find((controle) => controle.cle === 'TVA');
+      assert.equal(tva.pret, false); assert.equal(tva.bloquant, false, 'Sans taux facturé non couvert, le manque de compte TVA ne bloque pas.');
+      assert.match(tva.detail, /0 %/);
       assert.ok(reponse.body.controles.some((controle) => controle.cle === 'ADRESSES_CLIENTS' && controle.bloquant === false));
     });
 
