@@ -1462,6 +1462,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`).send();
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      await prisma.companySettings.upsert({ where: { id: 'singleton' }, create: { id: 'singleton', raisonSociale: 'TEST Société PDF', siret: 'TEST-SIRET-PDF', couleurPrimaire: '#123456', couleurSecondaire: '#f0a000' }, update: { raisonSociale: 'TEST Société PDF', siret: 'TEST-SIRET-PDF', couleurPrimaire: '#123456', couleurSecondaire: '#f0a000' } });
       const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
       assert.equal(document.status, 200, document.text);
       assert.match(document.headers['content-type'] || '', /application\/pdf/);
@@ -1470,6 +1471,8 @@ if (!TEST_DATABASE_URL) {
       const contenuPdf = await lecteurPdf.getText();
       await lecteurPdf.destroy();
       assert.match(contenuPdf.text, /TEST document émis/);
+      assert.match(contenuPdf.text, /TEST Société PDF/);
+      assert.match(contenuPdf.text, /TEST-SIRET-PDF/);
       assert.match(contenuPdf.text, /Mentions légales/);
     });
 

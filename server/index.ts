@@ -685,8 +685,11 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
     pdf.on('end', () => resolve(Buffer.concat(morceaux)));
     pdf.on('error', reject);
     const ligne = (texte: string, options: Record<string, unknown> = {}) => pdf.text(texte, options as any);
+    const couleurPrimaire = /^#[0-9a-f]{6}$/i.test(societe.couleurPrimaire || '') ? societe.couleurPrimaire : '#1e3a8a';
+    pdf.fillColor(couleurPrimaire);
     ligne(societe.raisonSociale || 'Société', { fontSize: 18 });
-    ligne([societe.adresse, [societe.codePostal, societe.ville].filter(Boolean).join(' '), societe.email].filter(Boolean).join('\n'), { fontSize: 9 });
+    pdf.fillColor('#000000');
+    ligne([societe.adresse, [societe.codePostal, societe.ville].filter(Boolean).join(' '), societe.email, societe.siret && `SIRET : ${societe.siret}`, societe.tvaIntra && `TVA intracommunautaire : ${societe.tvaIntra}`].filter(Boolean).join('\n'), { fontSize: 9 });
     pdf.moveDown();
     ligne(`FACTURE ${facture.numero}`, { fontSize: 18, align: 'right' });
     ligne(`Émise le ${formatDateFacture(facture.dateEmission)} · Échéance : ${formatDateFacture(facture.dateEcheance)}`, { align: 'right' });
