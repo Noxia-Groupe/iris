@@ -1620,8 +1620,14 @@ if (!TEST_DATABASE_URL) {
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
       await request(app).post(`/api/clients/${client.body.id}/sites`).set('Authorization', `Bearer ${session}`).send({ nom: 'TEST site', adresse: '1 rue du Test', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
       assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const compteTva = await prisma.compteComptable.findFirst({ where: { nature: 'TVA', actif: true } });
+      assert.ok(compteTva);
+      const exportAvant = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      const aCouvrir = exportAvant.status === 409 ? (exportAvant.body.tauxManquants || []) : [];
+      for (const taux of aCouvrir) assert.equal((await request(app).put(`/api/comptabilite/tva/${taux}`).set('Authorization', `Bearer ${session}`).send({ compteId: compteTva.id })).status, 200);
       const tva = controle((await diagnostic()).body, 'TVA');
       assert.equal(tva.bloquant, false); assert.doesNotMatch(tva.detail, /0 %.*facturé/i);
+      for (const taux of aCouvrir) await prisma.regleTvaComptable.deleteMany({ where: { taux } });
     });
 
     test('calcule la TVA sur la base HT cumulée par taux', async () => {
