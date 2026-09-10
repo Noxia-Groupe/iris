@@ -1625,8 +1625,11 @@ if (!TEST_DATABASE_URL) {
       const exportAvant = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       const aCouvrir = exportAvant.status === 409 ? (exportAvant.body.tauxManquants || []) : [];
       for (const taux of aCouvrir) assert.equal((await request(app).put(`/api/comptabilite/tva/${taux}`).set('Authorization', `Bearer ${session}`).send({ compteId: compteTva.id })).status, 200);
-      const tva = controle((await diagnostic()).body, 'TVA');
+      const diagCouvert = await diagnostic();
+      const tva = controle(diagCouvert.body, 'TVA');
       assert.equal(tva.bloquant, false); assert.doesNotMatch(tva.detail, /0 %.*facturé/i);
+      assert.equal(controle(diagCouvert.body, 'PREFIXE_FACTURE').pret, false);
+      assert.equal(diagCouvert.body.pret, true, JSON.stringify(diagCouvert.body.controles));
       for (const taux of aCouvrir) await prisma.regleTvaComptable.deleteMany({ where: { taux } });
     });
 
