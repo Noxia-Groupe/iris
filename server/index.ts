@@ -699,8 +699,12 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
       ligne(`${item.designation}  |  ${item.quantite}  |  ${formatMontantFacture(item.prixUnitaireHt)}  |  ${Number(item.tauxTva)} %  |  ${formatMontantFacture(item.totalHt)}`, { fontSize: 9 });
     }
     pdf.moveDown();
+    const tvaParTaux = tauxUtilises(facture.lignes).sort((a, b) => a - b).map(taux => ({ taux, ht: baseHtDuTaux(facture.lignes, taux), tva: tvaDuTaux(facture.lignes, taux) }));
     ligne(`Total HT : ${formatMontantFacture(facture.totalHt)}`, { align: 'right' });
-    ligne(`TVA : ${formatMontantFacture(facture.totalTva)}`, { align: 'right' });
+    for (const cumul of tvaParTaux) {
+      ligne(`TVA ${cumul.taux} % sur ${formatMontantFacture(cumul.ht)} : ${formatMontantFacture(cumul.tva)}`, { align: 'right' });
+    }
+    ligne(`TVA totale : ${formatMontantFacture(facture.totalTva)}`, { align: 'right' });
     ligne(`Total TTC : ${formatMontantFacture(facture.totalTtc)}`, { align: 'right', fontSize: 12 });
     pdf.moveDown();
     const legal = facture.mentionsLegalesVersion;
