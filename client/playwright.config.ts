@@ -18,6 +18,8 @@ export default defineConfig({
   use: {
     baseURL,
     locale: 'fr-FR',
+    // Playwright attend exactement `timezoneId` (z minuscule) : `timeZoneId` est ignoré
+    // silencieusement. Le parcours New York vérifie aussi le fuseau réellement appliqué.
     timezoneId: 'Europe/Paris',
     trace: process.env.CI ? 'retain-on-failure' : 'off',
     ...devices['Desktop Chrome'],
