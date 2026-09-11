@@ -106,4 +106,18 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(prefixe).toContainText('Non bloquant');
     await expect(prefixe.getByRole('link', { name: 'Configurer' })).toHaveCount(0);
   });
+
+  test.describe('à l’ouest de Greenwich', () => {
+    test.use({ timezoneId: 'America/New_York' });
+    test('affiche la date d’émission sans la décaler d’un jour', async ({ allerSurPageAdmin, creerClient, page }) => {
+      const client = await creerClient('fuseau'); await allerSurPageAdmin('/factures');
+      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('America/New_York');
+      await page.getByRole('button', { name: /Nouvelle facture/ }).click(); await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+      await page.locator('input[name="motifHorsAffaire"]').fill('Parcours fuseau'); const aujourdhui = dateDuJour();
+      await page.locator('input[name="dateEmission"]').fill(aujourdhui); await page.locator('input[name="dateEcheance"]').fill(aujourdhui);
+      await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle fuseau'); const prix = page.locator('input[aria-label="Prix unitaire HT ligne 1"]'); await prix.click(); await prix.pressSequentially('100');
+      await page.getByRole('button', { name: /Créer le brouillon/ }).click(); await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+      const [jour, mois, annee] = aujourdhui.split('-'); const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }); await expect(ligne).toHaveCount(1); await expect(ligne).toContainText(new RegExp(`${jour}[-/]${mois}[-/]${annee}`));
+    });
+  });
 });
