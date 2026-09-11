@@ -291,6 +291,9 @@ model CompanySettings {
   couleurSecondaire String?  @default("#f59e0b")
   prefixeFacture    String?
   piedFacture       String?
+  // Fuseau civil de la société exploitant l'instance. Les dates-seules restent à minuit
+  // UTC ; ce réglage sert uniquement aux instants et aux jours dérivés d'un instant.
+  fuseauHoraire     String?  @default("Europe/Paris")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

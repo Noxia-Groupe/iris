@@ -1883,5 +1883,15 @@ if (!TEST_DATABASE_URL) {
       const lecture = await request(app).get('/api/company').set('Authorization', `Bearer ${session}`);
       assert.equal(lecture.body.raisonSociale, 'TEST Société');
     });
+
+    test('n’accepte que les fuseaux horaires français et expose le réglage', async () => {
+      const invalide = await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Europe/London' });
+      assert.equal(invalide.status, 400, JSON.stringify(invalide.body));
+      const maj = await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Pacific/Noumea' });
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      assert.equal(maj.body.fuseauHoraire, 'Pacific/Noumea');
+      const lecture = await request(app).get('/api/company').set('Authorization', `Bearer ${session}`);
+      assert.equal(lecture.body.fuseauHoraire, 'Pacific/Noumea');
+    });
   });
 }

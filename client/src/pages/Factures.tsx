@@ -24,9 +24,10 @@ type Facture = {
 
 const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: '1', prixUnitaireHt: '', tauxTva: '20' });
 const nombreFr = (valeur: string): number | null => { const normalise = valeur.trim().replace(',', '.'); return /^\d+(\.\d+)?$/.test(normalise) ? Number(normalise) : null; };
-const dateFrancaiseDuJour = () => {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+const dateFrancaiseDuJour = (fuseauHoraire: string) => {
+  const parties = new Intl.DateTimeFormat('en-CA', { timeZone: fuseauHoraire, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const valeur = (type: Intl.DateTimeFormatPartTypes) => parties.find((partie) => partie.type === type)?.value || '';
+  return `${valeur('day')}-${valeur('month')}-${valeur('year')}`;
 };
 const formatDate = (date: string) => new Date(date).toLocaleDateString('fr-FR', { timeZone: 'UTC' }).replace(/\//g, '-');
 const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
@@ -43,11 +44,12 @@ export default function Factures() {
   const [origine, setOrigine] = useState<Origine>('HORS_AFFAIRE');
   const [clientSelection, setClientSelection] = useState('');
   const [lignes, setLignes] = useState<Ligne[]>([nouvelleLigne()]);
+  const [fuseauHoraire, setFuseauHoraire] = useState('Europe/Paris');
 
   const charger = async () => {
     try {
       const reponses = await Promise.all(
-        ['/factures', '/clients', '/chantiers', '/interventions', '/contrats-maintenance'].map((path) => apiFetch(path)),
+        ['/factures', '/clients', '/chantiers', '/interventions', '/contrats-maintenance', '/company'].map((path) => apiFetch(path)),
       );
       const donnees = await Promise.all(reponses.map((reponse) => reponse.json()));
       if (!reponses.every((reponse) => reponse.ok)) throw new Error(donnees.find((donnee) => donnee?.error)?.error || 'Chargement impossible.');
@@ -56,6 +58,7 @@ export default function Factures() {
       setChantiers(Array.isArray(donnees[2]) ? donnees[2] : []);
       setInterventions(Array.isArray(donnees[3]) ? donnees[3] : []);
       setContrats(Array.isArray(donnees[4]) ? donnees[4] : []);
+      setFuseauHoraire(donnees[5]?.fuseauHoraire || 'Europe/Paris');
     } catch (e) {
       setErreur(e instanceof Error ? e.message : 'Chargement impossible.');
     }
@@ -199,8 +202,8 @@ export default function Factures() {
               <option value="">Client…</option>
               {clients.map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
             </select>
-            <input required name="dateEmission" defaultValue={dateFrancaiseDuJour()} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Émission (JJ-MM-AAAA)" />
-            <input required name="dateEcheance" defaultValue={dateFrancaiseDuJour()} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Échéance (JJ-MM-AAAA)" />
+            <input required name="dateEmission" defaultValue={dateFrancaiseDuJour(fuseauHoraire)} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Émission (JJ-MM-AAAA)" />
+            <input required name="dateEcheance" defaultValue={dateFrancaiseDuJour(fuseauHoraire)} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Échéance (JJ-MM-AAAA)" />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <select name="origine" className="form-input" value={origine} onChange={(e) => setOrigine(e.target.value as Origine)}>

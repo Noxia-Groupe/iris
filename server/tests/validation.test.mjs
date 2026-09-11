@@ -6,6 +6,7 @@ import test, { describe } from 'node:test';
 
 const {
   clientPayload, contactPayload, sitePayload, companySettingsPayload,
+  fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise,
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
   commissionBaremeProgressif, computeChantierMetrics,
   parseBareme, serialiseBareme, validerBareme,
@@ -65,6 +66,26 @@ describe('Identité de la société', () => {
 
   test('un champ texte vide est enregistré comme absent, pas comme chaîne vide', () => {
     assert.equal(companySettingsPayload({ siret: '   ' }).siret, null);
+  });
+
+  test('n’accepte que les fuseaux des territoires français', () => {
+    assert.equal(fuseauHoraireEntrepriseValide('Pacific/Noumea'), true);
+    assert.equal(fuseauHoraireEntrepriseValide('America/Martinique'), true);
+    assert.equal(fuseauHoraireEntrepriseValide('Europe/London'), false);
+    assert.throws(() => companySettingsPayload({ fuseauHoraire: 'Europe/London' }), /Fuseau horaire invalide/);
+  });
+});
+
+describe('Jours civils de l’entreprise', () => {
+  test('calcule le jour dans le fuseau configuré, pas en UTC', () => {
+    const instant = new Date('2026-09-11T14:32:32.863Z');
+    assert.equal(jourCivilEntreprise(instant, 'Pacific/Noumea'), '2026-09-12');
+    assert.equal(jourCivilEntreprise(instant, 'America/Martinique'), '2026-09-11');
+  });
+
+  test('permet de fixer l’instant de référence pour aujourd’hui', () => {
+    const instant = new Date('2027-01-01T00:30:00.000Z');
+    assert.equal(aujourdHuiEntreprise('America/Martinique', instant), '2026-12-31');
   });
 });
 
