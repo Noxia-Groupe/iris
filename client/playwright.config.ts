@@ -18,7 +18,7 @@ export default defineConfig({
   use: {
     baseURL,
     locale: 'fr-FR',
-    timeZoneId: 'Europe/Paris',
+    timezoneId: 'Europe/Paris',
     trace: process.env.CI ? 'retain-on-failure' : 'off',
     ...devices['Desktop Chrome'],
   },

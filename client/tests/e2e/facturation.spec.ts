@@ -33,9 +33,10 @@ test.describe('Facturation — parcours utilisateur', () => {
     const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
     await expect(ligne).toHaveCount(1);
     await expect(ligne).toContainText(/3\s*427,61\s*€/);
-    const factures = await (await apiAdmin.get('/factures')).json();
-    const facture = factures.find((item: { client: { id: string } }) => item.client.id === client.id);
-    expect(facture.lignes.map((item: { ordre: number; nature: string; prixUnitaireHt: number }) => [item.ordre, item.nature, item.prixUnitaireHt])).toEqual([
+    const factures = await (await apiAdmin.get('/factures')).json() as Array<{ client: { id: string }; lignes: Array<{ ordre: number; nature: string; prixUnitaireHt: number }>; totalHt: number; totalTva: number; totalTtc: number }>;
+    const facture = factures.find((item) => item.client.id === client.id);
+    if (!facture) throw new Error('Facture multi-lignes absente de l’API');
+    expect(facture.lignes.map((item) => [item.ordre, item.nature, item.prixUnitaireHt])).toEqual([
       [0, 'PRESTATION', 1234.56], [1, 'ARTICLE', 49.9], [2, 'PRESTATION', 250],
     ]);
     expect([facture.totalHt, facture.totalTva, facture.totalTtc]).toEqual([2868.82, 558.79, 3427.61]);
@@ -59,11 +60,22 @@ test.describe('Facturation — parcours utilisateur', () => {
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(page.getByText(/émise et figée/)).toBeVisible();
     await expect(ligne).toContainText(/\d{4}-\d{4}/);
-    const factures = await (await apiAdmin.get('/factures')).json();
-    const facture = factures.find((item: { client: { id: string } }) => item.client.id === client.id);
+    const factures = await (await apiAdmin.get('/factures')).json() as Array<{ id: string; client: { id: string } }>;
+    const facture = factures.find((item) => item.client.id === client.id);
+    if (!facture) throw new Error('Facture émise absente de l’API');
     const document = await apiAdmin.get(`/factures/${facture.id}/document.pdf`);
     expect(document.status()).toBe(200);
     expect((await document.body()).subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  test('refuse la ligne invalide sans créer de facture', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient('invalide'); const page = await allerSurPageAdmin('/factures');
+    await page.getByRole('button', { name: /Nouvelle facture/ }).click(); await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await page.locator('input[name="motifHorsAffaire"]').fill('Validation client'); await page.getByRole('button', { name: /Ajouter une ligne/ }).click();
+    await page.locator('input[aria-label="Désignation ligne 1"]').fill('Correcte'); await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('10');
+    await page.locator('input[aria-label="Désignation ligne 2"]').fill('Invalide'); await page.locator('input[aria-label="Prix unitaire HT ligne 2"]').pressSequentially('douze');
+    await page.getByRole('button', { name: /Créer le brouillon/ }).click(); await expect(page.getByText(/^Ligne 2 :/)).toBeVisible();
+    const factures = await (await apiAdmin.get('/factures')).json() as Array<{ client: { id: string } }>; expect(factures.filter((item) => item.client.id === client.id)).toHaveLength(0);
   });
 
   test('affiche le refus d’émission sans adresse et ne consomme pas de numéro', async ({ allerSurPageAdmin, creerClient }) => {
@@ -75,7 +87,9 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Prestation refusée');
-    await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
+    const prix = page.locator('input[aria-label="Prix unitaire HT ligne 1"]');
+    await prix.click();
+    await prix.pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
     const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
