@@ -7,6 +7,7 @@ import test, { describe } from 'node:test';
 const {
   clientPayload, contactPayload, sitePayload, companySettingsPayload,
   fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise,
+  dateEmissionEstFuture,
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
   commissionBaremeProgressif, computeChantierMetrics,
   parseBareme, serialiseBareme, validerBareme,
@@ -86,6 +87,20 @@ describe('Jours civils de l’entreprise', () => {
   test('permet de fixer l’instant de référence pour aujourd’hui', () => {
     const instant = new Date('2027-01-01T00:30:00.000Z');
     assert.equal(aujourdHuiEntreprise('America/Martinique', instant), '2026-12-31');
+  });
+
+  test('le refus de date future se règle sur le jour civil de l’entreprise, pas sur UTC', () => {
+    // 11 septembre 21h37 UTC : il est déjà le 12 à Nouméa (UTC+11) et encore le 11 à Paris.
+    // L'instant est injecté pour que ce test soit vrai à toute heure — sinon il ne serait
+    // rouge que pendant la fenêtre de décalage, donc inutilisable.
+    const instant = new Date('2026-09-11T21:37:00.000Z');
+    const douze = '2026-09-12T00:00:00.000Z';
+    assert.equal(dateEmissionEstFuture(douze, 'Pacific/Noumea', instant), false, 'le 12 est le jour même à Nouméa');
+    assert.equal(dateEmissionEstFuture(douze, 'Europe/Paris', instant), true, 'le 12 est encore demain à Paris');
+    // Et à l'ouest : le 11 est toujours le jour même en Martinique (UTC−4), jamais du futur.
+    const onze = '2026-09-11T00:00:00.000Z';
+    assert.equal(dateEmissionEstFuture(onze, 'America/Martinique', instant), false);
+    assert.equal(dateEmissionEstFuture(douze, 'America/Martinique', instant), true);
   });
 });
 

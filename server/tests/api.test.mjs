@@ -1563,6 +1563,35 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('l’export ne déplace jamais une date d’émission, et date l’annulation dans le fuseau de la société', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'bascule de jour civil', dateEmission: '09-09-2026', dateEcheance: '09-09-2026', lignes: [{ designation: 'TEST bascule exercice', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      assert.equal((await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`)).status, 200);
+      await prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2026-09-09T04:30:00.000Z') } });
+      const datesDe = async (motif) => {
+        const csv = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+        assert.equal(csv.status, 200, csv.text);
+        const lignes = csv.text.split('\n').filter((ligne) => ligne.includes(emission.body.numero) && ligne.includes(motif));
+        assert.ok(lignes.length, `aucune écriture « ${motif} » dans l’export`);
+        return [...new Set(lignes.map((ligne) => ligne.split(';')[1].replace(/"/g, '')))];
+      };
+      const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+      try {
+        for (const [fuseau, jourAnnulation] of [['Europe/Paris', '20260909'], ['Pacific/Noumea', '20260909'], ['America/Martinique', '20260909'], ['Pacific/Gambier', '20260908']]) {
+          assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
+          assert.deepEqual(await datesDe('"Facture '), ['20260909'], `la date d’émission ne bouge pas en ${fuseau}`);
+          assert.deepEqual(await datesDe('Annulation facture'), [jourAnnulation], `l’annulation suit le fuseau ${fuseau}`);
+        }
+      } finally {
+        await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
+        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
+        await prisma.facture.delete({ where: { id: emission.body.id } });
+      }
+    });
+
     test('refuse une version légale incomplète', async () => {
       for (const corps of [{ cgv: 'TEST cgv', penalites: 'TEST pénalités' }, { mentions: '   ', cgv: 'TEST cgv', penalites: 'TEST pénalités' }]) {
         assert.equal((await request(app).post('/api/mentions-legales').set('Authorization', `Bearer ${session}`).send(corps)).status, 400);

@@ -157,8 +157,8 @@ const Admin = () => {
   // Modules activables (onglet « Modules », superadmin) : état global du Planning.
   const [planningActif, setPlanningActif] = useState<boolean | null>(null);
   const [modulesMessage, setModulesMessage] = useState('');
-  const [societe, setSociete] = useState<any>(null);
-  const [messageSociete, setMessageSociete] = useState('');
+  const [societe, setSociete] = useState<{ fuseauHoraire?: string | null } | null>(null);
+  const [messageSociete, setMessageSociete] = useState<{ texte: string; ok: boolean } | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -232,13 +232,13 @@ const Admin = () => {
 
   const enregistrerSociete = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setMessageSociete('');
+    setMessageSociete(null);
     const form = new FormData(e.currentTarget);
     const res = await apiFetch('/company', { method: 'PUT', body: JSON.stringify({ fuseauHoraire: form.get('fuseauHoraire') }) });
     const data = await res.json();
-    if (!res.ok) return setMessageSociete(data.error || 'Enregistrement impossible.');
+    if (!res.ok) return setMessageSociete({ texte: data.error || 'Enregistrement impossible.', ok: false });
     setSociete(data);
-    setMessageSociete('Fuseau horaire de la société enregistré.');
+    setMessageSociete({ texte: 'Fuseau horaire de la société enregistré.', ok: true });
   };
 
   // Enregistre les règles de rémunération. Les champs numériques transitent en texte
@@ -898,7 +898,7 @@ const Admin = () => {
                 <option value="America/Guadeloupe">America/Guadeloupe — Guadeloupe</option><option value="America/Martinique">America/Martinique — Martinique</option><option value="America/Cayenne">America/Cayenne — Guyane</option><option value="America/Miquelon">America/Miquelon — Saint-Pierre-et-Miquelon</option><option value="Indian/Mayotte">Indian/Mayotte — Mayotte</option><option value="Indian/Reunion">Indian/Reunion — La Réunion</option><option value="Pacific/Noumea">Pacific/Noumea — Nouvelle-Calédonie</option><option value="Pacific/Wallis">Pacific/Wallis — Wallis-et-Futuna</option><option value="Pacific/Tahiti">Pacific/Tahiti — Polynésie française (Tahiti)</option><option value="Pacific/Marquesas">Pacific/Marquesas — Polynésie française (Marquises)</option><option value="Pacific/Gambier">Pacific/Gambier — Polynésie française (Gambier)</option>
               </select>
             </label>
-            {messageSociete && <p className={messageSociete.startsWith('Fuseau') ? 'text-emerald-700' : 'text-red-600'}>{messageSociete}</p>}
+            {messageSociete && <p className={messageSociete.ok ? 'text-emerald-700' : 'text-red-600'}>{messageSociete.texte}</p>}
             <button className="btn btn-primary">Enregistrer</button>
           </form> : <p className="text-sm text-gray-400">Chargement…</p>}
         </div>
