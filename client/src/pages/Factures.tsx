@@ -1,38 +1,260 @@
 import { useEffect, useState } from 'react';
-import { FilePlus2, RefreshCw, Send, Download } from 'lucide-react';
+import { Download, FilePlus2, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
+type NatureLigne = 'PRESTATION' | 'ARTICLE';
 type Source = { id: string; nom?: string; titre?: string; reference?: string; clientId?: string; client?: Client };
-type Ligne = { designation: string; quantite: number; prixUnitaireHt: number; tauxTva: number };
-type Facture = { id: string; numero: string | null; statut: string; dateEmission: string; dateEcheance: string; totalHt: number; totalTva: number; totalTtc: number; origine: Origine; motifHorsAffaire?: string | null; client: Client; lignes: Ligne[] };
-const dateFrancaiseDuJour = () => { const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`; };
-const formatDate = (date: string) => new Date(date).toLocaleDateString('fr-FR');
+type Ligne = { designation: string; nature: NatureLigne; quantite: string; prixUnitaireHt: string; tauxTva: string };
+type Facture = {
+  id: string;
+  numero: string | null;
+  statut: string;
+  dateEmission: string;
+  dateEcheance: string;
+  totalHt: number;
+  totalTva: number;
+  totalTtc: number;
+  origine: Origine;
+  motifHorsAffaire?: string | null;
+  client: Client;
+  lignes: Ligne[];
+};
+
+const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: '1', prixUnitaireHt: '', tauxTva: '20' });
+const nombreFr = (valeur: string): number | null => { const normalise = valeur.trim().replace(',', '.'); return /^\d+(\.\d+)?$/.test(normalise) ? Number(normalise) : null; };
+const dateFrancaiseDuJour = () => {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+};
+const formatDate = (date: string) => new Date(date).toLocaleDateString('fr-FR', { timeZone: 'UTC' }).replace(/\//g, '-');
+const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 
 export default function Factures() {
-  const [factures, setFactures] = useState<Facture[]>([]), [clients, setClients] = useState<Client[]>([]);
-  const [chantiers, setChantiers] = useState<Source[]>([]), [interventions, setInterventions] = useState<Source[]>([]), [contrats, setContrats] = useState<Source[]>([]);
-  const [erreur, setErreur] = useState(''), [succes, setSucces] = useState(''), [ouvert, setOuvert] = useState(false), [origine, setOrigine] = useState<Origine>('HORS_AFFAIRE'), [clientSelection, setClientSelection] = useState('');
-  const charger = async () => { try {
-    const reponses = await Promise.all(['/factures', '/clients', '/chantiers', '/interventions', '/contrats-maintenance'].map(path => apiFetch(path)));
-    const donnees = await Promise.all(reponses.map(r => r.json()));
-    if (!reponses.every(r => r.ok)) throw new Error(donnees.find(d => d?.error)?.error || 'Chargement impossible.');
-    setFactures(Array.isArray(donnees[0]) ? donnees[0] : []); setClients(donnees[1].clients || donnees[1] || []);
-    setChantiers(Array.isArray(donnees[2]) ? donnees[2] : []); setInterventions(Array.isArray(donnees[3]) ? donnees[3] : []); setContrats(Array.isArray(donnees[4]) ? donnees[4] : []);
-  } catch (e) { setErreur(e instanceof Error ? e.message : 'Chargement impossible.'); } };
-  useEffect(() => { void charger(); }, []);
-  const creer = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); setErreur(''); setSucces('');
-    const form = new FormData(event.currentTarget); const ligne: Ligne = { designation: String(form.get('designation') || ''), quantite: Number(form.get('quantite')), prixUnitaireHt: Number(form.get('prixUnitaireHt')), tauxTva: Number(form.get('tauxTva')) };
-    const payload: Record<string, unknown> = { clientId: form.get('clientId'), origine, dateEmission: form.get('dateEmission'), dateEcheance: form.get('dateEcheance'), lignes: [ligne] };
-    if (origine === 'CHANTIER') payload.chantierId = form.get('chantierId'); if (origine === 'INTERVENTION') payload.interventionId = form.get('interventionId'); if (origine === 'CONTRAT') payload.contratMaintenanceId = form.get('contratMaintenanceId'); if (origine === 'HORS_AFFAIRE') payload.motifHorsAffaire = form.get('motifHorsAffaire');
-    const res = await apiFetch('/factures', { method: 'POST', body: JSON.stringify(payload) }); const data = await res.json();
-    if (!res.ok) return setErreur(data.error || 'Création impossible.'); setOuvert(false); setSucces('Brouillon créé : il ne porte aucun numéro tant qu’il n’est pas émis.'); await charger();
+  const [factures, setFactures] = useState<Facture[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [chantiers, setChantiers] = useState<Source[]>([]);
+  const [interventions, setInterventions] = useState<Source[]>([]);
+  const [contrats, setContrats] = useState<Source[]>([]);
+  const [erreur, setErreur] = useState('');
+  const [succes, setSucces] = useState('');
+  const [ouvert, setOuvert] = useState(false);
+  const [origine, setOrigine] = useState<Origine>('HORS_AFFAIRE');
+  const [clientSelection, setClientSelection] = useState('');
+  const [lignes, setLignes] = useState<Ligne[]>([nouvelleLigne()]);
+
+  const charger = async () => {
+    try {
+      const reponses = await Promise.all(
+        ['/factures', '/clients', '/chantiers', '/interventions', '/contrats-maintenance'].map((path) => apiFetch(path)),
+      );
+      const donnees = await Promise.all(reponses.map((reponse) => reponse.json()));
+      if (!reponses.every((reponse) => reponse.ok)) throw new Error(donnees.find((donnee) => donnee?.error)?.error || 'Chargement impossible.');
+      setFactures(Array.isArray(donnees[0]) ? donnees[0] : []);
+      setClients(donnees[1].clients || donnees[1] || []);
+      setChantiers(Array.isArray(donnees[2]) ? donnees[2] : []);
+      setInterventions(Array.isArray(donnees[3]) ? donnees[3] : []);
+      setContrats(Array.isArray(donnees[4]) ? donnees[4] : []);
+    } catch (e) {
+      setErreur(e instanceof Error ? e.message : 'Chargement impossible.');
+    }
   };
-  const emettre = async (facture: Facture) => { setErreur(''); setSucces(''); const res = await apiFetch(`/factures/${facture.id}/emettre`, { method: 'POST' }); const data = await res.json(); if (!res.ok) return setErreur(data.error || 'Émission impossible.'); setSucces(`Facture ${data.numero} émise et figée.`); await charger(); };
-  const exporter = async () => { setErreur(''); const res = await apiFetch('/factures/export-comptable.csv'); if (!res.ok) { const data = await res.json(); return setErreur(data.error || 'Export impossible.'); } const url = URL.createObjectURL(await res.blob()); const a = document.createElement('a'); a.href = url; a.download = 'export-ventes.csv'; a.click(); URL.revokeObjectURL(url); };
-  const telechargerDocument = async (facture: Facture) => { setErreur(''); const res = await apiFetch(`/factures/${facture.id}/document.pdf`); if (!res.ok) { const data = await res.json(); return setErreur(data.error || 'Document indisponible.'); } const url = URL.createObjectURL(await res.blob()); const a = document.createElement('a'); a.href = url; a.download = `${facture.numero || 'facture'}.pdf`; a.click(); URL.revokeObjectURL(url); };
-  const sources = (origine === 'CHANTIER' ? chantiers : origine === 'INTERVENTION' ? interventions : contrats).filter(source => !clientSelection || source.clientId === clientSelection || source.client?.id === clientSelection);
+
+  useEffect(() => { void charger(); }, []);
+
+  const ouvrirFormulaire = () => {
+    setErreur('');
+    setSucces('');
+    setClientSelection('');
+    setOrigine('HORS_AFFAIRE');
+    setLignes([nouvelleLigne()]);
+    setOuvert(true);
+  };
+
+  const modifierLigne = <Champ extends keyof Ligne>(index: number, champ: Champ, valeur: Ligne[Champ]) => {
+    setLignes((lignesActuelles) => lignesActuelles.map((ligne, ligneIndex) => (
+      ligneIndex === index ? { ...ligne, [champ]: valeur } : ligne
+    )));
+  };
+
+  const supprimerLigne = (index: number) => {
+    setLignes((lignesActuelles) => lignesActuelles.length > 1
+      ? lignesActuelles.filter((_, ligneIndex) => ligneIndex !== index)
+      : lignesActuelles);
+  };
+
+  const creer = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setErreur('');
+    setSucces('');
+    const form = new FormData(event.currentTarget);
+    const lignesConverties = lignes.map((ligne) => ({ ...ligne, quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
+    const fautive = lignesConverties.findIndex((ligne) => ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.tauxTva === null || ligne.tauxTva > 100);
+    if (fautive >= 0) return setErreur(`Ligne ${fautive + 1} : la quantité doit être supérieure à zéro, le prix et le taux de TVA doivent être des nombres (la virgule est acceptée, le taux ne dépasse pas 100).`);
+    const payload: Record<string, unknown> = {
+      clientId: form.get('clientId'),
+      origine,
+      dateEmission: form.get('dateEmission'),
+      dateEcheance: form.get('dateEcheance'),
+      lignes: lignesConverties,
+    };
+    if (origine === 'CHANTIER') payload.chantierId = form.get('chantierId');
+    if (origine === 'INTERVENTION') payload.interventionId = form.get('interventionId');
+    if (origine === 'CONTRAT') payload.contratMaintenanceId = form.get('contratMaintenanceId');
+    if (origine === 'HORS_AFFAIRE') payload.motifHorsAffaire = form.get('motifHorsAffaire');
+
+    const res = await apiFetch('/factures', { method: 'POST', body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok) return setErreur(data.error || 'Création impossible.');
+    setOuvert(false);
+    setSucces('Brouillon créé : il ne porte aucun numéro tant qu’il n’est pas émis.');
+    await charger();
+  };
+
+  const emettre = async (facture: Facture) => {
+    setErreur('');
+    setSucces('');
+    const res = await apiFetch(`/factures/${facture.id}/emettre`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) return setErreur(data.error || 'Émission impossible.');
+    setSucces(`Facture ${data.numero} émise et figée.`);
+    await charger();
+  };
+
+  const exporter = async () => {
+    setErreur('');
+    const res = await apiFetch('/factures/export-comptable.csv');
+    if (!res.ok) {
+      const data = await res.json();
+      return setErreur(data.error || 'Export impossible.');
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'export-ventes.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const telechargerDocument = async (facture: Facture) => {
+    setErreur('');
+    const res = await apiFetch(`/factures/${facture.id}/document.pdf`);
+    if (!res.ok) {
+      const data = await res.json();
+      return setErreur(data.error || 'Document indisponible.');
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${facture.numero || 'facture'}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const sources = (origine === 'CHANTIER' ? chantiers : origine === 'INTERVENTION' ? interventions : contrats)
+    .filter((source) => !clientSelection || source.clientId === clientSelection || source.client?.id === clientSelection);
   const sourceName = (source: Source) => source.nom || source.titre || source.reference || source.id;
-  return <div className="max-w-6xl mx-auto space-y-6"><div className="flex justify-between gap-3"><div><h1 className="text-2xl font-bold">Factures</h1><p className="text-gray-500">Facturation française native et numérotation attribuée à l’émission.</p></div><div className="flex gap-2"><button className="btn btn-secondary" onClick={() => void charger()}><RefreshCw size={16} /> Actualiser</button><button className="btn btn-secondary" onClick={() => void exporter()}><Download size={16} /> Export comptable</button><button className="btn btn-primary" onClick={() => setOuvert(true)}><FilePlus2 size={16} /> Nouvelle facture</button></div></div>{erreur && <p className="text-red-600">{erreur}</p>}{succes && <p className="text-emerald-700">{succes}</p>}{ouvert && <form className="rounded-xl border bg-white p-5 space-y-3" onSubmit={creer}><h2 className="font-semibold">Nouveau brouillon</h2><div className="grid gap-3 sm:grid-cols-3"><select required name="clientId" className="form-input" value={clientSelection} onChange={e => setClientSelection(e.target.value)}><option value="">Client…</option>{clients.map(c => <option key={c.id} value={c.id}>{c.raisonSociale}</option>)}</select><input required name="dateEmission" defaultValue={dateFrancaiseDuJour()} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Émission (JJ-MM-AAAA)"/><input required name="dateEcheance" defaultValue={dateFrancaiseDuJour()} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Échéance (JJ-MM-AAAA)"/></div><div className="grid gap-3 sm:grid-cols-2"><select name="origine" className="form-input" value={origine} onChange={e => setOrigine(e.target.value as Origine)}><option value="HORS_AFFAIRE">Hors affaire — exception motivée</option><option value="CHANTIER">Chantier / affaire</option><option value="INTERVENTION">Intervention SAV</option><option value="CONTRAT">Contrat de maintenance</option></select>{origine === 'HORS_AFFAIRE' ? <input required name="motifHorsAffaire" minLength={3} className="form-input" placeholder="Motif de l’exception"/> : <select required name={origine === 'CHANTIER' ? 'chantierId' : origine === 'INTERVENTION' ? 'interventionId' : 'contratMaintenanceId'} className="form-input" defaultValue=""><option value="">Rattachement…</option>{sources.map(s => <option key={s.id} value={s.id}>{sourceName(s)}</option>)}</select>}</div><div className="grid gap-3 sm:grid-cols-4"><input required name="designation" className="form-input sm:col-span-2" placeholder="Désignation"/><input required name="quantite" type="number" min="0.001" step="0.001" defaultValue="1" className="form-input" placeholder="Quantité"/><input required name="prixUnitaireHt" type="number" min="0" step="0.01" className="form-input" placeholder="Prix HT"/><input required name="tauxTva" type="number" min="0" max="100" step="0.01" defaultValue="20" className="form-input" placeholder="TVA %"/></div><div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer le brouillon</button><button className="btn btn-secondary" type="button" onClick={() => setOuvert(false)}>Annuler</button></div></form>}<div className="rounded-xl border bg-white overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left text-gray-500"><th className="p-3">Numéro</th><th className="p-3">Client</th><th className="p-3">Origine</th><th className="p-3">Émission</th><th className="p-3">TTC</th><th className="p-3">Statut</th><th className="p-3"/></tr></thead><tbody>{factures.map(f => <tr key={f.id} className="border-b"><td className="p-3">{f.numero || 'Brouillon'}</td><td className="p-3">{f.client.raisonSociale}</td><td className="p-3">{f.origine === 'HORS_AFFAIRE' ? `Hors affaire — ${f.motifHorsAffaire || ''}` : f.origine}</td><td className="p-3">{formatDate(f.dateEmission)}</td><td className="p-3">{f.totalTtc.toFixed(2)} €</td><td className="p-3">{f.statut}</td><td className="p-3">{f.statut === 'BROUILLON' && <button className="btn btn-primary" onClick={() => void emettre(f)}><Send size={15}/> Émettre</button>}{f.statut === 'EMISE' && <button className="btn btn-secondary" onClick={() => void telechargerDocument(f)}><Download size={15}/> PDF</button>}</td></tr>)}{!factures.length && <tr><td colSpan={7} className="p-6 text-center text-gray-500">Aucune facture.</td></tr>}</tbody></table></div></div>;
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6">
+      <div className="flex justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Factures</h1>
+          <p className="text-gray-500">Facturation française native et numérotation attribuée à l’émission.</p>
+        </div>
+        <div className="flex gap-2">
+          <button className="btn btn-secondary" onClick={() => void charger()}><RefreshCw size={16} /> Actualiser</button>
+          <button className="btn btn-secondary" onClick={() => void exporter()}><Download size={16} /> Export comptable</button>
+          <button className="btn btn-primary" onClick={ouvrirFormulaire}><FilePlus2 size={16} /> Nouvelle facture</button>
+        </div>
+      </div>
+
+      {erreur && <p className="text-red-600">{erreur}</p>}
+      {succes && <p className="text-emerald-700">{succes}</p>}
+
+      {ouvert && (
+        <form className="rounded-xl border bg-white p-5 space-y-4" onSubmit={creer}>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold">Nouveau brouillon</h2>
+            <button type="button" className="btn btn-secondary" onClick={() => setOuvert(false)}>Annuler</button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <select required name="clientId" className="form-input" value={clientSelection} onChange={(e) => setClientSelection(e.target.value)}>
+              <option value="">Client…</option>
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
+            </select>
+            <input required name="dateEmission" defaultValue={dateFrancaiseDuJour()} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Émission (JJ-MM-AAAA)" />
+            <input required name="dateEcheance" defaultValue={dateFrancaiseDuJour()} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Échéance (JJ-MM-AAAA)" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <select name="origine" className="form-input" value={origine} onChange={(e) => setOrigine(e.target.value as Origine)}>
+              <option value="HORS_AFFAIRE">Hors affaire — exception motivée</option>
+              <option value="CHANTIER">Chantier / affaire</option>
+              <option value="INTERVENTION">Intervention SAV</option>
+              <option value="CONTRAT">Contrat de maintenance</option>
+            </select>
+            {origine === 'HORS_AFFAIRE' ? (
+              <input required name="motifHorsAffaire" minLength={3} className="form-input" placeholder="Motif obligatoire" />
+            ) : (
+              <select required name={origine === 'CHANTIER' ? 'chantierId' : origine === 'INTERVENTION' ? 'interventionId' : 'contratMaintenanceId'} className="form-input">
+                <option value="">Rattachement…</option>
+                {sources.map((source) => <option key={source.id} value={source.id}>{sourceName(source)}</option>)}
+              </select>
+            )}
+          </div>
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-medium">Lignes de facture</h3>
+                <p className="text-sm text-gray-500">Ajoutez prestations et articles. Au moins une ligne est obligatoire.</p>
+              </div>
+              <button type="button" className="btn btn-secondary" onClick={() => setLignes((lignesActuelles) => [...lignesActuelles, nouvelleLigne()])}>
+                <Plus size={16} /> Ajouter une ligne
+              </button>
+            </div>
+            {lignes.map((ligne, index) => (
+              <div key={index} className="grid gap-3 rounded-lg border p-3 sm:grid-cols-12">
+                <input required className="form-input sm:col-span-4" value={ligne.designation} onChange={(e) => modifierLigne(index, 'designation', e.target.value)} placeholder="Désignation" aria-label={`Désignation ligne ${index + 1}`} />
+                <select className="form-input sm:col-span-2" value={ligne.nature} onChange={(e) => modifierLigne(index, 'nature', e.target.value as NatureLigne)} aria-label={`Nature ligne ${index + 1}`}>
+                  <option value="PRESTATION">Prestation</option>
+                  <option value="ARTICLE">Article</option>
+                </select>
+                <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.quantite} onChange={(e) => modifierLigne(index, 'quantite', e.target.value)} placeholder="Qté" aria-label={`Quantité ligne ${index + 1}`} />
+                <input required inputMode="decimal" className="form-input sm:col-span-2" value={ligne.prixUnitaireHt} onChange={(e) => modifierLigne(index, 'prixUnitaireHt', e.target.value)} placeholder="PU HT" aria-label={`Prix unitaire HT ligne ${index + 1}`} />
+                <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.tauxTva} onChange={(e) => modifierLigne(index, 'tauxTva', e.target.value)} placeholder="TVA %" aria-label={`TVA ligne ${index + 1}`} />
+                <button type="button" className="btn btn-secondary sm:col-span-2" disabled={lignes.length === 1} onClick={() => supprimerLigne(index)} title={lignes.length === 1 ? 'Une facture doit conserver au moins une ligne' : 'Supprimer cette ligne'}>
+                  <Trash2 size={16} /> Supprimer
+                </button>
+              </div>
+            ))}
+          </section>
+          <button className="btn btn-primary" type="submit"><Send size={16} /> Créer le brouillon</button>
+        </form>
+      )}
+
+      <div className="overflow-x-auto rounded-xl border bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-left text-gray-500">
+            <tr><th className="p-3">Numéro</th><th className="p-3">Client</th><th className="p-3">Émission</th><th className="p-3">Origine</th><th className="p-3">Total TTC</th><th className="p-3">Statut</th><th className="p-3">Actions</th></tr>
+          </thead>
+          <tbody>
+            {factures.map((facture) => (
+              <tr key={facture.id} className="border-t">
+                <td className="p-3">{facture.numero || 'Brouillon'}</td>
+                <td className="p-3">{facture.client.raisonSociale}</td>
+                <td className="p-3">{formatDate(facture.dateEmission)}</td>
+                <td className="p-3">{facture.origine === 'HORS_AFFAIRE' ? `Hors affaire — ${facture.motifHorsAffaire || ''}` : facture.origine}</td>
+                <td className="p-3">{formatMontant(facture.totalTtc)}</td>
+                <td className="p-3">{facture.statut}</td>
+                <td className="p-3"><div className="flex gap-2">{facture.statut === 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>}{facture.statut === 'EMISE' && <button className="btn btn-secondary" onClick={() => void telechargerDocument(facture)}><Download size={16} /> PDF</button>}</div></td>
+              </tr>
+            ))}
+            {!factures.length && <tr><td colSpan={7} className="p-5 text-center text-gray-500">Aucune facture.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }

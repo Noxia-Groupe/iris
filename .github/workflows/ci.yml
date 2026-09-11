@@ -124,3 +124,58 @@ jobs:
       # le Dockerfile, donc un build vert ici garantit une image constructible.
       - run: npm run build
       - run: npm run lint
+
+  parcours:
+    name: Frontend — parcours utilisateur
+    runs-on: ubuntu-latest
+    # Les tests API et jsdom ne reproduisent pas la saisie du navigateur : ce travail
+    # pilote Chromium contre la SPA, le proxy Vite, le backend et PostgreSQL.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: iris
+          POSTGRES_PASSWORD: iris_test
+          POSTGRES_DB: iris_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U iris -d iris_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      E2E_DATABASE_URL: postgresql://iris:iris_test@localhost:5432/iris_e2e?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+      - name: Backend — dépendances, schéma et compilation
+        working-directory: server
+        run: |
+          npm ci
+          npx prisma generate
+          npx prisma migrate deploy
+          npm run build
+        env:
+          DATABASE_URL: ${{ env.E2E_DATABASE_URL }}
+      - name: Frontend — dépendances
+        working-directory: client
+        run: npm ci
+      - name: Navigateur de test
+        working-directory: client
+        run: npx playwright install --with-deps chromium
+      # playwright.config.ts démarre le backend compilé et Vite.
+      - name: Parcours E2E
+        working-directory: client
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: parcours-rapport
+          path: client/playwright-report/
+          retention-days: 7
