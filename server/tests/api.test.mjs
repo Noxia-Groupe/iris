@@ -1483,9 +1483,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(traceAnnulation.action, 'ANNULATION');
       assert.ok(traceAnnulation.acteurId, 'l’annulation doit porter son acteur');
       assert.match(traceAnnulation.detail, /EMISE.*ANNULEE/i);
-      // Le garde-fou SQL reste actif après chaque état post-brouillon, même hors API.
-      await assert.rejects(() => prisma.facture.update({ where: { id: reglee.id }, data: { motifHorsAffaire: 'TEST modification interdite après règlement' } }));
-      await assert.rejects(() => prisma.facture.update({ where: { id: annulee.id }, data: { motifHorsAffaire: 'TEST modification interdite après annulation' } }));
+      // Le motif est épinglé : un rejet sans rapport ne doit pas valider le gel SQL.
+      for (const id of [reglee.id, annulee.id]) await assert.rejects(() => prisma.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST modification interdite hors brouillon' } }), /immuables/);
 
       for (const [id, route] of [[brouillon.body.id, 'regler'], [reglee.id, 'regler'], [annulee.id, 'annuler']]) {
         const refus = await request(app).post(`/api/factures/${id}/${route}`).set('Authorization', `Bearer ${session}`);

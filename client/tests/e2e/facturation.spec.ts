@@ -90,7 +90,9 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(ligne).toContainText('REGLEE');
   });
 
-  test('annule une facture et télécharge un PDF qui porte la mention d’annulation', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+  // Ce parcours couvre confirmation, statut et téléchargement ; le contenu du PDF est
+  // extrait et vérifié par les tests serveur avec pdf-parse.
+  test('annule une facture après confirmation et garde son document téléchargeable', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
     const client = await creerClient('annulation');
     const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();

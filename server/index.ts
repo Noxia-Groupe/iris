@@ -959,7 +959,9 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
     const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
     const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
     if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
-    const jourComptable = (date: Date) => date.toISOString().slice(0, 10).replace(/-/g, '');
+    // Les dates d'annulation sont des instants : une décision vers minuit à Paris ne doit
+    // jamais être rattachée à l'exercice UTC précédent. Les émissions restent à minuit UTC.
+    const jourComptable = (date: Date) => new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date).replace(/-/g, '');
     const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit']; for (const f of factures) { const date = jourComptable(f.dateEmission); const libelle = `Facture ${f.numero} — ${f.clientRaisonSociale}`;
       const ecrire = (dateEcriture: string, texte: string, contrepasse: boolean) => {
         const ecriture = (compte: { code: string; libelle: string }, debit: number, credit: number) => lignes.push([r.get('JOURNAL_VENTES')!.journal, dateEcriture, f.numero, compte.code, compte.libelle, texte, (contrepasse ? credit : debit).toFixed(2), (contrepasse ? debit : credit).toFixed(2)].map(csvComptable).join(';'));
