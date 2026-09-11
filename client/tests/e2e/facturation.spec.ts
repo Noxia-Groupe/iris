@@ -68,6 +68,26 @@ test.describe('Facturation — parcours utilisateur', () => {
     expect((await document.body()).subarray(0, 5).toString()).toBe('%PDF-');
   });
 
+  test('règle une facture émise après confirmation et affiche son nouveau statut', async ({ allerSurPageAdmin, creerClient }) => {
+    const client = await creerClient('règlement');
+    const page = await allerSurPageAdmin('/factures');
+    await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await page.locator('input[name="motifHorsAffaire"]').fill('Parcours règlement');
+    await page.locator('input[name="dateEmission"]').fill(dateDuJour());
+    await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
+    await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle règlement');
+    await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
+    await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
+    await ligne.getByRole('button', { name: /Émettre/ }).click();
+    await expect(ligne.getByRole('button', { name: /Marquer comme réglée/ })).toBeVisible();
+    page.once('dialog', (dialog) => dialog.accept());
+    await ligne.getByRole('button', { name: /Marquer comme réglée/ }).click();
+    await expect(page.getByText(/marquée comme réglée/i)).toBeVisible();
+    await expect(ligne).toContainText('REGLEE');
+  });
+
   test('refuse la ligne invalide sans créer de facture', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
     const client = await creerClient('invalide'); const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click(); await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });

@@ -771,7 +771,7 @@ app.get('/api/factures/:id/document.pdf', requireAuth, requireAdmin, async (req,
   try {
     const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: factureInclude });
     if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
-    if (facture.statut !== 'EMISE') return res.status(409).json({ error: 'Le document est disponible uniquement pour une facture émise.' });
+    if (!['EMISE', 'REGLEE', 'ANNULEE'].includes(facture.statut)) return res.status(409).json({ error: 'Le document est disponible uniquement pour une facture émise.' });
     if (!facture.mentionsLegalesVersion) return res.status(409).json({ error: 'Les mentions légales figées sont introuvables.' });
     if (!facture.clientAdresse) return res.status(409).json({ error: 'L’adresse de facturation figée est absente de cette facture : le document ne peut pas être imprimé sans cette mention obligatoire.' });
     const pdf = await rendreDocumentFacturePdf(decimalToNumber(facture), await getCompanySettings());
@@ -1031,6 +1031,31 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
     res.status(500).json({ error: 'Émission de facture impossible.' });
   }
 });
+
+// Ces transitions ne modifient jamais les lignes, les montants ni le document légal :
+// seule la situation de la facture évolue, avec une trace d'audit dans la même transaction.
+function transitionFactureEmise(statut: 'REGLEE' | 'ANNULEE', action: 'REGLEMENT' | 'ANNULATION') {
+  return async (req: AuthRequest, res: express.Response) => {
+    try {
+      const resultat = await prisma.$transaction(async (tx) => {
+        // Le prédicat d'état porte l'invariant directement dans l'écriture et ferme une
+        // course entre deux actions administratives concurrentes.
+        const maj = await tx.facture.updateMany({ where: { id: paramId(req), statut: 'EMISE' }, data: { statut } });
+        if (!maj.count) {
+          const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, select: { id: true } });
+          return facture ? { erreur: 'NOT_EMITTED' as const } : { erreur: 'NOT_FOUND' as const };
+        }
+        await tx.journalFacture.create({ data: { factureId: paramId(req), acteurId: req.user!.id, action, detail: `Transition EMISE → ${statut}` } });
+        return { facture: await tx.facture.findUniqueOrThrow({ where: { id: paramId(req) }, include: factureInclude }) };
+      });
+      if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise peut changer de statut.' });
+      return res.json(decimalToNumber(resultat.facture));
+    } catch { return res.status(500).json({ error: 'Changement de statut de facture impossible.' }); }
+  };
+}
+
+app.post('/api/factures/:id/regler', requireAuth, requireAdmin, transitionFactureEmise('REGLEE', 'REGLEMENT'));
+app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, transitionFactureEmise('ANNULEE', 'ANNULATION'));
 
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
