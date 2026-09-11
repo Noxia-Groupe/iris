@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, FilePlus2, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { Ban, CheckCircle2, Download, FilePlus2, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
 
 type Client = { id: string; raisonSociale: string };
@@ -119,6 +119,21 @@ export default function Factures() {
     const data = await res.json();
     if (!res.ok) return setErreur(data.error || 'Émission impossible.');
     setSucces(`Facture ${data.numero} émise et figée.`);
+    await charger();
+  };
+
+  const changerStatut = async (facture: Facture, action: 'regler' | 'annuler') => {
+    const reglement = action === 'regler';
+    const confirmation = reglement
+      ? `Confirmer le règlement de la facture ${facture.numero} ? Son montant et ses lignes resteront inchangés.`
+      : `Annuler la facture ${facture.numero} ? Cette opération est tracée, ne supprime pas le document et ne peut pas être annulée depuis cet écran.`;
+    if (!window.confirm(confirmation)) return;
+    setErreur('');
+    setSucces('');
+    const res = await apiFetch(`/factures/${facture.id}/${action}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) return setErreur(data.error || 'Changement de statut impossible.');
+    setSucces(reglement ? `Facture ${data.numero} marquée comme réglée.` : `Facture ${data.numero} annulée et conservée dans le journal.`);
     await charger();
   };
 
@@ -248,7 +263,14 @@ export default function Factures() {
                 <td className="p-3">{facture.origine === 'HORS_AFFAIRE' ? `Hors affaire — ${facture.motifHorsAffaire || ''}` : facture.origine}</td>
                 <td className="p-3">{formatMontant(facture.totalTtc)}</td>
                 <td className="p-3">{facture.statut}</td>
-                <td className="p-3"><div className="flex gap-2">{facture.statut === 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>}{facture.statut === 'EMISE' && <button className="btn btn-secondary" onClick={() => void telechargerDocument(facture)}><Download size={16} /> PDF</button>}</div></td>
+                <td className="p-3"><div className="flex flex-wrap gap-2">
+                  {facture.statut === 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>}
+                  {facture.statut === 'EMISE' && <>
+                    <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'regler')}><CheckCircle2 size={16} /> Marquer comme réglée</button>
+                    <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'annuler')}><Ban size={16} /> Annuler la facture</button>
+                  </>}
+                  {facture.statut !== 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void telechargerDocument(facture)}><Download size={16} /> PDF</button>}
+                </div></td>
               </tr>
             ))}
             {!factures.length && <tr><td colSpan={7} className="p-5 text-center text-gray-500">Aucune facture.</td></tr>}

@@ -1318,7 +1318,7 @@ if (!TEST_DATABASE_URL) {
     test('réserve factures et comptabilité à l’administration', async () => {
       const conducteur = await prisma.user.create({ data: { email: 'facture.conducteur@iris.test', name: 'TEST Conducteur facture', role: 'CONDUCTEUR_TRAVAUX' } });
       const token = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
-      const routes = [() => request(app).get('/api/factures'), () => request(app).post('/api/factures').send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }), () => request(app).get('/api/factures/export-comptable.csv'), () => request(app).get('/api/facturation/prete-a-facturer'), () => request(app).get('/api/comptabilite'), () => request(app).post('/api/comptabilite/comptes').send({ code: '999999', libelle: 'TEST interdit', nature: 'PRODUIT' }), () => request(app).post('/api/comptabilite/importer').send({ lignes: [{ code: '999998', libelle: 'TEST interdit', nature: 'PRODUIT' }] }), () => request(app).post('/api/factures/inexistante/emettre'), () => request(app).put('/api/comptabilite/regles/CLIENT').send({ compteId: 'peu-importe' }), () => request(app).put('/api/comptabilite/tva/20').send({ compteId: 'peu-importe' })];
+      const routes = [() => request(app).get('/api/factures'), () => request(app).post('/api/factures').send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }), () => request(app).get('/api/factures/export-comptable.csv'), () => request(app).get('/api/facturation/prete-a-facturer'), () => request(app).get('/api/comptabilite'), () => request(app).post('/api/comptabilite/comptes').send({ code: '999999', libelle: 'TEST interdit', nature: 'PRODUIT' }), () => request(app).post('/api/comptabilite/importer').send({ lignes: [{ code: '999998', libelle: 'TEST interdit', nature: 'PRODUIT' }] }), () => request(app).post('/api/factures/inexistante/emettre'), () => request(app).post('/api/factures/inexistante/regler'), () => request(app).post('/api/factures/inexistante/annuler'), () => request(app).put('/api/comptabilite/regles/CLIENT').send({ compteId: 'peu-importe' }), () => request(app).put('/api/comptabilite/tva/20').send({ compteId: 'peu-importe' })];
       for (const route of routes) assert.equal((await route().set('Authorization', `Bearer ${token}`)).status, 403);
     });
 
@@ -1445,6 +1445,122 @@ if (!TEST_DATABASE_URL) {
       ];
       for (const route of routes) assert.equal((await route().set('Authorization', `Bearer ${token}`)).status, 403);
       assert.equal(await prisma.mentionsLegalesVersion.count({ where: { mentions: 'TEST interdit' } }), 0);
+    });
+
+    test('règle ou annule seulement une facture émise, conserve son contenu et trace la transition', async () => {
+      const creerEtEmettre = async (motif) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+          clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+          lignes: [{ designation: `TEST ${motif}`, quantite: 2, prixUnitaireHt: 125, tauxTva: 20 }],
+        });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return emission.body;
+      };
+      const reglee = await creerEtEmettre('règlement');
+      const annulee = await creerEtEmettre('annulation');
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'refus statut', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST refus statut', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+
+      const reglement = await request(app).post(`/api/factures/${reglee.id}/regler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(reglement.status, 200, JSON.stringify(reglement.body));
+      assert.equal(reglement.body.statut, 'REGLEE');
+      assert.deepEqual([reglement.body.totalHt, reglement.body.totalTva, reglement.body.totalTtc, reglement.body.lignes], [reglee.totalHt, reglee.totalTva, reglee.totalTtc, reglee.lignes]);
+      const journalReglement = await request(app).get(`/api/factures/${reglee.id}/journal`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journalReglement.status, 200, JSON.stringify(journalReglement.body));
+      const traceReglement = journalReglement.body.at(-1);
+      assert.equal(traceReglement.action, 'REGLEMENT');
+      assert.ok(traceReglement.acteurId, 'le règlement doit porter son acteur');
+      assert.match(traceReglement.detail, /EMISE.*REGLEE/i);
+
+      const annulation = await request(app).post(`/api/factures/${annulee.id}/annuler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal(annulation.body.statut, 'ANNULEE');
+      assert.deepEqual([annulation.body.totalHt, annulation.body.totalTva, annulation.body.totalTtc, annulation.body.lignes], [annulee.totalHt, annulee.totalTva, annulee.totalTtc, annulee.lignes]);
+      const journalAnnulation = await request(app).get(`/api/factures/${annulee.id}/journal`).set('Authorization', `Bearer ${session}`);
+      const traceAnnulation = journalAnnulation.body.at(-1);
+      assert.equal(traceAnnulation.action, 'ANNULATION');
+      assert.ok(traceAnnulation.acteurId, 'l’annulation doit porter son acteur');
+      assert.match(traceAnnulation.detail, /EMISE.*ANNULEE/i);
+      // Le motif est épinglé : un rejet sans rapport ne doit pas valider le gel SQL.
+      for (const id of [reglee.id, annulee.id]) await assert.rejects(() => prisma.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST modification interdite hors brouillon' } }), /immuables/);
+
+      for (const [id, route] of [[brouillon.body.id, 'regler'], [reglee.id, 'regler'], [annulee.id, 'annuler']]) {
+        const refus = await request(app).post(`/api/factures/${id}/${route}`).set('Authorization', `Bearer ${session}`);
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /émise/i);
+      }
+      const documentReglee = await request(app).get(`/api/factures/${reglee.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      const documentAnnulee = await request(app).get(`/api/factures/${annulee.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      assert.equal(documentReglee.status, 200, documentReglee.text);
+      assert.equal(documentAnnulee.status, 200, documentAnnulee.text);
+      assert.ok(await prisma.facture.findUnique({ where: { id: annulee.id } }), 'une facture annulée demeure conservée');
+      const texteDuPdf = async (reponse) => { const lecteur = new PDFParse({ data: reponse.body }); const contenu = await lecteur.getText(); await lecteur.destroy(); return contenu.text; };
+      assert.match(await texteDuPdf(documentAnnulee), /FACTURE ANNULÉE/);
+      assert.match(await texteDuPdf(documentReglee), /Facture réglée/);
+      const pdfEmise = await request(app).get(`/api/factures/${(await creerEtEmettre('témoin émis')).id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      assert.doesNotMatch(await texteDuPdf(pdfEmise), /ANNUL|réglée/i, 'une facture simplement émise ne porte aucune mention post-émission');
+
+      const exportComptable = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      assert.equal(exportComptable.status, 200, exportComptable.text);
+      assert.match(exportComptable.text, new RegExp(reglee.numero));
+      const ecrituresAnnulee = exportComptable.text.split('\n').filter((ligne) => ligne.includes(annulee.numero));
+      assert.ok(ecrituresAnnulee.some((ligne) => ligne.includes(`\"Facture ${annulee.numero}`)), 'les écritures d’origine restent exportées');
+      assert.ok(ecrituresAnnulee.some((ligne) => ligne.includes(`\"Annulation facture ${annulee.numero}`)), 'l’annulation est exportée en contre-passation');
+      const colonne = (ligne, index) => Number(ligne.split(';')[index].replace(/\"/g, ''));
+      const debit = ecrituresAnnulee.reduce((somme, ligne) => somme + colonne(ligne, 6), 0);
+      const credit = ecrituresAnnulee.reduce((somme, ligne) => somme + colonne(ligne, 7), 0);
+      assert.equal(debit.toFixed(2), credit.toFixed(2), 'une facture annulée se solde à zéro dans le journal des ventes');
+      assert.ok(debit > 0, 'le solde nul provient de vraies écritures');
+    });
+
+    test('une facture ne quitte pas sa fiche affaire en changeant de statut', async () => {
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Affaire suivie', client: 'TEST Client contrat maintenance', clientId, dateDebut: new Date('2026-09-01T00:00:00.000Z'), statut: 'EN_COURS', budgetGlobalVendu: 10000 } });
+      const emettreSurAffaire = async (motif) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CHANTIER', chantierId: chantier.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: `TEST ${motif}`, quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return emission.body;
+      };
+      const fiche = async () => (await request(app).get(`/api/chantiers/${chantier.id}`).set('Authorization', `Bearer ${session}`)).body.facturation;
+      const aRegler = await emettreSurAffaire('affaire réglée');
+      const aAnnuler = await emettreSurAffaire('affaire annulée');
+      assert.equal((await fiche()).totalFactureHt, 2000);
+      assert.equal((await request(app).post(`/api/factures/${aRegler.id}/regler`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const apresReglement = await fiche();
+      assert.equal(apresReglement.totalFactureHt, 2000);
+      assert.equal(apresReglement.resteAFacturerHt, 8000);
+      assert.deepEqual(apresReglement.factures.map((facture) => facture.statut).sort(), ['EMISE', 'REGLEE']);
+      assert.equal((await request(app).post(`/api/factures/${aAnnuler.id}/annuler`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const apresAnnulation = await fiche();
+      assert.equal(apresAnnulation.totalFactureHt, 1000);
+      assert.equal(apresAnnulation.resteAFacturerHt, 9000);
+      assert.deepEqual(apresAnnulation.factures.map((facture) => facture.statut).sort(), ['ANNULEE', 'REGLEE']);
+      assert.ok(apresAnnulation.factures.every((facture) => facture.numero), 'chaque facture de la fiche porte son numéro légal');
+    });
+
+    test('le contrôle TVA des prérequis couvre le même périmètre que l’export', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'taux annulé non couvert', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST taux annulé', quantite: 1, prixUnitaireHt: 100, tauxTva: 5.5 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      assert.equal((await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`)).status, 200);
+      try {
+        const exportation = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+        assert.equal(exportation.status, 409, exportation.text);
+        assert.deepEqual(exportation.body.tauxManquants, [5.5]);
+        const prerequis = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
+        const tva = prerequis.body.controles.find((controle) => controle.cle === 'TVA');
+        assert.equal(tva.pret, false);
+        assert.equal(tva.bloquant, true);
+        assert.match(tva.detail, /5\.5 %/);
+      } finally {
+        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
+        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
+        await prisma.facture.delete({ where: { id: emission.body.id } });
+      }
     });
 
     test('refuse une version légale incomplète', async () => {
