@@ -1072,7 +1072,7 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
       const annee = facture.dateEmission.getUTCFullYear();
-      const derniereEmise = await tx.facture.findFirst({ where: { numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
+      const derniereEmise = await tx.facture.findFirst({ where: { type: 'FACTURE', numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
       if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
       const mentions = await tx.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } });
       if (!mentions) return { erreur: 'LEGAL_MENTIONS_MISSING' as const };

@@ -30,7 +30,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
 
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
+    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
     await expect(ligne).toHaveCount(1);
     await expect(ligne).toContainText(/3\s*427,61\s*€/);
     const factures = await (await apiAdmin.get('/factures')).json() as Array<{ client: { id: string }; lignes: Array<{ ordre: number; nature: string; prixUnitaireHt: number }>; totalHt: number; totalTva: number; totalTtc: number }>;
@@ -56,7 +56,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await prix.pressSequentially('480,50', { delay: 10 });
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
+    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(page.getByText(/émise et figée/)).toBeVisible();
     await expect(ligne).toContainText(/\d{4}-\d{4}/);
@@ -79,7 +79,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle règlement');
     await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
+    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(ligne.getByRole('button', { name: /Marquer comme réglée/ })).toBeVisible();
     let confirmationDemandee = '';
@@ -103,7 +103,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle annulation');
     await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
+    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     let confirmationDemandee = '';
     page.once('dialog', (dialog) => { confirmationDemandee = dialog.message(); void dialog.accept(); });
@@ -143,7 +143,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await prix.pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
+    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(page.getByText(/adresse de facturation/i)).toBeVisible();
     await expect(ligne).toContainText('Brouillon');
