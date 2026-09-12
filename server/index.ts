@@ -494,7 +494,7 @@ async function getParametres(): Promise<Parametres> {
 
 const COMPANY_TEXT_FIELDS = [
   'raisonSociale', 'nomCommercial', 'siret', 'tvaIntra', 'adresse', 'codePostal',
-  'ville', 'pays', 'telephone', 'email', 'siteWeb', 'logoUrl', 'prefixeFacture', 'piedFacture',
+  'ville', 'pays', 'telephone', 'email', 'siteWeb', 'logoUrl', 'prefixeFacture', 'prefixeAvoir', 'piedFacture',
 ] as const;
 const COULEUR_HEX = /^#[0-9a-fA-F]{6}$/;
 const FUSEAUX_HORAIRES_FRANCAIS = [
@@ -709,7 +709,7 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 }
 
 // --- Facturation française native ---
-const factureInclude = { client: { select: { id: true, raisonSociale: true } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+const factureInclude = { client: { select: { id: true, raisonSociale: true } }, factureOrigine: { select: { id: true, numero: true } }, avoir: { select: { id: true, numero: true, type: true, statut: true } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
 
 // L'adresse du client est sélectionnée depuis son site de facturation, puis figée à l'émission.
 const SITE_FACTURATION_ORDRE = [{ estSiteFacturation: 'desc' as const }, { principal: 'desc' as const }, { estSiegeSocial: 'desc' as const }, { nom: 'asc' as const }];
@@ -761,9 +761,11 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
 
     // L'identité de l'émetteur est portée par la version légale figée à l'émission, jamais par les paramètres vivants.
     pdf.fillColor(couleurPrimaire);
-    ligne(`FACTURE ${facture.numero}`, { taille: 18 });
+    const estAvoir = facture.type === 'AVOIR';
+    ligne(`${estAvoir ? 'AVOIR' : 'FACTURE'} ${facture.numero}`, { taille: 18 });
     pdf.fillColor('#000000');
     ligne(`Émise le ${formatDateFacture(facture.dateEmission)} · Échéance : ${formatDateFacture(facture.dateEcheance)}`, { taille: 10 });
+    if (estAvoir) ligne(`Facture d’origine : ${facture.factureOrigine?.numero || 'référence indisponible'}`, { taille: 10 });
     // Les documents de statuts post-émission doivent expliciter leur situation : un PDF
     // annulé muet serait indistinguable d'une créance toujours due.
     if (facture.statut === 'ANNULEE') { pdf.fillColor('#b91c1c'); ligne('FACTURE ANNULÉE — ce document ne vaut pas justificatif de créance.', { taille: 12 }); pdf.fillColor('#000000'); }
@@ -998,9 +1000,13 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
     const [regles, reglesTva, societe] = await Promise.all([prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }), prisma.regleTvaComptable.findMany({ include: { compte: true } }), getCompanySettings()]); const r = new Map(regles.map(x => [x.cle, x])); const tvaParTaux = new Map(reglesTva.filter(x => x.compte.actif).map(x => [Number(x.taux), x.compte]));
     const manquantes = CLES_COMPTABLES.filter(cle => cle === 'JOURNAL_VENTES' ? !r.get(cle)?.journal : !r.get(cle)?.compte?.actif);
     if (manquantes.length) return res.status(409).json({ error: 'Export bloqué : paramétrage comptable incomplet.', manquantes });
-    // Une facture numérotée demeure dans le journal des ventes : une annulation ajoute
-    // une contre-passation datée de la décision, elle ne retire jamais l'écriture d'origine.
-    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
+    // Une facture annulée avec avoir est déjà neutralisée par cet avoir. Les annulations
+    // historiques sans avoir gardent la contre-passation legacy pour ne jamais disparaître.
+    const factures = await prisma.facture.findMany({ where: { OR: [
+      { type: 'AVOIR', statut: { in: ['EMISE', 'REGLEE'] } },
+      { type: 'FACTURE', statut: { in: ['EMISE', 'REGLEE'] } },
+      { type: 'FACTURE', statut: 'ANNULEE', avoir: null },
+    ] }, include: { client: true, lignes: true, avoir: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
     const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
     if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
     // Deux classes de dates, deux lectures — les confondre décale l'écriture d'un jour, et
@@ -1017,8 +1023,8 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
         for (const nature of ['PRESTATION', 'ARTICLE']) { const ht = f.lignes.filter(l => l.nature === nature).reduce((s, l) => s + Number(l.totalHt), 0); if (ht) ecriture(r.get(nature === 'PRESTATION' ? 'VENTE_PRESTATION' : 'VENTE_ARTICLE')!.compte!, 0, ht); }
         for (const taux of tauxUtilises(f.lignes)) { const tva = tvaDuTaux(f.lignes, taux); if (tva) ecriture(tvaParTaux.get(taux)!, 0, tva); }
       };
-      ecrire(date, libelle, false);
-      if (f.statut === 'ANNULEE') ecrire(f.journal[0] ? jourDInstant(f.journal[0].createdAt) : jourDeDateSeule(f.dateEmission), `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
+      ecrire(date, f.type === 'AVOIR' ? `Avoir ${f.numero} — ${f.clientRaisonSociale}` : libelle, f.type === 'AVOIR');
+      if (f.statut === 'ANNULEE' && !f.avoir) ecrire(f.journal[0] ? jourDInstant(f.journal[0].createdAt) : jourDeDateSeule(f.dateEmission), `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="export-ventes.csv"'); res.send(`\uFEFF${lignes.join('\n')}\n`);
   } catch { res.status(500).json({ error: 'Export comptable impossible.' }); }
@@ -1096,7 +1102,7 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
 
 // Ces transitions ne modifient jamais les lignes, les montants ni le document légal :
 // seule la situation de la facture évolue, avec une trace d'audit dans la même transaction.
-function transitionFactureEmise(statut: 'REGLEE' | 'ANNULEE', action: 'REGLEMENT' | 'ANNULATION') {
+function transitionFactureEmise(statut: 'REGLEE', action: 'REGLEMENT') {
   return async (req: AuthRequest, res: express.Response) => {
     try {
       const resultat = await prisma.$transaction(async (tx) => {
@@ -1117,7 +1123,44 @@ function transitionFactureEmise(statut: 'REGLEE' | 'ANNULEE', action: 'REGLEMENT
 }
 
 app.post('/api/factures/:id/regler', requireAuth, requireAdmin, transitionFactureEmise('REGLEE', 'REGLEMENT'));
-app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, transitionFactureEmise('ANNULEE', 'ANNULATION'));
+
+// L’annulation d’une facture émise est une transition métier atomique : elle conserve la
+// facture historique, crée son unique avoir total et lie les deux documents dans la même TX.
+app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const resultat = await prisma.$transaction(async (tx) => {
+      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } } } });
+      if (!facture) return { erreur: 'NOT_FOUND' as const };
+      if (facture.statut !== 'EMISE' || facture.type !== 'FACTURE') return { erreur: 'NOT_EMITTED' as const };
+      const now = new Date();
+      const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
+      const jour = jourCivilEntreprise(now, societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
+      const dateAvoir = new Date(`${jour}T00:00:00.000Z`);
+      const annee = dateAvoir.getUTCFullYear();
+      const sequence = await tx.sequenceAvoir.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
+      const prefixe = (societe?.prefixeAvoir || 'A').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'A';
+      const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+      const maj = await tx.facture.updateMany({ where: { id: facture.id, statut: 'EMISE', type: 'FACTURE' }, data: { statut: 'ANNULEE' } });
+      if (!maj.count) return { erreur: 'NOT_EMITTED' as const };
+      const avoir = await tx.facture.create({ data: {
+        type: 'AVOIR', factureOrigineId: facture.id, numero, annee, statut: 'EMISE', dateEmission: dateAvoir, dateEcheance: dateAvoir,
+        clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
+        origine: facture.origine, chantierId: facture.chantierId, interventionId: facture.interventionId, contratMaintenanceId: facture.contratMaintenanceId,
+        motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
+        totalHt: facture.totalHt, totalTva: facture.totalTva, totalTtc: facture.totalTtc, createdById: req.user!.id, emisLe: now,
+        lignes: { create: facture.lignes.map(({ id: _id, factureId: _factureId, ...ligne }) => ligne) },
+      }, include: factureInclude });
+      await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'ANNULATION', detail: `Transition EMISE → ANNULEE ; avoir total ${numero}` } });
+      await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR', detail: `Avoir total de la facture ${facture.numero}` } });
+      return { facture: await tx.facture.findUniqueOrThrow({ where: { id: facture.id }, include: factureInclude }), avoir };
+    });
+    if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise peut être annulée.' });
+    return res.json(decimalToNumber({ ...resultat.facture, avoir: resultat.avoir }));
+  } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir déjà créé ou numéro déjà attribué, veuillez relire la facture.' });
+    return res.status(500).json({ error: 'Annulation de facture impossible.' });
+  }
+});
 
 // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
 // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
@@ -1713,7 +1756,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
         pointages: { where: { archivedAt: null }, include: { intervenant: true }, orderBy: { date: 'desc' } },
         // Toute facture numérotée reste rattachée à son affaire ; son statut décrit sa
         // situation, sans rompre la traçabilité du cycle commercial.
-        factures: { where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, select: { id: true, numero: true, statut: true, dateEmission: true, totalHt: true, totalTtc: true, origine: true } },
+        factures: { where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, select: { id: true, numero: true, statut: true, type: true, factureOrigineId: true, avoir: { select: { id: true } }, dateEmission: true, totalHt: true, totalTtc: true, origine: true } },
       }
     });
     // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
@@ -1734,8 +1777,13 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     const { factures, ...chantierSansFactures } = chantier;
     const detail = serializeChantier(chantierSansFactures, params, canSeeMarge) as Record<string, unknown>;
     if (canSeeMarge) {
-      // Un règlement reste du chiffre facturé ; une annulation reste visible mais ne l'est plus.
-      const totalFactureHt = factures.filter((facture) => facture.statut !== 'ANNULEE').reduce((somme, facture) => somme + Number(facture.totalHt), 0);
+      // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
+      // facture annulée est visible mais ne contribue plus, son avoir la neutralise.
+      const totalFactureHt = factures.reduce((somme, facture) => {
+        if (facture.type === 'AVOIR') return somme - Number(facture.totalHt);
+        if (facture.statut === 'ANNULEE' && !facture.avoir) return somme;
+        return somme + Number(facture.totalHt);
+      }, 0);
       detail.facturation = decimalToNumber({ factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
     }
     res.json(detail);

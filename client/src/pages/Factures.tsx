@@ -11,6 +11,8 @@ type Facture = {
   id: string;
   numero: string | null;
   statut: string;
+  type: 'FACTURE' | 'AVOIR';
+  factureOrigine?: { id: string; numero: string | null } | null;
   dateEmission: string;
   dateEcheance: string;
   totalHt: number;
@@ -129,14 +131,16 @@ export default function Factures() {
     const reglement = action === 'regler';
     const confirmation = reglement
       ? `Confirmer le règlement de la facture ${facture.numero} ? Son montant et ses lignes resteront inchangés.`
-      : `Annuler la facture ${facture.numero} ? Cette opération est tracée, ne supprime pas le document et ne peut pas être annulée depuis cet écran.`;
+      : `Annuler la facture ${facture.numero} ? Cette opération crée immédiatement un avoir total numéroté, conserve les deux documents et ne peut pas être annulée depuis cet écran.`;
     if (!window.confirm(confirmation)) return;
     setErreur('');
     setSucces('');
     const res = await apiFetch(`/factures/${facture.id}/${action}`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) return setErreur(data.error || 'Changement de statut impossible.');
-    setSucces(reglement ? `Facture ${data.numero} marquée comme réglée.` : `Facture ${data.numero} annulée et conservée dans le journal.`);
+    const document = data;
+    const avoir = !reglement ? data.avoir : null;
+    setSucces(reglement ? `Facture ${document.numero} marquée comme réglée.` : `Facture ${document.numero} annulée ; avoir ${avoir?.numero || 'créé'} disponible.`);
     await charger();
   };
 
@@ -255,20 +259,20 @@ export default function Factures() {
       <div className="overflow-x-auto rounded-xl border bg-white">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500">
-            <tr><th className="p-3">Numéro</th><th className="p-3">Client</th><th className="p-3">Émission</th><th className="p-3">Origine</th><th className="p-3">Total TTC</th><th className="p-3">Statut</th><th className="p-3">Actions</th></tr>
+            <tr><th className="p-3">Type / numéro</th><th className="p-3">Client</th><th className="p-3">Émission</th><th className="p-3">Origine</th><th className="p-3">Total TTC</th><th className="p-3">Statut</th><th className="p-3">Actions</th></tr>
           </thead>
           <tbody>
             {factures.map((facture) => (
               <tr key={facture.id} className="border-t">
-                <td className="p-3">{facture.numero || 'Brouillon'}</td>
+                <td className="p-3"><strong>{facture.type === 'AVOIR' ? 'Avoir' : 'Facture'}</strong><br />{facture.numero || 'Brouillon'}{facture.factureOrigine?.numero && <span className="block text-xs text-gray-500">Origine : {facture.factureOrigine.numero}</span>}</td>
                 <td className="p-3">{facture.client.raisonSociale}</td>
                 <td className="p-3">{formatDate(facture.dateEmission)}</td>
                 <td className="p-3">{facture.origine === 'HORS_AFFAIRE' ? `Hors affaire — ${facture.motifHorsAffaire || ''}` : facture.origine}</td>
                 <td className="p-3">{formatMontant(facture.totalTtc)}</td>
                 <td className="p-3">{facture.statut}</td>
                 <td className="p-3"><div className="flex flex-wrap gap-2">
-                  {facture.statut === 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>}
-                  {facture.statut === 'EMISE' && <>
+                  {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>}
+                  {facture.type === 'FACTURE' && facture.statut === 'EMISE' && <>
                     <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'regler')}><CheckCircle2 size={16} /> Marquer comme réglée</button>
                     <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'annuler')}><Ban size={16} /> Annuler la facture</button>
                   </>}
