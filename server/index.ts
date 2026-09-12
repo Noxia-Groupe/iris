@@ -497,6 +497,44 @@ const COMPANY_TEXT_FIELDS = [
   'ville', 'pays', 'telephone', 'email', 'siteWeb', 'logoUrl', 'prefixeFacture', 'piedFacture',
 ] as const;
 const COULEUR_HEX = /^#[0-9a-fA-F]{6}$/;
+const FUSEAUX_HORAIRES_FRANCAIS = [
+  'Europe/Paris', 'America/Guadeloupe', 'America/Martinique', 'America/Cayenne',
+  'America/Miquelon', 'Indian/Mayotte', 'Indian/Reunion', 'Pacific/Noumea',
+  'Pacific/Wallis', 'Pacific/Tahiti', 'Pacific/Marquesas', 'Pacific/Gambier',
+] as const;
+const FUSEAU_HORAIRE_PAR_DEFAUT = 'Europe/Paris';
+
+function fuseauHoraireEntrepriseValide(fuseauHoraire: unknown): fuseauHoraire is typeof FUSEAUX_HORAIRES_FRANCAIS[number] {
+  return typeof fuseauHoraire === 'string' && (FUSEAUX_HORAIRES_FRANCAIS as readonly string[]).includes(fuseauHoraire);
+}
+
+// Un jour civil dérivé d'un instant doit toujours être lu dans le fuseau de l'entreprise,
+// jamais dans UTC ou dans le fuseau de la machine qui exécute le serveur.
+function jourCivilEntreprise(instant: Date, fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT): string {
+  const parties = new Intl.DateTimeFormat('en-CA', {
+    timeZone: fuseauHoraire, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(instant);
+  const valeur = (type: Intl.DateTimeFormatPartTypes) => parties.find((partie) => partie.type === type)?.value;
+  return `${valeur('year')}-${valeur('month')}-${valeur('day')}`;
+}
+
+function aujourdHuiEntreprise(fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT, instant = new Date()): string {
+  return jourCivilEntreprise(instant, fuseauHoraire);
+}
+
+// La règle « pas de facture postdatée » compare des JOURS CIVILS de l'entreprise, jamais
+// des instants. `instant` est injectable pour que la règle soit testable sans dépendre de
+// l'heure qu'il est au moment où la suite tourne.
+function dateEmissionEstFuture(dateEmission: string, fuseauHoraire: string, instant = new Date()): boolean {
+  return dateSeuleEnJourCivil(dateEmission) > aujourdHuiEntreprise(fuseauHoraire, instant);
+}
+
+function dateSeuleEnJourCivil(dateSeule: Date | string): string {
+  // Une date-seule est stockée à minuit UTC et ne désigne pas un instant : on lit ses
+  // composantes telles quelles. La relire dans un fuseau la ferait basculer d'un jour
+  // à l'ouest de Greenwich — et d'un exercice quand la date est un 1er janvier.
+  return (typeof dateSeule === 'string' ? dateSeule : dateSeule.toISOString()).slice(0, 10);
+}
 
 function companySettingsPayload(body: Record<string, unknown>): Record<string, string | null> {
   const data: Record<string, string | null> = {};
@@ -513,6 +551,10 @@ function companySettingsPayload(body: Record<string, unknown>): Record<string, s
       throw new Error(`Couleur invalide : ${field}`);
     }
     data[field] = body[field].toLowerCase();
+  }
+  if (body.fuseauHoraire !== undefined) {
+    if (!fuseauHoraireEntrepriseValide(body.fuseauHoraire)) throw new Error('Fuseau horaire invalide.');
+    data.fuseauHoraire = body.fuseauHoraire;
   }
   return data;
 }
@@ -817,7 +859,9 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const dateEcheance = dateIsoStricte(req.body?.dateEcheance);
     if (!dateEmission || !dateEcheance) return res.status(400).json({ error: 'Les dates doivent être valides au format JJ-MM-AAAA.' });
     if (dateEcheance < dateEmission) return res.status(400).json({ error: 'L’échéance ne peut pas précéder la date d’émission.' });
-    if (new Date(dateEmission) > new Date()) return res.status(400).json({ error: "La date d’émission ne peut pas être future." });
+    const societe = await getCompanySettings();
+    const fuseauHoraire = societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+    if (dateEmissionEstFuture(dateEmission, fuseauHoraire)) return res.status(400).json({ error: "La date d’émission ne peut pas être future." });
     const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
     const origine = String(req.body?.origine || '');
@@ -951,7 +995,7 @@ const csvComptable = (v: unknown) => {
 };
 app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (_req, res) => {
   try {
-    const [regles, reglesTva] = await Promise.all([prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }), prisma.regleTvaComptable.findMany({ include: { compte: true } })]); const r = new Map(regles.map(x => [x.cle, x])); const tvaParTaux = new Map(reglesTva.filter(x => x.compte.actif).map(x => [Number(x.taux), x.compte]));
+    const [regles, reglesTva, societe] = await Promise.all([prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }), prisma.regleTvaComptable.findMany({ include: { compte: true } }), getCompanySettings()]); const r = new Map(regles.map(x => [x.cle, x])); const tvaParTaux = new Map(reglesTva.filter(x => x.compte.actif).map(x => [Number(x.taux), x.compte]));
     const manquantes = CLES_COMPTABLES.filter(cle => cle === 'JOURNAL_VENTES' ? !r.get(cle)?.journal : !r.get(cle)?.compte?.actif);
     if (manquantes.length) return res.status(409).json({ error: 'Export bloqué : paramétrage comptable incomplet.', manquantes });
     // Une facture numérotée demeure dans le journal des ventes : une annulation ajoute
@@ -959,10 +1003,14 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
     const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
     const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
     if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
-    // Les dates d'annulation sont des instants : une décision vers minuit à Paris ne doit
-    // jamais être rattachée à l'exercice UTC précédent. Les émissions restent à minuit UTC.
-    const jourComptable = (date: Date) => new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date).replace(/-/g, '');
-    const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit']; for (const f of factures) { const date = jourComptable(f.dateEmission); const libelle = `Facture ${f.numero} — ${f.clientRaisonSociale}`;
+    // Deux classes de dates, deux lectures — les confondre décale l'écriture d'un jour, et
+    // d'un exercice au 1er janvier. La date d'émission est une DATE-SEULE déjà stockée à minuit
+    // UTC : elle se lit telle quelle. La date d'annulation vient d'un INSTANT : elle se lit
+    // dans le fuseau de l'entreprise, sinon une décision prise vers minuit change d'exercice.
+    const fuseauHoraire = societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+    const jourDeDateSeule = (date: Date | string) => dateSeuleEnJourCivil(date).replace(/-/g, '');
+    const jourDInstant = (instant: Date) => jourCivilEntreprise(instant, fuseauHoraire).replace(/-/g, '');
+    const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit']; for (const f of factures) { const date = jourDeDateSeule(f.dateEmission); const libelle = `Facture ${f.numero} — ${f.clientRaisonSociale}`;
       const ecrire = (dateEcriture: string, texte: string, contrepasse: boolean) => {
         const ecriture = (compte: { code: string; libelle: string }, debit: number, credit: number) => lignes.push([r.get('JOURNAL_VENTES')!.journal, dateEcriture, f.numero, compte.code, compte.libelle, texte, (contrepasse ? credit : debit).toFixed(2), (contrepasse ? debit : credit).toFixed(2)].map(csvComptable).join(';'));
         ecriture(r.get('CLIENT')!.compte!, Number(f.totalTtc), 0);
@@ -970,7 +1018,7 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
         for (const taux of tauxUtilises(f.lignes)) { const tva = tvaDuTaux(f.lignes, taux); if (tva) ecriture(tvaParTaux.get(taux)!, 0, tva); }
       };
       ecrire(date, libelle, false);
-      if (f.statut === 'ANNULEE') ecrire(jourComptable(f.journal[0]?.createdAt ?? f.dateEmission), `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
+      if (f.statut === 'ANNULEE') ecrire(f.journal[0] ? jourDInstant(f.journal[0].createdAt) : jourDeDateSeule(f.dateEmission), `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="export-ventes.csv"'); res.send(`\uFEFF${lignes.join('\n')}\n`);
   } catch { res.status(500).json({ error: 'Export comptable impossible.' }); }
@@ -3881,7 +3929,7 @@ app.put('/api/company', requireAuth, requireSuperAdmin, async (req, res) => {
     res.json(company);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error updating company settings';
-    res.status(message.startsWith('Champ société invalide') || message.startsWith('Couleur invalide') ? 400 : 500)
+    res.status(message.startsWith('Champ société invalide') || message.startsWith('Couleur invalide') || message.startsWith('Fuseau horaire invalide') ? 400 : 500)
       .json({ error: message });
   }
 });
@@ -4874,6 +4922,10 @@ export {
   contactPayload,
   sitePayload,
   companySettingsPayload,
+  fuseauHoraireEntrepriseValide,
+  jourCivilEntreprise,
+  aujourdHuiEntreprise,
+  dateEmissionEstFuture,
   cataloguePayload,
   catalogueExtraPayload,
   catalogueFamily,

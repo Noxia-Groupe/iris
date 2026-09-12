@@ -4,3 +4,6 @@ dist/
 .env
 uploads/
 .DS_Store
+
+# Notes de travail de l’agent, hors dépôt
+.hermes/

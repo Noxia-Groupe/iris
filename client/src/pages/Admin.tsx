@@ -157,6 +157,8 @@ const Admin = () => {
   // Modules activables (onglet « Modules », superadmin) : état global du Planning.
   const [planningActif, setPlanningActif] = useState<boolean | null>(null);
   const [modulesMessage, setModulesMessage] = useState('');
+  const [societe, setSociete] = useState<{ fuseauHoraire?: string | null } | null>(null);
+  const [messageSociete, setMessageSociete] = useState<{ texte: string; ok: boolean } | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -218,9 +220,25 @@ const Admin = () => {
         const rRes = await apiFetch('/parametres/remuneration');
         if (rRes.ok) setRemuneration(await rRes.json());
       }
+
+      if (activeTab === 'societe' && isSuper) {
+        const sRes = await apiFetch('/company');
+        if (sRes.ok) setSociete(await sRes.json());
+      }
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const enregistrerSociete = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setMessageSociete(null);
+    const form = new FormData(e.currentTarget);
+    const res = await apiFetch('/company', { method: 'PUT', body: JSON.stringify({ fuseauHoraire: form.get('fuseauHoraire') }) });
+    const data = await res.json();
+    if (!res.ok) return setMessageSociete({ texte: data.error || 'Enregistrement impossible.', ok: false });
+    setSociete(data);
+    setMessageSociete({ texte: 'Fuseau horaire de la société enregistré.', ok: true });
   };
 
   // Enregistre les règles de rémunération. Les champs numériques transitent en texte
@@ -512,7 +530,10 @@ const Admin = () => {
           </>
         )}
         {isSuper && (
-          <button className={`btn ${activeTab === 'modules' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('modules')}>Modules</button>
+          <>
+            <button className={`btn ${activeTab === 'societe' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('societe')}>Société</button>
+            <button className={`btn ${activeTab === 'modules' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('modules')}>Modules</button>
+          </>
         )}
       </div>
 
@@ -863,6 +884,23 @@ const Admin = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'societe' && isSuper && (
+        <div className="card">
+          <h2 className="mb-2 text-primary-dark">Fuseau horaire de la société</h2>
+          <p className="text-sm text-muted mb-4">Paramétrage initial de l’entreprise qui exploite Iris. Il détermine ses jours civils, notamment la date du jour et les écritures comptables dérivées d’un instant.</p>
+          {societe ? <form onSubmit={enregistrerSociete} className="space-y-4 max-w-xl">
+            <label className="form-group block mb-0"><span className="form-label">Fuseau horaire</span>
+              <select name="fuseauHoraire" className="form-input" defaultValue={societe.fuseauHoraire || 'Europe/Paris'}>
+                <option value="Europe/Paris">Europe/Paris — Métropole</option>
+                <option value="America/Guadeloupe">America/Guadeloupe — Guadeloupe</option><option value="America/Martinique">America/Martinique — Martinique</option><option value="America/Cayenne">America/Cayenne — Guyane</option><option value="America/Miquelon">America/Miquelon — Saint-Pierre-et-Miquelon</option><option value="Indian/Mayotte">Indian/Mayotte — Mayotte</option><option value="Indian/Reunion">Indian/Reunion — La Réunion</option><option value="Pacific/Noumea">Pacific/Noumea — Nouvelle-Calédonie</option><option value="Pacific/Wallis">Pacific/Wallis — Wallis-et-Futuna</option><option value="Pacific/Tahiti">Pacific/Tahiti — Polynésie française (Tahiti)</option><option value="Pacific/Marquesas">Pacific/Marquesas — Polynésie française (Marquises)</option><option value="Pacific/Gambier">Pacific/Gambier — Polynésie française (Gambier)</option>
+              </select>
+            </label>
+            {messageSociete && <p className={messageSociete.ok ? 'text-emerald-700' : 'text-red-600'}>{messageSociete.texte}</p>}
+            <button className="btn btn-primary">Enregistrer</button>
+          </form> : <p className="text-sm text-gray-400">Chargement…</p>}
         </div>
       )}
 
