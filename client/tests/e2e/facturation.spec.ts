@@ -108,7 +108,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     let confirmationDemandee = '';
     page.once('dialog', (dialog) => { confirmationDemandee = dialog.message(); void dialog.accept(); });
     await ligne.getByRole('button', { name: /Annuler la facture/ }).click();
-    await expect(page.getByText(/annulée et conservée/i)).toBeVisible();
+    await expect(page.getByText(/annulée ; avoir .* disponible/i)).toBeVisible();
     expect(confirmationDemandee).toMatch(/Annuler la facture/);
     await expect(ligne).toContainText('ANNULEE');
     const factures = await (await apiAdmin.get('/factures')).json() as Array<{ id: string; client: { id: string } }>;

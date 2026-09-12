@@ -450,6 +450,7 @@ model Facture {
   updatedAt     DateTime       @updatedAt
 
   @@index([clientId, statut])
+  @@index([type, statut])
   @@index([statut, dateEcheance])
   @@index([chantierId])
   @@index([interventionId])
