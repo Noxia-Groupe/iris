@@ -1524,7 +1524,7 @@ if (!TEST_DATABASE_URL) {
         clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Avoir total transactionnel', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
         lignes: [
           { designation: 'TEST avoir prestation', nature: 'PRESTATION', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 },
-          { designation: 'TEST avoir article', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 50, tauxTva: 10 },
+          { designation: 'TEST avoir article', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
         ],
       });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
