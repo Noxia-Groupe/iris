@@ -1600,6 +1600,12 @@ if (!TEST_DATABASE_URL) {
         assert.equal(tva.bloquant, true);
         assert.match(tva.detail, /5\.5 %/);
       } finally {
+        const avoir = await prisma.facture.findUnique({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
+        if (avoir) {
+          await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
+          await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+          await prisma.facture.delete({ where: { id: avoir.id } });
+        }
         await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.facture.delete({ where: { id: emission.body.id } });
@@ -1629,6 +1635,12 @@ if (!TEST_DATABASE_URL) {
         }
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        const avoir = await prisma.facture.findUnique({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
+        if (avoir) {
+          await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
+          await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+          await prisma.facture.delete({ where: { id: avoir.id } });
+        }
         await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.facture.delete({ where: { id: emission.body.id } });
