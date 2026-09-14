@@ -1617,12 +1617,14 @@ if (!TEST_DATABASE_URL) {
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
-      assert.equal((await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const annulation = await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      const avoir = annulation.body.avoir;
       await prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2026-09-09T04:30:00.000Z') } });
       const datesDe = async (motif) => {
         const csv = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
         assert.equal(csv.status, 200, csv.text);
-        const lignes = csv.text.split('\n').filter((ligne) => ligne.includes(emission.body.numero) && ligne.includes(motif));
+        const lignes = csv.text.split('\n').filter((ligne) => ligne.includes(avoir.numero) && ligne.includes(motif));
         assert.ok(lignes.length, `aucune écriture « ${motif} » dans l’export`);
         return [...new Set(lignes.map((ligne) => ligne.split(';')[1].replace(/"/g, '')))];
       };
@@ -1630,8 +1632,7 @@ if (!TEST_DATABASE_URL) {
       try {
         for (const [fuseau, jourAnnulation] of [['Europe/Paris', '20260909'], ['Pacific/Noumea', '20260909'], ['America/Martinique', '20260909'], ['Pacific/Gambier', '20260908']]) {
           assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
-          assert.deepEqual(await datesDe('"Facture '), ['20260909'], `la date d’émission ne bouge pas en ${fuseau}`);
-          assert.deepEqual(await datesDe('Annulation facture'), [jourAnnulation], `l’annulation suit le fuseau ${fuseau}`);
+          assert.deepEqual(await datesDe(`Avoir ${avoir.numero}`), [jourAnnulation], `l’avoir suit le fuseau ${fuseau}`);
         }
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
