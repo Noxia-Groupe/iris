@@ -44,7 +44,10 @@ if (!TEST_DATABASE_URL) {
     // ces fiches afin de respecter les clés étrangères RESTRICT.
     await prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     await prisma.journalFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
-    await prisma.facture.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    // Les avoirs référencent leur facture source par RESTRICT : les documents enfants partent
+    // donc avant les factures de test. Ceci conserve le teardown rejouable avec plusieurs avoirs.
+    await prisma.facture.deleteMany({ where: { type: 'AVOIR', client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    await prisma.facture.deleteMany({ where: { type: 'FACTURE', client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.mentionsLegalesVersion.deleteMany({});
     await prisma.regleComptable.deleteMany({});
     await prisma.regleTvaComptable.deleteMany({});
@@ -1591,6 +1594,59 @@ if (!TEST_DATABASE_URL) {
       assert.ok(lignesAvoir.some((ligne) => montant(ligne, 7) > 0 && /Clients/.test(ligne)), 'l’avoir crédite le client');
     });
 
+    test('crée plusieurs avoirs partiels positifs, figés et plafonnés par taux de TVA', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Avoirs partiels multi taux', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [
+          { designation: 'TEST source vingt', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
+          { designation: 'TEST source cinq', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 100, tauxTva: 5.5 },
+        ],
+      });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const creer = (lignes) => request(app).post(`/api/factures/${emission.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({ lignes });
+
+      const premier = await creer([{ designation: 'TEST geste commercial 20', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 40, tauxTva: 20 }]);
+      assert.equal(premier.status, 201, JSON.stringify(premier.body));
+      assert.equal(premier.body.type, 'AVOIR'); assert.equal(premier.body.statut, 'EMISE');
+      assert.equal(premier.body.factureOrigineId, emission.body.id); assert.equal(premier.body.estAvoirAnnulation, false);
+      assert.deepEqual([premier.body.totalHt, premier.body.totalTva, premier.body.totalTtc], [40, 8, 48]);
+      assert.match(premier.body.numero, /^A\d{4}-\d{4}$/);
+      assert.equal(premier.body.clientRaisonSociale, emission.body.clientRaisonSociale);
+      assert.equal(premier.body.clientAdresse, emission.body.clientAdresse);
+      assert.equal(premier.body.mentionsLegalesVersion.id, emission.body.mentionsLegalesVersion.id);
+
+      const tauxInconnu = await creer([{ designation: 'TEST taux interdit', quantite: 1, prixUnitaireHt: 1, tauxTva: 10 }]);
+      assert.equal(tauxInconnu.status, 400, JSON.stringify(tauxInconnu.body));
+      assert.match(tauxInconnu.body.error, /taux de TVA.*origine/i);
+      const depassementTaux = await creer([{ designation: 'TEST dépassement vingt', quantite: 1, prixUnitaireHt: 61, tauxTva: 20 }]);
+      assert.equal(depassementTaux.status, 409, JSON.stringify(depassementTaux.body));
+      assert.match(depassementTaux.body.error, /plafond.*TVA|créditer/i);
+
+      const second = await creer([{ designation: 'TEST reliquat vingt', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 60, tauxTva: 20 }]);
+      assert.equal(second.status, 201, JSON.stringify(second.body)); assert.equal(second.body.totalTtc, 72);
+      const depassementTotal = await creer([{ designation: 'TEST dépassement total', quantite: 1, prixUnitaireHt: 0.01, tauxTva: 20 }]);
+      assert.equal(depassementTotal.status, 409, JSON.stringify(depassementTotal.body));
+
+      const reglee = await request(app).post(`/api/factures/${emission.body.id}/regler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(reglee.status, 200, JSON.stringify(reglee.body));
+      const troisieme = await creer([{ designation: 'TEST avoir cinq', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 100, tauxTva: 5.5 }]);
+      assert.equal(troisieme.status, 201, JSON.stringify(troisieme.body));
+      assert.deepEqual([troisieme.body.totalHt, troisieme.body.totalTva, troisieme.body.totalTtc], [100, 5.5, 105.5]);
+
+      const annulation = await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(annulation.status, 409, JSON.stringify(annulation.body));
+      const pdf = await request(app).get(`/api/factures/${premier.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      assert.equal(pdf.status, 200, pdf.text);
+      const lecteur = new PDFParse({ data: pdf.body }); const contenu = await lecteur.getText(); await lecteur.destroy();
+      assert.match(contenu.text, new RegExp(`AVOIR ${premier.body.numero}`));
+      assert.match(contenu.text, new RegExp(`Facture d’origine : ${emission.body.numero}`));
+      const exportation = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      assert.equal(exportation.status, 200, exportation.text);
+      assert.match(exportation.text, new RegExp(`Avoir ${premier.body.numero}`));
+    });
+
     test('une facture ne quitte pas sa fiche affaire en changeant de statut', async () => {
       const chantier = await prisma.chantier.create({ data: { nom: 'TEST Affaire suivie', client: 'TEST Client contrat maintenance', clientId, dateDebut: new Date('2026-09-01T00:00:00.000Z'), statut: 'EN_COURS', budgetGlobalVendu: 10000 } });
       const emettreSurAffaire = async (motif) => {
@@ -1633,7 +1689,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(tva.bloquant, true);
         assert.match(tva.detail, /5\.5 %/);
       } finally {
-        const avoir = await prisma.facture.findUnique({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
+        const avoir = await prisma.facture.findFirst({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
         if (avoir) {
           await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
           await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
@@ -1669,7 +1725,7 @@ if (!TEST_DATABASE_URL) {
         }
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
-        const avoir = await prisma.facture.findUnique({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
+        const avoir = await prisma.facture.findFirst({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
         if (avoir) {
           await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
           await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });

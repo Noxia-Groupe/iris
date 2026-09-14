@@ -423,9 +423,12 @@ model Facture {
   statut        String         @default("BROUILLON") // BROUILLON | EMISE | REGLEE | ANNULEE
   // FACTURE et AVOIR portent des montants positifs ; leur sens comptable est déterminé par ce type.
   type          String         @default("FACTURE") // FACTURE | AVOIR
-  factureOrigineId String?     @unique
-  factureOrigine   Facture?    @relation("FactureAvoir", fields: [factureOrigineId], references: [id], onDelete: Restrict)
-  avoir           Facture?     @relation("FactureAvoir")
+  // Un avoir peut être partiel : plusieurs avoirs partagent alors la même facture source.
+  // Le garde SQL `Facture_un_avoir_annulation_par_origine` maintient l’unicité du seul avoir total.
+  factureOrigineId      String?
+  factureOrigine        Facture?  @relation("FactureAvoir", fields: [factureOrigineId], references: [id], onDelete: Restrict)
+  avoirs                Facture[] @relation("FactureAvoir")
+  estAvoirAnnulation    Boolean   @default(false)
   dateEmission  DateTime
   dateEcheance  DateTime
   totalHt       Decimal        @db.Decimal(12, 2)
