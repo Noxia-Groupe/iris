@@ -290,6 +290,8 @@ model CompanySettings {
   couleurPrimaire   String?  @default("#1e3a8a")
   couleurSecondaire String?  @default("#f59e0b")
   prefixeFacture    String?
+  // Préfixe légal dédié aux avoirs. Son absence utilise « A » sans réemployer la séquence facture.
+  prefixeAvoir       String?
   piedFacture       String?
   // Fuseau civil de la société exploitant l'instance. Les dates-seules restent à minuit
   // UTC ; ce réglage sert uniquement aux instants et aux jours dérivés d'un instant.
@@ -419,6 +421,11 @@ model Facture {
   // Adresse de facturation figée à l'émission : mention obligatoire du document français.
   clientAdresse       String?
   statut        String         @default("BROUILLON") // BROUILLON | EMISE | REGLEE | ANNULEE
+  // FACTURE et AVOIR portent des montants positifs ; leur sens comptable est déterminé par ce type.
+  type          String         @default("FACTURE") // FACTURE | AVOIR
+  factureOrigineId String?     @unique
+  factureOrigine   Facture?    @relation("FactureAvoir", fields: [factureOrigineId], references: [id], onDelete: Restrict)
+  avoir           Facture?     @relation("FactureAvoir")
   dateEmission  DateTime
   dateEcheance  DateTime
   totalHt       Decimal        @db.Decimal(12, 2)
@@ -443,6 +450,7 @@ model Facture {
   updatedAt     DateTime       @updatedAt
 
   @@index([clientId, statut])
+  @@index([type, statut])
   @@index([statut, dateEcheance])
   @@index([chantierId])
   @@index([interventionId])
@@ -492,6 +500,12 @@ model MentionsLegalesVersion {
 }
 
 model SequenceFacture {
+  annee         Int @id
+  dernierNumero Int @default(0)
+}
+
+// Les avoirs ont une séquence autonome : un avoir ne consomme jamais un numéro de facture.
+model SequenceAvoir {
   annee         Int @id
   dernierNumero Int @default(0)
 }

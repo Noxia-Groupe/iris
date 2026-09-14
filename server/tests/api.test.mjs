@@ -50,6 +50,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.regleTvaComptable.deleteMany({});
     await prisma.compteComptable.deleteMany({});
     await prisma.sequenceFacture.deleteMany({});
+    await prisma.sequenceAvoir.deleteMany({});
     await prisma.intervention.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     const contratIds = (await prisma.contratMaintenance.findMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } }, select: { id: true } })).map((contrat) => contrat.id);
     await prisma.journalSaisieChantier.deleteMany({ where: { contratMaintenanceId: { in: contratIds } } });
@@ -1476,6 +1477,10 @@ if (!TEST_DATABASE_URL) {
 
       const annulation = await request(app).post(`/api/factures/${annulee.id}/annuler`).set('Authorization', `Bearer ${session}`);
       assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      const avoirAnnulation = annulation.body.avoir;
+      assert.ok(avoirAnnulation, 'une annulation crée un avoir total');
+      assert.equal(avoirAnnulation.type, 'AVOIR');
+      assert.equal(avoirAnnulation.factureOrigineId, annulee.id);
       assert.equal(annulation.body.statut, 'ANNULEE');
       assert.deepEqual([annulation.body.totalHt, annulation.body.totalTva, annulation.body.totalTtc, annulation.body.lignes], [annulee.totalHt, annulee.totalTva, annulee.totalTtc, annulee.lignes]);
       const journalAnnulation = await request(app).get(`/api/factures/${annulee.id}/journal`).set('Authorization', `Bearer ${session}`);
@@ -1505,14 +1510,85 @@ if (!TEST_DATABASE_URL) {
       const exportComptable = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportComptable.status, 200, exportComptable.text);
       assert.match(exportComptable.text, new RegExp(reglee.numero));
-      const ecrituresAnnulee = exportComptable.text.split('\n').filter((ligne) => ligne.includes(annulee.numero));
-      assert.ok(ecrituresAnnulee.some((ligne) => ligne.includes(`\"Facture ${annulee.numero}`)), 'les écritures d’origine restent exportées');
-      assert.ok(ecrituresAnnulee.some((ligne) => ligne.includes(`\"Annulation facture ${annulee.numero}`)), 'l’annulation est exportée en contre-passation');
+      const ecrituresFactureAnnulee = exportComptable.text.split('\n').filter((ligne) => ligne.includes(annulee.numero));
+      assert.ok(ecrituresFactureAnnulee.some((ligne) => ligne.includes(`\"Facture ${annulee.numero}`)), 'les écritures d’origine restent exportées');
+      assert.equal(ecrituresFactureAnnulee.filter((ligne) => ligne.includes(`Annulation facture ${annulee.numero}`)).length, 0, 'un avoir remplace la contre-passation legacy sans doublon');
+      const ecrituresAnnulee = exportComptable.text.split('\n').filter((ligne) => ligne.includes(avoirAnnulation.numero));
+      assert.ok(ecrituresAnnulee.some((ligne) => ligne.includes(`\"Avoir ${avoirAnnulation.numero}`)), 'l’avoir total est exporté en contre-passation');
       const colonne = (ligne, index) => Number(ligne.split(';')[index].replace(/\"/g, ''));
       const debit = ecrituresAnnulee.reduce((somme, ligne) => somme + colonne(ligne, 6), 0);
       const credit = ecrituresAnnulee.reduce((somme, ligne) => somme + colonne(ligne, 7), 0);
-      assert.equal(debit.toFixed(2), credit.toFixed(2), 'une facture annulée se solde à zéro dans le journal des ventes');
-      assert.ok(debit > 0, 'le solde nul provient de vraies écritures');
+      assert.equal(debit.toFixed(2), credit.toFixed(2), 'un avoir est équilibré dans le journal des ventes');
+      assert.ok(debit > 0, 'l’avoir comporte de vraies écritures');
+    });
+
+    test('un avoir ne consomme jamais un numéro de la séquence des factures', async () => {
+      const emettre = async (motif) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: `TEST ${motif}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return emission.body;
+      };
+      const annuler = async (facture) => {
+        const annulation = await request(app).post(`/api/factures/${facture.id}/annuler`).set('Authorization', `Bearer ${session}`);
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        return annulation.body.avoir;
+      };
+      const premiere = await emettre('séquence facture première');
+      const avoirPremier = await annuler(premiere);
+      const seconde = await emettre('séquence facture seconde');
+      const avoirSecond = await annuler(seconde);
+      try {
+        const rang = (numero) => Number(numero.split('-')[1]);
+        assert.equal(rang(seconde.numero), rang(premiere.numero) + 1, 'la séquence des factures ignore les avoirs');
+        assert.equal(rang(avoirSecond.numero), rang(avoirPremier.numero) + 1, 'la séquence des avoirs progresse indépendamment');
+      } finally {
+        for (const id of [avoirPremier.id, avoirSecond.id, premiere.id, seconde.id]) {
+          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
+          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
+          await prisma.facture.delete({ where: { id } });
+        }
+      }
+    });
+
+    test('annule atomiquement une facture en créant un avoir total numéroté séparément', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Avoir total transactionnel', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [
+          { designation: 'TEST avoir prestation', nature: 'PRESTATION', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 },
+          { designation: 'TEST avoir article', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
+        ],
+      });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const annulation = await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal(annulation.body.statut, 'ANNULEE');
+      assert.ok(annulation.body.avoir, 'l’annulation doit retourner l’avoir créé dans la même transaction');
+      const avoir = annulation.body.avoir;
+      assert.equal(avoir.type, 'AVOIR');
+      assert.match(avoir.numero, /^A\d{4}-\d{4}$/);
+      assert.equal(avoir.factureOrigineId, emission.body.id);
+      assert.deepEqual([avoir.totalHt, avoir.totalTva, avoir.totalTtc], [emission.body.totalHt, emission.body.totalTva, emission.body.totalTtc], 'les montants d’un avoir sont stockés positifs');
+      assert.deepEqual(avoir.lignes.map((ligne) => ({ designation: ligne.designation, nature: ligne.nature, quantite: ligne.quantite, prixUnitaireHt: ligne.prixUnitaireHt, tauxTva: ligne.tauxTva })), emission.body.lignes.map((ligne) => ({ designation: ligne.designation, nature: ligne.nature, quantite: ligne.quantite, prixUnitaireHt: ligne.prixUnitaireHt, tauxTva: ligne.tauxTva })));
+      const journal = await request(app).get(`/api/factures/${emission.body.id}/journal`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body.at(-1).action, 'ANNULATION');
+      assert.match(journal.body.at(-1).detail, new RegExp(avoir.numero));
+      const documentAvoir = await request(app).get(`/api/factures/${avoir.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      assert.equal(documentAvoir.status, 200, documentAvoir.text);
+      const lecteur = new PDFParse({ data: documentAvoir.body }); const contenu = await lecteur.getText(); await lecteur.destroy();
+      assert.match(contenu.text, new RegExp(`AVOIR ${avoir.numero}`));
+      assert.match(contenu.text, new RegExp(`Facture d’origine : ${emission.body.numero}`));
+      const exportComptable = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      assert.equal(exportComptable.status, 200, exportComptable.text);
+      const lignesAvoir = exportComptable.text.split('\n').filter((ligne) => ligne.includes(avoir.numero));
+      assert.ok(lignesAvoir.length > 0, 'l’avoir est exporté');
+      const montant = (ligne, index) => Number(ligne.split(';')[index].replace(/"/g, ''));
+      assert.ok(lignesAvoir.some((ligne) => montant(ligne, 6) > 0 && /Vente|TVA/.test(ligne)), 'l’avoir contre-passe les produits et la TVA');
+      assert.ok(lignesAvoir.some((ligne) => montant(ligne, 7) > 0 && /Clients/.test(ligne)), 'l’avoir crédite le client');
     });
 
     test('une facture ne quitte pas sa fiche affaire en changeant de statut', async () => {
@@ -1537,7 +1613,7 @@ if (!TEST_DATABASE_URL) {
       const apresAnnulation = await fiche();
       assert.equal(apresAnnulation.totalFactureHt, 1000);
       assert.equal(apresAnnulation.resteAFacturerHt, 9000);
-      assert.deepEqual(apresAnnulation.factures.map((facture) => facture.statut).sort(), ['ANNULEE', 'REGLEE']);
+      assert.deepEqual(apresAnnulation.factures.map((facture) => [facture.type, facture.statut]).sort(), [['AVOIR', 'EMISE'], ['FACTURE', 'ANNULEE'], ['FACTURE', 'REGLEE']]);
       assert.ok(apresAnnulation.factures.every((facture) => facture.numero), 'chaque facture de la fiche porte son numéro légal');
     });
 
@@ -1557,6 +1633,12 @@ if (!TEST_DATABASE_URL) {
         assert.equal(tva.bloquant, true);
         assert.match(tva.detail, /5\.5 %/);
       } finally {
+        const avoir = await prisma.facture.findUnique({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
+        if (avoir) {
+          await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
+          await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+          await prisma.facture.delete({ where: { id: avoir.id } });
+        }
         await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.facture.delete({ where: { id: emission.body.id } });
@@ -1568,24 +1650,31 @@ if (!TEST_DATABASE_URL) {
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
-      assert.equal((await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`)).status, 200);
+      const annulation = await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      const avoir = annulation.body.avoir;
       await prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2026-09-09T04:30:00.000Z') } });
       const datesDe = async (motif) => {
         const csv = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
         assert.equal(csv.status, 200, csv.text);
-        const lignes = csv.text.split('\n').filter((ligne) => ligne.includes(emission.body.numero) && ligne.includes(motif));
+        const lignes = csv.text.split('\n').filter((ligne) => ligne.includes(avoir.numero) && ligne.includes(motif));
         assert.ok(lignes.length, `aucune écriture « ${motif} » dans l’export`);
         return [...new Set(lignes.map((ligne) => ligne.split(';')[1].replace(/"/g, '')))];
       };
       const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
       try {
-        for (const [fuseau, jourAnnulation] of [['Europe/Paris', '20260909'], ['Pacific/Noumea', '20260909'], ['America/Martinique', '20260909'], ['Pacific/Gambier', '20260908']]) {
+        for (const [fuseau] of [['Europe/Paris'], ['Pacific/Noumea'], ['America/Martinique'], ['Pacific/Gambier']]) {
           assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
-          assert.deepEqual(await datesDe('"Facture '), ['20260909'], `la date d’émission ne bouge pas en ${fuseau}`);
-          assert.deepEqual(await datesDe('Annulation facture'), [jourAnnulation], `l’annulation suit le fuseau ${fuseau}`);
+          assert.deepEqual(await datesDe(`Avoir ${avoir.numero}`), [avoir.dateEmission.slice(0, 10).replace(/-/g, '')], `la date d’émission de l’avoir reste une date-seule en ${fuseau}`);
         }
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        const avoir = await prisma.facture.findUnique({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
+        if (avoir) {
+          await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
+          await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+          await prisma.facture.delete({ where: { id: avoir.id } });
+        }
         await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.facture.delete({ where: { id: emission.body.id } });

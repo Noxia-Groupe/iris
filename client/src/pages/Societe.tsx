@@ -15,7 +15,7 @@ type Societe = {
   adresse: string | null; codePostal: string | null; ville: string | null; pays: string | null;
   telephone: string | null; email: string | null; siteWeb: string | null; logoUrl: string | null;
   couleurPrimaire: string | null; couleurSecondaire: string | null;
-  prefixeFacture: string | null; piedFacture: string | null;
+  prefixeFacture: string | null; prefixeAvoir: string | null; piedFacture: string | null;
 };
 
 type ResultatRegistre = {
@@ -37,6 +37,7 @@ const CHAMPS_TEXTE: Array<{ cle: keyof Societe; libelle: string; type?: string; 
   { cle: 'siteWeb', libelle: 'Site web', placeholder: 'https://' },
   { cle: 'logoUrl', libelle: 'URL du logo', placeholder: 'https://…/logo.png' },
   { cle: 'prefixeFacture', libelle: 'Préfixe de facture', placeholder: 'FA' },
+  { cle: 'prefixeAvoir', libelle: 'Préfixe d’avoir', placeholder: 'AV' },
 ];
 
 const Societe = ({ modifiable }: { modifiable: boolean }) => {
