@@ -1510,6 +1510,9 @@ if (!TEST_DATABASE_URL) {
       const exportComptable = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportComptable.status, 200, exportComptable.text);
       assert.match(exportComptable.text, new RegExp(reglee.numero));
+      const ecrituresFactureAnnulee = exportComptable.text.split('\n').filter((ligne) => ligne.includes(annulee.numero));
+      assert.ok(ecrituresFactureAnnulee.some((ligne) => ligne.includes(`\"Facture ${annulee.numero}`)), 'les écritures d’origine restent exportées');
+      assert.equal(ecrituresFactureAnnulee.filter((ligne) => ligne.includes(`Annulation facture ${annulee.numero}`)).length, 0, 'un avoir remplace la contre-passation legacy sans doublon');
       const ecrituresAnnulee = exportComptable.text.split('\n').filter((ligne) => ligne.includes(avoirAnnulation.numero));
       assert.ok(ecrituresAnnulee.some((ligne) => ligne.includes(`\"Avoir ${avoirAnnulation.numero}`)), 'l’avoir total est exporté en contre-passation');
       const colonne = (ligne, index) => Number(ligne.split(';')[index].replace(/\"/g, ''));
@@ -1517,6 +1520,36 @@ if (!TEST_DATABASE_URL) {
       const credit = ecrituresAnnulee.reduce((somme, ligne) => somme + colonne(ligne, 7), 0);
       assert.equal(debit.toFixed(2), credit.toFixed(2), 'un avoir est équilibré dans le journal des ventes');
       assert.ok(debit > 0, 'l’avoir comporte de vraies écritures');
+    });
+
+    test('un avoir ne consomme jamais un numéro de la séquence des factures', async () => {
+      const emettre = async (motif) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: `TEST ${motif}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return emission.body;
+      };
+      const annuler = async (facture) => {
+        const annulation = await request(app).post(`/api/factures/${facture.id}/annuler`).set('Authorization', `Bearer ${session}`);
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        return annulation.body.avoir;
+      };
+      const premiere = await emettre('séquence facture première');
+      const avoirPremier = await annuler(premiere);
+      const seconde = await emettre('séquence facture seconde');
+      const avoirSecond = await annuler(seconde);
+      try {
+        const rang = (numero) => Number(numero.split('-')[1]);
+        assert.equal(rang(seconde.numero), rang(premiere.numero) + 1, 'la séquence des factures ignore les avoirs');
+        assert.equal(rang(avoirSecond.numero), rang(avoirPremier.numero) + 1, 'la séquence des avoirs progresse indépendamment');
+      } finally {
+        for (const id of [avoirPremier.id, avoirSecond.id, premiere.id, seconde.id]) {
+          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
+          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
+          await prisma.facture.delete({ where: { id } });
+        }
+      }
     });
 
     test('annule atomiquement une facture en créant un avoir total numéroté séparément', async () => {

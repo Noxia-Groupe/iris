@@ -1000,13 +1000,10 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
     const [regles, reglesTva, societe] = await Promise.all([prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }), prisma.regleTvaComptable.findMany({ include: { compte: true } }), getCompanySettings()]); const r = new Map(regles.map(x => [x.cle, x])); const tvaParTaux = new Map(reglesTva.filter(x => x.compte.actif).map(x => [Number(x.taux), x.compte]));
     const manquantes = CLES_COMPTABLES.filter(cle => cle === 'JOURNAL_VENTES' ? !r.get(cle)?.journal : !r.get(cle)?.compte?.actif);
     if (manquantes.length) return res.status(409).json({ error: 'Export bloqué : paramétrage comptable incomplet.', manquantes });
-    // Une facture annulée avec avoir est déjà neutralisée par cet avoir. Les annulations
-    // historiques sans avoir gardent la contre-passation legacy pour ne jamais disparaître.
-    const factures = await prisma.facture.findMany({ where: { OR: [
-      { type: 'AVOIR', statut: { in: ['EMISE', 'REGLEE'] } },
-      { type: 'FACTURE', statut: { in: ['EMISE', 'REGLEE'] } },
-      { type: 'FACTURE', statut: 'ANNULEE', avoir: null },
-    ] }, include: { client: true, lignes: true, avoir: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
+    // Une facture numérotée ne quitte jamais le journal des ventes : l'avoir la neutralise
+    // par une pièce distincte, sans effacer ses écritures ni son numéro légal déjà exporté.
+    // Les annulations historiques sans avoir gardent leur contre-passation legacy ci-dessous.
+    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, avoir: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
     const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
     if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
     // Deux classes de dates, deux lectures — les confondre décale l'écriture d'un jour, et
@@ -1108,7 +1105,7 @@ function transitionFactureEmise(statut: 'REGLEE', action: 'REGLEMENT') {
       const resultat = await prisma.$transaction(async (tx) => {
         // Le prédicat d'état porte l'invariant directement dans l'écriture et ferme une
         // course entre deux actions administratives concurrentes.
-        const maj = await tx.facture.updateMany({ where: { id: paramId(req), statut: 'EMISE' }, data: { statut } });
+        const maj = await tx.facture.updateMany({ where: { id: paramId(req), statut: 'EMISE', type: 'FACTURE' }, data: { statut } });
         if (!maj.count) {
           const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, select: { id: true } });
           return facture ? { erreur: 'NOT_EMITTED' as const } : { erreur: 'NOT_FOUND' as const };
