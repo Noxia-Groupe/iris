@@ -452,6 +452,7 @@ model Facture {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  @@index([factureOrigineId])
   @@index([clientId, statut])
   @@index([type, statut])
   @@index([statut, dateEcheance])
