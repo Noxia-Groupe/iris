@@ -1608,6 +1608,7 @@ if (!TEST_DATABASE_URL) {
       const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
       assert.ok(compteTva, 'le compte TVA de test existe');
       await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
+      try {
       const creer = (lignes) => request(app).post(`/api/factures/${emission.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({ lignes });
 
       const premier = await creer([{ designation: 'TEST geste commercial 20', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 40, tauxTva: 20 }]);
@@ -1648,6 +1649,9 @@ if (!TEST_DATABASE_URL) {
       const exportation = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportation.status, 200, exportation.text);
       assert.match(exportation.text, new RegExp(`Avoir ${premier.body.numero}`));
+      } finally {
+      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
+      }
     });
 
     test('une facture ne quitte pas sa fiche affaire en changeant de statut', async () => {
