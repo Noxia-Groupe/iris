@@ -1630,9 +1630,9 @@ if (!TEST_DATABASE_URL) {
       };
       const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
       try {
-        for (const [fuseau, jourAnnulation] of [['Europe/Paris', '20260909'], ['Pacific/Noumea', '20260909'], ['America/Martinique', '20260909'], ['Pacific/Gambier', '20260908']]) {
+        for (const [fuseau] of [['Europe/Paris'], ['Pacific/Noumea'], ['America/Martinique'], ['Pacific/Gambier']]) {
           assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
-          assert.deepEqual(await datesDe(`Avoir ${avoir.numero}`), [jourAnnulation], `l’avoir suit le fuseau ${fuseau}`);
+          assert.deepEqual(await datesDe(`Avoir ${avoir.numero}`), [avoir.dateEmission.slice(0, 10).replace(/-/g, '')], `la date d’émission de l’avoir reste une date-seule en ${fuseau}`);
         }
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
