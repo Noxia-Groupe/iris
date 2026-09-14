@@ -1677,6 +1677,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('le contrôle TVA des prérequis couvre le même périmètre que l’export', async () => {
+      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'taux annulé non couvert', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST taux annulé', quantite: 1, prixUnitaireHt: 100, tauxTva: 5.5 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
