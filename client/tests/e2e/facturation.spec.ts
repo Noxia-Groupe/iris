@@ -72,7 +72,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
     await expect(page.getByText(/Avoir .* créé et émis/)).toBeVisible();
 
-    const avoir = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Avoir' });
+    const avoir = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ has: page.getByText('Avoir', { exact: true }) });
     await expect(avoir).toHaveCount(1);
     await expect(avoir).toContainText(/60,00\s*€/);
     await expect(avoir).toContainText(/\d{2}[-/]\d{2}[-/]\d{4}/);
