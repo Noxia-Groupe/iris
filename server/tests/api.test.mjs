@@ -1555,6 +1555,104 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('deux avoirs partiels concurrents ne se répartissent pas deux fois le même reliquat', async () => {
+      // La transaction témoin reproduit l'entrelacement critique sans une course aléatoire :
+      // la vraie route est bloquée sur la facture source, puis relit les avoirs après commit.
+      // Le numéro est indépendant de sequenceAvoir afin que ce test ne mesure pas un verrou
+      // de séquence au lieu du verrou de la facture qui protège le plafond.
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'course deux avoirs', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [{ designation: 'TEST course deux avoirs', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }],
+      });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const facture = emission.body;
+      let reponseAvoir = null;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${facture.id} FOR UPDATE`;
+          const concurrent = request(app).post(`/api/factures/${facture.id}/avoirs`).set('Authorization', `Bearer ${session}`)
+            .send({ lignes: [{ designation: 'TEST second avoir concurrent', quantite: 1, prixUnitaireHt: 600, tauxTva: 20 }] })
+            .then((reponse) => { reponseAvoir = reponse; })
+            .catch((erreur) => { reponseAvoir = { status: 'ERREUR', body: { error: String(erreur) } }; });
+          void concurrent;
+          await new Promise((suite) => setTimeout(suite, 1000));
+          await tx.facture.create({ data: {
+            type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero: 'AVDOUBLE-COURSE-2026', annee: 2026,
+            statut: 'EMISE', dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-09-08T00:00:00.000Z'),
+            clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
+            origine: facture.origine, motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersion.id,
+            totalHt: 600, totalTva: 120, totalTtc: 720,
+            lignes: { create: [{ ordre: 0, designation: 'TEST premier avoir concurrent', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 600, tauxTva: 20, totalHt: 600, totalTtc: 720 }] },
+          }, select: { id: true } });
+        }, { timeout: 20000 });
+        for (let attente = 0; attente < 60 && !reponseAvoir; attente += 1) await new Promise((suite) => setTimeout(suite, 250));
+        assert.ok(reponseAvoir, 'POST /avoirs n’a pas répondu');
+        assert.equal(reponseAvoir.status, 409, `le second avoir devait être refusé : ${JSON.stringify(reponseAvoir.body)}`);
+        const credites = await prisma.facture.findMany({ where: { factureOrigineId: facture.id }, select: { totalHt: true } });
+        assert.equal(credites.reduce((somme, avoir) => somme + Number(avoir.totalHt), 0), 600, 'un seul des deux avoirs de 600 € est retenu');
+      } finally {
+        const avoirs = await prisma.facture.findMany({ where: { factureOrigineId: facture.id }, select: { id: true } });
+        for (const { id } of avoirs) {
+          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
+          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
+          await prisma.facture.delete({ where: { id } });
+        }
+        await prisma.journalFacture.deleteMany({ where: { factureId: facture.id } });
+        await prisma.factureLigne.deleteMany({ where: { factureId: facture.id } });
+        await prisma.facture.deleteMany({ where: { id: facture.id } });
+      }
+    });
+
+    test('une annulation concurrente ne passe pas par-dessus un avoir partiel', async () => {
+      // Même entrelacement déterministe : /annuler doit attendre le verrou de la facture,
+      // relire l'avoir partiel créé pendant son attente et expliquer son refus métier.
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'course avoir partiel', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [{ designation: 'TEST course avoir', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }],
+      });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const facture = emission.body;
+      let reponseAnnulation = null;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${facture.id} FOR UPDATE`;
+          const concurrent = request(app).post(`/api/factures/${facture.id}/annuler`).set('Authorization', `Bearer ${session}`)
+            .then((reponse) => { reponseAnnulation = reponse; })
+            .catch((erreur) => { reponseAnnulation = { status: 'ERREUR', body: { error: String(erreur) } }; });
+          void concurrent;
+          await new Promise((suite) => setTimeout(suite, 1000));
+          await tx.facture.create({ data: {
+            type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero: 'AVCOURSE-PARTIEL-2026', annee: 2026,
+            statut: 'EMISE', dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-09-08T00:00:00.000Z'),
+            clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
+            origine: facture.origine, motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersion.id,
+            totalHt: 600, totalTva: 120, totalTtc: 720,
+            lignes: { create: [{ ordre: 0, designation: 'TEST avoir partiel concurrent', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 600, tauxTva: 20, totalHt: 600, totalTtc: 720 }] },
+          } });
+        }, { timeout: 20000 });
+        for (let attente = 0; attente < 60 && !reponseAnnulation; attente += 1) await new Promise((suite) => setTimeout(suite, 250));
+        assert.ok(reponseAnnulation, 'POST /annuler n’a pas répondu');
+        assert.equal(reponseAnnulation.status, 409, `l’annulation devait être refusée : ${JSON.stringify(reponseAnnulation.body)}`);
+        assert.match(reponseAnnulation.body.error, /avoirs partiels/i, 'le refus doit nommer sa vraie raison');
+        const credites = await prisma.facture.findMany({ where: { factureOrigineId: facture.id }, select: { totalHt: true } });
+        assert.equal(credites.reduce((somme, avoir) => somme + Number(avoir.totalHt), 0), 600, 'le plafond de 1 000 € n’est jamais dépassé');
+      } finally {
+        const avoirs = await prisma.facture.findMany({ where: { factureOrigineId: facture.id }, select: { id: true } });
+        for (const { id } of avoirs) {
+          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
+          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
+          await prisma.facture.delete({ where: { id } });
+        }
+        await prisma.journalFacture.deleteMany({ where: { factureId: facture.id } });
+        await prisma.factureLigne.deleteMany({ where: { factureId: facture.id } });
+        await prisma.facture.deleteMany({ where: { id: facture.id } });
+      }
+    });
+
     test('annule atomiquement une facture en créant un avoir total numéroté séparément', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
         clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Avoir total transactionnel', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
@@ -1641,6 +1739,20 @@ if (!TEST_DATABASE_URL) {
 
       const annulation = await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
       assert.equal(annulation.status, 409, JSON.stringify(annulation.body));
+      // Un avoir partiel ne crédite que la facture source, émise ou réglée : créditer un
+      // brouillon contournerait l'absence de numéro légal, créditer un avoir créerait une
+      // chaîne d'avoirs sans document source légitime.
+      const surAvoir = await request(app).post(`/api/factures/${premier.body.id}/avoirs`).set('Authorization', `Bearer ${session}`)
+        .send({ lignes: [{ designation: 'TEST avoir sur avoir', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }] });
+      assert.equal(surAvoir.status, 409, JSON.stringify(surAvoir.body));
+      const jamaisEmise = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'brouillon non créditable', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [{ designation: 'TEST brouillon non créditable', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
+      });
+      assert.equal(jamaisEmise.status, 201, JSON.stringify(jamaisEmise.body));
+      const surBrouillon = await request(app).post(`/api/factures/${jamaisEmise.body.id}/avoirs`).set('Authorization', `Bearer ${session}`)
+        .send({ lignes: [{ designation: 'TEST avoir sur brouillon', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }] });
+      assert.equal(surBrouillon.status, 409, JSON.stringify(surBrouillon.body));
       const pdf = await request(app).get(`/api/factures/${premier.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
       assert.equal(pdf.status, 200, pdf.text);
       const lecteur = new PDFParse({ data: pdf.body }); const contenu = await lecteur.getText(); await lecteur.destroy();

@@ -1144,6 +1144,10 @@ app.post('/api/factures/:id/regler', requireAuth, requireAdmin, transitionFactur
 app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
+      // Toute décision qui crée un avoir ou annule la facture source acquiert ce verrou
+      // d'abord. Même ordre que POST /avoirs : facture puis séquence, afin d'éviter à la
+      // fois un reliquat lu périmé et les interblocages entre annulation et avoir partiel.
+      await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${paramId(req)} FOR UPDATE`;
       const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } }, avoirs: { select: { id: true } } } });
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'EMISE' || facture.type !== 'FACTURE') return { erreur: 'NOT_EMITTED' as const };
@@ -1170,7 +1174,11 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
       await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR', detail: `Avoir total de la facture ${facture.numero}` } });
       return { facture: await tx.facture.findUniqueOrThrow({ where: { id: facture.id }, include: factureInclude }), avoir };
     });
-    if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise peut être annulée.' });
+    if ('erreur' in resultat) {
+      if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
+      if (resultat.erreur === 'PARTIAL_CREDITS_EXIST') return res.status(409).json({ error: 'Cette facture porte déjà un ou plusieurs avoirs partiels : elle ne peut plus être annulée en totalité.' });
+      return res.status(409).json({ error: 'Seule une facture émise peut être annulée.' });
+    }
     return res.json(decimalToNumber({ ...resultat.facture, avoir: resultat.avoir }));
   } catch (error) {
     if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir déjà créé ou numéro déjà attribué, veuillez relire la facture.' });
