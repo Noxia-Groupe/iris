@@ -1710,6 +1710,9 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('l’export ne déplace jamais une date d’émission, et date l’annulation dans le fuseau de la société', async () => {
+      const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
+      assert.ok(compteTva, 'le compte TVA de test existe');
+      await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'bascule de jour civil', dateEmission: '09-09-2026', dateEcheance: '09-09-2026', lignes: [{ designation: 'TEST bascule exercice', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
