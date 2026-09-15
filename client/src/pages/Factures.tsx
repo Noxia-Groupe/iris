@@ -13,6 +13,7 @@ type Facture = {
   statut: string;
   type: 'FACTURE' | 'AVOIR';
   factureOrigine?: { id: string; numero: string | null } | null;
+  avoirs?: { id: string; numero: string | null; estAvoirAnnulation: boolean }[];
   dateEmission: string;
   dateEcheance: string;
   totalHt: number;
@@ -33,6 +34,10 @@ const dateFrancaiseDuJour = (fuseauHoraire: string) => {
 };
 const formatDate = (date: string) => new Date(date).toLocaleDateString('fr-FR', { timeZone: 'UTC' }).replace(/\//g, '-');
 const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+// Même arithmétique que le serveur : chaque ligne est arrondie au centime avant
+// agrégation, puis la TVA est calculée par taux. L’aperçu doit annoncer le document émis.
+const centimes = (montant: number) => Math.round((montant + Number.EPSILON) * 100) / 100;
+const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoir) => !avoir.estAvoirAnnulation);
 
 export default function Factures() {
   const [factures, setFactures] = useState<Facture[]>([]);
@@ -116,11 +121,13 @@ export default function Factures() {
       const quantite = nombreFr(ligne.quantite) ?? 0;
       const prixUnitaireHt = nombreFr(ligne.prixUnitaireHt) ?? 0;
       const tauxTva = nombreFr(ligne.tauxTva) ?? 0;
-      htParTaux.set(tauxTva, (htParTaux.get(tauxTva) || 0) + quantite * prixUnitaireHt);
+      // Le serveur arrondit chaque ligne avant de sommer : faire de même ici évite
+      // qu’un aperçu à côté d’un plafond annonce un montant différent du document.
+      htParTaux.set(tauxTva, centimes((htParTaux.get(tauxTva) || 0) + centimes(quantite * prixUnitaireHt)));
     }
-    const totalHt = [...htParTaux.values()].reduce((somme, ht) => somme + ht, 0);
-    const totalTva = [...htParTaux.entries()].reduce((somme, [taux, ht]) => somme + ht * taux / 100, 0);
-    return { totalHt, totalTva, totalTtc: totalHt + totalTva };
+    const totalHt = centimes([...htParTaux.values()].reduce((somme, ht) => somme + ht, 0));
+    const totalTva = centimes([...htParTaux.entries()].reduce((somme, [taux, ht]) => somme + centimes(ht * taux / 100), 0));
+    return { totalHt, totalTva, totalTtc: centimes(totalHt + totalTva) };
   })();
 
   const creerAvoirPartiel = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -367,7 +374,9 @@ export default function Factures() {
                   {facture.type === 'FACTURE' && ['EMISE', 'REGLEE'].includes(facture.statut) && <button className="btn btn-secondary" onClick={() => ouvrirAvoirPartiel(facture)}><FilePlus2 size={16} /> Créer un avoir partiel</button>}
                   {facture.type === 'FACTURE' && facture.statut === 'EMISE' && <>
                     <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'regler')}><CheckCircle2 size={16} /> Marquer comme réglée</button>
-                    <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'annuler')}><Ban size={16} /> Annuler la facture</button>
+                    {avoirsPartiels(facture).length
+                      ? <span className="self-center text-xs text-gray-500">Annulation totale impossible : {avoirsPartiels(facture).length} avoir(s) partiel(s) déjà émis</span>
+                      : <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'annuler')}><Ban size={16} /> Annuler la facture</button>}
                   </>}
                   {facture.statut !== 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void telechargerDocument(facture)}><Download size={16} /> PDF</button>}
                 </div></td>

@@ -1,6 +1,50 @@
+import type { Page } from '@playwright/test';
 import { test, expect, dateDuJour } from './fixtures';
 
 test.describe('Facturation — parcours utilisateur', () => {
+  // Prépare une facture émise hors affaire et rend sa ligne de tableau.
+  const emettreFactureSource = async (page: Page, client: { raisonSociale: string }, lignes: Array<[string, string, string]>) => {
+    await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await page.locator('input[name="motifHorsAffaire"]').fill('Parcours avoir partiel');
+    await page.locator('input[name="dateEmission"]').fill(dateDuJour());
+    await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
+    for (let index = 1; index < lignes.length; index += 1) await page.getByRole('button', { name: /Ajouter une ligne$/ }).click();
+    for (const [rang, [quantite, prix, taux]] of lignes.entries()) {
+      const index = rang + 1;
+      await page.locator(`input[aria-label="Désignation ligne ${index}"]`).fill(`Prestation à créditer ${index}`);
+      for (const [label, valeur] of [['Quantité', quantite], ['Prix unitaire HT', prix], ['TVA', taux]] as const) {
+        const champ = page.locator(`input[aria-label="${label} ligne ${index}"]`);
+        await champ.click();
+        await champ.press('Control+a');
+        await champ.pressSequentially(valeur, { delay: 10 });
+      }
+    }
+    await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+    const facture = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+    // Un brouillon n'est pas créditable : attendre sa ligne rend l'assertion d'absence
+    // significative, plutôt que vraie sur une ligne pas encore rendue.
+    await expect(facture).toContainText('BROUILLON');
+    await expect(facture.getByRole('button', { name: /Créer un avoir partiel/ })).toHaveCount(0);
+    await facture.getByRole('button', { name: /Émettre/ }).click();
+    await expect(facture).toContainText('EMISE');
+    return facture;
+  };
+
+  // Remplit la ligne d'avoir `index` du formulaire ouvert.
+  const remplirLigneAvoir = async (page: Page, index: number, quantite: string, prix: string, taux: string) => {
+    await page.locator(`input[aria-label="Désignation ligne avoir ${index}"]`).fill(`Geste commercial ${index}`);
+    await page.locator(`select[aria-label="Nature ligne avoir ${index}"]`).selectOption('PRESTATION');
+    // Simule la saisie réelle : fill() n'exerce pas la régression des virgules dans les
+    // champs décimaux que ces parcours doivent retenir.
+    for (const [label, valeur] of [['Quantité', quantite], ['Prix unitaire HT', prix], ['TVA', taux]] as const) {
+      const champ = page.locator(`input[aria-label="${label} ligne avoir ${index}"]`);
+      await champ.click();
+      await champ.press('Control+a');
+      await champ.pressSequentially(valeur, { delay: 10 });
+    }
+  };
+
   test('saisit plusieurs lignes à la virgule et conserve les totaux exacts', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
     const client = await creerClient('multi-lignes');
     const page = await allerSurPageAdmin('/factures');
@@ -80,6 +124,74 @@ test.describe('Facturation — parcours utilisateur', () => {
     const avoirApi = factures.find((item) => item.type === 'AVOIR' && item.client.id === client.id);
     if (!avoirApi) throw new Error('Avoir partiel absent de l’API');
     expect([avoirApi.totalHt, avoirApi.totalTva, avoirApi.totalTtc]).toEqual([50, 10, 60]);
+  });
+
+  // 0,5 × 4,27 = 2,135 € : l'aperçu doit annoncer le montant réellement émis,
+  // y compris lorsque l'arrondi navigateur et celui du serveur divergent.
+  test('l’aperçu d’avoir annonce au centime le montant réellement émis', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient('avoir-arrondi');
+    const page = await allerSurPageAdmin('/factures');
+    const facture = await emettreFactureSource(page, client, [['10', '4,27', '20']]);
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await remplirLigneAvoir(page, 1, '0,5', '4,27', '20');
+    await expect(page.getByTestId('aperçu-avoir')).toContainText(/2,13\s*€/);
+    await expect(page.getByTestId('aperçu-avoir')).not.toContainText(/2,14\s*€/);
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/créé et émis/)).toBeVisible();
+    const factures = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string }; totalHt: number; totalTva: number; totalTtc: number }>;
+    const avoir = factures.find((item) => item.type === 'AVOIR' && item.client.id === client.id);
+    if (!avoir) throw new Error('Avoir partiel absent de l’API');
+    expect([avoir.totalHt, avoir.totalTva, avoir.totalTtc]).toEqual([2.13, 0.43, 2.56]);
+  });
+
+  // Deux lignes et deux taux exercent l'agrégation de l'aperçu, et vérifient que le
+  // payload envoie bien toutes les lignes au serveur.
+  test('crédite deux taux en un seul avoir et agrège l’aperçu par taux', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient('avoir-deux-taux');
+    const page = await allerSurPageAdmin('/factures');
+    const facture = await emettreFactureSource(page, client, [['10', '100', '20'], ['10', '100', '10']]);
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await page.getByRole('button', { name: /Ajouter une ligne d’avoir/ }).click();
+    await remplirLigneAvoir(page, 1, '1', '33,33', '20');
+    await remplirLigneAvoir(page, 2, '2', '16,67', '10');
+    await expect(page.getByTestId('aperçu-avoir')).toContainText(/66,67\s*€/);
+    await expect(page.getByTestId('aperçu-avoir')).toContainText(/10,00\s*€/);
+    await expect(page.getByTestId('aperçu-avoir')).toContainText(/76,67\s*€/);
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/créé et émis/)).toBeVisible();
+    const factures = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string }; lignes: Array<{ tauxTva: number }>; totalHt: number; totalTva: number; totalTtc: number }>;
+    const avoir = factures.find((item) => item.type === 'AVOIR' && item.client.id === client.id);
+    if (!avoir) throw new Error('Avoir à deux taux absent de l’API');
+    expect(avoir.lignes.map((ligne) => ligne.tauxTva).sort((a, b) => a - b)).toEqual([10, 20]);
+    expect([avoir.totalHt, avoir.totalTva, avoir.totalTtc]).toEqual([66.67, 10, 76.67]);
+  });
+
+  // Les refus métier restent visibles et conservent la saisie. Une création réussie
+  // referme ensuite le formulaire et masque l'annulation totale désormais impossible.
+  test('affiche les refus métier, conserve la saisie puis ferme le formulaire après succès', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient('avoir-plafond');
+    const page = await allerSurPageAdmin('/factures');
+    const facture = await emettreFactureSource(page, client, [['10', '100', '20']]);
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await remplirLigneAvoir(page, 1, '20', '100', '20');
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/Cet avoir dépasse le montant total restant à créditer/)).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toBeVisible();
+    await expect(page.locator('input[aria-label="Prix unitaire HT ligne avoir 1"]')).toHaveValue('100');
+    const refuse = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string } }>;
+    expect(refuse.filter((item) => item.type === 'AVOIR' && item.client.id === client.id)).toEqual([]);
+
+    await remplirLigneAvoir(page, 1, '1', '10', '10');
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/Le taux de TVA d’une ligne d’avoir doit être présent/)).toBeVisible();
+
+    await remplirLigneAvoir(page, 1, '1', '10', '20');
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/créé et émis/)).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toHaveCount(0);
+    await expect(facture.getByRole('button', { name: /Annuler la facture/ })).toHaveCount(0);
+    await expect(facture).toContainText(/Annulation totale impossible : 1 avoir\(s\) partiel\(s\)/);
+    await expect(facture.getByRole('button', { name: /Marquer comme réglée/ })).toBeVisible();
   });
 
   test('émet un brouillon, attribue un numéro et rend le PDF disponible', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
