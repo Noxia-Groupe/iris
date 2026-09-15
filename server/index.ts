@@ -709,7 +709,7 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 }
 
 // --- Facturation française native ---
-const factureInclude = { client: { select: { id: true, raisonSociale: true } }, factureOrigine: { select: { id: true, numero: true } }, avoir: { select: { id: true, numero: true, type: true, statut: true } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+const factureInclude = { client: { select: { id: true, raisonSociale: true } }, factureOrigine: { select: { id: true, numero: true } }, avoirs: { select: { id: true, numero: true, type: true, statut: true, estAvoirAnnulation: true }, orderBy: { createdAt: 'asc' as const } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
 
 // L'adresse du client est sélectionnée depuis son site de facturation, puis figée à l'émission.
 const SITE_FACTURATION_ORDRE = [{ estSiteFacturation: 'desc' as const }, { principal: 'desc' as const }, { estSiegeSocial: 'desc' as const }, { nom: 'asc' as const }];
@@ -807,6 +807,24 @@ type LigneTaxable = { tauxTva: unknown; totalHt: unknown };
 const tauxUtilises = (lignes: LigneTaxable[]) => [...new Set(lignes.map(ligne => Number(ligne.tauxTva)))];
 const baseHtDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(lignes.filter(ligne => Number(ligne.tauxTva) === taux).reduce((somme, ligne) => somme + Number(ligne.totalHt), 0));
 const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(baseHtDuTaux(lignes, taux) * taux / 100);
+
+function lignesAvoirPartiel(brutes: unknown): { ordre: number; designation: string; nature: string; quantite: number; prixUnitaireHt: number; tauxTva: number; totalHt: number; totalTtc: number }[] {
+  const lignesBrutes = Array.isArray(brutes) ? brutes : [];
+  if (!lignesBrutes.length) throw new FactureInvalideError('Un avoir partiel doit contenir au moins une ligne.');
+  return lignesBrutes.map((ligne: any, ordre: number) => {
+    const designation = String(ligne?.designation || '').trim();
+    const quantite = nombreDecimalNonNegatif(ligne?.quantite, 9, false, 3);
+    const prixUnitaireHt = nombreDecimalNonNegatif(ligne?.prixUnitaireHt, 10, true);
+    const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3, true);
+    const nature = String(ligne?.nature || 'PRESTATION');
+    if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || prixUnitaireHt <= 0 || tauxTva === null || tauxTva > 100) throw new FactureInvalideError('Ligne d’avoir partiel invalide.');
+    const totalHt = centimes(quantite * prixUnitaireHt);
+    const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
+    if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de ligne hors des limites acceptées.');
+    return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
+  });
+}
+class AvoirPlafondError extends Error {}
 
 app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
   try {
@@ -1003,7 +1021,7 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
     // Une facture numérotée ne quitte jamais le journal des ventes : l'avoir la neutralise
     // par une pièce distincte, sans effacer ses écritures ni son numéro légal déjà exporté.
     // Les annulations historiques sans avoir gardent leur contre-passation legacy ci-dessous.
-    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, avoir: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
+    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, avoirs: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
     const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
     if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
     // Deux classes de dates, deux lectures — les confondre décale l'écriture d'un jour, et
@@ -1021,7 +1039,7 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
         for (const taux of tauxUtilises(f.lignes)) { const tva = tvaDuTaux(f.lignes, taux); if (tva) ecriture(tvaParTaux.get(taux)!, 0, tva); }
       };
       ecrire(date, f.type === 'AVOIR' ? `Avoir ${f.numero} — ${f.clientRaisonSociale}` : libelle, f.type === 'AVOIR');
-      if (f.statut === 'ANNULEE' && !f.avoir) ecrire(f.journal[0] ? jourDInstant(f.journal[0].createdAt) : jourDeDateSeule(f.dateEmission), `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
+      if (f.statut === 'ANNULEE' && !f.avoirs.length) ecrire(f.journal[0] ? jourDInstant(f.journal[0].createdAt) : jourDeDateSeule(f.dateEmission), `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="export-ventes.csv"'); res.send(`\uFEFF${lignes.join('\n')}\n`);
   } catch { res.status(500).json({ error: 'Export comptable impossible.' }); }
@@ -1126,9 +1144,14 @@ app.post('/api/factures/:id/regler', requireAuth, requireAdmin, transitionFactur
 app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
-      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } } } });
+      // Toute décision qui crée un avoir ou annule la facture source acquiert ce verrou
+      // d'abord. Même ordre que POST /avoirs : facture puis séquence, afin d'éviter à la
+      // fois un reliquat lu périmé et les interblocages entre annulation et avoir partiel.
+      await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${paramId(req)} FOR UPDATE`;
+      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } }, avoirs: { select: { id: true } } } });
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'EMISE' || facture.type !== 'FACTURE') return { erreur: 'NOT_EMITTED' as const };
+      if (facture.avoirs.length) return { erreur: 'PARTIAL_CREDITS_EXIST' as const };
       const now = new Date();
       const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
       const jour = jourCivilEntreprise(now, societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
@@ -1140,7 +1163,7 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
       const maj = await tx.facture.updateMany({ where: { id: facture.id, statut: 'EMISE', type: 'FACTURE' }, data: { statut: 'ANNULEE' } });
       if (!maj.count) return { erreur: 'NOT_EMITTED' as const };
       const avoir = await tx.facture.create({ data: {
-        type: 'AVOIR', factureOrigineId: facture.id, numero, annee, statut: 'EMISE', dateEmission: dateAvoir, dateEcheance: dateAvoir,
+        type: 'AVOIR', estAvoirAnnulation: true, factureOrigineId: facture.id, numero, annee, statut: 'EMISE', dateEmission: dateAvoir, dateEcheance: dateAvoir,
         clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
         origine: facture.origine, chantierId: facture.chantierId, interventionId: facture.interventionId, contratMaintenanceId: facture.contratMaintenanceId,
         motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
@@ -1151,11 +1174,71 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
       await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR', detail: `Avoir total de la facture ${facture.numero}` } });
       return { facture: await tx.facture.findUniqueOrThrow({ where: { id: facture.id }, include: factureInclude }), avoir };
     });
-    if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise peut être annulée.' });
+    if ('erreur' in resultat) {
+      if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
+      if (resultat.erreur === 'PARTIAL_CREDITS_EXIST') return res.status(409).json({ error: 'Cette facture porte déjà un ou plusieurs avoirs partiels : elle ne peut plus être annulée en totalité.' });
+      return res.status(409).json({ error: 'Seule une facture émise peut être annulée.' });
+    }
     return res.json(decimalToNumber({ ...resultat.facture, avoir: resultat.avoir }));
   } catch (error) {
     if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir déjà créé ou numéro déjà attribué, veuillez relire la facture.' });
     return res.status(500).json({ error: 'Annulation de facture impossible.' });
+  }
+});
+
+// Un avoir partiel est un document émis immédiatement : il n’annule jamais la facture
+// source et reprend tous ses snapshots. Le verrou SQL de la source sérialise les créations
+// concurrentes avant le contrôle cumulatif des plafonds HT, TVA et TTC.
+app.post('/api/factures/:id/avoirs', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const lignes = lignesAvoirPartiel(req.body?.lignes);
+    const totalHt = centimes(lignes.reduce((somme, ligne) => somme + ligne.totalHt, 0));
+    const totalTva = centimes(tauxUtilises(lignes).reduce((somme, taux) => somme + tvaDuTaux(lignes, taux), 0));
+    const totalTtc = centimes(totalHt + totalTva);
+    if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant d’avoir hors des limites acceptées.');
+    const resultat = await prisma.$transaction(async (tx) => {
+      // PostgreSQL verrouille la facture source jusqu’à la fin de la transaction ; sans ce
+      // verrou, deux administrateurs pourraient chacun lire le même reliquat puis le dépasser.
+      await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${paramId(req)} FOR UPDATE`;
+      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: true, avoirs: { include: { lignes: true } } } });
+      if (!facture) return { erreur: 'NOT_FOUND' as const };
+      if (facture.type !== 'FACTURE' || !['EMISE', 'REGLEE'].includes(facture.statut)) return { erreur: 'NOT_CREDITABLE' as const };
+      const tauxSource = new Set(tauxUtilises(facture.lignes));
+      for (const taux of tauxUtilises(lignes)) if (!tauxSource.has(taux)) throw new FactureInvalideError('Le taux de TVA d’une ligne d’avoir doit être présent sur la facture d’origine.');
+      const avoirsPrecedents = facture.avoirs;
+      const sommePrecedente = (champ: 'totalHt' | 'totalTva' | 'totalTtc') => centimes(avoirsPrecedents.reduce((somme, avoir) => somme + Number(avoir[champ]), 0));
+      if (centimes(sommePrecedente('totalHt') + totalHt) > Number(facture.totalHt) || centimes(sommePrecedente('totalTva') + totalTva) > Number(facture.totalTva) || centimes(sommePrecedente('totalTtc') + totalTtc) > Number(facture.totalTtc)) throw new AvoirPlafondError('Cet avoir dépasse le montant total restant à créditer sur la facture d’origine.');
+      for (const taux of tauxUtilises(lignes)) {
+        const htSource = baseHtDuTaux(facture.lignes, taux), tvaSource = tvaDuTaux(facture.lignes, taux);
+        const htPrecedent = centimes(avoirsPrecedents.reduce((somme, avoir) => somme + baseHtDuTaux(avoir.lignes, taux), 0));
+        const tvaPrecedente = centimes(avoirsPrecedents.reduce((somme, avoir) => somme + tvaDuTaux(avoir.lignes, taux), 0));
+        if (centimes(htPrecedent + baseHtDuTaux(lignes, taux)) > htSource || centimes(tvaPrecedente + tvaDuTaux(lignes, taux)) > tvaSource) throw new AvoirPlafondError(`Cet avoir dépasse le plafond restant pour la TVA à ${taux} % de la facture d’origine.`);
+      }
+      const now = new Date();
+      const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
+      const jour = jourCivilEntreprise(now, societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
+      const dateAvoir = new Date(`${jour}T00:00:00.000Z`);
+      const annee = dateAvoir.getUTCFullYear();
+      const sequence = await tx.sequenceAvoir.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
+      const prefixe = (societe?.prefixeAvoir || 'A').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'A';
+      const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+      const avoir = await tx.facture.create({ data: {
+        type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero, annee, statut: 'EMISE', dateEmission: dateAvoir, dateEcheance: dateAvoir,
+        clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
+        origine: facture.origine, chantierId: facture.chantierId, interventionId: facture.interventionId, contratMaintenanceId: facture.contratMaintenanceId,
+        motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
+        totalHt, totalTva, totalTtc, createdById: req.user!.id, emisLe: now, lignes: { create: lignes },
+      }, include: factureInclude });
+      await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR_PARTIEL', detail: `Avoir partiel de la facture ${facture.numero}` } });
+      return { avoir };
+    });
+    if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise ou réglée peut recevoir un avoir partiel.' });
+    return res.status(201).json(decimalToNumber(resultat.avoir));
+  } catch (error) {
+    if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
+    if (error instanceof AvoirPlafondError) return res.status(409).json({ error: error.message });
+    if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir total déjà créé ou numéro déjà attribué, veuillez relire la facture.' });
+    return res.status(500).json({ error: 'Création de l’avoir partiel impossible.' });
   }
 });
 
@@ -1753,7 +1836,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
         pointages: { where: { archivedAt: null }, include: { intervenant: true }, orderBy: { date: 'desc' } },
         // Toute facture numérotée reste rattachée à son affaire ; son statut décrit sa
         // situation, sans rompre la traçabilité du cycle commercial.
-        factures: { where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, select: { id: true, numero: true, statut: true, type: true, factureOrigineId: true, avoir: { select: { id: true } }, dateEmission: true, totalHt: true, totalTtc: true, origine: true } },
+        factures: { where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, select: { id: true, numero: true, statut: true, type: true, factureOrigineId: true, avoirs: { select: { id: true } }, dateEmission: true, totalHt: true, totalTtc: true, origine: true } },
       }
     });
     // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
@@ -1778,7 +1861,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
       // facture annulée est visible mais ne contribue plus, son avoir la neutralise.
       const totalFactureHt = factures.reduce((somme, facture) => {
         if (facture.type === 'AVOIR') return somme - Number(facture.totalHt);
-        if (facture.statut === 'ANNULEE' && !facture.avoir) return somme;
+        if (facture.statut === 'ANNULEE' && !facture.avoirs.length) return somme;
         return somme + Number(facture.totalHt);
       }, 0);
       detail.facturation = decimalToNumber({ factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
