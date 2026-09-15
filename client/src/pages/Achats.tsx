@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 import { isAdminRole } from '../roles';
-
-const dateFrancaiseDuJour = () => {
-  const maintenant = new Date();
-  return `${String(maintenant.getDate()).padStart(2, '0')}-${String(maintenant.getMonth() + 1).padStart(2, '0')}-${maintenant.getFullYear()}`;
-};
+import { useCompanyTimezone } from '../companyTimezoneContext';
+import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 
 const Achats = () => {
+  const companyTimezone = useCompanyTimezone();
   const [achats, setAchats] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -63,7 +61,7 @@ const Achats = () => {
         <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4 items-start sm:items-end flex-wrap">
           <div className="form-group mb-0 w-full sm:w-auto" style={{flex: '1 1 150px'}}>
             <label className="form-label">Date de facture</label>
-            <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" name="date" defaultValue={dateFrancaiseDuJour()} placeholder="JJ-MM-AAAA" className="form-input" />
+            <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" name="date" defaultValue={companyDateInputValue(companyTimezone)} placeholder="JJ-MM-AAAA" className="form-input" />
           </div>
           <div className="form-group mb-0" style={{flex: '1 1 200px'}}>
             <label className="form-label">Fournisseur</label>
@@ -120,7 +118,7 @@ const Achats = () => {
           <tbody>
             {achats.map(a => (
               <tr key={a.id} style={{borderBottom: '1px solid var(--color-border)'}}>
-                <td style={{padding: '8px'}}>{new Date(a.date).toLocaleDateString('fr-FR')}</td>
+                <td style={{padding: '8px'}}>{formatDateOnly(a.date)}</td>
                 <td style={{padding: '8px'}}>{a.chantier?.nom}</td>
                 <td style={{padding: '8px'}}>{a.fournisseur?.nom}</td>
                 <td style={{padding: '8px'}}>{a.numeroFacture || '-'}</td>

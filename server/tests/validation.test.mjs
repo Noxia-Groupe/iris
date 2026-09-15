@@ -7,7 +7,7 @@ import test, { describe } from 'node:test';
 const {
   clientPayload, contactPayload, sitePayload, companySettingsPayload,
   fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise,
-  dateEmissionEstFuture,
+  anneeEntreprise, dateEmissionEstFuture,
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
   commissionBaremeProgressif, computeChantierMetrics,
   parseBareme, serialiseBareme, validerBareme,
@@ -87,6 +87,14 @@ describe('Jours civils de l’entreprise', () => {
   test('permet de fixer l’instant de référence pour aujourd’hui', () => {
     const instant = new Date('2027-01-01T00:30:00.000Z');
     assert.equal(aujourdHuiEntreprise('America/Martinique', instant), '2026-12-31');
+  });
+
+  test('dérive l’année des références intervention et devis dans le fuseau de l’entreprise au nouvel an', () => {
+    // Le même instant appartient déjà à 2027 à Nouméa, mais encore à 2026 en Martinique.
+    // Les deux séquences annuelles (IYY et AYY) doivent donc choisir ces exercices, pas UTC.
+    const instant = new Date('2026-12-31T13:30:00.000Z');
+    assert.equal(anneeEntreprise(instant, 'Pacific/Noumea'), 2027, 'références I27 / A27 à Nouméa');
+    assert.equal(anneeEntreprise(instant, 'America/Martinique'), 2026, 'références I26 / A26 en Martinique');
   });
 
   test('le refus de date future se règle sur le jour civil de l’entreprise, pas sur UTC', () => {

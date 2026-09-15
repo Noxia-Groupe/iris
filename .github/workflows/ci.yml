@@ -124,6 +124,7 @@ jobs:
       # le Dockerfile, donc un build vert ici garantit une image constructible.
       - run: npm run build
       - run: npm run lint
+      - run: npm run test:unit
 
   parcours:
     name: Frontend — parcours utilisateur

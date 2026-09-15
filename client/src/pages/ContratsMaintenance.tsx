@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { CalendarPlus, FilePlus2, RefreshCw, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
+import { useCompanyTimezone } from '../companyTimezoneContext';
+import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 
 type Client = { id: string; raisonSociale: string };
 type ClientDetail = Client & { sites: { id: string; nom: string; ville: string; estSiteIntervention: boolean }[] };
@@ -9,16 +11,11 @@ type Contrat = {
   dateDebut: string; prochaineEcheance: string; client: Client; site?: { id: string; nom: string; ville: string } | null;
 };
 
-const formatDate = (value: string) => new Date(value).toLocaleDateString('fr-FR');
 const libelleStatut: Record<string, string> = { ACTIF: 'Actif', BROUILLON: 'Brouillon', SUSPENDU: 'Suspendu', TERMINE: 'Terminé' };
-const dateFrancaiseDuJour = () => {
-  // Le champ exige JJ-MM-AAAA : Intl rend des séparateurs localisés (souvent /), incompatibles
-  // avec son propre pattern. La date technique reste convertie exclusivement par le serveur.
-  const maintenant = new Date();
-  return `${String(maintenant.getDate()).padStart(2, '0')}-${String(maintenant.getMonth() + 1).padStart(2, '0')}-${maintenant.getFullYear()}`;
-};
 
 export default function ContratsMaintenance() {
+  const companyTimezone = useCompanyTimezone();
+  const formatDate = (value: string) => formatDateOnly(value);
   const [contrats, setContrats] = useState<Contrat[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [clientSelectionne, setClientSelectionne] = useState<ClientDetail | null>(null);
@@ -107,7 +104,7 @@ export default function ContratsMaintenance() {
       <select required name="clientId" className="form-input" defaultValue="" onChange={(event) => void choisirClient(event.target.value)}><option value="" disabled>Client concerné</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}</select>
       {clientSelectionne && <select name="siteId" className="form-input" defaultValue=""><option value="">Tous sites / site non précisé</option>{clientSelectionne.sites.map((site) => <option key={site.id} value={site.id}>{site.nom} — {site.ville}{site.estSiteIntervention ? ' · intervention' : ''}</option>)}</select>}
       <input required name="titre" minLength={3} maxLength={200} className="form-input" placeholder="Ex. Maintenance préventive SSI" />
-      <div className="grid gap-3 sm:grid-cols-3"><input required name="dateDebut" defaultValue={dateFrancaiseDuJour()} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Début (JJ-MM-AAAA)" /><input required name="periodiciteMois" type="number" min="1" max="60" defaultValue="12" className="form-input" placeholder="Périodicité (mois)" /><input required name="dureePrevisionnelleMinutes" type="number" min="15" max="1440" defaultValue="60" className="form-input" placeholder="Durée (minutes)" /></div>
+      <div className="grid gap-3 sm:grid-cols-3"><input required name="dateDebut" defaultValue={companyDateInputValue(companyTimezone)} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Début (JJ-MM-AAAA)" /><input required name="periodiciteMois" type="number" min="1" max="60" defaultValue="12" className="form-input" placeholder="Périodicité (mois)" /><input required name="dureePrevisionnelleMinutes" type="number" min="15" max="1440" defaultValue="60" className="form-input" placeholder="Durée (minutes)" /></div>
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer le contrat</button><button className="btn btn-secondary" type="button" onClick={() => { setFormulaireOuvert(false); setClientSelectionne(null); }}>Annuler</button></div>
     </form>}
     {chargement ? <p className="text-gray-500">Chargement…</p> : contrats.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucun contrat de maintenance.</div> : <div className="grid gap-3">{contrats.map((contrat) => <article key={contrat.id} className="rounded-xl border bg-white p-5 shadow-sm"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div><h2 className="font-semibold text-gray-900">{contrat.titre}</h2><p className="mt-1 text-sm text-gray-600">{contrat.client.raisonSociale}{contrat.site ? ` · ${contrat.site.nom} (${contrat.site.ville})` : ''}</p><p className="mt-2 text-sm text-gray-500">Début : {formatDate(contrat.dateDebut)} · Échéance : {formatDate(contrat.prochaineEcheance)} · Tous les {contrat.periodiciteMois} mois · {contrat.dureePrevisionnelleMinutes} min prévues</p></div><div className="flex items-center gap-3"><span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">{libelleStatut[contrat.statut] || contrat.statut}</span>{contrat.statut === 'ACTIF' && <><button className="btn btn-secondary flex items-center gap-2" onClick={() => void generer(contrat)}><CalendarPlus size={17} /> Générer l’intervention</button><button className="btn btn-secondary flex items-center gap-2" onClick={() => void avancerEcheance(contrat)}><RefreshCw size={17} /> Échéance suivante</button></>}{contrat.statut === 'ACTIF' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'SUSPENDU')}>Suspendre</button>}{contrat.statut === 'SUSPENDU' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'ACTIF')}>Réactiver</button>}{contrat.statut !== 'TERMINE' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'TERMINE')}>Clôturer</button>}</div></div></article>)}</div>}

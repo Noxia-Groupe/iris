@@ -33,6 +33,7 @@ import PreteAFacturer from './pages/PreteAFacturer';
 import { ErrorBoundary } from './ErrorBoundary';
 import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
 import { useModules } from './modules';
+import { CompanyTimezoneProvider } from './companyTimezone';
 
 // Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
 // ADMIN, il doit donc figurer partout où l'ADMIN était jusqu'ici seul admis.
@@ -61,6 +62,7 @@ const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX
   }
 
   return (
+    <CompanyTimezoneProvider>
     <div className="layout">
       <Sidebar />
       <div className="content-area">
@@ -72,6 +74,7 @@ const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX
         </main>
       </div>
     </div>
+    </CompanyTimezoneProvider>
   );
 };
 

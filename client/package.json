@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:unit": "tsx --test tests/dateFormatting.test.ts"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.16.0",
@@ -28,6 +29,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "oxlint": "^1.69.0",
     "tailwindcss": "^4.3.2",
+    "tsx": "^4.23.13",
     "typescript": "~6.0.2",
     "vite": "^8.1.0"
   }
