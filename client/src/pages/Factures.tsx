@@ -47,6 +47,8 @@ export default function Factures() {
   const [clientSelection, setClientSelection] = useState('');
   const [lignes, setLignes] = useState<Ligne[]>([nouvelleLigne()]);
   const [fuseauHoraire, setFuseauHoraire] = useState('Europe/Paris');
+  const [factureAvoir, setFactureAvoir] = useState<Facture | null>(null);
+  const [lignesAvoir, setLignesAvoir] = useState<Ligne[]>([nouvelleLigne()]);
 
   const charger = async () => {
     try {
@@ -87,6 +89,54 @@ export default function Factures() {
     setLignes((lignesActuelles) => lignesActuelles.length > 1
       ? lignesActuelles.filter((_, ligneIndex) => ligneIndex !== index)
       : lignesActuelles);
+  };
+
+  const ouvrirAvoirPartiel = (facture: Facture) => {
+    setErreur('');
+    setSucces('');
+    setFactureAvoir(facture);
+    setLignesAvoir([nouvelleLigne()]);
+  };
+
+  const modifierLigneAvoir = <Champ extends keyof Ligne>(index: number, champ: Champ, valeur: Ligne[Champ]) => {
+    setLignesAvoir((lignesActuelles) => lignesActuelles.map((ligne, ligneIndex) => (
+      ligneIndex === index ? { ...ligne, [champ]: valeur } : ligne
+    )));
+  };
+
+  const supprimerLigneAvoir = (index: number) => {
+    setLignesAvoir((lignesActuelles) => lignesActuelles.length > 1
+      ? lignesActuelles.filter((_, ligneIndex) => ligneIndex !== index)
+      : lignesActuelles);
+  };
+
+  const totauxAvoir = (() => {
+    const htParTaux = new Map<number, number>();
+    for (const ligne of lignesAvoir) {
+      const quantite = nombreFr(ligne.quantite) ?? 0;
+      const prixUnitaireHt = nombreFr(ligne.prixUnitaireHt) ?? 0;
+      const tauxTva = nombreFr(ligne.tauxTva) ?? 0;
+      htParTaux.set(tauxTva, (htParTaux.get(tauxTva) || 0) + quantite * prixUnitaireHt);
+    }
+    const totalHt = [...htParTaux.values()].reduce((somme, ht) => somme + ht, 0);
+    const totalTva = [...htParTaux.entries()].reduce((somme, [taux, ht]) => somme + ht * taux / 100, 0);
+    return { totalHt, totalTva, totalTtc: totalHt + totalTva };
+  })();
+
+  const creerAvoirPartiel = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!factureAvoir) return;
+    setErreur('');
+    setSucces('');
+    const lignesConverties = lignesAvoir.map((ligne) => ({ ...ligne, designation: ligne.designation.trim(), quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
+    const fautive = lignesConverties.findIndex((ligne) => !ligne.designation || ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.prixUnitaireHt < 0 || ligne.tauxTva === null || ligne.tauxTva < 0 || ligne.tauxTva > 100);
+    if (fautive >= 0) return setErreur(`Ligne d’avoir ${fautive + 1} : désignation obligatoire, quantité supérieure à zéro et montants numériques attendus (TVA entre 0 et 100).`);
+    const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
+    const data = await res.json();
+    if (!res.ok) return setErreur(data.error || 'Création de l’avoir partiel impossible.');
+    setFactureAvoir(null);
+    setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
+    await charger();
   };
 
   const creer = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -195,6 +245,48 @@ export default function Factures() {
       {erreur && <p className="text-red-600">{erreur}</p>}
       {succes && <p className="text-emerald-700">{succes}</p>}
 
+      {factureAvoir && (
+        <form className="rounded-xl border border-amber-300 bg-amber-50 p-5 space-y-4" onSubmit={creerAvoirPartiel}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Nouvel avoir partiel</h2>
+              <p className="text-sm text-gray-600">Facture {factureAvoir.numero} du {formatDate(factureAvoir.dateEmission)} — {factureAvoir.client.raisonSociale}</p>
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={() => setFactureAvoir(null)}>Annuler</button>
+          </div>
+          <p className="text-sm text-gray-600">Les plafonds cumulés et les taux autorisés sont contrôlés par le serveur lors de la création.</p>
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-medium">Lignes à créditer</h3>
+              <button type="button" className="btn btn-secondary" onClick={() => setLignesAvoir((lignesActuelles) => [...lignesActuelles, nouvelleLigne()])}>
+                <Plus size={16} /> Ajouter une ligne d’avoir
+              </button>
+            </div>
+            {lignesAvoir.map((ligne, index) => (
+              <div key={index} className="grid gap-3 rounded-lg border bg-white p-3 sm:grid-cols-12">
+                <input required className="form-input sm:col-span-4" value={ligne.designation} onChange={(e) => modifierLigneAvoir(index, 'designation', e.target.value)} placeholder="Désignation" aria-label={`Désignation ligne avoir ${index + 1}`} />
+                <select className="form-input sm:col-span-2" value={ligne.nature} onChange={(e) => modifierLigneAvoir(index, 'nature', e.target.value as NatureLigne)} aria-label={`Nature ligne avoir ${index + 1}`}>
+                  <option value="PRESTATION">Prestation</option>
+                  <option value="ARTICLE">Article</option>
+                </select>
+                <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.quantite} onChange={(e) => modifierLigneAvoir(index, 'quantite', e.target.value)} placeholder="Qté" aria-label={`Quantité ligne avoir ${index + 1}`} />
+                <input required inputMode="decimal" className="form-input sm:col-span-2" value={ligne.prixUnitaireHt} onChange={(e) => modifierLigneAvoir(index, 'prixUnitaireHt', e.target.value)} placeholder="PU HT" aria-label={`Prix unitaire HT ligne avoir ${index + 1}`} />
+                <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.tauxTva} onChange={(e) => modifierLigneAvoir(index, 'tauxTva', e.target.value)} placeholder="TVA %" aria-label={`TVA ligne avoir ${index + 1}`} />
+                <button type="button" className="btn btn-secondary sm:col-span-2" disabled={lignesAvoir.length === 1} onClick={() => supprimerLigneAvoir(index)} aria-label={`Supprimer la ligne d’avoir ${index + 1}`}>
+                  <Trash2 size={16} /> Supprimer
+                </button>
+              </div>
+            ))}
+          </section>
+          <div data-testid="aperçu-avoir" className="grid gap-3 rounded-lg border bg-white p-3 text-sm sm:grid-cols-3">
+            <span><strong>Total HT</strong><br />{formatMontant(totauxAvoir.totalHt)}</span>
+            <span><strong>TVA</strong><br />{formatMontant(totauxAvoir.totalTva)}</span>
+            <span><strong>Total TTC</strong><br />{formatMontant(totauxAvoir.totalTtc)}</span>
+          </div>
+          <button className="btn btn-primary" type="submit"><Send size={16} /> Créer l’avoir partiel</button>
+        </form>
+      )}
+
       {ouvert && (
         <form className="rounded-xl border bg-white p-5 space-y-4" onSubmit={creer}>
           <div className="flex items-center justify-between gap-3">
@@ -272,6 +364,7 @@ export default function Factures() {
                 <td className="p-3">{facture.statut}</td>
                 <td className="p-3"><div className="flex flex-wrap gap-2">
                   {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>}
+                  {facture.type === 'FACTURE' && ['EMISE', 'REGLEE'].includes(facture.statut) && <button className="btn btn-secondary" onClick={() => ouvrirAvoirPartiel(facture)}><FilePlus2 size={16} /> Créer un avoir partiel</button>}
                   {facture.type === 'FACTURE' && facture.statut === 'EMISE' && <>
                     <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'regler')}><CheckCircle2 size={16} /> Marquer comme réglée</button>
                     <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'annuler')}><Ban size={16} /> Annuler la facture</button>
