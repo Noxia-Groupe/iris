@@ -310,6 +310,46 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(prefixe.getByRole('link', { name: 'Configurer' })).toHaveCount(0);
   });
 
+  test('affiche sur la fiche affaire les factures émises liées et leur PDF', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
+    const apiResponse = await apiAdmin.get('/company');
+    expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
+    const api = new URL('/api', apiResponse.url()).toString().replace(/\/$/, '');
+    const client = await creerClient('factures-liees');
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const devis = await request.post(`${api}/devis`, {
+      headers,
+      data: { clientId: client.id, objet: `Affaire E2E facturée ${Date.now()}`, lignes: [{ designation: 'Pose facturée', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
+    });
+    expect(devis.ok(), await devis.text()).toBeTruthy();
+    const { id: devisId } = await devis.json() as { id: string };
+    for (const statut of ['ENVOYE', 'ACCEPTE']) {
+      const changement = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut } });
+      expect(changement.ok(), await changement.text()).toBeTruthy();
+    }
+    const conversion = await request.post(`${api}/devis/${devisId}/convertir`, { headers, data: { cible: 'CHANTIER' } });
+    expect(conversion.ok(), await conversion.text()).toBeTruthy();
+    const { id: chantierId } = await conversion.json() as { id: string };
+    const brouillon = await request.post(`${api}/factures`, {
+      headers,
+      data: { clientId: client.id, origine: 'CHANTIER', chantierId, dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'Pose facturée', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
+    });
+    expect(brouillon.ok(), await brouillon.text()).toBeTruthy();
+    const { id: factureId } = await brouillon.json() as { id: string };
+    const emission = await request.post(`${api}/factures/${factureId}/emettre`, { headers });
+    expect(emission.ok(), await emission.text()).toBeTruthy();
+    const { numero } = await emission.json() as { numero: string };
+
+    const page = await allerSurPageAdmin(`/chantiers/${chantierId}`);
+    const liste = page.getByRole('region', { name: 'Factures liées' });
+    await expect(liste).toBeVisible();
+    const ligne = liste.locator('tr', { hasText: numero });
+    await expect(ligne).toContainText('Facture');
+    await expect(ligne).toContainText('EMISE');
+    await expect(ligne).toContainText(/100\s*€/);
+    await expect(ligne).toContainText(/120\s*€/);
+    await expect(ligne.getByRole('button', { name: 'PDF' })).toBeVisible();
+  });
+
   test.describe('navigateur Pacific/Gambier', () => {
     test.use({ timezoneId: 'Pacific/Gambier' });
 

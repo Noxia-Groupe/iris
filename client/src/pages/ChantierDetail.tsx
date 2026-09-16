@@ -27,6 +27,16 @@ const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDig
 const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
 const daysBetween = (a: Date, b: Date) => Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000));
 
+type FactureLiee = {
+  id: string;
+  numero: string;
+  type: 'FACTURE' | 'AVOIR';
+  statut: string;
+  dateEmission: string;
+  totalHt: number;
+  totalTtc: number;
+};
+
 const STATUT_LABELS: Record<string, string> = {
   EN_COURS: 'En cours',
   TERMINE: 'Terminé',
@@ -368,6 +378,27 @@ const ChantierDetail = () => {
     html2pdf().set(opt).from(printRef.current).save();
   };
 
+  // Le téléchargement conserve les règles de l'écran Factures : seuls les administrateurs
+  // peuvent appeler la route PDF, et la liste ne contient côté API que des documents émis.
+  const handleDownloadFacturePdf = async (facture: Pick<FactureLiee, 'id' | 'numero'>) => {
+    try {
+      const res = await apiFetch(`/factures/${facture.id}/document.pdf`);
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Document indisponible.');
+        return;
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${facture.numero}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
   // Références stables tant que le chantier n'est pas rechargé : les répartitions et le
   // journal des achats ci-dessous sont mémorisés à partir de ces listes.
   const achats: any[] = useMemo(() => chantier?.achats || [], [chantier]);
@@ -682,6 +713,34 @@ const ChantierDetail = () => {
                 <div className="text-2xl font-black text-emerald-800">{fmtEuro(chantier.facturation.totalFactureHt)}</div>
                 <div className="mt-1 text-xs text-emerald-700">Reste à facturer : {fmtEuro(chantier.facturation.resteAFacturerHt)}</div>
               </div>
+            )}
+
+            {chantier.facturation?.factures?.length > 0 && (
+              <section aria-label="Factures liées" className="lg:col-span-4 overflow-x-auto rounded-xl border border-emerald-100 bg-white">
+                <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-5 py-3">
+                  <Wallet size={18} className="text-emerald-700" />
+                  <h3 className="m-0 text-lg font-bold text-emerald-900">Factures liées</h3>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-emerald-700">{chantier.facturation.factures.length}</span>
+                </div>
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                    <tr><th className="p-3">Numéro</th><th className="p-3">Type</th><th className="p-3">Statut</th><th className="p-3">Émission</th><th className="p-3 text-right">Total HT</th><th className="p-3 text-right">Total TTC</th>{isAdminRole(userRole) && <th className="p-3">Action</th>}</tr>
+                  </thead>
+                  <tbody>
+                    {chantier.facturation.factures.map((facture: FactureLiee) => (
+                      <tr key={facture.id} className="border-t border-gray-100">
+                        <td className="p-3 font-semibold text-gray-800">{facture.numero}</td>
+                        <td className="p-3">{facture.type === 'AVOIR' ? 'Avoir' : 'Facture'}</td>
+                        <td className="p-3">{facture.statut}</td>
+                        <td className="p-3">{toDateFrancaise(facture.dateEmission)}</td>
+                        <td className="p-3 text-right font-semibold">{fmtEuro(facture.totalHt)}</td>
+                        <td className="p-3 text-right font-semibold">{fmtEuro(facture.totalTtc)}</td>
+                        {isAdminRole(userRole) && <td className="p-3"><button type="button" className="btn btn-secondary" onClick={() => void handleDownloadFacturePdf(facture)}><FileDown size={16} /> PDF</button></td>}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
             )}
 
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
