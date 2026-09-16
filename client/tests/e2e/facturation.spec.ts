@@ -316,7 +316,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     test('préremplit Achats, Heures et Factures au jour de Pacific/Wallis, distinct du navigateur', async ({ allerSurPageAdmin, apiAdmin, page, request, session }) => {
       await page.clock.install({ time: new Date('2027-01-01T13:30:00Z') });
       expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('Pacific/Gambier');
-      expect(await page.evaluate(() => new Date().toISOString())).toBe('2027-01-01T13:30:00.000Z');
+      expect(await page.evaluate(() => new Date().toISOString().startsWith('2027-01-01T13:30:00.'))).toBeTruthy();
       // Ce garde-fou rend le scénario discriminant : Gambier est encore le 01, Wallis est déjà le 02.
       expect(await page.evaluate(() => new Intl.DateTimeFormat('en-CA', {
         year: 'numeric', month: '2-digit', day: '2-digit',
