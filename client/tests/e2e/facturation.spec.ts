@@ -1,5 +1,15 @@
+import { createHmac } from 'node:crypto';
 import type { Page } from '@playwright/test';
 import { test, expect, dateDuJour } from './fixtures';
+
+// Aucune route de connexion par mot de passe n'existe (SSO Microsoft ou accès de secours) :
+// pour ouvrir une session dans un rôle non administrateur, on signe le jeton avec le
+// secret que playwright.config.ts donne au backend jetable.
+const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toString('base64url');
+function jetonPour(userId: string) {
+  const corps = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
+  return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
+}
 
 test.describe('Facturation — parcours utilisateur', () => {
   // Prépare une facture émise hors affaire et rend sa ligne de tableau.
@@ -310,7 +320,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(prefixe.getByRole('link', { name: 'Configurer' })).toHaveCount(0);
   });
 
-  test('affiche sur la fiche affaire les factures émises liées et leur PDF', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
+  test('réserve aux administrateurs le PDF des factures liées de la fiche affaire', async ({ page, apiAdmin, creerClient, request, session }) => {
     const apiResponse = await apiAdmin.get('/company');
     expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
     const api = new URL('/api', apiResponse.url()).toString().replace(/\/$/, '');
@@ -329,6 +339,20 @@ test.describe('Facturation — parcours utilisateur', () => {
     const conversion = await request.post(`${api}/devis/${devisId}/convertir`, { headers, data: { cible: 'CHANTIER' } });
     expect(conversion.ok(), await conversion.text()).toBeTruthy();
     const { id: chantierId } = await conversion.json() as { id: string };
+    // Conducteur désigné responsable : c'est la configuration où le serveur lui livre
+    // le bloc facturation. Le tableau visible rend l'absence du PDF significative.
+    const nom = 'Conducteur factures liées';
+    const creation = await request.post(`${api}/users`, {
+      headers,
+      data: { email: `conducteur.factures.${Date.now()}@iris.test`, name: nom, role: 'CONDUCTEUR_TRAVAUX' },
+    });
+    expect(creation.status(), await creation.text()).toBe(201);
+    const { id: conducteurId } = await creation.json() as { id: string };
+    const affectation = await request.patch(`${api}/chantiers/${chantierId}`, {
+      headers,
+      data: { responsableId: conducteurId },
+    });
+    expect(affectation.ok(), await affectation.text()).toBeTruthy();
     const brouillon = await request.post(`${api}/factures`, {
       headers,
       data: { clientId: client.id, origine: 'CHANTIER', chantierId, dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'Pose facturée', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
@@ -339,19 +363,74 @@ test.describe('Facturation — parcours utilisateur', () => {
     expect(emission.ok(), await emission.text()).toBeTruthy();
     const { numero } = await emission.json() as { numero: string };
 
-    const page = await allerSurPageAdmin(`/chantiers/${chantierId}`);
+    const jeton = jetonPour(conducteurId);
+    await page.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token as string);
+      localStorage.setItem('user', user as string);
+    }, [jeton, JSON.stringify({ id: conducteurId, name: nom, email: 'conducteur@iris.test', role: 'CONDUCTEUR_TRAVAUX', permissions: [] })]);
+    await page.goto(`/chantiers/${chantierId}`, { waitUntil: 'networkidle' });
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('user') || '{}').role)).toBe('CONDUCTEUR_TRAVAUX');
     const liste = page.getByRole('region', { name: 'Factures liées' });
     await expect(liste).toBeVisible();
     const ligne = liste.locator('tr', { hasText: numero });
-    await expect(ligne).toContainText('Facture');
-    await expect(ligne).toContainText('EMISE');
-    await expect(ligne).toContainText(/100\s*€/);
-    await expect(ligne).toContainText(/120\s*€/);
-    await expect(ligne.getByRole('button', { name: 'PDF' })).toBeVisible();
+    await expect(ligne.locator('td').nth(0)).toHaveText(numero);
+    await expect(ligne.locator('td').nth(4)).toHaveText(/^100\s*€$/);
+    await expect(ligne.getByRole('button', { name: 'PDF' })).toHaveCount(0);
+    const pdf = await request.get(`${api}/factures/${factureId}/document.pdf`, { headers: { Authorization: `Bearer ${jeton}` } });
+    expect(pdf.status(), await pdf.text()).toBe(403);
   });
 
   test.describe('navigateur Pacific/Gambier', () => {
     test.use({ timezoneId: 'Pacific/Gambier' });
+
+    // dateEmission est une date-seule stockée à minuit UTC : à l'ouest de Greenwich,
+    // un rendu qui passerait par le fuseau du navigateur afficherait la veille.
+    test('affiche sur la fiche affaire les factures émises liées et leur PDF', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
+      const apiResponse = await apiAdmin.get('/company');
+      expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
+      const api = new URL('/api', apiResponse.url()).toString().replace(/\/$/, '');
+      const client = await creerClient('factures-liees');
+      const headers = { Authorization: `Bearer ${session.token}` };
+      const devis = await request.post(`${api}/devis`, {
+        headers,
+        data: { clientId: client.id, objet: `Affaire E2E facturée ${Date.now()}`, lignes: [{ designation: 'Pose facturée', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
+      });
+      expect(devis.ok(), await devis.text()).toBeTruthy();
+      const { id: devisId } = await devis.json() as { id: string };
+      for (const statut of ['ENVOYE', 'ACCEPTE']) {
+        const changement = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut } });
+        expect(changement.ok(), await changement.text()).toBeTruthy();
+      }
+      const conversion = await request.post(`${api}/devis/${devisId}/convertir`, { headers, data: { cible: 'CHANTIER' } });
+      expect(conversion.ok(), await conversion.text()).toBeTruthy();
+      const { id: chantierId } = await conversion.json() as { id: string };
+      const brouillon = await request.post(`${api}/factures`, {
+        headers,
+        data: { clientId: client.id, origine: 'CHANTIER', chantierId, dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'Pose facturée', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
+      });
+      expect(brouillon.ok(), await brouillon.text()).toBeTruthy();
+      const { id: factureId } = await brouillon.json() as { id: string };
+      const emission = await request.post(`${api}/factures/${factureId}/emettre`, { headers });
+      expect(emission.ok(), await emission.text()).toBeTruthy();
+      const { numero } = await emission.json() as { numero: string };
+
+      const page = await allerSurPageAdmin(`/chantiers/${chantierId}`);
+      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('Pacific/Gambier');
+      const liste = page.getByRole('region', { name: 'Factures liées' });
+      await expect(liste).toBeVisible();
+      const ligne = liste.locator('tr', { hasText: numero });
+      const cellules = ligne.locator('td');
+      await expect(cellules.nth(0)).toHaveText(numero);
+      await expect(cellules.nth(1)).toHaveText('Facture');
+      await expect(cellules.nth(2)).toHaveText('EMISE');
+      await expect(cellules.nth(3)).toHaveText(dateDuJour());
+      await expect(cellules.nth(4)).toHaveText(/^100\s*€$/);
+      await expect(cellules.nth(5)).toHaveText(/^120\s*€$/);
+      await expect(ligne.getByRole('button', { name: 'PDF' })).toBeVisible();
+      const pdf = await apiAdmin.get(`/factures/${factureId}/document.pdf`);
+      expect(pdf.status(), await pdf.text()).toBe(200);
+      expect(pdf.headers()['content-type']).toContain('application/pdf');
+    });
 
     test('émet la facture au jour proposé et conserve ce jour dans la ligne', async ({ allerSurPageAdmin, creerClient, page }) => {
       const client = await creerClient('fuseau-gambier');
