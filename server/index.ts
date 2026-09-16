@@ -522,6 +522,12 @@ function aujourdHuiEntreprise(fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT, instant
   return jourCivilEntreprise(instant, fuseauHoraire);
 }
 
+// Les références annuelles sont dérivées d'un instant de création : leur exercice est
+// donc celui du jour civil de l'entreprise, jamais celui d'UTC ou de la machine serveur.
+function anneeEntreprise(instant: Date, fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT): number {
+  return Number(jourCivilEntreprise(instant, fuseauHoraire).slice(0, 4));
+}
+
 // La règle « pas de facture postdatée » compare des JOURS CIVILS de l'entreprise, jamais
 // des instants. `instant` est injectable pour que la règle soit testable sans dépendre de
 // l'heure qu'il est au moment où la suite tourne.
@@ -1359,7 +1365,8 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
         include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
       });
       if (existante) return { intervention: existante, creee: false };
-      const annee = new Date().getUTCFullYear();
+      const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
+      const annee = anneeEntreprise(new Date(), societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
       const sequence = await tx.sequenceIntervention.upsert({
         where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
       });
@@ -1411,7 +1418,8 @@ app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthReq
     }
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
     if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
-    const annee = new Date().getUTCFullYear();
+    const societe = await getCompanySettings();
+    const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
     const intervention = await prisma.$transaction(async (tx) => {
       const sequence = await tx.sequenceIntervention.upsert({
         where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
@@ -3835,7 +3843,8 @@ function devisErreur(res: express.Response, error: unknown) {
 }
 const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true, conversion: true };
 async function nouveauNumeroDevis() {
-  const annee = new Date().getFullYear();
+  const societe = await getCompanySettings();
+  const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
   const [sequence] = await prisma.$queryRaw<{ dernierNumero: number }[]>(Prisma.sql`INSERT INTO "SequenceAffaire" ("annee", "dernierNumero") VALUES (${annee}, 1) ON CONFLICT ("annee") DO UPDATE SET "dernierNumero" = "SequenceAffaire"."dernierNumero" + 1 RETURNING "dernierNumero"`);
   return `A${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
 }
@@ -5053,6 +5062,7 @@ export {
   fuseauHoraireEntrepriseValide,
   jourCivilEntreprise,
   aujourdHuiEntreprise,
+  anneeEntreprise,
   dateEmissionEstFuture,
   cataloguePayload,
   catalogueExtraPayload,

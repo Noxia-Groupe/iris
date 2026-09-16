@@ -11,6 +11,8 @@ import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
+import { useCompanyTimezone } from '../companyTimezoneContext';
+import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
 
 // Date ISO (avec ou sans heure) -> format métier français JJ-MM-AAAA.
 const toDateFrancaise = (d: string | null | undefined) => {
@@ -19,7 +21,7 @@ const toDateFrancaise = (d: string | null | undefined) => {
   return `${jour}-${mois}-${annee}`;
 };
 
-const fmtDate = (d: string) => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+const fmtDate = (d: string) => formatDateOnly(d, { day: '2-digit', month: 'long', year: 'numeric' });
 const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
 // Heures pointées : demi-heures possibles, mais pas de décimale inutile (8 h, 7,5 h).
 const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
@@ -31,6 +33,7 @@ const STATUT_LABELS: Record<string, string> = {
 };
 
 const ChantierDetail = () => {
+  const companyTimezone = useCompanyTimezone();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -1095,7 +1098,7 @@ const ChantierDetail = () => {
                 <div key={entree.id} className="px-6 py-4 text-sm">
                   <div className="flex flex-wrap justify-between gap-2">
                     <strong>{entree.cible === 'ACHAT' ? 'Achat' : 'Heures'} — {entree.action.toLowerCase()}</strong>
-                    <span className="text-gray-500">{fmtDate(entree.createdAt)} · {entree.auteurNom}</span>
+                    <span className="text-gray-500">{formatCompanyDate(entree.createdAt, companyTimezone, { day: '2-digit', month: 'long', year: 'numeric' })} · {entree.auteurNom}</span>
                   </div>
                   {entree.motif && <p className="mt-1 text-gray-600">Motif : {entree.motif}</p>}
                   {entree.action === 'CORRECTION' && (

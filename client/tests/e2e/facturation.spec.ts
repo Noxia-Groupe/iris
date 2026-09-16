@@ -310,17 +310,45 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(prefixe.getByRole('link', { name: 'Configurer' })).toHaveCount(0);
   });
 
-  test.describe('à l’ouest de Greenwich', () => {
-    test.use({ timezoneId: 'America/New_York' });
-    test('affiche la date d’émission sans la décaler d’un jour', async ({ allerSurPageAdmin, creerClient, page }) => {
-      const client = await creerClient('fuseau'); await allerSurPageAdmin('/factures');
-      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('America/New_York');
-      await page.getByRole('button', { name: /Nouvelle facture/ }).click(); await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
-      await page.locator('input[name="motifHorsAffaire"]').fill('Parcours fuseau'); const aujourdhui = dateDuJour();
-      await page.locator('input[name="dateEmission"]').fill(aujourdhui); await page.locator('input[name="dateEcheance"]').fill(aujourdhui);
-      await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle fuseau'); const prix = page.locator('input[aria-label="Prix unitaire HT ligne 1"]'); await prix.click(); await prix.pressSequentially('100');
-      await page.getByRole('button', { name: /Créer le brouillon/ }).click(); await expect(page.getByText(/Brouillon créé/)).toBeVisible();
-      const [jour, mois, annee] = aujourdhui.split('-'); const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }); await expect(ligne).toHaveCount(1); await expect(ligne).toContainText(new RegExp(`${jour}[-/]${mois}[-/]${annee}`));
+  test.describe('fuseau horaire entreprise', () => {
+    test.use({ timezoneId: 'Pacific/Gambier' });
+
+    test('préremplit Achats, Heures et Factures au jour de Pacific/Wallis, distinct du navigateur', async ({ allerSurPageAdmin, apiAdmin, page, request, session }) => {
+      await page.clock.install({ time: new Date('2027-01-01T13:30:00Z') });
+      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('Pacific/Gambier');
+      expect(await page.evaluate(() => new Date().toISOString().startsWith('2027-01-01T13:30:00.'))).toBeTruthy();
+      // Ce garde-fou rend le scénario discriminant : Gambier est encore le 01, Wallis est déjà le 02.
+      expect(await page.evaluate(() => new Intl.DateTimeFormat('en-CA', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date()).map((partie) => partie.value).join(''))).toBe('2027-01-01');
+      const reponseSociete = await apiAdmin.get('/company');
+      expect(reponseSociete.ok(), await reponseSociete.text()).toBeTruthy();
+      const societeInitiale = await reponseSociete.json() as { fuseauHoraire?: string | null };
+      const api = new URL('/api', reponseSociete.url()).toString().replace(/\/$/, '');
+      const mettreAJourFuseau = (fuseauHoraire: string) => request.put(`${api}/company`, {
+        headers: { Authorization: `Bearer ${session.token}` },
+        data: { fuseauHoraire },
+      });
+
+      try {
+        const miseAJour = await mettreAJourFuseau('Pacific/Wallis');
+        expect(miseAJour.ok(), await miseAJour.text()).toBeTruthy();
+        expect((await miseAJour.json() as { fuseauHoraire: string }).fuseauHoraire).toBe('Pacific/Wallis');
+
+        await allerSurPageAdmin('/achats');
+        await expect(page.locator('input[name="date"]')).toHaveValue('02-01-2027');
+
+        await allerSurPageAdmin('/heures');
+        await expect(page.locator('input[name="date"]')).toHaveValue('02-01-2027');
+
+        await allerSurPageAdmin('/factures');
+        await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+        await expect(page.locator('input[name="dateEmission"]')).toHaveValue('02-01-2027');
+        await expect(page.locator('input[name="dateEcheance"]')).toHaveValue('02-01-2027');
+      } finally {
+        const restauration = await mettreAJourFuseau(societeInitiale.fuseauHoraire || 'Europe/Paris');
+        expect(restauration.ok(), await restauration.text()).toBeTruthy();
+      }
     });
   });
 });

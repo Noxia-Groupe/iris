@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Copy, Check, X, RefreshCw, Power, Share2 } from 'lucide-react';
 import { apiFetch } from '../api';
+import { useCompanyTimezone } from '../companyTimezoneContext';
+import { formatCompanyDateTime } from '../lib/dateFormatting';
 
 export interface PlanningShareState {
   published: boolean;
@@ -23,6 +25,7 @@ export default function PlanningShareModal({
   onClose: () => void;
   onChanged: (s: PlanningShareState) => void;
 }) {
+  const companyTimezone = useCompanyTimezone();
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -102,7 +105,7 @@ export default function PlanningShareModal({
               </div>
               {share.updatedAt && (
                 <p className="text-xs text-gray-400 mt-1">
-                  Dernière mise à jour le {new Date(share.updatedAt).toLocaleString('fr-FR')}
+                  Dernière mise à jour le {formatCompanyDateTime(share.updatedAt, companyTimezone)}
                 </p>
               )}
             </div>

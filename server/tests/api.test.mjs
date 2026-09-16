@@ -1821,7 +1821,55 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    test('l’export ne déplace jamais une date d’émission, et date l’annulation dans le fuseau de la société', async () => {
+    // Le pendant du test suivant : une date-seule ne bouge JAMAIS, quel que soit le fuseau
+    // de la société. Sans cette garde, relire `dateEmission` comme un instant passe
+    // inaperçu — à l'ouest de Greenwich l'avoir s'exporterait la veille de son émission.
+    test('l’export ne déplace jamais la date d’émission d’un avoir', async () => {
+      const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
+      assert.ok(compteTva, 'le compte TVA de test existe');
+      // L'export refuse de sortir tant qu'un taux utilisé n'a pas son compte : la règle 5,5
+      // doit exister avant d'exporter, comme dans le test voisin.
+      await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
+      // La numérotation est chronologique : on émet au jour de la dernière facture numérotée
+      // plutôt qu'à une date fixe, sinon ce test dépendrait de son rang dans la suite.
+      const derniere = await prisma.facture.findFirst({ where: { numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
+      const jour = derniere ? derniere.dateEmission : new Date('2026-09-09T00:00:00.000Z');
+      const jourFrancais = `${String(jour.getUTCDate()).padStart(2, '0')}-${String(jour.getUTCMonth() + 1).padStart(2, '0')}-${jour.getUTCFullYear()}`;
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'date-seule immobile', dateEmission: jourFrancais, dateEcheance: jourFrancais, lignes: [{ designation: 'TEST date-seule', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const annulation = await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      const avoir = annulation.body.avoir;
+      const jourAttendu = avoir.dateEmission.slice(0, 10).replace(/-/g, '');
+      const datesDeLAvoir = async () => {
+        const csv = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+        assert.equal(csv.status, 200, csv.text);
+        const lignes = csv.text.split('\n').filter((ligne) => ligne.includes(avoir.numero) && ligne.includes(`Avoir ${avoir.numero}`));
+        assert.ok(lignes.length, 'aucune écriture d’avoir dans l’export');
+        return [...new Set(lignes.map((ligne) => ligne.split(';')[1].replace(/"/g, '')))];
+      };
+      const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+      try {
+        // Nouméa (UTC+11) et Gambier (UTC−9) encadrent l'écart maximal des territoires
+        // français : si la date-seule bougeait, l'un des deux la décalerait d'un jour.
+        for (const fuseau of ['Europe/Paris', 'Pacific/Noumea', 'America/Martinique', 'Pacific/Gambier']) {
+          assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
+          assert.deepEqual(await datesDeLAvoir(), [jourAttendu], `la date d’émission de l’avoir reste une date-seule en ${fuseau}`);
+        }
+      } finally {
+        await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
+        await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+        await prisma.facture.delete({ where: { id: avoir.id } });
+        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
+        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
+        await prisma.facture.delete({ where: { id: emission.body.id } });
+      }
+    });
+
+    test('l’export date la contre-passation legacy dans le fuseau de la société', async () => {
       const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
       assert.ok(compteTva, 'le compte TVA de test existe');
       await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
@@ -1831,20 +1879,25 @@ if (!TEST_DATABASE_URL) {
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
       const annulation = await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
       assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      // Retire l'avoir pour exercer le chemin historique de contre-passation, pas son
+      // remplacement moderne. L'instant est volontairement à cheval sur le nouvel an.
       const avoir = annulation.body.avoir;
-      await prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2026-09-09T04:30:00.000Z') } });
-      const datesDe = async (motif) => {
+      await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
+      await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+      await prisma.facture.delete({ where: { id: avoir.id } });
+      await prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2027-01-01T00:30:00.000Z') } });
+      const jourComptable = async () => {
         const csv = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
         assert.equal(csv.status, 200, csv.text);
-        const lignes = csv.text.split('\n').filter((ligne) => ligne.includes(avoir.numero) && ligne.includes(motif));
-        assert.ok(lignes.length, `aucune écriture « ${motif} » dans l’export`);
+        const lignes = csv.text.split('\n').filter((ligne) => ligne.includes(emission.body.numero) && ligne.includes(`Annulation facture ${emission.body.numero}`));
+        assert.ok(lignes.length, 'aucune contre-passation legacy dans l’export');
         return [...new Set(lignes.map((ligne) => ligne.split(';')[1].replace(/"/g, '')))];
       };
       const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
       try {
-        for (const [fuseau] of [['Europe/Paris'], ['Pacific/Noumea'], ['America/Martinique'], ['Pacific/Gambier']]) {
+        for (const [fuseau, jourAttendu] of [['Europe/Paris', '20270101'], ['Pacific/Noumea', '20270101'], ['America/Martinique', '20261231'], ['Pacific/Gambier', '20261231']]) {
           assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
-          assert.deepEqual(await datesDe(`Avoir ${avoir.numero}`), [avoir.dateEmission.slice(0, 10).replace(/-/g, '')], `la date d’émission de l’avoir reste une date-seule en ${fuseau}`);
+          assert.deepEqual(await jourComptable(), [jourAttendu], `la contre-passation suit l’instant dans ${fuseau}`);
         }
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
