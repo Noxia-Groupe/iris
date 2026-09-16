@@ -310,6 +310,32 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(prefixe.getByRole('link', { name: 'Configurer' })).toHaveCount(0);
   });
 
+  test.describe('navigateur Pacific/Gambier', () => {
+    test.use({ timezoneId: 'Pacific/Gambier' });
+
+    test('émet la facture au jour proposé et conserve ce jour dans la ligne', async ({ allerSurPageAdmin, creerClient, page }) => {
+      const client = await creerClient('fuseau-gambier');
+      await allerSurPageAdmin('/factures');
+      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('Pacific/Gambier');
+
+      await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+      const dateEmission = page.locator('input[name="dateEmission"]');
+      const jourPropose = await dateEmission.inputValue();
+      expect(jourPropose).toMatch(/^\d{2}-\d{2}-\d{4}$/);
+      await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+      await page.locator('input[name="motifHorsAffaire"]').fill('Parcours fuseau Gambier');
+      await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle de la date proposée');
+      await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
+      await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+
+      const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+      await expect(ligne).toContainText('BROUILLON');
+      await ligne.getByRole('button', { name: /Émettre/ }).click();
+      await expect(ligne).toContainText('EMISE');
+      await expect(ligne).toContainText(jourPropose);
+    });
+  });
+
   test.describe('fuseau horaire entreprise', () => {
     test.use({ timezoneId: 'Pacific/Gambier' });
 

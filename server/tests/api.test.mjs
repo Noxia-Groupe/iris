@@ -2234,6 +2234,20 @@ if (!TEST_DATABASE_URL) {
       assert.equal(lecture.body.raisonSociale, 'TEST Société');
     });
 
+    test('lit weekStart et weekEnd dans le fuseau société pour une référence instant', async () => {
+      // Le dimanche 1er mars UTC est déjà lundi 2 mars à Wallis : l’API ne doit pas
+      // répondre avec la semaine UTC précédente.
+      const maj = await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Pacific/Wallis' });
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      const res = await request(app)
+        .get('/api/stats/conducteurs/assiduite')
+        .query({ week: '2026-03-01T12:30:00.000Z' })
+        .set('Authorization', `Bearer ${session}`);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.weekStart, '2026-03-02');
+      assert.equal(res.body.weekEnd, '2026-03-06');
+    });
+
     test('n’accepte que les fuseaux horaires français et expose le réglage', async () => {
       const invalide = await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Europe/London' });
       assert.equal(invalide.status, 400, JSON.stringify(invalide.body));
