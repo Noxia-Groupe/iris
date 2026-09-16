@@ -2064,7 +2064,10 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req,
     // renseigne automatiquement à la clôture si elle n'a pas déjà été saisie à la main.
     const data: Record<string, unknown> = { statut: nextStatut };
     if (nextStatut === 'TERMINE' && !chantier.dateFin) {
-      data.dateFin = new Date();
+      // `dateFin` est une date-seule : elle doit retenir le jour civil de l'entreprise
+      // et rester à minuit UTC, comme toute date métier stockée en base.
+      const societe = await getCompanySettings();
+      data.dateFin = new Date(`${aujourdHuiEntreprise(societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)}T00:00:00.000Z`);
     }
 
     const updated = await prisma.chantier.update({ where: { id: chantier.id }, data });
@@ -4231,7 +4234,8 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
     const period = (['month', 'quarter', 'year'] as const).includes(req.query.period as any)
       ? (req.query.period as 'month' | 'quarter' | 'year')
       : 'month';
-    const { start, endExclusive } = periodBounds(period, req.query.ref);
+    const societe = await getCompanySettings();
+    const { start, endExclusive } = periodBounds(period, req.query.ref, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
 
     const where = perimetreChantiers(req);
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
@@ -4417,17 +4421,54 @@ app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, r
   }
 });
 
-// Bornes lundi 00:00 -> samedi 00:00 (exclusif) de la semaine civile contenant `ref`,
-// en UTC. `weekParam` est une date quelconque de la semaine visée (ex: "2026-06-29").
-function weekBoundsFrom(weekParam: unknown): { monday: Date; friday: Date; saturdayExclusive: Date } {
-  const parsed = typeof weekParam === 'string' && weekParam ? new Date(weekParam) : new Date();
-  const ref = isNaN(parsed.getTime()) ? new Date() : parsed;
-  const day = ref.getUTCDay(); // 0 = dimanche ... 6 = samedi
+// Les dates-seules restent des jours métier et ne doivent donc jamais être relues dans
+// un fuseau. En revanche, une référence qui est un instant (ou l'instant courant) doit
+// d'abord devenir le jour civil de l'entreprise.
+function jourCivilDeReference(refParam: unknown, fuseauHoraire: string, instant = new Date()): string {
+  if (typeof refParam === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(refParam)) return refParam;
+  const parsed = refParam instanceof Date ? refParam : (typeof refParam === 'string' && refParam ? new Date(refParam) : instant);
+  return jourCivilEntreprise(isNaN(parsed.getTime()) ? instant : parsed, fuseauHoraire);
+}
+
+function ajouterJoursCivils(jour: string, nombre: number): string {
+  return new Date(new Date(`${jour}T00:00:00.000Z`).getTime() + nombre * 86400000).toISOString().slice(0, 10);
+}
+
+// Convertit minuit du jour civil entreprise en instant pour les champs DateTime tels
+// que createdAt. L'itération couvre les fuseaux à changement d'offset sans dépendre du
+// fuseau de la machine qui exécute le serveur.
+function debutJourCivilEntreprise(jour: string, fuseauHoraire: string): Date {
+  const [annee, mois, numeroJour] = jour.split('-').map(Number);
+  const cible = Date.UTC(annee, mois - 1, numeroJour);
+  let instant = new Date(cible);
+  for (let i = 0; i < 2; i++) {
+    const parties = new Intl.DateTimeFormat('en-CA', {
+      timeZone: fuseauHoraire, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(instant);
+    const valeur = (type: Intl.DateTimeFormatPartTypes) => Number(parties.find((partie) => partie.type === type)?.value);
+    const lu = Date.UTC(valeur('year'), valeur('month') - 1, valeur('day'), valeur('hour'), valeur('minute'), valeur('second'));
+    instant = new Date(instant.getTime() + cible - lu);
+  }
+  return instant;
+}
+
+// Bornes lundi 00:00 -> samedi 00:00 (exclusif) de la semaine civile contenant `weekParam`.
+// Les bornes sont des instants car elles filtrent createdAt ; les jours retournés restent
+// explicites pour éviter toute relecture UTC dans la réponse HTTP.
+function weekBoundsFrom(weekParam: unknown, fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT, instant = new Date()): { monday: Date; friday: Date; saturdayExclusive: Date; mondayCivil: string; fridayCivil: string } {
+  const refCivil = jourCivilDeReference(weekParam, fuseauHoraire, instant);
+  const day = new Date(`${refCivil}T00:00:00.000Z`).getUTCDay(); // jour d'une date-seule
   const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate() + diffToMonday));
-  const friday = new Date(monday.getTime() + 4 * 86400000);
-  const saturdayExclusive = new Date(monday.getTime() + 5 * 86400000);
-  return { monday, friday, saturdayExclusive };
+  const mondayCivil = ajouterJoursCivils(refCivil, diffToMonday);
+  const fridayCivil = ajouterJoursCivils(mondayCivil, 4);
+  return {
+    monday: debutJourCivilEntreprise(mondayCivil, fuseauHoraire),
+    friday: debutJourCivilEntreprise(fridayCivil, fuseauHoraire),
+    saturdayExclusive: debutJourCivilEntreprise(ajouterJoursCivils(mondayCivil, 5), fuseauHoraire),
+    mondayCivil,
+    fridayCivil,
+  };
 }
 
 const JOURS_OUVRES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
@@ -4437,7 +4478,9 @@ app.get('/api/stats/conducteurs/assiduite', requireAuth, requireTravauxRead, asy
   try {
     const authUser = (req as AuthRequest).user!;
     if (!isAdminRole(authUser.role) && authUser.role !== ROLE_RESPONSABLE) return res.status(403).json({ error: 'Accès réservé à l’administration et aux responsables.' });
-    const { monday, friday, saturdayExclusive } = weekBoundsFrom(req.query.week);
+    const societe = await getCompanySettings();
+    const fuseauHoraire = societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+    const { monday, friday, saturdayExclusive, mondayCivil, fridayCivil } = weekBoundsFrom(req.query.week, fuseauHoraire);
     const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX', ...(authUser.role === ROLE_RESPONSABLE ? { id: { in: authUser.equipeIds } } : {}) }, select: { id: true, name: true, email: true } });
     const userIds = users.map((u) => u.id);
 
@@ -4455,7 +4498,7 @@ app.get('/api/stats/conducteurs/assiduite', requireAuth, requireTravauxRead, asy
     for (const u of users) {
       byUser[u.id] = {
         days: JOURS_OUVRES.map((label, i) => ({
-          date: new Date(monday.getTime() + i * 86400000).toISOString().slice(0, 10),
+          date: ajouterJoursCivils(mondayCivil, i),
           label,
           nbSaisies: 0,
           heuresSaisies: 0,
@@ -4469,12 +4512,14 @@ app.get('/api/stats/conducteurs/assiduite', requireAuth, requireTravauxRead, asy
       if (!responsableId || !byUser[responsableId]) continue;
       const agg = byUser[responsableId];
       const created = new Date(p.createdAt);
-      const dayIndex = Math.round((Date.UTC(created.getUTCFullYear(), created.getUTCMonth(), created.getUTCDate()) - monday.getTime()) / 86400000);
+      const createdCivil = jourCivilEntreprise(created, fuseauHoraire);
+      const dayIndex = Math.round((new Date(`${createdCivil}T00:00:00.000Z`).getTime() - new Date(`${mondayCivil}T00:00:00.000Z`).getTime()) / 86400000);
       if (dayIndex >= 0 && dayIndex < 5) {
         agg.days[dayIndex].nbSaisies += 1;
         agg.days[dayIndex].heuresSaisies += p.nbrHeures;
       }
-      const heure = created.getUTCHours();
+      const heure = Number(new Intl.DateTimeFormat('en-GB', { timeZone: fuseauHoraire, hour: '2-digit', hourCycle: 'h23' })
+        .formatToParts(created).find((partie) => partie.type === 'hour')?.value);
       agg.heuresParHeureJournee[heure] = (agg.heuresParHeureJournee[heure] || 0) + 1;
     }
 
@@ -4502,8 +4547,8 @@ app.get('/api/stats/conducteurs/assiduite', requireAuth, requireTravauxRead, asy
     });
 
     res.json({
-      weekStart: monday.toISOString().slice(0, 10),
-      weekEnd: friday.toISOString().slice(0, 10),
+      weekStart: mondayCivil,
+      weekEnd: fridayCivil,
       conducteurs,
     });
   } catch (error) {
@@ -4551,33 +4596,35 @@ app.get('/api/stats/chantiers-repartition', requireAuth, requireAdmin, async (re
 });
 
 // Bornes [début, fin exclue[ d'une période "semaine civile complète" (lundi->lundi
-// suivant, 7 jours), "mois civil", "trimestre civil" (janv-mars, avr-juin, juil-sept,
-// oct-déc) ou "année civile" contenant `refParam`, en UTC.
-function periodBounds(period: 'week' | 'month' | 'quarter' | 'year', refParam: unknown): { start: Date; endExclusive: Date } {
-  const parsed = typeof refParam === 'string' && refParam ? new Date(refParam) : new Date();
-  const ref = isNaN(parsed.getTime()) ? new Date() : parsed;
+// suivant, 7 jours), « mois civil », « trimestre civil » (janv-mars, avr-juin, juil-sept,
+// oct-déc) ou « année civile » contenant `refParam`. Les données métier filtrées sont des
+// dates-seules : leurs bornes restent à minuit UTC, mais le jour de référence issu d'un
+// instant est obligatoirement lu dans le fuseau de l'entreprise.
+function periodBounds(period: 'week' | 'month' | 'quarter' | 'year', refParam: unknown, fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT, instant = new Date()): { start: Date; endExclusive: Date } {
+  const refCivil = jourCivilDeReference(refParam, fuseauHoraire, instant);
+  const [annee, mois, jour] = refCivil.split('-').map(Number);
   if (period === 'year') {
     return {
-      start: new Date(Date.UTC(ref.getUTCFullYear(), 0, 1)),
-      endExclusive: new Date(Date.UTC(ref.getUTCFullYear() + 1, 0, 1)),
+      start: new Date(Date.UTC(annee, 0, 1)),
+      endExclusive: new Date(Date.UTC(annee + 1, 0, 1)),
     };
   }
   if (period === 'quarter') {
-    const quarterStartMonth = Math.floor(ref.getUTCMonth() / 3) * 3;
+    const quarterStartMonth = Math.floor((mois - 1) / 3) * 3;
     return {
-      start: new Date(Date.UTC(ref.getUTCFullYear(), quarterStartMonth, 1)),
-      endExclusive: new Date(Date.UTC(ref.getUTCFullYear(), quarterStartMonth + 3, 1)),
+      start: new Date(Date.UTC(annee, quarterStartMonth, 1)),
+      endExclusive: new Date(Date.UTC(annee, quarterStartMonth + 3, 1)),
     };
   }
   if (period === 'month') {
     return {
-      start: new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), 1)),
-      endExclusive: new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + 1, 1)),
+      start: new Date(Date.UTC(annee, mois - 1, 1)),
+      endExclusive: new Date(Date.UTC(annee, mois, 1)),
     };
   }
-  const day = ref.getUTCDay(); // 0 = dimanche ... 6 = samedi
+  const day = new Date(Date.UTC(annee, mois - 1, jour)).getUTCDay(); // date-seule
   const diffToMonday = day === 0 ? -6 : 1 - day;
-  const start = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate() + diffToMonday));
+  const start = new Date(Date.UTC(annee, mois - 1, jour + diffToMonday));
   return { start, endExclusive: new Date(start.getTime() + 7 * 86400000) };
 }
 
@@ -4587,7 +4634,8 @@ function periodBounds(period: 'week' | 'month' | 'quarter' | 'year', refParam: u
 app.get('/api/stats/intervenants', requireAuth, requireTravauxRead, async (req, res) => {
   try {
     const period = (['week', 'month', 'year'] as const).includes(req.query.period as any) ? (req.query.period as 'week' | 'month' | 'year') : 'week';
-    const { start, endExclusive } = periodBounds(period, req.query.ref);
+    const societe = await getCompanySettings();
+    const { start, endExclusive } = periodBounds(period, req.query.ref, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
 
     const intervenants = await prisma.intervenant.findMany({ select: { id: true, nom: true, role: true } });
     const pointages = decimalToNumber(await prisma.pointageHeure.findMany({
@@ -4625,7 +4673,8 @@ app.get('/api/stats/intervenants', requireAuth, requireTravauxRead, async (req, 
 app.get('/api/stats/fournisseurs', requireAuth, requireTravauxRead, async (req, res) => {
   try {
     const period = req.query.period === 'year' ? 'year' : 'month';
-    const { start, endExclusive } = periodBounds(period, req.query.ref);
+    const societe = await getCompanySettings();
+    const { start, endExclusive } = periodBounds(period, req.query.ref, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
 
     const fournisseurs = await prisma.fournisseur.findMany({ select: { id: true, nom: true } });
     const achats = decimalToNumber(await prisma.achatReel.findMany({
@@ -4664,7 +4713,8 @@ app.get('/api/stats/fournisseurs', requireAuth, requireTravauxRead, async (req, 
 app.get('/api/stats/types-chantiers', requireAuth, requireTravauxRead, async (req, res) => {
   try {
     const period = req.query.period === 'year' ? 'year' : 'month';
-    const { start, endExclusive } = periodBounds(period, req.query.ref);
+    const societe = await getCompanySettings();
+    const { start, endExclusive } = periodBounds(period, req.query.ref, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
 
     const chantiers = await prisma.chantier.findMany({
       where: {
@@ -4889,7 +4939,8 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
     const period = (['month', 'quarter', 'year'] as const).includes(req.query.period as any)
       ? (req.query.period as 'month' | 'quarter' | 'year')
       : 'month';
-    const { start, endExclusive } = periodBounds(period, req.query.ref);
+    const societe = await getCompanySettings();
+    const { start, endExclusive } = periodBounds(period, req.query.ref, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
     const params = await getParametres();
     const regles = await getReglesRemuneration();
 
@@ -5064,6 +5115,8 @@ export {
   aujourdHuiEntreprise,
   anneeEntreprise,
   dateEmissionEstFuture,
+  periodBounds,
+  weekBoundsFrom,
   cataloguePayload,
   catalogueExtraPayload,
   catalogueFamily,

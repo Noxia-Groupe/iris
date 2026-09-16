@@ -8,6 +8,7 @@ const {
   clientPayload, contactPayload, sitePayload, companySettingsPayload,
   fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise,
   anneeEntreprise, dateEmissionEstFuture,
+  periodBounds, weekBoundsFrom,
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
   commissionBaremeProgressif, computeChantierMetrics,
   parseBareme, serialiseBareme, validerBareme,
@@ -109,6 +110,32 @@ describe('Jours civils de l’entreprise', () => {
     const onze = '2026-09-11T00:00:00.000Z';
     assert.equal(dateEmissionEstFuture(onze, 'America/Martinique', instant), false);
     assert.equal(dateEmissionEstFuture(douze, 'America/Martinique', instant), true);
+  });
+});
+
+describe('Périodes et assiduité dans le fuseau de l’entreprise', () => {
+  test('borne le mois du jour civil Wallis d’un instant injectable, pas du mois UTC', () => {
+    // 28 février UTC au soir est déjà le 1er mars à Wallis (UTC+12).
+    const instant = new Date('2026-02-28T23:30:00.000Z');
+    const { start, endExclusive } = periodBounds('month', undefined, 'Pacific/Wallis', instant);
+    assert.equal(start.toISOString(), '2026-03-01T00:00:00.000Z');
+    assert.equal(endExclusive.toISOString(), '2026-04-01T00:00:00.000Z');
+  });
+
+  test('conserve une référence date-seule, même à l’ouest de UTC', () => {
+    // Une date-seule est un jour métier, jamais un instant à relire dans le fuseau.
+    // Gambier est à l'ouest : minuit UTC y est encore la veille, donc sans le
+    // garde-fou d'une date-seule le mois basculerait sur février.
+    const { start, endExclusive } = periodBounds('month', '2026-03-01', 'Pacific/Gambier', new Date('2026-02-28T23:30:00.000Z'));
+    assert.equal(start.toISOString(), '2026-03-01T00:00:00.000Z');
+    assert.equal(endExclusive.toISOString(), '2026-04-01T00:00:00.000Z');
+  });
+
+  test('calcule la semaine d’assiduité depuis le lundi Wallis d’un instant injectable', () => {
+    // Dimanche UTC est déjà lundi 2 mars à Wallis : UTC choisirait la semaine précédente.
+    const { monday, friday } = weekBoundsFrom(undefined, 'Pacific/Wallis', new Date('2026-03-01T12:30:00.000Z'));
+    assert.equal(jourCivilEntreprise(monday, 'Pacific/Wallis'), '2026-03-02');
+    assert.equal(jourCivilEntreprise(friday, 'Pacific/Wallis'), '2026-03-06');
   });
 });
 
