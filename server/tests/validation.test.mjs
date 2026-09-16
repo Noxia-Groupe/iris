@@ -124,7 +124,9 @@ describe('Périodes et assiduité dans le fuseau de l’entreprise', () => {
 
   test('conserve une référence date-seule, même à l’ouest de UTC', () => {
     // Une date-seule est un jour métier, jamais un instant à relire dans le fuseau.
-    const { start, endExclusive } = periodBounds('month', '2026-03-01', 'Pacific/Wallis', new Date('2026-02-28T23:30:00.000Z'));
+    // Gambier est à l'ouest : minuit UTC y est encore la veille, donc sans le
+    // garde-fou d'une date-seule le mois basculerait sur février.
+    const { start, endExclusive } = periodBounds('month', '2026-03-01', 'Pacific/Gambier', new Date('2026-02-28T23:30:00.000Z'));
     assert.equal(start.toISOString(), '2026-03-01T00:00:00.000Z');
     assert.equal(endExclusive.toISOString(), '2026-04-01T00:00:00.000Z');
   });

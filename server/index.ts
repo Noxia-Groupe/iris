@@ -2064,7 +2064,10 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req,
     // renseigne automatiquement à la clôture si elle n'a pas déjà été saisie à la main.
     const data: Record<string, unknown> = { statut: nextStatut };
     if (nextStatut === 'TERMINE' && !chantier.dateFin) {
-      data.dateFin = new Date();
+      // `dateFin` est une date-seule : elle doit retenir le jour civil de l'entreprise
+      // et rester à minuit UTC, comme toute date métier stockée en base.
+      const societe = await getCompanySettings();
+      data.dateFin = new Date(`${aujourdHuiEntreprise(societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)}T00:00:00.000Z`);
     }
 
     const updated = await prisma.chantier.update({ where: { id: chantier.id }, data });

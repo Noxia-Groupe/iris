@@ -2248,6 +2248,69 @@ if (!TEST_DATABASE_URL) {
       assert.equal(res.body.weekEnd, '2026-03-06');
     });
 
+    test('date la clôture d’un chantier au jour civil de la société, à minuit', async () => {
+      const { aujourdHuiEntreprise } = await import('../dist/index.js');
+      const jourUtc = new Date().toISOString().slice(0, 10);
+      const fuseau = aujourdHuiEntreprise('Pacific/Wallis') !== jourUtc ? 'Pacific/Wallis' : 'Pacific/Gambier';
+      const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+      const chantier = await prisma.chantier.create({
+        data: { nom: 'TEST clôture fuseau', client: 'TEST', dateDebut: new Date(Date.UTC(2026, 8, 1)), budgetGlobalVendu: 1000, statut: 'EN_COURS' },
+      });
+      try {
+        assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
+        const cloture = await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE' });
+        assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+        const relu = await prisma.chantier.findUnique({ where: { id: chantier.id }, select: { dateFin: true } });
+        assert.equal(relu.dateFin.toISOString(), `${aujourdHuiEntreprise(fuseau)}T00:00:00.000Z`,
+          `la clôture doit porter le jour civil de la société en ${fuseau}, à minuit`);
+      } finally {
+        await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        await prisma.chantier.delete({ where: { id: chantier.id } });
+      }
+    });
+
+    test('range une saisie d’heures au jour et à l’heure de la société, pas d’UTC', async () => {
+      const instantSaisie = new Date('2026-03-03T06:00:00.000Z');
+      const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+      const conducteur = await prisma.user.create({ data: { email: 'assiduite.fuseau@iris.test', name: 'TEST Conducteur assiduité', role: 'CONDUCTEUR_TRAVAUX' } });
+      const chantier = await prisma.chantier.create({
+        data: { nom: 'TEST assiduité fuseau', client: 'TEST', dateDebut: new Date(Date.UTC(2026, 2, 1)), budgetGlobalVendu: 1000, responsableId: conducteur.id },
+      });
+      const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Intervenant assiduité', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const pointage = await prisma.pointageHeure.create({
+        data: { date: new Date(Date.UTC(2026, 2, 3)), intervenantId: intervenant.id, chantierId: chantier.id, nbrHeures: 7, tauxHoraireApplique: 30, createdAt: instantSaisie },
+      });
+      try {
+        assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Pacific/Wallis' })).status, 200);
+        const res = await request(app).get('/api/stats/conducteurs/assiduite').query({ week: '2026-03-02' }).set('Authorization', `Bearer ${session}`);
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        const ligne = res.body.conducteurs.find((c) => c.id === conducteur.id);
+        assert.ok(ligne, 'le conducteur de test est absent de la réponse');
+        assert.equal(ligne.days[1].nbSaisies, 1, 'la saisie appartient au mardi de Wallis');
+        assert.equal(ligne.days[2].nbSaisies, 0, 'une arithmétique UTC la rangerait au mercredi');
+        assert.equal(ligne.heurePic, 18, 'l’heure de pic est 18h à Wallis, pas 06h UTC');
+      } finally {
+        await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        await prisma.pointageHeure.delete({ where: { id: pointage.id } });
+        await prisma.chantier.delete({ where: { id: chantier.id } });
+        await prisma.intervenant.delete({ where: { id: intervenant.id } });
+        await prisma.user.delete({ where: { id: conducteur.id } });
+      }
+    });
+
+    test('borne la période du tableau de bord dans le fuseau société', async () => {
+      const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+      try {
+        assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Pacific/Wallis' })).status, 200);
+        const res = await request(app).get('/api/stats/global').query({ period: 'month', ref: '2026-02-28T13:00:00.000Z' }).set('Authorization', `Bearer ${session}`);
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        assert.equal(res.body.periodStart, '2026-03-01', 'la période suit le jour civil de la société');
+        assert.equal(res.body.periodEnd, '2026-03-31');
+      } finally {
+        await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+      }
+    });
+
     test('n’accepte que les fuseaux horaires français et expose le réglage', async () => {
       const invalide = await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Europe/London' });
       assert.equal(invalide.status, 400, JSON.stringify(invalide.body));
