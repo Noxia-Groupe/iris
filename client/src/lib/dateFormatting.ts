@@ -15,22 +15,22 @@ const DATE_TIME_OPTIONS: DateFormatOptions = {
   second: '2-digit',
 };
 
-/** Formats a business date stored at midnight UTC; it must never depend on a user timezone. */
+/** Formate une date métier stockée à minuit UTC : elle ne dépend d’aucun fuseau utilisateur. */
 export function formatDateOnly(value: string | Date, options: DateFormatOptions = DATE_ONLY_OPTIONS): string {
   return new Intl.DateTimeFormat('fr-FR', { ...options, timeZone: 'UTC' }).format(new Date(value));
 }
 
-/** Formats a real instant using the timezone configured in CompanySettings. */
+/** Formate un instant réel dans le fuseau configuré dans CompanySettings. */
 export function formatCompanyDateTime(value: string | Date, companyTimeZone: string, options: DateFormatOptions = DATE_TIME_OPTIONS): string {
   return new Intl.DateTimeFormat('fr-FR', { ...options, timeZone: companyTimeZone }).format(new Date(value));
 }
 
-/** Formats only the calendar day derived from a real instant in the company timezone. */
+/** Formate le jour civil dérivé d’un instant dans le fuseau de l’entreprise. */
 export function formatCompanyDate(value: string | Date, companyTimeZone: string, options: DateFormatOptions = DATE_ONLY_OPTIONS): string {
   return formatCompanyDateTime(value, companyTimeZone, options);
 }
 
-/** Returns today's business date for a text input, derived from an instant in the company timezone. */
+/** Rend la date métier du jour pour un champ texte, dérivée dans le fuseau entreprise. */
 export function companyDateInputValue(companyTimeZone: string, now: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: companyTimeZone,

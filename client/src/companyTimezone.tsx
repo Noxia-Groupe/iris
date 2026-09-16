@@ -4,7 +4,7 @@ import { CompanyTimezoneContext, DEFAULT_COMPANY_TIME_ZONE } from './companyTime
 
 type CompanySettingsTimezone = { fuseauHoraire?: string | null };
 
-/** Supplies the timezone stored in CompanySettings; never reads the browser timezone. */
+/** Fournit le fuseau enregistré dans CompanySettings ; ne lit jamais celui du navigateur. */
 export function CompanyTimezoneProvider({ children }: { children: ReactNode }) {
   const [timezone, setTimezone] = useState(DEFAULT_COMPANY_TIME_ZONE);
 
@@ -17,7 +17,7 @@ export function CompanyTimezoneProvider({ children }: { children: ReactNode }) {
         if (!cancelled && settings.fuseauHoraire) setTimezone(settings.fuseauHoraire);
       })
       .catch(() => {
-        // The server default remains usable if CompanySettings cannot be fetched.
+        // Le défaut serveur reste utilisable si CompanySettings est injoignable.
       });
     return () => { cancelled = true; };
   }, []);

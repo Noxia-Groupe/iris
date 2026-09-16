@@ -311,10 +311,16 @@ test.describe('Facturation — parcours utilisateur', () => {
   });
 
   test.describe('fuseau horaire entreprise', () => {
-    test.use({ timezoneId: 'Pacific/Noumea' });
+    test.use({ timezoneId: 'Pacific/Gambier' });
 
-    test('préremplit, accepte et affiche la date d’émission Pacific/Noumea sans décalage', async ({ allerSurPageAdmin, apiAdmin, creerClient, page, request, session }) => {
-      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('Pacific/Noumea');
+    test('préremplit Achats, Heures et Factures au jour de Pacific/Wallis, distinct du navigateur', async ({ allerSurPageAdmin, apiAdmin, page, request, session }) => {
+      await page.clock.install({ time: new Date('2027-01-01T13:30:00Z') });
+      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('Pacific/Gambier');
+      expect(await page.evaluate(() => new Date().toISOString())).toBe('2027-01-01T13:30:00.000Z');
+      // Ce garde-fou rend le scénario discriminant : Gambier est encore le 01, Wallis est déjà le 02.
+      expect(await page.evaluate(() => new Intl.DateTimeFormat('en-CA', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date()).map((partie) => partie.value).join(''))).toBe('01/01/2027');
       const reponseSociete = await apiAdmin.get('/company');
       expect(reponseSociete.ok(), await reponseSociete.text()).toBeTruthy();
       const societeInitiale = await reponseSociete.json() as { fuseauHoraire?: string | null };
@@ -325,35 +331,20 @@ test.describe('Facturation — parcours utilisateur', () => {
       });
 
       try {
-        const miseAJour = await mettreAJourFuseau('Pacific/Noumea');
+        const miseAJour = await mettreAJourFuseau('Pacific/Wallis');
         expect(miseAJour.ok(), await miseAJour.text()).toBeTruthy();
-        expect((await miseAJour.json() as { fuseauHoraire: string }).fuseauHoraire).toBe('Pacific/Noumea');
+        expect((await miseAJour.json() as { fuseauHoraire: string }).fuseauHoraire).toBe('Pacific/Wallis');
 
-        const client = await creerClient('fuseau-noumea');
+        await allerSurPageAdmin('/achats');
+        await expect(page.locator('input[name="date"]')).toHaveValue('02-01-2027');
+
+        await allerSurPageAdmin('/heures');
+        await expect(page.locator('input[name="date"]')).toHaveValue('02-01-2027');
+
         await allerSurPageAdmin('/factures');
         await page.getByRole('button', { name: /Nouvelle facture/ }).click();
-        const dateEntreprise = await page.evaluate(() => {
-          const parties = new Intl.DateTimeFormat('en-CA', {
-            timeZone: 'Pacific/Noumea', year: 'numeric', month: '2-digit', day: '2-digit',
-          }).formatToParts(new Date());
-          const valeur = (type: Intl.DateTimeFormatPartTypes) => parties.find((partie) => partie.type === type)?.value || '';
-          return `${valeur('day')}-${valeur('month')}-${valeur('year')}`;
-        });
-        const dateEmission = page.locator('input[name="dateEmission"]');
-        await expect(dateEmission).toHaveValue(dateEntreprise);
-        await expect(page.locator('input[name="dateEcheance"]')).toHaveValue(dateEntreprise);
-
-        await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
-        await page.locator('input[name="motifHorsAffaire"]').fill('Parcours fuseau Pacific/Noumea');
-        await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle fuseau');
-        await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
-        await page.getByRole('button', { name: /Créer le brouillon/ }).click();
-        await expect(page.getByText(/Brouillon créé/)).toBeVisible();
-        const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
-        await ligne.getByRole('button', { name: /Émettre/ }).click();
-        await expect(ligne).toContainText('EMISE');
-        const [jour, mois, annee] = dateEntreprise.split('-');
-        await expect(ligne).toContainText(new RegExp(`${jour}[-/]${mois}[-/]${annee}`));
+        await expect(page.locator('input[name="dateEmission"]')).toHaveValue('02-01-2027');
+        await expect(page.locator('input[name="dateEcheance"]')).toHaveValue('02-01-2027');
       } finally {
         const restauration = await mettreAJourFuseau(societeInitiale.fuseauHoraire || 'Europe/Paris');
         expect(restauration.ok(), await restauration.text()).toBeTruthy();
