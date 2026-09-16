@@ -320,7 +320,7 @@ test.describe('Facturation — parcours utilisateur', () => {
       // Ce garde-fou rend le scénario discriminant : Gambier est encore le 01, Wallis est déjà le 02.
       expect(await page.evaluate(() => new Intl.DateTimeFormat('en-CA', {
         year: 'numeric', month: '2-digit', day: '2-digit',
-      }).formatToParts(new Date()).map((partie) => partie.value).join(''))).toBe('01/01/2027');
+      }).formatToParts(new Date()).map((partie) => partie.value).join(''))).toBe('2027-01-01');
       const reponseSociete = await apiAdmin.get('/company');
       expect(reponseSociete.ok(), await reponseSociete.text()).toBeTruthy();
       const societeInitiale = await reponseSociete.json() as { fuseauHoraire?: string | null };
