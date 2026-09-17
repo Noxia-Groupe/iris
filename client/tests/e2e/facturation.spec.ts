@@ -373,8 +373,14 @@ test.describe('Facturation — parcours utilisateur', () => {
     const liste = page.getByRole('region', { name: 'Factures liées' });
     await expect(liste).toBeVisible();
     const ligne = liste.locator('tr', { hasText: numero });
+    // Ancrer le tableau avant l'absence du bouton : zéro bouton sur zéro ligne passerait
+    // aussi, et masquerait une régression de rendu ou de périmètre du conducteur.
+    await expect(liste.locator('th')).toHaveCount(6);
     await expect(ligne.locator('td').nth(0)).toHaveText(numero);
     await expect(ligne.locator('td').nth(4)).toHaveText(/^100\s*€$/);
+    await expect(ligne.locator('td')).toHaveCount(6);
+    // L'en-tête et les cellules suivent la même garde administrateur : sans ces comptes,
+    // une colonne « Action » orpheline rendrait le tableau désaligné sans fuite de données.
     await expect(ligne.getByRole('button', { name: 'PDF' })).toHaveCount(0);
     const pdf = await request.get(`${api}/factures/${factureId}/document.pdf`, { headers: { Authorization: `Bearer ${jeton}` } });
     expect(pdf.status(), await pdf.text()).toBe(403);
@@ -419,6 +425,8 @@ test.describe('Facturation — parcours utilisateur', () => {
       const liste = page.getByRole('region', { name: 'Factures liées' });
       await expect(liste).toBeVisible();
       const ligne = liste.locator('tr', { hasText: numero });
+      // L'administrateur reçoit la colonne PDF ; son en-tête fait partie du contrat de table.
+      await expect(liste.locator('th')).toHaveCount(7);
       const cellules = ligne.locator('td');
       await expect(cellules.nth(0)).toHaveText(numero);
       await expect(cellules.nth(1)).toHaveText('Facture');
