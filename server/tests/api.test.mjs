@@ -2249,6 +2249,9 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('date la clôture d’un chantier au jour civil de la société, à minuit', async () => {
+      // Le fuseau est choisi selon l'heure UTC : Wallis est en avance l'après-midi,
+      // Gambier en retard le matin. Le jour local diffère ainsi toujours d'UTC ; fixer
+      // Wallis rendrait ce test non discriminant pendant une moitié de la journée.
       const { aujourdHuiEntreprise } = await import('../dist/index.js');
       const jourUtc = new Date().toISOString().slice(0, 10);
       const fuseau = aujourdHuiEntreprise('Pacific/Wallis') !== jourUtc ? 'Pacific/Wallis' : 'Pacific/Gambier';
@@ -2270,6 +2273,8 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('range une saisie d’heures au jour et à l’heure de la société, pas d’UTC', async () => {
+      // À Wallis, 06:00 UTC donne mardi 18:00. Cet instant sépare le jour ET l'heure :
+      // à 14:30 UTC, Math.round ferait retomber l'index UTC sur le bon jour par hasard.
       const instantSaisie = new Date('2026-03-03T06:00:00.000Z');
       const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
       const conducteur = await prisma.user.create({ data: { email: 'assiduite.fuseau@iris.test', name: 'TEST Conducteur assiduité', role: 'CONDUCTEUR_TRAVAUX' } });
@@ -2299,6 +2304,8 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('borne la période du tableau de bord dans le fuseau société', async () => {
+      // À 13:00 UTC, Paris (le repli) est encore en février, Wallis déjà en mars. À
+      // 23:30 UTC ils seraient tous deux en mars : le test passerait sans réglage société.
       const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
       try {
         assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Pacific/Wallis' })).status, 200);
