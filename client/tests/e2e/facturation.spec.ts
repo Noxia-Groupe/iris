@@ -144,8 +144,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     const facture = await emettreFactureSource(page, client, [['10', '4,27', '20']]);
     await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
     await remplirLigneAvoir(page, 1, '0,5', '4,27', '20');
-    await expect(page.getByTestId('aperçu-avoir')).toContainText(/2,13\s*€/);
-    await expect(page.getByTestId('aperçu-avoir')).not.toContainText(/2,14\s*€/);
+    await expect(page.getByTestId('aperçu-avoir')).toContainText(/2,14\s*€/);
+    await expect(page.getByTestId('aperçu-avoir')).not.toContainText(/2,13\s*€/);
     await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
     await expect(page.getByText(/créé et émis/)).toBeVisible();
     const factures = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string }; totalHt: number; totalTva: number; totalTtc: number }>;
