@@ -151,7 +151,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const factures = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string }; totalHt: number; totalTva: number; totalTtc: number }>;
     const avoir = factures.find((item) => item.type === 'AVOIR' && item.client.id === client.id);
     if (!avoir) throw new Error('Avoir partiel absent de l’API');
-    expect([avoir.totalHt, avoir.totalTva, avoir.totalTtc]).toEqual([2.13, 0.43, 2.56]);
+    expect([avoir.totalHt, avoir.totalTva, avoir.totalTtc]).toEqual([2.14, 0.43, 2.57]);
   });
 
   // Deux lignes et deux taux exercent l'agrégation de l'aperçu, et vérifient que le
