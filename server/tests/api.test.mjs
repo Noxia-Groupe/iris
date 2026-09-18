@@ -2158,7 +2158,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([avoir.body.totalHt, avoir.body.totalTva, avoir.body.totalTtc], [9, 0.5, 9.5]);
       assert.equal(avoir.body.lignes[0].totalTtc, 9.5);
       assert.ok(avoir.body.totalHt > 0 && avoir.body.totalTva > 0 && avoir.body.totalTtc > 0, 'les avoirs sont stockés positifs');
-      const depassement = await creer([{ designation: 'TEST avoir dépassement', quantite: 1, prixUnitaireHt: '0.01', tauxTva: 20 }]);
+      const depassement = await creer([{ designation: 'TEST avoir dépassement', quantite: 1, prixUnitaireHt: '0.01', tauxTva: 5.5 }]);
       assert.equal(depassement.status, 409, JSON.stringify(depassement.body));
     });
 
