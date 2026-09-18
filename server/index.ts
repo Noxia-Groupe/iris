@@ -812,7 +812,11 @@ class FactureInvalideError extends Error {}
 type LigneTaxable = { tauxTva: unknown; totalHt: unknown };
 const tauxUtilises = (lignes: LigneTaxable[]) => [...new Set(lignes.map(ligne => Number(ligne.tauxTva)))];
 const baseHtDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(lignes.filter(ligne => Number(ligne.tauxTva) === taux).reduce((somme, ligne) => somme + Number(ligne.totalHt), 0));
-const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(baseHtDuTaux(lignes, taux) * taux / 100);
+const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => {
+  const baseCentimes = entierDecimal(baseHtDuTaux(lignes, taux), 2);
+  const millièmesTaux = entierDecimal(taux, 3);
+  return Number((baseCentimes * millièmesTaux + 50000n) / 100000n) / 100;
+};
 
 function lignesAvoirPartiel(brutes: unknown): { ordre: number; designation: string; nature: string; quantite: number; prixUnitaireHt: number; tauxTva: number; totalHt: number; totalTtc: number }[] {
   const lignesBrutes = Array.isArray(brutes) ? brutes : [];

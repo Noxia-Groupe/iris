@@ -2134,18 +2134,29 @@ if (!TEST_DATABASE_URL) {
       assert.equal(Math.round((facture.body.totalHt + facture.body.totalTva) * 100) / 100, facture.body.totalTtc);
     });
 
+    test('arrondit au demi-centime le TTC de ligne et la TVA agrégée', async () => {
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TVA sur demi-centime', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [{ designation: 'TEST TVA demi-centime', quantite: '1', prixUnitaireHt: '9.00', tauxTva: 5.5 }],
+      });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      assert.equal(facture.body.lignes[0].totalTtc, 9.5);
+      assert.equal(facture.body.totalTtc, 9.5);
+    });
+
     test('applique le même arrondi positif aux avoirs partiels et leur plafond', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
         clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Plafond avoir demi-centime', dateEmission: '11-09-2026', dateEcheance: '11-10-2026',
-        lignes: [{ designation: 'TEST source demi-centime', quantite: '0.5', prixUnitaireHt: '4.27', tauxTva: 20 }],
+        lignes: [{ designation: 'TEST source demi-centime', quantite: '1', prixUnitaireHt: '9.00', tauxTva: 5.5 }],
       });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
       const creer = (lignes) => request(app).post(`/api/factures/${emission.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({ lignes });
-      const avoir = await creer([{ designation: 'TEST avoir demi-centime', quantite: '0.5', prixUnitaireHt: '4.27', tauxTva: 20 }]);
+      const avoir = await creer([{ designation: 'TEST avoir demi-centime', quantite: '1', prixUnitaireHt: '9.00', tauxTva: 5.5 }]);
       assert.equal(avoir.status, 201, JSON.stringify(avoir.body));
-      assert.deepEqual([avoir.body.totalHt, avoir.body.totalTva, avoir.body.totalTtc], [2.14, 0.43, 2.57]);
+      assert.deepEqual([avoir.body.totalHt, avoir.body.totalTva, avoir.body.totalTtc], [9, 0.5, 9.5]);
+      assert.equal(avoir.body.lignes[0].totalTtc, 9.5);
       assert.ok(avoir.body.totalHt > 0 && avoir.body.totalTva > 0 && avoir.body.totalTtc > 0, 'les avoirs sont stockés positifs');
       const depassement = await creer([{ designation: 'TEST avoir dépassement', quantite: 1, prixUnitaireHt: '0.01', tauxTva: 20 }]);
       assert.equal(depassement.status, 409, JSON.stringify(depassement.body));
