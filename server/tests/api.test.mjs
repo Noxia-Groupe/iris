@@ -2131,7 +2131,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.status, 201, JSON.stringify(facture.body));
       assert.deepEqual(facture.body.lignes.map((ligne) => ligne.totalHt), [2.14, 2.14, 2.14]);
       assert.deepEqual([facture.body.totalHt, facture.body.totalTva, facture.body.totalTtc], [6.42, 0.76, 7.18]);
-      assert.equal(facture.body.totalHt + facture.body.totalTva, facture.body.totalTtc);
+      assert.equal(Math.round((facture.body.totalHt + facture.body.totalTva) * 100) / 100, facture.body.totalTtc);
     });
 
     test('applique le même arrondi positif aux avoirs partiels et leur plafond', async () => {

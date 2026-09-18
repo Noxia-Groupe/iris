@@ -825,7 +825,7 @@ function lignesAvoirPartiel(brutes: unknown): { ordre: number; designation: stri
     const nature = String(ligne?.nature || 'PRESTATION');
     if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || prixUnitaireHt <= 0 || tauxTva === null || tauxTva > 100) throw new FactureInvalideError('Ligne d’avoir partiel invalide.');
     const totalHt = arrondiCommercialLigneHt(ligne?.quantite, ligne?.prixUnitaireHt);
-    const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
+    const totalTtc = centimesTtcLigne(totalHt, ligne?.tauxTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de ligne hors des limites acceptées.');
     return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
   });
@@ -917,7 +917,7 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
       const nature = String(ligne?.nature || 'PRESTATION');
       if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new FactureInvalideError('Ligne de facture invalide.');
       const totalHt = arrondiCommercialLigneHt(ligne?.quantite, ligne?.prixUnitaireHt);
-      const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
+      const totalTtc = centimesTtcLigne(totalHt, ligne?.tauxTva);
       if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de ligne hors des limites acceptées.');
       return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
     });
@@ -3843,6 +3843,14 @@ function arrondiCommercialLigneHt(quantite: unknown, prixUnitaireHt: unknown): n
   return Number((milliemes * centimesPu + 500n) / 1000n) / 100;
 }
 
+function centimesTtcLigne(totalHt: number, tauxTva: unknown): number {
+  const centimesHt = entierDecimal(totalHt, 2);
+  const millièmesTaux = entierDecimal(tauxTva, 3);
+  // (100 % + taux) est exprimé en millièmes de pourcentage. L'arrondi final est
+  // commercial, identique à la ligne HT, y compris aux taux 10 % et 5,5 %.
+  return Number((centimesHt * (100000n + millièmesTaux) + 50000n) / 100000n) / 100;
+}
+
 const centimes = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 function devisPayload(body: Record<string, unknown>) {
   const clientId = String(body.clientId || '').trim(), objet = String(body.objet || '').trim();
@@ -5148,5 +5156,6 @@ export {
   serialiseBareme,
   validerBareme,
   arrondiCommercialLigneHt,
+  centimesTtcLigne,
   getReglesRemuneration,
 };

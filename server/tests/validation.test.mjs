@@ -12,7 +12,7 @@ const {
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
   commissionBaremeProgressif, computeChantierMetrics,
   parseBareme, serialiseBareme, validerBareme,
-  arrondiCommercialLigneHt,
+  arrondiCommercialLigneHt, centimesTtcLigne,
 } = await import('../dist/index.js');
 
 describe('Fiche client', () => {
@@ -260,5 +260,7 @@ describe('Arrondi commercial des lignes de facture', () => {
   test('arrondit exactement une demi-unité de centime vers le haut sans flottant', () => {
     assert.equal(arrondiCommercialLigneHt('0.5', '4.27'), 2.14);
     assert.equal(arrondiCommercialLigneHt('0.125', '4.12'), 0.52);
+    assert.equal(centimesTtcLigne(9, '5.5'), 9.5);
+    assert.equal(centimesTtcLigne(17.15, '10'), 18.87);
   });
 });
