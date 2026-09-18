@@ -2144,6 +2144,17 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.body.totalTva, 2.14);
       assert.equal(facture.body.lignes[0].totalTtc, 23.49);
       assert.equal(facture.body.totalTtc, facture.body.lignes[0].totalTtc);
+
+      // Deuxième témoin, nécessaire en plus du premier : 21,35 € à 10 % ne tient que la
+      // TVA agrégée. Son TTC flottant remonte à 23,49 par chance. À 9,00 € et 5,5 %, le
+      // flottant descend à 9,49 : ce cas tient seul le TTC de la route POST /api/factures.
+      const ttcSurDemiCentime = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TTC de ligne sur demi-centime', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [{ designation: 'TEST TTC de ligne', quantite: '1', prixUnitaireHt: '9.00', tauxTva: 5.5 }],
+      });
+      assert.equal(ttcSurDemiCentime.status, 201, JSON.stringify(ttcSurDemiCentime.body));
+      assert.equal(ttcSurDemiCentime.body.lignes[0].totalTtc, 9.5, 'le TTC de ligne monte la demi-tranche');
+      assert.equal(ttcSurDemiCentime.body.totalTtc, ttcSurDemiCentime.body.lignes[0].totalTtc, 'la ligne et le pied disent la même chose');
     });
 
     test('applique le même arrondi positif aux avoirs partiels et leur plafond', async () => {
