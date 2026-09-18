@@ -37,6 +37,14 @@ const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { sty
 // Même arithmétique que le serveur : chaque ligne est arrondie au centime avant
 // agrégation, puis la TVA est calculée par taux. L’aperçu doit annoncer le document émis.
 const centimes = (montant: number) => Math.round((montant + Number.EPSILON) * 100) / 100;
+const entierDecimal = (valeur: string, decimales: number): bigint | null => {
+  const resultat = new RegExp(`^(\\d+)(?:[,.](\\d{1,${decimales}}))?$`).exec(valeur.trim());
+  return resultat ? BigInt(resultat[1]) * 10n ** BigInt(decimales) + BigInt((resultat[2] || '').padEnd(decimales, '0') || '0') : null;
+};
+const centimesLigne = (quantite: string, prixUnitaireHt: string): number => {
+  const milliemes = entierDecimal(quantite, 3), centimesPu = entierDecimal(prixUnitaireHt, 2);
+  return milliemes === null || centimesPu === null ? 0 : Number((milliemes * centimesPu + 500n) / 1000n) / 100;
+};
 const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoir) => !avoir.estAvoirAnnulation);
 
 export default function Factures() {
@@ -118,12 +126,10 @@ export default function Factures() {
   const totauxAvoir = (() => {
     const htParTaux = new Map<number, number>();
     for (const ligne of lignesAvoir) {
-      const quantite = nombreFr(ligne.quantite) ?? 0;
-      const prixUnitaireHt = nombreFr(ligne.prixUnitaireHt) ?? 0;
       const tauxTva = nombreFr(ligne.tauxTva) ?? 0;
       // Le serveur arrondit chaque ligne avant de sommer : faire de même ici évite
       // qu’un aperçu à côté d’un plafond annonce un montant différent du document.
-      htParTaux.set(tauxTva, centimes((htParTaux.get(tauxTva) || 0) + centimes(quantite * prixUnitaireHt)));
+      htParTaux.set(tauxTva, centimes((htParTaux.get(tauxTva) || 0) + centimesLigne(ligne.quantite, ligne.prixUnitaireHt)));
     }
     const totalHt = centimes([...htParTaux.values()].reduce((somme, ht) => somme + ht, 0));
     const totalTva = centimes([...htParTaux.entries()].reduce((somme, [taux, ht]) => somme + centimes(ht * taux / 100), 0));
