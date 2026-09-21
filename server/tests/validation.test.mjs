@@ -12,7 +12,7 @@ const {
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
   commissionBaremeProgressif, computeChantierMetrics,
   parseBareme, serialiseBareme, validerBareme,
-  arrondiCommercialLigneHt, centimesTtcLigne,
+  arrondiCommercialLigneHt, centimesTtcLigne, devisPayload,
 } = await import('../dist/index.js');
 
 describe('Fiche client', () => {
@@ -262,5 +262,20 @@ describe('Arrondi commercial des lignes de facture', () => {
     assert.equal(arrondiCommercialLigneHt('0.125', '4.12'), 0.52);
     assert.equal(centimesTtcLigne(9, '5.5'), 9.5);
     assert.equal(centimesTtcLigne(17.15, '10'), 18.87);
+  });
+});
+
+describe('Arrondi commercial des devis', () => {
+  test('arrondit 0,5 × 4,27 au centime et conserve HT + TVA = TTC au taux réduit', () => {
+    const devis = devisPayload({
+      clientId: 'client-test', objet: 'TEST Arrondi commercial',
+      lignes: [{ designation: 'Demi-centime', nature: 'MAIN_OEUVRE', quantite: '0.5', prixUnitaireHt: '4.27', tauxTva: '5.5' }],
+    });
+    assert.equal(devis.lignesCalculees[0].totalHt, 2.14);
+    assert.equal(devis.totalHt, 2.14);
+    assert.equal(devis.totalTva, 0.12);
+    assert.equal(devis.totalTtc, 2.26);
+    assert.equal(Math.round((devis.totalHt + devis.totalTva) * 100) / 100, devis.totalTtc);
+    assert.throws(() => devisPayload({ clientId: 'client-test', objet: 'TEST Invalide', lignes: [{ designation: 'Invalide', quantite: 0, prixUnitaireHt: 4.27, tauxTva: 5.5 }] }), /Ligne de devis invalide/);
   });
 });
