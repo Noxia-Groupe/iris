@@ -1797,12 +1797,12 @@ if (!TEST_DATABASE_URL) {
       const premier = await creer();
       assert.equal(premier.status, 201, JSON.stringify(premier.body));
       assert.deepEqual([premier.body.totalHt, premier.body.totalTva, premier.body.totalTtc], [9, 0.5, 9.5]);
-      assert.deepEqual(premier.body.ventilationTva, [{ tauxTva: 5.5, totalHt: 9, totalTva: 0.5, totalTtc: 9.5 }]);
+      assert.deepEqual(premier.body.ventilationTva.map(({ tauxTva, totalHt, totalTva, totalTtc }) => ({ tauxTva, totalHt, totalTva, totalTtc })), [{ tauxTva: 5.5, totalHt: 9, totalTva: 0.5, totalTtc: 9.5 }]);
 
       const second = await creer();
       assert.equal(second.status, 201, JSON.stringify(second.body));
       assert.deepEqual([second.body.totalHt, second.body.totalTva, second.body.totalTtc], [9, 0.49, 9.49]);
-      assert.deepEqual(second.body.ventilationTva, [{ tauxTva: 5.5, totalHt: 9, totalTva: 0.49, totalTtc: 9.49 }]);
+      assert.deepEqual(second.body.ventilationTva.map(({ tauxTva, totalHt, totalTva, totalTtc }) => ({ tauxTva, totalHt, totalTva, totalTtc })), [{ tauxTva: 5.5, totalHt: 9, totalTva: 0.49, totalTtc: 9.49 }]);
       const ventilationFigee = await prisma.factureVentilationTva.findUniqueOrThrow({ where: { factureId_tauxTva: { factureId: second.body.id, tauxTva: 5.5 } } });
       await assert.rejects(() => prisma.factureVentilationTva.update({ where: { id: ventilationFigee.id }, data: { totalTva: 0.5 } }), /immuable/);
       const depassement = await request(app).post(`/api/factures/${emission.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({
