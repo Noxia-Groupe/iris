@@ -1775,6 +1775,54 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('fige la TVA cumulée des avoirs fractionnés à 5,5 % dans le PDF et l’export', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
+        clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Arrondi cumulatif avoir 5,5', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
+        lignes: [
+          { designation: 'TEST source 5,5 premier', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 9, tauxTva: 5.5 },
+          { designation: 'TEST source 5,5 second', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 9, tauxTva: 5.5 },
+        ],
+      });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      assert.deepEqual([brouillon.body.totalHt, brouillon.body.totalTva, brouillon.body.totalTtc], [18, 0.99, 18.99]);
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
+      assert.ok(compteTva, 'le compte TVA de test existe');
+      await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
+
+      const creer = () => request(app).post(`/api/factures/${emission.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({
+        lignes: [{ designation: 'TEST avoir fractionné 5,5', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 9, tauxTva: 5.5 }],
+      });
+      const premier = await creer();
+      assert.equal(premier.status, 201, JSON.stringify(premier.body));
+      assert.deepEqual([premier.body.totalHt, premier.body.totalTva, premier.body.totalTtc], [9, 0.5, 9.5]);
+      assert.deepEqual(premier.body.ventilationTva, [{ tauxTva: 5.5, totalHt: 9, totalTva: 0.5, totalTtc: 9.5 }]);
+
+      const second = await creer();
+      assert.equal(second.status, 201, JSON.stringify(second.body));
+      assert.deepEqual([second.body.totalHt, second.body.totalTva, second.body.totalTtc], [9, 0.49, 9.49]);
+      assert.deepEqual(second.body.ventilationTva, [{ tauxTva: 5.5, totalHt: 9, totalTva: 0.49, totalTtc: 9.49 }]);
+      const ventilationFigee = await prisma.factureVentilationTva.findUniqueOrThrow({ where: { factureId_tauxTva: { factureId: second.body.id, tauxTva: 5.5 } } });
+      await assert.rejects(() => prisma.factureVentilationTva.update({ where: { id: ventilationFigee.id }, data: { totalTva: 0.5 } }), /immuable/);
+      const depassement = await request(app).post(`/api/factures/${emission.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({
+        lignes: [{ designation: 'TEST dépassement fractionné', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 0.01, tauxTva: 5.5 }],
+      });
+      assert.equal(depassement.status, 409, JSON.stringify(depassement.body));
+
+      const texteDuPdf = async (reponse) => { const lecteur = new PDFParse({ data: reponse.body }); const contenu = await lecteur.getText(); await lecteur.destroy(); return contenu.text; };
+      const pdfSecond = await request(app).get(`/api/factures/${second.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
+      assert.equal(pdfSecond.status, 200, pdfSecond.text);
+      assert.match(await texteDuPdf(pdfSecond), /TVA 5\.5 % sur 9,00 € : 0,49 €/);
+
+      const exportation = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      assert.equal(exportation.status, 200, exportation.text);
+      const lignesSecond = exportation.text.split('\n').filter((ligne) => ligne.includes(second.body.numero));
+      const montant = (ligne, index) => Number(ligne.split(';')[index].replace(/\"/g, ''));
+      assert.ok(lignesSecond.some((ligne) => /TVA/.test(ligne) && montant(ligne, 6) === 0.49), 'la TVA figée à 0,49 € est contre-passée');
+      assert.equal(lignesSecond.reduce((somme, ligne) => somme + montant(ligne, 6), 0).toFixed(2), lignesSecond.reduce((somme, ligne) => somme + montant(ligne, 7), 0).toFixed(2), 'l’export du second avoir est équilibré');
+    });
+
     test('une facture ne quitte pas sa fiche affaire en changeant de statut', async () => {
       const chantier = await prisma.chantier.create({ data: { nom: 'TEST Affaire suivie', client: 'TEST Client contrat maintenance', clientId, dateDebut: new Date('2026-09-01T00:00:00.000Z'), statut: 'EN_COURS', budgetGlobalVendu: 10000 } });
       const emettreSurAffaire = async (motif) => {
