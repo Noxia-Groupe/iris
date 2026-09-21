@@ -812,7 +812,11 @@ class FactureInvalideError extends Error {}
 type LigneTaxable = { tauxTva: unknown; totalHt: unknown };
 const tauxUtilises = (lignes: LigneTaxable[]) => [...new Set(lignes.map(ligne => Number(ligne.tauxTva)))];
 const baseHtDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(lignes.filter(ligne => Number(ligne.tauxTva) === taux).reduce((somme, ligne) => somme + Number(ligne.totalHt), 0));
-const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(baseHtDuTaux(lignes, taux) * taux / 100);
+const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => {
+  const baseCentimes = entierDecimal(baseHtDuTaux(lignes, taux), 2);
+  const millièmesTaux = entierDecimal(taux, 3);
+  return Number((baseCentimes * millièmesTaux + 50000n) / 100000n) / 100;
+};
 
 function lignesAvoirPartiel(brutes: unknown): { ordre: number; designation: string; nature: string; quantite: number; prixUnitaireHt: number; tauxTva: number; totalHt: number; totalTtc: number }[] {
   const lignesBrutes = Array.isArray(brutes) ? brutes : [];
@@ -824,8 +828,8 @@ function lignesAvoirPartiel(brutes: unknown): { ordre: number; designation: stri
     const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3, true);
     const nature = String(ligne?.nature || 'PRESTATION');
     if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || prixUnitaireHt <= 0 || tauxTva === null || tauxTva > 100) throw new FactureInvalideError('Ligne d’avoir partiel invalide.');
-    const totalHt = centimes(quantite * prixUnitaireHt);
-    const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
+    const totalHt = arrondiCommercialLigneHt(ligne?.quantite, ligne?.prixUnitaireHt);
+    const totalTtc = centimesTtcLigne(totalHt, ligne?.tauxTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de ligne hors des limites acceptées.');
     return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
   });
@@ -916,8 +920,8 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
       const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3, true);
       const nature = String(ligne?.nature || 'PRESTATION');
       if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new FactureInvalideError('Ligne de facture invalide.');
-      const totalHt = centimes(quantite * prixUnitaireHt);
-      const totalTtc = centimes(totalHt * (1 + tauxTva / 100));
+      const totalHt = arrondiCommercialLigneHt(ligne?.quantite, ligne?.prixUnitaireHt);
+      const totalTtc = centimesTtcLigne(totalHt, ligne?.tauxTva);
       if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de ligne hors des limites acceptées.');
       return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
     });
@@ -3824,6 +3828,33 @@ class DevisSaisieError extends Error {}
 // Refus qui ne vient pas de la saisie mais de l'état de l'affaire : la requête est bien
 // formée, c'est le monde qui s'y oppose. 409, pas 400.
 class DevisConflitError extends Error {}
+// Arrondi commercial exact au centime d’une ligne : quantité (au millième) × PU HT
+// (au centime). Les montants de facture et d’avoir sont toujours positifs ; leur sens est
+// porté par le type du document. Aucun flottant ne participe à ce calcul.
+function entierDecimal(value: unknown, decimales: number): bigint {
+  const texte = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  const expression = new RegExp(`^(\\d+)(?:[,.](\\d{1,${decimales}}))?$`);
+  const resultat = expression.exec(texte);
+  if (!resultat) throw new FactureInvalideError('Montant de ligne invalide.');
+  return BigInt(resultat[1]) * 10n ** BigInt(decimales) + BigInt((resultat[2] || '').padEnd(decimales, '0') || '0');
+}
+
+function arrondiCommercialLigneHt(quantite: unknown, prixUnitaireHt: unknown): number {
+  const milliemes = entierDecimal(quantite, 3);
+  const centimesPu = entierDecimal(prixUnitaireHt, 2);
+  // Le produit est exprimé en millièmes de centime. Ajouter 500 puis diviser par 1 000
+  // applique exactement « moitié vers le haut » pour les valeurs positives.
+  return Number((milliemes * centimesPu + 500n) / 1000n) / 100;
+}
+
+function centimesTtcLigne(totalHt: number, tauxTva: unknown): number {
+  const centimesHt = entierDecimal(totalHt, 2);
+  const millièmesTaux = entierDecimal(tauxTva, 3);
+  // (100 % + taux) est exprimé en millièmes de pourcentage. L'arrondi final est
+  // commercial, identique à la ligne HT, y compris aux taux 10 % et 5,5 %.
+  return Number((centimesHt * (100000n + millièmesTaux) + 50000n) / 100000n) / 100;
+}
+
 const centimes = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 function devisPayload(body: Record<string, unknown>) {
   const clientId = String(body.clientId || '').trim(), objet = String(body.objet || '').trim();
@@ -5128,5 +5159,7 @@ export {
   parseBareme,
   serialiseBareme,
   validerBareme,
+  arrondiCommercialLigneHt,
+  centimesTtcLigne,
   getReglesRemuneration,
 };
