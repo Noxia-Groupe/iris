@@ -619,6 +619,15 @@ if (!TEST_DATABASE_URL) {
       assert.equal(res.body.totalTtc, 5.28);
     });
 
+    test('refuse les précisions incompatibles avec les unités monétaires sans erreur interne', async () => {
+      const res = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Précision invalide',
+        lignes: [{ designation: 'Quantité à quatre décimales', quantite: '0.3333', prixUnitaireHt: '4.27', tauxTva: '5.5' }],
+      });
+      assert.equal(res.status, 400, JSON.stringify(res.body));
+      assert.equal(res.body.error, 'Ligne de devis invalide.');
+    });
+
     test('révise un devis sans modifier sa version validée', async () => {
       const res = await request(app).post(`/api/devis/${devisId}/revisions`).set('Authorization', `Bearer ${session}`);
       assert.equal(res.status, 201, JSON.stringify(res.body));
