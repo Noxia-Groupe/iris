@@ -3861,8 +3861,13 @@ function devisPayload(body: Record<string, unknown>) {
   const lignes = Array.isArray(body.lignes) ? body.lignes : [];
   if (!clientId || !objet || objet.length > 300 || !lignes.length) throw new DevisSaisieError('Client, objet et au moins une ligne sont requis.');
   const lignesCalculees = lignes.map((ligne, ordre) => {
-    const item = ligne as Record<string, unknown>, designation = String(item.designation || '').trim(), nature = String(item.nature || 'MAIN_OEUVRE'), quantite = Number(item.quantite), prixUnitaireHt = Number(item.prixUnitaireHt), tauxTva = Number(item.tauxTva ?? 20);
-    if (!['MAIN_OEUVRE', 'FOURNITURE'].includes(nature) || !designation || !Number.isFinite(quantite) || quantite <= 0 || !Number.isFinite(prixUnitaireHt) || prixUnitaireHt < 0 || !Number.isFinite(tauxTva) || tauxTva < 0) throw new DevisSaisieError('Ligne de devis invalide.');
+    const item = ligne as Record<string, unknown>, designation = String(item.designation || '').trim(), nature = String(item.nature || 'MAIN_OEUVRE');
+    // Mêmes échelles que les factures : le calcul entier ne doit jamais recevoir une précision
+    // que ses unités (millièmes / centimes) ne représentent pas.
+    const quantite = nombreDecimalNonNegatif(item.quantite, 9, false, 3);
+    const prixUnitaireHt = nombreDecimalNonNegatif(item.prixUnitaireHt, 10, true);
+    const tauxTva = item.tauxTva === undefined || item.tauxTva === null ? 20 : nombreDecimalNonNegatif(item.tauxTva, 3, true);
+    if (!['MAIN_OEUVRE', 'FOURNITURE'].includes(nature) || !designation || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new DevisSaisieError('Ligne de devis invalide.');
     const totalHt = arrondiCommercialLigneHt(quantite, prixUnitaireHt);
     const totalTtc = centimesTtcLigne(totalHt, tauxTva);
     return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };

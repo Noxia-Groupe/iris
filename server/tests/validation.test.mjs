@@ -278,4 +278,27 @@ describe('Arrondi commercial des devis', () => {
     assert.equal(Math.round((devis.totalHt + devis.totalTva) * 100) / 100, devis.totalTtc);
     assert.throws(() => devisPayload({ clientId: 'client-test', objet: 'TEST Invalide', lignes: [{ designation: 'Invalide', quantite: 0, prixUnitaireHt: 4.27, tauxTva: 5.5 }] }), /Ligne de devis invalide/);
   });
+
+  test('refuse clairement les précisions incompatibles avec le calcul exact', () => {
+    for (const ligne of [
+      { designation: 'Quantité trop précise', quantite: '0.3333', prixUnitaireHt: '4.27', tauxTva: '5.5' },
+      { designation: 'Prix trop précis', quantite: '1', prixUnitaireHt: '4.275', tauxTva: '5.5' },
+      { designation: 'Taux trop précis', quantite: '1', prixUnitaireHt: '4.27', tauxTva: '5.5255' },
+    ]) assert.throws(() => devisPayload({ clientId: 'client-test', objet: 'TEST Précision invalide', lignes: [ligne] }), /Ligne de devis invalide/);
+  });
+
+  test('arrondit le TTC de ligne du devis sur une demi-tranche', () => {
+    const devis = devisPayload({ clientId: 'client-test', objet: 'TEST TTC de ligne', lignes: [{ designation: 'Demi-tranche TTC', nature: 'MAIN_OEUVRE', quantite: '1', prixUnitaireHt: '9.00', tauxTva: '5.5' }] });
+    assert.equal(devis.lignesCalculees[0].totalTtc, 9.5);
+  });
+
+  test('calcule la TVA du devis sur la base cumulée du taux, pas en sommant les lignes', () => {
+    const devis = devisPayload({ clientId: 'client-test', objet: 'TEST TVA agrégée', lignes: [
+      { designation: 'Ligne A', nature: 'MAIN_OEUVRE', quantite: '1', prixUnitaireHt: '0.05', tauxTva: '10' },
+      { designation: 'Ligne B', nature: 'MAIN_OEUVRE', quantite: '1', prixUnitaireHt: '0.05', tauxTva: '10' },
+    ] });
+    assert.equal(devis.totalHt, 0.1);
+    assert.equal(devis.totalTva, 0.01);
+    assert.equal(devis.totalTtc, 0.11);
+  });
 });
