@@ -446,6 +446,9 @@ model Facture {
   mentionsLegalesVersionId String?
   mentionsLegalesVersion   MentionsLegalesVersion? @relation(fields: [mentionsLegalesVersionId], references: [id], onDelete: Restrict)
   lignes        FactureLigne[]
+  // Ventilation par taux figée à la création des nouveaux documents. Les factures
+  // historiques restent lisibles sans ligne de ventilation et utilisent le fallback dérivé.
+  ventilationTva FactureVentilationTva[]
   journal       JournalFacture[]
   createdById   String?
   emisLe        DateTime?
@@ -488,6 +491,19 @@ model FactureLigne {
   totalTtc       Decimal @db.Decimal(12, 2)
 
   @@unique([factureId, ordre])
+}
+
+model FactureVentilationTva {
+  id        String   @id @default(uuid())
+  factureId String
+  facture   Facture  @relation(fields: [factureId], references: [id], onDelete: Cascade)
+  tauxTva   Decimal  @db.Decimal(5, 2)
+  totalHt   Decimal  @db.Decimal(12, 2)
+  totalTva  Decimal  @db.Decimal(12, 2)
+  totalTtc  Decimal  @db.Decimal(12, 2)
+
+  @@unique([factureId, tauxTva])
+  @@index([factureId])
 }
 
 model MentionsLegalesVersion {

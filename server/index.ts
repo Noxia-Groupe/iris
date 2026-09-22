@@ -715,7 +715,7 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 }
 
 // --- Facturation française native ---
-const factureInclude = { client: { select: { id: true, raisonSociale: true } }, factureOrigine: { select: { id: true, numero: true } }, avoirs: { select: { id: true, numero: true, type: true, statut: true, estAvoirAnnulation: true }, orderBy: { createdAt: 'asc' as const } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } } };
+const factureInclude = { client: { select: { id: true, raisonSociale: true } }, factureOrigine: { select: { id: true, numero: true } }, avoirs: { select: { id: true, numero: true, type: true, statut: true, estAvoirAnnulation: true }, orderBy: { createdAt: 'asc' as const } }, mentionsLegalesVersion: { select: { id: true, version: true, mentions: true, cgv: true, penalites: true, escompte: true, publieeLe: true } }, lignes: { orderBy: { ordre: 'asc' as const } }, ventilationTva: { orderBy: { tauxTva: 'asc' as const } } };
 
 // L'adresse du client est sélectionnée depuis son site de facturation, puis figée à l'émission.
 const SITE_FACTURATION_ORDRE = [{ estSiteFacturation: 'desc' as const }, { principal: 'desc' as const }, { estSiegeSocial: 'desc' as const }, { nom: 'asc' as const }];
@@ -793,7 +793,7 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
     }
     pdf.font('Helvetica');
     pdf.moveDown();
-    const tvaParTaux = tauxUtilises(facture.lignes).sort((a, b) => a - b).map(taux => ({ taux, ht: baseHtDuTaux(facture.lignes, taux), tva: tvaDuTaux(facture.lignes, taux) }));
+    const tvaParTaux = ventilationFacture(facture).map(ventilation => ({ taux: ventilation.tauxTva, ht: ventilation.totalHt, tva: ventilation.totalTva }));
     ligne(`Total HT : ${formatMontantFacture(facture.totalHt)}`, { taille: 10, align: 'right' });
     for (const cumul of tvaParTaux) ligne(`TVA ${cumul.taux} % sur ${formatMontantFacture(cumul.ht)} : ${formatMontantFacture(cumul.tva)}`, { taille: 10, align: 'right' });
     ligne(`TVA totale : ${formatMontantFacture(facture.totalTva)}`, { taille: 10, align: 'right' });
@@ -817,6 +817,15 @@ const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => {
   const millièmesTaux = entierDecimal(taux, 3);
   return Number((baseCentimes * millièmesTaux + 50000n) / 100000n) / 100;
 };
+type VentilationTva = { tauxTva: number; totalHt: number; totalTva: number; totalTtc: number };
+const ventilationTvaDerivee = (lignes: LigneTaxable[]): VentilationTva[] => tauxUtilises(lignes).sort((a, b) => a - b).map(tauxTva => {
+  const totalHt = baseHtDuTaux(lignes, tauxTva);
+  const totalTva = tvaDuTaux(lignes, tauxTva);
+  return { tauxTva, totalHt, totalTva, totalTtc: centimes(totalHt + totalTva) };
+});
+// Le fallback ne sert qu'aux documents historiques, qui n'ont volontairement pas été réécrits.
+const ventilationFacture = (facture: { lignes: LigneTaxable[]; ventilationTva?: { tauxTva: unknown; totalHt: unknown; totalTva: unknown; totalTtc: unknown }[] }): VentilationTva[] =>
+  facture.ventilationTva?.length ? facture.ventilationTva.map(v => ({ tauxTva: Number(v.tauxTva), totalHt: Number(v.totalHt), totalTva: Number(v.totalTva), totalTtc: Number(v.totalTtc) })) : ventilationTvaDerivee(facture.lignes);
 
 function lignesAvoirPartiel(brutes: unknown): { ordre: number; designation: string; nature: string; quantite: number; prixUnitaireHt: number; tauxTva: number; totalHt: number; totalTtc: number }[] {
   const lignesBrutes = Array.isArray(brutes) ? brutes : [];
@@ -927,11 +936,12 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     });
     const totalHt = centimes(lignes.reduce((s: number, ligne: { totalHt: number }) => s + ligne.totalHt, 0));
     // La TVA légale s'arrondit sur la base HT cumulée de chaque taux, jamais ligne par ligne.
-    const totalTva = centimes(tauxUtilises(lignes).reduce((somme: number, taux: number) => somme + tvaDuTaux(lignes, taux), 0));
+    const ventilationTva = ventilationTvaDerivee(lignes);
+    const totalTva = centimes(ventilationTva.reduce((somme, ventilation) => somme + ventilation.totalTva, 0));
     const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
     const facture = await prisma.$transaction(async (tx) => {
-      const creee = await tx.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes } }, include: factureInclude });
+      const creee = await tx.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes }, ventilationTva: { create: ventilationTva } }, include: factureInclude });
       await tx.journalFacture.create({ data: { factureId: creee.id, acteurId: req.user!.id, action: 'CREATION_BROUILLON', detail: `Origine ${origine}` } });
       return creee;
     });
@@ -1031,7 +1041,7 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
     // Une facture numérotée ne quitte jamais le journal des ventes : l'avoir la neutralise
     // par une pièce distincte, sans effacer ses écritures ni son numéro légal déjà exporté.
     // Les annulations historiques sans avoir gardent leur contre-passation legacy ci-dessous.
-    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, avoirs: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
+    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, ventilationTva: true, avoirs: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
     const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
     if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
     // Deux classes de dates, deux lectures — les confondre décale l'écriture d'un jour, et
@@ -1046,7 +1056,7 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
         const ecriture = (compte: { code: string; libelle: string }, debit: number, credit: number) => lignes.push([r.get('JOURNAL_VENTES')!.journal, dateEcriture, f.numero, compte.code, compte.libelle, texte, (contrepasse ? credit : debit).toFixed(2), (contrepasse ? debit : credit).toFixed(2)].map(csvComptable).join(';'));
         ecriture(r.get('CLIENT')!.compte!, Number(f.totalTtc), 0);
         for (const nature of ['PRESTATION', 'ARTICLE']) { const ht = f.lignes.filter(l => l.nature === nature).reduce((s, l) => s + Number(l.totalHt), 0); if (ht) ecriture(r.get(nature === 'PRESTATION' ? 'VENTE_PRESTATION' : 'VENTE_ARTICLE')!.compte!, 0, ht); }
-        for (const taux of tauxUtilises(f.lignes)) { const tva = tvaDuTaux(f.lignes, taux); if (tva) ecriture(tvaParTaux.get(taux)!, 0, tva); }
+        for (const ventilation of ventilationFacture(f)) if (ventilation.totalTva) ecriture(tvaParTaux.get(ventilation.tauxTva)!, 0, ventilation.totalTva);
       };
       ecrire(date, f.type === 'AVOIR' ? `Avoir ${f.numero} — ${f.clientRaisonSociale}` : libelle, f.type === 'AVOIR');
       if (f.statut === 'ANNULEE' && !f.avoirs.length) ecrire(f.journal[0] ? jourDInstant(f.journal[0].createdAt) : jourDeDateSeule(f.dateEmission), `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
@@ -1179,6 +1189,7 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
         motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
         totalHt: facture.totalHt, totalTva: facture.totalTva, totalTtc: facture.totalTtc, createdById: req.user!.id, emisLe: now,
         lignes: { create: facture.lignes.map(({ id: _id, factureId: _factureId, ...ligne }) => ligne) },
+        ventilationTva: { create: ventilationTvaDerivee(facture.lignes) },
       }, include: factureInclude });
       await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'ANNULATION', detail: `Transition EMISE → ANNULEE ; avoir total ${numero}` } });
       await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR', detail: `Avoir total de la facture ${facture.numero}` } });
@@ -1202,27 +1213,37 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
 app.post('/api/factures/:id/avoirs', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const lignes = lignesAvoirPartiel(req.body?.lignes);
-    const totalHt = centimes(lignes.reduce((somme, ligne) => somme + ligne.totalHt, 0));
-    const totalTva = centimes(tauxUtilises(lignes).reduce((somme, taux) => somme + tvaDuTaux(lignes, taux), 0));
-    const totalTtc = centimes(totalHt + totalTva);
-    if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant d’avoir hors des limites acceptées.');
     const resultat = await prisma.$transaction(async (tx) => {
       // PostgreSQL verrouille la facture source jusqu’à la fin de la transaction ; sans ce
       // verrou, deux administrateurs pourraient chacun lire le même reliquat puis le dépasser.
       await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${paramId(req)} FOR UPDATE`;
-      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: true, avoirs: { include: { lignes: true } } } });
+      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: true, ventilationTva: true, avoirs: { include: { lignes: true, ventilationTva: true } } } });
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.type !== 'FACTURE' || !['EMISE', 'REGLEE'].includes(facture.statut)) return { erreur: 'NOT_CREDITABLE' as const };
       const tauxSource = new Set(tauxUtilises(facture.lignes));
       for (const taux of tauxUtilises(lignes)) if (!tauxSource.has(taux)) throw new FactureInvalideError('Le taux de TVA d’une ligne d’avoir doit être présent sur la facture d’origine.');
       const avoirsPrecedents = facture.avoirs;
+      // La TVA de l'avoir est la différence des arrondis des bases HT cumulées avant/après.
+      const ventilationSource = new Map(ventilationFacture(facture).map(ventilation => [ventilation.tauxTva, ventilation]));
+      const ventilationTva = tauxUtilises(lignes).sort((a, b) => a - b).map(tauxTva => {
+        const totalHt = baseHtDuTaux(lignes, tauxTva);
+        const totalHtPrecedent = centimes(avoirsPrecedents.reduce((somme, avoir) => somme + (ventilationFacture(avoir).find(ventilation => ventilation.tauxTva === tauxTva)?.totalHt || 0), 0));
+        const totalTvaPrecedent = tvaDuTaux([{ tauxTva, totalHt: totalHtPrecedent }], tauxTva);
+        const totalTvaApres = tvaDuTaux([{ tauxTva, totalHt: centimes(totalHtPrecedent + totalHt) }], tauxTva);
+        const totalTva = centimes(totalTvaApres - totalTvaPrecedent);
+        return { tauxTva, totalHt, totalTva, totalTtc: centimes(totalHt + totalTva) };
+      });
+      const totalHt = centimes(ventilationTva.reduce((somme, ventilation) => somme + ventilation.totalHt, 0));
+      const totalTva = centimes(ventilationTva.reduce((somme, ventilation) => somme + ventilation.totalTva, 0));
+      const totalTtc = centimes(totalHt + totalTva);
+      if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant d’avoir hors des limites acceptées.');
       const sommePrecedente = (champ: 'totalHt' | 'totalTva' | 'totalTtc') => centimes(avoirsPrecedents.reduce((somme, avoir) => somme + Number(avoir[champ]), 0));
       if (centimes(sommePrecedente('totalHt') + totalHt) > Number(facture.totalHt) || centimes(sommePrecedente('totalTva') + totalTva) > Number(facture.totalTva) || centimes(sommePrecedente('totalTtc') + totalTtc) > Number(facture.totalTtc)) throw new AvoirPlafondError('Cet avoir dépasse le montant total restant à créditer sur la facture d’origine.');
-      for (const taux of tauxUtilises(lignes)) {
-        const htSource = baseHtDuTaux(facture.lignes, taux), tvaSource = tvaDuTaux(facture.lignes, taux);
-        const htPrecedent = centimes(avoirsPrecedents.reduce((somme, avoir) => somme + baseHtDuTaux(avoir.lignes, taux), 0));
-        const tvaPrecedente = centimes(avoirsPrecedents.reduce((somme, avoir) => somme + tvaDuTaux(avoir.lignes, taux), 0));
-        if (centimes(htPrecedent + baseHtDuTaux(lignes, taux)) > htSource || centimes(tvaPrecedente + tvaDuTaux(lignes, taux)) > tvaSource) throw new AvoirPlafondError(`Cet avoir dépasse le plafond restant pour la TVA à ${taux} % de la facture d’origine.`);
+      for (const ventilation of ventilationTva) {
+        const source = ventilationSource.get(ventilation.tauxTva)!;
+        const precedent = avoirsPrecedents.reduce((somme, avoir) => somme + (ventilationFacture(avoir).find(v => v.tauxTva === ventilation.tauxTva)?.totalHt || 0), 0);
+        const tvaPrecedente = avoirsPrecedents.reduce((somme, avoir) => somme + (ventilationFacture(avoir).find(v => v.tauxTva === ventilation.tauxTva)?.totalTva || 0), 0);
+        if (centimes(precedent + ventilation.totalHt) > source.totalHt || centimes(tvaPrecedente + ventilation.totalTva) > source.totalTva || centimes(precedent + ventilation.totalHt + tvaPrecedente + ventilation.totalTva) > source.totalTtc) throw new AvoirPlafondError(`Cet avoir dépasse le plafond restant pour la TVA à ${ventilation.tauxTva} % de la facture d’origine.`);
       }
       const now = new Date();
       const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
@@ -1237,7 +1258,7 @@ app.post('/api/factures/:id/avoirs', requireAuth, requireAdmin, async (req: Auth
         clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
         origine: facture.origine, chantierId: facture.chantierId, interventionId: facture.interventionId, contratMaintenanceId: facture.contratMaintenanceId,
         motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
-        totalHt, totalTva, totalTtc, createdById: req.user!.id, emisLe: now, lignes: { create: lignes },
+        totalHt, totalTva, totalTtc, createdById: req.user!.id, emisLe: now, lignes: { create: lignes }, ventilationTva: { create: ventilationTva },
       }, include: factureInclude });
       await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR_PARTIEL', detail: `Avoir partiel de la facture ${facture.numero}` } });
       return { avoir };
