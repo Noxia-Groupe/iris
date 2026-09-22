@@ -5,6 +5,10 @@
 **VPS** : CommercePro 46.202.129.169  
 **Déploiement** : une instance Iris dédiée par société cliente, avec sa propre base PostgreSQL
 
+## Configuration d’une instance
+
+La procédure de création d’une instance vierge, les variables PostgreSQL, Microsoft Entra ID, JWT, accès de secours, frontend et tests sont documentées dans [`docs/CONFIGURATION-ENVIRONNEMENT.md`](docs/CONFIGURATION-ENVIRONNEMENT.md). Les modèles versionnés sont [`.env.example`](.env.example) et [`server/.env.example`](server/.env.example) ; les fichiers `.env` réels ne doivent jamais être ajoutés au dépôt.
+
 ## Vision
 Iris est un ERP français pour métiers techniques : interventions SAV et travaux, facturation récurrente, abonnements télécom (4G/fibre), financeurs, raccordement bancaire automatique, web app mobile pour techniciens, branding personnalisé (couleurs + logo) et identité légale de la société exploitante. Une installation Iris correspond à une seule société : déploiement à la demande, sans inscription publique ni mutualisation de base de données.
 

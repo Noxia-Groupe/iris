@@ -4,7 +4,17 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test, { describe } from 'node:test';
 
-const { apiKeyHash, secretIdentique } = await import('../dist/index.js');
+const { apiKeyHash, secretIdentique, resolveJwtSecret } = await import('../dist/index.js');
+
+describe('Secret JWT de production', () => {
+  test('refuse une valeur d’exemple publiée', () => {
+    assert.throws(() => resolveJwtSecret('CHANGE_ME_GENERATE_A_LONG_RANDOM_SECRET', 'production'), /valeur d’exemple/);
+  });
+
+  test('accepte un secret de production non publié', () => {
+    assert.equal(resolveJwtSecret('secret-aleatoire-non-public-et-suffisamment-long', 'production'), 'secret-aleatoire-non-public-et-suffisamment-long');
+  });
+});
 
 describe('Clés API', () => {
   test("l'empreinte est un SHA-256 stable et non réversible", () => {

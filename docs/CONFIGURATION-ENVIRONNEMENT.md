@@ -1,0 +1,81 @@
+# Configuration d’environnement Iris
+
+Iris est en développement : une nouvelle installation part d’une base PostgreSQL vierge. Les fichiers `.env` contiennent des paramètres propres à une instance et ne doivent jamais être versionnés.
+
+## Fichiers à créer
+
+```bash
+cp .env.example .env
+cp server/.env.example server/.env
+```
+
+Les deux fichiers ont des rôles différents :
+
+- `.env` : variables interpolées par `docker-compose.yml`, principalement la création de PostgreSQL ;
+- `server/.env` : variables applicatives chargées par le backend, dont Microsoft Entra ID et les secrets d’administration.
+
+En Docker, `docker-compose.yml` injecte l’URL de base du backend à partir de `POSTGRES_USER`, `POSTGRES_PASSWORD` et `POSTGRES_DB`. En développement local sans Docker, renseigner `DATABASE_URL` dans `server/.env`.
+
+## Variables de la stack
+
+### PostgreSQL
+
+| Variable | Emplacement | Requise | Usage |
+|---|---|---:|---|
+| `POSTGRES_USER` | `.env` | oui, Docker | utilisateur créé à l’initialisation du volume PostgreSQL ; Compose refuse de démarrer s’il manque |
+| `POSTGRES_PASSWORD` | `.env` | oui, Docker | secret du compte PostgreSQL ; Compose refuse de démarrer s’il manque |
+| `POSTGRES_DB` | `.env` | oui, Docker | base créée à l’initialisation ; Compose refuse de démarrer s’il manque |
+| `DATABASE_URL` | `server/.env` hors Docker | oui hors Docker | connexion Prisma/backend |
+
+Les trois variables `POSTGRES_*` ne reconfigurent pas une base déjà initialisée : pour une instance en développement, les choisir avant le premier démarrage. Ne jamais utiliser une URL de test pour une base de développement ou future production.
+
+### Backend et sécurité
+
+| Variable | Requise | Défaut réel | Conséquence si absente |
+|---|---:|---|---|
+| `NODE_ENV` | non | `development` | Docker fixe `production`; le backend refuse un `JWT_SECRET` absent en production |
+| `PORT` | non | `3001` | port HTTP du backend local |
+| `JWT_SECRET` | oui en production | aucune clé sûre | démarrage refusé en production |
+| `SUPERADMIN_EMAILS` | oui sur base vierge | liste vide | aucun superadministrateur n’est créé |
+| `BREAK_GLASS_EMAIL` | non mais recommandé | vide | accès de secours inactif |
+| `BREAK_GLASS_TOKEN` | non mais recommandé | vide | accès de secours inactif; moins de 32 caractères le désactive |
+
+`SUPERADMIN_EMAILS` est une liste d’adresses séparées par des virgules. Les comptes doivent ensuite se connecter avec Microsoft Entra ID. Le jeton de secours a les droits d’un superadministrateur et doit être généré avec `openssl rand -base64 48`, conservé uniquement dans un gestionnaire de mots de passe et changé après usage réel.
+
+### Microsoft Entra ID
+
+| Variable | Requise | Usage |
+|---|---:|---|
+| `AZURE_TENANT_ID` | oui pour la connexion Microsoft | tenant Entra ID de l’organisation |
+| `AZURE_CLIENT_ID` | oui pour la connexion Microsoft | identifiant de l’application SPA |
+
+Créer une application **Single-page application (SPA)** dans Microsoft Entra ID et déclarer l’origine HTTPS exacte de l’instance dans les URI de redirection, par exemple `https://iris.votre-societe.fr`. Aucun secret client Microsoft ne doit être créé ni placé dans un fichier `.env` pour ce flux SPA. Sans les deux identifiants, la connexion Microsoft est indisponible; un accès de secours correctement configuré reste alors la seule porte d’administration.
+
+### Frontend et développement
+
+| Variable | Requise | Défaut réel | Usage |
+|---|---:|---|---|
+| `VITE_API_URL` | non | `/api` | URL d’API compilée dans le frontend Vite |
+| `VITE_DEV_API_TARGET` | non | `http://localhost:3001` | cible du proxy Vite local |
+
+Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigateur : elles ne doivent jamais contenir de secret. Dans la stack Docker, le frontend est construit avec `VITE_API_URL=/api`.
+
+### Tests et CI
+
+| Variable | Requise | Usage |
+|---|---:|---|
+| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend |
+| `E2E_DATABASE_URL` | seulement E2E locaux | PostgreSQL jetable Playwright |
+| `E2E_BASE_URL` | non | URL frontend E2E, défaut `http://127.0.0.1:5199` |
+| `E2E_API_PORT` | non | port API E2E, défaut `3001` |
+| `CI` | non localement | fourni par GitHub Actions; modifie le reporter et l’isolation Playwright |
+
+Les bases de test sont destructibles. Elles ne doivent jamais viser un volume de développement, ni une instance de production.
+
+## Vérifier avant démarrage
+
+1. vérifier que les deux `.env` sont ignorés par Git : `git status --short` ne doit pas les afficher ;
+2. s’assurer que `POSTGRES_PASSWORD`, `JWT_SECRET` et `BREAK_GLASS_TOKEN` ne sont pas des valeurs d’exemple ;
+3. vérifier les URI de redirection Entra ID avant d’essayer la connexion ;
+4. lancer `docker compose config` pour vérifier l’interpolation des variables sans démarrer les conteneurs ;
+5. démarrer la stack avec `docker compose up -d --build`.

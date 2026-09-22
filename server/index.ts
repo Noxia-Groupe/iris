@@ -22,14 +22,14 @@ app.use(express.json());
 
 // --- Sécurité : résolution du secret JWT ---
 // En production, le secret est OBLIGATOIRE : on refuse de démarrer sinon.
-function resolveJwtSecret(): string {
-  const secret = process.env.JWT_SECRET;
-  if (secret) return secret;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('JWT_SECRET manquant : définissez-le dans server/.env avant de démarrer en production.');
+export function resolveJwtSecret(secret = process.env.JWT_SECRET, environnement = process.env.NODE_ENV): string {
+  if (!secret) {
+    if (environnement === 'production') throw new Error('JWT_SECRET manquant : définissez-le dans server/.env avant de démarrer en production.');
+    console.warn('[AVERTISSEMENT] JWT_SECRET non défini — clé de développement non sécurisée utilisée.');
+    return 'dev_only_insecure_secret_change_me';
   }
-  console.warn('[AVERTISSEMENT] JWT_SECRET non défini — clé de développement non sécurisée utilisée.');
-  return 'dev_only_insecure_secret_change_me';
+  if (environnement === 'production' && /^CHANGE_ME(?:_|$)/.test(secret)) throw new Error('JWT_SECRET est resté la valeur d’exemple : générez-en un avec openssl rand -base64 48.');
+  return secret;
 }
 const JWT_SECRET = resolveJwtSecret();
 

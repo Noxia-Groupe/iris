@@ -4,9 +4,9 @@ services:
     container_name: iris_db
     restart: always
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-iris}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-iris_password}
-      - POSTGRES_DB=${POSTGRES_DB:-iris}
+      - POSTGRES_USER=${POSTGRES_USER:?POSTGRES_USER est obligatoire}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD est obligatoire}
+      - POSTGRES_DB=${POSTGRES_DB:?POSTGRES_DB est obligatoire}
     volumes:
       # Stockage persistant de la base PostgreSQL
       - postgres_data:/var/lib/postgresql/data
@@ -15,7 +15,7 @@ services:
       # Réseau partagé avec pgBackWeb pour les sauvegardes
       - backup-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iris} -d ${POSTGRES_DB:-iris}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER est obligatoire} -d ${POSTGRES_DB:?POSTGRES_DB est obligatoire}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,8 +29,8 @@ services:
     environment:
       - PORT=3001
       - NODE_ENV=production
-      # URL de connexion construite à partir des identifiants du service "db".
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-iris}:${POSTGRES_PASSWORD:-iris_password}@db:5432/${POSTGRES_DB:-iris}?schema=public
+      # URL de connexion construite à partir des identifiants obligatoires du service "db".
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?POSTGRES_USER est obligatoire}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD est obligatoire}@db:5432/${POSTGRES_DB:?POSTGRES_DB est obligatoire}?schema=public
     # Secrets applicatifs (JWT_SECRET obligatoire en prod, paramètres SSO et accès de secours).
     env_file:
       - ./server/.env
