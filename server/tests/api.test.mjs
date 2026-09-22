@@ -446,6 +446,33 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('une écriture archivée hors périmètre reste invisible', async () => {
+      const achatArchiveHorsPerimetre = await prisma.achatReel.create({
+        data: {
+          date: new Date(), description: 'TEST achat archivé hors périmètre', montantHT: 10,
+          chantierId: idChantierB, categorieId: idCategorie, fournisseurId: idFournisseur,
+          archivedAt: new Date(), archivedById: 'test', motifArchivage: 'Test de confidentialité',
+        },
+      });
+      const res = await request(app).patch(`/api/achats/${achatArchiveHorsPerimetre.id}`)
+        .set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 20 });
+      assert.equal(res.status, 404, 'un archivé hors périmètre doit rester indiscernable d’une affaire absente');
+    });
+
+    test('deux archivages simultanés n’en retiennent qu’un seul', async () => {
+      const creation = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
+        date: '06-09-2026', description: 'TEST archivage concurrent', montantHT: 25,
+      });
+      assert.equal(creation.status, 200);
+      const supprimer = () => request(app).delete(`/api/achats/${creation.body.id}`)
+        .set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+      const resultats = await Promise.all([supprimer(), supprimer()]);
+      assert.deepEqual(resultats.map((res) => res.status).sort(), [200, 409]);
+      const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: 'ACHAT', cibleId: creation.body.id, action: 'ARCHIVAGE' } });
+      assert.equal(traces.length, 1, 'un seul archivage doit être journalisé');
+    });
+
     test('le journal d’audit respecte le périmètre du conducteur', async () => {
       // Une trace ne doit pas devenir une porte latérale vers un chantier non rattaché.
       await prisma.journalSaisieChantier.create({
