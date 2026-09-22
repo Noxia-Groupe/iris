@@ -3088,6 +3088,7 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
     const achatId = paramId(req);
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
     if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
+    if (achat.archivedAt) return res.status(409).json({ error: 'Un achat archivé ne peut plus être corrigé.' });
     if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
 
     const data: Record<string, unknown> = {};
@@ -3133,6 +3134,7 @@ app.delete('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res)
     const achatId = paramId(req);
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
     if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
+    if (achat.archivedAt) return res.status(409).json({ error: 'Cet achat est déjà archivé.' });
     if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
 
     const motifArchivage = typeof req.body?.motifArchivage === 'string' ? req.body.motifArchivage.trim() : '';
@@ -3206,6 +3208,7 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
     const pointageId = paramId(req);
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
     if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
+    if (pointage.archivedAt) return res.status(409).json({ error: 'Un pointage archivé ne peut plus être corrigé.' });
     if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
 
     const data: Record<string, unknown> = {};
@@ -3248,6 +3251,7 @@ app.delete('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res)
     const pointageId = paramId(req);
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
     if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
+    if (pointage.archivedAt) return res.status(409).json({ error: 'Ce pointage est déjà archivé.' });
     if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
 
     const motifArchivage = typeof req.body?.motifArchivage === 'string' ? req.body.motifArchivage.trim() : '';

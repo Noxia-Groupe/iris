@@ -415,6 +415,37 @@ if (!TEST_DATABASE_URL) {
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
     });
 
+    test('une écriture archivée ne peut plus être corrigée ni archivée une seconde fois', async () => {
+      const scenarios = [
+        {
+          nom: 'achat', chemin: '/api/achats', creation: {
+            chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
+            date: '06-09-2026', description: 'TEST achat figé', montantHT: 25,
+          },
+          correction: { montantHT: 30 }, cible: 'ACHAT',
+        },
+        {
+          nom: 'pointage', chemin: '/api/heures', creation: {
+            chantierId: idChantierA, intervenantId: idIntervenant,
+            date: '06-09-2026', nbrHeures: 2,
+          },
+          correction: { nbrHeures: 3 }, cible: 'HEURE',
+        },
+      ];
+      for (const scenario of scenarios) {
+        const creation = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.creation);
+        assert.equal(creation.status, 200, `${scenario.nom} créé`);
+        const archive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+        assert.equal(archive.status, 200, `${scenario.nom} archivé`);
+        const correction = await request(app).patch(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.correction);
+        assert.equal(correction.status, 409, `${scenario.nom} archivé ne doit plus être corrigible`);
+        const secondeArchive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Deuxième demande' });
+        assert.equal(secondeArchive.status, 409, `${scenario.nom} archivé ne doit plus être archivable`);
+        const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: scenario.cible, cibleId: creation.body.id } });
+        assert.equal(traces.length, 2, `${scenario.nom} ne crée aucune trace après archivage`);
+      }
+    });
+
     test('le journal d’audit respecte le périmètre du conducteur', async () => {
       // Une trace ne doit pas devenir une porte latérale vers un chantier non rattaché.
       await prisma.journalSaisieChantier.create({
