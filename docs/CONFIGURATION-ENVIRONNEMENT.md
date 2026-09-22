@@ -22,9 +22,9 @@ En Docker, `docker-compose.yml` injecte l’URL de base du backend à partir de 
 
 | Variable | Emplacement | Requise | Usage |
 |---|---|---:|---|
-| `POSTGRES_USER` | `.env` | oui, Docker | utilisateur créé à l’initialisation du volume PostgreSQL |
-| `POSTGRES_PASSWORD` | `.env` | oui, Docker | secret du compte PostgreSQL |
-| `POSTGRES_DB` | `.env` | oui, Docker | base créée à l’initialisation |
+| `POSTGRES_USER` | `.env` | oui, Docker | utilisateur créé à l’initialisation du volume PostgreSQL ; Compose refuse de démarrer s’il manque |
+| `POSTGRES_PASSWORD` | `.env` | oui, Docker | secret du compte PostgreSQL ; Compose refuse de démarrer s’il manque |
+| `POSTGRES_DB` | `.env` | oui, Docker | base créée à l’initialisation ; Compose refuse de démarrer s’il manque |
 | `DATABASE_URL` | `server/.env` hors Docker | oui hors Docker | connexion Prisma/backend |
 
 Les trois variables `POSTGRES_*` ne reconfigurent pas une base déjà initialisée : pour une instance en développement, les choisir avant le premier démarrage. Ne jamais utiliser une URL de test pour une base de développement ou future production.
@@ -66,7 +66,7 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 |---|---:|---|
 | `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend |
 | `E2E_DATABASE_URL` | seulement E2E locaux | PostgreSQL jetable Playwright |
-| `E2E_BASE_URL` | non | URL frontend E2E, défaut `http://localhost:5199` |
+| `E2E_BASE_URL` | non | URL frontend E2E, défaut `http://127.0.0.1:5199` |
 | `E2E_API_PORT` | non | port API E2E, défaut `3001` |
 | `CI` | non localement | fourni par GitHub Actions; modifie le reporter et l’isolation Playwright |
 

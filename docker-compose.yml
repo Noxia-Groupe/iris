@@ -4,9 +4,9 @@ services:
     container_name: iris_db
     restart: always
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-iris}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-iris_password}
-      - POSTGRES_DB=${POSTGRES_DB:-iris}
+      - POSTGRES_USER=${POSTGRES_USER:?POSTGRES_USER est obligatoire}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD est obligatoire}
+      - POSTGRES_DB=${POSTGRES_DB:?POSTGRES_DB est obligatoire}
     volumes:
       # Stockage persistant de la base PostgreSQL
       - postgres_data:/var/lib/postgresql/data
@@ -15,7 +15,7 @@ services:
       # Réseau partagé avec pgBackWeb pour les sauvegardes
       - backup-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iris} -d ${POSTGRES_DB:-iris}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER est obligatoire} -d ${POSTGRES_DB:?POSTGRES_DB est obligatoire}"]
       interval: 10s
       timeout: 5s
       retries: 5
