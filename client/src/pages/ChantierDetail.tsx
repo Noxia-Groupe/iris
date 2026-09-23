@@ -13,6 +13,7 @@ import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
+import { archivagesRestaurables } from '../lib/archivesRestaurables';
 
 // Date ISO (avec ou sans heure) -> format métier français JJ-MM-AAAA.
 const toDateFrancaise = (d: string | null | undefined) => {
@@ -61,15 +62,7 @@ const ChantierDetail = () => {
   const { libelleBaremeReduit } = useModules();
   const [chantier, setChantier] = useState<any>(null);
   const [journalSaisies, setJournalSaisies] = useState<any[]>([]);
-  const archivesRestaurables = useMemo(() => {
-    const actifs = new Set<string>();
-    for (const entree of journalSaisies) {
-      const cle = `${entree.cible}:${entree.cibleId}`;
-      if (entree.action === 'ARCHIVAGE') actifs.add(cle);
-      if (entree.action === 'RESTAURATION') actifs.delete(cle);
-    }
-    return actifs;
-  }, [journalSaisies]);
+  const archivesRestaurables = useMemo(() => archivagesRestaurables(journalSaisies), [journalSaisies]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -1207,7 +1200,7 @@ const ChantierDetail = () => {
                   {entree.action === 'ARCHIVAGE' && entree.avant && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <pre className="overflow-auto rounded bg-amber-50 p-2 text-xs text-amber-900">Valeurs archivées : {JSON.stringify(entree.avant)}</pre>
-                      {peutArchiverTravaux && archivesRestaurables.has(`${entree.cible}:${entree.cibleId}`) && (
+                      {peutArchiverTravaux && archivesRestaurables.has(entree.id) && (
                         <button
                           type="button"
                           onClick={() => handleRestore(entree.cible, entree.cibleId)}
