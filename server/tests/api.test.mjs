@@ -649,6 +649,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('une écriture archivée hors périmètre reste invisible', async () => {
+      await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
       // Le 409 « déjà archivé » ne doit jamais précéder le contrôle de périmètre : il révélerait
       // l’existence et l’état d’une écriture sur une affaire que l’appelant ne peut pas voir.
       const archivees = {
@@ -681,6 +682,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('deux archivages simultanés n’en retiennent qu’un seul', async () => {
+      await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
       // Sans le filtre archivedAt: null dans l’UPDATE, deux requêtes concurrentes écrasent la
       // première trace. Les deux modèles portent le même verrou, donc les deux sont couverts.
       const scenarios = [
