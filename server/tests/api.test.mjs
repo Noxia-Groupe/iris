@@ -284,6 +284,7 @@ if (!TEST_DATABASE_URL) {
   describe('Journaux d’achats et d’heures : périmètre et montants', () => {
     let session = '';
     let sessionConducteur = '';
+    let idConducteur = '';
     let idChantierA = '';
     let idChantierB = '';
     let idCategorie = '';
@@ -300,6 +301,7 @@ if (!TEST_DATABASE_URL) {
         update: { role: 'CONDUCTEUR_TRAVAUX', actif: true },
         create: { email: 'conducteur.test@iris.test', name: 'TEST Conducteur', role: 'CONDUCTEUR_TRAVAUX' },
       });
+      idConducteur = conducteur.id;
       const jwt = (await import('jsonwebtoken')).default;
       sessionConducteur = jwt.sign({ id: conducteur.id, role: 'CONDUCTEUR_TRAVAUX' }, process.env.JWT_SECRET);
 
@@ -435,6 +437,10 @@ if (!TEST_DATABASE_URL) {
       for (const scenario of scenarios) {
         const creation = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.creation);
         assert.equal(creation.status, 200, `${scenario.nom} créé`);
+        for (const motifArchivage of ['', 'x', 'x'.repeat(501)]) {
+          const invalide = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage });
+          assert.equal(invalide.status, 400, `${scenario.nom} : motif d’archivage invalide refusé`);
+        }
         const archive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
         assert.equal(archive.status, 200, `${scenario.nom} archivé`);
         const correction = await request(app).patch(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.correction);
@@ -446,6 +452,19 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('la base refuse un archivage incomplet', async () => {
+      await assert.rejects(() => prisma.achatReel.create({ data: {
+        date: new Date(), description: 'TEST archivage incomplet', montantHT: 1,
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
+        archivedAt: new Date(), motifArchivage: 'Motif sans auteur',
+      } }));
+      await assert.rejects(() => prisma.pointageHeure.create({ data: {
+        date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40,
+        chantierId: idChantierA, intervenantId: idIntervenant,
+        archivedAt: new Date(), archivedById: idConducteur,
+      } }));
+    });
+
     test('une écriture archivée hors périmètre reste invisible', async () => {
       // Le 409 « déjà archivé » ne doit jamais précéder le contrôle de périmètre : il révélerait
       // l’existence et l’état d’une écriture sur une affaire que l’appelant ne peut pas voir.
@@ -453,12 +472,12 @@ if (!TEST_DATABASE_URL) {
         achat: await prisma.achatReel.create({ data: {
           date: new Date(), description: 'TEST achat archivé hors périmètre', montantHT: 10,
           chantierId: idChantierB, categorieId: idCategorie, fournisseurId: idFournisseur,
-          archivedAt: new Date(), motifArchivage: 'Test de confidentialité',
+          archivedAt: new Date(), archivedById: idConducteur, motifArchivage: 'Test de confidentialité',
         } }),
         heure: await prisma.pointageHeure.create({ data: {
           date: new Date(), nbrHeures: 2, tauxHoraireApplique: 40,
           chantierId: idChantierB, intervenantId: idIntervenant,
-          archivedAt: new Date(), motifArchivage: 'Test de confidentialité',
+          archivedAt: new Date(), archivedById: idConducteur, motifArchivage: 'Test de confidentialité',
         } }),
       };
       const scenarios = [

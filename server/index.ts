@@ -3143,7 +3143,7 @@ app.delete('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res)
     if (achat.archivedAt) return res.status(409).json({ error: 'Cet achat est déjà archivé.' });
 
     const motifArchivage = typeof req.body?.motifArchivage === 'string' ? req.body.motifArchivage.trim() : '';
-    if (!motifArchivage) return res.status(400).json({ error: 'Un motif d’archivage est obligatoire.' });
+    if (motifArchivage.length < 3 || motifArchivage.length > 500) return res.status(400).json({ error: 'Le motif d’archivage doit contenir entre 3 et 500 caractères.' });
     const archiveCree = await prisma.$transaction(async (tx) => {
       const { count } = await tx.achatReel.updateMany({ where: { id: achatId, archivedAt: null }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
       if (count === 0) return false;
@@ -3269,7 +3269,7 @@ app.delete('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res)
     if (pointage.archivedAt) return res.status(409).json({ error: 'Ce pointage est déjà archivé.' });
 
     const motifArchivage = typeof req.body?.motifArchivage === 'string' ? req.body.motifArchivage.trim() : '';
-    if (!motifArchivage) return res.status(400).json({ error: 'Un motif d’archivage est obligatoire.' });
+    if (motifArchivage.length < 3 || motifArchivage.length > 500) return res.status(400).json({ error: 'Le motif d’archivage doit contenir entre 3 et 500 caractères.' });
     const archiveCree = await prisma.$transaction(async (tx) => {
       const { count } = await tx.pointageHeure.updateMany({ where: { id: pointageId, archivedAt: null }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
       if (count === 0) return false;
