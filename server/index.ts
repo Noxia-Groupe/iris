@@ -3089,6 +3089,7 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
     if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
     if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
+    if (achat.archivedAt) return res.status(409).json({ error: 'Un achat archivé ne peut plus être corrigé.' });
 
     const data: Record<string, unknown> = {};
     if ('date' in req.body) {
@@ -3116,10 +3117,15 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
 
     data.updatedById = (req as AuthRequest).user!.id;
     const resultat = await prisma.$transaction(async (tx) => {
-      const misAJour = await tx.achatReel.update({ where: { id: achatId }, data });
+      // Ce filtre n’est pas redondant avec le garde ci-dessus : un archivage concurrent peut
+      // passer entre le findUnique et cet UPDATE. Sans lui, une correction toucherait un archivé.
+      const { count } = await tx.achatReel.updateMany({ where: { id: achatId, archivedAt: null }, data });
+      if (count === 0) return null;
+      const misAJour = await tx.achatReel.findUniqueOrThrow({ where: { id: achatId } });
       await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'CORRECTION', achatId, achat.chantierId, achat, misAJour);
       return misAJour;
     });
+    if (!resultat) return res.status(409).json({ error: 'Un achat archivé ne peut plus être corrigé.' });
     res.json(resultat);
   } catch (error) {
     res.status(500).json({ error: 'Error updating achat' });
@@ -3134,13 +3140,18 @@ app.delete('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res)
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
     if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
     if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
+    if (achat.archivedAt) return res.status(409).json({ error: 'Cet achat est déjà archivé.' });
 
     const motifArchivage = typeof req.body?.motifArchivage === 'string' ? req.body.motifArchivage.trim() : '';
     if (!motifArchivage) return res.status(400).json({ error: 'Un motif d’archivage est obligatoire.' });
-    await prisma.$transaction(async (tx) => {
-      const archive = await tx.achatReel.update({ where: { id: achatId }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
+    const archiveCree = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.achatReel.updateMany({ where: { id: achatId, archivedAt: null }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
+      if (count === 0) return false;
+      const archive = await tx.achatReel.findUniqueOrThrow({ where: { id: achatId } });
       await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'ARCHIVAGE', achatId, achat.chantierId, achat, archive, motifArchivage);
+      return true;
     });
+    if (!archiveCree) return res.status(409).json({ error: 'Cet achat est déjà archivé.' });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting achat' });
@@ -3207,6 +3218,7 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
     if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
     if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
+    if (pointage.archivedAt) return res.status(409).json({ error: 'Un pointage archivé ne peut plus être corrigé.' });
 
     const data: Record<string, unknown> = {};
     if ('date' in req.body) {
@@ -3231,10 +3243,15 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
 
     data.updatedById = (req as AuthRequest).user!.id;
     const resultat = await prisma.$transaction(async (tx) => {
-      const misAJour = await tx.pointageHeure.update({ where: { id: pointageId }, data });
+      // Ce filtre n’est pas redondant avec le garde ci-dessus : un archivage concurrent peut
+      // passer entre le findUnique et cet UPDATE. Sans lui, une correction toucherait un archivé.
+      const { count } = await tx.pointageHeure.updateMany({ where: { id: pointageId, archivedAt: null }, data });
+      if (count === 0) return null;
+      const misAJour = await tx.pointageHeure.findUniqueOrThrow({ where: { id: pointageId } });
       await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'CORRECTION', pointageId, pointage.chantierId, pointage, misAJour);
       return misAJour;
     });
+    if (!resultat) return res.status(409).json({ error: 'Un pointage archivé ne peut plus être corrigé.' });
     res.json(resultat);
   } catch (error) {
     res.status(500).json({ error: 'Error updating pointage' });
@@ -3249,13 +3266,18 @@ app.delete('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res)
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
     if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
     if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
+    if (pointage.archivedAt) return res.status(409).json({ error: 'Ce pointage est déjà archivé.' });
 
     const motifArchivage = typeof req.body?.motifArchivage === 'string' ? req.body.motifArchivage.trim() : '';
     if (!motifArchivage) return res.status(400).json({ error: 'Un motif d’archivage est obligatoire.' });
-    await prisma.$transaction(async (tx) => {
-      const archive = await tx.pointageHeure.update({ where: { id: pointageId }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
+    const archiveCree = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.pointageHeure.updateMany({ where: { id: pointageId, archivedAt: null }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
+      if (count === 0) return false;
+      const archive = await tx.pointageHeure.findUniqueOrThrow({ where: { id: pointageId } });
       await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'ARCHIVAGE', pointageId, pointage.chantierId, pointage, archive, motifArchivage);
+      return true;
     });
+    if (!archiveCree) return res.status(409).json({ error: 'Ce pointage est déjà archivé.' });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting pointage' });
