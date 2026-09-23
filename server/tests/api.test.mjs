@@ -80,7 +80,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
-      'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
+      'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
@@ -653,6 +653,13 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('le journal d’audit référence un auteur réel et protège son compte', async () => {
+      // En SQL brut : Prisma refuse un auteurId absent avant PostgreSQL. Cette insertion
+      // prouve donc réellement que la contrainte NOT NULL existe encore dans la base.
+      await assert.rejects(() => prisma.$executeRawUnsafe(
+        `INSERT INTO "JournalSaisieChantier" (id, "chantierId", cible, "cibleId", action, "auteurNom", "createdAt")
+         VALUES (gen_random_uuid()::text, $1, 'ACHAT', 'test-auteur-absent', 'CREATION', 'Sans auteur', now())`,
+        idChantierA,
+      ), 'une trace sans auteur doit être refusée par la base');
       await assert.rejects(() => prisma.journalSaisieChantier.create({
         data: { chantierId: idChantierA, cible: 'ACHAT', cibleId: 'test-auteur-inconnu', action: 'CREATION', auteurId: 'compte-inexistant', auteurNom: 'Auteur inconnu' },
       }));

@@ -2258,7 +2258,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       prisma.journalSaisieChantier.count({ where: { auteurId: id } }),
     ]);
     if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie > 0) {
-      return res.status(409).json({ error: 'Ce compte est l’auteur d’écritures Travaux : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
+      return res.status(409).json({ error: 'Ce compte est l’auteur de données tracées : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
     await prisma.$transaction([
       prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
