@@ -3045,6 +3045,12 @@ function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number, zeroA
   return Number.isFinite(nombre) && (nombre > 0 || (zeroAutorise && nombre === 0)) ? nombre : null;
 }
 
+function motifCorrectionValide(value: unknown): string | null {
+  const motif = typeof value === 'string' ? value.trim() : '';
+  // Même métrique Unicode que PostgreSQL : un emoji est un caractère métier, pas deux unités UTF-16.
+  return [...motif].length >= 3 && [...motif].length <= 500 ? motif : null;
+}
+
 // Achats
 // Journal des achats, restreint au périmètre du demandeur (cf. perimetreChantiers) et
 // dépouillé des montants du chantier (cf. CHANTIER_LITE_SELECT).
@@ -3106,6 +3112,8 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
     if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
     if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
     if (achat.archivedAt) return res.status(409).json({ error: 'Un achat archivé ne peut plus être corrigé.' });
+    const motifCorrection = motifCorrectionValide(req.body?.motifCorrection);
+    if (!motifCorrection) return res.status(400).json({ error: 'Le motif de correction doit contenir entre 3 et 500 caractères.' });
 
     const data: Record<string, unknown> = {};
     if ('date' in req.body) {
@@ -3138,7 +3146,7 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
       const { count } = await tx.achatReel.updateMany({ where: { id: achatId, archivedAt: null }, data });
       if (count === 0) return null;
       const misAJour = await tx.achatReel.findUniqueOrThrow({ where: { id: achatId } });
-      await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'CORRECTION', achatId, achat.chantierId, achat, misAJour);
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'CORRECTION', achatId, achat.chantierId, achat, misAJour, motifCorrection);
       return misAJour;
     });
     if (!resultat) return res.status(409).json({ error: 'Un achat archivé ne peut plus être corrigé.' });
@@ -3239,6 +3247,8 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
     if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
     if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
     if (pointage.archivedAt) return res.status(409).json({ error: 'Un pointage archivé ne peut plus être corrigé.' });
+    const motifCorrection = motifCorrectionValide(req.body?.motifCorrection);
+    if (!motifCorrection) return res.status(400).json({ error: 'Le motif de correction doit contenir entre 3 et 500 caractères.' });
 
     const data: Record<string, unknown> = {};
     if ('date' in req.body) {
@@ -3268,7 +3278,7 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
       const { count } = await tx.pointageHeure.updateMany({ where: { id: pointageId, archivedAt: null }, data });
       if (count === 0) return null;
       const misAJour = await tx.pointageHeure.findUniqueOrThrow({ where: { id: pointageId } });
-      await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'CORRECTION', pointageId, pointage.chantierId, pointage, misAJour);
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'CORRECTION', pointageId, pointage.chantierId, pointage, misAJour, motifCorrection);
       return misAJour;
     });
     if (!resultat) return res.status(409).json({ error: 'Un pointage archivé ne peut plus être corrigé.' });
