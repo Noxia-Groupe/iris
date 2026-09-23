@@ -475,6 +475,38 @@ if (!TEST_DATABASE_URL) {
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
     });
 
+    test('l’archivage d’un pointage exige la même délégation que celui d’un achat', async () => {
+      // Les deux DELETE ont des gardes indépendantes : protéger un achat ne protège pas un
+      // pointage. Ce compte dédié évite de dépendre de la délégation d'une fixture partagée.
+      const email = 'archiviste.pointage@iris.test';
+      const residu = await prisma.user.findUnique({ where: { email } });
+      if (residu) {
+        await prisma.journalSaisieChantier.deleteMany({ where: { auteurId: residu.id } });
+        await prisma.pointageHeure.deleteMany({ where: { OR: [{ createdById: residu.id }, { updatedById: residu.id }, { archivedById: residu.id }] } });
+        await prisma.user.delete({ where: { id: residu.id } });
+      }
+      const archiviste = await prisma.user.create({ data: { email, name: 'TEST Archiviste pointage', role: 'CONDUCTEUR_TRAVAUX', permissions: [] } });
+      await prisma.chantier.update({ where: { id: idChantierA }, data: { responsableId: archiviste.id } });
+      const jetonArchiviste = jwt.sign({ id: archiviste.id, role: 'CONDUCTEUR_TRAVAUX' }, process.env.JWT_SECRET);
+      try {
+        const creation = await request(app).post('/api/heures').set('Authorization', `Bearer ${jetonArchiviste}`)
+          .send({ chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2 });
+        assert.equal(creation.status, 200, 'chantiers:write suffit pour saisir un pointage');
+        const refus = await request(app).delete(`/api/heures/${creation.body.id}`).set('Authorization', `Bearer ${jetonArchiviste}`)
+          .send({ motifArchivage: 'Saisie en double' });
+        assert.equal(refus.status, 403, 'archiver un pointage exige chantiers:archive');
+        await prisma.user.update({ where: { id: archiviste.id }, data: { permissions: ['chantiers:archive'] } });
+        const archive = await request(app).delete(`/api/heures/${creation.body.id}`).set('Authorization', `Bearer ${jetonArchiviste}`)
+          .send({ motifArchivage: 'Saisie en double' });
+        assert.equal(archive.status, 200, 'la délégation rend l’archivage du pointage possible');
+      } finally {
+        await prisma.chantier.update({ where: { id: idChantierA }, data: { responsableId: idConducteur } });
+        await prisma.journalSaisieChantier.deleteMany({ where: { auteurId: archiviste.id } });
+        await prisma.pointageHeure.deleteMany({ where: { OR: [{ createdById: archiviste.id }, { updatedById: archiviste.id }, { archivedById: archiviste.id }] } });
+        await prisma.user.delete({ where: { id: archiviste.id } });
+      }
+    });
+
     test('une écriture archivée ne peut plus être corrigée ni archivée une seconde fois', async () => {
       const scenarios = [
         {
