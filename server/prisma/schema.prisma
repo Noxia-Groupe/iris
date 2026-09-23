@@ -50,6 +50,8 @@ model User {
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
   profilIntervenant       Intervenant?               @relation("IntervenantCompte")
   rapportsIntervention    InterventionRapport[]
+  achatsArchives          AchatReel[]                 @relation("AchatReelArchivePar")
+  pointagesArchives       PointageHeure[]             @relation("PointageHeureArchivePar")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -178,6 +180,7 @@ model AchatReel {
   updatedById String?
   archivedAt DateTime?
   archivedById String?
+  archivedBy   User? @relation("AchatReelArchivePar", fields: [archivedById], references: [id], onDelete: Restrict)
   motifArchivage String?
 
   @@index([archivedAt])
@@ -242,6 +245,7 @@ model PointageHeure {
   updatedById String?
   archivedAt DateTime?
   archivedById String?
+  archivedBy   User? @relation("PointageHeureArchivePar", fields: [archivedById], references: [id], onDelete: Restrict)
   motifArchivage String?
 
   @@index([archivedAt])

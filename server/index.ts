@@ -2246,6 +2246,15 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     if (await isLastSuperAdmin(target.id)) {
       return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
     }
+    // La clé étrangère RESTRICT reste le verrou contre une course ; ce contrôle rend le refus
+    // lisible à l’administrateur lorsqu’un compte porte déjà une preuve d’archivage.
+    const [achatsArchives, pointagesArchives] = await Promise.all([
+      prisma.achatReel.count({ where: { archivedById: id } }),
+      prisma.pointageHeure.count({ where: { archivedById: id } }),
+    ]);
+    if (achatsArchives + pointagesArchives > 0) {
+      return res.status(409).json({ error: 'Ce compte a archivé des écritures Travaux : le supprimer effacerait la preuve de ces archivages.' });
+    }
     await prisma.$transaction([
       prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
       prisma.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } }),

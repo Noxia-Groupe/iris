@@ -471,6 +471,40 @@ if (!TEST_DATABASE_URL) {
         chantierId: idChantierA, intervenantId: idIntervenant,
         archivedAt: new Date(), archivedById: idConducteur,
       } }));
+      await assert.rejects(() => prisma.achatReel.create({ data: {
+        date: new Date(), description: 'TEST auteur d’archivage inconnu', montantHT: 1,
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
+        archivedAt: new Date(), archivedById: 'compte-inexistant', motifArchivage: 'Auteur inconnu',
+      } }));
+      await assert.rejects(() => prisma.pointageHeure.create({ data: {
+        date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40,
+        chantierId: idChantierA, intervenantId: idIntervenant,
+        archivedAt: new Date(), archivedById: 'compte-inexistant', motifArchivage: 'Auteur inconnu',
+      } }));
+    });
+
+    test('un compte ayant archivé une écriture n’est pas supprimable', async () => {
+      const scenarios = ['achat', 'pointage'];
+      for (const nom of scenarios) {
+        const email = `archiveur.${nom}.protege@iris.test`;
+        const residu = await prisma.user.findUnique({ where: { email } });
+        if (residu) {
+          await prisma.achatReel.deleteMany({ where: { archivedById: residu.id } });
+          await prisma.pointageHeure.deleteMany({ where: { archivedById: residu.id } });
+          await prisma.user.delete({ where: { id: residu.id } });
+        }
+        const auteur = await prisma.user.create({ data: { email, name: 'TEST Archiveur protégé', role: 'ADMIN' } });
+        const ecriture = nom === 'achat'
+          ? await prisma.achatReel.create({ data: { date: new Date(), description: 'TEST achat auteur protégé', montantHT: 1, chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, archivedAt: new Date(), archivedById: auteur.id, motifArchivage: 'Saisie en double' } })
+          : await prisma.pointageHeure.create({ data: { date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40, chantierId: idChantierA, intervenantId: idIntervenant, archivedAt: new Date(), archivedById: auteur.id, motifArchivage: 'Saisie en double' } });
+        const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
+        assert.equal(suppression.status, 409, `${nom} : la suppression doit expliquer la protection de la preuve`);
+        assert.match(suppression.body.error, /preuve de ces archivages/);
+        assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
+        if (nom === 'achat') await prisma.achatReel.delete({ where: { id: ecriture.id } });
+        else await prisma.pointageHeure.delete({ where: { id: ecriture.id } });
+        await prisma.user.delete({ where: { id: auteur.id } });
+      }
     });
 
     test('une écriture archivée hors périmètre reste invisible', async () => {
