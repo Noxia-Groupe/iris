@@ -3117,6 +3117,8 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
 
     data.updatedById = (req as AuthRequest).user!.id;
     const resultat = await prisma.$transaction(async (tx) => {
+      // Ce filtre n’est pas redondant avec le garde ci-dessus : un archivage concurrent peut
+      // passer entre le findUnique et cet UPDATE. Sans lui, une correction toucherait un archivé.
       const { count } = await tx.achatReel.updateMany({ where: { id: achatId, archivedAt: null }, data });
       if (count === 0) return null;
       const misAJour = await tx.achatReel.findUniqueOrThrow({ where: { id: achatId } });
@@ -3241,6 +3243,8 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
 
     data.updatedById = (req as AuthRequest).user!.id;
     const resultat = await prisma.$transaction(async (tx) => {
+      // Ce filtre n’est pas redondant avec le garde ci-dessus : un archivage concurrent peut
+      // passer entre le findUnique et cet UPDATE. Sans lui, une correction toucherait un archivé.
       const { count } = await tx.pointageHeure.updateMany({ where: { id: pointageId, archivedAt: null }, data });
       if (count === 0) return null;
       const misAJour = await tx.pointageHeure.findUniqueOrThrow({ where: { id: pointageId } });

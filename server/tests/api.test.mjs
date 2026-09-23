@@ -447,30 +447,57 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('une écriture archivée hors périmètre reste invisible', async () => {
-      const achatArchiveHorsPerimetre = await prisma.achatReel.create({
-        data: {
+      // Le 409 « déjà archivé » ne doit jamais précéder le contrôle de périmètre : il révélerait
+      // l’existence et l’état d’une écriture sur une affaire que l’appelant ne peut pas voir.
+      const archivees = {
+        achat: await prisma.achatReel.create({ data: {
           date: new Date(), description: 'TEST achat archivé hors périmètre', montantHT: 10,
           chantierId: idChantierB, categorieId: idCategorie, fournisseurId: idFournisseur,
-          archivedAt: new Date(), archivedById: 'test', motifArchivage: 'Test de confidentialité',
-        },
-      });
-      const res = await request(app).patch(`/api/achats/${achatArchiveHorsPerimetre.id}`)
-        .set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 20 });
-      assert.equal(res.status, 404, 'un archivé hors périmètre doit rester indiscernable d’une affaire absente');
+          archivedAt: new Date(), motifArchivage: 'Test de confidentialité',
+        } }),
+        heure: await prisma.pointageHeure.create({ data: {
+          date: new Date(), nbrHeures: 2, tauxHoraireApplique: 40,
+          chantierId: idChantierB, intervenantId: idIntervenant,
+          archivedAt: new Date(), motifArchivage: 'Test de confidentialité',
+        } }),
+      };
+      const scenarios = [
+        { nom: 'achat', chemin: '/api/achats', correction: { montantHT: 20 } },
+        { nom: 'heure', chemin: '/api/heures', correction: { nbrHeures: 3 } },
+      ];
+      for (const scenario of scenarios) {
+        const id = archivees[scenario.nom].id;
+        const correction = await request(app).patch(`${scenario.chemin}/${id}`)
+          .set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.correction);
+        assert.equal(correction.status, 404, `${scenario.nom} archivé hors périmètre : correction invisible`);
+        const archivage = await request(app).delete(`${scenario.chemin}/${id}`)
+          .set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Deuxième demande' });
+        assert.equal(archivage.status, 404, `${scenario.nom} archivé hors périmètre : archivage invisible`);
+      }
     });
 
     test('deux archivages simultanés n’en retiennent qu’un seul', async () => {
-      const creation = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
-        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
-        date: '06-09-2026', description: 'TEST archivage concurrent', montantHT: 25,
-      });
-      assert.equal(creation.status, 200);
-      const supprimer = () => request(app).delete(`/api/achats/${creation.body.id}`)
-        .set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
-      const resultats = await Promise.all([supprimer(), supprimer()]);
-      assert.deepEqual(resultats.map((res) => res.status).sort(), [200, 409]);
-      const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: 'ACHAT', cibleId: creation.body.id, action: 'ARCHIVAGE' } });
-      assert.equal(traces.length, 1, 'un seul archivage doit être journalisé');
+      // Sans le filtre archivedAt: null dans l’UPDATE, deux requêtes concurrentes écrasent la
+      // première trace. Les deux modèles portent le même verrou, donc les deux sont couverts.
+      const scenarios = [
+        { nom: 'achat', chemin: '/api/achats', cible: 'ACHAT', creation: {
+          chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
+          date: '06-09-2026', description: 'TEST archivage concurrent', montantHT: 25,
+        } },
+        { nom: 'pointage', chemin: '/api/heures', cible: 'HEURE', creation: {
+          chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2,
+        } },
+      ];
+      for (const scenario of scenarios) {
+        const creation = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.creation);
+        assert.equal(creation.status, 200, `${scenario.nom} créé`);
+        const supprimer = () => request(app).delete(`${scenario.chemin}/${creation.body.id}`)
+          .set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+        const resultats = await Promise.all([supprimer(), supprimer()]);
+        assert.deepEqual(resultats.map((res) => res.status).sort(), [200, 409], `${scenario.nom} : un seul archivage doit réussir`);
+        const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: scenario.cible, cibleId: creation.body.id, action: 'ARCHIVAGE' } });
+        assert.equal(traces.length, 1, `${scenario.nom} : un seul archivage doit être journalisé`);
+      }
     });
 
     test('le journal d’audit respecte le périmètre du conducteur', async () => {
