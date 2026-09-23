@@ -649,7 +649,9 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('une écriture archivée hors périmètre reste invisible', async () => {
-      await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
+      const permissionsAvant = (await prisma.user.findUniqueOrThrow({ where: { id: idConducteur }, select: { permissions: true } })).permissions;
+      try {
+        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
       // Le 409 « déjà archivé » ne doit jamais précéder le contrôle de périmètre : il révélerait
       // l’existence et l’état d’une écriture sur une affaire que l’appelant ne peut pas voir.
       const archivees = {
@@ -679,10 +681,15 @@ if (!TEST_DATABASE_URL) {
           .set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Deuxième demande' });
         assert.equal(archivage.status, 404, `${scenario.nom} archivé hors périmètre : archivage invisible`);
       }
+      } finally {
+        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: permissionsAvant } });
+      }
     });
 
     test('deux archivages simultanés n’en retiennent qu’un seul', async () => {
-      await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
+      const permissionsAvant = (await prisma.user.findUniqueOrThrow({ where: { id: idConducteur }, select: { permissions: true } })).permissions;
+      try {
+        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
       // Sans le filtre archivedAt: null dans l’UPDATE, deux requêtes concurrentes écrasent la
       // première trace. Les deux modèles portent le même verrou, donc les deux sont couverts.
       const scenarios = [
@@ -703,6 +710,9 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual(resultats.map((res) => res.status).sort(), [200, 409], `${scenario.nom} : un seul archivage doit réussir`);
         const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: scenario.cible, cibleId: creation.body.id, action: 'ARCHIVAGE' } });
         assert.equal(traces.length, 1, `${scenario.nom} : un seul archivage doit être journalisé`);
+      }
+      } finally {
+        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: permissionsAvant } });
       }
     });
 
