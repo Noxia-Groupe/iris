@@ -80,7 +80,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.user.deleteMany({ where: { email: { in: [
-      'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
+      'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ] } } });
   };
@@ -284,7 +284,9 @@ if (!TEST_DATABASE_URL) {
   describe('Journaux d’achats et d’heures : périmètre et montants', () => {
     let session = '';
     let sessionConducteur = '';
+    let sessionCorrecteur = '';
     let idConducteur = '';
+    let idCorrecteur = '';
     let idChantierA = '';
     let idChantierB = '';
     let idCategorie = '';
@@ -302,8 +304,15 @@ if (!TEST_DATABASE_URL) {
         create: { email: 'conducteur.test@iris.test', name: 'TEST Conducteur', role: 'CONDUCTEUR_TRAVAUX' },
       });
       idConducteur = conducteur.id;
+      const correcteur = await prisma.user.upsert({
+        where: { email: 'correcteur.test@iris.test' },
+        update: { role: 'ADMIN', actif: true },
+        create: { email: 'correcteur.test@iris.test', name: 'TEST Correcteur', role: 'ADMIN' },
+      });
+      idCorrecteur = correcteur.id;
       const jwt = (await import('jsonwebtoken')).default;
       sessionConducteur = jwt.sign({ id: conducteur.id, role: 'CONDUCTEUR_TRAVAUX' }, process.env.JWT_SECRET);
+      sessionCorrecteur = jwt.sign({ id: correcteur.id, role: 'ADMIN' }, process.env.JWT_SECRET);
 
       const chantier = (nom, responsableId) => prisma.chantier.create({
         data: { nom, client: 'TEST Client', dateDebut: new Date(), budgetGlobalVendu: 100000, responsableId },
@@ -327,10 +336,10 @@ if (!TEST_DATABASE_URL) {
 
       for (const chantierId of [idChantierA, idChantierB]) {
         await prisma.achatReel.create({
-          data: { date: new Date(), description: 'TEST achat', montantHT: 1000, chantierId, categorieId: categorie.id, fournisseurId: fournisseur.id },
+          data: { date: new Date(), description: 'TEST achat', montantHT: 1000, chantierId, categorieId: categorie.id, fournisseurId: fournisseur.id, createdById: idConducteur, updatedById: idConducteur },
         });
         await prisma.pointageHeure.create({
-          data: { date: new Date(), nbrHeures: 7, tauxHoraireApplique: 40, chantierId, intervenantId: intervenant.id },
+          data: { date: new Date(), nbrHeures: 7, tauxHoraireApplique: 40, chantierId, intervenantId: intervenant.id, createdById: idConducteur, updatedById: idConducteur },
         });
       }
     });
@@ -381,6 +390,25 @@ if (!TEST_DATABASE_URL) {
         chantierId: idChantierB, intervenantId: idIntervenant, date: '2026-09-05', nbrHeures: 2,
       });
       assert.equal(heuresInterdites.status, 404);
+    });
+
+    test('la création et la correction conservent leurs auteurs distincts', async () => {
+      const scenarios = [
+        { nom: 'achat', chemin: '/api/achats', creation: { chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST auteurs achat', montantHT: 10 }, correction: { montantHT: 11 }, modele: prisma.achatReel },
+        { nom: 'pointage', chemin: '/api/heures', creation: { chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2 }, correction: { nbrHeures: 3 }, modele: prisma.pointageHeure },
+      ];
+      for (const scenario of scenarios) {
+        const creation = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.creation);
+        assert.equal(creation.status, 200, `${scenario.nom} créé`);
+        const cree = await scenario.modele.findUniqueOrThrow({ where: { id: creation.body.id } });
+        assert.equal(cree.createdById, idConducteur, `${scenario.nom} : auteur de création`);
+        assert.equal(cree.updatedById, idConducteur, `${scenario.nom} : dernier auteur initial`);
+        const correction = await request(app).patch(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionCorrecteur}`).send(scenario.correction);
+        assert.equal(correction.status, 200, `${scenario.nom} corrigé`);
+        const corrige = await scenario.modele.findUniqueOrThrow({ where: { id: creation.body.id } });
+        assert.equal(corrige.createdById, idConducteur, `${scenario.nom} : l’auteur de création est immuable`);
+        assert.equal(corrige.updatedById, idCorrecteur, `${scenario.nom} : le dernier correcteur est conservé`);
+      }
     });
 
     test('aucune ligne ne transporte les montants vendus du chantier', async () => {
@@ -464,23 +492,47 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(() => prisma.achatReel.create({ data: {
         date: new Date(), description: 'TEST archivage incomplet', montantHT: 1,
         chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
+        createdById: idConducteur, updatedById: idConducteur,
         archivedAt: new Date(), motifArchivage: 'Motif sans auteur',
       } }));
       await assert.rejects(() => prisma.pointageHeure.create({ data: {
         date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40,
         chantierId: idChantierA, intervenantId: idIntervenant,
+        createdById: idConducteur, updatedById: idConducteur,
         archivedAt: new Date(), archivedById: idConducteur,
       } }));
       await assert.rejects(() => prisma.achatReel.create({ data: {
         date: new Date(), description: 'TEST auteur d’archivage inconnu', montantHT: 1,
         chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
+        createdById: idConducteur, updatedById: idConducteur,
         archivedAt: new Date(), archivedById: 'compte-inexistant', motifArchivage: 'Auteur inconnu',
       } }));
       await assert.rejects(() => prisma.pointageHeure.create({ data: {
         date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40,
         chantierId: idChantierA, intervenantId: idIntervenant,
+        createdById: idConducteur, updatedById: idConducteur,
         archivedAt: new Date(), archivedById: 'compte-inexistant', motifArchivage: 'Auteur inconnu',
       } }));
+    });
+
+    test('la base relie les auteurs de saisie et fige l’auteur de création', async () => {
+      const scenarios = [
+        {
+          nom: 'achat', modele: prisma.achatReel,
+          creation: { date: new Date(), description: 'TEST auteurs achat SQL', montantHT: 1, chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, createdById: idConducteur, updatedById: idConducteur },
+        },
+        {
+          nom: 'pointage', modele: prisma.pointageHeure,
+          creation: { date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40, chantierId: idChantierA, intervenantId: idIntervenant, createdById: idConducteur, updatedById: idConducteur },
+        },
+      ];
+      for (const scenario of scenarios) {
+        await assert.rejects(() => scenario.modele.create({ data: { ...scenario.creation, createdById: 'compte-inexistant' } }), `${scenario.nom} : auteur de création inconnu refusé`);
+        await assert.rejects(() => scenario.modele.create({ data: { ...scenario.creation, updatedById: 'compte-inexistant' } }), `${scenario.nom} : dernier auteur inconnu refusé`);
+        const ecriture = await scenario.modele.create({ data: scenario.creation });
+        await assert.rejects(() => scenario.modele.update({ where: { id: ecriture.id }, data: { createdById: idCorrecteur } }), `${scenario.nom} : auteur de création immuable en base`);
+        assert.equal((await scenario.modele.findUniqueOrThrow({ where: { id: ecriture.id } })).createdById, idConducteur);
+      }
     });
 
     test('un compte ayant archivé une écriture n’est pas supprimable', async () => {
@@ -489,20 +541,42 @@ if (!TEST_DATABASE_URL) {
         const email = `archiveur.${nom}.protege@iris.test`;
         const residu = await prisma.user.findUnique({ where: { email } });
         if (residu) {
-          await prisma.achatReel.deleteMany({ where: { archivedById: residu.id } });
-          await prisma.pointageHeure.deleteMany({ where: { archivedById: residu.id } });
+          const referencesAuteur = { OR: [{ createdById: residu.id }, { updatedById: residu.id }, { archivedById: residu.id }] };
+          await prisma.achatReel.deleteMany({ where: referencesAuteur });
+          await prisma.pointageHeure.deleteMany({ where: referencesAuteur });
           await prisma.user.delete({ where: { id: residu.id } });
         }
         const auteur = await prisma.user.create({ data: { email, name: 'TEST Archiveur protégé', role: 'ADMIN' } });
         const ecriture = nom === 'achat'
-          ? await prisma.achatReel.create({ data: { date: new Date(), description: 'TEST achat auteur protégé', montantHT: 1, chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, archivedAt: new Date(), archivedById: auteur.id, motifArchivage: 'Saisie en double' } })
-          : await prisma.pointageHeure.create({ data: { date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40, chantierId: idChantierA, intervenantId: idIntervenant, archivedAt: new Date(), archivedById: auteur.id, motifArchivage: 'Saisie en double' } });
+          ? await prisma.achatReel.create({ data: { date: new Date(), description: 'TEST achat auteur protégé', montantHT: 1, chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, createdById: auteur.id, updatedById: auteur.id, archivedAt: new Date(), archivedById: auteur.id, motifArchivage: 'Saisie en double' } })
+          : await prisma.pointageHeure.create({ data: { date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40, chantierId: idChantierA, intervenantId: idIntervenant, createdById: auteur.id, updatedById: auteur.id, archivedAt: new Date(), archivedById: auteur.id, motifArchivage: 'Saisie en double' } });
         const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
         assert.equal(suppression.status, 409, `${nom} : la suppression doit expliquer la protection de la preuve`);
-        assert.match(suppression.body.error, /preuve de ces archivages/);
+        assert.match(suppression.body.error, /preuve de traçabilité/);
+        assert.match(suppression.body.error, /Désactivez-le plutôt/);
         assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
         if (nom === 'achat') await prisma.achatReel.delete({ where: { id: ecriture.id } });
         else await prisma.pointageHeure.delete({ where: { id: ecriture.id } });
+        await prisma.user.delete({ where: { id: auteur.id } });
+      }
+    });
+
+    test('un compte auteur de saisie n’est pas supprimable', async () => {
+      const scenarios = [
+        { nom: 'achat créé', modele: prisma.achatReel, creation: (auteurId) => ({ date: new Date(), description: 'TEST achat auteur de saisie', montantHT: 1, chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, createdById: auteurId, updatedById: idConducteur }) },
+        { nom: 'achat corrigé', modele: prisma.achatReel, creation: (auteurId) => ({ date: new Date(), description: 'TEST achat correcteur protégé', montantHT: 1, chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, createdById: idConducteur, updatedById: auteurId }) },
+        { nom: 'pointage créé', modele: prisma.pointageHeure, creation: (auteurId) => ({ date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40, chantierId: idChantierA, intervenantId: idIntervenant, createdById: auteurId, updatedById: idConducteur }) },
+        { nom: 'pointage corrigé', modele: prisma.pointageHeure, creation: (auteurId) => ({ date: new Date(), nbrHeures: 1, tauxHoraireApplique: 40, chantierId: idChantierA, intervenantId: idIntervenant, createdById: idConducteur, updatedById: auteurId }) },
+      ];
+      for (const [index, scenario] of scenarios.entries()) {
+        const auteur = await prisma.user.create({ data: { email: `auteur.saisie.${index}@iris.test`, name: 'TEST Auteur de saisie', role: 'ADMIN' } });
+        const ecriture = await scenario.modele.create({ data: scenario.creation(auteur.id) });
+        const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
+        assert.equal(suppression.status, 409, `${scenario.nom} : suppression refusée`);
+        assert.match(suppression.body.error, /preuve de traçabilité/);
+        assert.match(suppression.body.error, /Désactivez-le plutôt/);
+        assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
+        await scenario.modele.delete({ where: { id: ecriture.id } });
         await prisma.user.delete({ where: { id: auteur.id } });
       }
     });
@@ -514,11 +588,13 @@ if (!TEST_DATABASE_URL) {
         achat: await prisma.achatReel.create({ data: {
           date: new Date(), description: 'TEST achat archivé hors périmètre', montantHT: 10,
           chantierId: idChantierB, categorieId: idCategorie, fournisseurId: idFournisseur,
+          createdById: idConducteur, updatedById: idConducteur,
           archivedAt: new Date(), archivedById: idConducteur, motifArchivage: 'Test de confidentialité',
         } }),
         heure: await prisma.pointageHeure.create({ data: {
           date: new Date(), nbrHeures: 2, tauxHoraireApplique: 40,
           chantierId: idChantierB, intervenantId: idIntervenant,
+          createdById: idConducteur, updatedById: idConducteur,
           archivedAt: new Date(), archivedById: idConducteur, motifArchivage: 'Test de confidentialité',
         } }),
       };
@@ -997,7 +1073,8 @@ if (!TEST_DATABASE_URL) {
     test('une affaire commencée ne s’annule pas', async () => {
       const devis = await devisAccepte('TEST Affaire commencée');
       const chantier = (await convertir(devis.id)).body;
-      await prisma.pointageHeure.create({ data: { date: new Date(), nbrHeures: 3, tauxHoraireApplique: 40, chantierId: chantier.id, intervenantId } });
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      await prisma.pointageHeure.create({ data: { date: new Date(), nbrHeures: 3, tauxHoraireApplique: 40, chantierId: chantier.id, intervenantId, createdById: auteur.id, updatedById: auteur.id } });
 
       const refus = await request(app).post(`/api/devis/${devis.id}/annulation`).set('Authorization', `Bearer ${session}`).send({ motif: 'erreur de saisie' });
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
@@ -1009,7 +1086,8 @@ if (!TEST_DATABASE_URL) {
     test('un achat suffit lui aussi à verrouiller l’annulation', async () => {
       const devis = await devisAccepte('TEST Affaire approvisionnée');
       const chantier = (await convertir(devis.id)).body;
-      await prisma.achatReel.create({ data: { date: new Date(), description: 'TEST matériel', montantHT: 500, chantierId: chantier.id, categorieId, fournisseurId } });
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      await prisma.achatReel.create({ data: { date: new Date(), description: 'TEST matériel', montantHT: 500, chantierId: chantier.id, categorieId, fournisseurId, createdById: auteur.id, updatedById: auteur.id } });
 
       const refus = await request(app).post(`/api/devis/${devis.id}/annulation`).set('Authorization', `Bearer ${session}`).send({ motif: 'client renonce' });
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
@@ -2540,7 +2618,7 @@ if (!TEST_DATABASE_URL) {
       });
       const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Intervenant assiduité', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
       const pointage = await prisma.pointageHeure.create({
-        data: { date: new Date(Date.UTC(2026, 2, 3)), intervenantId: intervenant.id, chantierId: chantier.id, nbrHeures: 7, tauxHoraireApplique: 30, createdAt: instantSaisie },
+        data: { date: new Date(Date.UTC(2026, 2, 3)), intervenantId: intervenant.id, chantierId: chantier.id, nbrHeures: 7, tauxHoraireApplique: 30, createdAt: instantSaisie, createdById: conducteur.id, updatedById: conducteur.id },
       });
       try {
         assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Pacific/Wallis' })).status, 200);

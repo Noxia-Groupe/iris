@@ -50,6 +50,10 @@ model User {
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
   profilIntervenant       Intervenant?               @relation("IntervenantCompte")
   rapportsIntervention    InterventionRapport[]
+  achatsCrees             AchatReel[]                 @relation("AchatReelCreePar")
+  achatsMisAJour          AchatReel[]                 @relation("AchatReelMisAJourPar")
+  pointagesCrees          PointageHeure[]             @relation("PointageHeureCreePar")
+  pointagesMisAJour       PointageHeure[]             @relation("PointageHeureMisAJourPar")
   achatsArchives          AchatReel[]                 @relation("AchatReelArchivePar")
   pointagesArchives       PointageHeure[]             @relation("PointageHeureArchivePar")
 
@@ -176,8 +180,10 @@ model AchatReel {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  createdById String?
-  updatedById String?
+  createdById String
+  createdBy   User @relation("AchatReelCreePar", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedById String
+  updatedBy   User @relation("AchatReelMisAJourPar", fields: [updatedById], references: [id], onDelete: Restrict)
   archivedAt DateTime?
   archivedById String?
   archivedBy   User? @relation("AchatReelArchivePar", fields: [archivedById], references: [id], onDelete: Restrict)
@@ -241,8 +247,10 @@ model PointageHeure {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  createdById String?
-  updatedById String?
+  createdById String
+  createdBy   User @relation("PointageHeureCreePar", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedById String
+  updatedBy   User @relation("PointageHeureMisAJourPar", fields: [updatedById], references: [id], onDelete: Restrict)
   archivedAt DateTime?
   archivedById String?
   archivedBy   User? @relation("PointageHeureArchivePar", fields: [archivedById], references: [id], onDelete: Restrict)
