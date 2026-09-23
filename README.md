@@ -14,7 +14,7 @@ Iris est un ERP français pour métiers techniques : interventions SAV et travau
 
 ## Modules prévus
 
-> Référence fonctionnelle et UX : [`docs/PRODUCT-VISION-ERP-TECHNIQUE.md`](docs/PRODUCT-VISION-ERP-TECHNIQUE.md). Iris possède son propre référentiel clients, contacts, sites, devis, interventions, contrats et factures ; les intégrations externes ne sont jamais sa source de vérité.
+> Référence fonctionnelle et UX : [`docs/PRODUCT-VISION-ERP-TECHNIQUE.md`](docs/PRODUCT-VISION-ERP-TECHNIQUE.md). État des lieux et ordre de construction : [`docs/AUDIT-FONCTIONNEL-ERP-2026-09.md`](docs/AUDIT-FONCTIONNEL-ERP-2026-09.md). Iris possède son propre référentiel clients, contacts, sites, devis, interventions, contrats et factures ; les intégrations externes ne sont jamais sa source de vérité.
 
 1. **Interventions SAV** — suivi, historique client, rapports signés
 2. **Interventions Travaux** — planning, heures, achats, devis, facture
