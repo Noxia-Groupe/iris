@@ -30,6 +30,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  compose:
+    name: Docker Compose — gardes PostgreSQL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # `env_file` est requis par Compose mais ne doit jamais être commité : la CI
+      # part donc du modèle et remplace son unique secret d'exemple avant inspection.
+      - name: Préparer un environnement applicatif non secret
+        run: |
+          cp server/.env.example server/.env
+          python3 -c "from pathlib import Path; p = Path('server/.env'); p.write_text(p.read_text().replace('CHANGE_ME_GENERATE_A_LONG_RANDOM_SECRET', 'ci_jwt_secret_not_for_production_0123456789'))"
+      # Les trois identifiants PostgreSQL doivent être imposés par `:?`. Un repli
+      # `${POSTGRES_PASSWORD:-...}` ferait repasser cette commande au vert.
+      - name: Refuser les identifiants PostgreSQL absents
+        run: |
+          if docker compose --env-file /dev/null config > /dev/null 2>&1; then
+            echo '::error::Docker Compose accepte des identifiants PostgreSQL absents.'
+            exit 1
+          fi
+      # Avec les trois valeurs injectées, la configuration doit se résoudre et ne
+      # doit contenir ni exemple ni ancien repli. La présence de `ci_secret` prouve
+      # que le mot de passe provient bien de l'environnement de la CI.
+      - name: Résoudre sans valeur d'exemple
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci_secret
+          POSTGRES_DB: ci
+        run: |
+          docker compose config > compose.resolved.yml
+          if grep -Eq 'CHANGE_ME|iris_password' compose.resolved.yml; then
+            echo '::error::Une valeur d’exemple ou un repli interdit est présent dans la configuration Compose.'
+            exit 1
+          fi
+          grep -q 'POSTGRES_PASSWORD=ci_secret' compose.resolved.yml
+
   backend:
     name: Backend — compilation
     runs-on: ubuntu-latest
