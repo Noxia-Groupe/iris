@@ -5,10 +5,12 @@
 # workflow les lance à chaque poussée et à chaque pull request : une branche qui ne
 # construit pas, ou dont un test échoue, ne peut plus être fusionnée sans que ce soit vu.
 #
-# Trois travaux indépendants, pour que l'échec désigne tout de suite le coupable :
+# Cinq travaux indépendants, pour que l'échec désigne tout de suite le coupable :
+#   - compose   : gardes d'identifiants PostgreSQL et résolution de la stack ;
 #   - backend   : génération Prisma + compilation TypeScript ;
 #   - tests     : migrations et suite complète contre un vrai PostgreSQL 16 ;
-#   - frontend  : compilation TypeScript stricte, build Vite et lint.
+#   - frontend  : compilation TypeScript stricte, build Vite et lint ;
+#   - parcours  : parcours navigateur contre la SPA, l'API et PostgreSQL.
 name: CI
 
 # `push` est limité à main, `pull_request` couvre les branches de travail. Déclencher sur
@@ -35,6 +37,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Compose s'arrête à la PREMIÈRE interpolation fautive : une résolution qui
+      # échoue ne détecte donc pas la perte d'un garde isolé, masquée par un autre.
+      # Le contrôle structurel lit chaque interpolation : `:-` réinstalle un repli
+      # et `${VAR}` nu se résout en chaîne vide avec un simple avertissement.
+      - name: Interdire toute interpolation sans garde
+        run: |
+          mauvaises="$(grep -noE '\$\{[^}]*\}' docker-compose.yml | grep -vE '\$\{[A-Za-z_][A-Za-z0-9_]*:\?' || true)"
+          if [ -n "$mauvaises" ]; then
+            echo '::error::Une interpolation de docker-compose.yml ne porte pas de garde `:?`.'
+            echo "$mauvaises"
+            exit 1
+          fi
       # `env_file` est requis par Compose mais ne doit jamais être commité : la CI
       # part donc du modèle et remplace son unique secret d'exemple avant inspection.
       - name: Préparer un environnement applicatif non secret
