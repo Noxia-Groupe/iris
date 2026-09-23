@@ -456,20 +456,60 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('un archivage sort une écriture des journaux et laisse une trace immutable', async () => {
+      const permissionsAvant = (await prisma.user.findUniqueOrThrow({ where: { id: idConducteur }, select: { permissions: true } })).permissions;
+      try {
       const creation = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
         chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST archive', montantHT: 500,
       });
       assert.equal(creation.status, 200);
       const correction = await request(app).patch(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 50, motifCorrection: 'Montant facturé erroné' });
       assert.equal(correction.status, 200);
+      const archiveConducteur = await request(app).delete(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+      assert.equal(archiveConducteur.status, 403, 'un conducteur ne peut pas archiver sans délégation');
+      await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
       const archive = await request(app).delete(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
-      assert.equal(archive.status, 200);
+      assert.equal(archive.status, 200, 'la délégation individuelle d’archivage est effective');
       const journal = await request(app).get('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`);
       assert.equal(journal.body.some((a) => a.id === creation.body.id), false);
       const traces = await prisma.journalSaisieChantier.findMany({ where: { cibleId: creation.body.id }, orderBy: { createdAt: 'asc' } });
       assert.equal(traces.length, 3);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').avant.montantHT), 500);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
+      } finally {
+        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: permissionsAvant } });
+      }
+    });
+
+    test('l’archivage d’un pointage exige la même délégation que celui d’un achat', async () => {
+      // Les deux DELETE ont des gardes indépendantes : protéger un achat ne protège pas un
+      // pointage. Ce compte dédié évite de dépendre de la délégation d'une fixture partagée.
+      const email = 'archiviste.pointage@iris.test';
+      const residu = await prisma.user.findUnique({ where: { email } });
+      if (residu) {
+        await prisma.journalSaisieChantier.deleteMany({ where: { auteurId: residu.id } });
+        await prisma.pointageHeure.deleteMany({ where: { OR: [{ createdById: residu.id }, { updatedById: residu.id }, { archivedById: residu.id }] } });
+        await prisma.user.delete({ where: { id: residu.id } });
+      }
+      const archiviste = await prisma.user.create({ data: { email, name: 'TEST Archiviste pointage', role: 'CONDUCTEUR_TRAVAUX', permissions: [] } });
+      await prisma.chantier.update({ where: { id: idChantierA }, data: { responsableId: archiviste.id } });
+      const jetonArchiviste = jwt.sign({ id: archiviste.id, role: 'CONDUCTEUR_TRAVAUX' }, process.env.JWT_SECRET);
+      try {
+        const creation = await request(app).post('/api/heures').set('Authorization', `Bearer ${jetonArchiviste}`)
+          .send({ chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2 });
+        assert.equal(creation.status, 200, 'chantiers:write suffit pour saisir un pointage');
+        const refus = await request(app).delete(`/api/heures/${creation.body.id}`).set('Authorization', `Bearer ${jetonArchiviste}`)
+          .send({ motifArchivage: 'Saisie en double' });
+        assert.equal(refus.status, 403, 'archiver un pointage exige chantiers:archive');
+        await prisma.user.update({ where: { id: archiviste.id }, data: { permissions: ['chantiers:archive'] } });
+        const archive = await request(app).delete(`/api/heures/${creation.body.id}`).set('Authorization', `Bearer ${jetonArchiviste}`)
+          .send({ motifArchivage: 'Saisie en double' });
+        assert.equal(archive.status, 200, 'la délégation rend l’archivage du pointage possible');
+      } finally {
+        await prisma.chantier.update({ where: { id: idChantierA }, data: { responsableId: idConducteur } });
+        await prisma.journalSaisieChantier.deleteMany({ where: { auteurId: archiviste.id } });
+        await prisma.pointageHeure.deleteMany({ where: { OR: [{ createdById: archiviste.id }, { updatedById: archiviste.id }, { archivedById: archiviste.id }] } });
+        await prisma.user.delete({ where: { id: archiviste.id } });
+      }
     });
 
     test('une écriture archivée ne peut plus être corrigée ni archivée une seconde fois', async () => {
@@ -495,20 +535,20 @@ if (!TEST_DATABASE_URL) {
         // PostgreSQL compte les caractères (char_length), JavaScript .length compte les unités
         // UTF-16 : les emoji doivent suivre la même règle à la frontière API.
         for (const motifArchivage of ['', 'x', 'x'.repeat(501), '😀😀']) {
-          const invalide = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage });
+          const invalide = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`).send({ motifArchivage });
           assert.equal(invalide.status, 400, `${scenario.nom} : motif invalide refusé (${[...motifArchivage].length} caractère(s))`);
         }
         const motifLong = '😀'.repeat(300);
-        const archiveLongue = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: motifLong });
+        const archiveLongue = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`).send({ motifArchivage: motifLong });
         assert.equal(archiveLongue.status, 200, `${scenario.nom} : 300 caractères doivent être acceptés`);
         const modele = scenario.nom === 'achat' ? prisma.achatReel : prisma.pointageHeure;
         await modele.update({ where: { id: creation.body.id }, data: { archivedAt: null, archivedById: null, motifArchivage: null } });
         await prisma.journalSaisieChantier.deleteMany({ where: { cibleId: creation.body.id, action: 'ARCHIVAGE' } });
-        const archive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+        const archive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`).send({ motifArchivage: 'Saisie en double' });
         assert.equal(archive.status, 200, `${scenario.nom} archivé`);
         const correction = await request(app).patch(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.correction);
         assert.equal(correction.status, 409, `${scenario.nom} archivé ne doit plus être corrigible`);
-        const secondeArchive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Deuxième demande' });
+        const secondeArchive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`).send({ motifArchivage: 'Deuxième demande' });
         assert.equal(secondeArchive.status, 409, `${scenario.nom} archivé ne doit plus être archivable`);
         const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: scenario.cible, cibleId: creation.body.id } });
         assert.equal(traces.length, 2, `${scenario.nom} ne crée aucune trace après archivage`);
@@ -609,6 +649,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('une écriture archivée hors périmètre reste invisible', async () => {
+      await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
       // Le 409 « déjà archivé » ne doit jamais précéder le contrôle de périmètre : il révélerait
       // l’existence et l’état d’une écriture sur une affaire que l’appelant ne peut pas voir.
       const archivees = {
@@ -641,6 +682,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('deux archivages simultanés n’en retiennent qu’un seul', async () => {
+      await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
       // Sans le filtre archivedAt: null dans l’UPDATE, deux requêtes concurrentes écrasent la
       // première trace. Les deux modèles portent le même verrou, donc les deux sont couverts.
       const scenarios = [

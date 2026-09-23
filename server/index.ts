@@ -174,13 +174,16 @@ const ROLE_RESPONSABLE = 'RESPONSABLE';
 // existants ; SAV, maintenance, facturation, banques et objectifs seront ajoutés avec
 // leurs routes métier, jamais anticipés par des accès fictifs.
 const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
-  ADMIN: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
-  CONDUCTEUR_TRAVAUX: ['chantiers:read'],
+  ADMIN: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive'],
+  // Le conducteur saisit et corrige les écritures de son affaire. L'archivage, qui retire
+  // un coût ou des heures des marges actives, est distinct et réservé par défaut aux rôles
+  // d'encadrement ; il peut être accordé individuellement si l'organisation le décide.
+  CONDUCTEUR_TRAVAUX: ['chantiers:read', 'chantiers:write'],
   COMMERCIAL: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_ASSISTANTE_COMMERCIALE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_COMPTABLE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_DIRECTEUR_COMMERCIAL]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
-  [ROLE_RESPONSABLE]: ['chantiers:read'],
+  [ROLE_RESPONSABLE]: ['chantiers:read', 'chantiers:write', 'chantiers:archive'],
   [ROLE_TECHNICIEN]: ['chantiers:read'],
 };
 
@@ -245,6 +248,9 @@ const API_SCOPES = [
   // Domaine chantier : les chantiers eux-mêmes, leurs achats et leurs heures. Un agent
   // qui prépare un devis ou un rapport a besoin des trois, qui décrivent le même objet.
   'chantiers:read',
+  // Saisie/correction et archivage sont deux capacités distinctes : l'archivage sort une
+  // écriture des coûts actifs et requiert donc une délégation explicite.
+  'chantiers:write', 'chantiers:archive',
   // Montants vendus et marge. Scope SÉPARÉ, jamais inclus dans chantiers:read : côté
   // interface ces champs sont déjà réservés à certains rôles (cf. serializeChantier), une
   // clé d'intégration ne doit pas les obtenir par le simple fait de lire un chantier.
@@ -362,13 +368,10 @@ export function peutVoirFinance(user: { role: string; accesFinance?: boolean | n
   return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
 }
 
-// Écriture de suivi Travaux : réservée aux administrateurs, conducteurs affectés et
-// responsables affectés (la hiérarchie élargie attend son modèle explicite).
-const requireTravauxWrite: express.RequestHandler = (req, res, next) => {
-  const role = (req as AuthRequest).user?.role;
-  if (isAdminRole(role) || role === 'CONDUCTEUR_TRAVAUX' || role === ROLE_RESPONSABLE) return next();
-  res.status(403).json({ error: 'Accès réservé au suivi Travaux.' });
-};
+// Saisie/correction et archivage sont volontairement séparés : une correction conserve la
+// ligne active, alors qu'un archivage la retire des coûts et marges courants.
+const requireTravauxWrite = requirePermission('chantiers:write');
+const requireTravauxArchive = requirePermission('chantiers:archive');
 
 // Statistiques Travaux : administration globale, responsable équipe déclarée, conducteur périmètre propre.
 const requireTravauxRead: express.RequestHandler = (req, res, next) => {
@@ -3158,7 +3161,7 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
 
 // Suppression d'un achat saisi par erreur (doublon, mauvais chantier...) — mêmes droits
 // que la correction ci-dessus (PATCH), cf. assertChantierWritable.
-app.delete('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) => {
+app.delete('/api/achats/:id', requireAuth, requireTravauxArchive, async (req, res) => {
   try {
     const achatId = paramId(req);
     const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
@@ -3290,7 +3293,7 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
 
 // Suppression d'un pointage saisi par erreur (doublon, mauvais chantier...) — mêmes
 // droits que la correction ci-dessus (PATCH), cf. assertChantierWritable.
-app.delete('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) => {
+app.delete('/api/heures/:id', requireAuth, requireTravauxArchive, async (req, res) => {
   try {
     const pointageId = paramId(req);
     const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });

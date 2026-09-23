@@ -121,6 +121,8 @@ const MESSAGE_COMPTE_SUPERADMIN = "Seul un super administrateur peut gérer un c
 
 // Le droit d'établir un devis comprend le référentiel minimal nécessaire pour choisir le client.
 const DROITS_DEVIS = ['devis:read', 'devis:write', 'clients:read'];
+const DROIT_TRAVAUX_CORRECTION = 'chantiers:write';
+const DROIT_TRAVAUX_ARCHIVAGE = 'chantiers:archive';
 
 const Admin = () => {
   // Rôle réel du compte connecté (la page est fermée aux commerciaux, cf. App.tsx),
@@ -1155,6 +1157,8 @@ const Admin = () => {
                   <th className="px-4 py-4 font-semibold">Commercial</th>
                   <th className="px-4 py-4 font-semibold">Finance</th>
                   <th className="px-4 py-4 font-semibold">Droit devis</th>
+                  <th className="px-4 py-4 font-semibold">Corriger Travaux</th>
+                  <th className="px-4 py-4 font-semibold">Archiver Travaux</th>
                   <th className="px-4 py-4 font-semibold">Actif</th>
                   <th className="px-4 py-4 font-semibold text-right">Actions</th>
                 </tr>
@@ -1163,6 +1167,10 @@ const Admin = () => {
                 {users.map(u => {
                   const aLeDroitDevis = DROITS_DEVIS.every((permission) => (u.permissions || []).includes(permission));
                   const droitDevisVientDuRole = aLeDroitDevis && !DROITS_DEVIS.every((permission) => (u.permissionsIndividuelles || []).includes(permission));
+                  const peutCorrigerTravaux = (u.permissions || []).includes(DROIT_TRAVAUX_CORRECTION);
+                  const peutArchiverTravaux = (u.permissions || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
+                  const correctionVientDuRole = peutCorrigerTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_CORRECTION);
+                  const archivageVientDuRole = peutArchiverTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
                   return (
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
@@ -1235,6 +1243,12 @@ const Admin = () => {
                         <input type="checkbox" checked={aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROITS_DEVIS)} className="w-4 h-4" title={droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
                         <span className="text-xs text-gray-500">Droit devis</span>
                       </label>
+                    </td>
+                    <td className="px-4 py-4">
+                      <input type="checkbox" checked={peutCorrigerTravaux} disabled={!isSuper || correctionVientDuRole} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROIT_TRAVAUX_CORRECTION)} className="w-4 h-4" title={correctionVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la saisie et la correction Travaux'} />
+                    </td>
+                    <td className="px-4 py-4">
+                      <input type="checkbox" checked={peutArchiverTravaux} disabled={!isSuper || archivageVientDuRole} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROIT_TRAVAUX_ARCHIVAGE)} className="w-4 h-4" title={archivageVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser l’archivage des écritures Travaux'} />
                     </td>
                     {/* Compte actif : décocher vaut départ de l'entreprise. La connexion est
                         refusée et le compte sort des listes d'attribution, mais son
