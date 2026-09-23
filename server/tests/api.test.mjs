@@ -553,6 +553,7 @@ if (!TEST_DATABASE_URL) {
         const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
         assert.equal(suppression.status, 409, `${nom} : la suppression doit expliquer la protection de la preuve`);
         assert.match(suppression.body.error, /preuve de traçabilité/);
+        assert.match(suppression.body.error, /Désactivez-le plutôt/);
         assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
         if (nom === 'achat') await prisma.achatReel.delete({ where: { id: ecriture.id } });
         else await prisma.pointageHeure.delete({ where: { id: ecriture.id } });
@@ -573,6 +574,7 @@ if (!TEST_DATABASE_URL) {
         const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
         assert.equal(suppression.status, 409, `${scenario.nom} : suppression refusée`);
         assert.match(suppression.body.error, /preuve de traçabilité/);
+        assert.match(suppression.body.error, /Désactivez-le plutôt/);
         assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
         await scenario.modele.delete({ where: { id: ecriture.id } });
         await prisma.user.delete({ where: { id: auteur.id } });

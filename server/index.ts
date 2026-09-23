@@ -2257,7 +2257,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       prisma.pointageHeure.count({ where: { archivedById: id } }),
     ]);
     if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives > 0) {
-      return res.status(409).json({ error: 'Ce compte est l’auteur d’écritures Travaux : le supprimer effacerait une preuve de traçabilité.' });
+      return res.status(409).json({ error: 'Ce compte est l’auteur d’écritures Travaux : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
     await prisma.$transaction([
       prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
