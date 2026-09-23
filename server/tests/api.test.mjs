@@ -297,6 +297,16 @@ if (!TEST_DATABASE_URL) {
     let idFournisseur = '';
     let idIntervenant = '';
 
+    async function avecDelegation(userId, permissions, corps) {
+      const avant = (await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { permissions: true } })).permissions;
+      await prisma.user.update({ where: { id: userId }, data: { permissions } });
+      try {
+        return await corps();
+      } finally {
+        await prisma.user.update({ where: { id: userId }, data: { permissions: avant } });
+      }
+    }
+
     before(async () => {
       const res = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
       session = res.body.token;
@@ -456,11 +466,10 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('un archivage sort une écriture des journaux et laisse une trace immutable', async () => {
-      const permissionsAvant = (await prisma.user.findUniqueOrThrow({ where: { id: idConducteur }, select: { permissions: true } })).permissions;
-      try {
-      const creation = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
-        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST archive', montantHT: 500,
-      });
+      await avecDelegation(idConducteur, ['chantiers:archive'], async () => {
+        const creation = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
+          chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST archive', montantHT: 500,
+        });
       assert.equal(creation.status, 200);
       const correction = await request(app).patch(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 50, motifCorrection: 'Montant facturé erroné' });
       assert.equal(correction.status, 200);
@@ -475,9 +484,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(traces.length, 3);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').avant.montantHT), 500);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
-      } finally {
-        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: permissionsAvant } });
-      }
+      });
     });
 
     test('l’archivage d’un pointage exige la même délégation que celui d’un achat', async () => {
@@ -649,10 +656,8 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('une écriture archivée hors périmètre reste invisible', async () => {
-      const permissionsAvant = (await prisma.user.findUniqueOrThrow({ where: { id: idConducteur }, select: { permissions: true } })).permissions;
-      try {
-        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
-      // Le 409 « déjà archivé » ne doit jamais précéder le contrôle de périmètre : il révélerait
+      await avecDelegation(idConducteur, ['chantiers:archive'], async () => {
+        // Le 409 « déjà archivé » ne doit jamais précéder le contrôle de périmètre : il révélerait
       // l’existence et l’état d’une écriture sur une affaire que l’appelant ne peut pas voir.
       const archivees = {
         achat: await prisma.achatReel.create({ data: {
@@ -681,16 +686,12 @@ if (!TEST_DATABASE_URL) {
           .set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Deuxième demande' });
         assert.equal(archivage.status, 404, `${scenario.nom} archivé hors périmètre : archivage invisible`);
       }
-      } finally {
-        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: permissionsAvant } });
-      }
+      });
     });
 
     test('deux archivages simultanés n’en retiennent qu’un seul', async () => {
-      const permissionsAvant = (await prisma.user.findUniqueOrThrow({ where: { id: idConducteur }, select: { permissions: true } })).permissions;
-      try {
-        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
-      // Sans le filtre archivedAt: null dans l’UPDATE, deux requêtes concurrentes écrasent la
+      await avecDelegation(idConducteur, ['chantiers:archive'], async () => {
+        // Sans le filtre archivedAt: null dans l’UPDATE, deux requêtes concurrentes écrasent la
       // première trace. Les deux modèles portent le même verrou, donc les deux sont couverts.
       const scenarios = [
         { nom: 'achat', chemin: '/api/achats', cible: 'ACHAT', creation: {
@@ -711,9 +712,7 @@ if (!TEST_DATABASE_URL) {
         const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: scenario.cible, cibleId: creation.body.id, action: 'ARCHIVAGE' } });
         assert.equal(traces.length, 1, `${scenario.nom} : un seul archivage doit être journalisé`);
       }
-      } finally {
-        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: permissionsAvant } });
-      }
+      });
     });
 
     test('le journal d’audit respecte le périmètre du conducteur', async () => {
