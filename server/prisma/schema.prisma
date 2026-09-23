@@ -50,6 +50,7 @@ model User {
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
   profilIntervenant       Intervenant?               @relation("IntervenantCompte")
   rapportsIntervention    InterventionRapport[]
+  journauxSaisie          JournalSaisieChantier[]     @relation("JournalSaisieChantierAuteur")
   achatsCrees             AchatReel[]                 @relation("AchatReelCreePar")
   achatsMisAJour          AchatReel[]                 @relation("AchatReelMisAJourPar")
   pointagesCrees          PointageHeure[]             @relation("PointageHeureCreePar")
@@ -205,7 +206,9 @@ model JournalSaisieChantier {
   cible          String   // ACHAT | HEURE | INTERVENTION | CONTRAT
   cibleId        String
   action         String   // CREATION | CORRECTION | ARCHIVAGE | CHANGEMENT_STATUT | CREATION_CONTRAT | SUSPENSION | REACTIVATION | CLOTURE
-  auteurId       String?
+  auteurId       String
+  auteur         User     @relation("JournalSaisieChantierAuteur", fields: [auteurId], references: [id], onDelete: Restrict)
+  // Nom figé à l'acte, lisible même si le compte est désactivé ultérieurement.
   auteurNom      String
   avant          Json?
   apres          Json?
