@@ -488,6 +488,31 @@ if (!TEST_DATABASE_URL) {
       });
     });
 
+    test('un archivage se restaure avec un motif et réintègre les coûts actifs', async () => {
+      const scenarios = [
+        { nom: 'achat', chemin: '/api/achats', cible: 'ACHAT', creation: { chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST achat restauré', montantHT: 42 } },
+        { nom: 'pointage', chemin: '/api/heures', cible: 'HEURE', creation: { chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2 } },
+      ];
+      for (const scenario of scenarios) {
+        const creation = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.creation);
+        assert.equal(creation.status, 200, `${scenario.nom} créé`);
+        const archivage = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`)
+          .send({ motifArchivage: 'Saisie suspendue à vérifier' });
+        assert.equal(archivage.status, 200, `${scenario.nom} archivé`);
+
+        const motifRestauration = 'Saisie vérifiée et rétablie';
+        const restauration = await request(app).post(`${scenario.chemin}/${creation.body.id}/restaurer`).set('Authorization', `Bearer ${session}`)
+          .send({ motifRestauration });
+        assert.equal(restauration.status, 200, `${scenario.nom} restauré`);
+        const actif = await request(app).get(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`);
+        assert.ok(actif.body.some((ligne) => ligne.id === creation.body.id), `${scenario.nom} restauré réintègre le journal actif`);
+        const trace = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { cible: scenario.cible, cibleId: creation.body.id, action: 'RESTAURATION' } });
+        assert.equal(trace.motif, motifRestauration, `${scenario.nom} : motif de restauration tracé`);
+        assert.equal(trace.avant.archivedAt === null, false, `${scenario.nom} : snapshot avant archivé`);
+        assert.equal(trace.apres.archivedAt, null, `${scenario.nom} : snapshot après actif`);
+      }
+    });
+
     test('l’archivage d’un pointage exige la même délégation que celui d’un achat', async () => {
       // Les deux DELETE ont des gardes indépendantes : protéger un achat ne protège pas un
       // pointage. Ce compte dédié évite de dépendre de la délégation d'une fixture partagée.
