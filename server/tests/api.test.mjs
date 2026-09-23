@@ -462,8 +462,11 @@ if (!TEST_DATABASE_URL) {
       assert.equal(creation.status, 200);
       const correction = await request(app).patch(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 50, motifCorrection: 'Montant facturé erroné' });
       assert.equal(correction.status, 200);
+      const archiveConducteur = await request(app).delete(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+      assert.equal(archiveConducteur.status, 403, 'un conducteur ne peut pas archiver sans délégation');
+      await prisma.user.update({ where: { id: idConducteur }, data: { permissions: ['chantiers:archive'] } });
       const archive = await request(app).delete(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
-      assert.equal(archive.status, 200);
+      assert.equal(archive.status, 200, 'la délégation individuelle d’archivage est effective');
       const journal = await request(app).get('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`);
       assert.equal(journal.body.some((a) => a.id === creation.body.id), false);
       const traces = await prisma.journalSaisieChantier.findMany({ where: { cibleId: creation.body.id }, orderBy: { createdAt: 'asc' } });
@@ -495,20 +498,20 @@ if (!TEST_DATABASE_URL) {
         // PostgreSQL compte les caractères (char_length), JavaScript .length compte les unités
         // UTF-16 : les emoji doivent suivre la même règle à la frontière API.
         for (const motifArchivage of ['', 'x', 'x'.repeat(501), '😀😀']) {
-          const invalide = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage });
+          const invalide = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`).send({ motifArchivage });
           assert.equal(invalide.status, 400, `${scenario.nom} : motif invalide refusé (${[...motifArchivage].length} caractère(s))`);
         }
         const motifLong = '😀'.repeat(300);
-        const archiveLongue = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: motifLong });
+        const archiveLongue = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`).send({ motifArchivage: motifLong });
         assert.equal(archiveLongue.status, 200, `${scenario.nom} : 300 caractères doivent être acceptés`);
         const modele = scenario.nom === 'achat' ? prisma.achatReel : prisma.pointageHeure;
         await modele.update({ where: { id: creation.body.id }, data: { archivedAt: null, archivedById: null, motifArchivage: null } });
         await prisma.journalSaisieChantier.deleteMany({ where: { cibleId: creation.body.id, action: 'ARCHIVAGE' } });
-        const archive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
+        const archive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`).send({ motifArchivage: 'Saisie en double' });
         assert.equal(archive.status, 200, `${scenario.nom} archivé`);
         const correction = await request(app).patch(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.correction);
         assert.equal(correction.status, 409, `${scenario.nom} archivé ne doit plus être corrigible`);
-        const secondeArchive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Deuxième demande' });
+        const secondeArchive = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`).send({ motifArchivage: 'Deuxième demande' });
         assert.equal(secondeArchive.status, 409, `${scenario.nom} archivé ne doit plus être archivable`);
         const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: scenario.cible, cibleId: creation.body.id } });
         assert.equal(traces.length, 2, `${scenario.nom} ne crée aucune trace après archivage`);
