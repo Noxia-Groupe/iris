@@ -63,7 +63,7 @@ jobs:
             echo '::error::Une valeur d’exemple ou un repli interdit est présent dans la configuration Compose.'
             exit 1
           fi
-          grep -q 'POSTGRES_PASSWORD=ci_secret' compose.resolved.yml
+          grep -q 'POSTGRES_PASSWORD: ci_secret' compose.resolved.yml
 
   backend:
     name: Backend — compilation
