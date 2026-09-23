@@ -2246,14 +2246,18 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     if (await isLastSuperAdmin(target.id)) {
       return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
     }
-    // La clé étrangère RESTRICT reste le verrou contre une course ; ce contrôle rend le refus
-    // lisible à l’administrateur lorsqu’un compte porte déjà une preuve d’archivage.
-    const [achatsArchives, pointagesArchives] = await Promise.all([
+    // Les clés étrangères RESTRICT restent le verrou contre une course ; ce contrôle rend le refus
+    // lisible à l’administrateur lorsqu’un compte porte une preuve de saisie ou d’archivage Travaux.
+    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives] = await Promise.all([
+      prisma.achatReel.count({ where: { createdById: id } }),
+      prisma.achatReel.count({ where: { updatedById: id } }),
       prisma.achatReel.count({ where: { archivedById: id } }),
+      prisma.pointageHeure.count({ where: { createdById: id } }),
+      prisma.pointageHeure.count({ where: { updatedById: id } }),
       prisma.pointageHeure.count({ where: { archivedById: id } }),
     ]);
-    if (achatsArchives + pointagesArchives > 0) {
-      return res.status(409).json({ error: 'Ce compte a archivé des écritures Travaux : le supprimer effacerait la preuve de ces archivages.' });
+    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives > 0) {
+      return res.status(409).json({ error: 'Ce compte est l’auteur d’écritures Travaux : le supprimer effacerait une preuve de traçabilité.' });
     }
     await prisma.$transaction([
       prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
@@ -3076,7 +3080,9 @@ app.post('/api/achats', requireAuth, requireTravauxWrite, async (req, res) => {
         data: {
           date, fournisseurId: req.body.fournisseurId, numeroFacture: req.body.numeroFacture || null,
           description: req.body.description, montantHT, chantierId: req.body.chantierId,
-          categorieId: req.body.categorieId, createdById: (req as AuthRequest).user!.id,
+          categorieId: req.body.categorieId,
+          createdById: (req as AuthRequest).user!.id,
+          updatedById: (req as AuthRequest).user!.id,
         }
       });
       await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'CREATION', achat.id, achat.chantierId, null, achat);
@@ -3206,7 +3212,9 @@ app.post('/api/heures', requireAuth, requireTravauxWrite, async (req, res) => {
         data: {
           date, intervenantId: req.body.intervenantId, chantierId: req.body.chantierId,
           nbrHeures, tauxHoraireApplique: intervenant.tauxHoraireCharge,
-          commentaire: req.body.commentaire || null, createdById: (req as AuthRequest).user!.id,
+          commentaire: req.body.commentaire || null,
+          createdById: (req as AuthRequest).user!.id,
+          updatedById: (req as AuthRequest).user!.id,
         }
       });
       await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'CREATION', pointage.id, pointage.chantierId, null, pointage);
