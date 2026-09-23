@@ -3023,7 +3023,7 @@ async function journaliserSaisieTravaux(
   tx: any,
   req: AuthRequest,
   cible: 'ACHAT' | 'HEURE',
-  action: 'CREATION' | 'CORRECTION' | 'ARCHIVAGE',
+  action: 'CREATION' | 'CORRECTION' | 'ARCHIVAGE' | 'RESTAURATION',
   cibleId: string,
   chantierId: string,
   avant: unknown,
@@ -3051,6 +3051,11 @@ function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number, zeroA
 function motifCorrectionValide(value: unknown): string | null {
   const motif = typeof value === 'string' ? value.trim() : '';
   // Même métrique Unicode que PostgreSQL : un emoji est un caractère métier, pas deux unités UTF-16.
+  return [...motif].length >= 3 && [...motif].length <= 500 ? motif : null;
+}
+
+function motifRestaurationValide(value: unknown): string | null {
+  const motif = typeof value === 'string' ? value.trim() : '';
   return [...motif].length >= 3 && [...motif].length <= 500 ? motif : null;
 }
 
@@ -3187,6 +3192,32 @@ app.delete('/api/achats/:id', requireAuth, requireTravauxArchive, async (req, re
   }
 });
 
+app.post('/api/achats/:id/restaurer', requireAuth, requireTravauxArchive, async (req, res) => {
+  try {
+    const achatId = paramId(req);
+    const achat = await prisma.achatReel.findUnique({ where: { id: achatId } });
+    if (!achat) return res.status(404).json({ error: 'Achat introuvable.' });
+    if (!(await assertChantierWritable(req, res, achat.chantierId))) return;
+    if (!achat.archivedAt) return res.status(409).json({ error: 'Cet achat est déjà actif.' });
+    const motifRestauration = motifRestaurationValide(req.body?.motifRestauration);
+    if (!motifRestauration) return res.status(400).json({ error: 'Le motif de restauration doit contenir entre 3 et 500 caractères.' });
+    const restaure = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.achatReel.updateMany({
+        where: { id: achatId, archivedAt: { not: null } },
+        data: { archivedAt: null, archivedById: null, motifArchivage: null, updatedById: (req as AuthRequest).user!.id },
+      });
+      if (count === 0) return null;
+      const actif = await tx.achatReel.findUniqueOrThrow({ where: { id: achatId } });
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'ACHAT', 'RESTAURATION', achatId, achat.chantierId, achat, actif, motifRestauration);
+      return actif;
+    });
+    if (!restaure) return res.status(409).json({ error: 'Cet achat est déjà actif.' });
+    res.json(restaure);
+  } catch (error) {
+    res.status(500).json({ error: 'Error restoring achat' });
+  }
+});
+
 // Pointages (Heures)
 // Journal des heures : même correction et même raison que le journal des achats.
 const listerHeures: express.RequestHandler = async (req, res) => {
@@ -3316,6 +3347,32 @@ app.delete('/api/heures/:id', requireAuth, requireTravauxArchive, async (req, re
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting pointage' });
+  }
+});
+
+app.post('/api/heures/:id/restaurer', requireAuth, requireTravauxArchive, async (req, res) => {
+  try {
+    const pointageId = paramId(req);
+    const pointage = await prisma.pointageHeure.findUnique({ where: { id: pointageId } });
+    if (!pointage) return res.status(404).json({ error: 'Pointage introuvable.' });
+    if (!(await assertChantierWritable(req, res, pointage.chantierId))) return;
+    if (!pointage.archivedAt) return res.status(409).json({ error: 'Ce pointage est déjà actif.' });
+    const motifRestauration = motifRestaurationValide(req.body?.motifRestauration);
+    if (!motifRestauration) return res.status(400).json({ error: 'Le motif de restauration doit contenir entre 3 et 500 caractères.' });
+    const restaure = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.pointageHeure.updateMany({
+        where: { id: pointageId, archivedAt: { not: null } },
+        data: { archivedAt: null, archivedById: null, motifArchivage: null, updatedById: (req as AuthRequest).user!.id },
+      });
+      if (count === 0) return null;
+      const actif = await tx.pointageHeure.findUniqueOrThrow({ where: { id: pointageId } });
+      await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'RESTAURATION', pointageId, pointage.chantierId, pointage, actif, motifRestauration);
+      return actif;
+    });
+    if (!restaure) return res.status(409).json({ error: 'Ce pointage est déjà actif.' });
+    res.json(restaure);
+  } catch (error) {
+    res.status(500).json({ error: 'Error restoring pointage' });
   }
 });
 
