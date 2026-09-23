@@ -2247,16 +2247,17 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
     }
     // Les clés étrangères RESTRICT restent le verrou contre une course ; ce contrôle rend le refus
-    // lisible à l’administrateur lorsqu’un compte porte une preuve de saisie ou d’archivage Travaux.
-    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives] = await Promise.all([
+    // lisible à l’administrateur lorsqu’un compte porte une preuve de traçabilité métier.
+    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie] = await Promise.all([
       prisma.achatReel.count({ where: { createdById: id } }),
       prisma.achatReel.count({ where: { updatedById: id } }),
       prisma.achatReel.count({ where: { archivedById: id } }),
       prisma.pointageHeure.count({ where: { createdById: id } }),
       prisma.pointageHeure.count({ where: { updatedById: id } }),
       prisma.pointageHeure.count({ where: { archivedById: id } }),
+      prisma.journalSaisieChantier.count({ where: { auteurId: id } }),
     ]);
-    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives > 0) {
+    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie > 0) {
       return res.status(409).json({ error: 'Ce compte est l’auteur d’écritures Travaux : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
     await prisma.$transaction([

@@ -640,12 +640,28 @@ if (!TEST_DATABASE_URL) {
     test('le journal d’audit respecte le périmètre du conducteur', async () => {
       // Une trace ne doit pas devenir une porte latérale vers un chantier non rattaché.
       await prisma.journalSaisieChantier.create({
-        data: { chantierId: idChantierB, cible: 'ACHAT', cibleId: 'test-hors-perimetre', action: 'CREATION', auteurNom: 'TEST Admin' },
+        data: { chantierId: idChantierB, cible: 'ACHAT', cibleId: 'test-hors-perimetre', action: 'CREATION', auteurId: idConducteur, auteurNom: 'TEST Conducteur' },
       });
       const interdit = await request(app).get(`/api/chantiers/${idChantierB}/journal-saisies`).set('Authorization', `Bearer ${sessionConducteur}`);
       assert.equal(interdit.status, 404);
       const autorise = await request(app).get(`/api/chantiers/${idChantierA}/journal-saisies`).set('Authorization', `Bearer ${sessionConducteur}`);
       assert.equal(autorise.status, 200);
+    });
+
+    test('le journal d’audit référence un auteur réel et protège son compte', async () => {
+      await assert.rejects(() => prisma.journalSaisieChantier.create({
+        data: { chantierId: idChantierA, cible: 'ACHAT', cibleId: 'test-auteur-inconnu', action: 'CREATION', auteurId: 'compte-inexistant', auteurNom: 'Auteur inconnu' },
+      }));
+      const auteur = await prisma.user.create({ data: { email: 'auteur.journal@iris.test', name: 'TEST Auteur journal', role: 'ADMIN' } });
+      const trace = await prisma.journalSaisieChantier.create({
+        data: { chantierId: idChantierA, cible: 'ACHAT', cibleId: 'test-auteur-journal', action: 'CREATION', auteurId: auteur.id, auteurNom: auteur.name },
+      });
+      const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(suppression.status, 409);
+      assert.match(suppression.body.error, /preuve de traçabilité/);
+      assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
+      await prisma.journalSaisieChantier.delete({ where: { id: trace.id } });
+      await prisma.user.delete({ where: { id: auteur.id } });
     });
 
     test('un administrateur voit bien toutes les lignes', async () => {
@@ -1231,11 +1247,12 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('la base impose un unique parent pour chaque trace de journal', async () => {
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
       await assert.rejects(() => prisma.journalSaisieChantier.create({ data: {
-        chantierId: null, interventionId: null, cible: 'INTERVENTION', cibleId: 'TEST-parent-absent', action: 'CREATION', auteurNom: 'TEST',
+        chantierId: null, interventionId: null, cible: 'INTERVENTION', cibleId: 'TEST-parent-absent', action: 'CREATION', auteurId: auteur.id, auteurNom: 'TEST',
       } }));
       await assert.rejects(() => prisma.journalSaisieChantier.create({ data: {
-        chantierId: 'TEST-chantier-inexistant', interventionId: 'TEST-intervention-inexistante', cible: 'INTERVENTION', cibleId: 'TEST-double-parent', action: 'CREATION', auteurNom: 'TEST',
+        chantierId: 'TEST-chantier-inexistant', interventionId: 'TEST-intervention-inexistante', cible: 'INTERVENTION', cibleId: 'TEST-double-parent', action: 'CREATION', auteurId: auteur.id, auteurNom: 'TEST',
       } }));
     });
 
