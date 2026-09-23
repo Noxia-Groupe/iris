@@ -456,6 +456,8 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('un archivage sort une écriture des journaux et laisse une trace immutable', async () => {
+      const permissionsAvant = (await prisma.user.findUniqueOrThrow({ where: { id: idConducteur }, select: { permissions: true } })).permissions;
+      try {
       const creation = await request(app).post('/api/achats').set('Authorization', `Bearer ${sessionConducteur}`).send({
         chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST archive', montantHT: 500,
       });
@@ -473,6 +475,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal(traces.length, 3);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').avant.montantHT), 500);
       assert.equal(Number(traces.find((t) => t.action === 'CORRECTION').apres.montantHT), 50);
+      } finally {
+        await prisma.user.update({ where: { id: idConducteur }, data: { permissions: permissionsAvant } });
+      }
     });
 
     test('l’archivage d’un pointage exige la même délégation que celui d’un achat', async () => {
