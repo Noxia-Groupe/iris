@@ -962,6 +962,7 @@ const ChantierDetail = () => {
                       </select>
                       <input required type="text" name="description" defaultValue={a.description} placeholder="Description" className="form-input text-sm sm:col-span-2 lg:col-span-3" />
                       <input type="text" name="numeroFacture" defaultValue={a.numeroFacture || ''} placeholder="N° de facture (optionnel)" className="form-input text-sm sm:col-span-2 lg:col-span-1" />
+                      <input required minLength={3} maxLength={500} type="text" name="motifCorrection" placeholder="Motif de la correction" className="form-input text-sm sm:col-span-2 lg:col-span-4" />
                       <div className="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
                         <button type="button" disabled={savingAchat} onClick={() => setEditingAchatId(null)} className="btn bg-white border text-xs px-3 py-1.5">Annuler</button>
                         <button type="submit" disabled={savingAchat} className="btn btn-primary text-xs px-3 py-1.5">
@@ -1092,6 +1093,7 @@ const ChantierDetail = () => {
                       </select>
                       <input required type="number" step="0.5" min="0.5" name="nbrHeures" defaultValue={p.nbrHeures} className="form-input text-sm" />
                       <input type="text" name="commentaire" defaultValue={p.commentaire || ''} placeholder="Commentaire" className="form-input text-sm" />
+                      <input required minLength={3} maxLength={500} type="text" name="motifCorrection" placeholder="Motif de la correction" className="form-input text-sm sm:col-span-2 lg:col-span-3" />
                       <div className="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
                         <button type="button" disabled={savingPointage} onClick={() => setEditingPointageId(null)} className="btn bg-white border text-xs px-3 py-1.5">Annuler</button>
                         <button type="submit" disabled={savingPointage} className="btn btn-primary text-xs px-3 py-1.5">

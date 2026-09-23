@@ -398,8 +398,8 @@ if (!TEST_DATABASE_URL) {
 
     test('la création et la correction conservent leurs auteurs distincts', async () => {
       const scenarios = [
-        { nom: 'achat', chemin: '/api/achats', creation: { chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST auteurs achat', montantHT: 10 }, correction: { montantHT: 11 }, modele: prisma.achatReel },
-        { nom: 'pointage', chemin: '/api/heures', creation: { chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2 }, correction: { nbrHeures: 3 }, modele: prisma.pointageHeure },
+        { nom: 'achat', chemin: '/api/achats', creation: { chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST auteurs achat', montantHT: 10 }, correction: { montantHT: 11, motifCorrection: 'Correction de montant' }, modele: prisma.achatReel },
+        { nom: 'pointage', chemin: '/api/heures', creation: { chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2 }, correction: { nbrHeures: 3, motifCorrection: 'Correction des heures' }, modele: prisma.pointageHeure },
       ];
       for (const scenario of scenarios) {
         const creation = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.creation);
@@ -412,6 +412,29 @@ if (!TEST_DATABASE_URL) {
         const corrige = await scenario.modele.findUniqueOrThrow({ where: { id: creation.body.id } });
         assert.equal(corrige.createdById, idConducteur, `${scenario.nom} : l’auteur de création est immuable`);
         assert.equal(corrige.updatedById, idCorrecteur, `${scenario.nom} : le dernier correcteur est conservé`);
+      }
+    });
+
+    test('une correction exige un motif et le conserve avec ses snapshots', async () => {
+      const scenarios = [
+        { nom: 'achat', chemin: '/api/achats', creation: { chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST motif achat', montantHT: 10 }, correction: { montantHT: 11 } },
+        { nom: 'pointage', chemin: '/api/heures', creation: { chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2 }, correction: { nbrHeures: 3 } },
+      ];
+      for (const scenario of scenarios) {
+        const creation = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.creation);
+        assert.equal(creation.status, 200, `${scenario.nom} créé`);
+        for (const motifCorrection of ['', 'x', 'x'.repeat(501), '😀😀']) {
+          const refus = await request(app).patch(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`)
+            .send({ ...scenario.correction, motifCorrection });
+          assert.equal(refus.status, 400, `${scenario.nom} : motif de correction invalide refusé`);
+        }
+        const motifCorrection = 'Valeur de saisie rectifiée';
+        const correction = await request(app).patch(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`)
+          .send({ ...scenario.correction, motifCorrection });
+        assert.equal(correction.status, 200, `${scenario.nom} corrigé`);
+        const trace = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { cibleId: creation.body.id, action: 'CORRECTION' } });
+        assert.equal(trace.motif, motifCorrection, `${scenario.nom} : motif conservé dans le journal`);
+        assert.ok(trace.avant && trace.apres, `${scenario.nom} : snapshots conservés`);
       }
     });
 
@@ -437,7 +460,7 @@ if (!TEST_DATABASE_URL) {
         chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '2026-09-05', description: 'TEST archive', montantHT: 500,
       });
       assert.equal(creation.status, 200);
-      const correction = await request(app).patch(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 50 });
+      const correction = await request(app).patch(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ montantHT: 50, motifCorrection: 'Montant facturé erroné' });
       assert.equal(correction.status, 200);
       const archive = await request(app).delete(`/api/achats/${creation.body.id}`).set('Authorization', `Bearer ${sessionConducteur}`).send({ motifArchivage: 'Saisie en double' });
       assert.equal(archive.status, 200);
@@ -456,14 +479,14 @@ if (!TEST_DATABASE_URL) {
             chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
             date: '06-09-2026', description: 'TEST achat figé', montantHT: 25,
           },
-          correction: { montantHT: 30 }, cible: 'ACHAT',
+          correction: { montantHT: 30, motifCorrection: 'Correction nécessaire' }, cible: 'ACHAT',
         },
         {
           nom: 'pointage', chemin: '/api/heures', creation: {
             chantierId: idChantierA, intervenantId: idIntervenant,
             date: '06-09-2026', nbrHeures: 2,
           },
-          correction: { nbrHeures: 3 }, cible: 'HEURE',
+          correction: { nbrHeures: 3, motifCorrection: 'Correction nécessaire' }, cible: 'HEURE',
         },
       ];
       for (const scenario of scenarios) {
@@ -1175,7 +1198,7 @@ if (!TEST_DATABASE_URL) {
         .send({ chantierId: chantier.id, categorieId, fournisseurId, date: '01-09-2026', description: 'TEST achat journal', montantHT: 500 });
       assert.equal(achat.status, 200, JSON.stringify(achat.body));
       const correction = await request(app).patch(`/api/achats/${achat.body.id}`).set('Authorization', `Bearer ${session}`)
-        .send({ montantHT: 50 });
+        .send({ montantHT: 50, motifCorrection: 'Montant initial incorrect' });
       assert.equal(correction.status, 200, JSON.stringify(correction.body));
 
       const journal = await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
@@ -1184,6 +1207,7 @@ if (!TEST_DATABASE_URL) {
       const correctionJournal = journal.body.find((entree) => entree.action === 'CORRECTION');
       assert.equal(correctionJournal.avant.montantHT, 500);
       assert.equal(correctionJournal.apres.montantHT, 50);
+      assert.equal(correctionJournal.motif, 'Montant initial incorrect');
       assert.equal(correctionJournal.auteurNom, 'Secours');
     });
 
