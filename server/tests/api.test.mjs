@@ -79,10 +79,14 @@ if (!TEST_DATABASE_URL) {
     await prisma.intervenant.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
-    await prisma.user.deleteMany({ where: { email: { in: [
+    const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
-    ] } } });
+    ];
+    // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
+    // avant les comptes afin que le harnais reste rejouable après une interruption.
+    await prisma.journalSaisieChantier.deleteMany({ where: { auteur: { email: { in: emailsUtilisateursTest } } } });
+    await prisma.user.deleteMany({ where: { email: { in: emailsUtilisateursTest } } });
   };
 
   before(async () => {
