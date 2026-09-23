@@ -471,6 +471,11 @@ if (!TEST_DATABASE_URL) {
         chantierId: idChantierA, intervenantId: idIntervenant,
         archivedAt: new Date(), archivedById: idConducteur,
       } }));
+      await assert.rejects(() => prisma.achatReel.create({ data: {
+        date: new Date(), description: 'TEST auteur d’archivage inconnu', montantHT: 1,
+        chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur,
+        archivedAt: new Date(), archivedById: 'compte-inexistant', motifArchivage: 'Auteur inconnu',
+      } }));
     });
 
     test('une écriture archivée hors périmètre reste invisible', async () => {
