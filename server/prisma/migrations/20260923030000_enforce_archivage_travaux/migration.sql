@@ -5,7 +5,7 @@ ALTER TABLE "AchatReel"
   CHECK (
     ("archivedAt" IS NULL AND "archivedById" IS NULL AND "motifArchivage" IS NULL)
     OR
-    ("archivedAt" IS NOT NULL AND "archivedById" IS NOT NULL AND char_length(btrim("motifArchivage")) BETWEEN 3 AND 500)
+    ("archivedAt" IS NOT NULL AND "archivedById" IS NOT NULL AND "motifArchivage" IS NOT NULL AND char_length(btrim("motifArchivage")) BETWEEN 3 AND 500)
   );
 
 ALTER TABLE "PointageHeure"
@@ -13,5 +13,5 @@ ALTER TABLE "PointageHeure"
   CHECK (
     ("archivedAt" IS NULL AND "archivedById" IS NULL AND "motifArchivage" IS NULL)
     OR
-    ("archivedAt" IS NOT NULL AND "archivedById" IS NOT NULL AND char_length(btrim("motifArchivage")) BETWEEN 3 AND 500)
+    ("archivedAt" IS NOT NULL AND "archivedById" IS NOT NULL AND "motifArchivage" IS NOT NULL AND char_length(btrim("motifArchivage")) BETWEEN 3 AND 500)
   );
