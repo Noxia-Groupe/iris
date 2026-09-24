@@ -52,22 +52,32 @@ CREATE TABLE "CoutInterventionAchat" (
 CREATE INDEX "CoutInterventionAchat_interventionId_archivedAt_idx" ON "CoutInterventionAchat"("interventionId", "archivedAt");
 CREATE INDEX "CoutInterventionAchat_fournisseurId_idx" ON "CoutInterventionAchat"("fournisseurId");
 
--- Les taux appliqués et l'auteur d'origine sont des instantanés comptables, jamais modifiables.
-CREATE OR REPLACE FUNCTION prevent_cout_intervention_immutable_fields()
+-- L'auteur et l'intervention d'origine sont des instantanés comptables, jamais modifiables.
+-- Cette fonction est commune aux deux tables : elle ne référence que leurs colonnes communes.
+CREATE OR REPLACE FUNCTION prevent_cout_intervention_common_immutable_fields()
 RETURNS TRIGGER AS $$
 BEGIN
   IF NEW."createdById" IS DISTINCT FROM OLD."createdById"
      OR NEW."interventionId" IS DISTINCT FROM OLD."interventionId" THEN
     RAISE EXCEPTION 'champ immuable d''un coût intervention';
   END IF;
-  IF TG_TABLE_NAME = 'CoutInterventionHeure'
-     AND NEW."tauxHoraireApplique" IS DISTINCT FROM OLD."tauxHoraireApplique" THEN
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Le taux appliqué n'existe que pour les heures ; il est aussi figé à la création.
+CREATE OR REPLACE FUNCTION prevent_cout_intervention_heure_taux_immutable()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW."tauxHoraireApplique" IS DISTINCT FROM OLD."tauxHoraireApplique" THEN
     RAISE EXCEPTION 'taux horaire appliqué immuable';
   END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 CREATE TRIGGER "CoutInterventionHeure_immutable_fields" BEFORE UPDATE ON "CoutInterventionHeure"
-  FOR EACH ROW EXECUTE FUNCTION prevent_cout_intervention_immutable_fields();
+  FOR EACH ROW EXECUTE FUNCTION prevent_cout_intervention_common_immutable_fields();
 CREATE TRIGGER "CoutInterventionAchat_immutable_fields" BEFORE UPDATE ON "CoutInterventionAchat"
-  FOR EACH ROW EXECUTE FUNCTION prevent_cout_intervention_immutable_fields();
+  FOR EACH ROW EXECUTE FUNCTION prevent_cout_intervention_common_immutable_fields();
+CREATE TRIGGER "CoutInterventionHeure_taux_immutable" BEFORE UPDATE ON "CoutInterventionHeure"
+  FOR EACH ROW EXECUTE FUNCTION prevent_cout_intervention_heure_taux_immutable();

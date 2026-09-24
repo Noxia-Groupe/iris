@@ -55,7 +55,8 @@ test.describe('Interventions SAV', () => {
     await page.goto('/interventions', { waitUntil: 'networkidle' });
 
     const carte = page.locator('article').filter({ has: page.getByRole('heading', { name: titreIntervention }) });
-    const formulaire = carte.locator('form').filter({ has: carte.getByRole('button', { name: 'Enregistrer l’achat matériel' }) });
+    const formulaire = carte.locator('form').filter({ hasText: 'Enregistrer l’achat matériel' });
+    await expect(formulaire).toHaveCount(1);
     await formulaire.getByPlaceholder('Date (JJ-MM-AAAA)').fill('06-09-2026');
     await formulaire.locator('select[name="fournisseurId"]').selectOption({ value: fournisseurId, label: fournisseurNom });
     await formulaire.getByPlaceholder('Description du matériel').fill('Câble E2E');
