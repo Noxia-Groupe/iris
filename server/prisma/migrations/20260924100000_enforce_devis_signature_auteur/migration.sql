@@ -1,23 +1,16 @@
--- Une signature existante était supprimée avec son devis et n'identifiait pas l'humain
--- qui l'avait enregistrée. Cette migration est un delta depuis 20260924060000, jamais une
--- recréation du schéma : elle conserve les attestations déjà émises en les attribuant à un
--- compte utilisateur existant avant de rendre l'auteur obligatoire.
+-- Une signature est une preuve : une version antérieure ne porte pas l'identité de
+-- l'employé qui l'a enregistrée. Ne jamais inventer cette provenance en l'attribuant à un
+-- utilisateur arbitraire : l'administrateur doit d'abord la réparer explicitement.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "DevisSignature") THEN
+    RAISE EXCEPTION 'Impossible de migrer DevisSignature : des signatures existantes ne permettent pas d’établir leur enregistreur interne.';
+  END IF;
+END $$;
+
 ALTER TABLE "DevisSignature" DROP CONSTRAINT "DevisSignature_devisId_fkey";
 
 ALTER TABLE "DevisSignature" ADD COLUMN "enregistreParId" TEXT;
-
-UPDATE "DevisSignature"
-SET "enregistreParId" = (
-  SELECT "id" FROM "User" ORDER BY "createdAt" ASC, "id" ASC LIMIT 1
-)
-WHERE "enregistreParId" IS NULL;
-
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM "DevisSignature" WHERE "enregistreParId" IS NULL) THEN
-    RAISE EXCEPTION 'Impossible de migrer DevisSignature : aucun utilisateur ne peut enregistrer les signatures existantes.';
-  END IF;
-END $$;
 
 ALTER TABLE "DevisSignature" ALTER COLUMN "enregistreParId" SET NOT NULL;
 

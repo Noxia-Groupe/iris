@@ -343,6 +343,33 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(ligne.getByRole('button', { name: 'Signer en interne' })).toBeVisible();
   });
 
+  test('fait signer le client désigné et identifie l’employé qui enregistre', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
+    const client = await creerClient('signataire-client', false);
+    const apiResponse = await apiAdmin.get('/company');
+    expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
+    const api = new URL('/api', apiResponse.url()).toString().replace(/\/$/, '');
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const contact = await request.post(`${api}/clients/${client.id}/contacts`, { headers, data: { prenom: 'Claire', nom: 'Cliente', estSignataire: true } });
+    expect(contact.status(), await contact.text()).toBe(201);
+    const objet = `Devis E2E signataire client ${Date.now()}`;
+    const creation = await request.post(`${api}/devis`, {
+      headers,
+      data: { clientId: client.id, objet, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
+    });
+    expect(creation.ok(), await creation.text()).toBeTruthy();
+
+    const page = await allerSurPageAdmin('/devis');
+    const ligne = page.locator('li', { hasText: objet });
+    await ligne.getByRole('button', { name: 'Faire signer le client' }).click();
+    const formulaire = page.getByRole('dialog', { name: 'Signature client' });
+    await expect(formulaire.getByLabel('Enregistré par')).not.toHaveValue('');
+    await expect(formulaire.getByLabel('Autre signataire client')).toBeVisible();
+    await formulaire.getByLabel('Signataire client').selectOption({ label: 'Claire Cliente' });
+    await formulaire.getByLabel('Confirmation du client').check();
+    await formulaire.getByRole('button', { name: 'Enregistrer la signature client' }).click();
+    await expect(ligne).toContainText('Signature client : Claire Cliente');
+  });
+
   test('réserve aux administrateurs le PDF des factures liées de la fiche affaire', async ({ page, apiAdmin, creerClient, request, session }) => {
     const apiResponse = await apiAdmin.get('/company');
     expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
