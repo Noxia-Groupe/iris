@@ -353,6 +353,7 @@ model Devis {
   totalTtc           Decimal      @db.Decimal(12, 2)
   lignes             DevisLigne[]
   conversion         DevisConversion?
+  signature          DevisSignature?
 
   // --- Acompte conditionnant l'ouverture du chantier ---
   // Coché sur le devis initial : tant que l'acompte n'est pas constaté, la conversion en
@@ -407,6 +408,17 @@ model DevisLigne {
   totalTtc        Decimal  @db.Decimal(12, 2)
 
   @@unique([devisId, ordre])
+}
+
+// Attestation interne : elle associe l'identité déclarée du signataire à un instant et à
+// l'empreinte SHA-256 d'un contenu de devis déterministe. Ce n'est pas une signature qualifiée.
+model DevisSignature {
+  id         String   @id @default(uuid())
+  devisId    String   @unique
+  devis      Devis    @relation(fields: [devisId], references: [id], onDelete: Cascade)
+  signataire String
+  empreinte  String
+  signeLe    DateTime @default(now())
 }
 
 // Conversion irréversible et traçable d’un devis accepté. Les autres cibles (intervention,
