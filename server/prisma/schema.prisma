@@ -57,6 +57,10 @@ model User {
   pointagesMisAJour       PointageHeure[]             @relation("PointageHeureMisAJourPar")
   achatsArchives          AchatReel[]                 @relation("AchatReelArchivePar")
   pointagesArchives       PointageHeure[]             @relation("PointageHeureArchivePar")
+  coutsInterventionHeures CoutInterventionHeure[]     @relation("CoutInterventionHeureCreePar")
+  coutsInterventionAchats CoutInterventionAchat[]     @relation("CoutInterventionAchatCreePar")
+  coutsInterventionHeuresArchives CoutInterventionHeure[] @relation("CoutInterventionHeureArchivePar")
+  coutsInterventionAchatsArchives CoutInterventionAchat[] @relation("CoutInterventionAchatArchivePar")
   signaturesDevisEnregistrees DevisSignature[]        @relation("DevisSignatureEnregistreePar")
 
   createdAt DateTime @default(now())
@@ -71,6 +75,7 @@ model Fournisseur {
   contact String?
 
   achats AchatReel[]
+  coutsInterventionAchats CoutInterventionAchat[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -233,6 +238,7 @@ model Intervenant {
   tauxHoraireCharge Decimal @db.Decimal(10, 2)
 
   pointages      PointageHeure[]
+  coutsInterventionHeures CoutInterventionHeure[]
   planningEvents PlanningEvent[] @relation("PlanningEventIntervenants")
   affectationsIntervention InterventionAffectation[]
 }
@@ -263,6 +269,53 @@ model PointageHeure {
   @@index([archivedAt])
   @@index([intervenantId])
   @@index([chantierId])
+}
+
+// Écritures SAV contractuelles, séparées des coûts Chantier afin de ne jamais alimenter
+// les calculs de marge, de CA, de commission ou les flux d'intégration Travaux.
+model CoutInterventionHeure {
+  id                  String       @id @default(uuid())
+  interventionId      String
+  intervention        Intervention @relation(fields: [interventionId], references: [id], onDelete: Restrict)
+  intervenantId       String
+  intervenant         Intervenant  @relation(fields: [intervenantId], references: [id], onDelete: Restrict)
+  date                DateTime
+  nbrHeures           Decimal      @db.Decimal(10, 2)
+  tauxHoraireApplique Decimal      @db.Decimal(10, 2)
+  commentaire         String?
+  createdById         String
+  createdBy           User         @relation("CoutInterventionHeureCreePar", fields: [createdById], references: [id], onDelete: Restrict)
+  archivedAt          DateTime?
+  archivedById        String?
+  archivedBy          User?        @relation("CoutInterventionHeureArchivePar", fields: [archivedById], references: [id], onDelete: Restrict)
+  motifArchivage      String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([interventionId, archivedAt])
+  @@index([intervenantId])
+}
+
+model CoutInterventionAchat {
+  id             String       @id @default(uuid())
+  interventionId String
+  intervention   Intervention @relation(fields: [interventionId], references: [id], onDelete: Restrict)
+  fournisseurId  String
+  fournisseur    Fournisseur  @relation(fields: [fournisseurId], references: [id], onDelete: Restrict)
+  date           DateTime
+  description    String
+  montantHT      Decimal      @db.Decimal(12, 2)
+  createdById    String
+  createdBy      User         @relation("CoutInterventionAchatCreePar", fields: [createdById], references: [id], onDelete: Restrict)
+  archivedAt     DateTime?
+  archivedById   String?
+  archivedBy     User?        @relation("CoutInterventionAchatArchivePar", fields: [archivedById], references: [id], onDelete: Restrict)
+  motifArchivage String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([interventionId, archivedAt])
+  @@index([fournisseurId])
 }
 
 // Paramètres globaux configurables par les administrateurs (singleton).
@@ -655,6 +708,8 @@ model Intervention {
   updatedAt      DateTime @updatedAt
   affectations   InterventionAffectation[]
   rapports       InterventionRapport[]
+  coutsHeures    CoutInterventionHeure[]
+  coutsAchats    CoutInterventionAchat[]
   planningEvent  PlanningEvent?
   factures       Facture[] @relation("FactureIntervention")
 
