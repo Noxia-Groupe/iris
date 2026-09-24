@@ -296,7 +296,7 @@ const requireApiKey = (scope: ApiScope): express.RequestHandler => async (req, r
 // à tous les rôles : ce n'est pas l'accès à la route qui les restreint, mais le périmètre
 // de ce qu'elle renvoie (cf. perimetreChantiers) — passer [] est donc délibéré, pas un
 // oubli. La porte /api/v1 ne prend jamais de garde de rôle : une clé n'en a pas.
-type MethodeHttp = 'get' | 'post' | 'put' | 'delete';
+type MethodeHttp = 'get' | 'post' | 'put' | 'patch' | 'delete';
 function routeMixte(
   methode: MethodeHttp,
   chemin: string,
@@ -4019,7 +4019,46 @@ function devisErreur(res: express.Response, error: unknown) {
   if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
-const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true, conversion: true };
+const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true, conversion: true, signature: true };
+function montantDevisFige(value: Prisma.Decimal | number | string | null, decimales: number): string | null {
+  return value === null ? null : new Prisma.Decimal(value).toFixed(decimales);
+}
+function contenuDevisSigne(devis: {
+  id: string; dossierId: string; numero: string; version: number; clientId: string; objet: string;
+  acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; totalHt: Prisma.Decimal; totalTva: Prisma.Decimal; totalTtc: Prisma.Decimal;
+  lignes: { ordre: number; designation: string; nature: string; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal }[];
+}) {
+  return {
+    devisId: devis.id, dossierId: devis.dossierId, numero: devis.numero, version: devis.version,
+    clientId: devis.clientId, objet: devis.objet, acompteExige: devis.acompteExige,
+    tauxAcompte: montantDevisFige(devis.tauxAcompte, 2), totalHt: montantDevisFige(devis.totalHt, 2),
+    totalTva: montantDevisFige(devis.totalTva, 2), totalTtc: montantDevisFige(devis.totalTtc, 2),
+    lignes: devis.lignes.map(ligne => ({
+      ordre: ligne.ordre, designation: ligne.designation, nature: ligne.nature,
+      quantite: montantDevisFige(ligne.quantite, 3), prixUnitaireHt: montantDevisFige(ligne.prixUnitaireHt, 2),
+      tauxTva: montantDevisFige(ligne.tauxTva, 2), totalHt: montantDevisFige(ligne.totalHt, 2), totalTtc: montantDevisFige(ligne.totalTtc, 2),
+    })),
+  };
+}
+async function verrouillerDevis(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
+  const lignes = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "Devis" WHERE "id" = ${id} FOR UPDATE`);
+  return lignes.length === 1;
+}
+async function acompteDevisPayload(body: Record<string, unknown>, precedent?: { acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; acompteRecuLe: Date | null }) {
+  // Après encaissement, les conditions qui ont déclenché celui-ci constituent une preuve :
+  // elles sont reprises telles quelles, même si le formulaire réémet des valeurs différentes.
+  if (precedent?.acompteRecuLe) return { acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte };
+  const acompteExige = precedent && !Object.hasOwn(body, 'acompteExige') ? precedent.acompteExige : !!body.acompteExige;
+  const { tauxAcompteDefaut } = await getParametres();
+  const tauxAcompte = acompteExige
+    // Un PATCH portant sur les lignes ou l'objet ne renégocie pas silencieusement le taux.
+    ? (Object.hasOwn(body, 'tauxAcompte')
+      ? (nombreDecimalNonNegatif(body.tauxAcompte, 3) ?? Number(tauxAcompteDefaut))
+      : (precedent?.acompteExige ? precedent.tauxAcompte : null) ?? Number(tauxAcompteDefaut))
+    : null;
+  if (tauxAcompte !== null && Number(tauxAcompte) > 100) throw new DevisSaisieError('Le taux d’acompte ne peut pas dépasser 100 %.');
+  return { acompteExige, tauxAcompte };
+}
 async function nouveauNumeroDevis() {
   const societe = await getCompanySettings();
   const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
@@ -4029,30 +4068,73 @@ async function nouveauNumeroDevis() {
 const creerDevis: express.RequestHandler = async (req, res) => { try {
   const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
   if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
-  // L'acompte se décide sur le devis INITIAL. Son taux est figé ici, à partir du paramètre
-  // du jour : un devis émis en janvier garde son taux de janvier, quoi qu'il advienne du
-  // réglage global — c'est la non-rétroactivité posée pour toutes les règles chiffrées.
-  const acompteExige = !!(req.body ?? {}).acompteExige;
-  const { tauxAcompteDefaut } = await getParametres();
-  const tauxAcompte = acompteExige
-    ? (nombreDecimalNonNegatif((req.body ?? {}).tauxAcompte, 3) ?? Number(tauxAcompteDefaut))
-    : null;
-  if (tauxAcompte !== null && tauxAcompte > 100) throw new DevisSaisieError('Le taux d’acompte ne peut pas dépasser 100 %.');
+  const { acompteExige, tauxAcompte } = await acompteDevisPayload((req.body ?? {}) as Record<string, unknown>);
   const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, acompteExige, tauxAcompte, lignes: { create: payload.lignesCalculees } }, include: devisInclude });
   res.status(201).json(decimalToNumber(devis));
 } catch (error) { devisErreur(res, error); } };
 const listerDevis: express.RequestHandler = async (_req, res) => { try { res.json(decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } }))); } catch (error) { devisErreur(res, error); } };
+const modifierDevis: express.RequestHandler = async (req, res) => { try {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const payload = devisPayload(body);
+  const devis = await prisma.$transaction(async tx => {
+    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
+    const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { signature: true, conversion: true } });
+    if (precedent.signature) throw new DevisConflitError('Ce devis est signé : créez une nouvelle révision brouillon pour le modifier.');
+    if (precedent.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être modifié.');
+    if (!['BROUILLON', 'ENVOYE'].includes(precedent.statut)) throw new DevisConflitError('Seuls les devis brouillon ou envoyés, non signés, peuvent être modifiés.');
+    if (!await tx.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
+    const acompte = await acompteDevisPayload(body, precedent);
+    return tx.devis.update({
+      where: { id: precedent.id },
+      data: { clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, ...acompte,
+        lignes: { deleteMany: {}, create: payload.lignesCalculees } }, include: devisInclude,
+    });
+  });
+  res.json(decimalToNumber(devis));
+} catch (error) { devisErreur(res, error); } };
 const creerRevision: express.RequestHandler = async (req, res) => { try {
-  const precedent = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: devisInclude });
-  if (!precedent) throw new DevisSaisieError('Devis introuvable.');
-  for (let tentative = 0; tentative < 3; tentative++) {
-    const version = ((await prisma.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version ?? 0) + 1;
-    try { const devis = await prisma.devis.create({ data: { dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet, totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc, acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte, lignes: { create: precedent.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) } }, include: devisInclude }); return void res.status(201).json(decimalToNumber(devis)); } catch (error) { if ((error as { code?: string })?.code !== 'P2002' || tentative === 2) throw error; }
-  }
+  const devis = await prisma.$transaction(async tx => {
+    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
+    const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: devisInclude });
+    if (!precedent.signature) throw new DevisConflitError('Seul un devis signé peut ouvrir une nouvelle révision.');
+    if (precedent.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être révisé.');
+    const versionPlusRecente = await tx.devis.findFirst({ where: { dossierId: precedent.dossierId, version: { gt: precedent.version } }, select: { id: true } });
+    if (versionPlusRecente) throw new DevisConflitError('Seule la dernière version du dossier peut être révisée.');
+    const version = ((await tx.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version ?? 0) + 1;
+    return tx.devis.create({ data: {
+      dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet,
+      totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc,
+      acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte,
+      acompteRecuLe: precedent.acompteRecuLe, acompteMontant: precedent.acompteMontant,
+      acompteReference: precedent.acompteReference, acompteConstateParId: precedent.acompteConstateParId,
+      lignes: { create: precedent.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) },
+    }, include: devisInclude });
+  });
+  res.status(201).json(decimalToNumber(devis));
+} catch (error) { devisErreur(res, error); } };
+const signerDevis: express.RequestHandler = async (req, res) => { try {
+  const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
+  if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) throw new DevisSaisieError('Le signataire et sa confirmation explicite sont obligatoires.');
+  const signature = await prisma.$transaction(async tx => {
+    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
+    const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } }, signature: true, conversion: true } });
+    if (devis.signature) throw new DevisConflitError('Ce devis est déjà signé.');
+    if (devis.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être signé.');
+    if (devis.statut === 'ANNULE' || devis.statut === 'REFUSE') throw new DevisConflitError('Ce devis ne peut plus être signé dans son état actuel.');
+    const empreinte = crypto.createHash('sha256').update(JSON.stringify(contenuDevisSigne(devis)), 'utf8').digest('hex');
+    await tx.devis.update({ where: { id: devis.id }, data: { statut: 'ACCEPTE' } });
+    const auteur = (req as AuthRequest).user;
+    if (!auteur) throw new DevisConflitError('Une session humaine active est obligatoire pour signer un devis.');
+    return tx.devisSignature.create({ data: { devisId: devis.id, enregistreParId: auteur.id, signataire, empreinte }, select: { id: true, signataire: true, empreinte: true, signeLe: true, enregistreParId: true } });
+  });
+  res.status(201).json(signature);
 } catch (error) { devisErreur(res, error); } };
 routeMixte('get', '/devis', 'devis:read', listerDevis, [requirePermission('devis:read')]);
 routeMixte('post', '/devis', 'devis:write', creerDevis, [requirePermission('devis:write')]);
+routeMixte('patch', '/devis/:id', 'devis:write', modifierDevis, [requirePermission('devis:write')]);
 routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision, [requirePermission('devis:write')]);
+// La signature engage une personne identifiée : aucune clé d'intégration ne peut l'émettre.
+app.post('/api/devis/:id/signature', requireAuth, requirePermission('devis:write'), signerDevis);
 // Cycle de vie d'un devis. `ANNULE` ne figure dans aucune liste de destinations : on n'y
 // entre que par la route d'annulation, qui exige un motif et vérifie le chantier lié — et
 // on n'en sort jamais. `EN_ATTENTE_ACOMPTE` est le choix explicite fait après acceptation :
@@ -4060,7 +4142,7 @@ routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision, [requir
 // que l'acompte n'est pas constaté, mais pas une fois le chantier ouvert.
 const TRANSITIONS_DEVIS: Record<string, string[]> = {
   BROUILLON: ['ENVOYE'],
-  ENVOYE: ['ACCEPTE', 'REFUSE', 'BROUILLON'],
+  ENVOYE: ['REFUSE', 'BROUILLON'],
   ACCEPTE: ['EN_ATTENTE_ACOMPTE'],
   EN_ATTENTE_ACOMPTE: ['ACCEPTE'],
   REFUSE: [],
@@ -4095,11 +4177,14 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   const cible = String((req.body ?? {}).cible || '');
   if (cible !== 'CHANTIER') throw new DevisSaisieError('Cible de conversion non disponible.');
   const resultat = await prisma.$transaction(async tx => {
-    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, lignes: true } });
+    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, signature: true, lignes: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
     if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé : il ne peut plus ouvrir de chantier.');
+    const versionPlusRecente = await tx.devis.findFirst({ where: { dossierId: devis.dossierId, version: { gt: devis.version }, statut: { not: 'ANNULE' } }, select: { id: true } });
+    if (versionPlusRecente) throw new DevisConflitError('Seule la dernière version non annulée du dossier peut être convertie.');
     if (devis.statut === 'EN_ATTENTE_ACOMPTE') throw new DevisSaisieError('Ce devis attend son acompte : le chantier ne peut pas encore être ouvert.');
     if (devis.statut !== 'ACCEPTE') throw new DevisSaisieError('Seul un devis accepté peut être converti.');
+    if (!devis.signature) throw new DevisSaisieError('Seul un devis signé en interne peut être converti.');
     if (devis.conversion) throw new DevisSaisieError('Ce devis a déjà été converti.');
     // Verrou de fond, indépendant du statut : un devis qui exige un acompte n'ouvre pas de
     // chantier tant que sa réception n'a pas été constatée. Le statut peut être manipulé,

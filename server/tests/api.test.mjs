@@ -6,6 +6,7 @@
 // Sans elle, la suite s'annonce ignorée : mieux vaut un « skip » visible qu'un vert obtenu
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test, { after, before, describe } from 'node:test';
 import { PDFParse } from 'pdf-parse';
 
@@ -32,6 +33,8 @@ if (!TEST_DATABASE_URL) {
   let cleApi = '';
 
   const nettoyer = async () => {
+    // La signature dépend du devis : elle part avant le devis pour garder ce teardown explicite.
+    await prisma.devisSignature.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     // Une conversion garde le lien vers le devis : elle part avant le devis et sa fiche client.
     await prisma.devisConversion.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     // Les devis dépendent du client ; ils doivent être retirés avant la fiche client.
@@ -1001,6 +1004,87 @@ if (!TEST_DATABASE_URL) {
       numero = res.body.numero;
     });
 
+    test('modifie un devis non signé et recalcule ses totaux côté serveur', async () => {
+      const res = await request(app).patch(`/api/devis/${devisId}`).set('Authorization', `Bearer ${session}`).send({
+        clientId,
+        objet: 'Installation contrôle d’accès révisée',
+        acompteExige: true,
+        tauxAcompte: 30,
+        lignes: [{ designation: 'Pose lecteur révisée', nature: 'MAIN_OEUVRE', quantite: 3, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.objet, 'Installation contrôle d’accès révisée');
+      assert.equal(res.body.acompteExige, true);
+      assert.equal(res.body.tauxAcompte, 30);
+      assert.equal(res.body.lignes[0].designation, 'Pose lecteur révisée');
+      assert.equal(res.body.totalHt, 300);
+      assert.equal(res.body.totalTva, 60);
+      assert.equal(res.body.totalTtc, 360);
+    });
+
+    // Témoin d'audit : ces refus ne sont pas des variantes du parcours nominal. Ils
+    // séparent explicitement la révision (qui exige une signature), la conversion (qui
+    // la rend ensuite irréversible), l'identité du client externe et l'auteur interne.
+    test('préserve les invariants de signature, révision, conversion et acompte', async () => {
+      const lignes = [{ designation: 'Pose témoin', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }];
+      const clientInvalide = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId: 'client-inexistant', objet: 'Client invalide', lignes,
+      });
+      assert.equal(clientInvalide.status, 400, JSON.stringify(clientInvalide.body));
+      assert.match(clientInvalide.body.error, /client introuvable/i);
+
+      const brouillon = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Témoin invariants', acompteExige: true, tauxAcompte: 35, lignes,
+      });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const revisionNonSignee = await request(app).post(`/api/devis/${brouillon.body.id}/revisions`).set('Authorization', `Bearer ${session}`);
+      assert.equal(revisionNonSignee.status, 409, JSON.stringify(revisionNonSignee.body));
+      assert.match(revisionNonSignee.body.error, /signé/i);
+
+      const patchOmis = await request(app).patch(`/api/devis/${brouillon.body.id}`).set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Témoin invariants modifié', lignes: [{ ...lignes[0], designation: 'Pose témoin modifiée' }],
+      });
+      assert.equal(patchOmis.status, 200, JSON.stringify(patchOmis.body));
+      assert.equal(patchOmis.body.acompteExige, true, 'un PATCH sans acompteExige conserve la condition négociée');
+      assert.equal(patchOmis.body.tauxAcompte, 35, 'un PATCH sans tauxAcompte conserve le taux négocié');
+
+      const signataireInvalide = await request(app).post(`/api/devis/${brouillon.body.id}/signature`).set('Authorization', `Bearer ${session}`)
+        .send({ signataire: 'A', confirme: true });
+      assert.equal(signataireInvalide.status, 400, JSON.stringify(signataireInvalide.body));
+      assert.match(signataireInvalide.body.error, /signataire/i);
+
+      const signature = await request(app).post(`/api/devis/${brouillon.body.id}/signature`).set('Authorization', `Bearer ${session}`)
+        .send({ signataire: 'Claire Cliente', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.ok(signature.body.enregistreParId, 'l’employé de la session est le seul auteur interne enregistré');
+      const acompte = await request(app).post(`/api/devis/${brouillon.body.id}/acompte`).set('Authorization', `Bearer ${session}`)
+        .send({ recuLe: '01-09-2026', montant: 42, reference: 'VIR TÉMOIN' });
+      assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
+      const conversion = await request(app).post(`/api/devis/${brouillon.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      const revisionConvertie = await request(app).post(`/api/devis/${brouillon.body.id}/revisions`).set('Authorization', `Bearer ${session}`);
+      assert.equal(revisionConvertie.status, 409, JSON.stringify(revisionConvertie.body));
+      assert.match(revisionConvertie.body.error, /converti/i);
+
+      for (const statut of ['REFUSE', 'ANNULE']) {
+        const devisTerminal = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({ clientId, objet: `Signature ${statut}`, lignes });
+        assert.equal(devisTerminal.status, 201, JSON.stringify(devisTerminal.body));
+        if (statut === 'REFUSE') {
+          const envoi = await request(app).put(`/api/devis/${devisTerminal.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
+          assert.equal(envoi.status, 200, JSON.stringify(envoi.body));
+          const refus = await request(app).put(`/api/devis/${devisTerminal.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+          assert.equal(refus.status, 200, JSON.stringify(refus.body));
+        } else {
+          const annulation = await request(app).post(`/api/devis/${devisTerminal.body.id}/annulation`).set('Authorization', `Bearer ${session}`).send({ motif: 'Témoin audit' });
+          assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        }
+        const signatureTerminale = await request(app).post(`/api/devis/${devisTerminal.body.id}/signature`).set('Authorization', `Bearer ${session}`)
+          .send({ signataire: 'Claire Cliente', confirme: true });
+        assert.equal(signatureTerminale.status, 409, JSON.stringify(signatureTerminale.body));
+        assert.match(signatureTerminale.body.error, /ne peut plus être signé/i);
+      }
+    });
+
     test('garantit HT + TVA = TTC avec un taux réduit', async () => {
       const res = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({ clientId, objet: 'Rénovation', lignes: [{ designation: 'Fourniture posée', quantite: 1, prixUnitaireHt: 5, tauxTva: 5.5 }] });
       assert.equal(res.status, 201, JSON.stringify(res.body));
@@ -1017,27 +1101,149 @@ if (!TEST_DATABASE_URL) {
       assert.equal(res.body.error, 'Ligne de devis invalide.');
     });
 
-    test('révise un devis sans modifier sa version validée', async () => {
+    test('fige un devis signé avec confirmation, signataire et empreinte déterministe', async () => {
+      const sansConfirmation = await request(app).post(`/api/devis/${devisId}/signature`).set('Authorization', `Bearer ${session}`)
+        .send({ signataire: 'Alice Martin', confirme: false });
+      assert.equal(sansConfirmation.status, 400, JSON.stringify(sansConfirmation.body));
+
+      const signature = await request(app).post(`/api/devis/${devisId}/signature`).set('Authorization', `Bearer ${session}`)
+        .send({ signataire: 'Alice Martin', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.equal(signature.body.signataire, 'Alice Martin');
+      assert.ok(signature.body.enregistreParId, 'la session humaine qui enregistre la signature est conservée');
+      assert.ok(signature.body.signeLe);
+      const devisSigne = await request(app).get('/api/devis').set('Authorization', `Bearer ${session}`);
+      assert.equal(devisSigne.status, 200, JSON.stringify(devisSigne.body));
+      assert.equal(devisSigne.body.find((devis) => devis.id === devisId).statut, 'ACCEPTE');
+      const contenu = {
+        devisId,
+        dossierId,
+        numero,
+        version: 1,
+        clientId,
+        objet: 'Installation contrôle d’accès révisée',
+        acompteExige: true,
+        tauxAcompte: '30.00',
+        totalHt: '300.00',
+        totalTva: '60.00',
+        totalTtc: '360.00',
+        lignes: [{ ordre: 0, designation: 'Pose lecteur révisée', nature: 'MAIN_OEUVRE', quantite: '3.000', prixUnitaireHt: '100.00', tauxTva: '20.00', totalHt: '300.00', totalTtc: '360.00' }],
+      };
+      assert.equal(signature.body.empreinte, createHash('sha256').update(JSON.stringify(contenu), 'utf8').digest('hex'));
+    });
+
+    test('refuse de modifier la révision signée et crée une révision brouillon distincte', async () => {
+      const interdit = await request(app).patch(`/api/devis/${devisId}`).set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Modification interdite', lignes: [{ designation: 'Interdit', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }],
+      });
+      assert.equal(interdit.status, 409, JSON.stringify(interdit.body));
+      assert.match(interdit.body.error, /signé/i);
+
       const res = await request(app).post(`/api/devis/${devisId}/revisions`).set('Authorization', `Bearer ${session}`);
       assert.equal(res.status, 201, JSON.stringify(res.body));
       assert.equal(res.body.version, 2);
       assert.equal(res.body.statut, 'BROUILLON');
       assert.equal(res.body.dossierId, dossierId);
       assert.equal(res.body.numero, numero);
+      const modifie = await request(app).patch(`/api/devis/${res.body.id}`).set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Installation contrôle d’accès v2', acompteExige: false,
+        lignes: [{ designation: 'Pose v2', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 200, tauxTva: 20 }],
+      });
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      assert.equal(modifie.body.totalTtc, 240);
+      const original = await request(app).get('/api/devis').set('Authorization', `Bearer ${session}`);
+      assert.equal(original.body.find((d) => d.id === devisId).objet, 'Installation contrôle d’accès révisée');
     });
 
-    test('ne crée un chantier qu’après acceptation, avec la même référence affaire', async () => {
-      const avant = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+    test('fige l’acompte encaissé, le reporte dans la révision et protège la dernière version', async () => {
+      const initial = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Acompte versionné', acompteExige: true, tauxAcompte: 25,
+        lignes: [{ designation: 'Pose', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(initial.status, 201, JSON.stringify(initial.body));
+      const envoi = await request(app).put(`/api/devis/${initial.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
+      assert.equal(envoi.status, 200, JSON.stringify(envoi.body));
+      const acceptationDirecte = await request(app).put(`/api/devis/${initial.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
+      assert.equal(acceptationDirecte.status, 400, 'la signature est l’unique transition vers ACCEPTE');
+      const signature = await request(app).post(`/api/devis/${initial.body.id}/signature`).set('Authorization', `Bearer ${session}`).send({ signataire: 'Alice Martin', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.equal(signature.body.enregistreParId, (await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } })).id);
+      const signatureMachine = await request(app).post(`/api/v1/devis/${initial.body.id}/signature`).set('Authorization', `Bearer ${cleApi}`).send({ signataire: 'Automate', confirme: true });
+      assert.equal(signatureMachine.status, 404, 'une clé d’intégration ne peut pas signer un devis');
+      const patchSigne = await request(app).patch(`/api/devis/${initial.body.id}`).set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Modification signée interdite', lignes: [{ designation: 'Interdit', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }],
+      });
+      assert.equal(patchSigne.status, 409, 'un devis signé ne reste jamais éditable');
+      const acompte = await request(app).post(`/api/devis/${initial.body.id}/acompte`).set('Authorization', `Bearer ${session}`)
+        .send({ recuLe: '24-09-2026', montant: 30, reference: 'TEST-ACOMPTE-REVISION' });
+      assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
+      const revision = await request(app).post(`/api/devis/${initial.body.id}/revisions`).set('Authorization', `Bearer ${session}`);
+      assert.equal(revision.status, 201, JSON.stringify(revision.body));
+      assert.equal(revision.body.acompteExige, true);
+      assert.equal(revision.body.tauxAcompte, 25);
+      assert.equal(revision.body.acompteMontant, 30);
+      assert.equal(revision.body.acompteReference, 'TEST-ACOMPTE-REVISION');
+
+      const patchSansTaux = await request(app).patch(`/api/devis/${revision.body.id}`).set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Acompte versionné corrigé', acompteExige: false,
+        lignes: [{ designation: 'Pose corrigée', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(patchSansTaux.status, 200, JSON.stringify(patchSansTaux.body));
+      assert.equal(patchSansTaux.body.acompteExige, true, 'un acompte encaissé ne peut plus être retiré');
+      assert.equal(patchSansTaux.body.tauxAcompte, 25, 'un PATCH sans taux conserve le taux négocié');
+
+      const revisionDeAncienne = await request(app).post(`/api/devis/${initial.body.id}/revisions`).set('Authorization', `Bearer ${session}`);
+      assert.equal(revisionDeAncienne.status, 409, 'une version antérieure ne peut plus rouvrir une négociation');
+      const conversionAncienne = await request(app).post(`/api/devis/${initial.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+      assert.equal(conversionAncienne.status, 409, 'une version remplacée ne peut pas ouvrir une affaire');
+
+      const refuse = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Devis refusé figé', lignes: [{ designation: 'Pose', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
+      });
+      assert.equal(refuse.status, 201, JSON.stringify(refuse.body));
+      await request(app).put(`/api/devis/${refuse.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
+      await request(app).put(`/api/devis/${refuse.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'REFUSE' });
+      const patchRefuse = await request(app).patch(`/api/devis/${refuse.body.id}`).set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'Modification refusée interdite', lignes: [{ designation: 'Interdit', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }],
+      });
+      assert.equal(patchRefuse.status, 409, 'un devis refusé ne reste jamais éditable');
+    });
+
+    test('sérialise une seule signature concurrente', async () => {
+      const devis = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Signature concurrente', lignes: [{ designation: 'Pose', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
+      });
+      const reponses = await Promise.all(['Bob', 'Carole'].map(signataire => request(app).post(`/api/devis/${devis.body.id}/signature`)
+        .set('Authorization', `Bearer ${session}`).send({ signataire, confirme: true })));
+      assert.deepEqual(reponses.map(r => r.status).sort(), [201, 409]);
+      assert.equal(await prisma.devisSignature.count({ where: { devisId: devis.body.id } }), 1);
+    });
+
+    test('sérialise la création concurrente d’une seule révision brouillon', async () => {
+      const devis = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Révision concurrente', lignes: [{ designation: 'Pose', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
+      });
+      await request(app).post(`/api/devis/${devis.body.id}/signature`).set('Authorization', `Bearer ${session}`).send({ signataire: 'Alice', confirme: true });
+      const reponses = await Promise.all([1, 2].map(() => request(app).post(`/api/devis/${devis.body.id}/revisions`).set('Authorization', `Bearer ${session}`)));
+      assert.deepEqual(reponses.map(r => r.status).sort(), [201, 409]);
+      assert.equal(await prisma.devis.count({ where: { dossierId: devis.body.dossierId } }), 2);
+    });
+
+    test('ne crée un chantier qu’après signature humaine, avec la même référence affaire', async () => {
+      const nonSigne = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST devis non signé', lignes: [{ designation: 'Ligne', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
+      });
+      assert.equal(nonSigne.status, 201, JSON.stringify(nonSigne.body));
+      const avant = await request(app).post(`/api/devis/${nonSigne.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(avant.status, 400);
-      const envoye = await request(app).put(`/api/devis/${devisId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
-      assert.equal(envoye.status, 200);
-      const accepte = await request(app).put(`/api/devis/${devisId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
-      assert.equal(accepte.status, 200);
-      const conversion = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+      const signature = await request(app).post(`/api/devis/${nonSigne.body.id}/signature`).set('Authorization', `Bearer ${session}`)
+        .send({ signataire: 'Alice Martin', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      const conversion = await request(app).post(`/api/devis/${nonSigne.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
-      assert.equal(conversion.body.numeroDevis, numero);
+      assert.equal(conversion.body.numeroDevis, nonSigne.body.numero);
       assert.ok((await prisma.chantier.findUnique({ where: { id: conversion.body.id } })).clientId, 'la conversion doit rattacher l’affaire à son client');
-      const doublon = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+      const doublon = await request(app).post(`/api/devis/${nonSigne.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(doublon.status, 400);
     });
 
@@ -1056,7 +1262,7 @@ if (!TEST_DATABASE_URL) {
       const devis = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`)
         .send({ clientId, objet: 'TEST Référence', lignes: [{ designation: 'L', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
       await request(app).put(`/api/devis/${devis.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
-      await request(app).put(`/api/devis/${devis.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
+      await request(app).post(`/api/devis/${devis.body.id}/signature`).set('Authorization', `Bearer ${session}`).send({ signataire: 'TEST Signataire interne', confirme: true });
       const conversion = await request(app).post(`/api/devis/${devis.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
       const chantier = conversion.body;
@@ -1157,8 +1363,11 @@ if (!TEST_DATABASE_URL) {
         clientId, objet, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }], ...extra,
       });
       assert.equal(cree.status, 201, JSON.stringify(cree.body));
-      await request(app).put(`/api/devis/${cree.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
-      await request(app).put(`/api/devis/${cree.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
+      const envoi = await request(app).put(`/api/devis/${cree.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
+      assert.equal(envoi.status, 200, JSON.stringify(envoi.body));
+      const signature = await request(app).post(`/api/devis/${cree.body.id}/signature`).set('Authorization', `Bearer ${session}`)
+        .send({ signataire: 'TEST Signataire interne', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
       return cree.body;
     };
     const convertir = (id) => request(app).post(`/api/devis/${id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });

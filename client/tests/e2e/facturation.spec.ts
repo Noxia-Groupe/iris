@@ -320,6 +320,56 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(prefixe.getByRole('link', { name: 'Configurer' })).toHaveCount(0);
   });
 
+  test('n’expose pas d’acceptation manuelle : seule la signature peut accepter un devis envoyé', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
+    const client = await creerClient('devis-signature', false);
+    const apiResponse = await apiAdmin.get('/company');
+    expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
+    const api = new URL('/api', apiResponse.url()).toString().replace(/\/$/, '');
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const objet = `Devis E2E signature ${Date.now()}`;
+    const creation = await request.post(`${api}/devis`, {
+      headers,
+      data: { clientId: client.id, objet, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
+    });
+    expect(creation.ok(), await creation.text()).toBeTruthy();
+    const { id } = await creation.json() as { id: string };
+    const envoi = await request.put(`${api}/devis/${id}/statut`, { headers, data: { statut: 'ENVOYE' } });
+    expect(envoi.ok(), await envoi.text()).toBeTruthy();
+
+    const page = await allerSurPageAdmin('/devis');
+    const ligne = page.locator('li', { hasText: objet });
+    await expect(ligne).toContainText('ENVOYE');
+    await expect(ligne.getByRole('button', { name: 'Accepter' })).toHaveCount(0);
+    await expect(ligne.getByRole('button', { name: 'Faire signer le client' })).toBeVisible();
+  });
+
+  test('fait signer le client désigné et identifie l’employé qui enregistre', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
+    const client = await creerClient('signataire-client', false);
+    const apiResponse = await apiAdmin.get('/company');
+    expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
+    const api = new URL('/api', apiResponse.url()).toString().replace(/\/$/, '');
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const contact = await request.post(`${api}/clients/${client.id}/contacts`, { headers, data: { prenom: 'Claire', nom: 'Cliente', estSignataire: true } });
+    expect(contact.status(), await contact.text()).toBe(201);
+    const objet = `Devis E2E signataire client ${Date.now()}`;
+    const creation = await request.post(`${api}/devis`, {
+      headers,
+      data: { clientId: client.id, objet, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
+    });
+    expect(creation.ok(), await creation.text()).toBeTruthy();
+
+    const page = await allerSurPageAdmin('/devis');
+    const ligne = page.locator('li', { hasText: objet });
+    await ligne.getByRole('button', { name: 'Faire signer le client' }).click();
+    const formulaire = page.getByRole('dialog', { name: 'Signature client' });
+    await expect(formulaire.getByLabel('Enregistré par')).not.toHaveValue('');
+    await expect(formulaire.getByLabel('Autre signataire client')).toBeVisible();
+    await formulaire.getByLabel('Signataire client', { exact: true }).selectOption({ label: 'Claire Cliente' });
+    await formulaire.getByLabel('Confirmation du client').check();
+    await formulaire.getByRole('button', { name: 'Enregistrer la signature client' }).click();
+    await expect(ligne).toContainText('Signature client : Claire Cliente');
+  });
+
   test('réserve aux administrateurs le PDF des factures liées de la fiche affaire', async ({ page, apiAdmin, creerClient, request, session }) => {
     const apiResponse = await apiAdmin.get('/company');
     expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
@@ -332,10 +382,10 @@ test.describe('Facturation — parcours utilisateur', () => {
     });
     expect(devis.ok(), await devis.text()).toBeTruthy();
     const { id: devisId } = await devis.json() as { id: string };
-    for (const statut of ['ENVOYE', 'ACCEPTE']) {
-      const changement = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut } });
-      expect(changement.ok(), await changement.text()).toBeTruthy();
-    }
+    const envoi = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut: 'ENVOYE' } });
+    expect(envoi.ok(), await envoi.text()).toBeTruthy();
+    const signature = await request.post(`${api}/devis/${devisId}/signature`, { headers, data: { signataire: 'Signataire E2E', confirme: true } });
+    expect(signature.ok(), await signature.text()).toBeTruthy();
     const conversion = await request.post(`${api}/devis/${devisId}/convertir`, { headers, data: { cible: 'CHANTIER' } });
     expect(conversion.ok(), await conversion.text()).toBeTruthy();
     const { id: chantierId } = await conversion.json() as { id: string };
@@ -403,10 +453,10 @@ test.describe('Facturation — parcours utilisateur', () => {
       });
       expect(devis.ok(), await devis.text()).toBeTruthy();
       const { id: devisId } = await devis.json() as { id: string };
-      for (const statut of ['ENVOYE', 'ACCEPTE']) {
-        const changement = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut } });
-        expect(changement.ok(), await changement.text()).toBeTruthy();
-      }
+      const envoi = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut: 'ENVOYE' } });
+      expect(envoi.ok(), await envoi.text()).toBeTruthy();
+      const signature = await request.post(`${api}/devis/${devisId}/signature`, { headers, data: { signataire: 'Signataire E2E', confirme: true } });
+      expect(signature.ok(), await signature.text()).toBeTruthy();
       const conversion = await request.post(`${api}/devis/${devisId}/convertir`, { headers, data: { cible: 'CHANTIER' } });
       expect(conversion.ok(), await conversion.text()).toBeTruthy();
       const { id: chantierId } = await conversion.json() as { id: string };
