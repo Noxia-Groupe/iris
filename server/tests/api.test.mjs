@@ -1057,6 +1057,9 @@ if (!TEST_DATABASE_URL) {
         .send({ signataire: 'Claire Cliente', confirme: true });
       assert.equal(signature.status, 201, JSON.stringify(signature.body));
       assert.ok(signature.body.enregistreParId, 'l’employé de la session est le seul auteur interne enregistré');
+      const acompte = await request(app).post(`/api/devis/${brouillon.body.id}/acompte`).set('Authorization', `Bearer ${session}`)
+        .send({ recuLe: '01-09-2026', montant: 42, reference: 'VIR TÉMOIN' });
+      assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
       const conversion = await request(app).post(`/api/devis/${brouillon.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
       const revisionConvertie = await request(app).post(`/api/devis/${brouillon.body.id}/revisions`).set('Authorization', `Bearer ${session}`);

@@ -340,7 +340,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const ligne = page.locator('li', { hasText: objet });
     await expect(ligne).toContainText('ENVOYE');
     await expect(ligne.getByRole('button', { name: 'Accepter' })).toHaveCount(0);
-    await expect(ligne.getByRole('button', { name: 'Signer en interne' })).toBeVisible();
+    await expect(ligne.getByRole('button', { name: 'Faire signer le client' })).toBeVisible();
   });
 
   test('fait signer le client désigné et identifie l’employé qui enregistre', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
@@ -364,7 +364,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const formulaire = page.getByRole('dialog', { name: 'Signature client' });
     await expect(formulaire.getByLabel('Enregistré par')).not.toHaveValue('');
     await expect(formulaire.getByLabel('Autre signataire client')).toBeVisible();
-    await formulaire.getByLabel('Signataire client').selectOption({ label: 'Claire Cliente' });
+    await formulaire.getByLabel('Signataire client', { exact: true }).selectOption({ label: 'Claire Cliente' });
     await formulaire.getByLabel('Confirmation du client').check();
     await formulaire.getByRole('button', { name: 'Enregistrer la signature client' }).click();
     await expect(ligne).toContainText('Signature client : Claire Cliente');
