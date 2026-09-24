@@ -36,7 +36,7 @@ test.describe('Interventions SAV', () => {
     const client = await creerClient('achat intervention', false);
     const contrat = await request.post('http://127.0.0.1:3001/api/contrats-maintenance', {
       headers,
-      data: { clientId: client.id, titre: 'Contrat E2E achat', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2026' },
+      data: { clientId: client.id, titre: `Contrat E2E achat ${Date.now()}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2026' },
     });
     expect(contrat.status(), await contrat.text()).toBe(201);
     const { id: contratId } = await contrat.json() as { id: string };

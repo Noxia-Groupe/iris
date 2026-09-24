@@ -88,7 +88,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1800,6 +1800,41 @@ if (!TEST_DATABASE_URL) {
       assert.equal(saisie.body.intervenantId, undefined, 'la réponse technicien ne doit exposer aucun rattachement ni taux financier');
       assert.equal(saisie.body.tauxHoraireApplique, undefined, 'le taux horaire direction ne doit jamais être exposé au technicien');
       assert.equal(saisie.body.interventionId, undefined);
+    });
+
+    test('réserve les coûts à un technicien et fige son taux à la saisie', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.garde.taux@iris.test', 'TEST Garde taux technicien');
+      const responsable = await prisma.user.create({ data: { email: 'sav.cout.garde.responsable@iris.test', name: 'TEST Garde taux responsable', role: 'RESPONSABLE' } });
+      const intervenantResponsable = await prisma.intervenant.create({ data: { nom: 'TEST Garde taux intervenant responsable', role: 'Responsable', tauxHoraireCharge: 42, userId: responsable.id } });
+      const jetonResponsable = jwt.sign({ id: responsable.id }, process.env.JWT_SECRET);
+      const contrat = await prisma.contratMaintenance.create({ data: {
+        clientId, titre: 'TEST Contrat garde taux', statut: 'ACTIF', periodiciteMois: 12, dureePrevisionnelleMinutes: 60,
+        dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z'),
+      } });
+      const intervention = await prisma.intervention.create({ data: {
+        reference: `I26-GARDE-TAUX-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, titre: 'TEST Intervention garde taux',
+      } });
+      await prisma.interventionAffectation.createMany({ data: [
+        { interventionId: intervention.id, intervenantId: technicien.intervenantId },
+        { interventionId: intervention.id, intervenantId: intervenantResponsable.id },
+      ] });
+
+      const lectureResponsable = await request(app).get(`/api/interventions/${intervention.id}/couts`)
+        .set('Authorization', `Bearer ${jetonResponsable}`);
+      assert.equal(lectureResponsable.status, 403, JSON.stringify(lectureResponsable.body));
+      assert.equal(lectureResponsable.body.error, 'Accès non autorisé.');
+
+      const saisie = await request(app).post(`/api/interventions/${intervention.id}/couts/heures`)
+        .set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', nbrHeures: 2 });
+      assert.equal(saisie.status, 201, JSON.stringify(saisie.body));
+
+      await prisma.intervenant.update({ where: { id: technicien.intervenantId }, data: { tauxHoraireCharge: 99 } });
+      const lectureEncadrement = await request(app).get(`/api/interventions/${intervention.id}/couts`)
+        .set('Authorization', `Bearer ${session}`);
+      assert.equal(lectureEncadrement.status, 200, JSON.stringify(lectureEncadrement.body));
+      assert.equal(lectureEncadrement.body.heures.length, 1);
+      assert.equal(lectureEncadrement.body.heures[0].tauxHoraireApplique, 42);
+      assert.equal(lectureEncadrement.body.totalMainOeuvreHT, 84);
     });
 
     test('témoin des gardes des coûts SAV', async () => {
