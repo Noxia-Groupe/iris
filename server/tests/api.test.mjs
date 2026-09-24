@@ -1775,6 +1775,28 @@ if (!TEST_DATABASE_URL) {
       assert.equal(creation.body.priorite, 'HAUTE');
       assert.equal(creation.body.client.id, clientId);
     });
+
+    test('permet au technicien affecté de saisir ses heures sur une intervention de contrat', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.heures@iris.test', 'TEST Technicien coût SAV');
+      const contrat = await prisma.contratMaintenance.create({ data: {
+        clientId, titre: 'TEST Contrat coûts SAV', periodiciteMois: 12, dureePrevisionnelleMinutes: 60,
+        dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z'),
+      } });
+      const intervention = await prisma.intervention.create({ data: {
+        reference: `I26-COUT-${Date.now()}`, clientId, contratMaintenanceId: contrat.id,
+        titre: 'TEST Intervention contrat sans chantier',
+      } });
+      await prisma.interventionAffectation.create({ data: { interventionId: intervention.id, intervenantId: technicien.intervenantId } });
+
+      const saisie = await request(app).post(`/api/interventions/${intervention.id}/couts/heures`)
+        .set('Authorization', `Bearer ${technicien.jeton}`)
+        .send({ date: '06-09-2026', nbrHeures: 1.5 });
+
+      assert.equal(saisie.status, 201, JSON.stringify(saisie.body));
+      assert.equal(saisie.body.intervenantId, technicien.intervenantId);
+      assert.equal(saisie.body.tauxHoraireApplique, 42, 'le coût horaire direction est figé à la saisie');
+      assert.equal(saisie.body.interventionId, intervention.id);
+    });
   });
 
   describe('Contrats de maintenance cyclique', () => {
