@@ -1001,6 +1001,24 @@ if (!TEST_DATABASE_URL) {
       numero = res.body.numero;
     });
 
+    test('modifie un devis non signé et recalcule ses totaux côté serveur', async () => {
+      const res = await request(app).patch(`/api/devis/${devisId}`).set('Authorization', `Bearer ${session}`).send({
+        clientId,
+        objet: 'Installation contrôle d’accès révisée',
+        acompteExige: true,
+        tauxAcompte: 30,
+        lignes: [{ designation: 'Pose lecteur révisée', nature: 'MAIN_OEUVRE', quantite: 3, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.objet, 'Installation contrôle d’accès révisée');
+      assert.equal(res.body.acompteExige, true);
+      assert.equal(res.body.tauxAcompte, 30);
+      assert.equal(res.body.lignes[0].designation, 'Pose lecteur révisée');
+      assert.equal(res.body.totalHt, 300);
+      assert.equal(res.body.totalTva, 60);
+      assert.equal(res.body.totalTtc, 360);
+    });
+
     test('garantit HT + TVA = TTC avec un taux réduit', async () => {
       const res = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({ clientId, objet: 'Rénovation', lignes: [{ designation: 'Fourniture posée', quantite: 1, prixUnitaireHt: 5, tauxTva: 5.5 }] });
       assert.equal(res.status, 201, JSON.stringify(res.body));
