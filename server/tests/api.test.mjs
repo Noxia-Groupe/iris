@@ -88,7 +88,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.third@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1800,6 +1800,50 @@ if (!TEST_DATABASE_URL) {
       assert.equal(saisie.body.intervenantId, undefined, 'la réponse technicien ne doit exposer aucun rattachement ni taux financier');
       assert.equal(saisie.body.tauxHoraireApplique, undefined, 'le taux horaire direction ne doit jamais être exposé au technicien');
       assert.equal(saisie.body.interventionId, undefined);
+    });
+
+    test('témoin des gardes des coûts SAV', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.garde.technicien@iris.test', 'TEST Garde coûts technicien');
+      const collegue = await compteTechnicienSav('sav.cout.garde.collegue@iris.test', 'TEST Garde coûts collègue');
+      const conducteur = await prisma.user.create({ data: { email: 'sav.cout.garde.conducteur@iris.test', name: 'TEST Garde coûts conducteur', role: 'CONDUCTEUR_TRAVAUX' } });
+      const commercial = await prisma.user.create({ data: { email: 'sav.cout.garde.commercial@iris.test', name: 'TEST Garde coûts commercial', role: 'COMMERCIAL' } });
+      const jetonConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const jetonCommercial = jwt.sign({ id: commercial.id }, process.env.JWT_SECRET);
+      const contrat = await prisma.contratMaintenance.create({ data: { clientId, titre: 'TEST Contrat gardes coûts', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: new Date('2026-01-01'), prochaineEcheance: new Date('2026-12-01') } });
+      const intervention = await prisma.intervention.create({ data: { reference: `I26-GARDES-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, titre: 'TEST Intervention gardes coûts' } });
+      const sansContrat = await prisma.intervention.create({ data: { reference: `I26-SANS-CONTRAT-${Date.now()}`, clientId, titre: 'TEST Intervention sans contrat' } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur gardes ${Date.now()}` } });
+      await prisma.interventionAffectation.createMany({ data: [{ interventionId: intervention.id, intervenantId: technicien.intervenantId }, { interventionId: intervention.id, intervenantId: collegue.intervenantId }] });
+      const heure = await prisma.coutInterventionHeure.create({ data: { interventionId: intervention.id, intervenantId: technicien.intervenantId, date: new Date('2026-09-06'), nbrHeures: 1, tauxHoraireApplique: 42, createdById: (await prisma.user.findUniqueOrThrow({ where: { email: 'sav.cout.garde.technicien@iris.test' } })).id } });
+      const achat = await prisma.coutInterventionAchat.create({ data: { interventionId: intervention.id, fournisseurId: fournisseur.id, date: new Date('2026-09-06'), description: 'TEST Achat garde', montantHT: 1, createdById: conducteur.id } });
+      await prisma.interventionAffectation.create({ data: { interventionId: intervention.id, intervenantId: (await prisma.intervenant.create({ data: { nom: 'TEST Garde commercial', role: 'Commercial', tauxHoraireCharge: 0, userId: commercial.id } })).id } });
+
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set('Authorization', `Bearer ${jetonCommercial}`)).status, 403, 'un rôle affecté non autorisé ne lit pas les coûts');
+      assert.equal((await request(app).get(`/api/interventions/${sansContrat.id}/couts`).set('Authorization', `Bearer ${session}`)).status, 409, 'sans contrat, la lecture des coûts est refusée');
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${session}`).send({ date: '06-09-2026', nbrHeures: 1 })).status, 403, 'l’encadrement ne saisit pas les heures');
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', nbrHeures: 0 })).status, 400, 'zéro heure exige un motif');
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', fournisseurId: fournisseur.id, description: 'TEST', montantHT: 1 })).status, 403, 'un technicien ne saisit pas un achat');
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats`).set('Authorization', `Bearer ${session}`).send({ date: '06-09-2026', fournisseurId: fournisseur.id, description: 'TEST', montantHT: 0 })).status, 400, 'zéro achat exige un motif');
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats`).set('Authorization', `Bearer ${session}`).send({ date: '06-09-2026', fournisseurId: fournisseur.id, montantHT: 1 })).status, 400, 'un achat exige une description');
+      assert.equal((await request(app).patch(`/api/interventions/${intervention.id}/couts/heures/${heure.id}`).set('Authorization', `Bearer ${session}`).send({ commentaire: 'TEST', motifCorrection: 'Motif correction' })).status, 403, 'le mauvais rôle ne corrige pas les heures');
+      assert.equal((await request(app).patch(`/api/interventions/${intervention.id}/couts/heures/${heure.id}`).set('Authorization', `Bearer ${collegue.jeton}`).send({ commentaire: 'TEST', motifCorrection: 'Motif correction' })).status, 404, 'un technicien ne corrige pas l’heure du collègue');
+      assert.equal((await request(app).patch(`/api/interventions/${intervention.id}/couts/heures/${heure.id}`).set('Authorization', `Bearer ${technicien.jeton}`).send({ commentaire: 'TEST' })).status, 400, 'une correction exige un motif');
+      const sansChamp = await request(app).patch(`/api/interventions/${intervention.id}/couts/heures/${heure.id}`).set('Authorization', `Bearer ${technicien.jeton}`).send({ motifCorrection: 'Motif sans modification' });
+      assert.equal(sansChamp.status, 400); assert.equal(sansChamp.body.error, 'Aucun champ à corriger.');
+      const achatSansChamp = await request(app).patch(`/api/interventions/${intervention.id}/couts/achats/${achat.id}`).set('Authorization', `Bearer ${session}`).send({ motifCorrection: 'Motif sans modification' });
+      assert.equal(achatSansChamp.status, 400); assert.equal(achatSansChamp.body.error, 'Aucun champ à corriger.');
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${technicien.jeton}`).send({ motif: 'Archivage interdit' })).status, 403, 'un technicien n’archive pas');
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({})).status, 400, 'un archivage exige un motif');
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Archivage justifié' })).status, 200);
+      assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Double archivage' })).status, 409);
+      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/heures/${heure.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Hors contrat' })).status, 409);
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 403, 'le journal financier reste fermé au technicien');
+      assert.equal((await request(app).post('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`).send({ clientId, titre: 'TEST Création technicien refusée' })).status, 403, 'la création est réservée à l’encadrement');
+      const creationConducteur = await request(app).post('/api/interventions').set('Authorization', `Bearer ${jetonConducteur}`).send({ clientId, titre: 'TEST Création conducteur visible' });
+      assert.equal(creationConducteur.status, 201, JSON.stringify(creationConducteur.body));
+      assert.equal((await request(app).get('/api/interventions').set('Authorization', `Bearer ${jetonConducteur}`)).body.some((item) => item.id === creationConducteur.body.id), true, 'le conducteur voit l’intervention qu’il a créée');
+      const suppressionIntervenant = await request(app).delete(`/api/intervenants/${technicien.intervenantId}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(suppressionIntervenant.status, 409); assert.match(suppressionIntervenant.body.error, /coût\(s\) d'heures SAV/);
     });
 
     test('protège la confidentialité technicien, restitue l’historique encadrant et arrondit chaque ligne au centime', async () => {

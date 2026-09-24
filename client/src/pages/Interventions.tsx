@@ -142,7 +142,8 @@ export default function Interventions() {
   const enregistrerHeures = async (event: React.FormEvent<HTMLFormElement>, interventionId: string) => {
     event.preventDefault();
     setError('');
-    const form = new FormData(event.currentTarget);
+    const formulaire = event.currentTarget;
+    const form = new FormData(formulaire);
     const nbrHeures = String(form.get('nbrHeures') || '').replace(',', '.');
     const motif = String(form.get('motif') || '').trim();
     if (Number(nbrHeures) === 0 && motif.length < 3) return setError('Un motif de 3 caractères minimum est obligatoire pour zéro heure.');
@@ -152,14 +153,15 @@ export default function Interventions() {
       if (res.status === 409) setCouts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== interventionId)));
       return setError(data.error || 'Saisie des heures impossible.');
     }
-    event.currentTarget.reset();
+    formulaire.reset();
     await chargerCouts(interventions);
   };
 
   const enregistrerAchat = async (event: React.FormEvent<HTMLFormElement>, interventionId: string) => {
     event.preventDefault();
     setError('');
-    const form = new FormData(event.currentTarget);
+    const formulaire = event.currentTarget;
+    const form = new FormData(formulaire);
     const montantHT = String(form.get('montantHT') || '').replace(',', '.');
     const motif = String(form.get('motif') || '').trim();
     if (Number(montantHT) === 0 && motif.length < 3) return setError('Un motif de 3 caractères minimum est obligatoire pour un montant nul.');
@@ -169,7 +171,7 @@ export default function Interventions() {
       if (res.status === 409) setCouts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== interventionId)));
       return setError(data.error || 'Saisie de l’achat matériel impossible.');
     }
-    event.currentTarget.reset();
+    formulaire.reset();
     await chargerCouts(interventions);
   };
 

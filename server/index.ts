@@ -1627,22 +1627,24 @@ app.patch('/api/interventions/:id/couts/:type/:coutId', requireAuth, blockCommer
   try {
     const intervention = await chargerInterventionCout(req); const type = String(req.params.type);
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
-    if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
     const heures = type === 'heures'; const achats = type === 'achats';
     if (!heures && !achats) return res.status(404).json({ error: 'Coût introuvable.' });
     if ((heures && req.user!.role !== ROLE_TECHNICIEN) || (achats && !estEncadrementCoutIntervention(req.user!.role))) return res.status(403).json({ error: 'Accès non autorisé.' });
+    const body = req.body ?? {};
+    const motif = motifCorrectionValide(body.motifCorrection); if (!motif) return res.status(400).json({ error: 'Le motif de correction doit contenir entre 3 et 500 caractères.' });
+    const data: Record<string, unknown> = {};
+    if ('date' in body) { const date = dateIsoStricte(body.date); if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' }); data.date = date; }
+    const cleMontant = heures ? 'nbrHeures' : 'montantHT';
+    if (cleMontant in body) { const valeur = nombreDecimalNonNegatif(body[cleMontant], heures ? 8 : 10, true); if (valeur === null) return res.status(400).json({ error: 'Montant invalide.' }); data[cleMontant] = valeur; }
+    if (heures && 'commentaire' in body) data.commentaire = body.commentaire ? String(body.commentaire).trim() : null;
+    if (achats && 'description' in body) { const description = String(body.description || '').trim(); if (!description) return res.status(400).json({ error: 'Description obligatoire.' }); data.description = description; }
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Aucun champ à corriger.' });
+    if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
     const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat;
     const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
     if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
     if (heures && cout.intervenantId !== (await prisma.intervenant.findFirst({ where: { userId: req.user!.id }, select: { id: true } }))?.id) return res.status(404).json({ error: 'Coût introuvable.' });
     if (cout.archivedAt) return res.status(409).json({ error: 'Un coût archivé ne peut pas être corrigé.' });
-    const motif = motifCorrectionValide(req.body?.motifCorrection); if (!motif) return res.status(400).json({ error: 'Le motif de correction doit contenir entre 3 et 500 caractères.' });
-    const data: Record<string, unknown> = {};
-    if ('date' in req.body) { const date = dateIsoStricte(req.body.date); if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' }); data.date = date; }
-    const cleMontant = heures ? 'nbrHeures' : 'montantHT';
-    if (cleMontant in req.body) { const valeur = nombreDecimalNonNegatif(req.body[cleMontant], heures ? 8 : 10, true); if (valeur === null) return res.status(400).json({ error: 'Montant invalide.' }); data[cleMontant] = valeur; }
-    if (heures && 'commentaire' in req.body) data.commentaire = req.body.commentaire ? String(req.body.commentaire).trim() : null;
-    if (achats && 'description' in req.body) { const description = String(req.body.description || '').trim(); if (!description) return res.status(400).json({ error: 'Description obligatoire.' }); data.description = description; }
     const resultat = await prisma.$transaction(async (tx) => {
       const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, heures ? cout.intervenantId : undefined, heures ? req.user!.id : undefined);
       if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
@@ -2690,7 +2692,7 @@ app.put('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) => 
   }
 });
 
-// Supprimer un intervenant. Bloqué s'il possède des pointages (historique préservé) ou
+// Supprimer un intervenant. Bloqué s'il possède des pointages ou des coûts SAV (historique préservé) ou
 // des affectations SAV (elles gouvernent l'accès aux dossiers, ce n'est pas du prévisionnel).
 // Ses affectations de planning restent, elles, purement prévisionnelles : il en est simplement
 // retiré, et celles dont il était le seul technicien sont supprimées.
@@ -2700,6 +2702,10 @@ app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) 
     const used = await prisma.pointageHeure.count({ where: { intervenantId: id } });
     if (used > 0) {
       return res.status(409).json({ error: `Suppression impossible : cet intervenant a ${used} pointage(s) d'heures dans l'historique.` });
+    }
+    const couts = await prisma.coutInterventionHeure.count({ where: { intervenantId: id } });
+    if (couts > 0) {
+      return res.status(409).json({ error: `Suppression impossible : cet intervenant a ${couts} coût(s) d'heures SAV dans l'historique.` });
     }
     const affecte = await prisma.interventionAffectation.count({ where: { intervenantId: id } });
     if (affecte > 0) {
@@ -2715,6 +2721,7 @@ app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) 
     ]);
     res.json({ success: true });
   } catch (error) {
+    if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : cet intervenant vient d’être rattaché à des données métier.' });
     res.status(500).json({ error: 'Error deleting intervenant' });
   }
 });
