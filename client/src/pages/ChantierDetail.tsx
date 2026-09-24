@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import html2pdf from 'html2pdf.js';
 import {
   ArrowLeft, Calendar, User, FileDown,
-  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, X, MapPin, Search,
+  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, RotateCcw, X, MapPin, Search,
 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
@@ -13,6 +13,7 @@ import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
+import { archivagesRestaurables } from '../lib/archivesRestaurables';
 
 // Date ISO (avec ou sans heure) -> format métier français JJ-MM-AAAA.
 const toDateFrancaise = (d: string | null | undefined) => {
@@ -61,6 +62,7 @@ const ChantierDetail = () => {
   const { libelleBaremeReduit } = useModules();
   const [chantier, setChantier] = useState<any>(null);
   const [journalSaisies, setJournalSaisies] = useState<any[]>([]);
+  const archivesRestaurables = useMemo(() => archivagesRestaurables(journalSaisies), [journalSaisies]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -347,6 +349,26 @@ const ChantierDetail = () => {
       alert('Impossible de joindre le serveur.');
     } finally {
       setSavingPointage(false);
+    }
+  };
+
+  const handleRestore = async (cible: 'ACHAT' | 'HEURE', cibleId: string) => {
+    const motifRestauration = window.prompt(`Motif de la restauration de ${cible === 'ACHAT' ? 'cet achat' : 'ce pointage'} ?`)?.trim();
+    if (!motifRestauration) return;
+    const setSaving = cible === 'ACHAT' ? setSavingAchat : setSavingPointage;
+    setSaving(true);
+    try {
+      const chemin = cible === 'ACHAT' ? `/achats/${cibleId}/restaurer` : `/heures/${cibleId}/restaurer`;
+      const res = await apiFetch(chemin, { method: 'POST', body: JSON.stringify({ motifRestauration }) });
+      if (res.ok) fetchChantier();
+      else {
+        const d = await res.json();
+        alert(d.error || 'Erreur lors de la restauration.');
+      }
+    } catch (e) {
+      alert('Impossible de joindre le serveur.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1176,7 +1198,22 @@ const ChantierDetail = () => {
                     <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs enregistrées : {JSON.stringify(entree.apres)}</pre>
                   )}
                   {entree.action === 'ARCHIVAGE' && entree.avant && (
-                    <pre className="mt-2 overflow-auto rounded bg-amber-50 p-2 text-xs text-amber-900">Valeurs archivées : {JSON.stringify(entree.avant)}</pre>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <pre className="overflow-auto rounded bg-amber-50 p-2 text-xs text-amber-900">Valeurs archivées : {JSON.stringify(entree.avant)}</pre>
+                      {peutArchiverTravaux && archivesRestaurables.has(entree.id) && (
+                        <button
+                          type="button"
+                          onClick={() => handleRestore(entree.cible, entree.cibleId)}
+                          disabled={savingAchat || savingPointage}
+                          className="btn border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-800 hover:bg-emerald-100"
+                        >
+                          <RotateCcw size={14} /> Restaurer
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {entree.action === 'RESTAURATION' && entree.apres && (
+                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs restaurées : {JSON.stringify(entree.apres)}</pre>
                   )}
                 </div>
               ))}

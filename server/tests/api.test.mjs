@@ -488,6 +488,71 @@ if (!TEST_DATABASE_URL) {
       });
     });
 
+    test('un archivage se restaure avec un motif et réintègre les coûts actifs', async () => {
+      const scenarios = [
+        { nom: 'achat', chemin: '/api/achats', cible: 'ACHAT', creation: { chantierId: idChantierA, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST achat restauré', montantHT: 42 } },
+        { nom: 'pointage', chemin: '/api/heures', cible: 'HEURE', creation: { chantierId: idChantierA, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 2 } },
+      ];
+      for (const scenario of scenarios) {
+        const creation = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`).send(scenario.creation);
+        assert.equal(creation.status, 200, `${scenario.nom} créé`);
+        const archivage = await request(app).delete(`${scenario.chemin}/${creation.body.id}`).set('Authorization', `Bearer ${session}`)
+          .send({ motifArchivage: 'Saisie suspendue à vérifier' });
+        assert.equal(archivage.status, 200, `${scenario.nom} archivé`);
+
+        const motifRestauration = 'Saisie vérifiée et rétablie';
+        const restauration = await request(app).post(`${scenario.chemin}/${creation.body.id}/restaurer`).set('Authorization', `Bearer ${session}`)
+          .send({ motifRestauration });
+        assert.equal(restauration.status, 200, `${scenario.nom} restauré`);
+        const actif = await request(app).get(scenario.chemin).set('Authorization', `Bearer ${sessionConducteur}`);
+        assert.ok(actif.body.some((ligne) => ligne.id === creation.body.id), `${scenario.nom} restauré réintègre le journal actif`);
+        const trace = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { cible: scenario.cible, cibleId: creation.body.id, action: 'RESTAURATION' } });
+        assert.equal(trace.motif, motifRestauration, `${scenario.nom} : motif de restauration tracé`);
+        assert.equal(trace.avant.archivedAt === null, false, `${scenario.nom} : snapshot avant archivé`);
+        assert.equal(trace.apres.archivedAt, null, `${scenario.nom} : snapshot après actif`);
+      }
+    });
+
+    test('la restauration exige la délégation d’archivage, le périmètre, une archive et un motif', async () => {
+      // Les deux routes de restauration portent chacune leurs gardes : celles de l'achat ne
+      // couvrent pas celles du pointage. Chaque refus est épinglé séparément sur les deux.
+      const scenarios = [
+        { nom: 'achat', chemin: '/api/achats', creation: (chantierId) => ({ chantierId, categorieId: idCategorie, fournisseurId: idFournisseur, date: '06-09-2026', description: 'TEST restauration gardée', montantHT: 12 }) },
+        { nom: 'pointage', chemin: '/api/heures', creation: (chantierId) => ({ chantierId, intervenantId: idIntervenant, date: '06-09-2026', nbrHeures: 1 }) },
+      ];
+      const motifRestauration = 'Saisie vérifiée et rétablie';
+      for (const scenario of scenarios) {
+        const restaurer = (ecritureId, jeton, corps = { motifRestauration }) => request(app).post(`${scenario.chemin}/${ecritureId}/restaurer`)
+          .set('Authorization', `Bearer ${jeton}`).send(corps);
+        const dansA = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${session}`).send(scenario.creation(idChantierA));
+        const dansB = await request(app).post(scenario.chemin).set('Authorization', `Bearer ${session}`).send(scenario.creation(idChantierB));
+        assert.equal(dansA.status, 200, `${scenario.nom} créé dans le chantier du conducteur`);
+        assert.equal(dansB.status, 200, `${scenario.nom} créé hors de son périmètre`);
+        assert.equal((await restaurer(dansA.body.id, session)).status, 409, `${scenario.nom} actif : rien à restaurer`);
+
+        for (const ecritureId of [dansA.body.id, dansB.body.id]) {
+          const archivage = await request(app).delete(`${scenario.chemin}/${ecritureId}`).set('Authorization', `Bearer ${session}`)
+            .send({ motifArchivage: 'Saisie à vérifier' });
+          assert.equal(archivage.status, 200, `${scenario.nom} archivé`);
+        }
+        assert.equal((await restaurer(dansA.body.id, sessionConducteur)).status, 403, `${scenario.nom} : chantiers:write ne suffit pas`);
+        await avecDelegation(idConducteur, ['chantiers:archive'], async () => {
+          assert.equal((await restaurer(dansB.body.id, sessionConducteur)).status, 404, `${scenario.nom} hors périmètre : même réponse qu’une affaire absente`);
+          assert.equal((await restaurer(dansA.body.id, sessionConducteur, {})).status, 400, `${scenario.nom} sans motif`);
+          assert.equal((await restaurer(dansA.body.id, sessionConducteur, { motifRestauration: ' ok ' })).status, 400, `${scenario.nom} motif trop court`);
+          assert.equal((await restaurer(dansA.body.id, sessionConducteur)).status, 200, `${scenario.nom} restauré avec la délégation`);
+        });
+        assert.equal((await restaurer(dansA.body.id, session)).status, 409, `${scenario.nom} déjà restauré`);
+
+        const statuts = (await Promise.all([restaurer(dansB.body.id, session), restaurer(dansB.body.id, session)])).map((res) => res.status).sort();
+        assert.deepEqual(statuts, [200, 409], `${scenario.nom} : une seule restauration concurrente aboutit`);
+        for (const ecritureId of [dansA.body.id, dansB.body.id]) {
+          const traces = await prisma.journalSaisieChantier.count({ where: { cibleId: ecritureId, action: 'RESTAURATION' } });
+          assert.equal(traces, 1, `${scenario.nom} : une seule restauration tracée`);
+        }
+      }
+    });
+
     test('l’archivage d’un pointage exige la même délégation que celui d’un achat', async () => {
       // Les deux DELETE ont des gardes indépendantes : protéger un achat ne protège pas un
       // pointage. Ce compte dédié évite de dépendre de la délégation d'une fixture partagée.
