@@ -1118,6 +1118,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal(nonSigne.status, 201, JSON.stringify(nonSigne.body));
       const avant = await request(app).post(`/api/devis/${nonSigne.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(avant.status, 400);
+      const acompte = await request(app).post(`/api/devis/${devisId}/acompte`).set('Authorization', `Bearer ${session}`)
+        .send({ recuLe: '24-09-2026', montant: 108, reference: 'TEST-ACOMPTE-SIGNATURE' });
+      assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
       const conversion = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
       assert.equal(conversion.body.numeroDevis, numero);
