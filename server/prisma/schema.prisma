@@ -57,6 +57,7 @@ model User {
   pointagesMisAJour       PointageHeure[]             @relation("PointageHeureMisAJourPar")
   achatsArchives          AchatReel[]                 @relation("AchatReelArchivePar")
   pointagesArchives       PointageHeure[]             @relation("PointageHeureArchivePar")
+  signaturesDevisEnregistrees DevisSignature[]        @relation("DevisSignatureEnregistreePar")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -413,12 +414,17 @@ model DevisLigne {
 // Attestation interne : elle associe l'identité déclarée du signataire à un instant et à
 // l'empreinte SHA-256 d'un contenu de devis déterministe. Ce n'est pas une signature qualifiée.
 model DevisSignature {
-  id         String   @id @default(uuid())
-  devisId    String   @unique
-  devis      Devis    @relation(fields: [devisId], references: [id], onDelete: Cascade)
-  signataire String
-  empreinte  String
-  signeLe    DateTime @default(now())
+  id               String   @id @default(uuid())
+  devisId          String   @unique
+  // Une signature est une preuve : ni le devis ni l'auteur humain ne peuvent disparaître.
+  devis            Devis    @relation(fields: [devisId], references: [id], onDelete: Restrict)
+  enregistreParId  String
+  enregistrePar    User     @relation("DevisSignatureEnregistreePar", fields: [enregistreParId], references: [id], onDelete: Restrict)
+  signataire       String
+  empreinte        String
+  signeLe          DateTime @default(now())
+
+  @@index([enregistreParId])
 }
 
 // Conversion irréversible et traçable d’un devis accepté. Les autres cibles (intervention,

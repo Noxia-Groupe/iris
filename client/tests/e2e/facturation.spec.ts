@@ -320,6 +320,29 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(prefixe.getByRole('link', { name: 'Configurer' })).toHaveCount(0);
   });
 
+  test('n’expose pas d’acceptation manuelle : seule la signature peut accepter un devis envoyé', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
+    const client = await creerClient('devis-signature', false);
+    const apiResponse = await apiAdmin.get('/company');
+    expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
+    const api = new URL('/api', apiResponse.url()).toString().replace(/\/$/, '');
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const objet = `Devis E2E signature ${Date.now()}`;
+    const creation = await request.post(`${api}/devis`, {
+      headers,
+      data: { clientId: client.id, objet, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] },
+    });
+    expect(creation.ok(), await creation.text()).toBeTruthy();
+    const { id } = await creation.json() as { id: string };
+    const envoi = await request.put(`${api}/devis/${id}/statut`, { headers, data: { statut: 'ENVOYE' } });
+    expect(envoi.ok(), await envoi.text()).toBeTruthy();
+
+    const page = await allerSurPageAdmin('/devis');
+    const ligne = page.locator('li', { hasText: objet });
+    await expect(ligne).toContainText('ENVOYE');
+    await expect(ligne.getByRole('button', { name: 'Accepter' })).toHaveCount(0);
+    await expect(ligne.getByRole('button', { name: 'Signer en interne' })).toBeVisible();
+  });
+
   test('réserve aux administrateurs le PDF des factures liées de la fiche affaire', async ({ page, apiAdmin, creerClient, request, session }) => {
     const apiResponse = await apiAdmin.get('/company');
     expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
