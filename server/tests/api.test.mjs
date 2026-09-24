@@ -1111,13 +1111,13 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.devis.count({ where: { dossierId: devis.body.dossierId } }), 2);
     });
 
-    test('ne crée un chantier qu’après acceptation, avec la même référence affaire', async () => {
-      const avant = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
+    test('ne crée un chantier qu’après signature client, avec la même référence affaire', async () => {
+      const nonSigne = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST devis non signé', lignes: [{ designation: 'Ligne', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
+      });
+      assert.equal(nonSigne.status, 201, JSON.stringify(nonSigne.body));
+      const avant = await request(app).post(`/api/devis/${nonSigne.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(avant.status, 400);
-      const envoye = await request(app).put(`/api/devis/${devisId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ENVOYE' });
-      assert.equal(envoye.status, 200);
-      const accepte = await request(app).put(`/api/devis/${devisId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACCEPTE' });
-      assert.equal(accepte.status, 200);
       const conversion = await request(app).post(`/api/devis/${devisId}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
       assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
       assert.equal(conversion.body.numeroDevis, numero);

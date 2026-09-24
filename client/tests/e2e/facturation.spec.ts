@@ -332,10 +332,10 @@ test.describe('Facturation — parcours utilisateur', () => {
     });
     expect(devis.ok(), await devis.text()).toBeTruthy();
     const { id: devisId } = await devis.json() as { id: string };
-    for (const statut of ['ENVOYE', 'ACCEPTE']) {
-      const changement = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut } });
-      expect(changement.ok(), await changement.text()).toBeTruthy();
-    }
+    const envoi = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut: 'ENVOYE' } });
+    expect(envoi.ok(), await envoi.text()).toBeTruthy();
+    const signature = await request.post(`${api}/devis/${devisId}/signature`, { headers, data: { signataire: 'Signataire E2E', confirme: true } });
+    expect(signature.ok(), await signature.text()).toBeTruthy();
     const conversion = await request.post(`${api}/devis/${devisId}/convertir`, { headers, data: { cible: 'CHANTIER' } });
     expect(conversion.ok(), await conversion.text()).toBeTruthy();
     const { id: chantierId } = await conversion.json() as { id: string };
@@ -403,10 +403,10 @@ test.describe('Facturation — parcours utilisateur', () => {
       });
       expect(devis.ok(), await devis.text()).toBeTruthy();
       const { id: devisId } = await devis.json() as { id: string };
-      for (const statut of ['ENVOYE', 'ACCEPTE']) {
-        const changement = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut } });
-        expect(changement.ok(), await changement.text()).toBeTruthy();
-      }
+      const envoi = await request.put(`${api}/devis/${devisId}/statut`, { headers, data: { statut: 'ENVOYE' } });
+      expect(envoi.ok(), await envoi.text()).toBeTruthy();
+      const signature = await request.post(`${api}/devis/${devisId}/signature`, { headers, data: { signataire: 'Signataire E2E', confirme: true } });
+      expect(signature.ok(), await signature.text()).toBeTruthy();
       const conversion = await request.post(`${api}/devis/${devisId}/convertir`, { headers, data: { cible: 'CHANTIER' } });
       expect(conversion.ok(), await conversion.text()).toBeTruthy();
       const { id: chantierId } = await conversion.json() as { id: string };
