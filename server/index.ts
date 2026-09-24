@@ -1419,7 +1419,10 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
   }
 });
 
-app.post('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, res, next) => {
+  if (!isAdminRole(req.user?.role) && req.user?.role !== 'CONDUCTEUR_TRAVAUX') return res.status(403).json({ error: 'Création réservée à l’encadrement SAV.' });
+  next();
+}, async (req: AuthRequest, res) => {
   try {
     const titre = String(req.body?.titre || '').trim();
     const clientId = String(req.body?.clientId || '');
@@ -1490,12 +1493,205 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
   }
 });
 
+const STATUTS_COUT_INTERVENTION = ['A_PLANIFIER', 'PLANIFIEE', 'EN_COURS', 'TERMINEE'];
+const estEncadrementCoutIntervention = (role: string | undefined) => isAdminRole(role) || role === 'CONDUCTEUR_TRAVAUX';
+
+async function chargerInterventionCout(req: AuthRequest) {
+  return prisma.intervention.findFirst({
+    where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) },
+    include: { contratMaintenance: { select: { statut: true } } },
+  });
+}
+function interventionCoutEligible(intervention: { statut: string; contratMaintenanceId: string | null; contratMaintenance: { statut: string } | null }) {
+  return !!intervention.contratMaintenanceId && intervention.contratMaintenance?.statut === 'ACTIF' && STATUTS_COUT_INTERVENTION.includes(intervention.statut);
+}
+function estConflitTransactionCout(error: unknown) {
+  return ['P2034', 'P2003'].includes((error as { code?: string })?.code || '');
+}
+// Toutes les mutations de coût prennent ces verrous dans cet ordre afin que la relecture
+// d'éligibilité soit atomique avec les changements de contrat, statut et affectation.
+async function verrouillerContexteCout(tx: Prisma.TransactionClient, interventionId: string, intervenantId?: string, userId?: string) {
+  const interventions = await tx.$queryRaw<Array<{ id: string; contratMaintenanceId: string | null }>>(Prisma.sql`SELECT "id", "contratMaintenanceId" FROM "Intervention" WHERE "id" = ${interventionId} FOR UPDATE`);
+  const intervention = interventions[0];
+  if (!intervention?.contratMaintenanceId) return null;
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${intervention.contratMaintenanceId} FOR UPDATE`);
+  if (intervenantId && userId) {
+    await tx.$queryRaw(Prisma.sql`SELECT "interventionId", "intervenantId" FROM "InterventionAffectation" WHERE "interventionId" = ${interventionId} AND "intervenantId" = ${intervenantId} FOR UPDATE`);
+    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervenant" WHERE "id" = ${intervenantId} AND "userId" = ${userId} FOR UPDATE`);
+  }
+  return tx.intervention.findUnique({ where: { id: interventionId }, include: { contratMaintenance: { select: { statut: true } } } });
+}
+function heureOperationnelleTechnicien(heure: { id: string; date: Date; nbrHeures: Prisma.Decimal; commentaire: string | null; createdAt: Date }) {
+  return { id: heure.id, date: heure.date, nbrHeures: heure.nbrHeures, commentaire: heure.commentaire, createdAt: heure.createdAt };
+}
+async function journaliserCoutIntervention(tx: Prisma.TransactionClient, req: AuthRequest, cible: 'COUT_INTERVENTION_HEURE' | 'COUT_INTERVENTION_ACHAT', action: 'CREATION' | 'CORRECTION' | 'ARCHIVAGE' | 'RESTAURATION', cibleId: string, interventionId: string, avant: unknown, apres: unknown, motif?: string) {
+  await tx.journalSaisieChantier.create({ data: {
+    interventionId, cible, cibleId, action, auteurId: req.user!.id, auteurNom: req.user!.name,
+    avant: avant ? valeurJournal(avant) as Prisma.InputJsonValue : undefined, apres: apres ? valeurJournal(apres) as Prisma.InputJsonValue : undefined, motif: motif || null,
+  } });
+}
+
+function totalHeuresInterventionAuCentime(heures: Array<{ nbrHeures: Prisma.Decimal; tauxHoraireApplique: Prisma.Decimal }>): Prisma.Decimal {
+  // Les coûts de main-d’œuvre se calculent et s'arrondissent ligne par ligne : aucune
+  // conversion Number ne doit intervenir avant l'agrégation, sinon le binaire dérive.
+  return heures.reduce(
+    (total, heure) => total.plus(new Prisma.Decimal(heure.nbrHeures).mul(heure.tauxHoraireApplique).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)),
+    new Prisma.Decimal(0),
+  ).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+}
+
+// Coûts SAV contractuels : jamais exposés dans les flux Travaux ou /api/v1.
+app.get('/api/interventions/:id/couts', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const intervention = await chargerInterventionCout(req);
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    const encadrement = estEncadrementCoutIntervention(req.user!.role);
+    if (!encadrement && req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Accès non autorisé.' });
+    if (!intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+    if (!encadrement && !interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+
+    if (!encadrement) {
+      const heures = await prisma.coutInterventionHeure.findMany({
+        where: { interventionId: intervention.id, intervenant: { userId: req.user!.id }, archivedAt: null },
+        select: { id: true, date: true, nbrHeures: true, commentaire: true, createdAt: true },
+        orderBy: { date: 'desc' },
+      });
+      return res.json(decimalToNumber({ heures }));
+    }
+
+    // L'encadrement a besoin de toutes les lignes, actives et archivées, pour auditer et
+    // restaurer l'historique après suspension, terme ou annulation.
+    const [heures, achats] = await Promise.all([
+      prisma.coutInterventionHeure.findMany({ where: { interventionId: intervention.id }, orderBy: { date: 'desc' } }),
+      prisma.coutInterventionAchat.findMany({ where: { interventionId: intervention.id }, include: { fournisseur: true }, orderBy: { date: 'desc' } }),
+    ]);
+    const totalMainOeuvreHT = totalHeuresInterventionAuCentime(heures.filter((heure) => !heure.archivedAt));
+    const totalMaterielHT = achats.filter((achat) => !achat.archivedAt).reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT: totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP) }));
+  } catch (error) { console.error('Erreur lecture coûts intervention', error); res.status(500).json({ error: 'Lecture des coûts impossible.' }); }
+});
+
+app.post('/api/interventions/:id/couts/heures', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const intervention = await chargerInterventionCout(req);
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    if (req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Saisie d’heures réservée au technicien affecté.' });
+    if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+    const date = dateIsoStricte(req.body?.date); const nbrHeures = nombreDecimalNonNegatif(req.body?.nbrHeures, 8, true);
+    const motif = motifCorrectionValide(req.body?.motif);
+    if (!date || nbrHeures === null) return res.status(400).json({ error: 'Date ou nombre d’heures invalide.' });
+    if (nbrHeures === 0 && !motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères est obligatoire pour zéro heure.' });
+    const intervenant = await prisma.intervenant.findFirst({ where: { userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
+    if (!intervenant) return res.status(404).json({ error: 'Intervention introuvable.' });
+    const cree = await prisma.$transaction(async (tx) => {
+      const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, intervenant.id, req.user!.id);
+      if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
+      const intervenantActuel = await tx.intervenant.findFirst({ where: { id: intervenant.id, userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
+      if (!intervenantActuel) return null;
+      const cout = await tx.coutInterventionHeure.create({ data: { interventionId: interventionActuelle.id, intervenantId: intervenantActuel.id, date, nbrHeures, tauxHoraireApplique: intervenantActuel.tauxHoraireCharge, commentaire: req.body?.commentaire ? String(req.body.commentaire).trim() : null, createdById: req.user!.id } });
+      await journaliserCoutIntervention(tx, req, 'COUT_INTERVENTION_HEURE', 'CREATION', cout.id, interventionActuelle.id, null, cout, nbrHeures === 0 ? motif! : undefined);
+      return heureOperationnelleTechnicien(cout);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    if (!cree) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+    res.status(201).json(decimalToNumber(cree));
+  } catch (error) { if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la saisie des heures n’a pas été enregistrée.' }); console.error('Erreur saisie heures intervention', error); res.status(500).json({ error: 'Saisie des heures impossible.' }); }
+});
+
+app.post('/api/interventions/:id/couts/achats', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const intervention = await chargerInterventionCout(req);
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    if (!estEncadrementCoutIntervention(req.user!.role)) return res.status(403).json({ error: 'Saisie de matériel réservée à l’encadrement.' });
+    if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+    const date = dateIsoStricte(req.body?.date); const montantHT = nombreDecimalNonNegatif(req.body?.montantHT, 10, true); const motif = motifCorrectionValide(req.body?.motif);
+    const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+    if (!date || montantHT === null || !description) return res.status(400).json({ error: 'Date, description ou montant HT invalide.' });
+    if (montantHT === 0 && !motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères est obligatoire pour un montant nul.' });
+    const fournisseur = await prisma.fournisseur.findUnique({ where: { id: String(req.body?.fournisseurId || '') } });
+    if (!fournisseur) return res.status(404).json({ error: 'Fournisseur introuvable.' });
+    const cree = await prisma.$transaction(async (tx) => {
+      const interventionActuelle = await verrouillerContexteCout(tx, intervention.id);
+      if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
+      const cout = await tx.coutInterventionAchat.create({ data: { interventionId: interventionActuelle.id, fournisseurId: fournisseur.id, date, description, montantHT, createdById: req.user!.id } });
+      await journaliserCoutIntervention(tx, req, 'COUT_INTERVENTION_ACHAT', 'CREATION', cout.id, interventionActuelle.id, null, cout, montantHT === 0 ? motif! : undefined);
+      return cout;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    if (!cree) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+    res.status(201).json(decimalToNumber(cree));
+  } catch (error) { if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : l’achat n’a pas été enregistré.' }); console.error('Erreur saisie achat intervention', error); res.status(500).json({ error: 'Saisie du matériel impossible.' }); }
+});
+
+// Les mutations sont toutes conditionnelles sur archivedAt : une concurrence ne peut créer
+// ni seconde trace ni correction d'une écriture archivée entre lecture et écriture.
+app.patch('/api/interventions/:id/couts/:type/:coutId', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const intervention = await chargerInterventionCout(req); const type = String(req.params.type);
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+    const heures = type === 'heures'; const achats = type === 'achats';
+    if (!heures && !achats) return res.status(404).json({ error: 'Coût introuvable.' });
+    if ((heures && req.user!.role !== ROLE_TECHNICIEN) || (achats && !estEncadrementCoutIntervention(req.user!.role))) return res.status(403).json({ error: 'Accès non autorisé.' });
+    const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat;
+    const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
+    if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
+    if (heures && cout.intervenantId !== (await prisma.intervenant.findFirst({ where: { userId: req.user!.id }, select: { id: true } }))?.id) return res.status(404).json({ error: 'Coût introuvable.' });
+    if (cout.archivedAt) return res.status(409).json({ error: 'Un coût archivé ne peut pas être corrigé.' });
+    const motif = motifCorrectionValide(req.body?.motifCorrection); if (!motif) return res.status(400).json({ error: 'Le motif de correction doit contenir entre 3 et 500 caractères.' });
+    const data: Record<string, unknown> = {};
+    if ('date' in req.body) { const date = dateIsoStricte(req.body.date); if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' }); data.date = date; }
+    const cleMontant = heures ? 'nbrHeures' : 'montantHT';
+    if (cleMontant in req.body) { const valeur = nombreDecimalNonNegatif(req.body[cleMontant], heures ? 8 : 10, true); if (valeur === null) return res.status(400).json({ error: 'Montant invalide.' }); data[cleMontant] = valeur; }
+    if (heures && 'commentaire' in req.body) data.commentaire = req.body.commentaire ? String(req.body.commentaire).trim() : null;
+    if (achats && 'description' in req.body) { const description = String(req.body.description || '').trim(); if (!description) return res.status(400).json({ error: 'Description obligatoire.' }); data.description = description; }
+    const resultat = await prisma.$transaction(async (tx) => {
+      const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, heures ? cout.intervenantId : undefined, heures ? req.user!.id : undefined);
+      if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
+      const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat;
+      const coutActuel = await delegate.findFirst({ where: { id: cout.id, interventionId: interventionActuelle.id, archivedAt: null } });
+      if (!coutActuel) return null;
+      if (heures) {
+        const intervenantActuel = await tx.intervenant.findFirst({
+          where: { id: coutActuel.intervenantId, userId: req.user!.id, affectationsIntervention: { some: { interventionId: interventionActuelle.id } } },
+          select: { id: true },
+        });
+        if (!intervenantActuel) return null;
+      }
+      const updated = await delegate.updateMany({ where: { id: coutActuel.id, archivedAt: null }, data });
+      if (!updated.count) return null;
+      const apres = await delegate.findUniqueOrThrow({ where: { id: coutActuel.id } });
+      await journaliserCoutIntervention(tx, req, heures ? 'COUT_INTERVENTION_HEURE' : 'COUT_INTERVENTION_ACHAT', 'CORRECTION', coutActuel.id, interventionActuelle.id, coutActuel, apres, motif);
+      return heures ? heureOperationnelleTechnicien(apres) : apres;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    if (!resultat) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts ou le coût a été modifié concurremment.' });
+    res.json(decimalToNumber(resultat));
+  } catch (error) { if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la correction n’a pas été enregistrée.' }); console.error('Erreur correction coût intervention', error); res.status(500).json({ error: 'Correction impossible.' }); }
+});
+
+app.post('/api/interventions/:id/couts/:type/:coutId/:action', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+  try {
+    const intervention = await chargerInterventionCout(req); const type = String(req.params.type); const action = String(req.params.action);
+    if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    // L'archivage et la restauration sont des actes de conservation : l'encadrement peut
+    // les accomplir après la clôture, sans jamais réautoriser une création ou correction.
+    if (!intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+    const heures = type === 'heures'; const achats = type === 'achats';
+    if ((!heures && !achats) || !['archiver', 'restaurer'].includes(action) || !estEncadrementCoutIntervention(req.user!.role)) return res.status(403).json({ error: 'Accès non autorisé.' });
+    const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat; const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
+    if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
+    const motif = motifRestaurationValide(req.body?.motif); if (!motif) return res.status(400).json({ error: 'Le motif doit contenir entre 3 et 500 caractères.' });
+    const archivage = action === 'archiver'; if ((archivage && cout.archivedAt) || (!archivage && !cout.archivedAt)) return res.status(409).json({ error: archivage ? 'Ce coût est déjà archivé.' : 'Ce coût est déjà actif.' });
+    const resultat = await prisma.$transaction(async (tx) => { const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat; const updated = await delegate.updateMany({ where: { id: cout.id, archivedAt: archivage ? null : { not: null } }, data: archivage ? { archivedAt: new Date(), archivedById: req.user!.id, motifArchivage: motif } : { archivedAt: null, archivedById: null, motifArchivage: null } }); if (!updated.count) return null; const apres = await delegate.findUniqueOrThrow({ where: { id: cout.id } }); await journaliserCoutIntervention(tx, req, heures ? 'COUT_INTERVENTION_HEURE' : 'COUT_INTERVENTION_ACHAT', archivage ? 'ARCHIVAGE' : 'RESTAURATION', cout.id, intervention.id, cout, apres, motif); return apres; });
+    if (!resultat) return res.status(409).json({ error: 'État du coût modifié concurremment.' }); res.json(decimalToNumber(resultat));
+  } catch (error) { console.error('Erreur archivage coût intervention', error); res.status(500).json({ error: 'Opération impossible.' }); }
+});
+
 // Journal append-only du dossier SAV, soumis au même filtre de non-divulgation que les
 // mutations. Les traces sont ordonnées de la plus récente à la plus ancienne.
 app.get('/api/interventions/:id/journal-saisies', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
   try {
     const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    if (req.user!.role === ROLE_TECHNICIEN) return res.status(403).json({ error: 'Le journal financier est réservé à l’encadrement.' });
     const entrees = await prisma.journalSaisieChantier.findMany({ where: { interventionId: intervention.id }, orderBy: { createdAt: 'desc' } });
     res.json(decimalToNumber(entrees));
   } catch (error) {
@@ -1617,7 +1813,9 @@ function getInterventionFilterForUser(authUser: { id: string; role: string; equi
   if (authUser.role === 'SUPERADMIN' || authUser.role === 'ADMIN') return {};
   const parAffectation = { affectations: { some: { intervenant: { userId: authUser.id } } } };
   if (authUser.role === 'CONDUCTEUR_TRAVAUX') {
-    return { OR: [parAffectation, { chantier: { responsableId: authUser.id, annuleLe: null } }] };
+    // Le créateur encadrant reste explicitement rattaché aux demandes SAV sans chantier :
+    // il peut donc organiser et suivre le dossier qu'il vient d'ouvrir, sans accès global.
+    return { OR: [parAffectation, { createdById: authUser.id }, { chantier: { responsableId: authUser.id, annuleLe: null } }] };
   }
   if (authUser.role === ROLE_RESPONSABLE) {
     return { OR: [
@@ -2251,7 +2449,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     }
     // Les clés étrangères RESTRICT restent le verrou contre une course ; ce contrôle rend le refus
     // lisible à l’administrateur lorsqu’un compte porte une preuve de traçabilité métier.
-    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie] = await Promise.all([
+    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie, coutsHeuresCrees, coutsAchatsCrees, coutsHeuresArchives, coutsAchatsArchives] = await Promise.all([
       prisma.achatReel.count({ where: { createdById: id } }),
       prisma.achatReel.count({ where: { updatedById: id } }),
       prisma.achatReel.count({ where: { archivedById: id } }),
@@ -2259,8 +2457,12 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       prisma.pointageHeure.count({ where: { updatedById: id } }),
       prisma.pointageHeure.count({ where: { archivedById: id } }),
       prisma.journalSaisieChantier.count({ where: { auteurId: id } }),
+      prisma.coutInterventionHeure.count({ where: { createdById: id } }),
+      prisma.coutInterventionAchat.count({ where: { createdById: id } }),
+      prisma.coutInterventionHeure.count({ where: { archivedById: id } }),
+      prisma.coutInterventionAchat.count({ where: { archivedById: id } }),
     ]);
-    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie > 0) {
+    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives > 0) {
       return res.status(409).json({ error: 'Ce compte est l’auteur de données tracées : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
     await prisma.$transaction([
@@ -2270,6 +2472,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     ]);
     res.json({ success: true });
   } catch (error) {
+    if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : ce compte vient d’être rattaché à des données métier.' });
     res.status(500).json({ error: 'Error deleting user' });
   }
 });
@@ -2928,17 +3131,20 @@ app.put('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, res) 
   }
 });
 
-// Supprimer un fournisseur. Bloqué si des achats y sont rattachés (historique préservé).
+// Supprimer un fournisseur. Bloqué si des achats ou coûts intervention y sont rattachés (historique préservé).
 app.delete('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const id = paramId(req);
-    const used = await prisma.achatReel.count({ where: { fournisseurId: id } });
-    if (used > 0) {
-      return res.status(409).json({ error: `Suppression impossible : ${used} achat(s) sont rattachés à ce fournisseur.` });
+    const usedAchats = await prisma.achatReel.count({ where: { fournisseurId: id } });
+    const usedCoutsAchats = await prisma.coutInterventionAchat.count({ where: { fournisseurId: id } });
+    const usedTotal = usedAchats + usedCoutsAchats;
+    if (usedTotal > 0) {
+      return res.status(409).json({ error: `Suppression impossible : ${usedTotal} écriture(s) sont rattachées à ce fournisseur.` });
     }
     await prisma.fournisseur.delete({ where: { id } });
     res.json({ success: true });
   } catch (error) {
+    if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : ce fournisseur vient d’être rattaché à une écriture.' });
     res.status(500).json({ error: 'Error deleting fournisseur' });
   }
 });
