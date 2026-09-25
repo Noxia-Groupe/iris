@@ -2272,6 +2272,28 @@ if (!TEST_DATABASE_URL) {
       assert.equal(importation.body.importes, 2);
     });
 
+    test('refuse les caractères de contrôle dans un compte créé directement, sans écriture', async () => {
+      for (const [index, libelle] of ['Clients\nFrance', 'Clients\tFrance', 'Clients\rFrance', 'Clients\u0000France', 'Clients\u007fFrance', 'Clients\t'].entries()) {
+        const code = String(899970 + index);
+        const reponse = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code, libelle, nature: 'ACTIF' });
+        assert.equal(reponse.status, 400, JSON.stringify(reponse.body));
+        assert.equal(await prisma.compteComptable.count({ where: { code } }), 0);
+      }
+    });
+
+    test('refuse un lot avec libellé contenant retour ou tabulation sans écriture partielle', async () => {
+      for (const [index, libelle] of ['Clients\nFrance', 'Clients\tFrance', 'Clients\rFrance', 'Clients\u0000France', 'Clients\u007fFrance', 'Clients\t'].entries()) {
+        const code = String(899980 + index * 2);
+        const reponse = await request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ lignes: [
+          { code, libelle: 'Valide', nature: 'ACTIF' },
+          { code: String(Number(code) + 1), libelle, nature: 'ACTIF' },
+        ] });
+        assert.equal(reponse.status, 400, JSON.stringify(reponse.body));
+        assert.deepEqual(reponse.body.erreurs.map(({ ligne }) => ligne), [2]);
+        assert.equal(await prisma.compteComptable.count({ where: { code: { in: [code, String(Number(code) + 1)] } } }), 0);
+      }
+    });
+
     test('importe 5 000 comptes au-delà des 100 Ko par défaut et réimporte sans doublons', async () => {
       const lignes = Array.from({ length: 5000 }, (_, index) => ({ code: String(800000 + index), libelle: `Compte de test ${index} ${'x'.repeat(65)}`, nature: 'CHARGE' }));
       assert.ok(Buffer.byteLength(JSON.stringify({ lignes })) > 100 * 1024);

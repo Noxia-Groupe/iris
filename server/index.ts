@@ -1024,9 +1024,10 @@ app.get('/api/comptabilite', requireAuth, requireAdmin, async (_req, res) => {
   try { const [comptes, regles, reglesTva] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } }), prisma.regleTvaComptable.findMany({ include: { compte: true }, orderBy: { taux: 'asc' } })]); res.json(decimalToNumber({ comptes, regles, reglesTva })); }
   catch { res.status(500).json({ error: 'Lecture du paramétrage comptable impossible.' }); }
 });
+export function libelleComptableValide(libelle: string): boolean { return !Array.from(libelle).some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127); }
 app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res) => {
-  try { const code = String(req.body?.code || '').trim(), libelle = String(req.body?.libelle || '').trim(), nature = String(req.body?.nature || '');
-    if (!/^\d{3,12}$/.test(code) || !libelle || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
+  try { const code = String(req.body?.code || '').trim(), libelleBrut = String(req.body?.libelle || ''), libelle = libelleBrut.trim(), nature = String(req.body?.nature || '');
+    if (!/^\d{3,12}$/.test(code) || !libelle || !libelleComptableValide(libelleBrut) || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
     const compte = await prisma.compteComptable.create({ data: { code, libelle, nature } }); res.status(201).json(compte);
   } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte existe déjà.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
 });
@@ -1038,8 +1039,8 @@ app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req, re
   if (!lignes.length || lignes.length > 5000) return res.status(400).json({ error: 'Le plan doit contenir entre 1 et 5 000 lignes.' });
   const vus = new Set<string>(); const erreurs: { ligne: number; erreur: string }[] = [];
   const comptes: { code: string; libelle: string; nature: string }[] = lignes.map((ligne: any, index: number) => {
-    const code = String(ligne?.code || '').trim(), libelle = String(ligne?.libelle || '').trim(), nature = String(ligne?.nature || '');
-    if (!/^\d{3,12}$/.test(code) || !libelle || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) erreurs.push({ ligne: index + 1, erreur: 'Code, libellé ou nature invalide.' });
+    const code = String(ligne?.code || '').trim(), libelleBrut = String(ligne?.libelle || ''), libelle = libelleBrut.trim(), nature = String(ligne?.nature || '');
+    if (!/^\d{3,12}$/.test(code) || !libelle || !libelleComptableValide(libelleBrut) || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) erreurs.push({ ligne: index + 1, erreur: 'Code, libellé ou nature invalide.' });
     if (vus.has(code)) erreurs.push({ ligne: index + 1, erreur: 'Code dupliqué dans le fichier.' }); vus.add(code); return { code, libelle, nature };
   });
   if (erreurs.length) return res.status(400).json({ error: 'Import refusé : corrigez les lignes signalées.', erreurs });

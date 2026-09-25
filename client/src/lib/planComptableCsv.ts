@@ -1,4 +1,5 @@
 export type LignePlanComptable = { code: string; libelle: string; nature: string };
+const contientControle = (texte: string) => Array.from(texte).some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127);
 
 export function parserPlanComptableCsv(texte: string): LignePlanComptable[] {
   return parserPlanComptableCsvAvecLignes(texte).lignes;
@@ -28,8 +29,12 @@ export function parserPlanComptableCsvAvecLignes(texte: string): { lignes: Ligne
   let numero = 1;
   let debut = 1;
   let contientChampCsv = false;
-  const finir = () => {
+  const ajouterChamp = () => {
+    if (champs.length === 1 && contientControle(champ)) throw new Error(`Ligne ${debut} : libellé contenant un caractère de contrôle interdit.`);
     champs.push(champ.trim());
+  };
+  const finir = () => {
+    ajouterChamp();
     if (contientChampCsv || champs.some(valeur => valeur !== '')) lignes.push({ champs, numero: debut });
     champs = [];
     champ = '';
@@ -55,7 +60,7 @@ export function parserPlanComptableCsvAvecLignes(texte: string): { lignes: Ligne
       etat = 'cite';
     } else if (c === separateur) {
       contientChampCsv = true;
-      champs.push(champ.trim());
+      ajouterChamp();
       champ = '';
       etat = 'debut';
     } else if (c === '\n' || c === '\r') {
@@ -64,6 +69,7 @@ export function parserPlanComptableCsvAvecLignes(texte: string): { lignes: Ligne
       numero += 1;
     } else {
       if (etat === 'termine' && c !== ' ' && c !== '\t') throw new Error(`Ligne ${numero} : caractère après le guillemet fermant.`);
+      if (etat === 'termine' && c === '\t' && champs.length === 1) throw new Error(`Ligne ${debut} : libellé contenant un caractère de contrôle interdit.`);
       if (etat !== 'termine') {
         champ += c;
         if (etat === 'debut' && c !== ' ' && c !== '\t') etat = 'simple';
@@ -72,9 +78,13 @@ export function parserPlanComptableCsvAvecLignes(texte: string): { lignes: Ligne
   }
   if (etat === 'cite') throw new Error(`Ligne ${debut} : guillemet non fermé.`);
   if (champs.length || champ.trim() || contientChampCsv) finir();
+  // Les exports Excel ajoutent parfois des colonnes vides après la nature.
+  for (const ligne of lignes) {
+    while (ligne.champs.length > 3 && ligne.champs.at(-1) === '') ligne.champs.pop();
+  }
   const premiere = lignes[0]?.champs;
   if (premiere?.[0]?.toLowerCase() === 'code') {
-    if (premiere.length !== 3 || premiere[1].toLowerCase() !== 'libelle' || premiere[2].toLowerCase() !== 'nature') {
+    if (premiere.length !== 3 || !['libelle', 'libellé'].includes(premiere[1].toLowerCase()) || premiere[2].toLowerCase() !== 'nature') {
       throw new Error('En-tête CSV attendu : code, libelle, nature.');
     }
     lignes.shift();

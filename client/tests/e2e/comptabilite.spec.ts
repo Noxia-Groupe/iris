@@ -28,11 +28,22 @@ test('traduit les erreurs API en lignes physiques du second fichier et préserve
   await fichier.setInputFiles({ name: 'premier.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\n${code};Original;PRODUIT`) });
   await expect(page.getByText('1 compte(s) importé(s), 0 déjà présent(s).')).toBeVisible();
   const nouveau = `709${String(Date.now()).slice(-9)}`;
-  await fichier.setInputFiles({ name: 'second.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\r\n\r\n${nouveau};"Libellé\r\nmultiligne";PRODUIT\r\n   \r\n${code};Modifié;PASSIF`) });
-  await expect(page.getByText(/Ligne 6 : Le compte .* existe avec un libellé ou une nature différente/)).toBeVisible();
+  await fichier.setInputFiles({ name: 'second.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;Libellé;nature;\r\n\r\n${nouveau};"Libellé; valide";PRODUIT;\r\n   \r\n${code};Modifié;PASSIF;`) });
+  await expect(page.getByText(/Ligne 5 : Le compte .* existe avec un libellé ou une nature différente/)).toBeVisible();
   const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ code: string; libelle: string }> };
   expect(plan.comptes.find(compte => compte.code === code)?.libelle).toBe('Original');
   expect(plan.comptes.some(compte => compte.code === nouveau)).toBe(false);
+});
+
+test('refuse un libellé CSV multiligne sur sa ligne physique sans importer le lot', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const code = `710${String(Date.now()).slice(-9)}`;
+  const page = await allerSurPageAdmin('/comptabilite');
+  const fichier = page.locator('input[type="file"]');
+  await fichier.setInputFiles({ name: 'libelle-invalide.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\r\n\r\n${code};Valide;PRODUIT\r\n710999;"Clients\r\nFrance";ACTIF`) });
+  await expect(page.getByText(/Ligne 4 : libellé contenant un caractère de contrôle interdit/)).toBeVisible();
+  await expect(fichier).toHaveValue('');
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ code: string }> };
+  expect(plan.comptes.some(compte => compte.code === code)).toBe(false);
 });
 
 test('affiche une erreur lisible si le serveur renvoie une réponse non JSON', async ({ allerSurPageAdmin }) => {

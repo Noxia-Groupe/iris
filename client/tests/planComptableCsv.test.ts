@@ -8,10 +8,25 @@ test('préserve les séparateurs et guillemets échappés dans un libellé CSV �
   ]);
 });
 
-test('détecte la virgule hors des guillemets et accepte BOM, CRLF et saut de ligne dans un libellé', () => {
-  assert.deepEqual(parserPlanComptableCsv('\uFEFFcode,libelle,nature\r\n706124,"Pose; installation\r\net entretien",PRODUIT\r\n'), [
-    { code: '706124', libelle: 'Pose; installation\r\net entretien', nature: 'PRODUIT' },
+test('détecte la virgule hors des guillemets et accepte BOM, CRLF et séparateur cité', () => {
+  assert.deepEqual(parserPlanComptableCsv('\uFEFFcode,libelle,nature\r\n706124,"Pose; installation et entretien",PRODUIT\r\n'), [
+    { code: '706124', libelle: 'Pose; installation et entretien', nature: 'PRODUIT' },
   ]);
+});
+
+test('refuse les retours à la ligne cités et les tabulations du libellé à leur ligne physique', () => {
+  assert.throws(() => parserPlanComptableCsv('code;libelle;nature\r\n\r\n411123;"Clients\r\nFrance";ACTIF'), /Ligne 3 : .*libellé/i);
+  assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n\n411123;"Clients\nFrance";ACTIF'), /Ligne 3 : .*libellé/i);
+  assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n411123;"Clients\tFrance";ACTIF'), /Ligne 2 : .*libellé/i);
+  assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n411123;"Clients\t";ACTIF'), /Ligne 2 : .*libellé/i);
+});
+
+test('accepte les colonnes Excel vides finales et un en-tête Libellé accentué', () => {
+  assert.deepEqual(parserPlanComptableCsv('\uFEFFCode;Libellé;Nature;;\r\n411123;Clients;ACTIF;;;\r\n'), [
+    { code: '411123', libelle: 'Clients', nature: 'ACTIF' },
+  ]);
+  assert.throws(() => parserPlanComptableCsv('code;libellé;nature;inattendu\n411123;Clients;ACTIF'), /en-tête/i);
+  assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n411123;Clients;ACTIF;;inattendu'), /Ligne 2 : 3 colonnes attendues/);
 });
 
 test('accepte un fichier sans en-tête et ignore les lignes vides finales', () => {
@@ -32,16 +47,16 @@ test('refuse une colonne manquante ou supplémentaire sans retourner de lignes p
 });
 
 test('une ligne faite de délimiteurs ne disparaît pas même si tous ses champs sont vides', () => {
-  assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n;;;\n411123;Clients;ACTIF'), /Ligne 2 : 3 colonnes attendues/);
+  assert.deepEqual(parserPlanComptableCsv('code;libelle;nature\n;;;;\n411123;Clients;ACTIF')[0], { code: '', libelle: '', nature: '' });
   assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n""\n411123;Clients;ACTIF'), /Ligne 2 : 3 colonnes attendues/);
   assert.deepEqual(parserPlanComptableCsv('code;libelle;nature\n;;\n411123;Clients;ACTIF')[0], { code: '', libelle: '', nature: '' });
   assert.deepEqual(parserPlanComptableCsv('code;libelle;nature\n   \n411123;Clients;ACTIF'), [{ code: '411123', libelle: 'Clients', nature: 'ACTIF' }]);
 });
 
-test('associe les indices API aux lignes physiques, même après en-tête, blancs et champ multiligne', () => {
-  assert.deepEqual(parserPlanComptableCsvAvecLignes('code;libelle;nature\r\n\r\n411123;"Clients\r\nFrance";ACTIF\r\n   \r\n411124;Autres;ACTIF'), {
-    lignes: [{ code: '411123', libelle: 'Clients\r\nFrance', nature: 'ACTIF' }, { code: '411124', libelle: 'Autres', nature: 'ACTIF' }],
-    numeros: [3, 6],
+test('associe les indices API aux lignes physiques après en-tête et blancs', () => {
+  assert.deepEqual(parserPlanComptableCsvAvecLignes('code;libellé;nature;\r\n\r\n411123;"Clients; France";ACTIF;\r\n   \r\n411124;Autres;ACTIF'), {
+    lignes: [{ code: '411123', libelle: 'Clients; France', nature: 'ACTIF' }, { code: '411124', libelle: 'Autres', nature: 'ACTIF' }],
+    numeros: [3, 5],
   });
 });
 
