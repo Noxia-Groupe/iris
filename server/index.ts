@@ -1031,6 +1031,32 @@ app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res
     const compte = await prisma.compteComptable.create({ data: { code, libelle, nature } }); res.status(201).json(compte);
   } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte existe déjà.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
 });
+class CompteComptableUtilise extends Error {}
+app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin, async (req, res) => {
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) ||
+      Object.keys(req.body).length !== 1 || typeof req.body.actif !== 'boolean') {
+    return res.status(400).json({ error: 'Le statut actif du compte est requis (booléen).' });
+  }
+  try {
+    const compte = await prisma.$transaction(async tx => {
+      const existant = await tx.compteComptable.findUnique({ where: { id: String(req.params.id) } });
+      if (!existant) return null;
+      if (!req.body.actif) {
+        const [regles, reglesTva] = await Promise.all([
+          tx.regleComptable.count({ where: { compteId: existant.id } }),
+          tx.regleTvaComptable.count({ where: { compteId: existant.id } }),
+        ]);
+        if (regles || reglesTva) throw new CompteComptableUtilise();
+      }
+      return tx.compteComptable.update({ where: { id: existant.id }, data: { actif: req.body.actif } });
+    });
+    if (!compte) return res.status(404).json({ error: 'Compte comptable introuvable.' });
+    res.json(compte);
+  } catch (error) {
+    if (error instanceof CompteComptableUtilise) return res.status(409).json({ error: 'Compte utilisé par une règle comptable ou TVA : remappez la règle avant de désactiver.' });
+    res.status(500).json({ error: 'Modification du statut du compte impossible.' });
+  }
+});
 class ConflitImportComptable extends Error {
   constructor(readonly erreurs: { ligne: number; erreur: string }[]) { super('Import refusé : comptes existants différents.'); }
 }

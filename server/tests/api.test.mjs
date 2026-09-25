@@ -88,7 +88,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.admin@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -2264,6 +2264,71 @@ if (!TEST_DATABASE_URL) {
       const regle = await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: compte.body.id });
       assert.equal(regle.status, 200, JSON.stringify(regle.body));
       assert.equal(regle.body.compteId, compte.body.id);
+    });
+
+    test('désactive et réactive un compte libre sans modifier son identité', async () => {
+      const code = `898${String(Date.now()).slice(-9)}`;
+      const creation = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code, libelle: 'Compte temporaire', nature: 'CHARGE' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const url = `/api/comptabilite/comptes/${creation.body.id}/activation`;
+      const desactivation = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false });
+      assert.equal(desactivation.status, 200, JSON.stringify(desactivation.body));
+      assert.equal(desactivation.body.actif, false);
+      assert.equal(desactivation.body.code, code);
+      assert.equal(desactivation.body.libelle, 'Compte temporaire');
+      assert.equal((await request(app).get('/api/comptabilite').set('Authorization', `Bearer ${session}`)).body.comptes.find(c => c.id === creation.body.id)?.actif, false);
+      assert.equal((await request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ compteId: creation.body.id })).status, 404);
+      const reactivation = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: true });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      assert.equal(reactivation.body.actif, true);
+      assert.equal((await prisma.compteComptable.findUnique({ where: { id: creation.body.id } })).code, code);
+    });
+
+    test('refuse de désactiver un compte utilisé par une règle standard jusqu’à son remappage', async () => {
+      const premier = await prisma.compteComptable.create({ data: { code: `897${String(Date.now()).slice(-9)}`, libelle: 'Prestations liées', nature: 'PRODUIT' } });
+      const second = await prisma.compteComptable.create({ data: { code: `896${String(Date.now()).slice(-9)}`, libelle: 'Prestations remplacement', nature: 'PRODUIT' } });
+      const url = `/api/comptabilite/comptes/${premier.id}/activation`;
+      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: premier.id })).status, 200);
+      const conflit = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false });
+      assert.equal(conflit.status, 409, JSON.stringify(conflit.body));
+      assert.equal((await prisma.compteComptable.findUnique({ where: { id: premier.id } })).actif, true);
+      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: second.id })).status, 200);
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false })).status, 200);
+    });
+
+    test('refuse de désactiver un compte TVA utilisé jusqu’à son remappage', async () => {
+      const premier = await prisma.compteComptable.create({ data: { code: `895${String(Date.now()).slice(-9)}`, libelle: 'TVA liée', nature: 'TVA' } });
+      const second = await prisma.compteComptable.create({ data: { code: `894${String(Date.now()).slice(-9)}`, libelle: 'TVA remplacement', nature: 'TVA' } });
+      const url = `/api/comptabilite/comptes/${premier.id}/activation`;
+      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: premier.id })).status, 200);
+      const conflit = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false });
+      assert.equal(conflit.status, 409, JSON.stringify(conflit.body));
+      assert.equal((await prisma.compteComptable.findUnique({ where: { id: premier.id } })).actif, true);
+      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: second.id })).status, 200);
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false })).status, 200);
+    });
+
+    test('valide strictement la transition de compte et protège la route', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `893${String(Date.now()).slice(-9)}`, libelle: 'Compte protégé', nature: 'CHARGE' } });
+      const url = `/api/comptabilite/comptes/${compte.id}/activation`;
+      assert.equal((await request(app).patch(url).send({ actif: false })).status, 401);
+      const conducteur = await prisma.user.create({ data: { email: 'comptabilite.conducteur@iris.test', name: 'TEST Conducteur comptabilité', role: 'CONDUCTEUR_TRAVAUX' } });
+      const nonAdmin = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${nonAdmin}`).send({ actif: false })).status, 403);
+      for (const body of [{}, { actif: 'false' }, { actif: null }, { actif: false, libelle: 'Injection' }]) {
+        assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send(body)).status, 400);
+      }
+      assert.equal((await request(app).patch('/api/comptabilite/comptes/inexistant/activation').set('Authorization', `Bearer ${session}`).send({ actif: false })).status, 404);
+      assert.equal((await prisma.compteComptable.findUnique({ where: { id: compte.id } })).actif, true);
+    });
+
+    test('autorise un ADMIN ordinaire à changer le statut d’un compte', async () => {
+      const admin = await prisma.user.create({ data: { email: 'comptabilite.admin@iris.test', name: 'TEST Admin comptabilité', role: 'ADMIN' } });
+      const token = jwt.sign({ id: admin.id }, process.env.JWT_SECRET);
+      const compte = await prisma.compteComptable.create({ data: { code: `892${String(Date.now()).slice(-9)}`, libelle: 'Compte admin', nature: 'CHARGE' } });
+      const reponse = await request(app).patch(`/api/comptabilite/comptes/${compte.id}/activation`).set('Authorization', `Bearer ${token}`).send({ actif: false });
+      assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      assert.equal(reponse.body.actif, false);
     });
 
     test('importe un plan comptable contrôlé ligne par ligne', async () => {
