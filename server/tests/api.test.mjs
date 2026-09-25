@@ -2272,6 +2272,66 @@ if (!TEST_DATABASE_URL) {
       assert.equal(importation.body.importes, 2);
     });
 
+    test('refuse les caractères de contrôle dans un compte créé directement, sans écriture', async () => {
+      for (const [index, libelle] of ['Clients\nFrance', 'Clients\tFrance', 'Clients\rFrance', 'Clients\u0000France', 'Clients\u007fFrance', 'Clients\t'].entries()) {
+        const code = String(899970 + index);
+        const reponse = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code, libelle, nature: 'ACTIF' });
+        assert.equal(reponse.status, 400, JSON.stringify(reponse.body));
+        assert.equal(await prisma.compteComptable.count({ where: { code } }), 0);
+      }
+    });
+
+    test('refuse un lot avec libellé contenant retour ou tabulation sans écriture partielle', async () => {
+      for (const [index, libelle] of ['Clients\nFrance', 'Clients\tFrance', 'Clients\rFrance', 'Clients\u0000France', 'Clients\u007fFrance', 'Clients\t'].entries()) {
+        const code = String(899980 + index * 2);
+        const reponse = await request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ lignes: [
+          { code, libelle: 'Valide', nature: 'ACTIF' },
+          { code: String(Number(code) + 1), libelle, nature: 'ACTIF' },
+        ] });
+        assert.equal(reponse.status, 400, JSON.stringify(reponse.body));
+        assert.deepEqual(reponse.body.erreurs.map(({ ligne }) => ligne), [2]);
+        assert.equal(await prisma.compteComptable.count({ where: { code: { in: [code, String(Number(code) + 1)] } } }), 0);
+      }
+    });
+
+    test('importe 5 000 comptes au-delà des 100 Ko par défaut et réimporte sans doublons', async () => {
+      const lignes = Array.from({ length: 5000 }, (_, index) => ({ code: String(800000 + index), libelle: `Compte de test ${index} ${'x'.repeat(65)}`, nature: 'CHARGE' }));
+      assert.ok(Buffer.byteLength(JSON.stringify({ lignes })) > 100 * 1024);
+      const importer = () => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ lignes });
+      const premier = await importer();
+      assert.equal(premier.status, 201, JSON.stringify(premier.body));
+      assert.equal(premier.body.importes, lignes.length);
+      const second = await importer();
+      assert.equal(second.status, 201, JSON.stringify(second.body));
+      assert.equal(second.body.ignores, lignes.length);
+    });
+
+    test('refuse en JSON un corps de plus de 5 Mo sans écrire de compte', async () => {
+      const reponse = await request(app).post('/api/comptabilite/importer').set('Content-Type', 'application/json')
+        .send(JSON.stringify({ lignes: [{ code: '899990', libelle: 'X'.repeat(5 * 1024 * 1024), nature: 'ACTIF' }] }));
+      assert.equal(reponse.status, 413);
+      assert.match(reponse.headers['content-type'], /application\/json/);
+      assert.match(reponse.body.error, /volumineux|taille/i);
+      assert.equal(await prisma.compteComptable.count({ where: { code: '899990' } }), 0);
+    });
+
+    test('refuse 409 et annule tout le lot si un code existant diffère', async () => {
+      const lignes = [{ code: '899991', libelle: 'Nouveau', nature: 'ACTIF' }, { code: '411000', libelle: 'Autre libellé', nature: 'PASSIF' }];
+      const reponse = await request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ lignes });
+      assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
+      assert.deepEqual(reponse.body.erreurs.map(({ ligne }) => ligne), [2]);
+      assert.equal(await prisma.compteComptable.count({ where: { code: '899991' } }), 0);
+      assert.equal((await prisma.compteComptable.findUnique({ where: { code: '411000' } })).libelle, 'Clients');
+    });
+
+    test('deux imports concurrents divergents ne peuvent pas masquer un conflit', async () => {
+      const envoyer = (libelle) => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`)
+        .send({ lignes: [{ code: '899992', libelle, nature: 'ACTIF' }] });
+      const reponses = await Promise.all([envoyer('Premier'), envoyer('Second')]);
+      assert.deepEqual(reponses.map(reponse => reponse.status).sort(), [201, 409], reponses.map(reponse => JSON.stringify(reponse.body)).join(' / '));
+      assert.equal(await prisma.compteComptable.count({ where: { code: '899992' } }), 1);
+    });
+
     test('réserve factures et comptabilité à l’administration', async () => {
       const conducteur = await prisma.user.create({ data: { email: 'facture.conducteur@iris.test', name: 'TEST Conducteur facture', role: 'CONDUCTEUR_TRAVAUX' } });
       const token = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);

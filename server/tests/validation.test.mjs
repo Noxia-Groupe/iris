@@ -3,8 +3,10 @@
 // Aucune base de données n'est nécessaire.
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
+import request from 'supertest';
 
 const {
+  app,
   clientPayload, contactPayload, sitePayload, companySettingsPayload,
   fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise,
   anneeEntreprise, dateEmissionEstFuture,
@@ -13,7 +15,25 @@ const {
   commissionBaremeProgressif, computeChantierMetrics,
   parseBareme, serialiseBareme, validerBareme,
   arrondiCommercialLigneHt, centimesTtcLigne, devisPayload,
+  libelleComptableValide,
 } = await import('../dist/index.js');
+
+test('le libellé comptable refuse les contrôles CR, LF, TAB, NUL et DEL sans rejeter les accents', () => {
+  assert.equal(libelleComptableValide('Ventes, pose; et entretien'), true);
+  assert.equal(libelleComptableValide('Libellé d’entretien'), true);
+  for (const controle of ['\r', '\n', '\t', '\u0000', '\u001f', '\u007f']) {
+    assert.equal(libelleComptableValide(`Avant${controle}Après`), false);
+    assert.equal(libelleComptableValide(`Avant${controle}`), false);
+  }
+});
+
+test('limite les corps JSON à 5 Mo avec erreur 413 JSON même sans connexion à la base', async () => {
+  const reponse = await request(app).post('/api/comptabilite/importer').set('Content-Type', 'application/json')
+    .send(JSON.stringify({ lignes: [{ code: '899990', libelle: 'X'.repeat(5 * 1024 * 1024), nature: 'ACTIF' }] }));
+  assert.equal(reponse.status, 413);
+  assert.match(reponse.headers['content-type'], /application\/json/);
+  assert.match(reponse.body.error, /volumineux|taille/i);
+});
 
 describe('Fiche client', () => {
   test('la raison sociale est obligatoire à la création', () => {
