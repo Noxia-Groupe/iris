@@ -46,6 +46,51 @@ test('refuse un libellé CSV multiligne sur sa ligne physique sans importer le l
   expect(plan.comptes.some(compte => compte.code === code)).toBe(false);
 });
 
+test('confirme la désactivation d’un compte, le retire des choix et permet sa réactivation', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const code = `711${String(Date.now()).slice(-9)}`;
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.getByPlaceholder('Code', { exact: true }).fill(code);
+  await page.getByPlaceholder('Libellé', { exact: true }).fill('Compte temporaire E2E');
+  await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('combobox').selectOption('PRODUIT');
+  await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
+  const ligne = page.locator('tbody tr', { hasText: code });
+  await expect(ligne).toContainText('Actif');
+  const regle = page.getByLabel('Ventes de prestations');
+  await expect(regle.locator('option', { hasText: code })).toHaveCount(1);
+  await ligne.getByRole('button', { name: 'Désactiver' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Motif du changement de statut' });
+  await expect(dialogue.getByRole('button', { name: 'Confirmer la désactivation' })).toBeDisabled();
+  await dialogue.getByRole('button', { name: 'Annuler' }).click();
+  await expect(ligne).toContainText('Actif');
+  await ligne.getByRole('button', { name: 'Désactiver' }).click();
+  await dialogue.getByRole('textbox', { name: /Motif/ }).fill('  Compte retiré du plan  ');
+  await dialogue.getByRole('button', { name: 'Confirmer la désactivation' }).click();
+  await expect(ligne).toContainText('Inactif');
+  await expect(regle.locator('option', { hasText: code })).toHaveCount(0);
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ id: string; code: string; actif: boolean }> };
+  const compte = plan.comptes.find(compte => compte.code === code);
+  expect(compte?.actif).toBe(false);
+  const journal = await (await apiAdmin.get(`/comptabilite/comptes/${compte!.id}/journal`)).json() as Array<{ motif: string; action: string }>;
+  expect(journal.map(({ motif, action }) => ({ motif, action }))).toEqual([{ motif: 'Compte retiré du plan', action: 'DESACTIVATION' }]);
+  await ligne.getByRole('button', { name: 'Réactiver' }).click();
+  await dialogue.getByRole('textbox', { name: /Motif/ }).fill('Retour en service');
+  await dialogue.getByRole('button', { name: 'Confirmer la réactivation' }).click();
+  await expect(ligne).toContainText('Actif');
+  await expect(regle.locator('option', { hasText: code })).toHaveCount(1);
+});
+
+test('refuse la désactivation d’un compte encore lié à une règle et explique le remappage', async ({ allerSurPageAdmin }) => {
+  const page = await allerSurPageAdmin('/comptabilite');
+  const ligne = page.locator('tbody tr', { hasText: '706000' });
+  await expect(ligne).toContainText('Actif');
+  await ligne.getByRole('button', { name: 'Désactiver' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Motif du changement de statut' });
+  await dialogue.getByRole('textbox', { name: /Motif/ }).fill('Règle à remapper');
+  await dialogue.getByRole('button', { name: 'Confirmer la désactivation' }).click();
+  await expect(dialogue.getByRole('alert')).toContainText(/remappez la règle avant de désactiver/i);
+  await expect(ligne).toContainText('Actif');
+});
+
 test('affiche une erreur lisible si le serveur renvoie une réponse non JSON', async ({ allerSurPageAdmin }) => {
   const page = await allerSurPageAdmin('/comptabilite');
   await page.route('**/api/comptabilite/importer', route => route.fulfill({ status: 413, contentType: 'text/html', body: '<h1>Request Entity Too Large</h1>' }));
