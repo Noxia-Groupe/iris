@@ -20,3 +20,24 @@ test('importe un libellé CSV cité avec virgule et point-virgule puis le conser
   const apresRefus = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ code: string }> };
   expect(apresRefus.comptes.some(compte => compte.code === codeRefuse)).toBe(false);
 });
+
+test('traduit les erreurs API en lignes physiques du second fichier et préserve le lot', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const code = `708${String(Date.now()).slice(-9)}`;
+  const page = await allerSurPageAdmin('/comptabilite');
+  const fichier = page.locator('input[type="file"]');
+  await fichier.setInputFiles({ name: 'premier.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\n${code};Original;PRODUIT`) });
+  await expect(page.getByText('1 compte(s) importé(s), 0 déjà présent(s).')).toBeVisible();
+  const nouveau = `709${String(Date.now()).slice(-9)}`;
+  await fichier.setInputFiles({ name: 'second.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\r\n\r\n${nouveau};"Libellé\r\nmultiligne";PRODUIT\r\n   \r\n${code};Modifié;PASSIF`) });
+  await expect(page.getByText(/Ligne 6 : Le compte .* existe avec un libellé ou une nature différente/)).toBeVisible();
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ code: string; libelle: string }> };
+  expect(plan.comptes.find(compte => compte.code === code)?.libelle).toBe('Original');
+  expect(plan.comptes.some(compte => compte.code === nouveau)).toBe(false);
+});
+
+test('affiche une erreur lisible si le serveur renvoie une réponse non JSON', async ({ allerSurPageAdmin }) => {
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.route('**/api/comptabilite/importer', route => route.fulfill({ status: 413, contentType: 'text/html', body: '<h1>Request Entity Too Large</h1>' }));
+  await page.locator('input[type="file"]').setInputFiles({ name: 'plan.csv', mimeType: 'text/csv', buffer: Buffer.from('411123;Clients;ACTIF') });
+  await expect(page.getByText(/fichier trop volumineux/i)).toBeVisible();
+});

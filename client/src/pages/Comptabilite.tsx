@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileUp, Plus, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../api';
-import { parserPlanComptableCsv } from '../lib/planComptableCsv';
+import { parserPlanComptableCsvAvecLignes } from '../lib/planComptableCsv';
 type Compte = { id: string; code: string; libelle: string; nature: string; actif: boolean };
 type Regle = { cle: string; compteId?: string | null; journal?: string | null; compte?: Compte | null };
 type RegleTva = { taux: number; compteId: string; compte?: Compte | null };
@@ -16,9 +16,11 @@ export default function Comptabilite() {
   const input=e.currentTarget, f=input.files?.[0];if(!f)return;
   setErreur('');setSucces('');
   try {
-   const lignes=parserPlanComptableCsv(await f.text());
-   const r=await apiFetch('/comptabilite/importer',{method:'POST',body:JSON.stringify({lignes})}),d=await r.json();
-   if(!r.ok){setErreur(d.erreurs?.map((x:{ligne:number;erreur:string})=>`Ligne ${x.ligne} : ${x.erreur}`).join(' · ')||d.error||'Import impossible.');return}
+   const {lignes,numeros}=parserPlanComptableCsvAvecLignes(await f.text());
+   const r=await apiFetch('/comptabilite/importer',{method:'POST',body:JSON.stringify({lignes})});
+   const d=await r.json().catch(()=>null) as {error?:string;erreurs?:Array<{ligne:number;erreur:string}>;importes?:number;ignores?:number}|null;
+   if(!r.ok){setErreur(d?.erreurs?.map(x=>`Ligne ${numeros[x.ligne-1] ?? x.ligne} : ${x.erreur}`).join(' · ')||d?.error||(r.status===413?'Fichier trop volumineux pour l’import.':'Import impossible : réponse du serveur illisible.'));return}
+   if(!d) throw new Error('Import impossible : réponse du serveur illisible.');
    setSucces(`${d.importes} compte(s) importé(s), ${d.ignores} déjà présent(s).`);await charger();
   } catch (error) {setErreur(error instanceof Error?error.message:'Lecture du fichier CSV impossible.')} finally {input.value=''}
  };

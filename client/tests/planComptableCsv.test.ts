@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parserPlanComptableCsv } from '../src/lib/planComptableCsv.ts';
+import { parserPlanComptableCsv, parserPlanComptableCsvAvecLignes } from '../src/lib/planComptableCsv.ts';
 
 test('préserve les séparateurs et guillemets échappés dans un libellé CSV à point-virgule', () => {
   assert.deepEqual(parserPlanComptableCsv('code;libelle;nature\n706123;"Ventes, pose; et ""entretien""";PRODUIT\n'), [
@@ -29,6 +29,20 @@ test('refuse les guillemets non fermés et les guillemets hors d’un champ cit�
 test('refuse une colonne manquante ou supplémentaire sans retourner de lignes partielles', () => {
   assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n411123;Clients;ACTIF\n411124;Clients'), /Ligne 3/);
   assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n411123;Clients;ACTIF;inattendu'), /Ligne 2/);
+});
+
+test('une ligne faite de délimiteurs ne disparaît pas même si tous ses champs sont vides', () => {
+  assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n;;;\n411123;Clients;ACTIF'), /Ligne 2 : 3 colonnes attendues/);
+  assert.throws(() => parserPlanComptableCsv('code;libelle;nature\n""\n411123;Clients;ACTIF'), /Ligne 2 : 3 colonnes attendues/);
+  assert.deepEqual(parserPlanComptableCsv('code;libelle;nature\n;;\n411123;Clients;ACTIF')[0], { code: '', libelle: '', nature: '' });
+  assert.deepEqual(parserPlanComptableCsv('code;libelle;nature\n   \n411123;Clients;ACTIF'), [{ code: '411123', libelle: 'Clients', nature: 'ACTIF' }]);
+});
+
+test('associe les indices API aux lignes physiques, même après en-tête, blancs et champ multiligne', () => {
+  assert.deepEqual(parserPlanComptableCsvAvecLignes('code;libelle;nature\r\n\r\n411123;"Clients\r\nFrance";ACTIF\r\n   \r\n411124;Autres;ACTIF'), {
+    lignes: [{ code: '411123', libelle: 'Clients\r\nFrance', nature: 'ACTIF' }, { code: '411124', libelle: 'Autres', nature: 'ACTIF' }],
+    numeros: [3, 6],
+  });
 });
 
 test('refuse un en-tête non conforme et un fichier vide', () => {

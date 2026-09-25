@@ -1,6 +1,10 @@
 export type LignePlanComptable = { code: string; libelle: string; nature: string };
 
 export function parserPlanComptableCsv(texte: string): LignePlanComptable[] {
+  return parserPlanComptableCsvAvecLignes(texte).lignes;
+}
+
+export function parserPlanComptableCsvAvecLignes(texte: string): { lignes: LignePlanComptable[]; numeros: number[] } {
   const contenu = texte.replace(/^\uFEFF/, '');
   let virgules = 0;
   let pointsVirgules = 0;
@@ -23,12 +27,14 @@ export function parserPlanComptableCsv(texte: string): LignePlanComptable[] {
   let etat: 'debut' | 'simple' | 'cite' | 'termine' = 'debut';
   let numero = 1;
   let debut = 1;
+  let contientChampCsv = false;
   const finir = () => {
     champs.push(champ.trim());
-    if (champs.some(valeur => valeur !== '')) lignes.push({ champs, numero: debut });
+    if (contientChampCsv || champs.some(valeur => valeur !== '')) lignes.push({ champs, numero: debut });
     champs = [];
     champ = '';
     etat = 'debut';
+    contientChampCsv = false;
     debut = numero + 1;
   };
   for (let i = 0; i < contenu.length; i += 1) {
@@ -39,14 +45,16 @@ export function parserPlanComptableCsv(texte: string): LignePlanComptable[] {
         else etat = 'termine';
       } else {
         champ += c;
-        if (c === '\n') numero += 1;
+        if (c === '\n' || (c === '\r' && contenu[i + 1] !== '\n')) numero += 1;
       }
       continue;
     }
     if (c === '"') {
       if (etat !== 'debut') throw new Error(`Ligne ${numero} : guillemet mal placé.`);
+      contientChampCsv = true;
       etat = 'cite';
     } else if (c === separateur) {
+      contientChampCsv = true;
       champs.push(champ.trim());
       champ = '';
       etat = 'debut';
@@ -63,7 +71,7 @@ export function parserPlanComptableCsv(texte: string): LignePlanComptable[] {
     }
   }
   if (etat === 'cite') throw new Error(`Ligne ${debut} : guillemet non fermé.`);
-  if (champs.length || champ.trim()) finir();
+  if (champs.length || champ.trim() || contientChampCsv) finir();
   const premiere = lignes[0]?.champs;
   if (premiere?.[0]?.toLowerCase() === 'code') {
     if (premiere.length !== 3 || premiere[1].toLowerCase() !== 'libelle' || premiere[2].toLowerCase() !== 'nature') {
@@ -72,9 +80,10 @@ export function parserPlanComptableCsv(texte: string): LignePlanComptable[] {
     lignes.shift();
   }
   if (!lignes.length) throw new Error('Le fichier CSV ne contient aucun compte.');
-  return lignes.map(({ champs: valeurs, numero: ligne }) => {
+  const comptes = lignes.map(({ champs: valeurs, numero: ligne }) => {
     if (valeurs.length !== 3) throw new Error(`Ligne ${ligne} : 3 colonnes attendues (code, libelle, nature).`);
     const [code, libelle, nature] = valeurs;
     return { code, libelle, nature };
   });
+  return { lignes: comptes, numeros: lignes.map(ligne => ligne.numero) };
 }
