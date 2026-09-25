@@ -1029,9 +1029,10 @@ app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res
   try { const code = String(req.body?.code || '').trim(), libelleBrut = String(req.body?.libelle || ''), libelle = libelleBrut.trim(), nature = String(req.body?.nature || '');
     if (!/^\d{3,12}$/.test(code) || !libelle || !libelleComptableValide(libelleBrut) || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
     const compte = await prisma.compteComptable.create({ data: { code, libelle, nature } }); res.status(201).json(compte);
-  } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte existe déjà.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
+  } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce code de compte existe déjà, éventuellement inactif. Consultez le plan et réactivez-le avec un motif si nécessaire.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
 });
 class CompteComptableUtilise extends Error {}
+class CompteComptableDejaDansCetEtat extends Error {}
 class CompteComptableInactif extends Error {}
 class NatureCompteInvalide extends Error {
   constructor(readonly messageMetier: string) { super(messageMetier); }
@@ -1042,16 +1043,28 @@ class NatureCompteInvalide extends Error {
 async function verrouillerCompteComptable(tx: Prisma.TransactionClient, compteId: string) {
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "CompteComptable" WHERE "id" = ${compteId} FOR UPDATE`);
 }
-app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/comptabilite/comptes/:id/journal', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id);
+    if (!await prisma.compteComptable.findUnique({ where: { id }, select: { id: true } })) return res.status(404).json({ error: 'Compte comptable introuvable.' });
+    res.json(await prisma.journalCompteComptable.findMany({ where: { compteId: id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }));
+  } catch { res.status(500).json({ error: 'Lecture du journal du compte impossible.' }); }
+});
+app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) ||
-      Object.keys(req.body).length !== 1 || typeof req.body.actif !== 'boolean') {
-    return res.status(400).json({ error: 'Le statut actif du compte est requis (booléen).' });
+      Object.keys(req.body).length !== 2 || !Object.hasOwn(req.body, 'actif') || !Object.hasOwn(req.body, 'motif') ||
+      typeof req.body.actif !== 'boolean' || typeof req.body.motif !== 'string' ||
+      [...req.body.motif.trim()].length < 3 || [...req.body.motif.trim()].length > 500 ||
+      !libelleComptableValide(req.body.motif)) {
+    return res.status(400).json({ error: 'Statut booléen et motif de 3 à 500 caractères requis.' });
   }
+  const motif = req.body.motif.trim();
   try {
     const compte = await prisma.$transaction(async tx => {
       await verrouillerCompteComptable(tx, String(req.params.id));
       const existant = await tx.compteComptable.findUnique({ where: { id: String(req.params.id) } });
       if (!existant) return null;
+      if (existant.actif === req.body.actif) throw new CompteComptableDejaDansCetEtat();
       if (!req.body.actif) {
         const [regles, reglesTva] = await Promise.all([
           tx.regleComptable.count({ where: { compteId: existant.id } }),
@@ -1059,11 +1072,18 @@ app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin,
         ]);
         if (regles || reglesTva) throw new CompteComptableUtilise();
       }
-      return tx.compteComptable.update({ where: { id: existant.id }, data: { actif: req.body.actif } });
+      const modifie = await tx.compteComptable.update({ where: { id: existant.id }, data: { actif: req.body.actif } });
+      await tx.journalCompteComptable.create({ data: {
+        compteId: existant.id, auteurId: req.user!.id, auteurNom: req.user!.name,
+        action: req.body.actif ? 'REACTIVATION' : 'DESACTIVATION', avant: existant.actif,
+        apres: modifie.actif, motif,
+      } });
+      return modifie;
     });
     if (!compte) return res.status(404).json({ error: 'Compte comptable introuvable.' });
     res.json(compte);
   } catch (error) {
+    if (error instanceof CompteComptableDejaDansCetEtat) return res.status(409).json({ error: 'Ce compte est déjà dans cet état.' });
     if (error instanceof CompteComptableUtilise) return res.status(409).json({ error: 'Compte utilisé par une règle comptable ou TVA : remappez la règle avant de désactiver.' });
     if ((error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'Modification concurrente du compte : réessayez.' });
     res.status(500).json({ error: 'Modification du statut du compte impossible.' });
@@ -1087,11 +1107,13 @@ app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req, re
       // Sérialise les imports : les lots concurrents doivent comparer après le commit précédent.
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(814081)::text AS verrou`;
       const resultat = await tx.compteComptable.createMany({ data: comptes, skipDuplicates: true });
-      const existants = await tx.compteComptable.findMany({ where: { code: { in: comptes.map(compte => compte.code) } }, select: { code: true, libelle: true, nature: true } });
+      const existants = await tx.compteComptable.findMany({ where: { code: { in: comptes.map(compte => compte.code) } }, select: { code: true, libelle: true, nature: true, actif: true } });
       const parCode = new Map(existants.map(compte => [compte.code, compte]));
       const divergences = comptes.flatMap((compte, index) => {
         const existant = parCode.get(compte.code);
-        return existant && (existant.libelle !== compte.libelle || existant.nature !== compte.nature)
+        return existant && !existant.actif
+          ? [{ ligne: index + 1, erreur: `Le compte ${compte.code} existe mais est inactif : réactivez-le explicitement avec un motif avant de relancer l’import.` }]
+          : existant && (existant.libelle !== compte.libelle || existant.nature !== compte.nature)
           ? [{ ligne: index + 1, erreur: `Le compte ${compte.code} existe avec un libellé ou une nature différente.` }] : [];
       });
       if (divergences.length) throw new ConflitImportComptable(divergences);

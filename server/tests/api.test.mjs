@@ -54,6 +54,15 @@ if (!TEST_DATABASE_URL) {
     await prisma.mentionsLegalesVersion.deleteMany({});
     await prisma.regleComptable.deleteMany({});
     await prisma.regleTvaComptable.deleteMany({});
+    await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" DROP CONSTRAINT IF EXISTS "journal_test_refus_insertion"');
+    // Le journal est append-only : le nettoyage de la base jetable désactive le trigger
+    // uniquement le temps de purger les fixtures, puis le réactive même en cas d'échec.
+    try {
+      await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" DISABLE TRIGGER "journal_compte_append_only"');
+      await prisma.journalCompteComptable.deleteMany({});
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" ENABLE TRIGGER "journal_compte_append_only"');
+    }
     await prisma.compteComptable.deleteMany({});
     await prisma.sequenceFacture.deleteMany({});
     await prisma.sequenceAvoir.deleteMany({});
@@ -2271,14 +2280,14 @@ if (!TEST_DATABASE_URL) {
       const creation = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code, libelle: 'Compte temporaire', nature: 'CHARGE' });
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
       const url = `/api/comptabilite/comptes/${creation.body.id}/activation`;
-      const desactivation = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false });
+      const desactivation = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' });
       assert.equal(desactivation.status, 200, JSON.stringify(desactivation.body));
       assert.equal(desactivation.body.actif, false);
       assert.equal(desactivation.body.code, code);
       assert.equal(desactivation.body.libelle, 'Compte temporaire');
       assert.equal((await request(app).get('/api/comptabilite').set('Authorization', `Bearer ${session}`)).body.comptes.find(c => c.id === creation.body.id)?.actif, false);
       assert.equal((await request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ compteId: creation.body.id })).status, 404);
-      const reactivation = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: true });
+      const reactivation = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: true, motif: 'Retour en service' });
       assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
       assert.equal(reactivation.body.actif, true);
       assert.equal((await prisma.compteComptable.findUnique({ where: { id: creation.body.id } })).code, code);
@@ -2289,11 +2298,11 @@ if (!TEST_DATABASE_URL) {
       const second = await prisma.compteComptable.create({ data: { code: `896${String(Date.now()).slice(-9)}`, libelle: 'Prestations remplacement', nature: 'PRODUIT' } });
       const url = `/api/comptabilite/comptes/${premier.id}/activation`;
       assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: premier.id })).status, 200);
-      const conflit = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false });
+      const conflit = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' });
       assert.equal(conflit.status, 409, JSON.stringify(conflit.body));
       assert.equal((await prisma.compteComptable.findUnique({ where: { id: premier.id } })).actif, true);
       assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: second.id })).status, 200);
-      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false })).status, 200);
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' })).status, 200);
     });
 
     test('refuse de désactiver un compte TVA utilisé jusqu’à son remappage', async () => {
@@ -2301,11 +2310,11 @@ if (!TEST_DATABASE_URL) {
       const second = await prisma.compteComptable.create({ data: { code: `894${String(Date.now()).slice(-9)}`, libelle: 'TVA remplacement', nature: 'TVA' } });
       const url = `/api/comptabilite/comptes/${premier.id}/activation`;
       assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: premier.id })).status, 200);
-      const conflit = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false });
+      const conflit = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' });
       assert.equal(conflit.status, 409, JSON.stringify(conflit.body));
       assert.equal((await prisma.compteComptable.findUnique({ where: { id: premier.id } })).actif, true);
       assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: second.id })).status, 200);
-      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false })).status, 200);
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' })).status, 200);
     });
 
     test('une règle attend le verrou du compte puis refuse un compte désactivé entre-temps', async () => {
@@ -2347,27 +2356,119 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('la désactivation attend le remappage vers son compte et refuse sans journal', async () => {
+      for (const { nature, cle, taux, prefixe } of [
+        { nature: 'PRODUIT', cle: 'VENTE_ARTICLE', prefixe: '885' },
+        { nature: 'TVA', taux: 7.7, prefixe: '884' },
+      ]) {
+        const cible = await prisma.compteComptable.create({ data: { code: `${prefixe}${String(Date.now()).slice(-9)}`, libelle: 'Cible course symétrique', nature } });
+        let liberer;
+        let annoncer;
+        const verrouPose = new Promise(resolve => { annoncer = resolve; });
+        const libere = new Promise(resolve => { liberer = resolve; });
+        const remappage = prisma.$transaction(async tx => {
+          await tx.$queryRaw`SELECT "id" FROM "CompteComptable" WHERE "id" = ${cible.id} FOR UPDATE`;
+          if (cle) await tx.regleComptable.upsert({ where: { cle }, create: { cle, compteId: cible.id }, update: { compteId: cible.id } });
+          else await tx.regleTvaComptable.upsert({ where: { taux }, create: { taux, compteId: cible.id }, update: { compteId: cible.id } });
+          annoncer();
+          await libere;
+        }, { timeout: 10_000 });
+        await verrouPose;
+        const reponsePromise = request(app).patch(`/api/comptabilite/comptes/${cible.id}/activation`)
+          .set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Remappage concurrent' })
+          .timeout({ deadline: 12_000 }).then(r => r, e => ({ status: 0, body: { error: String(e) } }));
+        let attenteObservee = false;
+        try {
+          for (let tentative = 0; tentative < 60; tentative++) {
+            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
+            if (etat.attente) { attenteObservee = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+        } finally { liberer(); await remappage; }
+        const reponse = await reponsePromise;
+        assert.equal(attenteObservee, true, `${nature} : désactivation bloquée par le verrou du compte cible`);
+        assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
+        assert.equal((await prisma.compteComptable.findUnique({ where: { id: cible.id } })).actif, true);
+        const regle = cle ? await prisma.regleComptable.findUnique({ where: { cle } }) : await prisma.regleTvaComptable.findUnique({ where: { taux } });
+        assert.equal(regle.compteId, cible.id);
+        assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: cible.id } }), 0);
+      }
+    });
+
     test('valide strictement la transition de compte et protège la route', async () => {
       const compte = await prisma.compteComptable.create({ data: { code: `893${String(Date.now()).slice(-9)}`, libelle: 'Compte protégé', nature: 'CHARGE' } });
       const url = `/api/comptabilite/comptes/${compte.id}/activation`;
-      assert.equal((await request(app).patch(url).send({ actif: false })).status, 401);
+      assert.equal((await request(app).patch(url).send({ actif: false, motif: 'Compte devenu inutile' })).status, 401);
       const conducteur = await prisma.user.create({ data: { email: 'comptabilite.conducteur@iris.test', name: 'TEST Conducteur comptabilité', role: 'CONDUCTEUR_TRAVAUX' } });
       const nonAdmin = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
-      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${nonAdmin}`).send({ actif: false })).status, 403);
-      for (const body of [{}, { actif: 'false' }, { actif: null }, { actif: false, libelle: 'Injection' }]) {
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${nonAdmin}`).send({ actif: false, motif: 'Compte devenu inutile' })).status, 403);
+      for (const body of [{}, { actif: 'false' }, { actif: null }, { actif: false, libelle: 'Injection' }, { actif: false }, { actif: false, motif: '  ' }, { actif: false, motif: 'ab' }, { actif: false, motif: 'Motif\ninvalide' }, { actif: false, motif: 'Motif\tinvalide' }, { actif: false, motif: 'Motif\u0000invalide' }, { actif: false, motif: 'x'.repeat(501) }, { actif: false, motif: 42 }, { actif: false, motif: 'Valide', code: '999' }]) {
         assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send(body)).status, 400);
       }
-      assert.equal((await request(app).patch('/api/comptabilite/comptes/inexistant/activation').set('Authorization', `Bearer ${session}`).send({ actif: false })).status, 404);
+      assert.equal((await request(app).patch('/api/comptabilite/comptes/inexistant/activation').set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' })).status, 404);
       assert.equal((await prisma.compteComptable.findUnique({ where: { id: compte.id } })).actif, true);
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+      assert.equal((await request(app).get(`/api/comptabilite/comptes/${compte.id}/journal`)).status, 401);
+      assert.equal((await request(app).get(`/api/comptabilite/comptes/${compte.id}/journal`).set('Authorization', `Bearer ${nonAdmin}`)).status, 403);
+      assert.equal((await request(app).get('/api/comptabilite/comptes/inexistant/journal').set('Authorization', `Bearer ${session}`)).status, 404);
     });
 
     test('autorise un ADMIN ordinaire à changer le statut d’un compte', async () => {
       const admin = await prisma.user.create({ data: { email: 'comptabilite.admin@iris.test', name: 'TEST Admin comptabilité', role: 'ADMIN' } });
       const token = jwt.sign({ id: admin.id }, process.env.JWT_SECRET);
       const compte = await prisma.compteComptable.create({ data: { code: `892${String(Date.now()).slice(-9)}`, libelle: 'Compte admin', nature: 'CHARGE' } });
-      const reponse = await request(app).patch(`/api/comptabilite/comptes/${compte.id}/activation`).set('Authorization', `Bearer ${token}`).send({ actif: false });
+      const reponse = await request(app).patch(`/api/comptabilite/comptes/${compte.id}/activation`).set('Authorization', `Bearer ${token}`).send({ actif: false, motif: 'Compte devenu inutile' });
       assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
       assert.equal(reponse.body.actif, false);
+      const journal = await request(app).get(`/api/comptabilite/comptes/${compte.id}/journal`).set('Authorization', `Bearer ${token}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body.length, 1);
+      const { compteId, auteurId, auteurNom, action, avant, apres, motif } = journal.body[0];
+      assert.deepEqual({ compteId, auteurId, auteurNom, action, avant, apres, motif }, {
+        compteId: compte.id, auteurId: admin.id, auteurNom: admin.name, action: 'DESACTIVATION', avant: true, apres: false, motif: 'Compte devenu inutile',
+      });
+      assert.ok(journal.body[0].createdAt);
+      const url = `/api/comptabilite/comptes/${compte.id}/activation`;
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${token}`).send({ actif: false, motif: 'Doublon injustifié' })).status, 409);
+      assert.equal((await prisma.journalCompteComptable.count({ where: { compteId: compte.id } })), 1);
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${token}`).send({ actif: true, motif: '  Retour en service  ' })).status, 200);
+      const traces = await prisma.journalCompteComptable.findMany({ where: { compteId: compte.id } });
+      assert.equal(traces.length, 2);
+      const retour = traces.find(trace => trace.action === 'REACTIVATION');
+      assert.ok(retour);
+      assert.deepEqual([retour.avant, retour.apres, retour.motif], [false, true, 'Retour en service']);
+      await assert.rejects(prisma.journalCompteComptable.update({ where: { id: journal.body[0].id }, data: { motif: 'Altéré' } }), /Journal comptable immuable/);
+      await assert.rejects(prisma.journalCompteComptable.delete({ where: { id: journal.body[0].id } }), /Journal comptable immuable/);
+      assert.equal((await prisma.journalCompteComptable.count({ where: { compteId: compte.id } })), 2);
+    });
+
+    test('une écriture du journal refusée par la base annule aussi le statut', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `881${String(Date.now()).slice(-9)}`, libelle: 'Rollback journal', nature: 'CHARGE' } });
+      await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" DROP CONSTRAINT IF EXISTS "journal_test_refus_insertion"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" ADD CONSTRAINT "journal_test_refus_insertion" CHECK ("motif" <> \'TEST refus atomique\')');
+      try {
+        const reponse = await request(app).patch(`/api/comptabilite/comptes/${compte.id}/activation`).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'TEST refus atomique' });
+        assert.equal(reponse.status, 500, JSON.stringify(reponse.body));
+        assert.equal((await prisma.compteComptable.findUnique({ where: { id: compte.id } })).actif, true);
+        assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+      } finally {
+        await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" DROP CONSTRAINT "journal_test_refus_insertion"');
+      }
+    });
+
+    test('signale un code inactif lors de la création et refuse un import atomiquement', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `887${String(Date.now()).slice(-9)}`, libelle: 'Compte inactif import', nature: 'CHARGE', actif: false } });
+      const codeLibre = `886${String(Date.now()).slice(-9)}`;
+      const creation = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: compte.code, libelle: compte.libelle, nature: compte.nature });
+      assert.equal(creation.status, 409);
+      assert.match(creation.body.error, /inactif/);
+      const importation = await request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ lignes: [{ code: codeLibre, libelle: 'Nouveau', nature: 'CHARGE' }, { code: compte.code, libelle: compte.libelle, nature: compte.nature }] });
+      assert.equal(importation.status, 409, JSON.stringify(importation.body));
+      assert.deepEqual(importation.body.erreurs.map(e => e.ligne), [2]);
+      assert.match(importation.body.erreurs[0].erreur, /inactif/);
+      assert.equal(await prisma.compteComptable.count({ where: { code: codeLibre } }), 0);
+      assert.equal((await prisma.compteComptable.findUnique({ where: { id: compte.id } })).actif, false);
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
     });
 
     test('importe un plan comptable contrôlé ligne par ligne', async () => {

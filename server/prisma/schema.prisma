@@ -51,6 +51,7 @@ model User {
   profilIntervenant       Intervenant?               @relation("IntervenantCompte")
   rapportsIntervention    InterventionRapport[]
   journauxSaisie          JournalSaisieChantier[]     @relation("JournalSaisieChantierAuteur")
+  journauxComptables      JournalCompteComptable[]
   achatsCrees             AchatReel[]                 @relation("AchatReelCreePar")
   achatsMisAJour          AchatReel[]                 @relation("AchatReelMisAJourPar")
   pointagesCrees          PointageHeure[]             @relation("PointageHeureCreePar")
@@ -627,6 +628,24 @@ model CompteComptable {
   updatedAt DateTime @updatedAt
   regles    RegleComptable[]
   reglesTva RegleTvaComptable[]
+  journal   JournalCompteComptable[]
+}
+
+model JournalCompteComptable {
+  id        String @id @default(uuid())
+  compteId  String
+  compte    CompteComptable @relation(fields: [compteId], references: [id], onDelete: Restrict)
+  auteurId  String
+  auteur    User @relation(fields: [auteurId], references: [id], onDelete: Restrict)
+  auteurNom String
+  action    String // DESACTIVATION | REACTIVATION
+  avant     Boolean
+  apres     Boolean
+  motif     String
+  createdAt DateTime @default(now())
+
+  @@index([compteId, createdAt])
+  @@index([auteurId])
 }
 
 model RegleComptable {
