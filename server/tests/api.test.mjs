@@ -2308,6 +2308,45 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false })).status, 200);
     });
 
+    test('une règle attend le verrou du compte puis refuse un compte désactivé entre-temps', async () => {
+      for (const { nature, chemin, lire } of [
+        { nature: 'PRODUIT', chemin: '/api/comptabilite/regles/VENTE_ARTICLE', lire: () => prisma.regleComptable.findUnique({ where: { cle: 'VENTE_ARTICLE' } }) },
+        { nature: 'TVA', chemin: '/api/comptabilite/tva/7.7', lire: () => prisma.regleTvaComptable.findUnique({ where: { taux: 7.7 } }) },
+      ]) {
+        const compte = await prisma.compteComptable.create({ data: { code: `${nature === 'TVA' ? '890' : '891'}${String(Date.now()).slice(-9)}`, libelle: 'Course activation', nature } });
+        const source = await prisma.compteComptable.create({ data: { code: `${nature === 'TVA' ? '888' : '889'}${String(Date.now()).slice(-9)}`, libelle: 'Source du remappage', nature } });
+        if (nature === 'TVA') await prisma.regleTvaComptable.upsert({ where: { taux: 7.7 }, create: { taux: 7.7, compteId: source.id }, update: { compteId: source.id } });
+        else await prisma.regleComptable.upsert({ where: { cle: 'VENTE_ARTICLE' }, create: { cle: 'VENTE_ARTICLE', compteId: source.id }, update: { compteId: source.id } });
+        let liberer;
+        let annoncer;
+        const verrouPose = new Promise(resolve => { annoncer = resolve; });
+        const libere = new Promise(resolve => { liberer = resolve; });
+        const transaction = prisma.$transaction(async tx => {
+          await tx.$queryRaw`SELECT "id" FROM "CompteComptable" WHERE "id" = ${compte.id} FOR UPDATE`;
+          annoncer();
+          await libere;
+          await tx.compteComptable.update({ where: { id: compte.id }, data: { actif: false } });
+        }, { timeout: 10_000 });
+        await verrouPose;
+        const requete = request(app).put(chemin).set('Authorization', `Bearer ${session}`).send({ compteId: compte.id });
+        // Le serveur doit réellement attendre le verrou SQL, pas simplement être lent à démarrer.
+        const reponsePromise = requete.then(reponse => reponse);
+        let attenteObservee = false;
+        try {
+          for (let tentative = 0; tentative < 60; tentative++) {
+            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
+            if (etat.attente) { attenteObservee = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+        } finally { liberer(); await transaction; }
+        const reponse = await reponsePromise;
+        assert.equal(attenteObservee, true, `${chemin} doit attendre le verrou du compte`);
+        assert.equal(reponse.status, 404, JSON.stringify(reponse.body));
+        assert.equal((await lire())?.compteId, source.id, 'le remappage refusé conserve le compte source actif');
+        assert.equal((await prisma.compteComptable.findUnique({ where: { id: source.id } })).actif, true);
+      }
+    });
+
     test('valide strictement la transition de compte et protège la route', async () => {
       const compte = await prisma.compteComptable.create({ data: { code: `893${String(Date.now()).slice(-9)}`, libelle: 'Compte protégé', nature: 'CHARGE' } });
       const url = `/api/comptabilite/comptes/${compte.id}/activation`;

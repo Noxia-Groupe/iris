@@ -1032,6 +1032,16 @@ app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res
   } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte existe déjà.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
 });
 class CompteComptableUtilise extends Error {}
+class CompteComptableInactif extends Error {}
+class NatureCompteInvalide extends Error {
+  constructor(readonly messageMetier: string) { super(messageMetier); }
+}
+// Toutes les mutations de compte/règle prennent d'abord le verrou du compte cible.
+// Le compte source d'un remappage n'est jamais verrouillé : sa désactivation vérifie
+// les références sous son propre verrou, sans cycle de verrous entre deux comptes.
+async function verrouillerCompteComptable(tx: Prisma.TransactionClient, compteId: string) {
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "CompteComptable" WHERE "id" = ${compteId} FOR UPDATE`);
+}
 app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin, async (req, res) => {
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) ||
       Object.keys(req.body).length !== 1 || typeof req.body.actif !== 'boolean') {
@@ -1039,6 +1049,7 @@ app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin,
   }
   try {
     const compte = await prisma.$transaction(async tx => {
+      await verrouillerCompteComptable(tx, String(req.params.id));
       const existant = await tx.compteComptable.findUnique({ where: { id: String(req.params.id) } });
       if (!existant) return null;
       if (!req.body.actif) {
@@ -1054,6 +1065,7 @@ app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin,
     res.json(compte);
   } catch (error) {
     if (error instanceof CompteComptableUtilise) return res.status(409).json({ error: 'Compte utilisé par une règle comptable ou TVA : remappez la règle avant de désactiver.' });
+    if ((error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'Modification concurrente du compte : réessayez.' });
     res.status(500).json({ error: 'Modification du statut du compte impossible.' });
   }
 });
@@ -1096,21 +1108,41 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, 
     const compteId = req.body?.compteId ? String(req.body.compteId) : null; const journal = req.body?.journal == null ? null : String(req.body.journal).trim() || null;
     if (cle === 'JOURNAL_VENTES' ? !journal : !compteId) return res.status(400).json({ error: 'Paramétrage de règle incomplet.' });
     if (journal && !/^[A-Z0-9]{1,8}$/.test(journal)) return res.status(400).json({ error: 'Le code journal doit compter au plus 8 caractères alphanumériques majuscules.' });
-    const compte = compteId ? await prisma.compteComptable.findFirst({ where: { id: compteId, actif: true } }) : null;
-    if (compteId && !compte) return res.status(404).json({ error: 'Compte comptable actif introuvable.' });
-    if (compte && NATURES_ATTENDUES[cle] && !NATURES_ATTENDUES[cle].includes(compte.nature)) return res.status(400).json({ error: `Cette règle attend un compte de nature ${NATURES_ATTENDUES[cle].join(' ou ')}.` });
-    const regle = await prisma.regleComptable.upsert({ where: { cle }, create: { cle, compteId, journal }, update: { compteId, journal }, include: { compte: true } }); res.json(regle);
-  } catch { res.status(500).json({ error: 'Mise à jour du paramétrage impossible.' }); }
+    const regle = await prisma.$transaction(async tx => {
+      if (compteId) {
+        await verrouillerCompteComptable(tx, compteId);
+        const compte = await tx.compteComptable.findFirst({ where: { id: compteId, actif: true } });
+        if (!compte) throw new CompteComptableInactif();
+        if (NATURES_ATTENDUES[cle] && !NATURES_ATTENDUES[cle].includes(compte.nature)) throw new NatureCompteInvalide(`Cette règle attend un compte de nature ${NATURES_ATTENDUES[cle].join(' ou ')}.`);
+      }
+      return tx.regleComptable.upsert({ where: { cle }, create: { cle, compteId, journal }, update: { compteId, journal }, include: { compte: true } });
+    });
+    res.json(regle);
+  } catch (error) {
+    if (error instanceof CompteComptableInactif) return res.status(404).json({ error: 'Compte comptable actif introuvable.' });
+    if (error instanceof NatureCompteInvalide) return res.status(400).json({ error: error.messageMetier });
+    if ((error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'Modification concurrente de la règle : réessayez.' });
+    res.status(500).json({ error: 'Mise à jour du paramétrage impossible.' });
+  }
 });
 
 app.put('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req, res) => {
   try { const taux = nombreDecimalNonNegatif(req.params.taux, 3, true); const compteId = String(req.body?.compteId || '');
     if (taux === null || taux > 100) return res.status(400).json({ error: 'Taux de TVA invalide.' });
-    const compte = await prisma.compteComptable.findFirst({ where: { id: compteId, actif: true } });
-    if (!compte) return res.status(404).json({ error: 'Compte TVA actif introuvable.' });
-    if (compte.nature !== 'TVA') return res.status(400).json({ error: 'Une règle TVA attend un compte de nature TVA.' });
-    res.json(await prisma.regleTvaComptable.upsert({ where: { taux }, create: { taux, compteId }, update: { compteId }, include: { compte: true } }));
-  } catch { res.status(500).json({ error: 'Mise à jour de la règle TVA impossible.' }); }
+    const regle = await prisma.$transaction(async tx => {
+      await verrouillerCompteComptable(tx, compteId);
+      const compte = await tx.compteComptable.findFirst({ where: { id: compteId, actif: true } });
+      if (!compte) throw new CompteComptableInactif();
+      if (compte.nature !== 'TVA') throw new NatureCompteInvalide('Une règle TVA attend un compte de nature TVA.');
+      return tx.regleTvaComptable.upsert({ where: { taux }, create: { taux, compteId }, update: { compteId }, include: { compte: true } });
+    });
+    res.json(regle);
+  } catch (error) {
+    if (error instanceof CompteComptableInactif) return res.status(404).json({ error: 'Compte TVA actif introuvable.' });
+    if (error instanceof NatureCompteInvalide) return res.status(400).json({ error: error.messageMetier });
+    if ((error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'Modification concurrente de la règle TVA : réessayez.' });
+    res.status(500).json({ error: 'Mise à jour de la règle TVA impossible.' });
+  }
 });
 
 const csvComptable = (v: unknown) => {

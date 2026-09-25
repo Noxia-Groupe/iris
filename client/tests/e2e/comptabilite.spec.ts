@@ -51,6 +51,7 @@ test('confirme la désactivation d’un compte, le retire des choix et permet sa
   const page = await allerSurPageAdmin('/comptabilite');
   await page.getByPlaceholder('Code', { exact: true }).fill(code);
   await page.getByPlaceholder('Libellé', { exact: true }).fill('Compte temporaire E2E');
+  await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('combobox').selectOption('PRODUIT');
   await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
   const ligne = page.locator('tbody tr', { hasText: code });
   await expect(ligne).toContainText('Actif');
