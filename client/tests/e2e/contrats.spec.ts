@@ -1,9 +1,9 @@
 import { test, expect } from './fixtures';
 
 test.describe('Contrats de maintenance', () => {
-  test('réinitialise l’éditeur de couverture avant d’enregistrer le second contrat', async ({ page, creerClient, apiAdmin }) => {
+  test('réinitialise l’éditeur de couverture avant d’enregistrer le second contrat', async ({ page, allerSurPageAdmin, creerClient, apiAdmin }) => {
     const client = await creerClient('couverture contrats', false);
-    await page.goto('/contrats-maintenance', { waitUntil: 'networkidle' });
+    await allerSurPageAdmin('/contrats-maintenance');
 
     const creerContrat = async (titre: string, politiqueMainOeuvre: 'INCLUSE' | 'HORS_FORFAIT', politiqueMateriel: 'INCLUS' | 'HORS_FORFAIT', noteCouverture: string) => {
       await page.getByRole('button', { name: 'Nouveau contrat' }).click();
