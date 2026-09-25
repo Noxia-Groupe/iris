@@ -2047,6 +2047,12 @@ if (!TEST_DATABASE_URL) {
 
       const refus = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${jetonTechnicien}`).send(politique);
       assert.equal(refus.status, 403, JSON.stringify(refus.body));
+      for (const corps of [{}, { titre: 'Modification hors politique' }]) {
+        const sansPolitique = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send(corps);
+        assert.equal(sansPolitique.status, 400, 'une requête sans champ de couverture est refusée');
+      }
+      const tracesAvantModification = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: contrat.body.id } });
+      assert.equal(tracesAvantModification, 1, 'aucun refus ne crée de journal');
       const miseAJour = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send(politique);
       assert.equal(miseAJour.status, 200, JSON.stringify(miseAJour.body));
       assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, miseAJour.body[cle]])), politique);

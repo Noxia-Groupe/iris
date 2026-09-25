@@ -32,6 +32,7 @@ test.describe('Contrats de maintenance', () => {
     await expect(editeur.locator('select[name="politiqueMateriel"]')).toHaveValue('INCLUS');
     await expect(editeur.locator('textarea[name="noteCouverture"]')).toHaveValue('Politique B');
     await editeur.getByRole('button', { name: 'Enregistrer la couverture' }).click();
+    await expect(page.getByText('Couverture contractuelle mise à jour pour les prochaines interventions.')).toBeVisible();
 
     const contrats = await apiAdmin.get('/contrats-maintenance');
     expect(contrats.ok(), await contrats.text()).toBeTruthy();
