@@ -705,13 +705,13 @@ async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRe
   } });
 }
 
-async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE', contrat: unknown, avant: unknown, motif?: string) {
+async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE', contrat: unknown, avant: unknown, motif?: string) {
   const user = req.user!;
   const cibleId = String((contrat as { id: string }).id);
   await tx.journalSaisieChantier.create({ data: {
     chantierId: null, interventionId: null, contratMaintenanceId: cibleId, cible: 'CONTRAT', cibleId, action,
     auteurId: user.id, auteurNom: user.name,
-    avant: valeurJournal(avant) as Prisma.InputJsonValue,
+    avant: avant === null ? Prisma.JsonNull : valeurJournal(avant) as Prisma.InputJsonValue,
     apres: valeurJournal(contrat) as Prisma.InputJsonValue,
     motif: motif || null,
   } });
@@ -1347,9 +1347,13 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
       const site = await prisma.clientSite.findFirst({ where: { id: siteId, clientId: client.id }, select: { id: true } });
       if (!site) return res.status(404).json({ error: 'Site introuvable.' });
     }
-    const contrat = await prisma.contratMaintenance.create({
-      data: { clientId: client.id, siteId, titre, periodiciteMois, dureePrevisionnelleMinutes, dateDebut, prochaineEcheance: dateDebut, ...couverture, createdById: req.user!.id },
-      include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
+    const contrat = await prisma.$transaction(async (tx) => {
+      const cree = await tx.contratMaintenance.create({
+        data: { clientId: client.id, siteId, titre, periodiciteMois, dureePrevisionnelleMinutes, dateDebut, prochaineEcheance: dateDebut, ...couverture, createdById: req.user!.id },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
+      });
+      await journaliserContrat(tx, req, 'CREATION', cree, null);
+      return cree;
     });
     res.status(201).json(decimalToNumber(contrat));
   } catch (error) {
@@ -1477,10 +1481,11 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
     res.status(resultat.creee ? 201 : 200).json(decimalToNumber(exposerIntervention(resultat.intervention)));
   } catch (error) {
     if ((error as { code?: string }).code === 'P2002') {
-      // Une génération concurrente a gagné la contrainte d'idempotence : relire son
-      // instantané plutôt que d'écraser la politique ou de signaler un faux échec.
-      const existante = await prisma.intervention.findFirst({
-        where: { contratMaintenanceId: paramId(req) },
+      // Une génération concurrente ne peut renvoyer que l'intervention de l'échéance
+      // courante ; une ancienne visite du même contrat ne prouve pas l'idempotence.
+      const contrat = await prisma.contratMaintenance.findUnique({ where: { id: paramId(req) }, select: { prochaineEcheance: true } });
+      const existante = contrat && await prisma.intervention.findFirst({
+        where: { contratMaintenanceId: paramId(req), echeanceContrat: contrat.prochaineEcheance },
         orderBy: { createdAt: 'desc' },
         include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
       });

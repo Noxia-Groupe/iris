@@ -2013,6 +2013,12 @@ if (!TEST_DATABASE_URL) {
       }, {
         politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: note,
       });
+      const journalCreation = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journalCreation.status, 200, JSON.stringify(journalCreation.body));
+      assert.equal(journalCreation.body.length, 1);
+      assert.equal(journalCreation.body[0].action, 'CREATION');
+      assert.equal(journalCreation.body[0].avant, null, 'la création stocke explicitement un état antérieur NULL');
+      assert.equal(journalCreation.body[0].apres.id, contrat.body.id);
 
       for (const corps of [
         { politiqueMainOeuvre: 'FORFAIT_TOTAL' },
@@ -2044,6 +2050,14 @@ if (!TEST_DATABASE_URL) {
       const miseAJour = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send(politique);
       assert.equal(miseAJour.status, 200, JSON.stringify(miseAJour.body));
       assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, miseAJour.body[cle]])), politique);
+      const journal = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      const modification = journal.body.find((entree) => entree.action === 'MODIFICATION_COUVERTURE');
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, modification.avant[cle]])), {
+        politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: null,
+      });
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, modification.apres[cle]])), politique);
+      const tracesAvantRefus = journal.body.length;
       assert.equal(await prisma.facture.count({ where: { contratMaintenanceId: contrat.body.id } }), factureAvant, 'la politique ne crée aucune facture');
       assert.equal(await prisma.devis.count({ where: { clientId } }), devisAvant, 'la politique ne crée aucun devis');
 
@@ -2051,6 +2065,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
       const mutationApresCloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({ noteCouverture: 'Tentative interdite' });
       assert.equal(mutationApresCloture.status, 409, JSON.stringify(mutationApresCloture.body));
+      const journalApresRefus = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journalApresRefus.body.length, tracesAvantRefus + 1, 'seule la clôture autorisée est tracée ; le refus ne crée aucune trace');
       const generationApresCloture = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(generationApresCloture.status, 404, JSON.stringify(generationApresCloture.body));
     });
@@ -2100,10 +2116,14 @@ if (!TEST_DATABASE_URL) {
         { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS', noteCouverture: { texte: 'pas une chaîne' } },
       ].entries()) {
         await assert.rejects(() => prisma.$executeRawUnsafe(
-          'INSERT INTO "Intervention" ("id", "reference", "clientId", "titre", "couvertureContrat", "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, $1, $2, $3, $4::jsonb, now(), now())',
-          `TEST-CONTRAINTE-COUVERTURE-${Date.now()}-${index}`, clientId, 'TEST Instantané SQL invalide', JSON.stringify(couvertureInvalide),
+          'INSERT INTO "Intervention" ("id", "reference", "clientId", "contratMaintenanceId", "titre", "couvertureContrat", "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5::jsonb, now(), now())',
+          `TEST-CONTRAINTE-COUVERTURE-${Date.now()}-${index}`, clientId, contrat.body.id, 'TEST Instantané SQL invalide', JSON.stringify(couvertureInvalide),
         ), `PostgreSQL doit refuser ${JSON.stringify(couvertureInvalide)}`);
       }
+      await assert.rejects(() => prisma.$executeRawUnsafe(
+        'INSERT INTO "Intervention" ("id", "reference", "clientId", "titre", "couvertureContrat", "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, $1, $2, $3, $4::jsonb, now(), now())',
+        `TEST-CONTRAINTE-COUVERTURE-SANS-CONTRAT-${Date.now()}`, clientId, 'TEST Instantané SQL sans contrat', JSON.stringify({ politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS' }),
+      ), 'PostgreSQL doit refuser une couverture sans contrat de maintenance');
     });
 
     test('la base interdit toute réécriture Prisma de l’instantané de couverture', async () => {
@@ -3180,6 +3200,39 @@ if (!TEST_DATABASE_URL) {
       const second = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(second.status, 200, JSON.stringify(second.body));
       assert.equal(second.body.id, premier.body.id);
+    });
+
+    test('ne retourne jamais une intervention d’échéance antérieure après un P2002 de génération', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST P2002 fallback', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2025',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const echeanceCourante = new Date('2026-01-01T00:00:00.000Z');
+      await prisma.contratMaintenance.update({ where: { id: contrat.body.id }, data: { prochaineEcheance: echeanceCourante } });
+      const interventionAnterieure = await prisma.intervention.create({ data: {
+        reference: `TEST-I-P2002-ANTERIEURE-${Date.now()}`, clientId, siteId, contratMaintenanceId: contrat.body.id,
+        echeanceContrat: new Date('2025-01-01T00:00:00.000Z'), titre: 'TEST Intervention échéance antérieure',
+      } });
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_forcer_p2002_generation_contrat"()
+        RETURNS TRIGGER AS $$
+        BEGIN
+          IF NEW."titre" = 'Maintenance préventive — TEST P2002 fallback' THEN
+            RAISE EXCEPTION 'collision de test' USING ERRCODE = 'unique_violation';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_forcer_p2002_generation_contrat"
+        BEFORE INSERT ON "Intervention"
+        FOR EACH ROW EXECUTE FUNCTION "test_forcer_p2002_generation_contrat"();`);
+      try {
+        const generation = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+        assert.equal(generation.status, 500, JSON.stringify(generation.body));
+        assert.notEqual(generation.body.id, interventionAnterieure.id, 'le fallback ne doit pas divulguer l’intervention de l’échéance antérieure');
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_forcer_p2002_generation_contrat" ON "Intervention";');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_forcer_p2002_generation_contrat"();');
+      }
     });
 
     test('clôture une échéance avant de préparer la suivante', async () => {

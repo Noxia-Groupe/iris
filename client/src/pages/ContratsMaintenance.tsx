@@ -129,7 +129,7 @@ export default function ContratsMaintenance() {
       <textarea name="noteCouverture" maxLength={1000} className="form-input" placeholder="Note de couverture (facultative)" />
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer le contrat</button><button className="btn btn-secondary" type="button" onClick={() => { setFormulaireOuvert(false); setClientSelectionne(null); }}>Annuler</button></div>
     </form>}
-    {contratCouvertureEdite && contratCouvertureEdite.statut !== 'TERMINE' && <form onSubmit={modifierCouverture} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
+    {contratCouvertureEdite && contratCouvertureEdite.statut !== 'TERMINE' && <form key={contratCouvertureEdite.id} onSubmit={modifierCouverture} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
       <h2 className="font-semibold">Modifier la couverture — {contratCouvertureEdite.titre}</h2>
       <p className="text-sm text-gray-600">Cette modification s’appliquera aux prochaines interventions ; les instantanés existants restent figés.</p>
       <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm text-gray-700">Main-d’œuvre<select required name="politiqueMainOeuvre" defaultValue={contratCouvertureEdite.politiqueMainOeuvre} className="form-input mt-1"><option value="INCLUSE">Incluse</option><option value="HORS_FORFAIT">Hors forfait</option></select></label><label className="text-sm text-gray-700">Matériel<select required name="politiqueMateriel" defaultValue={contratCouvertureEdite.politiqueMateriel} className="form-input mt-1"><option value="INCLUS">Inclus</option><option value="HORS_FORFAIT">Hors forfait</option></select></label></div>

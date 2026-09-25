@@ -46,6 +46,11 @@ ALTER TABLE "Intervention"
     CHECK (
       "couvertureContrat" IS NULL
       OR "couverture_contrat_valide"("couvertureContrat")
+    ),
+  ADD CONSTRAINT "Intervention_couvertureContrat_contratMaintenance_check"
+    CHECK (
+      "couvertureContrat" IS NULL
+      OR "contratMaintenanceId" IS NOT NULL
     );
 
 -- L'instantané créé pour une intervention contractuelle est une preuve : aucune couche
