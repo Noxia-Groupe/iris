@@ -9,6 +9,7 @@ type ClientDetail = Client & { sites: { id: string; nom: string; ville: string; 
 type Contrat = {
   id: string; titre: string; statut: string; periodiciteMois: number; dureePrevisionnelleMinutes: number;
   dateDebut: string; prochaineEcheance: string; client: Client; site?: { id: string; nom: string; ville: string } | null;
+  politiqueMainOeuvre: 'INCLUSE' | 'HORS_FORFAIT'; politiqueMateriel: 'INCLUS' | 'HORS_FORFAIT'; noteCouverture?: string | null;
 };
 
 const libelleStatut: Record<string, string> = { ACTIF: 'Actif', BROUILLON: 'Brouillon', SUSPENDU: 'Suspendu', TERMINE: 'Terminé' };
@@ -21,6 +22,8 @@ export default function ContratsMaintenance() {
   const [clientSelectionne, setClientSelectionne] = useState<ClientDetail | null>(null);
   const [chargement, setChargement] = useState(true);
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
+  const [contratCouvertureEdite, setContratCouvertureEdite] = useState<Contrat | null>(null);
+  const [enregistrementCouverture, setEnregistrementCouverture] = useState(false);
   const [erreur, setErreur] = useState('');
   const [succes, setSucces] = useState('');
 
@@ -64,6 +67,23 @@ export default function ContratsMaintenance() {
     await charger();
   };
 
+  const modifierCouverture = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!contratCouvertureEdite || contratCouvertureEdite.statut === 'TERMINE' || enregistrementCouverture) return;
+    setErreur(''); setSucces(''); setEnregistrementCouverture(true);
+    try {
+      const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+      const res = await apiFetch(`/contrats-maintenance/${contratCouvertureEdite.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) return setErreur(data.error || 'Mise à jour de la couverture impossible.');
+      setContratCouvertureEdite(null);
+      setSucces('Couverture contractuelle mise à jour pour les prochaines interventions.');
+      await charger();
+    } finally {
+      setEnregistrementCouverture(false);
+    }
+  };
+
   const generer = async (contrat: Contrat) => {
     setErreur(''); setSucces('');
     const res = await apiFetch(`/contrats-maintenance/${contrat.id}/generer-intervention`, { method: 'POST' });
@@ -105,9 +125,18 @@ export default function ContratsMaintenance() {
       {clientSelectionne && <select name="siteId" className="form-input" defaultValue=""><option value="">Tous sites / site non précisé</option>{clientSelectionne.sites.map((site) => <option key={site.id} value={site.id}>{site.nom} — {site.ville}{site.estSiteIntervention ? ' · intervention' : ''}</option>)}</select>}
       <input required name="titre" minLength={3} maxLength={200} className="form-input" placeholder="Ex. Maintenance préventive SSI" />
       <div className="grid gap-3 sm:grid-cols-3"><input required name="dateDebut" key={companyTimezone} defaultValue={companyDateInputValue(companyTimezone)} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Début (JJ-MM-AAAA)" /><input required name="periodiciteMois" type="number" min="1" max="60" defaultValue="12" className="form-input" placeholder="Périodicité (mois)" /><input required name="dureePrevisionnelleMinutes" type="number" min="15" max="1440" defaultValue="60" className="form-input" placeholder="Durée (minutes)" /></div>
+      <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm text-gray-700">Main-d’œuvre<select required name="politiqueMainOeuvre" defaultValue="HORS_FORFAIT" className="form-input mt-1"><option value="INCLUSE">Incluse</option><option value="HORS_FORFAIT">Hors forfait</option></select></label><label className="text-sm text-gray-700">Matériel<select required name="politiqueMateriel" defaultValue="HORS_FORFAIT" className="form-input mt-1"><option value="INCLUS">Inclus</option><option value="HORS_FORFAIT">Hors forfait</option></select></label></div>
+      <textarea name="noteCouverture" maxLength={1000} className="form-input" placeholder="Note de couverture (facultative)" />
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer le contrat</button><button className="btn btn-secondary" type="button" onClick={() => { setFormulaireOuvert(false); setClientSelectionne(null); }}>Annuler</button></div>
     </form>}
-    {chargement ? <p className="text-gray-500">Chargement…</p> : contrats.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucun contrat de maintenance.</div> : <div className="grid gap-3">{contrats.map((contrat) => <article key={contrat.id} className="rounded-xl border bg-white p-5 shadow-sm"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div><h2 className="font-semibold text-gray-900">{contrat.titre}</h2><p className="mt-1 text-sm text-gray-600">{contrat.client.raisonSociale}{contrat.site ? ` · ${contrat.site.nom} (${contrat.site.ville})` : ''}</p><p className="mt-2 text-sm text-gray-500">Début : {formatDate(contrat.dateDebut)} · Échéance : {formatDate(contrat.prochaineEcheance)} · Tous les {contrat.periodiciteMois} mois · {contrat.dureePrevisionnelleMinutes} min prévues</p></div><div className="flex items-center gap-3"><span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">{libelleStatut[contrat.statut] || contrat.statut}</span>{contrat.statut === 'ACTIF' && <><button className="btn btn-secondary flex items-center gap-2" onClick={() => void generer(contrat)}><CalendarPlus size={17} /> Générer l’intervention</button><button className="btn btn-secondary flex items-center gap-2" onClick={() => void avancerEcheance(contrat)}><RefreshCw size={17} /> Échéance suivante</button></>}{contrat.statut === 'ACTIF' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'SUSPENDU')}>Suspendre</button>}{contrat.statut === 'SUSPENDU' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'ACTIF')}>Réactiver</button>}{contrat.statut !== 'TERMINE' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'TERMINE')}>Clôturer</button>}</div></div></article>)}</div>}
+    {contratCouvertureEdite && contratCouvertureEdite.statut !== 'TERMINE' && <form onSubmit={modifierCouverture} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
+      <h2 className="font-semibold">Modifier la couverture — {contratCouvertureEdite.titre}</h2>
+      <p className="text-sm text-gray-600">Cette modification s’appliquera aux prochaines interventions ; les instantanés existants restent figés.</p>
+      <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm text-gray-700">Main-d’œuvre<select required name="politiqueMainOeuvre" defaultValue={contratCouvertureEdite.politiqueMainOeuvre} className="form-input mt-1"><option value="INCLUSE">Incluse</option><option value="HORS_FORFAIT">Hors forfait</option></select></label><label className="text-sm text-gray-700">Matériel<select required name="politiqueMateriel" defaultValue={contratCouvertureEdite.politiqueMateriel} className="form-input mt-1"><option value="INCLUS">Inclus</option><option value="HORS_FORFAIT">Hors forfait</option></select></label></div>
+      <textarea name="noteCouverture" maxLength={1000} defaultValue={contratCouvertureEdite.noteCouverture || ''} className="form-input" placeholder="Note de couverture (facultative)" />
+      <div className="flex gap-2"><button className="btn btn-primary" type="submit" disabled={enregistrementCouverture}>{enregistrementCouverture ? 'Enregistrement…' : 'Enregistrer la couverture'}</button><button className="btn btn-secondary" type="button" disabled={enregistrementCouverture} onClick={() => setContratCouvertureEdite(null)}>Annuler</button></div>
+    </form>}
+    {chargement ? <p className="text-gray-500">Chargement…</p> : contrats.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucun contrat de maintenance.</div> : <div className="grid gap-3">{contrats.map((contrat) => <article key={contrat.id} className="rounded-xl border bg-white p-5 shadow-sm"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div><h2 className="font-semibold text-gray-900">{contrat.titre}</h2><p className="mt-1 text-sm text-gray-600">{contrat.client.raisonSociale}{contrat.site ? ` · ${contrat.site.nom} (${contrat.site.ville})` : ''}</p><p className="mt-2 text-sm text-gray-500">Début : {formatDate(contrat.dateDebut)} · Échéance : {formatDate(contrat.prochaineEcheance)} · Tous les {contrat.periodiciteMois} mois · {contrat.dureePrevisionnelleMinutes} min prévues</p><p className="mt-2 text-sm text-gray-700">Couverture : main-d’œuvre {contrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {contrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{contrat.noteCouverture ? ` · ${contrat.noteCouverture}` : ''}</p></div><div className="flex items-center gap-3"><span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">{libelleStatut[contrat.statut] || contrat.statut}</span>{contrat.statut !== 'TERMINE' && <button className="btn btn-secondary" onClick={() => setContratCouvertureEdite(contrat)}>Modifier la couverture</button>}{contrat.statut === 'ACTIF' && <><button className="btn btn-secondary flex items-center gap-2" onClick={() => void generer(contrat)}><CalendarPlus size={17} /> Générer l’intervention</button><button className="btn btn-secondary flex items-center gap-2" onClick={() => void avancerEcheance(contrat)}><RefreshCw size={17} /> Échéance suivante</button></>}{contrat.statut === 'ACTIF' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'SUSPENDU')}>Suspendre</button>}{contrat.statut === 'SUSPENDU' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'ACTIF')}>Réactiver</button>}{contrat.statut !== 'TERMINE' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'TERMINE')}>Clôturer</button>}</div></div></article>)}</div>}
     <button className="text-sm text-gray-500 underline" onClick={() => void charger()}><RefreshCw className="mr-1 inline" size={14} />Actualiser la liste</button>
   </div>;
 }

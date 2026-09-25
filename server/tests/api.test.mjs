@@ -2051,6 +2051,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
       const mutationApresCloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({ noteCouverture: 'Tentative interdite' });
       assert.equal(mutationApresCloture.status, 409, JSON.stringify(mutationApresCloture.body));
+      const generationApresCloture = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generationApresCloture.status, 404, JSON.stringify(generationApresCloture.body));
     });
 
     test('fige la couverture dans l’intervention générée et la rend lisible au technicien affecté', async () => {
@@ -2082,6 +2084,44 @@ if (!TEST_DATABASE_URL) {
       assert.equal(relue.status, 200, JSON.stringify(relue.body));
       const interventionRelue = relue.body.find((intervention) => intervention.id === generation.body.id);
       assert.deepEqual(interventionRelue?.couvertureContrat, generation.body.couvertureContrat, 'une modification ultérieure du contrat ne réécrit pas l’instantané pour l’encadrement autorisé');
+    });
+
+    test('la base refuse toute donnée commerciale ou note structurée dans un instantané de couverture', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Contrat contrainte JSON', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '12-09-2026',
+        politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const generation = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generation.status, 201, JSON.stringify(generation.body));
+
+      for (const [index, couvertureInvalide] of [
+        { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS', montant: 1 },
+        { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS', noteCouverture: { texte: 'pas une chaîne' } },
+      ].entries()) {
+        await assert.rejects(() => prisma.$executeRawUnsafe(
+          'INSERT INTO "Intervention" ("id", "reference", "clientId", "titre", "couvertureContrat", "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, $1, $2, $3, $4::jsonb, now(), now())',
+          `TEST-CONTRAINTE-COUVERTURE-${Date.now()}-${index}`, clientId, 'TEST Instantané SQL invalide', JSON.stringify(couvertureInvalide),
+        ), `PostgreSQL doit refuser ${JSON.stringify(couvertureInvalide)}`);
+      }
+    });
+
+    test('la base interdit toute réécriture Prisma de l’instantané de couverture', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Contrat snapshot immuable', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '13-09-2026',
+        politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const generation = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generation.status, 201, JSON.stringify(generation.body));
+      await assert.rejects(() => prisma.$executeRawUnsafe(
+        'UPDATE "Intervention" SET "couvertureContrat" = $1::jsonb WHERE "id" = $2',
+        JSON.stringify({ politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS' }), generation.body.id,
+      ), 'l’instantané ne doit pas être réécrivable par SQL direct');
+      await assert.rejects(() => prisma.intervention.update({
+        where: { id: generation.body.id },
+        data: { couvertureContrat: { politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS' } },
+      }), 'l’instantané ne doit être modifiable ni via Prisma ni par SQL direct');
     });
 
     test('réserve toutes les routes contrat à l’administration et ferme les contournements', async () => {

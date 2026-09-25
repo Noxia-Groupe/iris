@@ -705,7 +705,7 @@ async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRe
   } });
 }
 
-async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE', contrat: unknown, avant: unknown, motif?: string) {
+async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE', contrat: unknown, avant: unknown, motif?: string) {
   const user = req.user!;
   const cibleId = String((contrat as { id: string }).id);
   await tx.journalSaisieChantier.create({ data: {
@@ -715,6 +715,33 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
     apres: valeurJournal(contrat) as Prisma.InputJsonValue,
     motif: motif || null,
   } });
+}
+
+const POLITIQUES_MAIN_OEUVRE = ['INCLUSE', 'HORS_FORFAIT'];
+const POLITIQUES_MATERIEL = ['INCLUS', 'HORS_FORFAIT'];
+function lirePolitiqueCouverture(body: Record<string, unknown>, defaults?: { politiqueMainOeuvre: string; politiqueMateriel: string; noteCouverture: string | null }) {
+  const politiqueMainOeuvre = body.politiqueMainOeuvre === undefined ? defaults?.politiqueMainOeuvre ?? 'HORS_FORFAIT' : String(body.politiqueMainOeuvre);
+  const politiqueMateriel = body.politiqueMateriel === undefined ? defaults?.politiqueMateriel ?? 'HORS_FORFAIT' : String(body.politiqueMateriel);
+  let noteCouverture: string | null;
+  if (body.noteCouverture === undefined) noteCouverture = defaults?.noteCouverture ?? null;
+  else if (body.noteCouverture === null) noteCouverture = null;
+  else if (typeof body.noteCouverture === 'string') noteCouverture = body.noteCouverture.trim() || null;
+  else return null;
+  if (!POLITIQUES_MAIN_OEUVRE.includes(politiqueMainOeuvre) || !POLITIQUES_MATERIEL.includes(politiqueMateriel) || (noteCouverture !== null && noteCouverture.length > 1000)) return null;
+  return { politiqueMainOeuvre, politiqueMateriel, noteCouverture };
+}
+function exposerIntervention(intervention: any) {
+  if (intervention?.couvertureContrat === null) {
+    const { couvertureContrat: _couvertureContrat, ...sansCouverture } = intervention;
+    return sansCouverture;
+  }
+  return intervention;
+}
+
+// Tous les parcours qui changent le cycle contractualisé prennent ce verrou avant de
+// relire le statut : aucune création ou modification ne peut contourner une clôture.
+async function verrouillerContratMaintenance(tx: Prisma.TransactionClient, contratId: string) {
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${contratId} FOR UPDATE`);
 }
 
 // --- Facturation française native ---
@@ -1305,10 +1332,12 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
     const periodiciteMois = Number(req.body?.periodiciteMois);
     const dureePrevisionnelleMinutes = Number(req.body?.dureePrevisionnelleMinutes);
     const dateDebut = dateIsoStricte(req.body?.dateDebut);
+    const couverture = lirePolitiqueCouverture(req.body || {});
     if (titre.length < 3 || titre.length > 200) return res.status(400).json({ error: 'Le titre du contrat doit contenir entre 3 et 200 caractères.' });
     if (!Number.isInteger(periodiciteMois) || periodiciteMois < 1 || periodiciteMois > 60) return res.status(400).json({ error: 'La périodicité doit être comprise entre 1 et 60 mois.' });
     if (!Number.isInteger(dureePrevisionnelleMinutes) || dureePrevisionnelleMinutes < 15 || dureePrevisionnelleMinutes > 1440) return res.status(400).json({ error: 'La durée prévisionnelle doit être comprise entre 15 et 1 440 minutes.' });
     if (!dateDebut) return res.status(400).json({ error: 'La date de début doit être valide au format JJ-MM-AAAA.' });
+    if (!couverture) return res.status(400).json({ error: 'La politique de couverture est invalide.' });
     // Même règle que la création directe d’intervention : un client désactivé n'ouvre plus
     // de dossier par le contrat, qui ne doit jamais devenir une porte de contournement.
     const client = await prisma.client.findFirst({ where: { id: String(req.body?.clientId || ''), actif: true }, select: { id: true } });
@@ -1319,12 +1348,37 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
       if (!site) return res.status(404).json({ error: 'Site introuvable.' });
     }
     const contrat = await prisma.contratMaintenance.create({
-      data: { clientId: client.id, siteId, titre, periodiciteMois, dureePrevisionnelleMinutes, dateDebut, prochaineEcheance: dateDebut, createdById: req.user!.id },
+      data: { clientId: client.id, siteId, titre, periodiciteMois, dureePrevisionnelleMinutes, dateDebut, prochaineEcheance: dateDebut, ...couverture, createdById: req.user!.id },
       include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
     });
     res.status(201).json(decimalToNumber(contrat));
   } catch (error) {
     res.status(500).json({ error: 'Création du contrat de maintenance impossible.' });
+  }
+});
+
+app.patch('/api/contrats-maintenance/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    if (!['politiqueMainOeuvre', 'politiqueMateriel', 'noteCouverture'].some((champ) => Object.prototype.hasOwnProperty.call(req.body || {}, champ))) return res.status(400).json({ error: 'Aucune politique de couverture à modifier.' });
+    const resultat = await prisma.$transaction(async (tx) => {
+      await verrouillerContratMaintenance(tx, paramId(req));
+      const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
+      if (!contrat) return { erreur: 'NOT_FOUND' as const };
+      if (contrat.statut === 'TERMINE') return { erreur: 'TERMINE' as const };
+      const couverture = lirePolitiqueCouverture(req.body || {}, contrat);
+      if (!couverture) return { erreur: 'INVALIDE' as const };
+      const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: couverture, include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } } });
+      await journaliserContrat(tx, req, 'MODIFICATION_COUVERTURE', maj, contrat);
+      return { contrat: maj };
+    });
+    if ('erreur' in resultat) {
+      if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
+      if (resultat.erreur === 'TERMINE') return res.status(409).json({ error: 'Un contrat clos ne peut plus être modifié.' });
+      return res.status(400).json({ error: 'La politique de couverture est invalide.' });
+    }
+    res.json(decimalToNumber(resultat.contrat));
+  } catch (error) {
+    res.status(500).json({ error: 'Mise à jour de la couverture du contrat impossible.' });
   }
 });
 
@@ -1335,6 +1389,7 @@ app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, asy
     if (!['ACTIF', 'SUSPENDU', 'TERMINE'].includes(statut)) return res.status(400).json({ error: 'Statut de contrat invalide.' });
     if (['SUSPENDU', 'TERMINE'].includes(statut) && motif.length < 3) return res.status(400).json({ error: 'Un motif d’au moins 3 caractères est obligatoire.' });
     const resultat = await prisma.$transaction(async (tx) => {
+      await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
       if (contrat.statut === 'TERMINE') return { erreur: 'TERMINE' as const };
@@ -1359,6 +1414,7 @@ app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, asy
 app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
+      await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findFirst({ where: { id: paramId(req), statut: 'ACTIF' } });
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
       const intervention = await tx.intervention.findFirst({
@@ -1383,6 +1439,7 @@ app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireA
 app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
+      await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findFirst({
         where: { id: paramId(req), statut: 'ACTIF' },
         include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
@@ -1405,6 +1462,11 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
           echeanceContrat: contrat.prochaineEcheance, titre: `Maintenance préventive — ${contrat.titre}`,
           description: `Intervention prévisionnelle issue du contrat. Durée prévue : ${contrat.dureePrevisionnelleMinutes} minutes.`,
           dateSouhaitee: contrat.prochaineEcheance, createdById: req.user!.id,
+          couvertureContrat: {
+            politiqueMainOeuvre: contrat.politiqueMainOeuvre,
+            politiqueMateriel: contrat.politiqueMateriel,
+            noteCouverture: contrat.noteCouverture,
+          },
         },
         include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
       });
@@ -1412,9 +1474,18 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
       return { intervention, creee: true };
     });
     if (!resultat) return res.status(404).json({ error: 'Contrat de maintenance actif introuvable.' });
-    res.status(resultat.creee ? 201 : 200).json(decimalToNumber(resultat.intervention));
+    res.status(resultat.creee ? 201 : 200).json(decimalToNumber(exposerIntervention(resultat.intervention)));
   } catch (error) {
-    if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Une intervention existe déjà pour cette échéance.' });
+    if ((error as { code?: string }).code === 'P2002') {
+      // Une génération concurrente a gagné la contrainte d'idempotence : relire son
+      // instantané plutôt que d'écraser la politique ou de signaler un faux échec.
+      const existante = await prisma.intervention.findFirst({
+        where: { contratMaintenanceId: paramId(req) },
+        orderBy: { createdAt: 'desc' },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
+      });
+      if (existante) return res.status(200).json(decimalToNumber(exposerIntervention(existante)));
+    }
     res.status(500).json({ error: 'Génération de l’intervention prévisionnelle impossible.' });
   }
 });
@@ -1463,7 +1534,7 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
       await journaliserIntervention(tx, req, 'CREATION', cree);
       return cree;
     });
-    res.status(201).json(decimalToNumber(intervention));
+    res.status(201).json(decimalToNumber(exposerIntervention(intervention)));
   } catch (error) {
     console.error('Erreur création intervention SAV', error);
     res.status(500).json({ error: 'Erreur lors de la création de l’intervention.' });
@@ -1486,7 +1557,7 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
       include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true, rapports: { select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } }, signature: { select: { id: true, signataire: true, empreinte: true, accepteLe: true } } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
-    res.json(decimalToNumber(interventions));
+    res.json(decimalToNumber(interventions.map(exposerIntervention)));
   } catch (error) {
     console.error('Erreur liste interventions SAV', error);
     res.status(500).json({ error: 'Erreur lors de la lecture des interventions.' });
