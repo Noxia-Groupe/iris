@@ -88,7 +88,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1999,6 +1999,157 @@ if (!TEST_DATABASE_URL) {
       assert.equal(contrat.body.dureePrevisionnelleMinutes, 120);
     });
 
+    test('enregistre une politique de couverture bornée avec les deux postes explicites', async () => {
+      const note = 'Couverture préventive, hors pièces d’usure.';
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Contrat couverture création', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '09-09-2026',
+        politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: note,
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      assert.deepEqual({
+        politiqueMainOeuvre: contrat.body.politiqueMainOeuvre,
+        politiqueMateriel: contrat.body.politiqueMateriel,
+        noteCouverture: contrat.body.noteCouverture,
+      }, {
+        politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: note,
+      });
+      const journalCreation = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journalCreation.status, 200, JSON.stringify(journalCreation.body));
+      assert.equal(journalCreation.body.length, 1);
+      assert.equal(journalCreation.body[0].action, 'CREATION');
+      assert.equal(journalCreation.body[0].avant, null, 'la création stocke explicitement un état antérieur NULL');
+      assert.equal(journalCreation.body[0].apres.id, contrat.body.id);
+
+      for (const corps of [
+        { politiqueMainOeuvre: 'FORFAIT_TOTAL' },
+        { politiqueMateriel: 'OPTIONNEL' },
+        { noteCouverture: 'x'.repeat(1001) },
+      ]) {
+        const refus = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+          clientId, siteId, titre: 'TEST Contrat couverture invalide', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '09-09-2026',
+          politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', ...corps,
+        });
+        assert.equal(refus.status, 400, `${JSON.stringify(corps)} → ${JSON.stringify(refus.body)}`);
+      }
+    });
+
+    test('réserve la modification de couverture à l’administration et ne crée ni devis ni facture', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Contrat couverture modifiable', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '10-09-2026',
+        politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const conducteur = await prisma.user.create({ data: { email: 'contrat.couverture.technicien@iris.test', name: 'TEST Technicien couverture', role: 'TECHNICIEN' } });
+      const jetonTechnicien = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const factureAvant = await prisma.facture.count({ where: { contratMaintenanceId: contrat.body.id } });
+      const devisAvant = await prisma.devis.count({ where: { clientId } });
+      const politique = { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'Déplacement inclus, consommables hors forfait.' };
+
+      const refus = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${jetonTechnicien}`).send(politique);
+      assert.equal(refus.status, 403, JSON.stringify(refus.body));
+      for (const corps of [{}, { titre: 'Modification hors politique' }]) {
+        const sansPolitique = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send(corps);
+        assert.equal(sansPolitique.status, 400, 'une requête sans champ de couverture est refusée');
+      }
+      const tracesAvantModification = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: contrat.body.id } });
+      assert.equal(tracesAvantModification, 1, 'aucun refus ne crée de journal');
+      const miseAJour = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send(politique);
+      assert.equal(miseAJour.status, 200, JSON.stringify(miseAJour.body));
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, miseAJour.body[cle]])), politique);
+      const journal = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      const modification = journal.body.find((entree) => entree.action === 'MODIFICATION_COUVERTURE');
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, modification.avant[cle]])), {
+        politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: null,
+      });
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, modification.apres[cle]])), politique);
+      const tracesAvantRefus = journal.body.length;
+      assert.equal(await prisma.facture.count({ where: { contratMaintenanceId: contrat.body.id } }), factureAvant, 'la politique ne crée aucune facture');
+      assert.equal(await prisma.devis.count({ where: { clientId } }), devisAvant, 'la politique ne crée aucun devis');
+
+      const cloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'Fin du contrat de test' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      const mutationApresCloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({ noteCouverture: 'Tentative interdite' });
+      assert.equal(mutationApresCloture.status, 409, JSON.stringify(mutationApresCloture.body));
+      const journalApresRefus = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journalApresRefus.body.length, tracesAvantRefus + 1, 'seule la clôture autorisée est tracée ; le refus ne crée aucune trace');
+      const generationApresCloture = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generationApresCloture.status, 404, JSON.stringify(generationApresCloture.body));
+    });
+
+    test('fige la couverture dans l’intervention générée et la rend lisible au technicien affecté', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Contrat instantané couverture', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '11-09-2026',
+        politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'Main-d’œuvre incluse, matériel refacturable.',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const generation = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generation.status, 201, JSON.stringify(generation.body));
+      assert.deepEqual(generation.body.couvertureContrat, {
+        politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'Main-d’œuvre incluse, matériel refacturable.',
+      });
+
+      const technicien = await prisma.user.create({ data: { email: 'contrat.couverture.lecteur@iris.test', name: 'TEST Technicien lecteur couverture', role: 'TECHNICIEN' } });
+      const intervenant = await prisma.intervenant.create({ data: { userId: technicien.id, nom: 'TEST Intervenant couverture', role: 'TECHNICIEN', tauxHoraireCharge: 42 } });
+      await prisma.interventionAffectation.create({ data: { interventionId: generation.body.id, intervenantId: intervenant.id } });
+      const jetonTechnicien = jwt.sign({ id: technicien.id }, process.env.JWT_SECRET);
+      const lectureTechnicien = await request(app).get('/api/interventions').set('Authorization', `Bearer ${jetonTechnicien}`);
+      assert.equal(lectureTechnicien.status, 200, JSON.stringify(lectureTechnicien.body));
+      const interventionTechnicien = lectureTechnicien.body.find((intervention) => intervention.id === generation.body.id);
+      assert.deepEqual(interventionTechnicien?.couvertureContrat, generation.body.couvertureContrat);
+
+      const mutation = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({
+        politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: 'Nouvelle politique pour les prochaines échéances.',
+      });
+      assert.equal(mutation.status, 200, JSON.stringify(mutation.body));
+      const relue = await request(app).get('/api/interventions').set('Authorization', `Bearer ${session}`);
+      assert.equal(relue.status, 200, JSON.stringify(relue.body));
+      const interventionRelue = relue.body.find((intervention) => intervention.id === generation.body.id);
+      assert.deepEqual(interventionRelue?.couvertureContrat, generation.body.couvertureContrat, 'une modification ultérieure du contrat ne réécrit pas l’instantané pour l’encadrement autorisé');
+    });
+
+    test('la base refuse toute donnée commerciale ou note structurée dans un instantané de couverture', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Contrat contrainte JSON', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '12-09-2026',
+        politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const generation = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generation.status, 201, JSON.stringify(generation.body));
+
+      for (const [index, couvertureInvalide] of [
+        { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS', montant: 1 },
+        { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS', noteCouverture: { texte: 'pas une chaîne' } },
+      ].entries()) {
+        await assert.rejects(() => prisma.$executeRawUnsafe(
+          'INSERT INTO "Intervention" ("id", "reference", "clientId", "contratMaintenanceId", "titre", "couvertureContrat", "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5::jsonb, now(), now())',
+          `TEST-CONTRAINTE-COUVERTURE-${Date.now()}-${index}`, clientId, contrat.body.id, 'TEST Instantané SQL invalide', JSON.stringify(couvertureInvalide),
+        ), `PostgreSQL doit refuser ${JSON.stringify(couvertureInvalide)}`);
+      }
+      await assert.rejects(() => prisma.$executeRawUnsafe(
+        'INSERT INTO "Intervention" ("id", "reference", "clientId", "titre", "couvertureContrat", "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, $1, $2, $3, $4::jsonb, now(), now())',
+        `TEST-CONTRAINTE-COUVERTURE-SANS-CONTRAT-${Date.now()}`, clientId, 'TEST Instantané SQL sans contrat', JSON.stringify({ politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'INCLUS' }),
+      ), 'PostgreSQL doit refuser une couverture sans contrat de maintenance');
+    });
+
+    test('la base interdit toute réécriture Prisma de l’instantané de couverture', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Contrat snapshot immuable', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '13-09-2026',
+        politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const generation = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generation.status, 201, JSON.stringify(generation.body));
+      await assert.rejects(() => prisma.$executeRawUnsafe(
+        'UPDATE "Intervention" SET "couvertureContrat" = $1::jsonb WHERE "id" = $2',
+        JSON.stringify({ politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS' }), generation.body.id,
+      ), 'l’instantané ne doit pas être réécrivable par SQL direct');
+      await assert.rejects(() => prisma.intervention.update({
+        where: { id: generation.body.id },
+        data: { couvertureContrat: { politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS' } },
+      }), 'l’instantané ne doit être modifiable ni via Prisma ni par SQL direct');
+    });
+
     test('réserve toutes les routes contrat à l’administration et ferme les contournements', async () => {
       const conducteur = await prisma.user.create({ data: { email: 'contrat.conducteur@iris.test', name: 'TEST Conducteur contrat', role: 'CONDUCTEUR_TRAVAUX' } });
       const sessionConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
@@ -3055,6 +3206,39 @@ if (!TEST_DATABASE_URL) {
       const second = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(second.status, 200, JSON.stringify(second.body));
       assert.equal(second.body.id, premier.body.id);
+    });
+
+    test('ne retourne jamais une intervention d’échéance antérieure après un P2002 de génération', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST P2002 fallback', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2025',
+      });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const echeanceCourante = new Date('2026-01-01T00:00:00.000Z');
+      await prisma.contratMaintenance.update({ where: { id: contrat.body.id }, data: { prochaineEcheance: echeanceCourante } });
+      const interventionAnterieure = await prisma.intervention.create({ data: {
+        reference: `TEST-I-P2002-ANTERIEURE-${Date.now()}`, clientId, siteId, contratMaintenanceId: contrat.body.id,
+        echeanceContrat: new Date('2025-01-01T00:00:00.000Z'), titre: 'TEST Intervention échéance antérieure',
+      } });
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_forcer_p2002_generation_contrat"()
+        RETURNS TRIGGER AS $$
+        BEGIN
+          IF NEW."titre" = 'Maintenance préventive — TEST P2002 fallback' THEN
+            RAISE EXCEPTION 'collision de test' USING ERRCODE = 'unique_violation';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_forcer_p2002_generation_contrat"
+        BEFORE INSERT ON "Intervention"
+        FOR EACH ROW EXECUTE FUNCTION "test_forcer_p2002_generation_contrat"();`);
+      try {
+        const generation = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+        assert.equal(generation.status, 500, JSON.stringify(generation.body));
+        assert.notEqual(generation.body.id, interventionAnterieure.id, 'le fallback ne doit pas divulguer l’intervention de l’échéance antérieure');
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_forcer_p2002_generation_contrat" ON "Intervention";');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_forcer_p2002_generation_contrat"();');
+      }
     });
 
     test('clôture une échéance avant de préparer la suivante', async () => {

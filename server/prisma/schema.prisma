@@ -665,6 +665,10 @@ model ContratMaintenance {
   dureePrevisionnelleMinutes  Int
   dateDebut                   DateTime
   prochaineEcheance           DateTime
+  // Politique qualitative du contrat : aucun prix, taux ou mécanisme de facturation.
+  politiqueMainOeuvre         String      @default("HORS_FORFAIT") // INCLUSE | HORS_FORFAIT
+  politiqueMateriel           String      @default("HORS_FORFAIT") // INCLUS | HORS_FORFAIT
+  noteCouverture              String?
   createdById                 String?
   createdAt                   DateTime    @default(now())
   updatedAt                   DateTime    @updatedAt
@@ -698,6 +702,9 @@ model Intervention {
   contratMaintenanceId String?
   contratMaintenance   ContratMaintenance? @relation(fields: [contratMaintenanceId], references: [id], onDelete: Restrict)
   echeanceContrat      DateTime?
+  // Instantané de la politique du contrat lors de la génération. Absent hors contrat,
+  // et jamais réécrit lors d'une modification future du contrat.
+  couvertureContrat    Json?
   titre          String
   description    String?
   priorite       String   @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
