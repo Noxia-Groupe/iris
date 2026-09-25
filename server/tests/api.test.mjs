@@ -2052,7 +2052,7 @@ if (!TEST_DATABASE_URL) {
       const jetonTechnicien = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
       const factureAvant = await prisma.facture.count({ where: { contratMaintenanceId: contrat.body.id } });
       const devisAvant = await prisma.devis.count({ where: { clientId } });
-      const politique = { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'Déplacement inclus, consommables hors forfait.' };
+      const politique = { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'Déplacement inclus, consommables hors forfait.', motif: 'Renégociation annuelle de la couverture' };
 
       const refus = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${jetonTechnicien}`).send(politique);
       assert.equal(refus.status, 403, JSON.stringify(refus.body));
@@ -2064,26 +2064,116 @@ if (!TEST_DATABASE_URL) {
       assert.equal(tracesAvantModification, 1, 'aucun refus ne crée de journal');
       const miseAJour = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send(politique);
       assert.equal(miseAJour.status, 200, JSON.stringify(miseAJour.body));
-      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, miseAJour.body[cle]])), politique);
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).filter((cle) => cle !== 'motif').map((cle) => [cle, miseAJour.body[cle]])), {
+        politiqueMainOeuvre: politique.politiqueMainOeuvre, politiqueMateriel: politique.politiqueMateriel, noteCouverture: politique.noteCouverture,
+      });
       const journal = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
       assert.equal(journal.status, 200, JSON.stringify(journal.body));
       const modification = journal.body.find((entree) => entree.action === 'MODIFICATION_COUVERTURE');
-      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, modification.avant[cle]])), {
+      assert.equal(modification.motif, politique.motif);
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).filter((cle) => cle !== 'motif').map((cle) => [cle, modification.avant[cle]])), {
         politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: null,
       });
-      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, modification.apres[cle]])), politique);
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).filter((cle) => cle !== 'motif').map((cle) => [cle, modification.apres[cle]])), {
+        politiqueMainOeuvre: politique.politiqueMainOeuvre, politiqueMateriel: politique.politiqueMateriel, noteCouverture: politique.noteCouverture,
+      });
       const tracesAvantRefus = journal.body.length;
       assert.equal(await prisma.facture.count({ where: { contratMaintenanceId: contrat.body.id } }), factureAvant, 'la politique ne crée aucune facture');
       assert.equal(await prisma.devis.count({ where: { clientId } }), devisAvant, 'la politique ne crée aucun devis');
 
       const cloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'Fin du contrat de test' });
       assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
-      const mutationApresCloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({ noteCouverture: 'Tentative interdite' });
+      const mutationApresCloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({ noteCouverture: 'Tentative interdite', motif: 'Contrat déjà clos' });
       assert.equal(mutationApresCloture.status, 409, JSON.stringify(mutationApresCloture.body));
       const journalApresRefus = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
       assert.equal(journalApresRefus.body.length, tracesAvantRefus + 1, 'seule la clôture autorisée est tracée ; le refus ne crée aucune trace');
       const generationApresCloture = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(generationApresCloture.status, 404, JSON.stringify(generationApresCloture.body));
+    });
+
+    test('refuse les motifs invalides de couverture sans modifier le contrat ni son journal', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Motifs couverture', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      for (const motif of [undefined, null, 123, '', '  ab  ', 'x'.repeat(501), '🔧'.repeat(501), 'Avant\naprès', 'Avant\taprès', 'Avant\u007faprès', 'Avant\u0085après']) {
+        const refus = await request(app).patch(`/api/contrats-maintenance/${id}`).set('Authorization', `Bearer ${session}`)
+          .send({ politiqueMainOeuvre: 'INCLUSE', ...(motif === undefined ? {} : { motif }) });
+        assert.equal(refus.status, 400, `${JSON.stringify(motif)} → ${JSON.stringify(refus.body)}`);
+      }
+      const journal = await request(app).get(`/api/contrats-maintenance/${id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.body.length, 1);
+      assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id } })).politiqueMainOeuvre, creation.body.politiqueMainOeuvre);
+      const accepte = await request(app).patch(`/api/contrats-maintenance/${id}`).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMainOeuvre: 'INCLUSE', motif: '  🔧évolution  ' });
+      assert.equal(accepte.status, 200, JSON.stringify(accepte.body));
+      const trace = await request(app).get(`/api/contrats-maintenance/${id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(trace.body[0].motif, '🔧évolution');
+      const borneUnicode = await request(app).patch(`/api/contrats-maintenance/${id}`).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMateriel: 'INCLUS', motif: '🔧'.repeat(500) });
+      assert.equal(borneUnicode.status, 200, JSON.stringify(borneUnicode.body));
+    });
+
+    test('refuse la couverture inchangée et suspendue, puis autorise la modification après réactivation motivée', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Contrat suspendu couverture', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const couverture = `/api/contrats-maintenance/${id}`;
+      const statut = `${couverture}/statut`;
+      const inchangée = await request(app).patch(couverture).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMainOeuvre: creation.body.politiqueMainOeuvre, noteCouverture: '  ', motif: 'Contrôle sans changement' });
+      assert.equal(inchangée.status, 409, JSON.stringify(inchangée.body));
+      const suspension = await request(app).patch(statut).set('Authorization', `Bearer ${session}`).send({ statut: 'SUSPENDU', motif: 'Pause contractuelle' });
+      assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+      const refus = await request(app).patch(couverture).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMainOeuvre: 'INCLUSE', motif: 'Changement durant la pause' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /réactiv/i);
+      assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id } })).politiqueMainOeuvre, creation.body.politiqueMainOeuvre);
+      const avant = await request(app).get(`${couverture}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.deepEqual(avant.body.map((entree) => entree.action).sort(), ['CREATION', 'SUSPENSION']);
+      const reactivation = await request(app).patch(statut).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF', motif: 'Reprise du service' });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      const modification = await request(app).patch(couverture).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMainOeuvre: 'INCLUSE', motif: 'Nouvelle couverture applicable' });
+      assert.equal(modification.status, 200, JSON.stringify(modification.body));
+      const journal = await request(app).get(`${couverture}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.body.find((entree) => entree.action === 'REACTIVATION')?.motif, 'Reprise du service');
+      assert.equal(journal.body.find((entree) => entree.action === 'MODIFICATION_COUVERTURE')?.motif, 'Nouvelle couverture applicable');
+      assert.equal(journal.body.length, 4, 'aucun refus ne crée de trace');
+    });
+
+    test('impose le même motif borné sans contrôles à chaque transition de statut', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Motifs statut', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const url = `/api/contrats-maintenance/${id}/statut`;
+      const refuser = async (cible) => {
+        for (const motif of [undefined, null, '', ' ab ', 'x'.repeat(501), '🔧'.repeat(501), 'Avant\naprès', 'Avant\u0000après', 'Avant\u007faprès', 'Avant\u0085après']) {
+          const refus = await request(app).patch(url).set('Authorization', `Bearer ${session}`)
+            .send({ statut: cible, ...(motif === undefined ? {} : { motif }) });
+          assert.equal(refus.status, 400, `${cible} ${JSON.stringify(motif)} → ${JSON.stringify(refus.body)}`);
+        }
+      };
+      await refuser('SUSPENDU');
+      const suspension = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ statut: 'SUSPENDU', motif: '  Pause demandée  ' });
+      assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+      await refuser('ACTIF');
+      const reactivation = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF', motif: '🔧évolution' });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      await refuser('TERMINE');
+      const cloture = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'x'.repeat(500) });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      const journal = await request(app).get(`/api/contrats-maintenance/${id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.body.length, 4);
+      assert.equal(journal.body.find((entree) => entree.action === 'SUSPENSION')?.motif, 'Pause demandée');
+      assert.equal(journal.body.find((entree) => entree.action === 'REACTIVATION')?.motif, '🔧évolution');
+      assert.equal(journal.body.find((entree) => entree.action === 'CLOTURE')?.motif, 'x'.repeat(500));
     });
 
     test('fige la couverture dans l’intervention générée et la rend lisible au technicien affecté', async () => {
@@ -2108,7 +2198,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(interventionTechnicien?.couvertureContrat, generation.body.couvertureContrat);
 
       const mutation = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({
-        politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: 'Nouvelle politique pour les prochaines échéances.',
+        politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: 'Nouvelle politique pour les prochaines échéances.', motif: 'Evolution pour les prochaines échéances',
       });
       assert.equal(mutation.status, 200, JSON.stringify(mutation.body));
       const relue = await request(app).get('/api/interventions').set('Authorization', `Bearer ${session}`);
@@ -3579,12 +3669,12 @@ if (!TEST_DATABASE_URL) {
       assert.equal(sansMotif.status, 400, JSON.stringify(sansMotif.body));
       const generationRefusee = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(generationRefusee.status, 404, JSON.stringify(generationRefusee.body));
-      const reactivation = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
+      const reactivation = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF', motif: 'Reprise après travaux' });
       assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
       assert.equal(reactivation.body.statut, 'ACTIF');
       const cloture = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'Fin contractuelle confirmée' });
       assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
-      const repriseInterdite = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
+      const repriseInterdite = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF', motif: 'Contrat terminé définitivement' });
       assert.equal(repriseInterdite.status, 409, JSON.stringify(repriseInterdite.body));
     });
   });
