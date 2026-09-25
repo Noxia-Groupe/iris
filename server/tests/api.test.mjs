@@ -97,7 +97,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.admin@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -2440,6 +2440,32 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.journalCompteComptable.update({ where: { id: journal.body[0].id }, data: { motif: 'Altéré' } }), /Journal comptable immuable/);
       await assert.rejects(prisma.journalCompteComptable.delete({ where: { id: journal.body[0].id } }), /Journal comptable immuable/);
       assert.equal((await prisma.journalCompteComptable.count({ where: { compteId: compte.id } })), 2);
+    });
+
+    test('les CHECK SQL refusent transitions et motifs incohérents dans le journal comptable', async () => {
+      const auteur = await prisma.user.create({ data: { email: 'journal.comptable.sql@iris.test', name: 'TEST Journal SQL', role: 'ADMIN' } });
+      const compte = await prisma.compteComptable.create({ data: { code: `880${String(Date.now()).slice(-9)}`, libelle: 'Contrôles SQL', nature: 'CHARGE' } });
+      for (const { id, action, avant, apres, motif } of [
+        { id: 'test-journal-transition-invalide', action: 'DESACTIVATION', avant: false, apres: false, motif: 'Correction métier' },
+        { id: 'test-journal-motif-vide', action: 'DESACTIVATION', avant: true, apres: false, motif: '' },
+        { id: 'test-journal-motif-controle', action: 'DESACTIVATION', avant: true, apres: false, motif: 'Motif\ninvalide' },
+      ]) {
+        await assert.rejects(prisma.$executeRaw`INSERT INTO "JournalCompteComptable" ("id", "compteId", "auteurId", "auteurNom", "action", "avant", "apres", "motif") VALUES (${id}, ${compte.id}, ${auteur.id}, ${auteur.name}, ${action}, ${avant}, ${apres}, ${motif})`);
+      }
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+    });
+
+    test('la suppression de l’auteur d’un journal comptable explique la preuve à conserver', async () => {
+      const auteur = await prisma.user.create({ data: { email: 'journal.comptable.auteur@iris.test', name: 'TEST Auteur comptable', role: 'ADMIN' } });
+      const compte = await prisma.compteComptable.create({ data: { code: `879${String(Date.now()).slice(-9)}`, libelle: 'Compte auteur protégé', nature: 'CHARGE' } });
+      const token = jwt.sign({ id: auteur.id }, process.env.JWT_SECRET);
+      assert.equal((await request(app).patch(`/api/comptabilite/comptes/${compte.id}/activation`).set('Authorization', `Bearer ${token}`).send({ actif: false, motif: 'Fin utilisation' })).status, 200);
+      const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(suppression.status, 409, JSON.stringify(suppression.body));
+      assert.match(suppression.body.error, /preuve de traçabilité/);
+      assert.match(suppression.body.error, /Désactivez-le plutôt/);
+      assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
+      assert.equal(await prisma.journalCompteComptable.count({ where: { auteurId: auteur.id } }), 1);
     });
 
     test('une écriture du journal refusée par la base annule aussi le statut', async () => {

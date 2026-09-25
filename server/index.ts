@@ -2635,7 +2635,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     }
     // Les clés étrangères RESTRICT restent le verrou contre une course ; ce contrôle rend le refus
     // lisible à l’administrateur lorsqu’un compte porte une preuve de traçabilité métier.
-    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie, coutsHeuresCrees, coutsAchatsCrees, coutsHeuresArchives, coutsAchatsArchives] = await Promise.all([
+    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie, journauxComptables, coutsHeuresCrees, coutsAchatsCrees, coutsHeuresArchives, coutsAchatsArchives] = await Promise.all([
       prisma.achatReel.count({ where: { createdById: id } }),
       prisma.achatReel.count({ where: { updatedById: id } }),
       prisma.achatReel.count({ where: { archivedById: id } }),
@@ -2643,12 +2643,13 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       prisma.pointageHeure.count({ where: { updatedById: id } }),
       prisma.pointageHeure.count({ where: { archivedById: id } }),
       prisma.journalSaisieChantier.count({ where: { auteurId: id } }),
+      prisma.journalCompteComptable.count({ where: { auteurId: id } }),
       prisma.coutInterventionHeure.count({ where: { createdById: id } }),
       prisma.coutInterventionAchat.count({ where: { createdById: id } }),
       prisma.coutInterventionHeure.count({ where: { archivedById: id } }),
       prisma.coutInterventionAchat.count({ where: { archivedById: id } }),
     ]);
-    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives > 0) {
+    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + journauxComptables + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives > 0) {
       return res.status(409).json({ error: 'Ce compte est l’auteur de données tracées : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
     await prisma.$transaction([
