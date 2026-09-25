@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileUp, Plus, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../api';
+import { parserPlanComptableCsv } from '../lib/planComptableCsv';
 type Compte = { id: string; code: string; libelle: string; nature: string; actif: boolean };
 type Regle = { cle: string; compteId?: string | null; journal?: string | null; compte?: Compte | null };
 type RegleTva = { taux: number; compteId: string; compte?: Compte | null };
@@ -11,7 +12,16 @@ export default function Comptabilite() {
  const [comptes, setComptes] = useState<Compte[]>([]), [regles,setRegles]=useState<Regle[]>([]), [reglesTva,setReglesTva]=useState<RegleTva[]>([]), [erreur,setErreur]=useState(''),[succes,setSucces]=useState('');
  const charger=async()=>{setErreur('');const r=await apiFetch('/comptabilite');const d=await r.json();if(!r.ok)return setErreur(d.error||'Chargement impossible.');setComptes(d.comptes||[]);setRegles(d.regles||[]);setReglesTva(d.reglesTva||[])}; useEffect(()=>{void charger()},[]);
  const creer=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const formulaire=e.currentTarget;const b=Object.fromEntries(new FormData(formulaire));const r=await apiFetch('/comptabilite/comptes',{method:'POST',body:JSON.stringify(b)}),d=await r.json();if(!r.ok)return setErreur(d.error||'Création impossible.');setSucces('Compte ajouté.');formulaire.reset();await charger()};
- const importer=async(e:React.ChangeEvent<HTMLInputElement>)=>{const f=e.target.files?.[0];if(!f)return;setErreur('');setSucces('');const texte=await f.text();const lignes=texte.split(/\r?\n/).filter(Boolean).map(l=>{const [code,libelle,nature]=l.split(/[;,]/).map(x=>x.trim());return {code,libelle,nature}}).filter((l,i)=>i>0||!/^code$/i.test(l.code));const r=await apiFetch('/comptabilite/importer',{method:'POST',body:JSON.stringify({lignes})}),d=await r.json();if(!r.ok)return setErreur(d.erreurs?.map((x:{ligne:number;erreur:string})=>`Ligne ${x.ligne} : ${x.erreur}`).join(' · ')||d.error||'Import impossible.');setSucces(`${d.importes} compte(s) importé(s), ${d.ignores} déjà présent(s).`);e.target.value='';await charger()};
+ const importer=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+  const input=e.currentTarget, f=input.files?.[0];if(!f)return;
+  setErreur('');setSucces('');
+  try {
+   const lignes=parserPlanComptableCsv(await f.text());
+   const r=await apiFetch('/comptabilite/importer',{method:'POST',body:JSON.stringify({lignes})}),d=await r.json();
+   if(!r.ok){setErreur(d.erreurs?.map((x:{ligne:number;erreur:string})=>`Ligne ${x.ligne} : ${x.erreur}`).join(' · ')||d.error||'Import impossible.');return}
+   setSucces(`${d.importes} compte(s) importé(s), ${d.ignores} déjà présent(s).`);await charger();
+  } catch (error) {setErreur(error instanceof Error?error.message:'Lecture du fichier CSV impossible.')} finally {input.value=''}
+ };
  const sauver=async(cle:string, value:string)=>{setErreur('');const body=cle==='JOURNAL_VENTES'?{journal:value}:{compteId:value};const r=await apiFetch(`/comptabilite/regles/${cle}`,{method:'PUT',body:JSON.stringify(body)}),d=await r.json();if(!r.ok)return setErreur(d.error||'Enregistrement impossible.');setSucces(`${libelles[cle]} enregistré.`);await charger()};
  const sauverTva=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const formulaire=e.currentTarget;const b=Object.fromEntries(new FormData(formulaire));const r=await apiFetch(`/comptabilite/tva/${b.taux}`,{method:'PUT',body:JSON.stringify({compteId:b.compteId})}),d=await r.json();if(!r.ok)return setErreur(d.error||'Règle TVA impossible.');setSucces(`TVA ${b.taux}% enregistrée.`);formulaire.reset();await charger()};
  const regle=(cle:string)=>regles.find(r=>r.cle===cle);
