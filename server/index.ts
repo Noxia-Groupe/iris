@@ -729,7 +729,7 @@ function motifContratValide(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const motif = value.trim();
   const longueur = [...motif].length;
-  return longueur >= 3 && longueur <= 500 && !/[\u0000-\u001f\u007f-\u009f]/u.test(motif) ? motif : null;
+  return longueur >= 3 && longueur <= 500 && !/[\p{Cc}\p{Cf}]/u.test(motif) ? motif : null;
 }
 function lirePolitiqueCouverture(body: Record<string, unknown>, defaults?: { politiqueMainOeuvre: string; politiqueMateriel: string; noteCouverture: string | null }) {
   const politiqueMainOeuvre = body.politiqueMainOeuvre === undefined ? defaults?.politiqueMainOeuvre ?? 'HORS_FORFAIT' : String(body.politiqueMainOeuvre);
@@ -1486,6 +1486,8 @@ app.patch('/api/contrats-maintenance/:id', requireAuth, requireAdmin, async (req
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
       if (contrat.statut === 'TERMINE') return { erreur: 'TERMINE' as const };
       if (contrat.statut !== 'ACTIF') return { erreur: 'SUSPENDU' as const };
+      // Le verrou précède la relecture : deux éditeurs ne peuvent pas écraser la version de l'autre.
+      if (req.body?.expectedUpdatedAt !== undefined && req.body.expectedUpdatedAt !== contrat.updatedAt.toISOString()) return { erreur: 'PERIME' as const };
       const couverture = lirePolitiqueCouverture(req.body || {}, contrat);
       if (!couverture) return { erreur: 'INVALIDE' as const };
       if (couverture.politiqueMainOeuvre === contrat.politiqueMainOeuvre && couverture.politiqueMateriel === contrat.politiqueMateriel && couverture.noteCouverture === contrat.noteCouverture) return { erreur: 'INCHANGEE' as const };
@@ -1497,6 +1499,7 @@ app.patch('/api/contrats-maintenance/:id', requireAuth, requireAdmin, async (req
       if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
       if (resultat.erreur === 'TERMINE') return res.status(409).json({ error: 'Un contrat clos ne peut plus être modifié.' });
       if (resultat.erreur === 'SUSPENDU') return res.status(409).json({ error: 'Réactivez le contrat avant de modifier sa couverture.' });
+      if (resultat.erreur === 'PERIME') return res.status(409).json({ error: 'Le contrat a été modifié depuis l’ouverture de l’éditeur : actualisez la liste.' });
       if (resultat.erreur === 'INCHANGEE') return res.status(409).json({ error: 'La couverture est inchangée.' });
       return res.status(400).json({ error: 'La politique de couverture est invalide.' });
     }

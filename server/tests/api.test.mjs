@@ -2097,7 +2097,7 @@ if (!TEST_DATABASE_URL) {
       });
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
       const id = creation.body.id;
-      for (const motif of [undefined, null, 123, '', '  ab  ', 'x'.repeat(501), '🔧'.repeat(501), 'Avant\naprès', 'Avant\taprès', 'Avant\u007faprès', 'Avant\u0085après']) {
+      for (const motif of [undefined, null, 123, '', '  ab  ', 'x'.repeat(501), '🔧'.repeat(501), 'Avant\naprès', 'Avant\taprès', 'Avant\u007faprès', 'Avant\u0085après', 'Avant\u200baprès', 'Avant\u202eaprès']) {
         const refus = await request(app).patch(`/api/contrats-maintenance/${id}`).set('Authorization', `Bearer ${session}`)
           .send({ politiqueMainOeuvre: 'INCLUSE', ...(motif === undefined ? {} : { motif }) });
         assert.equal(refus.status, 400, `${JSON.stringify(motif)} → ${JSON.stringify(refus.body)}`);
@@ -2113,6 +2113,25 @@ if (!TEST_DATABASE_URL) {
       const borneUnicode = await request(app).patch(`/api/contrats-maintenance/${id}`).set('Authorization', `Bearer ${session}`)
         .send({ politiqueMateriel: 'INCLUS', motif: '🔧'.repeat(500) });
       assert.equal(borneUnicode.status, 200, JSON.stringify(borneUnicode.body));
+    });
+
+    test('refuse la version périmée après une modification concurrente sans écraser ni journaliser', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Concurrence couverture', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const url = `/api/contrats-maintenance/${creation.body.id}`;
+      const version = creation.body.updatedAt;
+      const premier = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ politiqueMainOeuvre: 'INCLUSE', motif: 'Premier changement', expectedUpdatedAt: version });
+      assert.equal(premier.status, 200, JSON.stringify(premier.body));
+      assert.notEqual(premier.body.updatedAt, version);
+      const perime = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ politiqueMateriel: 'INCLUS', motif: 'Éditeur périmé', expectedUpdatedAt: version });
+      assert.equal(perime.status, 409, JSON.stringify(perime.body));
+      assert.match(perime.body.error, /actualis|modifi|périm/i);
+      const relu = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: creation.body.id } });
+      assert.equal(relu.politiqueMainOeuvre, 'INCLUSE');
+      assert.equal(relu.politiqueMateriel, 'HORS_FORFAIT');
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: creation.body.id } }), 2);
     });
 
     test('refuse la couverture inchangée et suspendue, puis autorise la modification après réactivation motivée', async () => {
@@ -2154,7 +2173,7 @@ if (!TEST_DATABASE_URL) {
       const id = creation.body.id;
       const url = `/api/contrats-maintenance/${id}/statut`;
       const refuser = async (cible) => {
-        for (const motif of [undefined, null, '', ' ab ', 'x'.repeat(501), '🔧'.repeat(501), 'Avant\naprès', 'Avant\u0000après', 'Avant\u007faprès', 'Avant\u0085après']) {
+        for (const motif of [undefined, null, '', ' ab ', 'x'.repeat(501), '🔧'.repeat(501), 'Avant\naprès', 'Avant\u0000après', 'Avant\u007faprès', 'Avant\u0085après', 'Avant\u200baprès', 'Avant\u202eaprès']) {
           const refus = await request(app).patch(url).set('Authorization', `Bearer ${session}`)
             .send({ statut: cible, ...(motif === undefined ? {} : { motif }) });
           assert.equal(refus.status, 400, `${cible} ${JSON.stringify(motif)} → ${JSON.stringify(refus.body)}`);
