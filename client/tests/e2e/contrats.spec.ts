@@ -62,10 +62,13 @@ test.describe('Contrats de maintenance', () => {
     await editeur.getByRole('button', { name: 'Enregistrer la couverture' }).click();
     await expect(page.getByText('Couverture contractuelle mise à jour pour les prochaines interventions.')).toBeVisible();
 
+    await carte.getByRole('button', { name: 'Modifier la couverture' }).click();
+    await expect(editeur).toBeVisible();
     page.once('dialog', (dialog) => dialog.accept('Pause temporaire'));
     await carte.getByRole('button', { name: 'Suspendre' }).click();
     await expect(carte.getByText('Suspendu', { exact: true })).toBeVisible();
     await expect(carte.getByRole('button', { name: 'Modifier la couverture' })).toHaveCount(0);
+    await expect(editeur).toHaveCount(0);
     const contrat = (await (await apiAdmin.get('/contrats-maintenance')).json() as Array<{ id: string; titre: string }>).find((item) => item.titre === titre);
     expect(contrat).toBeTruthy();
     const avant = await apiAdmin.get(`/contrats-maintenance/${contrat!.id}/journal-saisies`);
