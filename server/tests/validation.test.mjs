@@ -23,8 +23,11 @@ test('date demandée : défaut selon le jour civil entreprise à minuit et forma
   const now = new Date('2026-02-28T23:30:00.000Z');
   assert.equal(dateDemandeCurative(undefined, 'Pacific/Wallis', now), '2026-03-01T00:00:00.000Z');
   assert.equal(dateDemandeCurative('28-02-2026', 'Pacific/Wallis', now), '2026-02-28T00:00:00.000Z');
-  // À 13 h UTC Wallis est déjà au 1er mars, Paris est encore au 28 février.
-  assert.equal(dateDemandeCurative('01-03-2026', 'Europe/Paris', new Date('2026-02-28T13:00:00.000Z')), null);
+  // À 13 h UTC Wallis est déjà au 1er mars, Paris et UTC sont encore au 28 février :
+  // un repli silencieux sur Paris/UTC doit refuser à tort la date de Wallis.
+  const instantDiscriminant = new Date('2026-02-28T13:00:00.000Z');
+  assert.equal(dateDemandeCurative('01-03-2026', 'Pacific/Wallis', instantDiscriminant), '2026-03-01T00:00:00.000Z');
+  assert.equal(dateDemandeCurative('01-03-2026', 'Europe/Paris', instantDiscriminant), null);
   for (const value of ['2026-02-28', '2026-02-28T00:00:00Z', '29-02-2026', ' 28-02-2026', '', null]) {
     assert.equal(dateDemandeCurative(value, 'Pacific/Wallis', now), null);
   }

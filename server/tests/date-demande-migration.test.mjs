@@ -46,16 +46,37 @@ test('migration date demande : historique nullable préservé, nouveaux rattache
     const contrat = randomUUID();
     const curative = randomUUID();
     const contractuelle = randomUUID();
+    const autreClient = randomUUID();
+    const historiqueIncoherent = randomUUID();
     await db.query('INSERT INTO "Client" (id, "raisonSociale", "updatedAt") VALUES ($1, $2, now())', [client, 'TEST date historique']);
     await db.query('INSERT INTO "ContratMaintenance" (id, "clientId", titre, "periodiciteMois", "dureePrevisionnelleMinutes", "dateDebut", "prochaineEcheance", "updatedAt") VALUES ($1, $2, $3, 12, 60, $4, $4, now())', [contrat, client, 'TEST contrat historique', '2025-01-01']);
     await db.query('INSERT INTO "Intervention" (id, reference, "clientId", titre, "updatedAt") VALUES ($1, $2, $3, $4, now())', [curative, `TEST-${curative}`, client, 'Historique libre']);
     await db.query('INSERT INTO "Intervention" (id, reference, "clientId", titre, "contratMaintenanceId", "updatedAt") VALUES ($1, $2, $3, $4, $5, now())', [contractuelle, `TEST-${contractuelle}`, client, 'Historique contractuel', contrat]);
+    await db.query('INSERT INTO "Client" (id, "raisonSociale", "updatedAt") VALUES ($1, $2, now())', [autreClient, 'TEST autre client']);
+    // La migration ne répare pas implicitement les données historiques incohérentes.
+    await db.query('INSERT INTO "Intervention" (id, reference, "clientId", titre, "contratMaintenanceId", "updatedAt") VALUES ($1, $2, $3, $4, $5, now())', [historiqueIncoherent, `TEST-${historiqueIncoherent}`, autreClient, 'Historique incohérent', contrat]);
     cpSync(join(prismaDir, 'migrations', migration), join(migrations, migration), { recursive: true });
     deploy();
     const rows = await db.query('SELECT id, "dateDemande" FROM "Intervention" WHERE id = ANY($1::text[]) ORDER BY id', [[curative, contractuelle]]);
     assert.equal(rows.rowCount, 2);
     assert.ok(rows.rows.every(({ dateDemande }) => dateDemande === null), 'aucune date de réception inventée');
     await db.query('UPDATE "Intervention" SET statut = $1 WHERE id = $2', ['PLANIFIEE', contractuelle]);
+    await db.query('UPDATE "Intervention" SET statut = $1 WHERE id = $2', ['PLANIFIEE', historiqueIncoherent]);
+    assert.equal((await db.query('SELECT "clientId" FROM "Intervention" WHERE id = $1', [historiqueIncoherent])).rows[0].clientId, autreClient);
+    const insertion = 'INSERT INTO "Intervention" (id, reference, "clientId", titre, "contratMaintenanceId", "dateDemande", "updatedAt") VALUES ($1, $2, $3, $4, $5, $6, now())';
+    const nouvelle = randomUUID();
+    await db.query(insertion, [nouvelle, `TEST-${nouvelle}`, client, 'Même client', contrat, '2025-01-01']);
+    assert.equal((await db.query('SELECT "clientId" FROM "Intervention" WHERE id = $1', [nouvelle])).rows[0].clientId, client);
+    const etrangere = randomUUID();
+    await assert.rejects(db.query(insertion, [etrangere, `TEST-${etrangere}`, autreClient, 'Autre client', contrat, '2025-01-01']), { code: '23514' });
+    await assert.rejects(db.query('UPDATE "Intervention" SET "clientId" = $1 WHERE id = $2', [autreClient, nouvelle]), { code: '23514' });
+    await assert.rejects(db.query('UPDATE "Intervention" SET "clientId" = $1 WHERE id = $2', [client, historiqueIncoherent]), { code: '23514' });
+    await db.query('UPDATE "Intervention" SET "dateDemande" = $1 WHERE id = $2', ['2025-01-01', curative]);
+    await db.query('UPDATE "Intervention" SET "contratMaintenanceId" = $1 WHERE id = $2', [contrat, curative]);
+    const libreEtranger = randomUUID();
+    await db.query('INSERT INTO "Intervention" (id, reference, "clientId", titre, "dateDemande", "updatedAt") VALUES ($1, $2, $3, $4, $5, now())', [libreEtranger, `TEST-${libreEtranger}`, autreClient, 'Libre étranger', '2025-01-01']);
+    await assert.rejects(db.query('UPDATE "Intervention" SET "contratMaintenanceId" = $1 WHERE id = $2', [contrat, libreEtranger]), { code: '23514' });
+    await assert.rejects(db.query('UPDATE "ContratMaintenance" SET "clientId" = $1 WHERE id = $2', [autreClient, contrat]), { code: '23514' });
     await assert.rejects(db.query('INSERT INTO "Intervention" (id, reference, "clientId", titre, "contratMaintenanceId", "updatedAt") VALUES ($1, $2, $3, $4, $5, now())', [randomUUID(), `TEST-${randomUUID()}`, client, 'Nouveau sans date', contrat]), { code: '23514' });
   } finally {
     if (db) await db.end();
