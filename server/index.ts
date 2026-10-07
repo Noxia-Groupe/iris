@@ -711,7 +711,7 @@ async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRe
   } });
 }
 
-async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE', contrat: unknown, avant: unknown, motif?: string) {
+async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE' | 'AVANCEMENT_ECHEANCE', contrat: unknown, avant: unknown, motif?: string) {
   const user = req.user!;
   const cibleId = String((contrat as { id: string }).id);
   await tx.journalSaisieChantier.create({ data: {
@@ -1538,7 +1538,7 @@ app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, asy
   }
 });
 
-app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
       await verrouillerContratMaintenance(tx, paramId(req));
@@ -1546,11 +1546,13 @@ app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireA
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
       const intervention = await tx.intervention.findFirst({
         where: { contratMaintenanceId: contrat.id, echeanceContrat: contrat.prochaineEcheance },
-        select: { id: true, statut: true },
+        select: { id: true, reference: true, statut: true },
       });
       if (!intervention || intervention.statut !== 'TERMINEE') return { erreur: 'NOT_READY' as const };
       const prochaineEcheance = echeanceSuivante(contrat.dateDebut, contrat.prochaineEcheance, contrat.periodiciteMois);
       const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { prochaineEcheance } });
+      const motif = `Intervention ${intervention.reference} terminée : échéance du ${contrat.prochaineEcheance.toISOString().slice(0, 10)} au ${prochaineEcheance.toISOString().slice(0, 10)}.`;
+      await journaliserContrat(tx, req, 'AVANCEMENT_ECHEANCE', maj, contrat, motif);
       return { contrat: maj };
     });
     if ('erreur' in resultat) {

@@ -2195,6 +2195,97 @@ if (!TEST_DATABASE_URL) {
       assert.equal(journal.body.find((entree) => entree.action === 'CLOTURE')?.motif, 'x'.repeat(500));
     });
 
+    test('CHECK SQL : motif NULL interdit pour une transition CONTRAT, permis pour CREATION', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Contrainte motif journal', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const original = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { contratMaintenanceId: creation.body.id } });
+      assert.equal(original.action, 'CREATION');
+      assert.equal(original.motif, null, 'la création historique reste compatible');
+      for (const action of ['SUSPENSION', 'AVANCEMENT_ECHEANCE', 'MODIFICATION_COUVERTURE']) {
+        await assert.rejects(() => prisma.$executeRawUnsafe(
+          'INSERT INTO "JournalSaisieChantier" ("id", "contratMaintenanceId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif") VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, NULL)',
+          creation.body.id, 'CONTRAT', creation.body.id, action, original.auteurId, original.auteurNom,
+        ), `motif NULL interdit pour ${action}`);
+      }
+      const creationDirecte = await prisma.$executeRawUnsafe(
+        'INSERT INTO "JournalSaisieChantier" ("id", "contratMaintenanceId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif") VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, NULL)',
+        creation.body.id, 'CONTRAT', creation.body.id, 'CREATION', original.auteurId, original.auteurNom,
+      );
+      assert.equal(creationDirecte, 1);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: creation.body.id } }), 2);
+      const intervention = await prisma.intervention.create({ data: {
+        clientId, reference: `TEST-MOTIF-SAV-${Date.now()}`, titre: 'TEST Motif SAV distinct',
+      } });
+      assert.equal(await prisma.$executeRawUnsafe(
+        'INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif") VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, NULL)',
+        intervention.id, 'INTERVENTION', intervention.id, 'CHANGEMENT_STATUT', original.auteurId, original.auteurNom,
+      ), 1, 'une cible non-contrat reste hors du CHECK');
+    });
+
+    test('avancement : succès journalisé avec référence et échéances, refus sans nouvelle trace', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Journal échéance', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const url = `/api/contrats-maintenance/${id}/avancer-echeance`;
+      const generation = await request(app).post(`/api/contrats-maintenance/${id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generation.status, 201, JSON.stringify(generation.body));
+      const journalAvant = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } });
+      assert.equal((await request(app).post(url).set('Authorization', `Bearer ${session}`)).status, 409);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } }), journalAvant);
+      for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
+        const transition = await request(app).patch(`/api/interventions/${generation.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      }
+      const avance = await request(app).post(url).set('Authorization', `Bearer ${session}`);
+      assert.equal(avance.status, 200, JSON.stringify(avance.body));
+      const traces = await prisma.journalSaisieChantier.findMany({ where: { contratMaintenanceId: id, action: 'AVANCEMENT_ECHEANCE' } });
+      assert.equal(traces.length, 1);
+      const trace = traces[0];
+      assert.equal(trace.cible, 'CONTRAT');
+      assert.equal(trace.cibleId, id);
+      assert.equal(trace.auteurNom, (await prisma.user.findUniqueOrThrow({ where: { id: trace.auteurId } })).name);
+      assert.match(trace.motif, new RegExp(generation.body.reference));
+      assert.equal(trace.avant.prochaineEcheance, creation.body.prochaineEcheance);
+      assert.equal(trace.apres.prochaineEcheance, avance.body.prochaineEcheance);
+      assert.equal((await request(app).post(url).set('Authorization', `Bearer ${session}`)).status, 409);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } }), journalAvant + 1);
+    });
+
+    test('échec de journalisation : l’avancement est annulé atomiquement', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Atomicité journal échéance', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const intervention = await prisma.intervention.create({ data: {
+        clientId, contratMaintenanceId: id, echeanceContrat: new Date(creation.body.prochaineEcheance),
+        reference: `TEST-ATOMICITE-${Date.now()}`, titre: 'TEST Intervention terminée', statut: 'TERMINEE',
+      } });
+      const avant = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } });
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_refuser_avancement_journal"()
+        RETURNS TRIGGER AS $$ BEGIN
+          IF NEW."action" = 'AVANCEMENT_ECHEANCE' AND NEW."cibleId" = '${id}' THEN
+            RAISE EXCEPTION 'journal refusé pour le test';
+          END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe('CREATE TRIGGER "test_refuser_avancement_journal" BEFORE INSERT ON "JournalSaisieChantier" FOR EACH ROW EXECUTE FUNCTION "test_refuser_avancement_journal"()');
+      try {
+        const refus = await request(app).post(`/api/contrats-maintenance/${id}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+        assert.equal(refus.status, 500, JSON.stringify(refus.body));
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id } })).prochaineEcheance.toISOString(), creation.body.prochaineEcheance);
+        assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } }), avant);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: intervention.id } })).statut, 'TERMINEE');
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_avancement_journal" ON "JournalSaisieChantier"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_refuser_avancement_journal"()');
+      }
+    });
+
     test('fige la couverture dans l’intervention générée et la rend lisible au technicien affecté', async () => {
       const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
         clientId, siteId, titre: 'TEST Contrat instantané couverture', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '11-09-2026',
@@ -3647,6 +3738,7 @@ if (!TEST_DATABASE_URL) {
       // L'échéance ne bouge pas tant que son intervention n'est pas effectivement terminée.
       const avancementPremature = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
       assert.equal(avancementPremature.status, 409, JSON.stringify(avancementPremature.body));
+      const tracesInitiales = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: contratId } });
       for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
         const transition = await request(app).patch(`/api/interventions/${intervention.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
         assert.equal(transition.status, 200, JSON.stringify(transition.body));
@@ -3654,8 +3746,22 @@ if (!TEST_DATABASE_URL) {
       const avance = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
       assert.equal(avance.status, 200, JSON.stringify(avance.body));
       assert.equal(new Date(avance.body.prochaineEcheance).toISOString().slice(0, 10), '2027-03-08');
+      const journal = await request(app).get(`/api/contrats-maintenance/${contratId}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200);
+      assert.equal(journal.body.length, tracesInitiales + 1, 'une seule trace créée dans la même transaction');
+      const trace = journal.body.find((ligne) => ligne.action === 'AVANCEMENT_ECHEANCE');
+      assert.ok(trace, 'l’avancement est journalisé');
+      assert.equal(trace.cible, 'CONTRAT');
+      assert.equal(trace.cibleId, contratId);
+      assert.equal(trace.contratMaintenanceId, contratId);
+      assert.ok(trace.auteurId);
+      assert.ok(trace.auteurNom);
+      assert.match(trace.motif, new RegExp(intervention.body.reference));
+      assert.equal(trace.avant.prochaineEcheance, intervention.body.echeanceContrat);
+      assert.equal(trace.apres.prochaineEcheance, avance.body.prochaineEcheance);
       const secondeTentative = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
       assert.equal(secondeTentative.status, 409, JSON.stringify(secondeTentative.body));
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: contratId } }), tracesInitiales + 1, 'aucune trace de refus');
     });
 
     test('conserve le jour contractuel après un mois court', async () => {
