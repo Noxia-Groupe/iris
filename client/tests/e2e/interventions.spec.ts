@@ -8,6 +8,29 @@ const tokenFor = (userId: string) => {
 };
 
 test.describe('Interventions SAV', () => {
+  test('saisit et affiche la date de demande client distincte du souhait de planning', async ({ page, request, session, creerClient }) => {
+    const client = await creerClient('date demandée intervention', false);
+    await page.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token as string);
+      localStorage.setItem('user', user as string);
+    }, [session.token, JSON.stringify(session.user)]);
+    await page.goto('/interventions', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'Nouvelle intervention' }).click();
+    await page.locator('select[name="clientId"]').selectOption(client.id);
+    const titre = `TEST Demande datée E2E ${Date.now()}`;
+    await page.getByPlaceholder('Objet de la demande').fill(titre);
+    await page.getByPlaceholder('Date de demande (JJ-MM-AAAA)').fill('02-01-2026');
+    await page.getByPlaceholder('Date souhaitée (JJ-MM-AAAA)').fill('10-01-2026');
+    await page.getByRole('button', { name: 'Créer', exact: true }).click();
+    const carte = page.locator('article').filter({ has: page.getByRole('heading', { name: titre }) });
+    await expect(carte).toContainText('Demandée le 02/01/2026');
+    await expect(carte).toContainText('Souhaitée le 10/01/2026');
+    const liste = await request.get('http://127.0.0.1:3001/api/interventions', { headers: { Authorization: `Bearer ${session.token}` } });
+    expect(liste.ok()).toBeTruthy();
+    const enregistree = (await liste.json() as { titre: string; dateDemande: string }[]).find((i) => i.titre === titre);
+    expect(enregistree?.dateDemande).toBe('2026-01-02T00:00:00.000Z');
+  });
+
   test('permet au conducteur de travaux d’ouvrir la création d’intervention', async ({ page, request, session }) => {
     const headers = { Authorization: `Bearer ${session.token}` };
     const creation = await request.post('http://127.0.0.1:3001/api/users', {
