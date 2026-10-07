@@ -729,6 +729,8 @@ model Intervention {
   priorite       String   @default("NORMALE") // BASSE | NORMALE | HAUTE | URGENTE
   statut         String   @default("A_PLANIFIER") // A_PLANIFIER | PLANIFIEE | EN_COURS | TERMINEE | ANNULEE
   dateSouhaitee  DateTime?
+  // Jour de réception de la demande (date seule) ; NULL uniquement pour l'historique.
+  dateDemande    DateTime? @db.Date
   createdById    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

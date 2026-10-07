@@ -9,7 +9,7 @@ const {
   app,
   clientPayload, contactPayload, sitePayload, companySettingsPayload,
   fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise,
-  anneeEntreprise, dateEmissionEstFuture,
+  anneeEntreprise, dateEmissionEstFuture, dateDemandeCurative,
   periodBounds, weekBoundsFrom,
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
   commissionBaremeProgressif, computeChantierMetrics,
@@ -17,6 +17,21 @@ const {
   arrondiCommercialLigneHt, centimesTtcLigne, devisPayload,
   libelleComptableValide,
 } = await import('../dist/index.js');
+
+test('date demandée : défaut selon le jour civil entreprise à minuit et format français strict', () => {
+  // Wallis voit déjà le 1er mars tandis que le serveur UTC voit encore février.
+  const now = new Date('2026-02-28T23:30:00.000Z');
+  assert.equal(dateDemandeCurative(undefined, 'Pacific/Wallis', now), '2026-03-01T00:00:00.000Z');
+  assert.equal(dateDemandeCurative('28-02-2026', 'Pacific/Wallis', now), '2026-02-28T00:00:00.000Z');
+  // À 13 h UTC Wallis est déjà au 1er mars, Paris et UTC sont encore au 28 février :
+  // un repli silencieux sur Paris/UTC doit refuser à tort la date de Wallis.
+  const instantDiscriminant = new Date('2026-02-28T13:00:00.000Z');
+  assert.equal(dateDemandeCurative('01-03-2026', 'Pacific/Wallis', instantDiscriminant), '2026-03-01T00:00:00.000Z');
+  assert.equal(dateDemandeCurative('01-03-2026', 'Europe/Paris', instantDiscriminant), null);
+  for (const value of ['2026-02-28', '2026-02-28T00:00:00Z', '29-02-2026', ' 28-02-2026', '', null]) {
+    assert.equal(dateDemandeCurative(value, 'Pacific/Wallis', now), null);
+  }
+});
 
 test('le libellé comptable refuse les contrôles CR, LF, TAB, NUL et DEL sans rejeter les accents', () => {
   assert.equal(libelleComptableValide('Ventes, pose; et entretien'), true);

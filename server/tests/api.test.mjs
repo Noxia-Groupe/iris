@@ -25,7 +25,7 @@ if (!TEST_DATABASE_URL) {
   process.env.SUPERADMIN_EMAILS = 'secours@iris.test';
 
   const request = (await import('supertest')).default;
-  const { app, initDb, ensureSuperAdmins } = await import('../dist/index.js');
+  const { app, initDb, ensureSuperAdmins, jourCivilEntreprise } = await import('../dist/index.js');
   const { PrismaClient } = await import('@prisma/client');
   const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
@@ -1780,7 +1780,7 @@ if (!TEST_DATABASE_URL) {
 
     test('crée une intervention SAV avec une référence annuelle stable', async () => {
       const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({
-        clientId, titre: 'TEST Alarme déclenchée', description: 'Le client signale un déclenchement intempestif.', priorite: 'HAUTE', dateSouhaitee: '06-09-2026',
+        clientId, titre: 'TEST Alarme déclenchée', description: 'Le client signale un déclenchement intempestif.', priorite: 'HAUTE', dateDemande: '06-09-2026', dateSouhaitee: '06-09-2026',
       });
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
       assert.match(creation.body.reference, /^I\d{2}-\d{4,}$/);
@@ -1796,7 +1796,7 @@ if (!TEST_DATABASE_URL) {
         dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z'),
       } });
       const intervention = await prisma.intervention.create({ data: {
-        reference: `I26-COUT-${Date.now()}`, clientId, contratMaintenanceId: contrat.id,
+        reference: `I26-COUT-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance,
         titre: 'TEST Intervention contrat sans chantier',
       } });
       await prisma.interventionAffectation.create({ data: { interventionId: intervention.id, intervenantId: technicien.intervenantId } });
@@ -1821,7 +1821,7 @@ if (!TEST_DATABASE_URL) {
         dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z'),
       } });
       const intervention = await prisma.intervention.create({ data: {
-        reference: `I26-GARDE-TAUX-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, titre: 'TEST Intervention garde taux',
+        reference: `I26-GARDE-TAUX-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance, titre: 'TEST Intervention garde taux',
       } });
       await prisma.interventionAffectation.createMany({ data: [
         { interventionId: intervention.id, intervenantId: technicien.intervenantId },
@@ -1854,7 +1854,7 @@ if (!TEST_DATABASE_URL) {
       const jetonConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
       const jetonCommercial = jwt.sign({ id: commercial.id }, process.env.JWT_SECRET);
       const contrat = await prisma.contratMaintenance.create({ data: { clientId, titre: 'TEST Contrat gardes coûts', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: new Date('2026-01-01'), prochaineEcheance: new Date('2026-12-01') } });
-      const intervention = await prisma.intervention.create({ data: { reference: `I26-GARDES-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, titre: 'TEST Intervention gardes coûts' } });
+      const intervention = await prisma.intervention.create({ data: { reference: `I26-GARDES-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance, titre: 'TEST Intervention gardes coûts' } });
       const sansContrat = await prisma.intervention.create({ data: { reference: `I26-SANS-CONTRAT-${Date.now()}`, clientId, titre: 'TEST Intervention sans contrat' } });
       const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur gardes ${Date.now()}` } });
       await prisma.interventionAffectation.createMany({ data: [{ interventionId: intervention.id, intervenantId: technicien.intervenantId }, { interventionId: intervention.id, intervenantId: collegue.intervenantId }] });
@@ -1898,7 +1898,7 @@ if (!TEST_DATABASE_URL) {
         dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z'),
       } });
       const intervention = await prisma.intervention.create({ data: {
-        reference: `I26-COUT-PRIVE-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, titre: 'TEST Intervention coûts privés',
+        reference: `I26-COUT-PRIVE-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance, titre: 'TEST Intervention coûts privés',
       } });
       const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur coûts ${Date.now()}` } });
       await prisma.interventionAffectation.createMany({ data: [
@@ -1978,6 +1978,64 @@ if (!TEST_DATABASE_URL) {
   });
 
   describe('Contrats de maintenance cyclique', () => {
+    test('date demandée curative : saisie française stricte, défaut civil et refus futur', async () => {
+      const token = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${token}`).send({ raisonSociale: 'TEST Client date demande' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      const creer = (data) => request(app).post('/api/interventions').set('Authorization', `Bearer ${token}`).send({ clientId: client.body.id, titre: 'TEST Demande client', ...data });
+      for (const dateDemande of ['2026-01-01', '2026-01-01T00:00:00Z', '31-02-2026', '01/01/2026', '01-01-9999']) {
+        const refuse = await creer({ dateDemande });
+        assert.equal(refuse.status, 400, `${dateDemande}: ${JSON.stringify(refuse.body)}`);
+      }
+      const explicite = await creer({ dateDemande: '02-01-2026' });
+      assert.equal(explicite.status, 201, JSON.stringify(explicite.body));
+      assert.equal(explicite.body.dateDemande, '2026-01-02T00:00:00.000Z');
+      const implicite = await creer({});
+      assert.equal(implicite.status, 201, JSON.stringify(implicite.body));
+      assert.equal(implicite.body.dateDemande?.slice(0, 10), jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris'));
+    });
+
+    test('date souhaitée curative : jamais avant la demande explicite ou le jour civil implicite', async () => {
+      const token = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${token}`).send({ raisonSociale: 'TEST Client cohérence dates' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      const creer = (data) => request(app).post('/api/interventions').set('Authorization', `Bearer ${token}`).send({ clientId: client.body.id, titre: 'TEST Cohérence planning', ...data });
+      const refuse = await creer({ dateDemande: '10-01-2026', dateSouhaitee: '09-01-2026' });
+      assert.equal(refuse.status, 400, JSON.stringify(refuse.body));
+      assert.match(refuse.body.error, /date souhaitée.*date de demande/i);
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const aujourdHui = jourCivilEntreprise(new Date(), fuseau);
+      const hier = new Date(`${aujourdHui}T00:00:00.000Z`);
+      hier.setUTCDate(hier.getUTCDate() - 1);
+      const dateHier = `${String(hier.getUTCDate()).padStart(2, '0')}-${String(hier.getUTCMonth() + 1).padStart(2, '0')}-${hier.getUTCFullYear()}`;
+      const impliciteRefuse = await creer({ dateSouhaitee: dateHier });
+      assert.equal(impliciteRefuse.status, 400, JSON.stringify(impliciteRefuse.body));
+      assert.match(impliciteRefuse.body.error, /date souhaitée.*date de demande/i);
+      const egale = await creer({ dateDemande: '10-01-2026', dateSouhaitee: '10-01-2026' });
+      assert.equal(egale.status, 201, JSON.stringify(egale.body));
+      const sansSouhait = await creer({ dateDemande: '10-01-2026' });
+      assert.equal(sansSouhait.status, 201, JSON.stringify(sansSouhait.body));
+      assert.equal(sansSouhait.body.dateSouhaitee, null);
+    });
+
+    test('date demandée contractuelle : échéance future, bornes et gel SQL', async () => {
+      const token = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${token}`).send({ raisonSociale: 'TEST Client date effet' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${token}`).send({ clientId: client.body.id, titre: 'TEST Contrat date effet', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2099' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const intervention = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${token}`);
+      assert.equal(intervention.status, 201, JSON.stringify(intervention.body));
+      assert.equal(intervention.body.dateDemande, contrat.body.prochaineEcheance);
+      await assert.rejects(prisma.$executeRaw`UPDATE "Intervention" SET "dateDemande" = '2099-01-02' WHERE "id" = ${intervention.body.id}`);
+      await assert.rejects(prisma.$executeRaw`UPDATE "Intervention" SET "dateDemande" = NULL WHERE "id" = ${intervention.body.id}`);
+      await assert.rejects(prisma.$executeRaw`UPDATE "ContratMaintenance" SET "dateDebut" = '2100-01-01' WHERE "id" = ${contrat.body.id}`);
+      await assert.rejects(prisma.$executeRaw`INSERT INTO "Intervention" ("id", "reference", "clientId", "titre", "contratMaintenanceId", "updatedAt") VALUES ('test-date-effet-sans-date', 'TEST-I-SANS-DATE', ${client.body.id}, 'TEST sans date', ${contrat.body.id}, now())`);
+      await assert.rejects(prisma.$executeRaw`INSERT INTO "Intervention" ("id", "reference", "clientId", "titre", "contratMaintenanceId", "dateDemande", "echeanceContrat", "updatedAt") VALUES ('test-date-effet-avant', 'TEST-I-AVANT-EFFET', ${client.body.id}, 'TEST avant', ${contrat.body.id}, '2098-12-31', '2099-01-01', now())`);
+      const libre = await prisma.intervention.create({ data: { reference: `TEST-I-LIBRE-${Date.now()}`, clientId: client.body.id, titre: 'TEST à rattacher', dateDemande: new Date('2026-01-01') } });
+      await assert.rejects(prisma.$executeRaw`UPDATE "Intervention" SET "contratMaintenanceId" = ${contrat.body.id} WHERE "id" = ${libre.id}`);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: libre.id } })).contratMaintenanceId, null);
+    });
     let session = '';
     let clientId = '';
     let siteId = '';
@@ -2262,7 +2320,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
       const id = creation.body.id;
       const intervention = await prisma.intervention.create({ data: {
-        clientId, contratMaintenanceId: id, echeanceContrat: new Date(creation.body.prochaineEcheance),
+        clientId, contratMaintenanceId: id, echeanceContrat: new Date(creation.body.prochaineEcheance), dateDemande: new Date(creation.body.prochaineEcheance),
         reference: `TEST-ATOMICITE-${Date.now()}`, titre: 'TEST Intervention terminée', statut: 'TERMINEE',
       } });
       const avant = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } });
@@ -3708,7 +3766,7 @@ if (!TEST_DATABASE_URL) {
       await prisma.contratMaintenance.update({ where: { id: contrat.body.id }, data: { prochaineEcheance: echeanceCourante } });
       const interventionAnterieure = await prisma.intervention.create({ data: {
         reference: `TEST-I-P2002-ANTERIEURE-${Date.now()}`, clientId, siteId, contratMaintenanceId: contrat.body.id,
-        echeanceContrat: new Date('2025-01-01T00:00:00.000Z'), titre: 'TEST Intervention échéance antérieure',
+        echeanceContrat: new Date('2025-01-01T00:00:00.000Z'), dateDemande: new Date('2025-01-01T00:00:00.000Z'), titre: 'TEST Intervention échéance antérieure',
       } });
       await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_forcer_p2002_generation_contrat"()
         RETURNS TRIGGER AS $$
@@ -3773,7 +3831,7 @@ if (!TEST_DATABASE_URL) {
       await prisma.contratMaintenance.update({ where: { id: contrat31.body.id }, data: { prochaineEcheance: echeanceFevrier } });
       await prisma.intervention.create({ data: {
         reference: `TEST-I-31-${Date.now()}`, clientId, siteId, contratMaintenanceId: contrat31.body.id, echeanceContrat: echeanceFevrier,
-        titre: 'TEST Intervention échéance courte', statut: 'TERMINEE', dateSouhaitee: echeanceFevrier,
+        titre: 'TEST Intervention échéance courte', statut: 'TERMINEE', dateSouhaitee: echeanceFevrier, dateDemande: echeanceFevrier,
       } });
       const avance = await request(app).post(`/api/contrats-maintenance/${contrat31.body.id}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
       assert.equal(avance.status, 200, JSON.stringify(avance.body));

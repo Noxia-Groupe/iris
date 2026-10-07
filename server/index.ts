@@ -1590,7 +1590,7 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
           reference, clientId: contrat.clientId, siteId: contrat.siteId, contratMaintenanceId: contrat.id,
           echeanceContrat: contrat.prochaineEcheance, titre: `Maintenance préventive — ${contrat.titre}`,
           description: `Intervention prévisionnelle issue du contrat. Durée prévue : ${contrat.dureePrevisionnelleMinutes} minutes.`,
-          dateSouhaitee: contrat.prochaineEcheance, createdById: req.user!.id,
+          dateSouhaitee: contrat.prochaineEcheance, dateDemande: contrat.prochaineEcheance, createdById: req.user!.id,
           couvertureContrat: {
             politiqueMainOeuvre: contrat.politiqueMainOeuvre,
             politiqueMateriel: contrat.politiqueMateriel,
@@ -1651,6 +1651,9 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
     if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
     const societe = await getCompanySettings();
+    const dateDemande = dateDemandeCurative(req.body?.dateDemande, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
+    if (!dateDemande) return res.status(400).json({ error: 'La date de demande doit être valide au format JJ-MM-AAAA et ne peut pas être future.' });
+    if (dateSouhaitee && dateSouhaitee < dateDemande) return res.status(400).json({ error: 'La date souhaitée ne peut pas précéder la date de demande.' });
     const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
     const intervention = await prisma.$transaction(async (tx) => {
       const sequence = await tx.sequenceIntervention.upsert({
@@ -1658,7 +1661,7 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
       });
       const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
       const cree = await tx.intervention.create({
-        data: { reference, clientId, siteId, contactId, chantierId, titre, description, priorite, dateSouhaitee, createdById: req.user!.id },
+        data: { reference, clientId, siteId, contactId, chantierId, titre, description, priorite, dateSouhaitee, dateDemande, createdById: req.user!.id },
         include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
       });
       await journaliserIntervention(tx, req, 'CREATION', cree);
@@ -3410,6 +3413,13 @@ function dateIsoStricte(value: unknown): string | null {
   const date = new Date(Date.UTC(annee, mois - 1, jour));
   if (date.getUTCFullYear() !== annee || date.getUTCMonth() !== mois - 1 || date.getUTCDate() !== jour) return null;
   return date.toISOString();
+}
+
+function dateDemandeCurative(value: unknown, fuseauHoraire: string, instant = new Date()): string | null {
+  if (value === undefined) return `${aujourdHuiEntreprise(fuseauHoraire, instant)}T00:00:00.000Z`;
+  if (typeof value !== 'string' || !/^\d{2}-\d{2}-\d{4}$/.test(value)) return null;
+  const date = dateIsoStricte(value);
+  return date && dateSeuleEnJourCivil(date) <= aujourdHuiEntreprise(fuseauHoraire, instant) ? date : null;
 }
 
 function ajouterMoisUTC(date: Date, nombreDeMois: number): Date {
@@ -5786,6 +5796,7 @@ export {
   sitePayload,
   companySettingsPayload,
   fuseauHoraireEntrepriseValide,
+  dateDemandeCurative,
   jourCivilEntreprise,
   aujourdHuiEntreprise,
   anneeEntreprise,
