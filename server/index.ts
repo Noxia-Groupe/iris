@@ -711,7 +711,7 @@ async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRe
   } });
 }
 
-async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE', contrat: unknown, avant: unknown, motif?: string) {
+async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE' | 'AVANCEMENT_ECHEANCE', contrat: unknown, avant: unknown, motif?: string) {
   const user = req.user!;
   const cibleId = String((contrat as { id: string }).id);
   await tx.journalSaisieChantier.create({ data: {
@@ -725,6 +725,12 @@ async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest
 
 const POLITIQUES_MAIN_OEUVRE = ['INCLUSE', 'HORS_FORFAIT'];
 const POLITIQUES_MATERIEL = ['INCLUS', 'HORS_FORFAIT'];
+function motifContratValide(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const motif = value.trim();
+  const longueur = [...motif].length;
+  return longueur >= 3 && longueur <= 500 && !/[\p{Cc}\p{Cf}]/u.test(motif) ? motif : null;
+}
 function lirePolitiqueCouverture(body: Record<string, unknown>, defaults?: { politiqueMainOeuvre: string; politiqueMateriel: string; noteCouverture: string | null }) {
   const politiqueMainOeuvre = body.politiqueMainOeuvre === undefined ? defaults?.politiqueMainOeuvre ?? 'HORS_FORFAIT' : String(body.politiqueMainOeuvre);
   const politiqueMateriel = body.politiqueMateriel === undefined ? defaults?.politiqueMateriel ?? 'HORS_FORFAIT' : String(body.politiqueMateriel);
@@ -1472,20 +1478,29 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
 app.patch('/api/contrats-maintenance/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     if (!['politiqueMainOeuvre', 'politiqueMateriel', 'noteCouverture'].some((champ) => Object.prototype.hasOwnProperty.call(req.body || {}, champ))) return res.status(400).json({ error: 'Aucune politique de couverture à modifier.' });
+    const motif = motifContratValide(req.body?.motif);
+    if (!motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères sans caractère de contrôle est obligatoire.' });
     const resultat = await prisma.$transaction(async (tx) => {
       await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
       if (contrat.statut === 'TERMINE') return { erreur: 'TERMINE' as const };
+      if (contrat.statut !== 'ACTIF') return { erreur: 'SUSPENDU' as const };
+      // Le verrou précède la relecture : deux éditeurs ne peuvent pas écraser la version de l'autre.
+      if (req.body?.expectedUpdatedAt !== undefined && req.body.expectedUpdatedAt !== contrat.updatedAt.toISOString()) return { erreur: 'PERIME' as const };
       const couverture = lirePolitiqueCouverture(req.body || {}, contrat);
       if (!couverture) return { erreur: 'INVALIDE' as const };
+      if (couverture.politiqueMainOeuvre === contrat.politiqueMainOeuvre && couverture.politiqueMateriel === contrat.politiqueMateriel && couverture.noteCouverture === contrat.noteCouverture) return { erreur: 'INCHANGEE' as const };
       const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: couverture, include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } } });
-      await journaliserContrat(tx, req, 'MODIFICATION_COUVERTURE', maj, contrat);
+      await journaliserContrat(tx, req, 'MODIFICATION_COUVERTURE', maj, contrat, motif);
       return { contrat: maj };
     });
     if ('erreur' in resultat) {
       if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
       if (resultat.erreur === 'TERMINE') return res.status(409).json({ error: 'Un contrat clos ne peut plus être modifié.' });
+      if (resultat.erreur === 'SUSPENDU') return res.status(409).json({ error: 'Réactivez le contrat avant de modifier sa couverture.' });
+      if (resultat.erreur === 'PERIME') return res.status(409).json({ error: 'Le contrat a été modifié depuis l’ouverture de l’éditeur : actualisez la liste.' });
+      if (resultat.erreur === 'INCHANGEE') return res.status(409).json({ error: 'La couverture est inchangée.' });
       return res.status(400).json({ error: 'La politique de couverture est invalide.' });
     }
     res.json(decimalToNumber(resultat.contrat));
@@ -1497,9 +1512,9 @@ app.patch('/api/contrats-maintenance/:id', requireAuth, requireAdmin, async (req
 app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const statut = String(req.body?.statut || '');
-    const motif = typeof req.body?.motif === 'string' ? req.body.motif.trim() : '';
     if (!['ACTIF', 'SUSPENDU', 'TERMINE'].includes(statut)) return res.status(400).json({ error: 'Statut de contrat invalide.' });
-    if (['SUSPENDU', 'TERMINE'].includes(statut) && motif.length < 3) return res.status(400).json({ error: 'Un motif d’au moins 3 caractères est obligatoire.' });
+    const motif = motifContratValide(req.body?.motif);
+    if (!motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères sans caractère de contrôle est obligatoire.' });
     const resultat = await prisma.$transaction(async (tx) => {
       await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
@@ -1509,7 +1524,7 @@ app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, asy
       if (!autorise) return { erreur: 'TRANSITION' as const };
       const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { statut } });
       const action = statut === 'SUSPENDU' ? 'SUSPENSION' : statut === 'TERMINE' ? 'CLOTURE' : 'REACTIVATION';
-      await journaliserContrat(tx, req, action, maj, contrat, motif || undefined);
+      await journaliserContrat(tx, req, action, maj, contrat, motif);
       return { contrat: maj };
     });
     if ('erreur' in resultat) {
@@ -1523,7 +1538,7 @@ app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, asy
   }
 });
 
-app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
       await verrouillerContratMaintenance(tx, paramId(req));
@@ -1531,11 +1546,13 @@ app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireA
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
       const intervention = await tx.intervention.findFirst({
         where: { contratMaintenanceId: contrat.id, echeanceContrat: contrat.prochaineEcheance },
-        select: { id: true, statut: true },
+        select: { id: true, reference: true, statut: true },
       });
       if (!intervention || intervention.statut !== 'TERMINEE') return { erreur: 'NOT_READY' as const };
       const prochaineEcheance = echeanceSuivante(contrat.dateDebut, contrat.prochaineEcheance, contrat.periodiciteMois);
       const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { prochaineEcheance } });
+      const motif = `Intervention ${intervention.reference} terminée : échéance du ${contrat.prochaineEcheance.toISOString().slice(0, 10)} au ${prochaineEcheance.toISOString().slice(0, 10)}.`;
+      await journaliserContrat(tx, req, 'AVANCEMENT_ECHEANCE', maj, contrat, motif);
       return { contrat: maj };
     });
     if ('erreur' in resultat) {

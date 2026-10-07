@@ -2052,7 +2052,7 @@ if (!TEST_DATABASE_URL) {
       const jetonTechnicien = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
       const factureAvant = await prisma.facture.count({ where: { contratMaintenanceId: contrat.body.id } });
       const devisAvant = await prisma.devis.count({ where: { clientId } });
-      const politique = { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'Déplacement inclus, consommables hors forfait.' };
+      const politique = { politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'Déplacement inclus, consommables hors forfait.', motif: 'Renégociation annuelle de la couverture' };
 
       const refus = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${jetonTechnicien}`).send(politique);
       assert.equal(refus.status, 403, JSON.stringify(refus.body));
@@ -2064,26 +2064,226 @@ if (!TEST_DATABASE_URL) {
       assert.equal(tracesAvantModification, 1, 'aucun refus ne crée de journal');
       const miseAJour = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send(politique);
       assert.equal(miseAJour.status, 200, JSON.stringify(miseAJour.body));
-      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, miseAJour.body[cle]])), politique);
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).filter((cle) => cle !== 'motif').map((cle) => [cle, miseAJour.body[cle]])), {
+        politiqueMainOeuvre: politique.politiqueMainOeuvre, politiqueMateriel: politique.politiqueMateriel, noteCouverture: politique.noteCouverture,
+      });
       const journal = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
       assert.equal(journal.status, 200, JSON.stringify(journal.body));
       const modification = journal.body.find((entree) => entree.action === 'MODIFICATION_COUVERTURE');
-      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, modification.avant[cle]])), {
+      assert.equal(modification.motif, politique.motif);
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).filter((cle) => cle !== 'motif').map((cle) => [cle, modification.avant[cle]])), {
         politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: null,
       });
-      assert.deepEqual(Object.fromEntries(Object.keys(politique).map((cle) => [cle, modification.apres[cle]])), politique);
+      assert.deepEqual(Object.fromEntries(Object.keys(politique).filter((cle) => cle !== 'motif').map((cle) => [cle, modification.apres[cle]])), {
+        politiqueMainOeuvre: politique.politiqueMainOeuvre, politiqueMateriel: politique.politiqueMateriel, noteCouverture: politique.noteCouverture,
+      });
       const tracesAvantRefus = journal.body.length;
       assert.equal(await prisma.facture.count({ where: { contratMaintenanceId: contrat.body.id } }), factureAvant, 'la politique ne crée aucune facture');
       assert.equal(await prisma.devis.count({ where: { clientId } }), devisAvant, 'la politique ne crée aucun devis');
 
       const cloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'Fin du contrat de test' });
       assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
-      const mutationApresCloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({ noteCouverture: 'Tentative interdite' });
+      const mutationApresCloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({ noteCouverture: 'Tentative interdite', motif: 'Contrat déjà clos' });
       assert.equal(mutationApresCloture.status, 409, JSON.stringify(mutationApresCloture.body));
       const journalApresRefus = await request(app).get(`/api/contrats-maintenance/${contrat.body.id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
       assert.equal(journalApresRefus.body.length, tracesAvantRefus + 1, 'seule la clôture autorisée est tracée ; le refus ne crée aucune trace');
       const generationApresCloture = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(generationApresCloture.status, 404, JSON.stringify(generationApresCloture.body));
+    });
+
+    test('refuse les motifs invalides de couverture sans modifier le contrat ni son journal', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Motifs couverture', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      for (const motif of [undefined, null, 123, '', '  ab  ', 'x'.repeat(501), '🔧'.repeat(501), 'Avant\naprès', 'Avant\taprès', 'Avant\u007faprès', 'Avant\u0085après', 'Avant\u200baprès', 'Avant\u202eaprès']) {
+        const refus = await request(app).patch(`/api/contrats-maintenance/${id}`).set('Authorization', `Bearer ${session}`)
+          .send({ politiqueMainOeuvre: 'INCLUSE', ...(motif === undefined ? {} : { motif }) });
+        assert.equal(refus.status, 400, `${JSON.stringify(motif)} → ${JSON.stringify(refus.body)}`);
+      }
+      const journal = await request(app).get(`/api/contrats-maintenance/${id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.body.length, 1);
+      assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id } })).politiqueMainOeuvre, creation.body.politiqueMainOeuvre);
+      const accepte = await request(app).patch(`/api/contrats-maintenance/${id}`).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMainOeuvre: 'INCLUSE', motif: '  🔧évolution  ' });
+      assert.equal(accepte.status, 200, JSON.stringify(accepte.body));
+      const trace = await request(app).get(`/api/contrats-maintenance/${id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(trace.body[0].motif, '🔧évolution');
+      const borneUnicode = await request(app).patch(`/api/contrats-maintenance/${id}`).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMateriel: 'INCLUS', motif: '🔧'.repeat(500) });
+      assert.equal(borneUnicode.status, 200, JSON.stringify(borneUnicode.body));
+    });
+
+    test('refuse la version périmée après une modification concurrente sans écraser ni journaliser', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Concurrence couverture', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const url = `/api/contrats-maintenance/${creation.body.id}`;
+      const version = creation.body.updatedAt;
+      const premier = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ politiqueMainOeuvre: 'INCLUSE', motif: 'Premier changement', expectedUpdatedAt: version });
+      assert.equal(premier.status, 200, JSON.stringify(premier.body));
+      assert.notEqual(premier.body.updatedAt, version);
+      const perime = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ politiqueMateriel: 'INCLUS', motif: 'Éditeur périmé', expectedUpdatedAt: version });
+      assert.equal(perime.status, 409, JSON.stringify(perime.body));
+      assert.match(perime.body.error, /actualis|modifi|périm/i);
+      const relu = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: creation.body.id } });
+      assert.equal(relu.politiqueMainOeuvre, 'INCLUSE');
+      assert.equal(relu.politiqueMateriel, 'HORS_FORFAIT');
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: creation.body.id } }), 2);
+    });
+
+    test('refuse la couverture inchangée et suspendue, puis autorise la modification après réactivation motivée', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Contrat suspendu couverture', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const couverture = `/api/contrats-maintenance/${id}`;
+      const statut = `${couverture}/statut`;
+      const inchangée = await request(app).patch(couverture).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMainOeuvre: creation.body.politiqueMainOeuvre, noteCouverture: '  ', motif: 'Contrôle sans changement' });
+      assert.equal(inchangée.status, 409, JSON.stringify(inchangée.body));
+      const suspension = await request(app).patch(statut).set('Authorization', `Bearer ${session}`).send({ statut: 'SUSPENDU', motif: 'Pause contractuelle' });
+      assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+      const refus = await request(app).patch(couverture).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMainOeuvre: 'INCLUSE', motif: 'Changement durant la pause' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /réactiv/i);
+      assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id } })).politiqueMainOeuvre, creation.body.politiqueMainOeuvre);
+      const avant = await request(app).get(`${couverture}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.deepEqual(avant.body.map((entree) => entree.action).sort(), ['CREATION', 'SUSPENSION']);
+      const reactivation = await request(app).patch(statut).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF', motif: 'Reprise du service' });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      const modification = await request(app).patch(couverture).set('Authorization', `Bearer ${session}`)
+        .send({ politiqueMainOeuvre: 'INCLUSE', motif: 'Nouvelle couverture applicable' });
+      assert.equal(modification.status, 200, JSON.stringify(modification.body));
+      const journal = await request(app).get(`${couverture}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.body.find((entree) => entree.action === 'REACTIVATION')?.motif, 'Reprise du service');
+      assert.equal(journal.body.find((entree) => entree.action === 'MODIFICATION_COUVERTURE')?.motif, 'Nouvelle couverture applicable');
+      assert.equal(journal.body.length, 4, 'aucun refus ne crée de trace');
+    });
+
+    test('impose le même motif borné sans contrôles à chaque transition de statut', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Motifs statut', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const url = `/api/contrats-maintenance/${id}/statut`;
+      const refuser = async (cible) => {
+        for (const motif of [undefined, null, '', ' ab ', 'x'.repeat(501), '🔧'.repeat(501), 'Avant\naprès', 'Avant\u0000après', 'Avant\u007faprès', 'Avant\u0085après', 'Avant\u200baprès', 'Avant\u202eaprès']) {
+          const refus = await request(app).patch(url).set('Authorization', `Bearer ${session}`)
+            .send({ statut: cible, ...(motif === undefined ? {} : { motif }) });
+          assert.equal(refus.status, 400, `${cible} ${JSON.stringify(motif)} → ${JSON.stringify(refus.body)}`);
+        }
+      };
+      await refuser('SUSPENDU');
+      const suspension = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ statut: 'SUSPENDU', motif: '  Pause demandée  ' });
+      assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+      await refuser('ACTIF');
+      const reactivation = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF', motif: '🔧évolution' });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      await refuser('TERMINE');
+      const cloture = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'x'.repeat(500) });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      const journal = await request(app).get(`/api/contrats-maintenance/${id}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.body.length, 4);
+      assert.equal(journal.body.find((entree) => entree.action === 'SUSPENSION')?.motif, 'Pause demandée');
+      assert.equal(journal.body.find((entree) => entree.action === 'REACTIVATION')?.motif, '🔧évolution');
+      assert.equal(journal.body.find((entree) => entree.action === 'CLOTURE')?.motif, 'x'.repeat(500));
+    });
+
+    test('CHECK SQL : motif NULL interdit pour une transition CONTRAT, permis pour CREATION', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Contrainte motif journal', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const original = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { contratMaintenanceId: creation.body.id } });
+      assert.equal(original.action, 'CREATION');
+      assert.equal(original.motif, null, 'la création historique reste compatible');
+      for (const action of ['SUSPENSION', 'AVANCEMENT_ECHEANCE', 'MODIFICATION_COUVERTURE']) {
+        await assert.rejects(() => prisma.$executeRawUnsafe(
+          'INSERT INTO "JournalSaisieChantier" ("id", "contratMaintenanceId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif") VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, NULL)',
+          creation.body.id, 'CONTRAT', creation.body.id, action, original.auteurId, original.auteurNom,
+        ), `motif NULL interdit pour ${action}`);
+      }
+      const creationDirecte = await prisma.$executeRawUnsafe(
+        'INSERT INTO "JournalSaisieChantier" ("id", "contratMaintenanceId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif") VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, NULL)',
+        creation.body.id, 'CONTRAT', creation.body.id, 'CREATION', original.auteurId, original.auteurNom,
+      );
+      assert.equal(creationDirecte, 1);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: creation.body.id } }), 2);
+      const intervention = await prisma.intervention.create({ data: {
+        clientId, reference: `TEST-MOTIF-SAV-${Date.now()}`, titre: 'TEST Motif SAV distinct',
+      } });
+      assert.equal(await prisma.$executeRawUnsafe(
+        'INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif") VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, NULL)',
+        intervention.id, 'INTERVENTION', intervention.id, 'CHANGEMENT_STATUT', original.auteurId, original.auteurNom,
+      ), 1, 'une cible non-contrat reste hors du CHECK');
+    });
+
+    test('avancement : succès journalisé avec référence et échéances, refus sans nouvelle trace', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, siteId, titre: 'TEST Journal échéance', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const url = `/api/contrats-maintenance/${id}/avancer-echeance`;
+      const generation = await request(app).post(`/api/contrats-maintenance/${id}/generer-intervention`).set('Authorization', `Bearer ${session}`);
+      assert.equal(generation.status, 201, JSON.stringify(generation.body));
+      const journalAvant = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } });
+      assert.equal((await request(app).post(url).set('Authorization', `Bearer ${session}`)).status, 409);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } }), journalAvant);
+      for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
+        const transition = await request(app).patch(`/api/interventions/${generation.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      }
+      const avance = await request(app).post(url).set('Authorization', `Bearer ${session}`);
+      assert.equal(avance.status, 200, JSON.stringify(avance.body));
+      const traces = await prisma.journalSaisieChantier.findMany({ where: { contratMaintenanceId: id, action: 'AVANCEMENT_ECHEANCE' } });
+      assert.equal(traces.length, 1);
+      const trace = traces[0];
+      assert.equal(trace.cible, 'CONTRAT');
+      assert.equal(trace.cibleId, id);
+      assert.equal(trace.auteurNom, (await prisma.user.findUniqueOrThrow({ where: { id: trace.auteurId } })).name);
+      assert.match(trace.motif, new RegExp(generation.body.reference));
+      assert.equal(trace.avant.prochaineEcheance, creation.body.prochaineEcheance);
+      assert.equal(trace.apres.prochaineEcheance, avance.body.prochaineEcheance);
+      assert.equal((await request(app).post(url).set('Authorization', `Bearer ${session}`)).status, 409);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } }), journalAvant + 1);
+    });
+
+    test('échec de journalisation : l’avancement est annulé atomiquement', async () => {
+      const creation = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
+        clientId, titre: 'TEST Atomicité journal échéance', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '10-09-2026',
+      });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const intervention = await prisma.intervention.create({ data: {
+        clientId, contratMaintenanceId: id, echeanceContrat: new Date(creation.body.prochaineEcheance),
+        reference: `TEST-ATOMICITE-${Date.now()}`, titre: 'TEST Intervention terminée', statut: 'TERMINEE',
+      } });
+      const avant = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } });
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_refuser_avancement_journal"()
+        RETURNS TRIGGER AS $$ BEGIN
+          IF NEW."action" = 'AVANCEMENT_ECHEANCE' AND NEW."cibleId" = '${id}' THEN
+            RAISE EXCEPTION 'journal refusé pour le test';
+          END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe('CREATE TRIGGER "test_refuser_avancement_journal" BEFORE INSERT ON "JournalSaisieChantier" FOR EACH ROW EXECUTE FUNCTION "test_refuser_avancement_journal"()');
+      try {
+        const refus = await request(app).post(`/api/contrats-maintenance/${id}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
+        assert.equal(refus.status, 500, JSON.stringify(refus.body));
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id } })).prochaineEcheance.toISOString(), creation.body.prochaineEcheance);
+        assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } }), avant);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: intervention.id } })).statut, 'TERMINEE');
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_avancement_journal" ON "JournalSaisieChantier"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_refuser_avancement_journal"()');
+      }
     });
 
     test('fige la couverture dans l’intervention générée et la rend lisible au technicien affecté', async () => {
@@ -2108,7 +2308,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(interventionTechnicien?.couvertureContrat, generation.body.couvertureContrat);
 
       const mutation = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}`).set('Authorization', `Bearer ${session}`).send({
-        politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: 'Nouvelle politique pour les prochaines échéances.',
+        politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'INCLUS', noteCouverture: 'Nouvelle politique pour les prochaines échéances.', motif: 'Evolution pour les prochaines échéances',
       });
       assert.equal(mutation.status, 200, JSON.stringify(mutation.body));
       const relue = await request(app).get('/api/interventions').set('Authorization', `Bearer ${session}`);
@@ -3538,6 +3738,7 @@ if (!TEST_DATABASE_URL) {
       // L'échéance ne bouge pas tant que son intervention n'est pas effectivement terminée.
       const avancementPremature = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
       assert.equal(avancementPremature.status, 409, JSON.stringify(avancementPremature.body));
+      const tracesInitiales = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: contratId } });
       for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
         const transition = await request(app).patch(`/api/interventions/${intervention.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
         assert.equal(transition.status, 200, JSON.stringify(transition.body));
@@ -3545,8 +3746,22 @@ if (!TEST_DATABASE_URL) {
       const avance = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
       assert.equal(avance.status, 200, JSON.stringify(avance.body));
       assert.equal(new Date(avance.body.prochaineEcheance).toISOString().slice(0, 10), '2027-03-08');
+      const journal = await request(app).get(`/api/contrats-maintenance/${contratId}/journal-saisies`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200);
+      assert.equal(journal.body.length, tracesInitiales + 1, 'une seule trace créée dans la même transaction');
+      const trace = journal.body.find((ligne) => ligne.action === 'AVANCEMENT_ECHEANCE');
+      assert.ok(trace, 'l’avancement est journalisé');
+      assert.equal(trace.cible, 'CONTRAT');
+      assert.equal(trace.cibleId, contratId);
+      assert.equal(trace.contratMaintenanceId, contratId);
+      assert.ok(trace.auteurId);
+      assert.ok(trace.auteurNom);
+      assert.match(trace.motif, new RegExp(intervention.body.reference));
+      assert.equal(trace.avant.prochaineEcheance, intervention.body.echeanceContrat);
+      assert.equal(trace.apres.prochaineEcheance, avance.body.prochaineEcheance);
       const secondeTentative = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
       assert.equal(secondeTentative.status, 409, JSON.stringify(secondeTentative.body));
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: contratId } }), tracesInitiales + 1, 'aucune trace de refus');
     });
 
     test('conserve le jour contractuel après un mois court', async () => {
@@ -3579,12 +3794,12 @@ if (!TEST_DATABASE_URL) {
       assert.equal(sansMotif.status, 400, JSON.stringify(sansMotif.body));
       const generationRefusee = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set('Authorization', `Bearer ${session}`);
       assert.equal(generationRefusee.status, 404, JSON.stringify(generationRefusee.body));
-      const reactivation = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
+      const reactivation = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF', motif: 'Reprise après travaux' });
       assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
       assert.equal(reactivation.body.statut, 'ACTIF');
       const cloture = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'TERMINE', motif: 'Fin contractuelle confirmée' });
       assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
-      const repriseInterdite = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF' });
+      const repriseInterdite = await request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ACTIF', motif: 'Contrat terminé définitivement' });
       assert.equal(repriseInterdite.status, 409, JSON.stringify(repriseInterdite.body));
     });
   });
