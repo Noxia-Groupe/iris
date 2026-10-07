@@ -1780,7 +1780,7 @@ if (!TEST_DATABASE_URL) {
 
     test('crée une intervention SAV avec une référence annuelle stable', async () => {
       const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({
-        clientId, titre: 'TEST Alarme déclenchée', description: 'Le client signale un déclenchement intempestif.', priorite: 'HAUTE', dateSouhaitee: '06-09-2026',
+        clientId, titre: 'TEST Alarme déclenchée', description: 'Le client signale un déclenchement intempestif.', priorite: 'HAUTE', dateDemande: '06-09-2026', dateSouhaitee: '06-09-2026',
       });
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
       assert.match(creation.body.reference, /^I\d{2}-\d{4,}$/);
@@ -1993,6 +1993,29 @@ if (!TEST_DATABASE_URL) {
       const implicite = await creer({});
       assert.equal(implicite.status, 201, JSON.stringify(implicite.body));
       assert.equal(implicite.body.dateDemande?.slice(0, 10), jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris'));
+    });
+
+    test('date souhaitée curative : jamais avant la demande explicite ou le jour civil implicite', async () => {
+      const token = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${token}`).send({ raisonSociale: 'TEST Client cohérence dates' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      const creer = (data) => request(app).post('/api/interventions').set('Authorization', `Bearer ${token}`).send({ clientId: client.body.id, titre: 'TEST Cohérence planning', ...data });
+      const refuse = await creer({ dateDemande: '10-01-2026', dateSouhaitee: '09-01-2026' });
+      assert.equal(refuse.status, 400, JSON.stringify(refuse.body));
+      assert.match(refuse.body.error, /date souhaitée.*date de demande/i);
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const aujourdHui = jourCivilEntreprise(new Date(), fuseau);
+      const hier = new Date(`${aujourdHui}T00:00:00.000Z`);
+      hier.setUTCDate(hier.getUTCDate() - 1);
+      const dateHier = `${String(hier.getUTCDate()).padStart(2, '0')}-${String(hier.getUTCMonth() + 1).padStart(2, '0')}-${hier.getUTCFullYear()}`;
+      const impliciteRefuse = await creer({ dateSouhaitee: dateHier });
+      assert.equal(impliciteRefuse.status, 400, JSON.stringify(impliciteRefuse.body));
+      assert.match(impliciteRefuse.body.error, /date souhaitée.*date de demande/i);
+      const egale = await creer({ dateDemande: '10-01-2026', dateSouhaitee: '10-01-2026' });
+      assert.equal(egale.status, 201, JSON.stringify(egale.body));
+      const sansSouhait = await creer({ dateDemande: '10-01-2026' });
+      assert.equal(sansSouhait.status, 201, JSON.stringify(sansSouhait.body));
+      assert.equal(sansSouhait.body.dateSouhaitee, null);
     });
 
     test('date demandée contractuelle : échéance future, bornes et gel SQL', async () => {

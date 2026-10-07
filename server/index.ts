@@ -1653,6 +1653,7 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     const societe = await getCompanySettings();
     const dateDemande = dateDemandeCurative(req.body?.dateDemande, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
     if (!dateDemande) return res.status(400).json({ error: 'La date de demande doit être valide au format JJ-MM-AAAA et ne peut pas être future.' });
+    if (dateSouhaitee && dateSouhaitee < dateDemande) return res.status(400).json({ error: 'La date souhaitée ne peut pas précéder la date de demande.' });
     const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
     const intervention = await prisma.$transaction(async (tx) => {
       const sequence = await tx.sequenceIntervention.upsert({

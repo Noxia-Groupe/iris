@@ -35,11 +35,15 @@ DECLARE debut timestamp(3);
         client_contrat text;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
+    -- Toute date renseignée est figée, même sur une intervention libre. Seul
+    -- l'historique NULL peut recevoir sa première date, sans la modifier ensuite.
+    IF OLD."dateDemande" IS NOT NULL AND NEW."dateDemande" IS DISTINCT FROM OLD."dateDemande" THEN
+      RAISE EXCEPTION 'La date de demande est figée.' USING ERRCODE = 'check_violation';
+    END IF;
     IF OLD."contratMaintenanceId" IS NOT NULL AND
        (NEW."contratMaintenanceId" IS DISTINCT FROM OLD."contratMaintenanceId"
-        OR NEW."dateDemande" IS DISTINCT FROM OLD."dateDemande"
         OR NEW."clientId" IS DISTINCT FROM OLD."clientId") THEN
-      RAISE EXCEPTION 'La date de demande, le client et le rattachement contractuel sont figés.' USING ERRCODE = 'check_violation';
+      RAISE EXCEPTION 'Le client et le rattachement contractuel sont figés.' USING ERRCODE = 'check_violation';
     END IF;
     IF OLD."contratMaintenanceId" IS NULL AND NEW."contratMaintenanceId" IS NOT NULL
        AND NEW."dateDemande" IS DISTINCT FROM OLD."dateDemande" THEN

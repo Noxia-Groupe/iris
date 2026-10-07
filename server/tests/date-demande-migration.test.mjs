@@ -63,6 +63,11 @@ test('migration date demande : historique nullable préservé, nouveaux rattache
     await db.query('UPDATE "Intervention" SET statut = $1 WHERE id = $2', ['PLANIFIEE', contractuelle]);
     await db.query('UPDATE "Intervention" SET statut = $1 WHERE id = $2', ['PLANIFIEE', historiqueIncoherent]);
     assert.equal((await db.query('SELECT "clientId" FROM "Intervention" WHERE id = $1', [historiqueIncoherent])).rows[0].clientId, autreClient);
+    // Un dossier contractuel historique NULL peut également recevoir une date,
+    // à condition de respecter le début du contrat, mais pas être réécrit.
+    await assert.rejects(db.query('UPDATE "Intervention" SET "dateDemande" = $1 WHERE id = $2', ['2024-12-31', contractuelle]), { code: '23514' });
+    await db.query('UPDATE "Intervention" SET "dateDemande" = $1 WHERE id = $2', ['2025-01-01', contractuelle]);
+    await assert.rejects(db.query('UPDATE "Intervention" SET "dateDemande" = $1 WHERE id = $2', ['2025-01-02', contractuelle]), { code: '23514' });
     const insertion = 'INSERT INTO "Intervention" (id, reference, "clientId", titre, "contratMaintenanceId", "dateDemande", "updatedAt") VALUES ($1, $2, $3, $4, $5, $6, now())';
     const nouvelle = randomUUID();
     await db.query(insertion, [nouvelle, `TEST-${nouvelle}`, client, 'Même client', contrat, '2025-01-01']);
@@ -71,8 +76,19 @@ test('migration date demande : historique nullable préservé, nouveaux rattache
     await assert.rejects(db.query(insertion, [etrangere, `TEST-${etrangere}`, autreClient, 'Autre client', contrat, '2025-01-01']), { code: '23514' });
     await assert.rejects(db.query('UPDATE "Intervention" SET "clientId" = $1 WHERE id = $2', [autreClient, nouvelle]), { code: '23514' });
     await assert.rejects(db.query('UPDATE "Intervention" SET "clientId" = $1 WHERE id = $2', [client, historiqueIncoherent]), { code: '23514' });
+    // Une date historique NULL peut être renseignée une seule fois, sans réécriture ultérieure.
     await db.query('UPDATE "Intervention" SET "dateDemande" = $1 WHERE id = $2', ['2025-01-01', curative]);
+    await db.query('UPDATE "Intervention" SET "dateDemande" = $1 WHERE id = $2', ['2025-01-01', curative]);
+    await assert.rejects(db.query('UPDATE "Intervention" SET "dateDemande" = $1 WHERE id = $2', ['2025-02-01', curative]), { code: '23514' });
+    await assert.rejects(db.query('UPDATE "Intervention" SET "dateDemande" = NULL WHERE id = $1', [curative]), { code: '23514' });
+    assert.equal((await db.query('SELECT "dateDemande"::text AS jour FROM "Intervention" WHERE id = $1', [curative])).rows[0].jour, '2025-01-01');
     await db.query('UPDATE "Intervention" SET "contratMaintenanceId" = $1 WHERE id = $2', [contrat, curative]);
+    const avantEffet = randomUUID();
+    await db.query('INSERT INTO "Intervention" (id, reference, "clientId", titre, "dateDemande", "updatedAt") VALUES ($1, $2, $3, $4, $5, now())', [avantEffet, `TEST-${avantEffet}`, client, 'Libre avant effet', '2024-12-31']);
+    await assert.rejects(db.query('UPDATE "Intervention" SET "dateDemande" = $1 WHERE id = $2', ['2025-01-01', avantEffet]), { code: '23514' });
+    assert.equal((await db.query('SELECT "dateDemande"::text AS jour FROM "Intervention" WHERE id = $1', [avantEffet])).rows[0].jour, '2024-12-31');
+    await assert.rejects(db.query('UPDATE "Intervention" SET "contratMaintenanceId" = $1 WHERE id = $2', [contrat, avantEffet]), { code: '23514' });
+    assert.equal((await db.query('SELECT "contratMaintenanceId", "dateDemande"::text AS jour FROM "Intervention" WHERE id = $1', [avantEffet])).rows[0].contratMaintenanceId, null);
     const libreEtranger = randomUUID();
     await db.query('INSERT INTO "Intervention" (id, reference, "clientId", titre, "dateDemande", "updatedAt") VALUES ($1, $2, $3, $4, $5, now())', [libreEtranger, `TEST-${libreEtranger}`, autreClient, 'Libre étranger', '2025-01-01']);
     await assert.rejects(db.query('UPDATE "Intervention" SET "contratMaintenanceId" = $1 WHERE id = $2', [contrat, libreEtranger]), { code: '23514' });

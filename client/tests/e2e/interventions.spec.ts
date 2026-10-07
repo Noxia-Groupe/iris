@@ -31,6 +31,31 @@ test.describe('Interventions SAV', () => {
     expect(enregistree?.dateDemande).toBe('2026-01-02T00:00:00.000Z');
   });
 
+  test('historique sans date de demande : pas de libellé vide dans la carte', async ({ page, request, session, creerClient }) => {
+    const client = await creerClient('historique sans demande', false);
+    const titre = `TEST Historique sans demande ${Date.now()}`;
+    const creation = await request.post('http://127.0.0.1:3001/api/interventions', {
+      headers: { Authorization: 'Bearer ' + session.token },
+      data: { clientId: client.id, titre, dateSouhaitee: '10-01-2027' },
+    });
+    expect(creation.status(), await creation.text()).toBe(201);
+    const { id } = await creation.json() as { id: string };
+    // Simule uniquement le champ NULL d'un enregistrement pré-migration, via la vraie liste API.
+    await page.route('**/api/interventions', async (route) => {
+      const response = await route.fetch();
+      const interventions = await response.json() as { id: string; dateDemande: string | null }[];
+      await route.fulfill({ response, json: interventions.map((item) => item.id === id ? { ...item, dateDemande: null } : item) });
+    });
+    await page.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token as string);
+      localStorage.setItem('user', user as string);
+    }, [session.token, JSON.stringify(session.user)]);
+    await page.goto('/interventions', { waitUntil: 'networkidle' });
+    const carte = page.locator('article').filter({ has: page.getByRole('heading', { name: titre }) });
+    await expect(carte).toContainText('Souhaitée le 10/01/2027');
+    await expect(carte).not.toContainText('Demandée le');
+  });
+
   test('permet au conducteur de travaux d’ouvrir la création d’intervention', async ({ page, request, session }) => {
     const headers = { Authorization: `Bearer ${session.token}` };
     const creation = await request.post('http://127.0.0.1:3001/api/users', {
