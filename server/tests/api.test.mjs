@@ -29,6 +29,22 @@ if (!TEST_DATABASE_URL) {
   const { PrismaClient } = await import('@prisma/client');
   const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
+  const configurerTva55 = async () => {
+    const compte = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
+    await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compte.id }, update: { compteId: compte.id } });
+  };
+  const purgerEcrituresJetables = async id => {
+    try {
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_immutable"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre_immediat"');
+      await prisma.ecritureFacture.deleteMany({ where: { factureId: id } });
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre_immediat"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_immutable"');
+    }
+  };
 
   let cleApi = '';
 
@@ -45,6 +61,17 @@ if (!TEST_DATABASE_URL) {
     await prisma.interventionSignature.deleteMany({ where: { rapport: { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } } } });
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
+    // Les snapshots ont une FK RESTRICT et sont append-only : purge uniquement sur la base jetable.
+    try {
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_immutable"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre_immediat"');
+      await prisma.ecritureFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre_immediat"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_immutable"');
+    }
     await prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     await prisma.journalFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     // Les avoirs référencent leur facture source par RESTRICT : les documents enfants partent
@@ -2872,6 +2899,53 @@ if (!TEST_DATABASE_URL) {
       await prisma.mentionsLegalesVersion.create({ data: { version: 1, mentions: 'TEST Mentions légales', cgv: 'TEST Conditions générales', penalites: 'TEST Pénalités de retard', actif: true, publieeLe: new Date() } });
     });
 
+    test('refuse une imputation incomplète à l’émission sans consommer de numéro', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST compte requis', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST compte requis', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201);
+      const avant = await prisma.sequenceFacture.findUnique({ where: { annee: 2026 } });
+      const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /comptable/i);
+      assert.equal((await prisma.facture.findUnique({ where: { id: brouillon.body.id } })).numero, null);
+      assert.deepEqual(await prisma.sequenceFacture.findUnique({ where: { annee: 2026 } }), avant);
+      const compte = async code => (await prisma.compteComptable.findUnique({ where: { code } })).id;
+      for (const [cle, code] of [['CLIENT', '411000'], ['VENTE_PRESTATION', '706100'], ['VENTE_ARTICLE', '706100']]) {
+        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ compteId: await compte(code) })).status, 200);
+      }
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'VTE' })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: await compte('445710') })).status, 200);
+      assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
+    });
+
+    test('refuse à l’émission un taux de TVA sans compte, sans consommer de séquence', async () => {
+      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST TVA absente', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST taux réduit', quantite: 1, prixUnitaireHt: 9, tauxTva: 5.5 }] });
+      assert.equal(brouillon.status, 201);
+      const avant = await prisma.sequenceFacture.findUniqueOrThrow({ where: { annee: 2026 } });
+      const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /TVA:5\.5/);
+      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.body.id } })).numero, null);
+      assert.deepEqual(await prisma.sequenceFacture.findUniqueOrThrow({ where: { annee: 2026 } }), avant);
+    });
+
+    test('exige VENTE_ARTICLE même pour une facture sans ligne article', async () => {
+      const article = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '706100' } });
+      await prisma.regleComptable.upsert({ where: { cle: 'VENTE_ARTICLE' }, create: { cle: 'VENTE_ARTICLE', compteId: article.id }, update: { compteId: article.id } });
+      const regle = await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } });
+      await prisma.regleComptable.delete({ where: { cle: 'VENTE_ARTICLE' } });
+      try {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST règle article obligatoire', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST prestation', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /VENTE_ARTICLE/);
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.body.id } })).numero, null);
+      } finally {
+        await prisma.regleComptable.create({ data: { cle: regle.cle, compteId: regle.compteId, journal: regle.journal } });
+      }
+    });
+
     test('attribue un numéro annuel seulement lors de l’émission', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST Émission facture', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
@@ -2914,11 +2988,12 @@ if (!TEST_DATABASE_URL) {
       const journal = await prisma.regleComptable.findUnique({ where: { cle: 'JOURNAL_VENTES' } });
       await prisma.regleComptable.delete({ where: { cle: 'JOURNAL_VENTES' } });
       const exportIncomplet = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
-      assert.equal(exportIncomplet.status, 409); assert.deepEqual(exportIncomplet.body.manquantes, ['JOURNAL_VENTES']);
+      assert.equal(exportIncomplet.status, 200);
+      assert.equal(exportIncomplet.text, exportComptable.text, 'retirer le journal courant ne réécrit pas les pièces émises');
       await prisma.regleComptable.create({ data: { cle: 'JOURNAL_VENTES', journal: journal.journal } });
       await prisma.regleTvaComptable.deleteMany({ where: { taux: 20 } });
       const exportSansTva = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
-      assert.equal(exportSansTva.status, 409); assert.deepEqual(exportSansTva.body.tauxManquants, [20]);
+      assert.equal(exportSansTva.status, 200); assert.equal(exportSansTva.text, exportComptable.text);
       assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id })).status, 200);
       const diagSansTva = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
       const tvaDecouverte = diagSansTva.body.controles.find((controle) => controle.cle === 'TVA');
@@ -2940,6 +3015,152 @@ if (!TEST_DATABASE_URL) {
       const article = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST article CSV', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       const articleEmis = await request(app).post(`/api/factures/${article.body.id}/emettre`).set('Authorization', `Bearer ${session}`); const csvPiege = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(articleEmis.status, 200); assert.match(csvPiege.text, /;"'=1\+1";/);
+    });
+
+    test('fige les écritures à l’émission malgré un remappage puis inverse celles des avoirs', async () => {
+      const exporter = () => request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
+      const creer = (designation) => request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST gel imputation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation, nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      const emettre = id => request(app).post(`/api/factures/${id}/emettre`).set('Authorization', `Bearer ${session}`);
+      const piece = (csv, numero) => csv.split('\n').filter(ligne => ligne.split(';')[2] === `"${numero}"`);
+      const premier = await creer('TEST gel premier');
+      assert.equal(premier.status, 201);
+      const emis = await emettre(premier.body.id);
+      assert.equal(emis.status, 200, JSON.stringify(emis.body));
+      assert.equal(emis.body.ecrituresScellees, true, 'la réponse d’émission reflète le scellement commité');
+      const avant = piece((await exporter()).text, emis.body.numero);
+      assert.equal(avant.length, 3);
+      const nouveauCompte = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '706986', libelle: 'Nouveau compte de ventes', nature: 'PRODUIT' });
+      assert.equal(nouveauCompte.status, 201);
+      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: nouveauCompte.body.id })).status, 200);
+      const nouveauClient = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '411986', libelle: 'Nouveau compte client', nature: 'ACTIF' });
+      const nouvelleTva = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '445986', libelle: 'Nouveau compte TVA', nature: 'TVA' });
+      assert.equal(nouveauClient.status, 201);
+      assert.equal(nouvelleTva.status, 201);
+      assert.equal((await request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ compteId: nouveauClient.body.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: nouvelleTva.body.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'NOUV' })).status, 200);
+      const apres = piece((await exporter()).text, emis.body.numero);
+      assert.deepEqual(apres, avant, 'les octets historiques ne dépendent plus des comptes client/vente/TVA ni du journal');
+      const compteHistorique = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '706100' } });
+      await prisma.compteComptable.update({ where: { id: compteHistorique.id }, data: { libelle: 'Libellé changé après émission' } });
+      try {
+        assert.deepEqual(piece((await exporter()).text, emis.body.numero), avant, 'CompteLib est également figé');
+      } finally {
+        await prisma.compteComptable.update({ where: { id: compteHistorique.id }, data: { libelle: compteHistorique.libelle } });
+      }
+      const second = await creer('TEST gel second');
+      const emisSecond = await emettre(second.body.id);
+      assert.equal(emisSecond.status, 200, JSON.stringify(emisSecond.body));
+      assert.ok(piece((await exporter()).text, emisSecond.body.numero).some(ligne => ligne.includes('706986')));
+      assert.ok(piece((await exporter()).text, emisSecond.body.numero).some(ligne => ligne.includes('411986')));
+      assert.ok(piece((await exporter()).text, emisSecond.body.numero).some(ligne => ligne.includes('445986')));
+      assert.ok(piece((await exporter()).text, emisSecond.body.numero).every(ligne => ligne.startsWith('"NOUV";')));
+      const avoir = await request(app).post(`/api/factures/${premier.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({ lignes: [{ designation: 'TEST crédit', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 40, tauxTva: 20 }] });
+      assert.equal(avoir.status, 201, JSON.stringify(avoir.body));
+      assert.equal(avoir.body.ecrituresScellees, true, 'la réponse de l’avoir partiel reflète le scellement');
+      const lignesAvoir = piece((await exporter()).text, avoir.body.numero);
+      assert.equal(lignesAvoir.length, 3);
+      assert.ok(lignesAvoir.some(ligne => ligne.includes('706100') && ligne.includes('"40.00"')));
+      assert.ok(lignesAvoir.every(ligne => !ligne.includes('706986') && !ligne.includes('411986') && !ligne.includes('445986')));
+      assert.ok(lignesAvoir.every(ligne => ligne.startsWith('"VTE";')));
+      const originalClient = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '411000' } });
+      const originalTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
+      for (const [cle, id] of [['CLIENT', originalClient.id], ['VENTE_PRESTATION', compteHistorique.id]]) {
+        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ compteId: id })).status, 200);
+      }
+      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: originalTva.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'VTE' })).status, 200);
+      const annulation = await request(app).post(`/api/factures/${second.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal(annulation.body.avoir.ecrituresScellees, true, 'la réponse de l’avoir total reflète le scellement');
+      const ecrituresSource = await prisma.ecritureFacture.findMany({ where: { factureId: second.body.id }, orderBy: { ordre: 'asc' } });
+      const ecrituresAvoir = await prisma.ecritureFacture.findMany({ where: { factureId: annulation.body.avoir.id }, orderBy: { ordre: 'asc' } });
+      assert.deepEqual(ecrituresAvoir.map(e => [e.journalCode, e.compteNum, e.compteLib, Number(e.debit), Number(e.credit)]),
+        ecrituresSource.map(e => [e.journalCode, e.compteNum, e.compteLib, Number(e.credit), Number(e.debit)]));
+      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: annulation.body.avoir.id } })).ecrituresScellees, true);
+    });
+
+    test('sérialise émission et remappage du journal par verrou comptable commun', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST concurrence règles', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST verrou comptable', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201);
+      const ancienJournal = (await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'JOURNAL_VENTES' } })).journal;
+      const clientCompteId = (await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'CLIENT' } })).compteId;
+      const tvaCompteId = (await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 20 } })).compteId;
+      let course;
+      try {
+        await prisma.$transaction(async tx => {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(814086)::text`;
+          const emission = request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`).then(r => r);
+          const remappage = request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'NOUVEAU' }).then(r => r);
+          const regleClient = request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ compteId: clientCompteId }).then(r => r);
+          const regleTva = request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: tvaCompteId }).then(r => r);
+          course = Promise.all([emission, remappage, regleClient, regleTva]);
+          const attendre = p => Promise.race([p.then(() => 'TERMINE'), new Promise(resolve => setTimeout(() => resolve('EN_ATTENTE'), 150))]);
+          for (const operation of [emission, remappage, regleClient, regleTva]) assert.equal(await attendre(operation), 'EN_ATTENTE', 'toutes les mutations et l’émission attendent le verrou comptable');
+        });
+        const [emission, remappage, client, tva] = await course;
+        assert.equal(client.status, 200, JSON.stringify(client.body));
+        assert.equal(tva.status, 200, JSON.stringify(tva.body));
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        assert.equal(remappage.status, 200, JSON.stringify(remappage.body));
+        const lignes = await prisma.ecritureFacture.findMany({ where: { factureId: brouillon.body.id } });
+        assert.equal(new Set(lignes.map(e => e.journalCode)).size, 1);
+        assert.ok(['VTE', 'NOUVEAU'].includes(lignes[0].journalCode));
+      } finally {
+        await prisma.regleComptable.update({ where: { cle: 'JOURNAL_VENTES' }, data: { journal: ancienJournal } });
+      }
+    });
+
+    test('la base refuse un INSERT tardif et une pièce émise déséquilibrée ou vide', async () => {
+      const compte = async (code, nature) => (await prisma.compteComptable.upsert({ where: { code }, create: { code, nature, libelle: `TEST ${code}` }, update: { actif: true } })).id;
+      for (const [cle, code, nature] of [['CLIENT', '411000', 'ACTIF'], ['VENTE_PRESTATION', '706100', 'PRODUIT'], ['VENTE_ARTICLE', '706100', 'PRODUIT']]) {
+        await prisma.regleComptable.upsert({ where: { cle }, create: { cle, compteId: await compte(code, nature) }, update: { compteId: await compte(code, nature) } });
+      }
+      await prisma.regleComptable.upsert({ where: { cle: 'JOURNAL_VENTES' }, create: { cle: 'JOURNAL_VENTES', journal: 'VTE' }, update: { journal: 'VTE' } });
+      await prisma.regleTvaComptable.upsert({ where: { taux: 20 }, create: { taux: 20, compteId: await compte('445710', 'TVA') }, update: { compteId: await compte('445710', 'TVA') } });
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST scellement SQL', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST scellement', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201);
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const original = await prisma.ecritureFacture.findFirstOrThrow({ where: { factureId: brouillon.body.id } });
+      const vide = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST pièce sans écritures', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST vide', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(vide.status, 201);
+      await assert.rejects(() => prisma.facture.update({ where: { id: vide.body.id }, data: { statut: 'EMISE', numero: `TEST-VIDE-${Date.now()}`, annee: 2026, ecrituresScellees: true } }), /absentes|déséquilibrées/i);
+      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: vide.body.id } })).statut, 'BROUILLON');
+      await assert.rejects(() => prisma.facture.update({ where: { id: brouillon.body.id }, data: { ecrituresScellees: false } }), /scellée/i);
+      await assert.rejects(() => prisma.ecritureFacture.create({ data: { factureId: brouillon.body.id, ordre: 99, cle: 'CLIENT', journalCode: original.journalCode, compteNum: original.compteNum, compteLib: original.compteLib, debit: 1, credit: 0 } }), /figée|scellée/i);
+      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_immutable"');
+      try {
+        await assert.rejects(() => prisma.$transaction(async tx => {
+          await tx.ecritureFacture.delete({ where: { id: original.id } });
+        }), /équilibr|scellée/i);
+        assert.equal(await prisma.ecritureFacture.count({ where: { factureId: brouillon.body.id } }), 3);
+      } finally {
+        await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_immutable"');
+      }
+    });
+
+    test('la base refuse UPDATE et DELETE des écritures émises, y compris après règlement', async () => {
+      const facture = await prisma.facture.findFirst({ where: { type: 'FACTURE', statut: 'EMISE', ecrituresComptables: { some: {} }, clientId }, select: { id: true } });
+      assert.ok(facture);
+      const ecriture = await prisma.ecritureFacture.findFirstOrThrow({ where: { factureId: facture.id } });
+      await assert.rejects(() => prisma.ecritureFacture.update({ where: { id: ecriture.id }, data: { compteLib: 'Réécrit' } }));
+      await assert.rejects(() => prisma.ecritureFacture.delete({ where: { id: ecriture.id } }));
+      assert.deepEqual(await prisma.ecritureFacture.findUnique({ where: { id: ecriture.id } }), ecriture);
+      const reglement = await request(app).post(`/api/factures/${facture.id}/regler`).set('Authorization', `Bearer ${session}`);
+      assert.equal(reglement.status, 200);
+      await assert.rejects(() => prisma.ecritureFacture.update({ where: { id: ecriture.id }, data: { credit: 1 } }));
+    });
+
+    test('émet et exporte une facture entièrement offerte sans écriture déséquilibrée', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST remise totale', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST offerte', quantite: 1, prixUnitaireHt: 0, tauxTva: 0 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const ecritures = await prisma.ecritureFacture.findMany({ where: { factureId: emission.body.id } });
+      assert.ok(ecritures.length > 0);
+      assert.equal(ecritures.reduce((somme, e) => somme + Number(e.debit) - Number(e.credit), 0), 0);
+      assert.equal((await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`)).status, 200);
     });
 
     test('réserve traçabilité, journal et mentions légales à l’administration', async () => {
@@ -3052,6 +3273,7 @@ if (!TEST_DATABASE_URL) {
         for (const id of [avoirPremier.id, avoirSecond.id, premiere.id, seconde.id]) {
           await prisma.journalFacture.deleteMany({ where: { factureId: id } });
           await prisma.factureLigne.deleteMany({ where: { factureId: id } });
+          await purgerEcrituresJetables(id);
           await prisma.facture.delete({ where: { id } });
         }
       }
@@ -3080,14 +3302,17 @@ if (!TEST_DATABASE_URL) {
             .catch((erreur) => { reponseAvoir = { status: 'ERREUR', body: { error: String(erreur) } }; });
           void concurrent;
           await new Promise((suite) => setTimeout(suite, 1000));
-          await tx.facture.create({ data: {
+          const origineEcritures = await tx.ecritureFacture.findMany({ where: { factureId: facture.id }, orderBy: { ordre: 'asc' } });
+          const avoirConcurrent = await tx.facture.create({ data: {
             type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero: 'AVDOUBLE-COURSE-2026', annee: 2026,
             statut: 'EMISE', dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-09-08T00:00:00.000Z'),
             clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
             origine: facture.origine, motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersion.id,
             totalHt: 600, totalTva: 120, totalTtc: 720,
             lignes: { create: [{ ordre: 0, designation: 'TEST premier avoir concurrent', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 600, tauxTva: 20, totalHt: 600, totalTtc: 720 }] },
+            ecrituresComptables: { create: origineEcritures.map(e => ({ ordre: e.ordre, cle: e.cle, tauxTva: e.tauxTva, journalCode: e.journalCode, compteNum: e.compteNum, compteLib: e.compteLib, debit: Number(e.credit) * 0.6, credit: Number(e.debit) * 0.6 })) },
           }, select: { id: true } });
+          await tx.facture.update({ where: { id: avoirConcurrent.id }, data: { ecrituresScellees: true } });
         }, { timeout: 20000 });
         for (let attente = 0; attente < 60 && !reponseAvoir; attente += 1) await new Promise((suite) => setTimeout(suite, 250));
         assert.ok(reponseAvoir, 'POST /avoirs n’a pas répondu');
@@ -3099,10 +3324,12 @@ if (!TEST_DATABASE_URL) {
         for (const { id } of avoirs) {
           await prisma.journalFacture.deleteMany({ where: { factureId: id } });
           await prisma.factureLigne.deleteMany({ where: { factureId: id } });
+          await purgerEcrituresJetables(id);
           await prisma.facture.delete({ where: { id } });
         }
         await prisma.journalFacture.deleteMany({ where: { factureId: facture.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: facture.id } });
+        await purgerEcrituresJetables(facture.id);
         await prisma.facture.deleteMany({ where: { id: facture.id } });
       }
     });
@@ -3127,14 +3354,17 @@ if (!TEST_DATABASE_URL) {
             .catch((erreur) => { reponseAnnulation = { status: 'ERREUR', body: { error: String(erreur) } }; });
           void concurrent;
           await new Promise((suite) => setTimeout(suite, 1000));
-          await tx.facture.create({ data: {
+          const origineEcritures = await tx.ecritureFacture.findMany({ where: { factureId: facture.id }, orderBy: { ordre: 'asc' } });
+          const avoirConcurrent = await tx.facture.create({ data: {
             type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero: 'AVCOURSE-PARTIEL-2026', annee: 2026,
             statut: 'EMISE', dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-09-08T00:00:00.000Z'),
             clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
             origine: facture.origine, motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersion.id,
             totalHt: 600, totalTva: 120, totalTtc: 720,
             lignes: { create: [{ ordre: 0, designation: 'TEST avoir partiel concurrent', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 600, tauxTva: 20, totalHt: 600, totalTtc: 720 }] },
+            ecrituresComptables: { create: origineEcritures.map(e => ({ ordre: e.ordre, cle: e.cle, tauxTva: e.tauxTva, journalCode: e.journalCode, compteNum: e.compteNum, compteLib: e.compteLib, debit: Number(e.credit) * 0.6, credit: Number(e.debit) * 0.6 })) },
           } });
+          await tx.facture.update({ where: { id: avoirConcurrent.id }, data: { ecrituresScellees: true } });
         }, { timeout: 20000 });
         for (let attente = 0; attente < 60 && !reponseAnnulation; attente += 1) await new Promise((suite) => setTimeout(suite, 250));
         assert.ok(reponseAnnulation, 'POST /annuler n’a pas répondu');
@@ -3147,10 +3377,12 @@ if (!TEST_DATABASE_URL) {
         for (const { id } of avoirs) {
           await prisma.journalFacture.deleteMany({ where: { factureId: id } });
           await prisma.factureLigne.deleteMany({ where: { factureId: id } });
+          await purgerEcrituresJetables(id);
           await prisma.facture.delete({ where: { id } });
         }
         await prisma.journalFacture.deleteMany({ where: { factureId: facture.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: facture.id } });
+        await purgerEcrituresJetables(facture.id);
         await prisma.facture.deleteMany({ where: { id: facture.id } });
       }
     });
@@ -3195,6 +3427,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('crée plusieurs avoirs partiels positifs, figés et plafonnés par taux de TVA', async () => {
+      await configurerTva55();
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
         clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Avoirs partiels multi taux', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
         lignes: [
@@ -3269,6 +3502,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('fige la TVA cumulée des avoirs fractionnés à 5,5 % dans le PDF et l’export', async () => {
+      await configurerTva55();
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({
         clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Arrondi cumulatif avoir 5,5', dateEmission: '08-09-2026', dateEcheance: '08-10-2026',
         lignes: [
@@ -3342,17 +3576,17 @@ if (!TEST_DATABASE_URL) {
       assert.ok(apresAnnulation.factures.every((facture) => facture.numero), 'chaque facture de la fiche porte son numéro légal');
     });
 
-    test('le contrôle TVA des prérequis couvre le même périmètre que l’export', async () => {
-      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
+    test('le contrôle TVA des prérequis couvre les futures émissions sans bloquer l’export historique', async () => {
+      await configurerTva55();
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'taux annulé non couvert', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST taux annulé', quantite: 1, prixUnitaireHt: 100, tauxTva: 5.5 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
       assert.equal((await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`)).status, 200);
+      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
       try {
         const exportation = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
-        assert.equal(exportation.status, 409, exportation.text);
-        assert.deepEqual(exportation.body.tauxManquants, [5.5]);
+        assert.equal(exportation.status, 200, exportation.text);
         const prerequis = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
         const tva = prerequis.body.controles.find((controle) => controle.cle === 'TVA');
         assert.equal(tva.pret, false);
@@ -3363,10 +3597,12 @@ if (!TEST_DATABASE_URL) {
         if (avoir) {
           await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
           await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+          await purgerEcrituresJetables(avoir.id);
           await prisma.facture.delete({ where: { id: avoir.id } });
         }
         await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
+        await purgerEcrituresJetables(emission.body.id);
         await prisma.facture.delete({ where: { id: emission.body.id } });
       }
     });
@@ -3412,9 +3648,11 @@ if (!TEST_DATABASE_URL) {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
         await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+        await purgerEcrituresJetables(avoir.id);
         await prisma.facture.delete({ where: { id: avoir.id } });
         await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
+        await purgerEcrituresJetables(emission.body.id);
         await prisma.facture.delete({ where: { id: emission.body.id } });
       }
     });
@@ -3423,7 +3661,10 @@ if (!TEST_DATABASE_URL) {
       const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
       assert.ok(compteTva, 'le compte TVA de test existe');
       await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
-      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'bascule de jour civil', dateEmission: '09-09-2026', dateEcheance: '09-09-2026', lignes: [{ designation: 'TEST bascule exercice', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] });
+      const derniereFacture = await prisma.facture.findFirst({ where: { type: 'FACTURE', numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
+      const datePiece = derniereFacture?.dateEmission || new Date('2026-09-09T00:00:00.000Z');
+      const jourPiece = `${String(datePiece.getUTCDate()).padStart(2, '0')}-${String(datePiece.getUTCMonth() + 1).padStart(2, '0')}-${datePiece.getUTCFullYear()}`;
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'bascule de jour civil', dateEmission: jourPiece, dateEcheance: jourPiece, lignes: [{ designation: 'TEST bascule exercice', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
@@ -3434,6 +3675,7 @@ if (!TEST_DATABASE_URL) {
       const avoir = annulation.body.avoir;
       await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
       await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+      await purgerEcrituresJetables(avoir.id);
       await prisma.facture.delete({ where: { id: avoir.id } });
       await prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2027-01-01T00:30:00.000Z') } });
       const jourComptable = async () => {
@@ -3455,10 +3697,12 @@ if (!TEST_DATABASE_URL) {
         if (avoir) {
           await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
           await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
+          await purgerEcrituresJetables(avoir.id);
           await prisma.facture.delete({ where: { id: avoir.id } });
         }
         await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
         await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
+        await purgerEcrituresJetables(emission.body.id);
         await prisma.facture.delete({ where: { id: emission.body.id } });
       }
     });
@@ -3567,6 +3811,8 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('ventile la TVA par taux dans le document PDF', async () => {
+      const compteTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
+      await prisma.regleTvaComptable.upsert({ where: { taux: 10 }, create: { taux: 10, compteId: compteTva.id }, update: { compteId: compteTva.id } });
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST TVA PDF', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST TVA 20', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }, { designation: 'TEST TVA 10', quantite: 1, prixUnitaireHt: 100, tauxTva: 10 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
@@ -3599,7 +3845,16 @@ if (!TEST_DATABASE_URL) {
     test('refuse le document PDF d’une facture antérieure au gel de l’adresse', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST adresse héritée', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST adresse héritée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       const mentions = await prisma.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } }); assert.ok(mentions);
-      await prisma.facture.update({ where: { id: brouillon.body.id }, data: { statut: 'EMISE', annee: 2026, numero: `TEST-HERITEE-${Date.now()}`, emisLe: new Date(), mentionsLegalesVersionId: mentions.id } });
+      await prisma.$transaction(async tx => {
+        await tx.facture.update({ where: { id: brouillon.body.id }, data: { statut: 'EMISE', annee: 2026, numero: `TEST-HERITEE-${Date.now()}`, emisLe: new Date(), mentionsLegalesVersionId: mentions.id } });
+        const regles = await tx.regleComptable.findMany({ include: { compte: true } });
+        const tva = await tx.regleTvaComptable.findUniqueOrThrow({ where: { taux: 20 }, include: { compte: true } });
+        const parCle = new Map(regles.map(r => [r.cle, r]));
+        const journalCode = parCle.get('JOURNAL_VENTES').journal;
+        const ecritures = [['CLIENT', parCle.get('CLIENT').compte, 12, 0], ['VENTE_PRESTATION', parCle.get('VENTE_PRESTATION').compte, 0, 10], ['TVA:20', tva.compte, 0, 2]];
+        await tx.ecritureFacture.createMany({ data: ecritures.map(([cle, compte, debit, credit], ordre) => ({ factureId: brouillon.body.id, ordre, cle, tauxTva: cle === 'TVA:20' ? 20 : null, journalCode, compteNum: compte.code, compteLib: compte.libelle, debit, credit })) });
+        await tx.facture.update({ where: { id: brouillon.body.id }, data: { ecrituresScellees: true } });
+      });
       const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`); assert.equal(document.status, 409, document.text); assert.match(document.body.error, /adresse de facturation/i);
     });
 

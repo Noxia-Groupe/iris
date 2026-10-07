@@ -536,6 +536,8 @@ model Facture {
   // Ventilation par taux figée à la création des nouveaux documents. Les factures
   // historiques restent lisibles sans ligne de ventilation et utilisent le fallback dérivé.
   ventilationTva FactureVentilationTva[]
+  ecrituresComptables EcritureFacture[]
+  ecrituresScellees Boolean @default(false)
   journal       JournalFacture[]
   createdById   String?
   emisLe        DateTime?
@@ -550,6 +552,23 @@ model Facture {
   @@index([interventionId])
   @@index([contratMaintenanceId])
   @@index([mentionsLegalesVersionId])
+}
+
+model EcritureFacture {
+  id          String  @id @default(uuid())
+  factureId   String
+  facture     Facture @relation(fields: [factureId], references: [id], onDelete: Restrict)
+  ordre       Int
+  cle         String
+  tauxTva     Decimal? @db.Decimal(5, 2)
+  journalCode String
+  compteNum   String
+  compteLib   String
+  debit       Decimal @db.Decimal(12, 2)
+  credit      Decimal @db.Decimal(12, 2)
+
+  @@unique([factureId, ordre])
+  @@index([factureId])
 }
 
 model JournalFacture {
