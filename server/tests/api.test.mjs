@@ -6,7 +6,7 @@
 // Sans elle, la suite s'annonce ignorée : mieux vaut un « skip » visible qu'un vert obtenu
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import test, { after, before, describe } from 'node:test';
 import { PDFParse } from 'pdf-parse';
 
@@ -124,7 +124,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -3013,17 +3013,27 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
     });
 
-    test('aperçu de 4 900 modifications liées : latence bornée et règles respectées', async () => {
+    test('aperçu de 4 900 modifications liées : lectures bornées et règles respectées', async () => {
       const lignes = Array.from({ length: 4900 }, (_, i) => ({ code: String(880000 + i), libelle: `Modifié ${i}`, nature: 'ACTIF' }));
       await prisma.compteComptable.createMany({ data: lignes.map(c => ({ ...c, libelle: `Initial ${c.code}`, nature: 'CHARGE' })) });
       const lie = await prisma.compteComptable.findUniqueOrThrow({ where: { code: lignes[0].code } });
       await prisma.regleComptable.upsert({ where: { cle: 'CLIENT' }, create: { cle: 'CLIENT', compteId: lie.id }, update: { compteId: lie.id } });
-      const debut = performance.now();
-      const reponse = await request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', phase: 'apercu', lignes });
-      const duree = performance.now() - debut;
+      // Compter les lectures applicatives (pas le temps machine) distingue un préchargement
+      // borné d'une requête par compte, même sur une CI lente.
+      const { prisma: prismaApp } = await import('../dist/index.js');
+      let lectures = 0;
+      let enCours = true;
+      prismaApp.$use(async (params, next) => {
+        if (enCours && ['CompteComptable', 'RegleComptable', 'RegleTvaComptable'].includes(params.model) && ['findMany', 'count'].includes(params.action)) lectures++;
+        return next(params);
+      });
+      let reponse;
+      try {
+        reponse = await request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', phase: 'apercu', lignes });
+      } finally { enCours = false; }
       assert.equal(reponse.status, 200, JSON.stringify(reponse.body).slice(0, 300));
       assert.equal(reponse.body.actions.length, lignes.length);
-      assert.ok(duree < 2_500, `aperçu de 4900 lignes en ${Math.round(duree)} ms (budget 2,5 s local)`);
+      assert.ok(lectures <= 4, `préchargement borné attendu, ${lectures} lectures observées pour 4 900 comptes`);
       assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: lie.id } }), 0);
     });
 
@@ -3064,6 +3074,105 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.compteComptable.count({ where: { code: '899854' } }), 0);
       assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, 'Intermédiaire');
       assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 1);
+    });
+
+    test('aperçu lié au fichier : substitution des lignes rejetée sans création ni journal', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: '899863', libelle: 'Original', nature: 'CHARGE' } });
+      const lignes = [{ code: '899864', libelle: 'Création', nature: 'CHARGE' }, { code: compte.code, libelle: 'Révision', nature: 'CHARGE' }];
+      const envoyer = body => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', ...body });
+      const apercu = await envoyer({ phase: 'apercu', lignes });
+      assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
+      const substitution = await envoyer({ phase: 'confirmer', lignes: [{ ...lignes[0], libelle: 'Substitué' }, lignes[1]], motif: 'Correction motivée', apercuId: apercu.body.apercuId });
+      assert.equal(substitution.status, 409, JSON.stringify(substitution.body));
+      assert.equal(await prisma.compteComptable.count({ where: { code: '899864' } }), 0);
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, 'Original');
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+    });
+
+    test('aperçu réservé à son auteur : autre administrateur refusé sans effet', async () => {
+      const admin = await prisma.user.create({ data: { email: 'comptabilite.import.autre.admin@iris.test', name: 'TEST Autre admin import', role: 'ADMIN' } });
+      const lignes = [{ code: '899865', libelle: 'À créer', nature: 'CHARGE' }];
+      const envoyer = token => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${token}`);
+      const apercu = await envoyer(session).send({ mode: 'mettre_a_jour', phase: 'apercu', lignes });
+      assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
+      const refus = await envoyer(jwt.sign({ id: admin.id }, process.env.JWT_SECRET)).send({ mode: 'mettre_a_jour', phase: 'confirmer', lignes, motif: 'Correction motivée', apercuId: apercu.body.apercuId });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 0);
+      assert.equal(await prisma.journalCompteComptable.count({ where: { auteurId: admin.id } }), 0);
+    });
+
+    test('aperçu expiré après dix minutes : horloge restaurée même en cas d’échec', async () => {
+      const lignes = [{ code: '899866', libelle: 'À créer', nature: 'CHARGE' }];
+      const envoyer = body => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', lignes, ...body });
+      const apercu = await envoyer({ phase: 'apercu' });
+      assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
+      const horloge = Date.now;
+      try {
+        Date.now = () => horloge() + 10 * 60_000 + 1_000;
+        const refus = await envoyer({ phase: 'confirmer', motif: 'Correction motivée', apercuId: apercu.body.apercuId });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /périmé/i);
+      } finally { Date.now = horloge; }
+      assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 0);
+    });
+
+    test('signature HMAC de l’ancien domaine rejetée, vraie signature acceptée', async () => {
+      const lignes = [{ code: '899867', libelle: 'À créer', nature: 'CHARGE' }];
+      const envoyer = body => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', lignes, ...body });
+      const apercu = await envoyer({ phase: 'apercu' });
+      assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
+      const [contenu] = apercu.body.apercuId.split('.');
+      const signatureAncienne = createHmac('sha256', process.env.JWT_SECRET).update(contenu).digest('base64url');
+      const refus = await envoyer({ phase: 'confirmer', motif: 'Correction motivée', apercuId: `${contenu}.${signatureAncienne}` });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 0);
+      const succes = await envoyer({ phase: 'confirmer', motif: 'Correction motivée', apercuId: apercu.body.apercuId });
+      assert.equal(succes.status, 200, JSON.stringify(succes.body));
+      assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 1);
+    });
+
+    test('remappage comptable après aperçu : 409 sans écriture du lot', async () => {
+      const source = await prisma.compteComptable.create({ data: { code: '899868', libelle: 'Source', nature: 'PRODUIT' } });
+      const cible = await prisma.compteComptable.create({ data: { code: '899869', libelle: 'Cible', nature: 'PRODUIT' } });
+      const lignes = [{ code: '899870', libelle: 'Ne pas créer', nature: 'CHARGE' }, { code: source.code, libelle: 'Révisé', nature: 'PRODUIT' }];
+      const envoyer = body => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', lignes, ...body });
+      const regle = '/api/comptabilite/regles/VENTE_ARTICLE';
+      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: source.id })).status, 200);
+      const apercu = await envoyer({ phase: 'apercu' });
+      assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
+      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: cible.id })).status, 200);
+      const refus = await envoyer({ phase: 'confirmer', motif: 'Correction motivée', apercuId: apercu.body.apercuId });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 0);
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: source.id } })).libelle, 'Source');
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: source.id } }), 0);
+    });
+
+    test('remappage TVA après aperçu : 409 sans écriture du lot', async () => {
+      const source = await prisma.compteComptable.create({ data: { code: '899871', libelle: 'TVA source', nature: 'TVA' } });
+      const cible = await prisma.compteComptable.create({ data: { code: '899872', libelle: 'TVA cible', nature: 'TVA' } });
+      const lignes = [{ code: '899873', libelle: 'Ne pas créer', nature: 'CHARGE' }, { code: source.code, libelle: 'Révisé', nature: 'TVA' }];
+      const envoyer = body => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', lignes, ...body });
+      const regle = '/api/comptabilite/tva/20';
+      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: source.id })).status, 200);
+      const apercu = await envoyer({ phase: 'apercu' });
+      assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
+      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: cible.id })).status, 200);
+      const refus = await envoyer({ phase: 'confirmer', motif: 'Correction motivée', apercuId: apercu.body.apercuId });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 0);
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: source.id } })).libelle, 'TVA source');
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: source.id } }), 0);
+    });
+
+    test('modes et phases inconnus refusés atomiquement', async () => {
+      const lignes = [{ code: '899874', libelle: 'Ne pas créer', nature: 'CHARGE' }];
+      const envoyer = body => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ lignes, ...body });
+      for (const body of [{ mode: 'inconnu' }, { mode: 'mettre_a_jour', phase: 'inconnue' }, { mode: 'mettre_a_jour' }, { phase: 'apercu' }]) {
+        const refus = await envoyer(body);
+        assert.equal(refus.status, 400, JSON.stringify({ body, reponse: refus.body }));
+        assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 0);
+      }
     });
 
     test('mise à jour CSV refuse les inactifs et natures liées à des règles sans effet partiel', async () => {

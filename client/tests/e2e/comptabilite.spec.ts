@@ -11,6 +11,8 @@ test('aperçoit un CSV en mode mise à jour puis confirme avec un motif unique',
   const fichier = creation.locator('input[type="file"]');
   await fichier.setInputFiles({ name: 'correction.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\n${code};Après import;ACTIF`) });
   const dialogue = creation.getByRole('dialog', { name: 'Aperçu de la mise à jour CSV' });
+  await expect(dialogue.locator('tbody tr', { hasText: code })).toContainText('Modification');
+  await expect(dialogue.getByText(/Le motif documente les modifications ; les créations seules ne produisent pas de journal/)).toBeVisible();
   await expect(dialogue).toContainText('Avant import');
   await expect(dialogue).toContainText('Après import');
   expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ code: string; libelle: string }> }).comptes.find(c => c.code === code)?.libelle).toBe('Avant import');
@@ -20,6 +22,22 @@ test('aperçoit un CSV en mode mise à jour puis confirme avec un motif unique',
   const compte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; code: string }> }).comptes.find(c => c.code === code)!;
   const journal = (await (await apiAdmin.get(`/comptabilite/comptes/${compte.id}/journal`)).json()) as Array<{ action: string; motif: string }>;
   expect(journal.map((j: { action: string; motif: string }) => [j.action, j.motif])).toEqual([['MODIFICATION', 'Correction comptable CSV']]);
+});
+
+test('aperçu créations seules : motif expliqué, aucune trace de modification', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const code = `718${String(Date.now()).slice(-9)}`;
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.getByLabel('Mode de mise à jour CSV').check();
+  await page.locator('input[type="file"]').setInputFiles({ name: 'creation.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\n${code};Nouveau compte;CHARGE`) });
+  const dialogue = page.getByRole('dialog', { name: 'Aperçu de la mise à jour CSV' });
+  await expect(dialogue.locator('tbody tr', { hasText: code })).toContainText('Création');
+  await expect(dialogue.getByText(/Le motif documente les modifications ; les créations seules ne produisent pas de journal/)).toBeVisible();
+  await dialogue.getByLabel(/Motif unique/).fill('Création du nouveau plan');
+  await dialogue.getByRole('button', { name: 'Confirmer la mise à jour' }).click();
+  await expect(dialogue).not.toBeVisible();
+  const compte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; code: string }> }).comptes.find(c => c.code === code)!;
+  expect(compte).toBeTruthy();
+  expect(await (await apiAdmin.get(`/comptabilite/comptes/${compte.id}/journal`)).json()).toEqual([]);
 });
 
 test('annule l’aperçu sans écriture puis refuse une confirmation devenue périmée', async ({ allerSurPageAdmin, apiAdmin, session, request }) => {

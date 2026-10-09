@@ -11,7 +11,7 @@ import PDFDocument from 'pdfkit';
 dotenv.config();
 
 const app = express();
-const prisma = new PrismaClient();
+export const prisma = new PrismaClient();
 const port = process.env.PORT || 3001;
 
 // Ne pas révéler la techno serveur (en-tête `X-Powered-By: Express`).
@@ -1205,14 +1205,14 @@ async function preparerApercuImport(tx: Prisma.TransactionClient, comptes: { cod
 }
 function signerApercu(empreinte: string, auteurId: string, delivre: number) {
   const contenu = Buffer.from(JSON.stringify({ empreinte, auteurId, delivre })).toString('base64url');
-  const signature = crypto.createHmac('sha256', JWT_SECRET).update(contenu).digest('base64url');
+  const signature = crypto.createHmac('sha256', JWT_SECRET).update('iris:apercu-import-comptable:v1:').update(contenu).digest('base64url');
   return `${contenu}.${signature}`;
 }
 function apercuValide(jeton: unknown, empreinte: string, auteurId: string) {
   if (typeof jeton !== 'string' || jeton.length > 2048) return false;
   const [contenu, signature, surplus] = jeton.split('.');
   if (!contenu || !signature || surplus !== undefined) return false;
-  const attendu = crypto.createHmac('sha256', JWT_SECRET).update(contenu).digest();
+  const attendu = crypto.createHmac('sha256', JWT_SECRET).update('iris:apercu-import-comptable:v1:').update(contenu).digest();
   let fourni: Buffer;
   try { fourni = Buffer.from(signature, 'base64url'); } catch { return false; }
   if (fourni.length !== attendu.length || !crypto.timingSafeEqual(fourni, attendu)) return false;
