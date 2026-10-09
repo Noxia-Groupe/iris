@@ -124,7 +124,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -2698,6 +2698,236 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).get('/api/comptabilite/comptes/inexistant/journal').set('Authorization', `Bearer ${session}`)).status, 404);
     });
 
+    test('modifie un compte avec motif et instantanés auditables sans changer son code', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `878${String(Date.now()).slice(-9)}`, libelle: 'Avant', nature: 'CHARGE' } });
+      const url = `/api/comptabilite/comptes/${compte.id}`;
+      const reponse = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ libelle: 'Après', nature: 'ACTIF', motif: 'Correction de classification', expectedUpdatedAt: compte.updatedAt.toISOString() });
+      assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      assert.deepEqual([reponse.body.code, reponse.body.libelle, reponse.body.nature], [compte.code, 'Après', 'ACTIF']);
+      const journal = await request(app).get(`${url}/journal`).set('Authorization', `Bearer ${session}`);
+      assert.equal(journal.status, 200);
+      assert.equal(journal.body.length, 1);
+      assert.deepEqual([journal.body[0].action, journal.body[0].avantLibelle, journal.body[0].apresLibelle, journal.body[0].avantNature, journal.body[0].apresNature, journal.body[0].motif], ['MODIFICATION', 'Avant', 'Après', 'CHARGE', 'ACTIF', 'Correction de classification']);
+      assert.equal(journal.body[0].auteurId, (await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } })).id);
+    });
+
+    test('un ADMIN modifie un compte inactif sans le réactiver et signe son journal', async () => {
+      const admin = await prisma.user.create({ data: { email: 'comptabilite.modification.admin@iris.test', name: 'TEST Admin modification', role: 'ADMIN' } });
+      const compte = await prisma.compteComptable.create({ data: { code: `869${String(Date.now()).slice(-9)}`, libelle: 'Libellé inactif', nature: 'CHARGE', actif: false } });
+      const token = jwt.sign({ id: admin.id }, process.env.JWT_SECRET);
+      const reponse = await request(app).patch(`/api/comptabilite/comptes/${compte.id}`).set('Authorization', `Bearer ${token}`).send({ libelle: 'Libellé rectifié', motif: 'Correction historique', expectedUpdatedAt: compte.updatedAt.toISOString() });
+      assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      assert.equal(reponse.body.actif, false);
+      const [trace] = await prisma.journalCompteComptable.findMany({ where: { compteId: compte.id } });
+      assert.deepEqual([trace.auteurId, trace.auteurNom, trace.avantNature, trace.apresNature], [admin.id, admin.name, 'CHARGE', 'CHARGE']);
+    });
+
+    test('une version périmée ou absente ne modifie rien et ne journalise rien', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `868${String(Date.now()).slice(-9)}`, libelle: 'Initial', nature: 'CHARGE' } });
+      const url = `/api/comptabilite/comptes/${compte.id}`;
+      const premier = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ libelle: 'Premier', motif: 'Premier éditeur', expectedUpdatedAt: compte.updatedAt.toISOString() });
+      assert.equal(premier.status, 200, JSON.stringify(premier.body));
+      for (const body of [
+        { libelle: 'Écrasement', nature: 'ACTIF', motif: 'Éditeur périmé', expectedUpdatedAt: compte.updatedAt.toISOString() },
+        { libelle: 'Écrasement', motif: 'Version manquante' },
+      ]) {
+        const reponse = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send(body);
+        assert.equal(reponse.status, body.expectedUpdatedAt ? 409 : 400, JSON.stringify(reponse.body));
+      }
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, 'Premier');
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 1);
+    });
+
+    test('refuse les rôles non admin, les champs étrangers et les motifs invalides sans trace', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `877${String(Date.now()).slice(-9)}`, libelle: 'Initial', nature: 'CHARGE' } });
+      const url = `/api/comptabilite/comptes/${compte.id}`;
+      const valide = { libelle: 'Révisé', nature: 'PRODUIT', motif: 'Correction motivée', expectedUpdatedAt: compte.updatedAt.toISOString() };
+      assert.equal((await request(app).patch(url).send(valide)).status, 401);
+      const conducteur = await prisma.user.create({ data: { email: 'comptabilite.modification.conducteur@iris.test', name: 'TEST Conducteur modification', role: 'CONDUCTEUR_TRAVAUX' } });
+      const nonAdmin = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${nonAdmin}`).send(valide)).status, 403);
+      for (const body of [{ ...valide, code: '999' }, { ...valide, libelle: '   ' }, { ...valide, libelle: 'Ligne\nbrisée' }, { ...valide, libelle: 'Compte\u0085invalide' }, { ...valide, libelle: 42 }, { ...valide, nature: 'INCONNU' }, { ...valide, motif: 'ab' }, { ...valide, motif: 'x'.repeat(501) }, { ...valide, motif: 'Motif\tinterdit' }, { ...valide, motif: 'Motif\u007finterdit' }, { ...valide, motif: 'Motif\u0085interdit' }, { ...valide, motif: '\u200B'.repeat(3) }, { ...valide, motif: 'Motif \u202E inversé' }, { ...valide, libelle: 'Compte \u202E inversé' }]) {
+        const r = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send(body);
+        assert.equal(r.status, 400, JSON.stringify({ body, reponse: r.body }));
+        assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+      }
+      assert.equal((await request(app).patch('/api/comptabilite/comptes/inexistant').set('Authorization', `Bearer ${session}`).send(valide)).status, 404);
+      assert.deepEqual([(await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, await prisma.journalCompteComptable.count({ where: { compteId: compte.id } })], ['Initial', 0]);
+      assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ libelle: 'Initial', motif: 'Sans changement', expectedUpdatedAt: compte.updatedAt.toISOString() })).status, 400);
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+    });
+
+    test('création et import refusent le libellé bidi sans aucun compte créé', async () => {
+      const code = `864${String(Date.now()).slice(-9)}`;
+      const autreCode = `863${String(Date.now()).slice(-9)}`;
+      const libelle = 'Compte \u202E inversé';
+      const creation = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code, libelle, nature: 'CHARGE' });
+      assert.equal(creation.status, 400, JSON.stringify(creation.body));
+      const importation = await request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ lignes: [{ code, libelle: 'Compte autorisé', nature: 'CHARGE' }, { code: autreCode, libelle, nature: 'CHARGE' }] });
+      assert.equal(importation.status, 400, JSON.stringify(importation.body));
+      assert.deepEqual(importation.body.erreurs.map(e => e.ligne), [2]);
+      assert.equal(await prisma.compteComptable.count({ where: { code: { in: [code, autreCode] } } }), 0);
+    });
+
+    test('activation et modification refusent le même motif invisible sans journal', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `862${String(Date.now()).slice(-9)}`, libelle: 'Compte sans trace', nature: 'CHARGE' } });
+      const url = `/api/comptabilite/comptes/${compte.id}`;
+      for (const motif of ['\u200B'.repeat(3), 'Motif \u202E inversé']) {
+        const modification = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ libelle: 'Tentative', motif, expectedUpdatedAt: compte.updatedAt.toISOString() });
+        const activation = await request(app).patch(`${url}/activation`).set('Authorization', `Bearer ${session}`).send({ actif: false, motif });
+        assert.equal(modification.status, 400, JSON.stringify(modification.body));
+        assert.equal(activation.status, 400, JSON.stringify(activation.body));
+      }
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, compte.libelle);
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+    });
+
+    test('les deux actions acceptent 500 emoji comptés en points de code', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `865${String(Date.now()).slice(-9)}`, libelle: 'Compte emoji', nature: 'CHARGE' } });
+      const motif = '🔧'.repeat(500);
+      const url = `/api/comptabilite/comptes/${compte.id}`;
+      const modification = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ libelle: 'Compte corrigé', motif, expectedUpdatedAt: compte.updatedAt.toISOString() });
+      assert.equal(modification.status, 200, JSON.stringify(modification.body));
+      const activation = await request(app).patch(`${url}/activation`).set('Authorization', `Bearer ${session}`).send({ actif: false, motif });
+      assert.equal(activation.status, 200, JSON.stringify(activation.body));
+      assert.deepEqual((await prisma.journalCompteComptable.findMany({ where: { compteId: compte.id }, orderBy: { createdAt: 'asc' } })).map(j => j.motif), [motif, motif]);
+    });
+
+    test('corrige un libellé hérité C1 en conservant son instantané avant sans 500', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `861${String(Date.now()).slice(-9)}`, libelle: 'Ancien\u0085libellé', nature: 'CHARGE' } });
+      const reponse = await request(app).patch(`/api/comptabilite/comptes/${compte.id}`).set('Authorization', `Bearer ${session}`).send({ libelle: 'Libellé corrigé', motif: 'Correction historique', expectedUpdatedAt: compte.updatedAt.toISOString() });
+      assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      const [trace] = await prisma.journalCompteComptable.findMany({ where: { compteId: compte.id } });
+      assert.deepEqual([trace.avantLibelle, trace.apresLibelle], ['Ancien\u0085libellé', 'Libellé corrigé']);
+    });
+
+    test('refuse une nature incompatible avec une règle client, vente ou TVA sans effet', async () => {
+      const client = await prisma.compteComptable.create({ data: { code: `876${String(Date.now()).slice(-9)}`, libelle: 'Clients liés', nature: 'ACTIF' } });
+      const vente = await prisma.compteComptable.create({ data: { code: `875${String(Date.now()).slice(-9)}`, libelle: 'Ventes liées', nature: 'PRODUIT' } });
+      const tva = await prisma.compteComptable.create({ data: { code: `874${String(Date.now()).slice(-9)}`, libelle: 'TVA liée', nature: 'TVA' } });
+      for (const [cle, compteId] of [['CLIENT', client.id], ['VENTE_PRESTATION', vente.id], ['VENTE_ARTICLE', vente.id]]) {
+        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ compteId })).status, 200);
+      }
+      assert.equal((await request(app).put('/api/comptabilite/tva/17').set('Authorization', `Bearer ${session}`).send({ compteId: tva.id })).status, 200);
+      for (const compte of [client, vente, tva]) {
+        const r = await request(app).patch(`/api/comptabilite/comptes/${compte.id}`).set('Authorization', `Bearer ${session}`).send({ libelle: 'Tentative', nature: 'CHARGE', motif: 'Changement de nature', expectedUpdatedAt: compte.updatedAt.toISOString() });
+        assert.equal(r.status, 409, JSON.stringify(r.body));
+        assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, compte.libelle);
+        assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+      }
+    });
+
+    test('les contraintes SQL protègent code et journal de modification', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `873${String(Date.now()).slice(-9)}`, libelle: 'Origine SQL', nature: 'CHARGE' } });
+      await assert.rejects(prisma.compteComptable.update({ where: { id: compte.id }, data: { code: '999123' } }), /Code du compte comptable immuable/);
+      const r = await request(app).patch(`/api/comptabilite/comptes/${compte.id}`).set('Authorization', `Bearer ${session}`).send({ libelle: 'Destination SQL', motif: 'Correction SQL', expectedUpdatedAt: compte.updatedAt.toISOString() });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const trace = await prisma.journalCompteComptable.findFirstOrThrow({ where: { compteId: compte.id } });
+      for (const data of [{ motif: 'Falsifié' }, { avantLibelle: 'Falsifié' }]) await assert.rejects(prisma.journalCompteComptable.update({ where: { id: trace.id }, data }), /Journal comptable immuable/);
+      await assert.rejects(prisma.journalCompteComptable.delete({ where: { id: trace.id } }), /Journal comptable immuable/);
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { id: trace.auteurId } });
+      for (const [id, avantLibelle, apresLibelle, avantNature, apresNature, motif] of [
+        ['test-modification-identique', 'Même', 'Même', 'CHARGE', 'CHARGE', 'Motif correct'],
+        ['test-modification-vide', '', 'Après', 'CHARGE', 'ACTIF', 'Motif correct'],
+        ['test-modification-nature', 'Avant', 'Après', 'INCONNU', 'ACTIF', 'Motif correct'],
+        ['test-modification-motif', 'Avant', 'Après', 'CHARGE', 'ACTIF', 'Non\nvalide'],
+        ['test-modification-apres-controle', 'Avant', 'Après\u0005', 'CHARGE', 'ACTIF', 'Motif correct'],
+        ['test-modification-apres-espace', 'Avant', ' Après', 'CHARGE', 'ACTIF', 'Motif correct'],
+        ['test-modification-apres-bidi', 'Avant', 'Après\u202E', 'CHARGE', 'ACTIF', 'Motif correct'],
+        ['test-modification-motif-invisible', 'Avant', 'Après', 'CHARGE', 'ACTIF', '\u200B'.repeat(3)],
+      ]) {
+        await assert.rejects(prisma.$executeRaw`INSERT INTO "JournalCompteComptable" ("id", "compteId", "auteurId", "auteurNom", "action", "avantLibelle", "apresLibelle", "avantNature", "apresNature", "motif") VALUES (${id}, ${compte.id}, ${auteur.id}, ${auteur.name}, 'MODIFICATION', ${avantLibelle}, ${apresLibelle}, ${avantNature}, ${apresNature}, ${motif})`, /constraint|check/i);
+      }
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 1);
+    });
+
+    test('SQL direct sans journal motivé est rejeté à la validation de transaction', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `867${String(Date.now()).slice(-9)}`, libelle: 'Original SQL', nature: 'CHARGE' } });
+      await assert.rejects(prisma.compteComptable.update({ where: { id: compte.id }, data: { libelle: 'Fraude SQL' } }), /journal|motif|transition/i);
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, 'Original SQL');
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+    });
+
+    test('SQL avance la version même si un UPDATE remet le même instant milliseconde', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `860${String(Date.now()).slice(-9)}`, libelle: 'Version SQL', nature: 'CHARGE' } });
+      await prisma.$executeRaw`UPDATE "CompteComptable" SET "updatedAt" = ${compte.updatedAt} WHERE "id" = ${compte.id}`;
+      const apres = await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } });
+      assert.ok(apres.updatedAt.getTime() >= compte.updatedAt.getTime() + 1);
+    });
+
+    test('SQL accepte une transition avec journal dans la même transaction, pas un journal antérieur', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `866${String(Date.now()).slice(-9)}`, libelle: 'Avant SQL', nature: 'CHARGE' } });
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      await prisma.$transaction(async tx => {
+        await tx.compteComptable.update({ where: { id: compte.id }, data: { libelle: 'Après SQL' } });
+        await tx.journalCompteComptable.create({ data: { compteId: compte.id, auteurId: auteur.id, auteurNom: auteur.name, action: 'MODIFICATION', avantLibelle: 'Avant SQL', apresLibelle: 'Après SQL', avantNature: 'CHARGE', apresNature: 'CHARGE', motif: 'Correction SQL motivée' } });
+      });
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, 'Après SQL');
+      await assert.rejects(prisma.compteComptable.update({ where: { id: compte.id }, data: { libelle: 'Avant SQL' } }), /journal|motif|transition/i);
+      await prisma.$transaction(async tx => {
+        await tx.compteComptable.update({ where: { id: compte.id }, data: { libelle: 'Avant SQL' } });
+        await tx.journalCompteComptable.create({ data: { compteId: compte.id, auteurId: auteur.id, auteurNom: auteur.name, action: 'MODIFICATION', avantLibelle: 'Après SQL', apresLibelle: 'Avant SQL', avantNature: 'CHARGE', apresNature: 'CHARGE', motif: 'Retour motivé' } });
+      });
+      // Le premier journal A→B existe, mais une troisième transition A→B
+      // doit exiger une nouvelle écriture créée dans cette transaction.
+      await assert.rejects(prisma.compteComptable.update({ where: { id: compte.id }, data: { libelle: 'Après SQL' } }), /journal|motif|transition/i);
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, 'Avant SQL');
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 2);
+    });
+
+    test('attend le verrou global puis relit les règles avant une modification de nature', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `872${String(Date.now()).slice(-9)}`, libelle: 'Compte concurrent', nature: 'PRODUIT' } });
+      const url = `/api/comptabilite/comptes/${compte.id}`;
+      let signalerVerrou;
+      const verrouPris = new Promise(resolve => { signalerVerrou = resolve; });
+      let liberer;
+      const barriere = new Promise(resolve => { liberer = resolve; });
+      const transaction = prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(814086)::text`;
+        await tx.regleComptable.upsert({ where: { cle: 'VENTE_ARTICLE' }, create: { cle: 'VENTE_ARTICLE', compteId: compte.id }, update: { compteId: compte.id } });
+        signalerVerrou();
+        await barriere;
+      }, { timeout: 20_000 });
+      await verrouPris;
+      const demande = request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ libelle: 'Changé', nature: 'CHARGE', motif: 'Concurrence de remappage', expectedUpdatedAt: compte.updatedAt.toISOString() });
+      const resultat = demande.then(r => r);
+      try {
+        let attente = false;
+        for (let i = 0; i < 30 && !attente; i++) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock%') AS attente`;
+          attente = etat.attente;
+          if (!attente) await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        assert.equal(attente, true, 'la modification doit attendre le verrou du paramétrage');
+      } finally { liberer(); await transaction; }
+      const reponse = await resultat;
+      assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).nature, 'PRODUIT');
+      assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+    });
+
+    test('deux modifications simultanées journalisent une chaîne avant/après cohérente', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `870${String(Date.now()).slice(-9)}`, libelle: 'Départ', nature: 'CHARGE' } });
+      const url = `/api/comptabilite/comptes/${compte.id}`;
+      const requetes = await Promise.all(['Premier', 'Second'].map(libelle => request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ libelle, motif: `Correction ${libelle}`, expectedUpdatedAt: compte.updatedAt.toISOString() })));
+      assert.deepEqual(requetes.map(r => r.status).sort(), [200, 409]);
+      const traces = await prisma.journalCompteComptable.findMany({ where: { compteId: compte.id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].avantLibelle, 'Départ');
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, traces[0].apresLibelle);
+    });
+
+    test('une insertion du journal refusée annule la modification du compte', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: `871${String(Date.now()).slice(-9)}`, libelle: 'Avant rollback', nature: 'CHARGE' } });
+      await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" ADD CONSTRAINT "journal_test_refus_insertion" CHECK ("motif" <> \'TEST refus atomique\')');
+      try {
+        const reponse = await request(app).patch(`/api/comptabilite/comptes/${compte.id}`).set('Authorization', `Bearer ${session}`).send({ libelle: 'Après rollback', motif: 'TEST refus atomique', expectedUpdatedAt: compte.updatedAt.toISOString() });
+        assert.equal(reponse.status, 500, JSON.stringify(reponse.body));
+        assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).libelle, 'Avant rollback');
+        assert.equal(await prisma.journalCompteComptable.count({ where: { compteId: compte.id } }), 0);
+      } finally { await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" DROP CONSTRAINT "journal_test_refus_insertion"'); }
+    });
+
     test('autorise un ADMIN ordinaire à changer le statut d’un compte', async () => {
       const admin = await prisma.user.create({ data: { email: 'comptabilite.admin@iris.test', name: 'TEST Admin comptabilité', role: 'ADMIN' } });
       const token = jwt.sign({ id: admin.id }, process.env.JWT_SECRET);
@@ -2734,6 +2964,7 @@ if (!TEST_DATABASE_URL) {
         { id: 'test-journal-transition-invalide', action: 'DESACTIVATION', avant: false, apres: false, motif: 'Correction métier' },
         { id: 'test-journal-motif-vide', action: 'DESACTIVATION', avant: true, apres: false, motif: '' },
         { id: 'test-journal-motif-controle', action: 'DESACTIVATION', avant: true, apres: false, motif: 'Motif\ninvalide' },
+        { id: 'test-journal-motif-invisible', action: 'DESACTIVATION', avant: true, apres: false, motif: '\u200B'.repeat(3) },
       ]) {
         await assert.rejects(prisma.$executeRaw`INSERT INTO "JournalCompteComptable" ("id", "compteId", "auteurId", "auteurNom", "action", "avant", "apres", "motif") VALUES (${id}, ${compte.id}, ${auteur.id}, ${auteur.name}, ${action}, ${avant}, ${apres}, ${motif})`);
       }
@@ -3051,16 +3282,22 @@ if (!TEST_DATABASE_URL) {
       const apres = piece((await exporter()).text, emis.body.numero);
       assert.deepEqual(apres, avant, 'les octets historiques ne dépendent plus des comptes client/vente/TVA ni du journal');
       const compteHistorique = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '706100' } });
-      await prisma.compteComptable.update({ where: { id: compteHistorique.id }, data: { libelle: 'Libellé changé après émission' } });
+      const patchHistorique = await request(app).patch(`/api/comptabilite/comptes/${compteHistorique.id}`).set('Authorization', `Bearer ${session}`).send({ libelle: 'Libellé changé après émission', motif: 'Rectification motivée', expectedUpdatedAt: compteHistorique.updatedAt.toISOString() });
+      assert.equal(patchHistorique.status, 200, JSON.stringify(patchHistorique.body));
       try {
         assert.deepEqual(piece((await exporter()).text, emis.body.numero), avant, 'CompteLib est également figé');
       } finally {
-        await prisma.compteComptable.update({ where: { id: compteHistorique.id }, data: { libelle: compteHistorique.libelle } });
+        const restauration = await request(app).patch(`/api/comptabilite/comptes/${compteHistorique.id}`).set('Authorization', `Bearer ${session}`).send({ libelle: compteHistorique.libelle, motif: 'Restauration du référentiel de test', expectedUpdatedAt: patchHistorique.body.updatedAt });
+        assert.equal(restauration.status, 200, JSON.stringify(restauration.body));
       }
+      const patchNouveau = await request(app).patch(`/api/comptabilite/comptes/${nouveauCompte.body.id}`).set('Authorization', `Bearer ${session}`).send({ libelle: 'Libellé neuf pour émissions futures', motif: 'Harmonisation du libellé', expectedUpdatedAt: nouveauCompte.body.updatedAt });
+      assert.equal(patchNouveau.status, 200, JSON.stringify(patchNouveau.body));
+      assert.deepEqual(piece((await exporter()).text, emis.body.numero), avant);
       const second = await creer('TEST gel second');
       const emisSecond = await emettre(second.body.id);
       assert.equal(emisSecond.status, 200, JSON.stringify(emisSecond.body));
       assert.ok(piece((await exporter()).text, emisSecond.body.numero).some(ligne => ligne.includes('706986')));
+      assert.ok(piece((await exporter()).text, emisSecond.body.numero).some(ligne => ligne.includes('Libellé neuf pour émissions futures')));
       assert.ok(piece((await exporter()).text, emisSecond.body.numero).some(ligne => ligne.includes('411986')));
       assert.ok(piece((await exporter()).text, emisSecond.body.numero).some(ligne => ligne.includes('445986')));
       assert.ok(piece((await exporter()).text, emisSecond.body.numero).every(ligne => ligne.startsWith('"NOUV";')));

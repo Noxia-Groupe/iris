@@ -657,9 +657,13 @@ model JournalCompteComptable {
   auteurId  String
   auteur    User @relation(fields: [auteurId], references: [id], onDelete: Restrict)
   auteurNom String
-  action    String // DESACTIVATION | REACTIVATION
-  avant     Boolean
-  apres     Boolean
+  action    String // DESACTIVATION | REACTIVATION | MODIFICATION
+  avant     Boolean?
+  apres     Boolean?
+  avantLibelle String?
+  apresLibelle String?
+  avantNature String?
+  apresNature String?
   motif     String
   createdAt DateTime @default(now())
 
