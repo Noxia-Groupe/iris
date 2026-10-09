@@ -1011,14 +1011,14 @@ app.get('/api/facturation/prete-a-facturer', requireAuth, requireAdmin, async (_
     const reglesOk = CLES_COMPTABLES.every(cle => cle === 'JOURNAL_VENTES' ? Boolean(parCle.get(cle)?.journal) : Boolean(parCle.get(cle)?.compte?.actif));
     const tauxCouverts = new Set(reglesTva.map(regle => Number(regle.taux)));
     const tauxManquants = [...new Set(tauxFactures.map(ligne => Number(ligne.tauxTva)))].filter(taux => taux !== 0 && !tauxCouverts.has(taux)).sort((a, b) => a - b);
-    // L'export ne refuse que les taux non nuls déjà facturés sans compte. Le 0 % d'une
-    // autoliquidation BTP est donc exempt : imposer un compte TVA dans ce cas créerait un faux barrage.
+    // Les taux historiques servent de signal pour de futures émissions ; l'export des
+    // pièces déjà émises relit leurs écritures figées. Le 0 % n'exige aucun compte TVA.
     const tvaOk = tauxCouverts.size > 0 && tauxManquants.length === 0;
     const prefixe = (settings.prefixeFacture || '').trim();
     const controles = [
       { cle: 'PLAN_COMPTABLE', bloquant: true, pret: comptes > 0, libelle: 'Plan comptable', detail: comptes > 0 ? `${comptes} compte(s) actif(s).` : 'Importez ou créez au moins un compte.', route: '/comptabilite' },
       { cle: 'REGLES_COMPTABLES', bloquant: true, pret: reglesOk, libelle: 'Règles comptables', detail: reglesOk ? 'Les règles client, ventes et journal sont renseignées.' : 'Renseignez les comptes client, ventes et le journal.', route: '/comptabilite' },
-      { cle: 'TVA', bloquant: tauxManquants.length > 0, pret: tvaOk, libelle: 'Règles TVA', detail: tauxManquants.length ? `Aucun compte TVA pour ${tauxManquants.map(taux => `${taux} %`).join(', ')} — ce taux est déjà facturé, l’export comptable sera refusé.` : !tauxCouverts.size ? 'Aucun compte TVA associé. Une entreprise qui ne facture qu’à 0 % (autoliquidation BTP) n’en a pas besoin ; sinon, associez un compte avant la première facture à un taux non nul.' : `${tauxCouverts.size} taux configuré(s) ; tous les taux déjà facturés sont couverts.`, route: '/comptabilite' },
+      { cle: 'TVA', bloquant: tauxManquants.length > 0, pret: tvaOk, libelle: 'Règles TVA', detail: tauxManquants.length ? `Aucun compte TVA pour ${tauxManquants.map(taux => `${taux} %`).join(', ')} — ce taux a déjà été facturé ; l’émission d’une nouvelle facture à ce taux sera refusée (l’export historique reste disponible).` : !tauxCouverts.size ? 'Aucun compte TVA associé. Une entreprise qui ne facture qu’à 0 % (autoliquidation BTP) n’en a pas besoin ; sinon, associez un compte avant la première facture à un taux non nul.' : `${tauxCouverts.size} taux configuré(s) ; tous les taux déjà facturés sont couverts.`, route: '/comptabilite' },
       { cle: 'MENTIONS_LEGALES', bloquant: true, pret: Boolean(mentions), libelle: 'Mentions légales et CGV', detail: mentions ? 'Une version publiée est active.' : 'Publiez une version légale validée.', route: '/mentions-legales' },
       { cle: 'PREFIXE_FACTURE', bloquant: false, pret: Boolean(prefixe), libelle: 'Préfixe de facture', detail: prefixe ? `Préfixe actuel : ${prefixe}.` : 'Aucun préfixe défini : les numéros utiliseront « F » par défaut.', route: null },
       { cle: 'ADRESSES_CLIENTS', bloquant: false, pret: clientsSansSite === 0, libelle: 'Adresses de facturation', detail: clientsSansSite === 0 ? 'Tous les clients actifs portent au moins un site.' : `${clientsSansSite} client(s) actif(s) sans aucun site : l’émission de leurs factures sera refusée.`, route: '/clients' },
@@ -1046,7 +1046,13 @@ class NatureCompteInvalide extends Error {
 // Toutes les mutations de compte/règle prennent d'abord le verrou du compte cible.
 // Le compte source d'un remappage n'est jamais verrouillé : sa désactivation vérifie
 // les références sous son propre verrou, sans cycle de verrous entre deux comptes.
+// Même ordre de verrou partout : périmètre comptable, puis compte cible, puis
+// règles. L'émission relit les règles après ce verrou pour figer un état cohérent.
+async function verrouillerParametrageComptable(tx: Prisma.TransactionClient) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(814086)::text`;
+}
 async function verrouillerCompteComptable(tx: Prisma.TransactionClient, compteId: string) {
+  await verrouillerParametrageComptable(tx);
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "CompteComptable" WHERE "id" = ${compteId} FOR UPDATE`);
 }
 app.get('/api/comptabilite/comptes/:id/journal', requireAuth, requireAdmin, async (req, res) => {
@@ -1110,7 +1116,8 @@ app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req, re
   if (erreurs.length) return res.status(400).json({ error: 'Import refusé : corrigez les lignes signalées.', erreurs });
   try {
     const resultat = await prisma.$transaction(async tx => {
-      // Sérialise les imports : les lots concurrents doivent comparer après le commit précédent.
+      // Sérialise les imports et toutes les émissions/remappages comptables.
+      await verrouillerParametrageComptable(tx);
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(814081)::text AS verrou`;
       const resultat = await tx.compteComptable.createMany({ data: comptes, skipDuplicates: true });
       const existants = await tx.compteComptable.findMany({ where: { code: { in: comptes.map(compte => compte.code) } }, select: { code: true, libelle: true, nature: true, actif: true } });
@@ -1137,6 +1144,7 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, 
     if (cle === 'JOURNAL_VENTES' ? !journal : !compteId) return res.status(400).json({ error: 'Paramétrage de règle incomplet.' });
     if (journal && !/^[A-Z0-9]{1,8}$/.test(journal)) return res.status(400).json({ error: 'Le code journal doit compter au plus 8 caractères alphanumériques majuscules.' });
     const regle = await prisma.$transaction(async tx => {
+      await verrouillerParametrageComptable(tx);
       if (compteId) {
         await verrouillerCompteComptable(tx, compteId);
         const compte = await tx.compteComptable.findFirst({ where: { id: compteId, actif: true } });
@@ -1173,21 +1181,76 @@ app.put('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req, re
   }
 });
 
+class ImputationIncompletError extends Error {}
+
+type PieceComptable = { totalTtc: unknown; lignes: { nature: string; totalHt: unknown; tauxTva: unknown }[]; ventilationTva?: { tauxTva: unknown; totalHt: unknown; totalTva: unknown; totalTtc: unknown }[] };
+
+// Construire les écritures avant la numérotation, puis les écrire dans la même transaction.
+// Un avoir reprend les comptes ET le journal de l'origine, jamais les règles actuelles.
+async function ecrituresPourPiece(tx: Prisma.TransactionClient, piece: PieceComptable, origineId?: string) {
+  const montants = new Map<string, { debit: number; credit: number; tauxTva?: number }>();
+  montants.set('CLIENT', { debit: Number(piece.totalTtc), credit: 0 });
+  for (const nature of ['PRESTATION', 'ARTICLE']) {
+    const ht = centimes(piece.lignes.filter(l => l.nature === nature).reduce((s, l) => s + Number(l.totalHt), 0));
+    if (ht) montants.set(`VENTE_${nature}`, { debit: 0, credit: ht });
+  }
+  for (const v of ventilationFacture(piece)) if (v.totalTva) montants.set(`TVA:${v.tauxTva}`, { debit: 0, credit: v.totalTva, tauxTva: v.tauxTva });
+  const cles = [...montants.keys()];
+  const origine = origineId ? await tx.ecritureFacture.findMany({ where: { factureId: origineId }, orderBy: { ordre: 'asc' } }) : [];
+  if (origineId && !origine.length) throw new ImputationIncompletError('La facture d’origine ne possède pas d’imputation comptable figée.');
+  let journal: string;
+  const comptes = new Map<string, { code: string; libelle: string }>();
+  if (origineId) {
+    journal = origine[0].journalCode;
+    for (const e of origine) comptes.set(e.cle, { code: e.compteNum, libelle: e.compteLib });
+  } else {
+    // La lecture et la mutation des règles utilisent le même verrou global.
+    // FOR SHARE seul ne protège pas les règles créées après la lecture.
+    const [regles, reglesTva] = await Promise.all([
+      tx.regleComptable.findMany({ include: { compte: true } }),
+      tx.regleTvaComptable.findMany({ include: { compte: true } }),
+    ]);
+    const parCle = new Map(regles.map(r => [r.cle, r]));
+    journal = parCle.get('JOURNAL_VENTES')?.journal || '';
+    for (const cle of CLES_COMPTABLES.filter(c => c !== 'JOURNAL_VENTES')) {
+      const compte = parCle.get(cle)?.compte;
+      if (compte?.actif && NATURES_ATTENDUES[cle]?.includes(compte.nature)) comptes.set(cle, { code: compte.code, libelle: compte.libelle });
+    }
+    for (const cle of cles.filter(c => c.startsWith('TVA:'))) {
+      const compte = reglesTva.find(r => Number(r.taux) === Number(cle.slice(4)))?.compte;
+      if (compte?.actif && compte.nature === 'TVA') comptes.set(cle, { code: compte.code, libelle: compte.libelle });
+    }
+  }
+  const requises = origineId ? cles : [...CLES_COMPTABLES.filter(c => c !== 'JOURNAL_VENTES'), ...cles.filter(c => c.startsWith('TVA:'))];
+  if (origineId) {
+    const absentes = requises.filter(cle => !comptes.has(cle));
+    if (absentes.length) throw new ImputationIncompletError(`L’avoir crédite une nature ou un taux absent de la facture d’origine (${absentes.join(', ')}).`);
+  } else if (!journal || requises.some(cle => !comptes.has(cle))) {
+    throw new ImputationIncompletError(`Paramétrage comptable incomplet : ${[...(!journal ? ['JOURNAL_VENTES'] : []), ...requises.filter(cle => !comptes.has(cle))].join(', ')}.`);
+  }
+  const ecritures = cles.map((cle, ordre) => {
+    const montant = montants.get(cle)!;
+    const compte = comptes.get(cle)!;
+    return { ordre, cle, tauxTva: montant.tauxTva ?? null, journalCode: journal, compteNum: compte.code, compteLib: compte.libelle,
+      debit: origineId ? montant.credit : montant.debit, credit: origineId ? montant.debit : montant.credit };
+  });
+  const difference = ecritures.reduce((s, e) => s + Math.round(e.debit * 100) - Math.round(e.credit * 100), 0);
+  if (difference !== 0) throw new ImputationIncompletError('Écriture comptable déséquilibrée.');
+  return ecritures;
+}
+
 const csvComptable = (v: unknown) => {
   const texte = String(v ?? ''); const formule = /^[=+@\t\r]/.test(texte) || (texte.startsWith('-') && !Number.isFinite(Number(texte)));
   return `"${(formule ? `'${texte}` : texte).replace(/"/g, '""')}"`;
 };
 app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (_req, res) => {
   try {
-    const [regles, reglesTva, societe] = await Promise.all([prisma.regleComptable.findMany({ where: { cle: { in: CLES_COMPTABLES } }, include: { compte: true } }), prisma.regleTvaComptable.findMany({ include: { compte: true } }), getCompanySettings()]); const r = new Map(regles.map(x => [x.cle, x])); const tvaParTaux = new Map(reglesTva.filter(x => x.compte.actif).map(x => [Number(x.taux), x.compte]));
-    const manquantes = CLES_COMPTABLES.filter(cle => cle === 'JOURNAL_VENTES' ? !r.get(cle)?.journal : !r.get(cle)?.compte?.actif);
-    if (manquantes.length) return res.status(409).json({ error: 'Export bloqué : paramétrage comptable incomplet.', manquantes });
+    const societe = await getCompanySettings();
     // Une facture numérotée ne quitte jamais le journal des ventes : l'avoir la neutralise
     // par une pièce distincte, sans effacer ses écritures ni son numéro légal déjà exporté.
     // Les annulations historiques sans avoir gardent leur contre-passation legacy ci-dessous.
-    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { client: true, lignes: true, ventilationTva: true, avoirs: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
-    const tauxManquants = [...new Set(factures.flatMap(f => f.lignes.map(l => Number(l.tauxTva))).filter(taux => taux !== 0 && !tvaParTaux.has(taux)))];
-    if (tauxManquants.length) return res.status(409).json({ error: 'Export bloqué : compte TVA absent pour un taux utilisé.', tauxManquants });
+    const factures = await prisma.facture.findMany({ where: { statut: { in: ['EMISE', 'REGLEE', 'ANNULEE'] } }, include: { ecrituresComptables: { orderBy: { ordre: 'asc' } }, avoirs: { select: { id: true } }, journal: { where: { action: 'ANNULATION' }, orderBy: { createdAt: 'desc' }, take: 1 } }, orderBy: [{ dateEmission: 'asc' }, { numero: 'asc' }] });
+    if (factures.some(f => !f.ecrituresComptables.length)) return res.status(409).json({ error: 'Export bloqué : pièce historique sans imputation comptable validée.' });
     // Deux classes de dates, deux lectures — les confondre décale l'écriture d'un jour, et
     // d'un exercice au 1er janvier. La date d'émission est une DATE-SEULE déjà stockée à minuit
     // UTC : elle se lit telle quelle. La date d'annulation vient d'un INSTANT : elle se lit
@@ -1195,15 +1258,16 @@ app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (
     const fuseauHoraire = societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
     const jourDeDateSeule = (date: Date | string) => dateSeuleEnJourCivil(date).replace(/-/g, '');
     const jourDInstant = (instant: Date) => jourCivilEntreprise(instant, fuseauHoraire).replace(/-/g, '');
-    const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit']; for (const f of factures) { const date = jourDeDateSeule(f.dateEmission); const libelle = `Facture ${f.numero} — ${f.clientRaisonSociale}`;
+    const lignes = ['JournalCode;EcritureDate;PieceRef;CompteNum;CompteLib;Libelle;Debit;Credit'];
+    for (const f of factures) {
+      const date = jourDeDateSeule(f.dateEmission);
+      const libelle = `${f.type === 'AVOIR' ? 'Avoir' : 'Facture'} ${f.numero} — ${f.clientRaisonSociale}`;
       const ecrire = (dateEcriture: string, texte: string, contrepasse: boolean) => {
-        const ecriture = (compte: { code: string; libelle: string }, debit: number, credit: number) => lignes.push([r.get('JOURNAL_VENTES')!.journal, dateEcriture, f.numero, compte.code, compte.libelle, texte, (contrepasse ? credit : debit).toFixed(2), (contrepasse ? debit : credit).toFixed(2)].map(csvComptable).join(';'));
-        ecriture(r.get('CLIENT')!.compte!, Number(f.totalTtc), 0);
-        for (const nature of ['PRESTATION', 'ARTICLE']) { const ht = f.lignes.filter(l => l.nature === nature).reduce((s, l) => s + Number(l.totalHt), 0); if (ht) ecriture(r.get(nature === 'PRESTATION' ? 'VENTE_PRESTATION' : 'VENTE_ARTICLE')!.compte!, 0, ht); }
-        for (const ventilation of ventilationFacture(f)) if (ventilation.totalTva) ecriture(tvaParTaux.get(ventilation.tauxTva)!, 0, ventilation.totalTva);
+        for (const e of f.ecrituresComptables) lignes.push([e.journalCode, dateEcriture, f.numero, e.compteNum, e.compteLib, texte,
+          Number(contrepasse ? e.credit : e.debit).toFixed(2), Number(contrepasse ? e.debit : e.credit).toFixed(2)].map(csvComptable).join(';'));
       };
-      ecrire(date, f.type === 'AVOIR' ? `Avoir ${f.numero} — ${f.clientRaisonSociale}` : libelle, f.type === 'AVOIR');
-      if (f.statut === 'ANNULEE' && !f.avoirs.length) ecrire(f.journal[0] ? jourDInstant(f.journal[0].createdAt) : jourDeDateSeule(f.dateEmission), `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
+      ecrire(date, libelle, false);
+      if (f.statut === 'ANNULEE' && !f.avoirs.length) ecrire(f.journal[0] ? jourDInstant(f.journal[0].createdAt) : date, `Annulation facture ${f.numero} — ${f.clientRaisonSociale}`, true);
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="export-ventes.csv"'); res.send(`\uFEFF${lignes.join('\n')}\n`);
   } catch { res.status(500).json({ error: 'Export comptable impossible.' }); }
@@ -1247,7 +1311,8 @@ app.get('/api/mentions-legales', requireAuth, requireAdmin, async (_req, res) =>
 app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res) => {
   try {
     const resultat = await prisma.$transaction(async (tx) => {
-      const facture = await tx.facture.findUnique({ where: { id: paramId(req) } });
+      await verrouillerParametrageComptable(tx);
+      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: true, ventilationTva: true } });
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
       const annee = facture.dateEmission.getUTCFullYear();
@@ -1257,13 +1322,16 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       if (!mentions) return { erreur: 'LEGAL_MENTIONS_MISSING' as const };
       const siteFacturation = await tx.clientSite.findFirst({ where: { clientId: facture.clientId }, orderBy: SITE_FACTURATION_ORDRE });
       if (!siteFacturation) return { erreur: 'CLIENT_ADRESSE_MISSING' as const };
+      const ecritures = await ecrituresPourPiece(tx, facture);
       const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
       const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
       const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
       const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
       const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date(), mentionsLegalesVersionId: mentions.id, clientAdresse: formaterAdresseFacturation(siteFacturation) }, include: factureInclude });
+      await tx.ecritureFacture.createMany({ data: ecritures.map(e => ({ ...e, factureId: facture.id })) });
+      await tx.facture.update({ where: { id: facture.id }, data: { ecrituresScellees: true } });
       await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: (req as AuthRequest).user!.id, action: 'EMISSION', detail: `Numéro ${numero}, version légale ${mentions.id}` } });
-      return { facture: maj };
+      return { facture: { ...maj, ecrituresScellees: true } };
     });
     if ('erreur' in resultat) {
       if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
@@ -1274,6 +1342,7 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
     }
     res.json(decimalToNumber(resultat.facture));
   } catch (error) {
+    if (error instanceof ImputationIncompletError) return res.status(409).json({ error: error.message });
     if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Numérotation de facture déjà attribuée, veuillez réessayer.' });
     res.status(500).json({ error: 'Émission de facture impossible.' });
   }
@@ -1312,10 +1381,11 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
       // d'abord. Même ordre que POST /avoirs : facture puis séquence, afin d'éviter à la
       // fois un reliquat lu périmé et les interblocages entre annulation et avoir partiel.
       await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${paramId(req)} FOR UPDATE`;
-      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } }, avoirs: { select: { id: true } } } });
+      const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } }, ventilationTva: true, avoirs: { select: { id: true } } } });
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'EMISE' || facture.type !== 'FACTURE') return { erreur: 'NOT_EMITTED' as const };
       if (facture.avoirs.length) return { erreur: 'PARTIAL_CREDITS_EXIST' as const };
+      const ecritures = await ecrituresPourPiece(tx, facture, facture.id);
       const now = new Date();
       const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
       const jour = jourCivilEntreprise(now, societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
@@ -1333,11 +1403,13 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
         motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
         totalHt: facture.totalHt, totalTva: facture.totalTva, totalTtc: facture.totalTtc, createdById: req.user!.id, emisLe: now,
         lignes: { create: facture.lignes.map(({ id: _id, factureId: _factureId, ...ligne }) => ligne) },
-        ventilationTva: { create: ventilationTvaDerivee(facture.lignes) },
+        ventilationTva: { create: facture.ventilationTva.length ? facture.ventilationTva.map(({ id: _id, factureId: _factureId, ...v }) => v) : ventilationTvaDerivee(facture.lignes) },
+        ecrituresComptables: { create: ecritures },
       }, include: factureInclude });
+      await tx.facture.update({ where: { id: avoir.id }, data: { ecrituresScellees: true } });
       await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'ANNULATION', detail: `Transition EMISE → ANNULEE ; avoir total ${numero}` } });
       await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR', detail: `Avoir total de la facture ${facture.numero}` } });
-      return { facture: await tx.facture.findUniqueOrThrow({ where: { id: facture.id }, include: factureInclude }), avoir };
+      return { facture: await tx.facture.findUniqueOrThrow({ where: { id: facture.id }, include: factureInclude }), avoir: { ...avoir, ecrituresScellees: true } };
     });
     if ('erreur' in resultat) {
       if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
@@ -1346,6 +1418,7 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
     }
     return res.json(decimalToNumber({ ...resultat.facture, avoir: resultat.avoir }));
   } catch (error) {
+    if (error instanceof ImputationIncompletError) return res.status(409).json({ error: error.message });
     if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir déjà créé ou numéro déjà attribué, veuillez relire la facture.' });
     return res.status(500).json({ error: 'Annulation de facture impossible.' });
   }
@@ -1389,6 +1462,7 @@ app.post('/api/factures/:id/avoirs', requireAuth, requireAdmin, async (req: Auth
         const tvaPrecedente = avoirsPrecedents.reduce((somme, avoir) => somme + (ventilationFacture(avoir).find(v => v.tauxTva === ventilation.tauxTva)?.totalTva || 0), 0);
         if (centimes(precedent + ventilation.totalHt) > source.totalHt || centimes(tvaPrecedente + ventilation.totalTva) > source.totalTva || centimes(precedent + ventilation.totalHt + tvaPrecedente + ventilation.totalTva) > source.totalTtc) throw new AvoirPlafondError(`Cet avoir dépasse le plafond restant pour la TVA à ${ventilation.tauxTva} % de la facture d’origine.`);
       }
+      const ecritures = await ecrituresPourPiece(tx, { lignes, ventilationTva, totalTtc }, facture.id);
       const now = new Date();
       const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
       const jour = jourCivilEntreprise(now, societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
@@ -1403,13 +1477,16 @@ app.post('/api/factures/:id/avoirs', requireAuth, requireAdmin, async (req: Auth
         origine: facture.origine, chantierId: facture.chantierId, interventionId: facture.interventionId, contratMaintenanceId: facture.contratMaintenanceId,
         motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
         totalHt, totalTva, totalTtc, createdById: req.user!.id, emisLe: now, lignes: { create: lignes }, ventilationTva: { create: ventilationTva },
+        ecrituresComptables: { create: ecritures },
       }, include: factureInclude });
+      await tx.facture.update({ where: { id: avoir.id }, data: { ecrituresScellees: true } });
       await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR_PARTIEL', detail: `Avoir partiel de la facture ${facture.numero}` } });
-      return { avoir };
+      return { avoir: { ...avoir, ecrituresScellees: true } };
     });
     if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise ou réglée peut recevoir un avoir partiel.' });
     return res.status(201).json(decimalToNumber(resultat.avoir));
   } catch (error) {
+    if (error instanceof ImputationIncompletError) return res.status(409).json({ error: error.message });
     if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
     if (error instanceof AvoirPlafondError) return res.status(409).json({ error: error.message });
     if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir total déjà créé ou numéro déjà attribué, veuillez relire la facture.' });
