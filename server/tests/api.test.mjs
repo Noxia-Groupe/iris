@@ -2998,8 +2998,10 @@ if (!TEST_DATABASE_URL) {
       const diagSansTva = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
       const tvaDecouverte = diagSansTva.body.controles.find((controle) => controle.cle === 'TVA');
       assert.equal(tvaDecouverte.pret, false, JSON.stringify(tvaDecouverte));
-      assert.equal(tvaDecouverte.bloquant, true, 'Un taux facturé sans compte bloque comme l’export.');
+      assert.equal(tvaDecouverte.bloquant, true, 'Un taux historique sans compte signale un risque pour les nouvelles émissions de ce taux.');
       assert.match(tvaDecouverte.detail, /20 %/);
+      assert.match(tvaDecouverte.detail, /émission.*refusée/i);
+      assert.doesNotMatch(tvaDecouverte.detail, /export.*refusé/i);
       assert.equal(diagSansTva.body.pret, false, JSON.stringify(diagSansTva.body.controles));
       await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
       await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id });
@@ -3027,6 +3029,13 @@ if (!TEST_DATABASE_URL) {
       const emis = await emettre(premier.body.id);
       assert.equal(emis.status, 200, JSON.stringify(emis.body));
       assert.equal(emis.body.ecrituresScellees, true, 'la réponse d’émission reflète le scellement commité');
+      const numeroAvantRefus = await prisma.sequenceAvoir.findFirst({ orderBy: { annee: 'desc' } });
+      const avoirNatureAbsente = await request(app).post(`/api/factures/${premier.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({ lignes: [{ designation: 'TEST article absent de la source', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(avoirNatureAbsente.status, 409, JSON.stringify(avoirNatureAbsente.body));
+      assert.match(avoirNatureAbsente.body.error, /nature ou un taux absent de la facture d’origine.*VENTE_ARTICLE/i);
+      assert.doesNotMatch(avoirNatureAbsente.body.error, /paramétrage comptable incomplet/i);
+      assert.equal(await prisma.facture.count({ where: { factureOrigineId: premier.body.id } }), 0);
+      assert.deepEqual(await prisma.sequenceAvoir.findFirst({ orderBy: { annee: 'desc' } }), numeroAvantRefus);
       const avant = piece((await exporter()).text, emis.body.numero);
       assert.equal(avant.length, 3);
       const nouveauCompte = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '706986', libelle: 'Nouveau compte de ventes', nature: 'PRODUIT' });
@@ -3127,7 +3136,11 @@ if (!TEST_DATABASE_URL) {
       assert.equal(vide.status, 201);
       await assert.rejects(() => prisma.facture.update({ where: { id: vide.body.id }, data: { statut: 'EMISE', numero: `TEST-VIDE-${Date.now()}`, annee: 2026, ecrituresScellees: true } }), /absentes|déséquilibrées/i);
       assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: vide.body.id } })).statut, 'BROUILLON');
-      await assert.rejects(() => prisma.facture.update({ where: { id: brouillon.body.id }, data: { ecrituresScellees: false } }), /scellée/i);
+      await assert.rejects(() => prisma.facture.update({ where: { id: brouillon.body.id }, data: { ecrituresScellees: false } }), /scellée : retour interdit/i);
+      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.body.id } })).ecrituresScellees, true);
+      // 0/0 ne change pas l'équilibre : seul le trigger d'insertion interdit cette ligne parasite d'export.
+      await assert.rejects(() => prisma.ecritureFacture.create({ data: { factureId: brouillon.body.id, ordre: 98, cle: 'CLIENT', journalCode: original.journalCode, compteNum: original.compteNum, compteLib: original.compteLib, debit: 0, credit: 0 } }), /scellée : insertion interdite/i);
+      assert.equal(await prisma.ecritureFacture.count({ where: { factureId: brouillon.body.id } }), 3);
       await assert.rejects(() => prisma.ecritureFacture.create({ data: { factureId: brouillon.body.id, ordre: 99, cle: 'CLIENT', journalCode: original.journalCode, compteNum: original.compteNum, compteLib: original.compteLib, debit: 1, credit: 0 } }), /figée|scellée/i);
       await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_immutable"');
       try {
@@ -3613,8 +3626,8 @@ if (!TEST_DATABASE_URL) {
     test('l’export ne déplace jamais la date d’émission d’un avoir', async () => {
       const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
       assert.ok(compteTva, 'le compte TVA de test existe');
-      // L'export refuse de sortir tant qu'un taux utilisé n'a pas son compte : la règle 5,5
-      // doit exister avant d'exporter, comme dans le test voisin.
+      // Le compte du taux 5,5 permet l'émission de la source ; son export ultérieur
+      // ne dépend plus de cette règle vivante, contrairement aux futures émissions.
       await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
       // La numérotation est chronologique : on émet au jour de la dernière facture numérotée
       // plutôt qu'à une date fixe, sinon ce test dépendrait de son rang dans la suite.
