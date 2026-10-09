@@ -1,6 +1,86 @@
 import { Buffer } from 'node:buffer';
 import { test, expect } from './fixtures';
 
+test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans supprimer le compte', async ({ allerSurPageAdmin, apiAdmin, session, request }) => {
+  const base = 'http://127.0.0.1:3001/api';
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const code = `445${String(Date.now()).slice(-9)}`;
+  const compte = await request.post(`${base}/comptabilite/comptes`, { headers, data: { code, libelle: 'TVA à conserver', nature: 'TVA' } });
+  expect(compte.status()).toBe(201);
+  const compteId = (await compte.json()).id;
+  expect((await request.put(`${base}/comptabilite/tva/7.7`, { headers, data: { compteId } })).status()).toBe(200);
+  const page = await allerSurPageAdmin('/comptabilite');
+  const ligne = page.getByRole('row', { name: /7,7 %/ });
+  await expect(ligne).toContainText(`${code} — TVA à conserver`);
+  await ligne.getByRole('button', { name: 'Remapper' }).click();
+  await expect(page.getByRole('textbox', { name: 'Taux de TVA (%)' })).toHaveValue('7.7');
+  await expect(page.getByRole('combobox', { name: 'Compte TVA à associer' })).toHaveValue(compteId);
+  const autreCompte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ code: string; id: string }> }).comptes.find(c => c.code === '445710')!;
+  await page.getByRole('combobox', { name: 'Compte TVA à associer' }).selectOption(autreCompte.id);
+  await page.getByRole('button', { name: 'Enregistrer' }).click();
+  await expect(ligne).toContainText('445710');
+  await ligne.getByRole('button', { name: 'Retirer' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Retirer la règle TVA' });
+  await expect(dialogue).toContainText('émissions futures');
+  await dialogue.getByRole('button', { name: 'Annuler' }).click();
+  await expect(ligne).toBeVisible();
+  await ligne.getByRole('button', { name: 'Retirer' }).click();
+  await dialogue.getByLabel('Confirmer le taux exact').fill('7.7');
+  await dialogue.getByRole('button', { name: 'Confirmer le retrait' }).click();
+  await expect(ligne).not.toBeVisible();
+  expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; actif: boolean }> }).comptes.find(c => c.id === compteId)?.actif).toBe(true);
+  await page.getByRole('textbox', { name: 'Taux de TVA (%)' }).fill('7.7');
+  await page.getByRole('combobox', { name: 'Compte TVA à associer' }).selectOption(compteId);
+  await page.getByRole('button', { name: 'Enregistrer' }).click();
+  await expect(ligne).toContainText(code);
+});
+
+test('TVA #92 : deux sessions, la confirmation ancienne ne retire pas le nouveau mapping', async ({ browser, request, session }) => {
+  const base = 'http://127.0.0.1:3001/api';
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const code = String(Date.now()).slice(-8);
+  const creerCompte = async (suffixe: string) => {
+    const response = await request.post(`${base}/comptabilite/comptes`, { headers, data: { code: `445${code}${suffixe}`, libelle: `TVA session ${suffixe}`, nature: 'TVA' } });
+    expect(response.status()).toBe(201);
+    return (await response.json() as { id: string }).id;
+  };
+  const ancienId = await creerCompte('1');
+  const nouveauId = await creerCompte('2');
+  expect((await request.put(`${base}/comptabilite/tva/8.9`, { headers, data: { compteId: ancienId } })).status()).toBe(200);
+  const ouvrir = async () => {
+    const contexte = await browser.newContext();
+    await contexte.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', user);
+    }, [session.token, JSON.stringify(session.user)]);
+    const page = await contexte.newPage();
+    await page.goto('/comptabilite', { waitUntil: 'networkidle' });
+    return { contexte, page };
+  };
+  const a = await ouvrir();
+  const b = await ouvrir();
+  try {
+    const ligneA = a.page.getByRole('row', { name: /8,9 %/ });
+    const ligneB = b.page.getByRole('row', { name: /8,9 %/ });
+    await expect(ligneA).toContainText('TVA session 1');
+    await ligneA.getByRole('button', { name: 'Retirer' }).click();
+    const dialogue = a.page.getByRole('dialog', { name: 'Retirer la règle TVA' });
+    await dialogue.getByLabel('Confirmer le taux exact').fill('8.9');
+    await ligneB.getByRole('button', { name: 'Remapper' }).click();
+    await b.page.getByRole('combobox', { name: 'Compte TVA à associer' }).selectOption(nouveauId);
+    await b.page.getByRole('button', { name: 'Enregistrer' }).click();
+    await expect(ligneB).toContainText('TVA session 2');
+    await dialogue.getByRole('button', { name: 'Confirmer le retrait' }).click();
+    await expect(dialogue.getByRole('alert')).toContainText('a changé depuis son affichage');
+    const reglesTva = (await (await request.get(`${base}/comptabilite`, { headers })).json() as { reglesTva: Array<{ taux: number; compteId: string }> }).reglesTva;
+    expect(reglesTva.find(r => r.taux === 8.9)?.compteId).toBe(nouveauId);
+    await expect(ligneB).toContainText('TVA session 2');
+  } finally {
+    await a.contexte.close();
+    await b.contexte.close();
+  }
+});
+
 test('aperçoit un CSV en mode mise à jour puis confirme avec un motif unique', async ({ allerSurPageAdmin, apiAdmin }) => {
   const code = `716${String(Date.now()).slice(-9)}`;
   const creation = await allerSurPageAdmin('/comptabilite');
