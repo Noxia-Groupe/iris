@@ -1036,7 +1036,10 @@ function motifCompteComptableValide(value: unknown): string | null { return moti
 app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res) => {
   try { const code = String(req.body?.code || '').trim(), libelleBrut = String(req.body?.libelle || ''), libelle = libelleBrut.trim(), nature = String(req.body?.nature || '');
     if (!/^\d{3,12}$/.test(code) || !libelle || !libelleComptableValide(libelleBrut) || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
-    const compte = await prisma.compteComptable.create({ data: { code, libelle, nature } }); res.status(201).json(compte);
+    const compte = await prisma.$transaction(async tx => {
+      await verrouillerParametrageComptable(tx);
+      return tx.compteComptable.create({ data: { code, libelle, nature } });
+    }); res.status(201).json(compte);
   } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce code de compte existe déjà, éventuellement inactif. Consultez le plan et réactivez-le avec un motif si nécessaire.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
 });
 class CompteComptableUtilise extends Error {}
@@ -1059,6 +1062,29 @@ async function verrouillerCompteComptable(tx: Prisma.TransactionClient, compteId
   await verrouillerParametrageComptable(tx);
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "CompteComptable" WHERE "id" = ${compteId} FOR UPDATE`);
 }
+type ModificationCompte = { libelle: string; nature: string; expectedUpdatedAt: string };
+async function verifierModificationCompte(tx: Prisma.TransactionClient, avant: Prisma.CompteComptableGetPayload<object>, modification: ModificationCompte) {
+  if (avant.updatedAt.toISOString() !== modification.expectedUpdatedAt) throw new CompteComptablePerime();
+  const { libelle, nature } = modification;
+  if (avant.libelle === libelle && avant.nature === nature) throw new CompteComptableSansChangement();
+  if (avant.nature !== nature) {
+    const [regles, reglesTva] = await Promise.all([
+      tx.regleComptable.findMany({ where: { compteId: avant.id }, select: { cle: true } }),
+      tx.regleTvaComptable.count({ where: { compteId: avant.id } }),
+    ]);
+    if (regles.some(r => NATURES_ATTENDUES[r.cle] && !NATURES_ATTENDUES[r.cle].includes(nature)) || (reglesTva && nature !== 'TVA')) throw new NatureCompteInvalide('Nature incompatible avec une règle client, vente ou TVA : remappez la règle auparavant.');
+  }
+}
+async function appliquerModificationCompte(tx: Prisma.TransactionClient, avant: Prisma.CompteComptableGetPayload<object>, modification: ModificationCompte, motif: string, auteur: { id: string; name: string }) {
+  await verifierModificationCompte(tx, avant, modification);
+  const apres = await tx.compteComptable.update({ where: { id: avant.id }, data: { libelle: modification.libelle, nature: modification.nature } });
+  await tx.journalCompteComptable.create({ data: {
+    compteId: avant.id, auteurId: auteur.id, auteurNom: auteur.name,
+    action: 'MODIFICATION', avantLibelle: avant.libelle, apresLibelle: apres.libelle,
+    avantNature: avant.nature, apresNature: apres.nature, motif,
+  } });
+  return apres;
+}
 app.patch('/api/comptabilite/comptes/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body) ||
@@ -1075,24 +1101,11 @@ app.patch('/api/comptabilite/comptes/:id', requireAuth, requireAdmin, async (req
       await verrouillerCompteComptable(tx, String(req.params.id));
       const avant = await tx.compteComptable.findUnique({ where: { id: String(req.params.id) } });
       if (!avant) return null;
-      if (avant.updatedAt.toISOString() !== body.expectedUpdatedAt) throw new CompteComptablePerime();
-      const libelle = Object.hasOwn(body, 'libelle') ? body.libelle.trim() as string : avant.libelle;
-      const nature = Object.hasOwn(body, 'nature') ? body.nature as string : avant.nature;
-      if (avant.libelle === libelle && avant.nature === nature) throw new CompteComptableSansChangement();
-      if (avant.nature !== nature) {
-        const [regles, reglesTva] = await Promise.all([
-          tx.regleComptable.findMany({ where: { compteId: avant.id }, select: { cle: true } }),
-          tx.regleTvaComptable.count({ where: { compteId: avant.id } }),
-        ]);
-        if (regles.some(r => NATURES_ATTENDUES[r.cle] && !NATURES_ATTENDUES[r.cle].includes(nature)) || (reglesTva && nature !== 'TVA')) throw new NatureCompteInvalide('Nature incompatible avec une règle client, vente ou TVA : remappez la règle auparavant.');
-      }
-      const apres = await tx.compteComptable.update({ where: { id: avant.id }, data: { libelle, nature } });
-      await tx.journalCompteComptable.create({ data: {
-        compteId: avant.id, auteurId: req.user!.id, auteurNom: req.user!.name,
-        action: 'MODIFICATION', avantLibelle: avant.libelle, apresLibelle: apres.libelle,
-        avantNature: avant.nature, apresNature: apres.nature, motif: body.motif.trim(),
-      } });
-      return apres;
+      return appliquerModificationCompte(tx, avant, {
+        libelle: Object.hasOwn(body, 'libelle') ? body.libelle.trim() : avant.libelle,
+        nature: Object.hasOwn(body, 'nature') ? body.nature : avant.nature,
+        expectedUpdatedAt: body.expectedUpdatedAt,
+      }, body.motif.trim(), req.user!);
     });
     if (!compte) return res.status(404).json({ error: 'Compte comptable introuvable.' });
     res.json(compte);
@@ -1151,7 +1164,65 @@ app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin,
 class ConflitImportComptable extends Error {
   constructor(readonly erreurs: { ligne: number; erreur: string }[]) { super('Import refusé : comptes existants différents.'); }
 }
-app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req, res) => {
+// Jeton signé, lié à l'acteur, au fichier et à la photographie complète du périmètre.
+// Aucun brouillon en base : l'aperçu ne produit aucune écriture.
+async function preparerApercuImport(tx: Prisma.TransactionClient, comptes: { code: string; libelle: string; nature: string }[]) {
+  const existants = await tx.compteComptable.findMany({ where: { code: { in: comptes.map(c => c.code) } } });
+  const parCode = new Map(existants.map(c => [c.code, c]));
+  // Précharger les rattachements une fois pour le lot ; aucun aller-retour par ligne.
+  const [regles, tva] = await Promise.all([
+    tx.regleComptable.findMany({ orderBy: { cle: 'asc' } }),
+    tx.regleTvaComptable.findMany({ orderBy: { taux: 'asc' } }),
+  ]);
+  const reglesParCompte = new Map<string, string[]>();
+  for (const regle of regles) {
+    if (!regle.compteId) continue;
+    const rattachements = reglesParCompte.get(regle.compteId) ?? [];
+    rattachements.push(regle.cle);
+    reglesParCompte.set(regle.compteId, rattachements);
+  }
+  const comptesTva = new Set(tva.map(regle => regle.compteId));
+  const actions = [] as { code: string; ligne: number; action: 'creer' | 'modifier' | 'ignorer'; avant?: { libelle: string; nature: string }; apres: { libelle: string; nature: string } }[];
+  const erreurs: { ligne: number; erreur: string }[] = [];
+  for (const [index, compte] of comptes.entries()) {
+    const avant = parCode.get(compte.code);
+    const apres = { libelle: compte.libelle, nature: compte.nature };
+    if (avant && !avant.actif) { erreurs.push({ ligne: index + 1, erreur: `Le compte ${compte.code} est inactif : réactivez-le explicitement.` }); continue; }
+    const action = !avant ? 'creer' : avant.libelle === compte.libelle && avant.nature === compte.nature ? 'ignorer' : 'modifier';
+    if (avant && action === 'modifier' && avant.nature !== compte.nature &&
+      ((reglesParCompte.get(avant.id) ?? []).some(cle => NATURES_ATTENDUES[cle] && !NATURES_ATTENDUES[cle].includes(compte.nature)) ||
+        (comptesTva.has(avant.id) && compte.nature !== 'TVA'))) {
+      erreurs.push({ ligne: index + 1, erreur: 'Nature incompatible avec une règle client, vente ou TVA : remappez la règle auparavant.' });
+      continue;
+    }
+    actions.push({ code: compte.code, ligne: index + 1, action, ...(avant ? { avant: { libelle: avant.libelle, nature: avant.nature } } : {}), apres });
+  }
+  if (erreurs.length) throw new ConflitImportComptable(erreurs);
+  // Les versions et l'activité capturent aussi les comptes inchangés ; les règles
+  // sont incluses pour refuser un aperçu devenu caduc après un remappage.
+  const empreinte = crypto.createHash('sha256').update(JSON.stringify({ comptes, existants: existants.sort((a, b) => a.code.localeCompare(b.code)), regles, tva })).digest('hex');
+  return { actions, empreinte, parCode };
+}
+function signerApercu(empreinte: string, auteurId: string, delivre: number) {
+  const contenu = Buffer.from(JSON.stringify({ empreinte, auteurId, delivre })).toString('base64url');
+  const signature = crypto.createHmac('sha256', JWT_SECRET).update(contenu).digest('base64url');
+  return `${contenu}.${signature}`;
+}
+function apercuValide(jeton: unknown, empreinte: string, auteurId: string) {
+  if (typeof jeton !== 'string' || jeton.length > 2048) return false;
+  const [contenu, signature, surplus] = jeton.split('.');
+  if (!contenu || !signature || surplus !== undefined) return false;
+  const attendu = crypto.createHmac('sha256', JWT_SECRET).update(contenu).digest();
+  let fourni: Buffer;
+  try { fourni = Buffer.from(signature, 'base64url'); } catch { return false; }
+  if (fourni.length !== attendu.length || !crypto.timingSafeEqual(fourni, attendu)) return false;
+  try {
+    const donnees = JSON.parse(Buffer.from(contenu, 'base64url').toString());
+    return donnees.empreinte === empreinte && donnees.auteurId === auteurId &&
+      Number.isSafeInteger(donnees.delivre) && donnees.delivre <= Date.now() && Date.now() - donnees.delivre <= 10 * 60_000;
+  } catch { return false; }
+}
+app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const lignes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
   if (!lignes.length || lignes.length > 5000) return res.status(400).json({ error: 'Le plan doit contenir entre 1 et 5 000 lignes.' });
   const vus = new Set<string>(); const erreurs: { ligne: number; erreur: string }[] = [];
@@ -1161,6 +1232,37 @@ app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req, re
     if (vus.has(code)) erreurs.push({ ligne: index + 1, erreur: 'Code dupliqué dans le fichier.' }); vus.add(code); return { code, libelle, nature };
   });
   if (erreurs.length) return res.status(400).json({ error: 'Import refusé : corrigez les lignes signalées.', erreurs });
+  const mode = req.body?.mode;
+  if (mode !== undefined && mode !== 'mettre_a_jour') return res.status(400).json({ error: 'Mode d’import inconnu.' });
+  if (mode === 'mettre_a_jour') {
+    if (!['apercu', 'confirmer'].includes(req.body?.phase) ||
+      (req.body.phase === 'confirmer' && !motifCompteComptableValide(req.body.motif)))
+      return res.status(400).json({ error: 'Phase ou motif de 3 à 500 caractères invalide.' });
+    try {
+      const resultat = await prisma.$transaction(async tx => {
+        await verrouillerParametrageComptable(tx);
+        const { actions, empreinte, parCode } = await preparerApercuImport(tx, comptes);
+        if (req.body.phase === 'apercu') return { actions, apercuId: signerApercu(empreinte, req.user!.id, Date.now()) };
+        if (!apercuValide(req.body.apercuId, empreinte, req.user!.id)) throw new CompteComptablePerime();
+        for (const action of actions) {
+          const cible = comptes[action.ligne - 1];
+          if (action.action === 'creer') await tx.compteComptable.create({ data: cible });
+          if (action.action === 'modifier') {
+            const avant = parCode.get(action.code)!;
+            await appliquerModificationCompte(tx, avant, { libelle: cible.libelle, nature: cible.nature, expectedUpdatedAt: avant.updatedAt.toISOString() }, req.body.motif.trim(), req.user!);
+          }
+        }
+        return { crees: actions.filter(a => a.action === 'creer').length, modifies: actions.filter(a => a.action === 'modifier').length, ignores: actions.filter(a => a.action === 'ignorer').length };
+      }, { maxWait: 10_000, timeout: 60_000 });
+      return res.status(200).json(resultat);
+    } catch (error) {
+      if (error instanceof ConflitImportComptable) return res.status(409).json({ error: error.message, erreurs: error.erreurs });
+      if (error instanceof CompteComptablePerime) return res.status(409).json({ error: 'Aperçu périmé : recommencez l’aperçu.' });
+      if ((error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'Import concurrent : recommencez l’aperçu.' });
+      return res.status(500).json({ error: 'Mise à jour du plan comptable impossible.' });
+    }
+  }
+  if (req.body?.phase !== undefined || req.body?.motif !== undefined || req.body?.apercuId !== undefined) return res.status(400).json({ error: 'Mode d’import requis.' });
   try {
     const resultat = await prisma.$transaction(async tx => {
       // Sérialise les imports et toutes les émissions/remappages comptables.

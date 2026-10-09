@@ -1,6 +1,60 @@
 import { Buffer } from 'node:buffer';
 import { test, expect } from './fixtures';
 
+test('aperçoit un CSV en mode mise à jour puis confirme avec un motif unique', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const code = `716${String(Date.now()).slice(-9)}`;
+  const creation = await allerSurPageAdmin('/comptabilite');
+  await creation.getByPlaceholder('Code', { exact: true }).fill(code);
+  await creation.getByPlaceholder('Libellé', { exact: true }).fill('Avant import');
+  await creation.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
+  await creation.getByLabel('Mode de mise à jour CSV').check();
+  const fichier = creation.locator('input[type="file"]');
+  await fichier.setInputFiles({ name: 'correction.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\n${code};Après import;ACTIF`) });
+  const dialogue = creation.getByRole('dialog', { name: 'Aperçu de la mise à jour CSV' });
+  await expect(dialogue).toContainText('Avant import');
+  await expect(dialogue).toContainText('Après import');
+  expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ code: string; libelle: string }> }).comptes.find(c => c.code === code)?.libelle).toBe('Avant import');
+  await dialogue.getByLabel(/Motif unique/).fill('Correction comptable CSV');
+  await dialogue.getByRole('button', { name: 'Confirmer la mise à jour' }).click();
+  await expect(creation.locator('section.overflow-hidden tbody tr', { hasText: code })).toContainText('Après import');
+  const compte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; code: string }> }).comptes.find(c => c.code === code)!;
+  const journal = (await (await apiAdmin.get(`/comptabilite/comptes/${compte.id}/journal`)).json()) as Array<{ action: string; motif: string }>;
+  expect(journal.map((j: { action: string; motif: string }) => [j.action, j.motif])).toEqual([['MODIFICATION', 'Correction comptable CSV']]);
+});
+
+test('annule l’aperçu sans écriture puis refuse une confirmation devenue périmée', async ({ allerSurPageAdmin, apiAdmin, session, request }) => {
+  const code = `717${String(Date.now()).slice(-9)}`;
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.getByPlaceholder('Code', { exact: true }).fill(code);
+  await page.getByPlaceholder('Libellé', { exact: true }).fill('Départ');
+  await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
+  const compte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; code: string; updatedAt: string }> }).comptes.find(c => c.code === code)!;
+  await page.getByLabel('Mode de mise à jour CSV').check();
+  const fichier = page.locator('input[type="file"]');
+  const csv = { name: 'correction.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\n${code};Valeur CSV;ACTIF`) };
+  await fichier.setInputFiles(csv);
+  const dialogue = page.getByRole('dialog', { name: 'Aperçu de la mise à jour CSV' });
+  await expect(dialogue).toBeVisible();
+  await dialogue.getByRole('button', { name: 'Annuler' }).click();
+  await expect(dialogue).not.toBeVisible();
+  expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ code: string; libelle: string }> }).comptes.find(c => c.code === code)?.libelle).toBe('Départ');
+  await fichier.setInputFiles(csv);
+  await expect(dialogue).toBeVisible();
+  const patch = await request.patch(`http://127.0.0.1:3001/api/comptabilite/comptes/${compte.id}`, { headers: { Authorization: `Bearer ${session.token}` }, data: { libelle: 'Modification concurrente', motif: 'Autre opérateur', expectedUpdatedAt: compte.updatedAt } });
+  expect(patch.status()).toBe(200);
+  await dialogue.getByLabel(/Motif unique/).fill('Correction motivée');
+  await dialogue.getByRole('button', { name: 'Confirmer la mise à jour' }).click();
+  await expect(dialogue).not.toBeVisible();
+  await expect(page.getByText(/aperçu périmé/i)).toBeVisible();
+  await fichier.setInputFiles(csv);
+  await expect(dialogue).toBeVisible();
+  await expect(dialogue).toContainText('Modification concurrente');
+  await dialogue.getByLabel(/Motif unique/).fill('Correction après nouvel aperçu');
+  await dialogue.getByRole('button', { name: 'Confirmer la mise à jour' }).click();
+  await expect(dialogue).not.toBeVisible();
+  expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ code: string; libelle: string }> }).comptes.find(c => c.code === code)?.libelle).toBe('Valeur CSV');
+});
+
 test('importe un libellé CSV cité avec virgule et point-virgule puis le conserve', async ({ allerSurPageAdmin, apiAdmin }) => {
   const code = `706${String(Date.now()).slice(-9)}`;
   const libelle = 'Ventes, pose; et "entretien"';
