@@ -46,7 +46,10 @@ test('annule l’aperçu sans écriture puis refuse une confirmation devenue pé
   await page.getByPlaceholder('Code', { exact: true }).fill(code);
   await page.getByPlaceholder('Libellé', { exact: true }).fill('Départ');
   await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
-  const compte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; code: string; updatedAt: string }> }).comptes.find(c => c.code === code)!;
+  await expect(page.locator('section.overflow-hidden tbody tr', { hasText: code })).toBeVisible();
+  const compte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; code: string; updatedAt: string }> }).comptes.find(c => c.code === code);
+  expect(compte).toBeDefined();
+  if (!compte) throw new Error(`Compte ${code} absent après création`);
   await page.getByLabel('Mode de mise à jour CSV').check();
   const fichier = page.locator('input[type="file"]');
   const csv = { name: 'correction.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\n${code};Valeur CSV;ACTIF`) };
