@@ -110,7 +110,7 @@ jobs:
         working-directory: server
     services:
       postgres:
-        image: postgres:16-alpine
+        image: public.ecr.aws/docker/library/postgres:16-alpine
         env:
           POSTGRES_USER: iris
           POSTGRES_PASSWORD: iris_test
@@ -182,7 +182,7 @@ jobs:
     # pilote Chromium contre la SPA, le proxy Vite, le backend et PostgreSQL.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: public.ecr.aws/docker/library/postgres:16-alpine
         env:
           POSTGRES_USER: iris
           POSTGRES_PASSWORD: iris_test
