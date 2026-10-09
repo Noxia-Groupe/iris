@@ -2494,8 +2494,19 @@ if (!TEST_DATABASE_URL) {
       };
       assert.equal((await request(app).delete(url)).status, 401);
       assert.equal((await request(app).delete(url).set('Authorization', nonAdmin).send(attendu(7.7))).status, 403);
-      for (const [chemin, body] of [['/api/comptabilite/tva/invalide', { confirmation: 'invalide' }], [url, {}], [url, { confirmation: '10' }], [url, { confirmation: 7.7 }]]) {
-        assert.equal((await request(app).delete(chemin).set('Authorization', auth).send(body)).status, 400);
+      const valide = attendu(7.7);
+      for (const [chemin, body] of [
+        ['/api/comptabilite/tva/invalide', valide],
+        [url, {}],
+        [url, { ...valide, confirmation: '10' }],
+        [url, { ...valide, confirmation: 7.7 }],
+        [url, { ...valide, champImprevu: true }],
+        ['/api/comptabilite/tva/100.01', { ...valide, confirmation: '100.01' }],
+      ]) {
+        const refus = await request(app).delete(chemin).set('Authorization', auth).send(body);
+        assert.equal(refus.status, 400, `${chemin} ${JSON.stringify(body)} → ${JSON.stringify(refus.body)}`);
+        assert.equal(await prisma.regleTvaComptable.count({ where: { taux: 7.7 } }), 1, 'un corps invalide ne retire pas le taux ciblé');
+        assert.equal(await prisma.regleTvaComptable.count({ where: { taux: 10 } }), 1, 'un corps invalide ne retire pas les autres taux');
       }
       assert.equal(await prisma.regleTvaComptable.count({ where: { taux: 7.7 } }), 1);
       assert.equal(await prisma.regleTvaComptable.count({ where: { taux: 10 } }), 1);
@@ -2505,6 +2516,20 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: cible.id } })).actif, true);
       assert.equal((await request(app).delete(url).set('Authorization', auth).send(attendu(7.7))).status, 404);
       assert.equal((await request(app).delete('/api/comptabilite/tva/10').set('Authorization', auth).send(attendu(10))).status, 204);
+    });
+
+    test('TVA #92 : confirmation décimale française exacte 5,5 retire la règle sans accepter un autre taux', async () => {
+      const auth = `Bearer ${session}`;
+      const compte = await prisma.compteComptable.create({ data: { code: '445797', libelle: 'TVA virgule #92', nature: 'TVA' } });
+      const url = '/api/comptabilite/tva/5.5';
+      assert.equal((await request(app).put(url).set('Authorization', auth).send({ compteId: compte.id })).status, 200);
+      const regle = (await request(app).get('/api/comptabilite').set('Authorization', auth)).body.reglesTva.find(r => r.taux === 5.5);
+      const attendu = { expectedCompteId: regle.compteId, expectedUpdatedAt: regle.updatedAt };
+      assert.equal((await request(app).delete(url).set('Authorization', auth).send({ ...attendu, confirmation: '5,6' })).status, 400);
+      assert.equal(await prisma.regleTvaComptable.count({ where: { taux: 5.5 } }), 1);
+      assert.equal((await request(app).delete(url).set('Authorization', auth).send({ ...attendu, confirmation: '5,5' })).status, 204);
+      assert.equal(await prisma.regleTvaComptable.count({ where: { taux: 5.5 } }), 0);
+      assert.equal((await prisma.compteComptable.findUniqueOrThrow({ where: { id: compte.id } })).actif, true);
     });
 
     test('TVA #92 : retrait périmé après remappage refuse 409 sans effacer le nouveau compte', async () => {
@@ -2521,6 +2546,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.regleTvaComptable.findUniqueOrThrow({ where: { id: photographie.id } })).compteId, nouveau.id);
       assert.equal((await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: nouveau.id, expectedUpdatedAt: photographie.updatedAt })).status, 409, 'la version périmée est aussi refusée');
       const actuelle = (await request(app).get('/api/comptabilite').set('Authorization', auth)).body.reglesTva.find(r => r.taux === 8.8);
+      const mauvaisCompte = await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: ancien.id, expectedUpdatedAt: actuelle.updatedAt });
+      assert.equal(mauvaisCompte.status, 409, JSON.stringify(mauvaisCompte.body));
+      assert.equal((await prisma.regleTvaComptable.findUniqueOrThrow({ where: { id: photographie.id } })).compteId, nouveau.id);
       assert.equal((await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: actuelle.compteId, expectedUpdatedAt: actuelle.updatedAt })).status, 204);
     });
 

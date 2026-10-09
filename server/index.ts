@@ -1317,7 +1317,8 @@ app.delete('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req,
   const taux = nombreDecimalNonNegatif(req.params.taux, 3, true);
   const { confirmation, expectedCompteId, expectedUpdatedAt } = req.body || {};
   if (taux === null || taux > 100 || Object.keys(req.body || {}).sort().join(',') !== 'confirmation,expectedCompteId,expectedUpdatedAt' ||
-      confirmation !== String(taux) || typeof expectedCompteId !== 'string' || !expectedCompteId ||
+      typeof confirmation !== 'string' || confirmation.replace(',', '.') !== String(taux) ||
+      typeof expectedCompteId !== 'string' || !expectedCompteId ||
       typeof expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(expectedUpdatedAt))) {
     return res.status(400).json({ error: 'Confirmez le taux et la version de la règle TVA à retirer.' });
   }

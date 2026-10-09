@@ -35,6 +35,28 @@ test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans sup
   await expect(ligne).toContainText(code);
 });
 
+test('TVA #92 : confirmation française 5,5 dans le navigateur retire le mapping et préserve le compte', async ({ allerSurPageAdmin, request, session, apiAdmin }) => {
+  const base = 'http://127.0.0.1:3001/api';
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const code = `445${String(Date.now()).slice(-9)}`;
+  const compte = await request.post(`${base}/comptabilite/comptes`, { headers, data: { code, libelle: 'TVA virgule E2E', nature: 'TVA' } });
+  expect(compte.status()).toBe(201);
+  const compteId = (await compte.json() as { id: string }).id;
+  expect((await request.put(`${base}/comptabilite/tva/5.5`, { headers, data: { compteId } })).status()).toBe(200);
+  const page = await allerSurPageAdmin('/comptabilite');
+  const ligne = page.getByRole('row', { name: /5,5 %/ });
+  await expect(ligne).toContainText(code);
+  await ligne.getByRole('button', { name: 'Retirer' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Retirer la règle TVA' });
+  await dialogue.getByLabel('Confirmer le taux exact').fill('5,5');
+  await expect(dialogue.getByRole('button', { name: 'Confirmer le retrait' })).toBeEnabled();
+  await dialogue.getByRole('button', { name: 'Confirmer le retrait' }).click();
+  await expect(ligne).not.toBeVisible();
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { reglesTva: Array<{ taux: number }>; comptes: Array<{ id: string; actif: boolean }> };
+  expect(plan.reglesTva.some(r => r.taux === 5.5)).toBe(false);
+  expect(plan.comptes.find(c => c.id === compteId)?.actif).toBe(true);
+});
+
 test('TVA #92 : deux sessions, la confirmation ancienne ne retire pas le nouveau mapping', async ({ browser, request, session }) => {
   const base = 'http://127.0.0.1:3001/api';
   const headers = { Authorization: `Bearer ${session.token}` };
