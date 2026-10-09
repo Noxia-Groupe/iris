@@ -1,4 +1,4 @@
-// Base PostgreSQL locale éphémère : les migrations de main précèdent celle de la PR.
+// Base PostgreSQL locale éphémère : toutes les migrations antérieures à #86 sont appliquées.
 // TEST_DATABASE_URL est uniquement une connexion administrative, jamais la cible migrée.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -11,7 +11,6 @@ import test from 'node:test';
 import pg from 'pg';
 
 const prismaDir = resolve(dirname(fileURLToPath(import.meta.url)), '../prisma');
-const derniereMain = '20260925120000_journal_activation_comptes';
 const migrationPR = '20261007140000_facture_ecritures_figees';
 const adminUrl = process.env.TEST_DATABASE_URL;
 
@@ -36,8 +35,8 @@ test('migration imputation : refuse une pièce déjà numérotée sans la recons
     copyFileSync(join(prismaDir, 'schema.prisma'), schema);
     mkdirSync(migrations);
     copyFileSync(join(prismaDir, 'migrations/migration_lock.toml'), join(migrations, 'migration_lock.toml'));
-    const main = readdirSync(join(prismaDir, 'migrations')).filter(nom => nom <= derniereMain && nom !== 'migration_lock.toml');
-    assert.ok(main.includes(derniereMain), 'migration finale main absente');
+    const main = readdirSync(join(prismaDir, 'migrations')).filter(nom => nom < migrationPR && nom !== 'migration_lock.toml');
+    assert.ok(main.includes('20261007120000_contrat_journal_motif_obligatoire') && main.includes('20261007130000_intervention_date_demande'), 'les migrations de main #87 et #88 doivent être présentes');
     for (const nom of main) cpSync(join(prismaDir, 'migrations', nom), join(migrations, nom), { recursive: true });
     const prisma = resolve(prismaDir, '../node_modules/.bin/prisma');
     const deployer = () => execFileSync(prisma, ['migrate', 'deploy', '--schema', schema], {
