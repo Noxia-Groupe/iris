@@ -46,6 +46,31 @@ test('refuse un libellé CSV multiligne sur sa ligne physique sans importer le l
   expect(plan.comptes.some(compte => compte.code === code)).toBe(false);
 });
 
+test('rejette depuis l’écran un CSV bidi atomiquement et un motif invisible sans trace', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const code = `714${String(Date.now()).slice(-9)}`;
+  const codeBidi = `715${String(Date.now()).slice(-9)}`;
+  const page = await allerSurPageAdmin('/comptabilite');
+  const fichier = page.locator('input[type="file"]');
+  await fichier.setInputFiles({ name: 'bidi.csv', mimeType: 'text/csv', buffer: Buffer.from(`code;libelle;nature\n${code};Normal;CHARGE\n${codeBidi};Compte \u202E inversé;CHARGE`) });
+  await expect(page.getByText(/Ligne 3 :/)).toBeVisible();
+  expect((await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ code: string }> }).comptes.some(c => c.code === code || c.code === codeBidi)).toBe(false);
+
+  await page.getByPlaceholder('Code', { exact: true }).fill(code);
+  await page.getByPlaceholder('Libellé', { exact: true }).fill('Compte visible');
+  await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
+  const ligne = page.locator('tbody tr', { hasText: code });
+  await ligne.getByRole('button', { name: 'Modifier' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Modifier le compte' });
+  await dialogue.getByLabel('Libellé').fill('Changement refusé');
+  await dialogue.getByLabel(/Motif/).fill('\u200B'.repeat(3));
+  await dialogue.getByRole('button', { name: 'Enregistrer la modification' }).click();
+  await expect(dialogue.getByRole('alert')).toContainText(/motif de 3 à 500 caractères/i);
+  await expect(ligne).toContainText('Compte visible');
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ id: string; code: string }> };
+  const journal = await (await apiAdmin.get(`/comptabilite/comptes/${plan.comptes.find(c => c.code === code)!.id}/journal`)).json() as Array<unknown>;
+  expect(journal).toHaveLength(0);
+});
+
 test('modifie libellé et nature depuis le plan avec motif et conserve une trace', async ({ allerSurPageAdmin, apiAdmin }) => {
   const code = `712${String(Date.now()).slice(-9)}`;
   const page = await allerSurPageAdmin('/comptabilite');

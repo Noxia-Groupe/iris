@@ -1030,7 +1030,9 @@ app.get('/api/comptabilite', requireAuth, requireAdmin, async (_req, res) => {
   try { const [comptes, regles, reglesTva] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } }), prisma.regleTvaComptable.findMany({ include: { compte: true }, orderBy: { taux: 'asc' } })]); res.json(decimalToNumber({ comptes, regles, reglesTva })); }
   catch { res.status(500).json({ error: 'Lecture du paramétrage comptable impossible.' }); }
 });
-export function libelleComptableValide(libelle: string): boolean { return !/\p{Cc}/u.test(libelle); }
+export function libelleComptableValide(libelle: string): boolean { return !/[\p{Cc}\p{Cf}]/u.test(libelle); }
+// Même règle Unicode, longueur en points de code et trim que les contrats.
+function motifCompteComptableValide(value: unknown): string | null { return motifContratValide(value); }
 app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res) => {
   try { const code = String(req.body?.code || '').trim(), libelleBrut = String(req.body?.libelle || ''), libelle = libelleBrut.trim(), nature = String(req.body?.nature || '');
     if (!/^\d{3,12}$/.test(code) || !libelle || !libelleComptableValide(libelleBrut) || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
@@ -1065,8 +1067,7 @@ app.patch('/api/comptabilite/comptes/:id', requireAuth, requireAdmin, async (req
       (!Object.hasOwn(body, 'libelle') && !Object.hasOwn(body, 'nature')) ||
       (Object.hasOwn(body, 'libelle') && (typeof body.libelle !== 'string' || !body.libelle.trim() || !libelleComptableValide(body.libelle))) ||
       (Object.hasOwn(body, 'nature') && (typeof body.nature !== 'string' || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(body.nature))) ||
-      typeof body.motif !== 'string' || !libelleComptableValide(body.motif) ||
-      [...body.motif.trim()].length < 3 || [...body.motif.trim()].length > 500) {
+      !motifCompteComptableValide(body.motif)) {
     return res.status(400).json({ error: 'Libellé ou nature et motif de 3 à 500 caractères requis ; code non modifiable.' });
   }
   try {
@@ -1113,9 +1114,7 @@ app.get('/api/comptabilite/comptes/:id/journal', requireAuth, requireAdmin, asyn
 app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) ||
       Object.keys(req.body).length !== 2 || !Object.hasOwn(req.body, 'actif') || !Object.hasOwn(req.body, 'motif') ||
-      typeof req.body.actif !== 'boolean' || typeof req.body.motif !== 'string' ||
-      [...req.body.motif.trim()].length < 3 || [...req.body.motif.trim()].length > 500 ||
-      !libelleComptableValide(req.body.motif)) {
+      typeof req.body.actif !== 'boolean' || !motifCompteComptableValide(req.body.motif)) {
     return res.status(400).json({ error: 'Statut booléen et motif de 3 à 500 caractères requis.' });
   }
   const motif = req.body.motif.trim();

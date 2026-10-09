@@ -18,10 +18,20 @@ ALTER TABLE "JournalCompteComptable" ADD CONSTRAINT "JournalCompteComptable_tran
     AND "avantNature" IS NOT NULL AND "apresNature" IS NOT NULL
     AND char_length(btrim("avantLibelle")) > 0 AND char_length(btrim("apresLibelle")) > 0
     AND "avantLibelle" = btrim("avantLibelle") AND "apresLibelle" = btrim("apresLibelle")
-    AND "avantLibelle" !~ '[[:cntrl:]]' AND "apresLibelle" !~ '[[:cntrl:]]'
+    -- L'instantané avant peut conserver un caractère C1 accepté historiquement.
+    AND "apresLibelle" !~ '[[:cntrl:]]'
+    AND "apresLibelle" !~ U&'[\200B-\200F\202A-\202E\2060-\206F\FEFF]'
     AND "avantNature" IN ('ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA')
     AND "apresNature" IN ('ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA')
     AND ("avantLibelle" <> "apresLibelle" OR "avantNature" <> "apresNature"))
+);
+
+-- Motif commun aux activations et aux modifications, sans contrôles invisibles.
+ALTER TABLE "JournalCompteComptable" DROP CONSTRAINT "JournalCompteComptable_motif_check";
+ALTER TABLE "JournalCompteComptable" ADD CONSTRAINT "JournalCompteComptable_motif_check" CHECK (
+  char_length(btrim("motif")) BETWEEN 3 AND 500 AND "motif" = btrim("motif")
+  AND "motif" !~ '[[:cntrl:]]'
+  AND "motif" !~ U&'[\200B-\200F\202A-\202E\2060-\206F\FEFF]'
 );
 
 CREATE FUNCTION "interdire_changement_code_compte"() RETURNS trigger AS $$
