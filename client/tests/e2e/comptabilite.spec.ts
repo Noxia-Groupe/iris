@@ -46,6 +46,85 @@ test('refuse un libellé CSV multiligne sur sa ligne physique sans importer le l
   expect(plan.comptes.some(compte => compte.code === code)).toBe(false);
 });
 
+test('modifie libellé et nature depuis le plan avec motif et conserve une trace', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const code = `712${String(Date.now()).slice(-9)}`;
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.getByPlaceholder('Code', { exact: true }).fill(code);
+  await page.getByPlaceholder('Libellé', { exact: true }).fill('Avant modification');
+  await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
+  const ligne = page.locator('tbody tr', { hasText: code });
+  await ligne.getByRole('button', { name: 'Modifier' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Modifier le compte' });
+  await expect(dialogue.getByText(/factures déjà émises restent inchangées/i)).toBeVisible();
+  await expect(dialogue.getByLabel('Code')).toHaveValue(code);
+  await expect(dialogue.getByLabel('Code')).toBeDisabled();
+  await dialogue.getByLabel('Libellé').fill('Après modification');
+  await dialogue.getByLabel('Nature').selectOption('PRODUIT');
+  await expect(dialogue.getByRole('button', { name: 'Enregistrer la modification' })).toBeDisabled();
+  await dialogue.getByLabel(/Motif/).fill('Correction du référentiel');
+  await dialogue.getByRole('button', { name: 'Enregistrer la modification' }).click();
+  await expect(ligne).toContainText('Après modification');
+  await expect(ligne).toContainText('PRODUIT');
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ id: string; code: string }> };
+  const compte = plan.comptes.find(c => c.code === code)!;
+  const journal = await (await apiAdmin.get(`/comptabilite/comptes/${compte.id}/journal`)).json() as Array<{ action: string; motif: string }>;
+  expect(journal.map(j => [j.action, j.motif])).toEqual([['MODIFICATION', 'Correction du référentiel']]);
+});
+
+test('deux sessions : le formulaire périmé reçoit 409 sans écraser la première modification', async ({ allerSurPageAdmin, browser, session, apiAdmin }) => {
+  const code = `713${String(Date.now()).slice(-9)}`;
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.getByPlaceholder('Code', { exact: true }).fill(code);
+  await page.getByPlaceholder('Libellé', { exact: true }).fill('Départ partagé');
+  await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
+  const contexteSecond = await browser.newContext();
+  try {
+    await contexteSecond.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', user);
+    }, [session.token, JSON.stringify(session.user)]);
+    const second = await contexteSecond.newPage();
+    await second.goto('/comptabilite');
+    const dialogueSecond = second.getByRole('dialog', { name: 'Modifier le compte' });
+    await second.locator('tbody tr', { hasText: code }).getByRole('button', { name: 'Modifier' }).click();
+    const ligne = page.locator('tbody tr', { hasText: code });
+    await ligne.getByRole('button', { name: 'Modifier' }).click();
+    const dialogue = page.getByRole('dialog', { name: 'Modifier le compte' });
+    await dialogue.getByLabel('Libellé').fill('Premier validé');
+    await dialogue.getByLabel(/Motif/).fill('Premier changement motivé');
+    await dialogue.getByRole('button', { name: 'Enregistrer la modification' }).click();
+    await dialogueSecond.getByLabel('Libellé').fill('Écrasement périmé');
+    await dialogueSecond.getByLabel(/Motif/).fill('Tentative périmée motivée');
+    await dialogueSecond.getByRole('button', { name: 'Enregistrer la modification' }).click();
+    await expect(dialogueSecond).toBeVisible();
+    await expect(dialogueSecond.getByRole('alert')).toContainText(/modifié depuis son ouverture/i);
+    const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ id: string; code: string; libelle: string }> };
+    const compte = plan.comptes.find(c => c.code === code)!;
+    expect(compte.libelle).toBe('Premier validé');
+    const journal = await (await apiAdmin.get(`/comptabilite/comptes/${compte.id}/journal`)).json() as Array<{ action: string }>;
+    expect(journal.map(j => j.action)).toEqual(['MODIFICATION']);
+  } finally { await contexteSecond.close(); }
+});
+
+test('nature liée à une règle refusée et dialogue conservé pour corriger la saisie', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const page = await allerSurPageAdmin('/comptabilite');
+  const ligne = page.locator('tbody tr', { hasText: '706000' });
+  await ligne.getByRole('button', { name: 'Modifier' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Modifier le compte' });
+  const libelle = await dialogue.getByLabel('Libellé').inputValue();
+  await dialogue.getByLabel('Nature').selectOption('CHARGE');
+  await dialogue.getByLabel(/Motif/).fill('Reclassement envisagé');
+  await dialogue.getByRole('button', { name: 'Enregistrer la modification' }).click();
+  await expect(dialogue.getByRole('alert')).toContainText(/nature incompatible.*remappez/i);
+  await expect(dialogue.getByLabel('Nature')).toHaveValue('CHARGE');
+  await expect(ligne).toContainText('PRODUIT');
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ id: string; code: string; libelle: string }> };
+  const compte = plan.comptes.find(c => c.code === '706000')!;
+  expect(compte.libelle).toBe(libelle);
+  const journal = await (await apiAdmin.get(`/comptabilite/comptes/${compte.id}/journal`)).json() as Array<{ action: string }>;
+  expect(journal.filter(j => j.action === 'MODIFICATION')).toHaveLength(0);
+});
+
 test('confirme la désactivation d’un compte, le retire des choix et permet sa réactivation', async ({ allerSurPageAdmin, apiAdmin }) => {
   const code = `711${String(Date.now()).slice(-9)}`;
   const page = await allerSurPageAdmin('/comptabilite');

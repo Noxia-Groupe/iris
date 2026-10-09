@@ -1030,7 +1030,7 @@ app.get('/api/comptabilite', requireAuth, requireAdmin, async (_req, res) => {
   try { const [comptes, regles, reglesTva] = await Promise.all([prisma.compteComptable.findMany({ orderBy: { code: 'asc' } }), prisma.regleComptable.findMany({ include: { compte: true }, orderBy: { cle: 'asc' } }), prisma.regleTvaComptable.findMany({ include: { compte: true }, orderBy: { taux: 'asc' } })]); res.json(decimalToNumber({ comptes, regles, reglesTva })); }
   catch { res.status(500).json({ error: 'Lecture du paramétrage comptable impossible.' }); }
 });
-export function libelleComptableValide(libelle: string): boolean { return !Array.from(libelle).some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127); }
+export function libelleComptableValide(libelle: string): boolean { return !/\p{Cc}/u.test(libelle); }
 app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res) => {
   try { const code = String(req.body?.code || '').trim(), libelleBrut = String(req.body?.libelle || ''), libelle = libelleBrut.trim(), nature = String(req.body?.nature || '');
     if (!/^\d{3,12}$/.test(code) || !libelle || !libelleComptableValide(libelleBrut) || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
@@ -1038,6 +1038,8 @@ app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res
   } catch (error) { if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce code de compte existe déjà, éventuellement inactif. Consultez le plan et réactivez-le avec un motif si nécessaire.' }); res.status(500).json({ error: 'Création du compte impossible.' }); }
 });
 class CompteComptableUtilise extends Error {}
+class CompteComptableSansChangement extends Error {}
+class CompteComptablePerime extends Error {}
 class CompteComptableDejaDansCetEtat extends Error {}
 class CompteComptableInactif extends Error {}
 class NatureCompteInvalide extends Error {
@@ -1055,6 +1057,52 @@ async function verrouillerCompteComptable(tx: Prisma.TransactionClient, compteId
   await verrouillerParametrageComptable(tx);
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "CompteComptable" WHERE "id" = ${compteId} FOR UPDATE`);
 }
+app.patch('/api/comptabilite/comptes/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).some(k => !['libelle', 'nature', 'motif', 'expectedUpdatedAt'].includes(k)) ||
+      typeof body.expectedUpdatedAt !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(body.expectedUpdatedAt) || !Number.isFinite(Date.parse(body.expectedUpdatedAt)) ||
+      (!Object.hasOwn(body, 'libelle') && !Object.hasOwn(body, 'nature')) ||
+      (Object.hasOwn(body, 'libelle') && (typeof body.libelle !== 'string' || !body.libelle.trim() || !libelleComptableValide(body.libelle))) ||
+      (Object.hasOwn(body, 'nature') && (typeof body.nature !== 'string' || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(body.nature))) ||
+      typeof body.motif !== 'string' || !libelleComptableValide(body.motif) ||
+      [...body.motif.trim()].length < 3 || [...body.motif.trim()].length > 500) {
+    return res.status(400).json({ error: 'Libellé ou nature et motif de 3 à 500 caractères requis ; code non modifiable.' });
+  }
+  try {
+    const compte = await prisma.$transaction(async tx => {
+      await verrouillerCompteComptable(tx, String(req.params.id));
+      const avant = await tx.compteComptable.findUnique({ where: { id: String(req.params.id) } });
+      if (!avant) return null;
+      if (avant.updatedAt.toISOString() !== body.expectedUpdatedAt) throw new CompteComptablePerime();
+      const libelle = Object.hasOwn(body, 'libelle') ? body.libelle.trim() as string : avant.libelle;
+      const nature = Object.hasOwn(body, 'nature') ? body.nature as string : avant.nature;
+      if (avant.libelle === libelle && avant.nature === nature) throw new CompteComptableSansChangement();
+      if (avant.nature !== nature) {
+        const [regles, reglesTva] = await Promise.all([
+          tx.regleComptable.findMany({ where: { compteId: avant.id }, select: { cle: true } }),
+          tx.regleTvaComptable.count({ where: { compteId: avant.id } }),
+        ]);
+        if (regles.some(r => NATURES_ATTENDUES[r.cle] && !NATURES_ATTENDUES[r.cle].includes(nature)) || (reglesTva && nature !== 'TVA')) throw new NatureCompteInvalide('Nature incompatible avec une règle client, vente ou TVA : remappez la règle auparavant.');
+      }
+      const apres = await tx.compteComptable.update({ where: { id: avant.id }, data: { libelle, nature } });
+      await tx.journalCompteComptable.create({ data: {
+        compteId: avant.id, auteurId: req.user!.id, auteurNom: req.user!.name,
+        action: 'MODIFICATION', avantLibelle: avant.libelle, apresLibelle: apres.libelle,
+        avantNature: avant.nature, apresNature: apres.nature, motif: body.motif.trim(),
+      } });
+      return apres;
+    });
+    if (!compte) return res.status(404).json({ error: 'Compte comptable introuvable.' });
+    res.json(compte);
+  } catch (error) {
+    if (error instanceof CompteComptableSansChangement) return res.status(400).json({ error: 'Aucune modification du compte.' });
+    if (error instanceof CompteComptablePerime) return res.status(409).json({ error: 'Compte modifié depuis son ouverture : actualisez le plan avant de réessayer.' });
+    if (error instanceof NatureCompteInvalide) return res.status(409).json({ error: error.messageMetier });
+    if ((error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'Modification concurrente du compte : réessayez.' });
+    res.status(500).json({ error: 'Modification du compte impossible.' });
+  }
+});
 app.get('/api/comptabilite/comptes/:id/journal', requireAuth, requireAdmin, async (req, res) => {
   try {
     const id = String(req.params.id);
