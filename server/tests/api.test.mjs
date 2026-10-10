@@ -218,7 +218,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -2584,18 +2584,33 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).put(u).set('Authorization', auth).send({ compteId: a.id, motif: 'Création du taux initial' })).status, 200);
       assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', auth).send({ journal: 'VTE' })).status, 400);
       assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', auth).send({ journal: 'VTE', motif: 'Création du journal initial' })).status, 200);
-      for (const body of [{ compteId: b.id }, { compteId: b.id, motif: 'ab' }, { compteId: b.id, motif: 'invalide\u200b' }]) {
+      const tvaVersion = await versionTva(9.5);
+      const journalVersion = await versionRegle('JOURNAL_VENTES');
+      for (const motif of [undefined, 'ab', 'invalide\u200b']) {
+        const body = { compteId: b.id, ...tvaVersion, ...(motif === undefined ? {} : { motif }) };
+        const tracesAvant = await prisma.journalRegleComptable.count();
         assert.equal((await request(app).put(u).set('Authorization', auth).send(body)).status, 400);
         assert.equal((await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 9.5 } })).compteId, a.id);
+        assert.equal(await prisma.journalRegleComptable.count(), tracesAvant);
       }
       const tvaAvant = await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 9.5 } });
       assert.equal((await request(app).put(u).set('Authorization', auth).send({ compteId: b.id, expectedCompteId: a.id, expectedUpdatedAt: tvaAvant.updatedAt.toISOString(), motif: 'Changement du compte TVA' })).status, 200);
       const journalAvant = await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'JOURNAL_VENTES' } });
-      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', auth).send({ journal: 'NOUV' })).status, 400);
+      for (const motif of [undefined, 'ab', 'invalide\u200b']) {
+        const tracesAvant = await prisma.journalRegleComptable.count();
+        assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', auth).send({ journal: 'NOUV', ...journalVersion, ...(motif === undefined ? {} : { motif }) })).status, 400);
+        assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'JOURNAL_VENTES' } })).journal, 'VTE');
+        assert.equal(await prisma.journalRegleComptable.count(), tracesAvant);
+      }
       assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', auth).send({ journal: 'NOUV', expectedValeur: 'VTE', expectedUpdatedAt: journalAvant.updatedAt.toISOString(), motif: 'Changement du journal' })).status, 200);
       const actuel = await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 9.5 } });
       const retrait = { confirmation: '9.5', expectedCompteId: b.id, expectedUpdatedAt: actuel.updatedAt.toISOString() };
-      assert.equal((await request(app).delete(u).set('Authorization', auth).send(retrait)).status, 400);
+      for (const motif of [undefined, 'ab', 'invalide\u200b']) {
+        const tracesAvant = await prisma.journalRegleComptable.count();
+        assert.equal((await request(app).delete(u).set('Authorization', auth).send({ ...retrait, ...(motif === undefined ? {} : { motif }) })).status, 400);
+        assert.equal((await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 9.5 } })).compteId, b.id);
+        assert.equal(await prisma.journalRegleComptable.count(), tracesAvant);
+      }
       assert.equal((await request(app).delete(u).set('Authorization', auth).send({ ...retrait, motif: 'Retrait du taux TVA' })).status, 204);
       const journal = await request(app).get('/api/comptabilite/regles/journal').set('Authorization', auth);
       assert.equal(journal.status, 200, JSON.stringify(journal.body));
@@ -2609,6 +2624,21 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.journalRegleComptable.update({ where: { id: journal.body[0].id }, data: { motif: 'Falsifié' } }), /immuable/);
       await assert.rejects(prisma.journalRegleComptable.delete({ where: { id: journal.body[0].id } }), /immuable/);
       await retirerRegleFixture('JOURNAL_VENTES');
+    });
+
+    test('#95 : suppression de l’auteur d’une règle journalisée refuse 409 avant la FK', async () => {
+      const auteur = await prisma.user.create({ data: { email: 'journal.regle.auteur@iris.test', name: 'TEST Auteur règle', role: 'ADMIN' } });
+      const compte = await prisma.compteComptable.create({ data: { code: '706878', libelle: 'Règle auteur', nature: 'PRODUIT' } });
+      const token = jwt.sign({ id: auteur.id }, process.env.JWT_SECRET);
+      const creation = await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', `Bearer ${token}`).send({ compteId: compte.id, motif: 'Création par auteur protégé' });
+      assert.equal(creation.status, 200, JSON.stringify(creation.body));
+      const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(suppression.status, 409, JSON.stringify(suppression.body));
+      assert.match(suppression.body.error, /preuve de traçabilité/);
+      assert.match(suppression.body.error, /Désactivez-le plutôt/);
+      assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
+      assert.equal(await prisma.journalRegleComptable.count({ where: { auteurId: auteur.id } }), 1);
+      await retirerRegleFixture('VENTE_ARTICLE');
     });
 
     test('#95 : SQL refuse un remappage sans preuve, et une preuve invalide', async () => {
@@ -2627,7 +2657,11 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.journalRegleComptable.create({ data: { type: 'REGLE', cible: 'VENTE_ARTICLE', action: 'REMAPPAGE', avant: a.id, apres: b.id, motif: 'ab', auteurId: auteur.id, auteurNom: auteur.name } }), /JournalRegleComptable_motif_check/);
       await assert.rejects(prisma.journalRegleComptable.create({ data: { type: 'TVA', cible: '100.99', action: 'RETRAIT', avant: a.id, motif: 'Taux supérieur à cent', auteurId: auteur.id, auteurNom: auteur.name } }), /JournalRegleComptable_transition_check/);
       await assert.rejects(prisma.journalRegleComptable.create({ data: { type: 'TVA', cible: '9.5', action: 'RETRAIT', avant: a.id, apres: b.id, motif: 'Retrait factice', auteurId: auteur.id, auteurNom: auteur.name } }), /JournalRegleComptable_transition_check/);
-      assert.equal(await prisma.journalRegleComptable.count({ where: { cible: 'VENTE_ARTICLE', action: 'CREATION' } }), 1);
+      await assert.rejects(prisma.journalRegleComptable.create({ data: { type: 'REGLE', cible: 'VENTE_ARTICLE', action: 'REMAPPAGE', avant: a.id, apres: a.id, motif: 'Transition fictive identique', auteurId: auteur.id, auteurNom: auteur.name } }), /JournalRegleComptable_transition_check/);
+      for (const motif of ['Avant\u200baprès', 'Avant\u202eaprès']) {
+        await assert.rejects(prisma.journalRegleComptable.create({ data: { type: 'REGLE', cible: 'VENTE_ARTICLE', action: 'REMAPPAGE', avant: a.id, apres: b.id, motif, auteurId: auteur.id, auteurNom: auteur.name } }), /JournalRegleComptable_motif_check/);
+      }
+      assert.equal(await prisma.journalRegleComptable.count({ where: { cible: 'VENTE_ARTICLE', action: 'CREATION', motif: 'Création de règle de test' } }), 1);
       await retirerRegleFixture('VENTE_ARTICLE');
     });
 
@@ -2635,7 +2669,7 @@ if (!TEST_DATABASE_URL) {
       const auth = `Bearer ${session}`;
       const a = await prisma.compteComptable.create({ data: { code: '706891', libelle: 'Source répétée', nature: 'PRODUIT' } });
       const b = await prisma.compteComptable.create({ data: { code: '706892', libelle: 'Cible répétée', nature: 'PRODUIT' } });
-      const creee = await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', auth).send({ motif: "Création de règle de test",  compteId: a.id });
+      const creee = await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', auth).send({ ...(await versionRegle('VENTE_ARTICLE')), motif: "Création de règle de test", compteId: a.id });
       assert.equal(creee.status, 200, JSON.stringify(creee.body));
       const auteur = await auteurFixture(prisma);
       const event = (avant, apres) => ({ type: 'REGLE', cible: 'VENTE_ARTICLE', action: 'REMAPPAGE', avant, apres, motif: 'Transition SQL répétée', auteurId: auteur.id, auteurNom: auteur.name });
@@ -2655,6 +2689,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } })).compteId, a.id);
       assert.equal(await prisma.journalRegleComptable.count({ where: { motif: 'Transition SQL répétée' } }), 0);
       await assert.rejects(prisma.regleComptable.update({ where: { cle: 'VENTE_ARTICLE' }, data: { cle: 'CLIENT' } }), /[Ii]dentité|[Ii]dentite/);
+      await assert.rejects(prisma.$executeRaw`UPDATE "TransitionRegleComptable" SET "avant" = ${a.id} WHERE "type" = 'REGLE' AND "cible" = 'VENTE_ARTICLE'`, /Preuve de transition immuable/);
+      await assert.rejects(prisma.$executeRaw`DELETE FROM "TransitionRegleComptable" WHERE "type" = 'REGLE' AND "cible" = 'VENTE_ARTICLE'`, /Preuve de transition immuable/);
       const tva = await prisma.compteComptable.create({ data: { code: '445891', libelle: 'TVA identité', nature: 'TVA' } });
       assert.equal((await request(app).put('/api/comptabilite/tva/9.5').set('Authorization', auth).send({ motif: "Création de règle de test",  compteId: tva.id })).status, 200);
       await assert.rejects(prisma.regleTvaComptable.update({ where: { taux: 9.5 }, data: { taux: 9.6 } }), /[Ii]dentité|[Ii]dentite/);
@@ -2668,7 +2704,7 @@ if (!TEST_DATABASE_URL) {
       const b = await prisma.compteComptable.create({ data: { code: '706894', libelle: 'Après concurrent', nature: 'PRODUIT' } });
       const c = await prisma.compteComptable.create({ data: { code: '706882', libelle: 'Périmé concurrent', nature: 'PRODUIT' } });
       const url = '/api/comptabilite/regles/VENTE_ARTICLE';
-      const initial = await request(app).put(url).set('Authorization', auth).send({ motif: "Création de règle de test", compteId: a.id });
+      const initial = await request(app).put(url).set('Authorization', auth).send({ ...(await versionRegle('VENTE_ARTICLE')), motif: "Création de règle de test", compteId: a.id });
       assert.equal(initial.status, 200, JSON.stringify(initial.body));
       const attente = { expectedValeur: a.id, expectedUpdatedAt: initial.body.updatedAt, motif: 'Changement concurrent' };
       const premier = await request(app).put(url).set('Authorization', auth).send({ motif: "Création de règle de test", compteId: b.id, ...attente });
@@ -2680,12 +2716,47 @@ if (!TEST_DATABASE_URL) {
       await retirerRegleFixture('VENTE_ARTICLE');
     });
 
+    test('#95 : remappage TVA périmé refuse 409 sans mutation ni trace', async () => {
+      const a = await prisma.compteComptable.create({ data: { code: '445881', libelle: 'TVA périmée A', nature: 'TVA' } });
+      const b = await prisma.compteComptable.create({ data: { code: '445882', libelle: 'TVA périmée B', nature: 'TVA' } });
+      const c = await prisma.compteComptable.create({ data: { code: '445883', libelle: 'TVA périmée C', nature: 'TVA' } });
+      const url = '/api/comptabilite/tva/9.5';
+      const auth = `Bearer ${session}`;
+      const initial = await request(app).put(url).set('Authorization', auth).send({ compteId: a.id, motif: 'Création TVA concurrente' });
+      assert.equal(initial.status, 200, JSON.stringify(initial.body));
+      const attendu = { expectedCompteId: a.id, expectedUpdatedAt: initial.body.updatedAt };
+      assert.equal((await request(app).put(url).set('Authorization', auth).send({ compteId: b.id, ...attendu, motif: 'Premier changement TVA' })).status, 200);
+      const tracesAvant = await prisma.journalRegleComptable.count({ where: { type: 'TVA', cible: '9.5' } });
+      const perime = await request(app).put(url).set('Authorization', auth).send({ compteId: c.id, ...attendu, motif: 'Tentative TVA périmée' });
+      assert.equal(perime.status, 409, JSON.stringify(perime.body));
+      assert.equal((await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 9.5 } })).compteId, b.id);
+      assert.equal(await prisma.journalRegleComptable.count({ where: { type: 'TVA', cible: '9.5' } }), tracesAvant);
+      await retirerTvaFixture(9.5);
+    });
+
+    test('#95 : retrait standard périmé refuse 409 sans suppression ni trace', async () => {
+      const a = await prisma.compteComptable.create({ data: { code: '706881', libelle: 'Règle périmée A', nature: 'PRODUIT' } });
+      const b = await prisma.compteComptable.create({ data: { code: '706877', libelle: 'Règle périmée B', nature: 'PRODUIT' } });
+      const url = '/api/comptabilite/regles/VENTE_ARTICLE';
+      const auth = `Bearer ${session}`;
+      const initial = await request(app).put(url).set('Authorization', auth).send({ ...(await versionRegle('VENTE_ARTICLE')), compteId: a.id, motif: 'Création avant retrait' });
+      assert.equal(initial.status, 200, JSON.stringify(initial.body));
+      const attendu = { expectedValeur: a.id, expectedUpdatedAt: initial.body.updatedAt };
+      assert.equal((await request(app).put(url).set('Authorization', auth).send({ compteId: b.id, ...attendu, motif: 'Remappage avant retrait' })).status, 200);
+      const tracesAvant = await prisma.journalRegleComptable.count({ where: { type: 'REGLE', cible: 'VENTE_ARTICLE' } });
+      const perime = await request(app).delete(url).set('Authorization', auth).send({ ...attendu, motif: 'Retrait depuis vue périmée' });
+      assert.equal(perime.status, 409, JSON.stringify(perime.body));
+      assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } })).compteId, b.id);
+      assert.equal(await prisma.journalRegleComptable.count({ where: { type: 'REGLE', cible: 'VENTE_ARTICLE' } }), tracesAvant);
+      await retirerRegleFixture('VENTE_ARTICLE');
+    });
+
     test('#95 : les codes et libellés des comptes restent figés après renommage', async () => {
       const auth = `Bearer ${session}`;
       const a = await prisma.compteComptable.create({ data: { code: '706889', libelle: 'Ancien libellé figé', nature: 'PRODUIT' } });
       const b = await prisma.compteComptable.create({ data: { code: '706890', libelle: 'Nouveau libellé figé', nature: 'PRODUIT' } });
       const url = '/api/comptabilite/regles/VENTE_ARTICLE';
-      const initial = await request(app).put(url).set('Authorization', auth).send({ motif: "Création de règle de test", compteId: a.id });
+      const initial = await request(app).put(url).set('Authorization', auth).send({ ...(await versionRegle('VENTE_ARTICLE')), motif: "Création de règle de test", compteId: a.id });
       assert.equal(initial.status, 200, JSON.stringify(initial.body));
       const change = await request(app).put(url).set('Authorization', auth).send({ compteId: b.id, expectedValeur: a.id, expectedUpdatedAt: initial.body.updatedAt, motif: 'Figement des comptes' });
       assert.equal(change.status, 200, JSON.stringify(change.body));
@@ -2704,16 +2775,52 @@ if (!TEST_DATABASE_URL) {
     test('#95 : retrait motivé d’une règle standard conserve le journal et bloque une émission future', async () => {
       const auth = `Bearer ${session}`;
       const compte = await prisma.compteComptable.create({ data: { code: '706897', libelle: 'Ventes à retirer', nature: 'PRODUIT' } });
-      const creee = await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', auth).send({ motif: "Création de règle de test",  compteId: compte.id });
+      const creee = await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', auth).send({ ...(await versionRegle('VENTE_ARTICLE')), motif: "Création de règle de test", compteId: compte.id });
       assert.equal(creee.status, 200, JSON.stringify(creee.body));
       const body = { expectedValeur: compte.id, expectedUpdatedAt: creee.body.updatedAt };
       const u = '/api/comptabilite/regles/VENTE_ARTICLE';
-      assert.equal((await request(app).delete(u).set('Authorization', auth).send(body)).status, 400);
+      for (const motif of [undefined, 'ab', 'invalide\u200b']) {
+        const tracesAvant = await prisma.journalRegleComptable.count();
+        assert.equal((await request(app).delete(u).set('Authorization', auth).send({ ...body, ...(motif === undefined ? {} : { motif }) })).status, 400);
+        assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } })).compteId, compte.id);
+        assert.equal(await prisma.journalRegleComptable.count(), tracesAvant);
+      }
       assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } })).compteId, compte.id);
       assert.equal((await request(app).delete(u).set('Authorization', auth).send({ ...body, motif: 'Retrait du mapping des ventes' })).status, 204);
       assert.equal(await prisma.regleComptable.findUnique({ where: { cle: 'VENTE_ARTICLE' } }), null);
       const journal = (await request(app).get('/api/comptabilite/regles/journal').set('Authorization', auth)).body;
       assert.deepEqual(journal.filter(j => j.cible === 'VENTE_ARTICLE' && j.motif === 'Retrait du mapping des ventes').map(j => [j.action, j.avant, j.apres, j.motif]), [['RETRAIT', compte.id, null, 'Retrait du mapping des ventes']]);
+    });
+
+    test('#95 : retrait standard attend le verrou comptable global', async () => {
+      const compte = await prisma.compteComptable.create({ data: { code: '706879', libelle: 'Règle sous verrou', nature: 'PRODUIT' } });
+      const url = '/api/comptabilite/regles/VENTE_ARTICLE';
+      const auth = `Bearer ${session}`;
+      const creee = await request(app).put(url).set('Authorization', auth).send({ ...(await versionRegle('VENTE_ARTICLE')), compteId: compte.id, motif: 'Création sous verrou' });
+      assert.equal(creee.status, 200, JSON.stringify(creee.body));
+      let liberer, annoncer;
+      const verrouPose = new Promise(resolve => { annoncer = resolve; });
+      const attente = new Promise(resolve => { liberer = resolve; });
+      const transaction = prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(814086)::text`;
+        annoncer();
+        await attente;
+      }, { timeout: 10_000 });
+      await verrouPose;
+      const retrait = request(app).delete(url).set('Authorization', auth).send({ expectedValeur: compte.id, expectedUpdatedAt: creee.body.updatedAt, motif: 'Retrait après verrou' })
+        .timeout({ deadline: 12_000 }).then(r => r, e => ({ status: 0, body: { error: String(e) } }));
+      let bloquee = false;
+      try {
+        for (let i = 0; i < 60; i++) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
+          if (etat.attente) { bloquee = true; break; }
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        assert.equal(await prisma.regleComptable.count({ where: { cle: 'VENTE_ARTICLE' } }), 1);
+      } finally { liberer(); await transaction; }
+      assert.equal(bloquee, true, 'DELETE doit attendre le verrou partagé avec les émissions');
+      assert.equal((await retrait).status, 204);
+      assert.equal(await prisma.regleComptable.count({ where: { cle: 'VENTE_ARTICLE' } }), 0);
     });
 
     test('TVA #92 : supprime seulement le taux ciblé, refuse les taux et corps invalides, protège la route', async () => {

@@ -9,6 +9,16 @@
 
 La procédure de création d’une instance vierge, les variables PostgreSQL, Microsoft Entra ID, JWT, accès de secours, frontend et tests sont documentées dans [`docs/CONFIGURATION-ENVIRONNEMENT.md`](docs/CONFIGURATION-ENVIRONNEMENT.md). Les modèles versionnés sont [`.env.example`](.env.example) et [`server/.env.example`](server/.env.example) ; les fichiers `.env` réels ne doivent jamais être ajoutés au dépôt.
 
+**Portée du journal des règles comptables.** Les contraintes et triggers SQL vérifient les
+transitions et journaux dans les deux sens pour un rôle SQL non propriétaire. Le propriétaire
+de la base est **de confiance** : il peut désactiver les triggers, modifier les fonctions et
+fabriquer des lignes dans `TransitionRegleComptable`. La configuration actuelle ne démontre
+pas une garantie contre des `INSERT` SQL arbitraires faits avec ce rôle propriétaire.
+Avant de revendiquer cette garantie face aux écritures directes, déployer l’application avec
+un rôle non propriétaire distinct du rôle de migration, lui accorder seulement les droits
+nécessaires sur les tables métier (pas d’écriture sur le ledger ni de DDL), et tester les
+permissions effectives du rôle déployé. Ne jamais partager le rôle migrateur avec l’API.
+
 ## Vision
 Iris est un ERP français pour métiers techniques : interventions SAV et travaux, facturation récurrente, abonnements télécom (4G/fibre), financeurs, raccordement bancaire automatique, web app mobile pour techniciens, branding personnalisé (couleurs + logo) et identité légale de la société exploitante. Une installation Iris correspond à une seule société : déploiement à la demande, sans inscription publique ni mutualisation de base de données.
 

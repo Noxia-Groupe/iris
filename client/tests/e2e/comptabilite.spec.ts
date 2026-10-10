@@ -47,7 +47,7 @@ test('#95 : création de règle standard motivée, sans mutation à la sélectio
   await expect(creation).not.toBeVisible();
   expect((await (await apiAdmin.get('/comptabilite')).json() as { regles: Array<{ cle: string }> }).regles.some(r => r.cle === 'VENTE_ARTICLE')).toBe(true);
   await page.getByRole('button', { name: 'Historique des règles' }).click();
-  await expect(page.getByRole('region', { name: 'Historique des règles' }).locator('p', { hasText: 'Création de la règle articles' }).last()).toContainText('CREATION');
+  await expect(page.getByRole('region', { name: 'Historique des règles' }).locator('p', { hasText: 'Création de la règle articles' }).last()).toContainText('Création de Ventes d’articles');
 });
 
  test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans supprimer le compte', async ({ allerSurPageAdmin, apiAdmin, session, request }) => {
@@ -57,7 +57,8 @@ test('#95 : création de règle standard motivée, sans mutation à la sélectio
   const compte = await request.post(`${base}/comptabilite/comptes`, { headers, data: { code, libelle: 'TVA à conserver', nature: 'TVA' } });
   expect(compte.status()).toBe(201);
   const compteId = (await compte.json()).id;
-  expect((await request.put(`${base}/comptabilite/tva/7.7`, { headers, data: { compteId, motif: 'Création du taux de test' } })).status()).toBe(200);
+  const avant77 = (await (await apiAdmin.get('/comptabilite')).json() as { reglesTva: Array<{ taux: number; compteId: string; updatedAt: string }> }).reglesTva.find(r => r.taux === 7.7);
+  expect((await request.put(`${base}/comptabilite/tva/7.7`, { headers, data: { compteId, motif: 'Configuration du taux de test', ...(avant77 ? { expectedCompteId: avant77.compteId, expectedUpdatedAt: avant77.updatedAt } : {}) } })).status()).toBe(200);
   const page = await allerSurPageAdmin('/comptabilite');
   const ligne = page.getByRole('row', { name: /7,7 %/ });
   await expect(ligne).toContainText(`${code} — TVA à conserver`);
@@ -110,7 +111,7 @@ test('TVA #92 : confirmation française 5,5 dans le navigateur retire le mapping
   expect(plan.comptes.find(c => c.id === compteId)?.actif).toBe(true);
 });
 
-test('TVA #92 : deux sessions, la confirmation ancienne ne retire pas le nouveau mapping', async ({ browser, request, session }) => {
+test('TVA #92 : deux sessions, la confirmation ancienne ne retire pas le nouveau mapping', async ({ browser, request, session, apiAdmin }) => {
   const base = 'http://127.0.0.1:3001/api';
   const headers = { Authorization: `Bearer ${session.token}` };
   const code = String(Date.now()).slice(-8);
@@ -121,7 +122,8 @@ test('TVA #92 : deux sessions, la confirmation ancienne ne retire pas le nouveau
   };
   const ancienId = await creerCompte('1');
   const nouveauId = await creerCompte('2');
-  expect((await request.put(`${base}/comptabilite/tva/8.9`, { headers, data: { compteId: ancienId, motif: 'Création du taux de test' } })).status()).toBe(200);
+  const avant89 = (await (await apiAdmin.get('/comptabilite')).json() as { reglesTva: Array<{ taux: number; compteId: string; updatedAt: string }> }).reglesTva.find(r => r.taux === 8.9);
+  expect((await request.put(`${base}/comptabilite/tva/8.9`, { headers, data: { compteId: ancienId, motif: 'Configuration du taux de test', ...(avant89 ? { expectedCompteId: avant89.compteId, expectedUpdatedAt: avant89.updatedAt } : {}) } })).status()).toBe(200);
   const ouvrir = async () => {
     const contexte = await browser.newContext();
     await contexte.addInitScript(([token, user]) => {
