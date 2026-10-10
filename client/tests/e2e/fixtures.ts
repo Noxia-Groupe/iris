@@ -33,11 +33,16 @@ async function preparerFacturation(request: APIRequestContext, token: string) {
     ['VENTE_ARTICLE', { compteId: articles.id }],
     ['JOURNAL_VENTES', { journal: 'VE' }],
   ] as const) {
-    const response = await request.put(`${api}/comptabilite/regles/${cle}`, { headers: auth, data });
+    const actuel = (await (await request.get(`${api}/comptabilite`, { headers: auth })).json()).regles.find((r: { cle: string }) => r.cle === cle);
+    if (actuel && (cle === 'JOURNAL_VENTES' ? actuel.journal === 'VE' : actuel.compteId === (data as { compteId?: string }).compteId)) continue;
+    const version = actuel ? { expectedValeur: cle === 'JOURNAL_VENTES' ? actuel.journal : actuel.compteId, expectedUpdatedAt: actuel.updatedAt } : {};
+    const response = await request.put(`${api}/comptabilite/regles/${cle}`, { headers: auth, data: { ...data, ...version, motif: actuel ? 'Réinitialisation de la fixture E2E' : 'Création de la fixture E2E' } });
     expect(response.ok(), `règle ${cle} : ${response.status()}`).toBeTruthy();
   }
   for (const taux of [20, 10]) {
-    const response = await request.put(`${api}/comptabilite/tva/${taux}`, { headers: auth, data: { compteId: tva.id } });
+    const existante = (await (await request.get(`${api}/comptabilite`, { headers: auth })).json()).reglesTva.find((r: { taux: number }) => r.taux === taux);
+    if (existante?.compteId === tva.id) continue;
+    const response = await request.put(`${api}/comptabilite/tva/${taux}`, { headers: auth, data: { compteId: tva.id, motif: existante ? 'Réinitialisation de la fixture E2E' : 'Création de la fixture E2E', ...(existante ? { expectedCompteId: existante.compteId, expectedUpdatedAt: existante.updatedAt } : {}) } });
     expect(response.ok(), `TVA ${taux} : ${response.status()}`).toBeTruthy();
   }
   const versions = await (await request.get(`${api}/mentions-legales`, { headers: auth })).json();

@@ -52,6 +52,7 @@ model User {
   rapportsIntervention    InterventionRapport[]
   journauxSaisie          JournalSaisieChantier[]     @relation("JournalSaisieChantierAuteur")
   journauxComptables      JournalCompteComptable[]
+  journauxRegles          JournalRegleComptable[]
   achatsCrees             AchatReel[]                 @relation("AchatReelCreePar")
   achatsMisAJour          AchatReel[]                 @relation("AchatReelMisAJourPar")
   pointagesCrees          PointageHeure[]             @relation("PointageHeureCreePar")
@@ -680,6 +681,40 @@ model RegleComptable {
   updatedAt DateTime         @updatedAt
 
   @@index([compteId])
+}
+
+model JournalRegleComptable {
+  id        String   @id @default(uuid())
+  type      String   // REGLE | TVA
+  cible     String   // clé de règle ou taux canonique
+  action    String   // CREATION | REMAPPAGE | RETRAIT
+  avant     String?
+  apres     String?
+  avantCode String?
+  avantLibelle String?
+  apresCode String?
+  apresLibelle String?
+  motif     String
+  auteurId  String
+  auteur    User     @relation(fields: [auteurId], references: [id], onDelete: Restrict)
+  auteurNom String
+  createdAt DateTime @default(now())
+
+  @@index([type, cible, createdAt])
+  @@index([auteurId])
+}
+
+model TransitionRegleComptable {
+  // Ledger interne des transitions : la cardinalité empêche la réutilisation d'une preuve.
+  id            BigInt @id @default(autoincrement())
+  transactionId BigInt
+  type          String
+  cible         String
+  action        String
+  avant         String?
+  apres         String?
+
+  @@index([transactionId])
 }
 
 // Une TVA est ventilée par taux : indispensable à la déclaration CA3.
