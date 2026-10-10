@@ -887,6 +887,17 @@ function lignesAvoirPartiel(brutes: unknown): { ordre: number; designation: stri
 }
 class AvoirPlafondError extends Error {}
 
+// Même sélection pour la lecture informative et le garde transactionnel à l'émission.
+const derniereDateFactureNumerotee = (db: PrismaClient | Prisma.TransactionClient) =>
+  db.facture.findFirst({ where: { type: 'FACTURE', numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
+
+app.get('/api/factures/chronologie', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const derniere = await derniereDateFactureNumerotee(prisma);
+    res.json({ derniereDateEmission: derniere?.dateEmission ?? null });
+  } catch { res.status(500).json({ error: 'Lecture de la chronologie impossible.' }); }
+});
+
 app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
   try {
     const factures = await prisma.facture.findMany({ include: factureInclude, orderBy: [{ dateEmission: 'desc' }, { createdAt: 'desc' }] });
@@ -1571,7 +1582,7 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
       const annee = facture.dateEmission.getUTCFullYear();
-      const derniereEmise = await tx.facture.findFirst({ where: { type: 'FACTURE', numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
+      const derniereEmise = await derniereDateFactureNumerotee(tx);
       if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
       const mentions = await tx.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } });
       if (!mentions) return { erreur: 'LEGAL_MENTIONS_MISSING' as const };

@@ -49,6 +49,7 @@ const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoi
 
 export default function Factures() {
   const [factures, setFactures] = useState<Facture[]>([]);
+  const [derniereDateEmission, setDerniereDateEmission] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [chantiers, setChantiers] = useState<Source[]>([]);
   const [interventions, setInterventions] = useState<Source[]>([]);
@@ -66,7 +67,7 @@ export default function Factures() {
   const charger = async () => {
     try {
       const reponses = await Promise.all(
-        ['/factures', '/clients', '/chantiers', '/interventions', '/contrats-maintenance', '/company'].map((path) => apiFetch(path)),
+        ['/factures', '/clients', '/chantiers', '/interventions', '/contrats-maintenance', '/company', '/factures/chronologie'].map((path) => apiFetch(path)),
       );
       const donnees = await Promise.all(reponses.map((reponse) => reponse.json()));
       if (!reponses.every((reponse) => reponse.ok)) throw new Error(donnees.find((donnee) => donnee?.error)?.error || 'Chargement impossible.');
@@ -76,6 +77,7 @@ export default function Factures() {
       setInterventions(Array.isArray(donnees[3]) ? donnees[3] : []);
       setContrats(Array.isArray(donnees[4]) ? donnees[4] : []);
       setFuseauHoraire(donnees[5]?.fuseauHoraire || 'Europe/Paris');
+      setDerniereDateEmission(donnees[6].derniereDateEmission);
     } catch (e) {
       setErreur(e instanceof Error ? e.message : 'Chargement impossible.');
     }
@@ -185,7 +187,10 @@ export default function Factures() {
     setSucces('');
     const res = await apiFetch(`/factures/${facture.id}/emettre`, { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) return setErreur(data.error || 'Émission impossible.');
+    if (!res.ok) {
+      if (res.status === 409) await charger();
+      return setErreur(data.error || 'Émission impossible.');
+    }
     setSucces(`Facture ${data.numero} émise et figée.`);
     await charger();
   };
@@ -237,6 +242,7 @@ export default function Factures() {
     URL.revokeObjectURL(url);
   };
 
+  const emissionImpossible = (facture: Facture) => !!derniereDateEmission && facture.dateEmission.slice(0, 10) < derniereDateEmission.slice(0, 10);
   const sources = (origine === 'CHANTIER' ? chantiers : origine === 'INTERVENTION' ? interventions : contrats)
     .filter((source) => !clientSelection || source.clientId === clientSelection || source.client?.id === clientSelection);
   const sourceName = (source: Source) => source.nom || source.titre || source.reference || source.id;
@@ -256,6 +262,7 @@ export default function Factures() {
       </div>
 
       {erreur && <p className="text-red-600">{erreur}</p>}
+      <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
       {succes && <p className="text-emerald-700">{succes}</p>}
 
       {factureAvoir && (
@@ -376,7 +383,9 @@ export default function Factures() {
                 <td className="p-3">{formatMontant(facture.totalTtc)}</td>
                 <td className="p-3">{facture.statut}</td>
                 <td className="p-3"><div className="flex flex-wrap gap-2">
-                  {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>}
+                  {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && (emissionImpossible(facture)
+                    ? <span className="text-sm text-amber-700"><button className="btn btn-secondary" disabled><Send size={16} /> Émission impossible</button> Date antérieure à la dernière facture numérotée du {formatDate(derniereDateEmission!)}</span>
+                    : <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>)}
                   {facture.type === 'FACTURE' && ['EMISE', 'REGLEE'].includes(facture.statut) && <button className="btn btn-secondary" onClick={() => ouvrirAvoirPartiel(facture)}><FilePlus2 size={16} /> Créer un avoir partiel</button>}
                   {facture.type === 'FACTURE' && facture.statut === 'EMISE' && <>
                     <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'regler')}><CheckCircle2 size={16} /> Marquer comme réglée</button>

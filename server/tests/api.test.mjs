@@ -2931,6 +2931,49 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.regleTvaComptable.count({ where: { taux: 6.6 } }), 0);
     });
 
+    test('chronologie #101 : lecture admin seule, nulle sans numéro et filtrée sur FACTURE numérotée quel que soit le statut', async () => {
+      const url = '/api/factures/chronologie';
+      const auth = `Bearer ${session}`;
+      const conducteur = await prisma.user.create({ data: { email: `test.chronologie.${Date.now()}@iris.test`, name: 'TEST Chronologie', role: 'CONDUCTEUR_TRAVAUX' } });
+      const autreToken = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      assert.equal((await request(app).get(url)).status, 401);
+      assert.equal((await request(app).get(url).set('Authorization', `Bearer ${autreToken}`)).status, 403);
+      const initial = await request(app).get(url).set('Authorization', auth);
+      assert.equal(initial.status, 200, JSON.stringify(initial.body));
+      assert.deepEqual(initial.body, { derniereDateEmission: null });
+      const creer = (type, statut, numero, jour, factureOrigineId = null) => prisma.$transaction(async tx => {
+        const piece = await tx.facture.create({ data: {
+          clientId, clientRaisonSociale: 'TEST Client contrat maintenance', type, statut, numero, factureOrigineId,
+          dateEmission: new Date(`${jour}T00:00:00.000Z`), dateEcheance: new Date(`${jour}T00:00:00.000Z`),
+          totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST chronologie',
+          ecrituresScellees: false,
+        } });
+        if (statut !== 'BROUILLON') await tx.ecritureFacture.createMany({ data: [
+          { factureId: piece.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'Clients', debit: type === 'AVOIR' ? 0 : 12, credit: type === 'AVOIR' ? 12 : 0 },
+          { factureId: piece.id, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'Ventes', debit: type === 'AVOIR' ? 10 : 0, credit: type === 'AVOIR' ? 0 : 10 },
+          { factureId: piece.id, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TVA', debit: type === 'AVOIR' ? 2 : 0, credit: type === 'AVOIR' ? 0 : 2 },
+        ] });
+        if (statut !== 'BROUILLON') await tx.facture.update({ where: { id: piece.id }, data: { ecrituresScellees: true } });
+        return piece;
+      });
+      const ids = [];
+      try {
+        ids.push((await creer('FACTURE', 'BROUILLON', null, '2026-09-30')).id);
+        ids.push((await creer('AVOIR', 'EMISE', 'TEST-A-101', '2026-09-29', ids[0])).id);
+        assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: null });
+        ids.push((await creer('FACTURE', 'EMISE', 'TEST-F-101', '2026-09-27')).id);
+        assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-27T00:00:00.000Z' });
+        ids.push((await creer('FACTURE', 'ANNULEE', 'TEST-F-102', '2026-09-28')).id);
+        assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-28T00:00:00.000Z' });
+        ids.push((await creer('FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29')).id);
+        assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-29T00:00:00.000Z' });
+      } finally {
+        for (const id of ids.slice(1)) await purgerEcrituresJetables(id);
+        await prisma.facture.deleteMany({ where: { id: { in: ids.slice(1) } } });
+        await prisma.facture.deleteMany({ where: { id: ids[0] } });
+      }
+    });
+
     test('refuse une facture sans origine métier déclarée', async () => {
       const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST origine absente', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(facture.status, 400, JSON.stringify(facture.body));
