@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test:e2e": "playwright test",
-    "test:unit": "TZ=Pacific/Gambier tsx --test tests/dateFormatting.test.ts tests/archivesRestaurables.test.ts tests/planComptableCsv.test.ts"
+    "test:unit": "TZ=Pacific/Gambier tsx --test tests/dateDuJour.test.ts tests/dateFormatting.test.ts tests/archivesRestaurables.test.ts tests/planComptableCsv.test.ts"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.16.0",

@@ -67,8 +67,13 @@ async function creerClient(request: APIRequestContext, token: string, libelle: s
 }
 
 export function dateDuJour() {
-  const date = new Date();
-  return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
+  // La base E2E conserve le fuseau entreprise par défaut (Europe/Paris).
+  // Le fuseau du processus Node peut être UTC ou différent de celui de l'entreprise.
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', year: 'numeric',
+  }).formatToParts(new Date());
+  const valeur = (type: string) => parts.find((part) => part.type === type)!.value;
+  return `${valeur('day')}-${valeur('month')}-${valeur('year')}`;
 }
 
 type Outils = {
