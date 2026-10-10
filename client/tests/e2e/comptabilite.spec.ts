@@ -1,6 +1,35 @@
 import { Buffer } from 'node:buffer';
 import { test, expect } from './fixtures';
 
+test('#95 : remappage de règle par dialogue motivé et historique visible', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ id: string; nature: string }> ; regles: Array<{ cle: string; compteId: string }> };
+  const comptes = plan.comptes.filter(c => c.nature === 'PRODUIT');
+  expect(comptes.length).toBeGreaterThanOrEqual(2);
+  const current = plan.regles.find(r => r.cle === 'VENTE_PRESTATION');
+  const cible = comptes.find(c => c.id !== current?.compteId)!;
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.getByRole('combobox', { name: 'Ventes de prestations' }).selectOption(cible.id);
+  const dialogue = page.getByRole('dialog', { name: 'Motif du remappage' });
+  await dialogue.getByRole('textbox', { name: /Motif/ }).fill('Révision du compte de prestation');
+  await dialogue.getByRole('button', { name: 'Confirmer le remappage' }).click();
+  await expect(dialogue).not.toBeVisible();
+  await page.getByRole('button', { name: 'Historique des règles' }).click();
+  await expect(page.getByRole('region', { name: 'Historique des règles' }).locator('p', { hasText: 'Révision du compte de prestation' }).last()).toBeVisible();
+});
+
+test('#95 : retrait de règle standard motivé dans le navigateur', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.getByRole('button', { name: 'Retirer Ventes d’articles' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Retirer la règle comptable' });
+  await dialogue.getByRole('textbox', { name: /Motif du retrait/ }).fill('Révision des ventes articles');
+  await dialogue.getByRole('button', { name: 'Confirmer le retrait' }).click();
+  await expect(dialogue).not.toBeVisible();
+  const plan = await (await apiAdmin.get('/comptabilite')).json() as { regles: Array<{ cle: string }> };
+  expect(plan.regles.some(r => r.cle === 'VENTE_ARTICLE')).toBe(false);
+  await page.getByRole('button', { name: 'Historique des règles' }).click();
+  await expect(page.getByRole('region', { name: 'Historique des règles' }).locator('p', { hasText: 'Révision des ventes articles' })).toBeVisible();
+});
+
 test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans supprimer le compte', async ({ allerSurPageAdmin, apiAdmin, session, request }) => {
   const base = 'http://127.0.0.1:3001/api';
   const headers = { Authorization: `Bearer ${session.token}` };
@@ -17,6 +46,7 @@ test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans sup
   await expect(page.getByRole('combobox', { name: 'Compte TVA à associer' })).toHaveValue(compteId);
   const autreCompte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ code: string; id: string }> }).comptes.find(c => c.code === '445710')!;
   await page.getByRole('combobox', { name: 'Compte TVA à associer' }).selectOption(autreCompte.id);
+  await page.getByRole('textbox', { name: /Motif du remappage TVA/ }).fill('Révision du compte TVA');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(ligne).toContainText('445710');
   await ligne.getByRole('button', { name: 'Retirer' }).click();
@@ -26,6 +56,7 @@ test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans sup
   await expect(ligne).toBeVisible();
   await ligne.getByRole('button', { name: 'Retirer' }).click();
   await dialogue.getByLabel('Confirmer le taux exact').fill('7.7');
+  await dialogue.getByRole('textbox', { name: /Motif du retrait/ }).fill('Retrait du mapping TVA');
   await dialogue.getByRole('button', { name: 'Confirmer le retrait' }).click();
   await expect(ligne).not.toBeVisible();
   expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; actif: boolean }> }).comptes.find(c => c.id === compteId)?.actif).toBe(true);
@@ -49,6 +80,7 @@ test('TVA #92 : confirmation française 5,5 dans le navigateur retire le mapping
   await ligne.getByRole('button', { name: 'Retirer' }).click();
   const dialogue = page.getByRole('dialog', { name: 'Retirer la règle TVA' });
   await dialogue.getByLabel('Confirmer le taux exact').fill('5,5');
+  await dialogue.getByRole('textbox', { name: /Motif du retrait/ }).fill('Retrait du taux réduit');
   await expect(dialogue.getByRole('button', { name: 'Confirmer le retrait' })).toBeEnabled();
   await dialogue.getByRole('button', { name: 'Confirmer le retrait' }).click();
   await expect(ligne).not.toBeVisible();
@@ -88,8 +120,10 @@ test('TVA #92 : deux sessions, la confirmation ancienne ne retire pas le nouveau
     await ligneA.getByRole('button', { name: 'Retirer' }).click();
     const dialogue = a.page.getByRole('dialog', { name: 'Retirer la règle TVA' });
     await dialogue.getByLabel('Confirmer le taux exact').fill('8.9');
+    await dialogue.getByRole('textbox', { name: /Motif du retrait/ }).fill('Retrait sur ancienne version');
     await ligneB.getByRole('button', { name: 'Remapper' }).click();
     await b.page.getByRole('combobox', { name: 'Compte TVA à associer' }).selectOption(nouveauId);
+    await b.page.getByRole('textbox', { name: /Motif du remappage TVA/ }).fill('Changement concurrent de mapping');
     await b.page.getByRole('button', { name: 'Enregistrer' }).click();
     await expect(ligneB).toContainText('TVA session 2');
     await dialogue.getByRole('button', { name: 'Confirmer le retrait' }).click();

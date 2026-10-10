@@ -1287,7 +1287,14 @@ app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req: Au
     res.status(500).json({ error: 'Import du plan comptable impossible.' });
   }
 });
-app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/comptabilite/regles/journal', requireAuth, requireAdmin, async (_req, res) => {
+  try { res.json(await prisma.journalRegleComptable.findMany({ orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })); }
+  catch { res.status(500).json({ error: 'Lecture du journal des règles impossible.' }); }
+});
+class RegleComptableSansChangement extends Error {}
+class RegleComptableMotifManquant extends Error {}
+class RegleComptableVersionManquante extends Error {}
+app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try { const cle = String(req.params.cle || ''); if (!CLES_COMPTABLES.includes(cle)) return res.status(400).json({ error: 'Règle comptable inconnue.' });
     const compteId = req.body?.compteId ? String(req.body.compteId) : null; const journal = req.body?.journal == null ? null : String(req.body.journal).trim() || null;
     if (cle === 'JOURNAL_VENTES' ? !journal : !compteId) return res.status(400).json({ error: 'Paramétrage de règle incomplet.' });
@@ -1300,10 +1307,26 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, 
         if (!compte) throw new CompteComptableInactif();
         if (NATURES_ATTENDUES[cle] && !NATURES_ATTENDUES[cle].includes(compte.nature)) throw new NatureCompteInvalide(`Cette règle attend un compte de nature ${NATURES_ATTENDUES[cle].join(' ou ')}.`);
       }
-      return tx.regleComptable.upsert({ where: { cle }, create: { cle, compteId, journal }, update: { compteId, journal }, include: { compte: true } });
+      const courante = await tx.regleComptable.findUnique({ where: { cle } });
+      if (courante) {
+        if (typeof req.body?.expectedCompteId !== 'string' || typeof req.body?.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(req.body.expectedUpdatedAt))) throw new RegleComptableVersionManquante();
+        if ((courante.journal ?? courante.compteId) !== req.body.expectedCompteId || courante.updatedAt.toISOString() !== req.body.expectedUpdatedAt) throw new RegleTvaPerimee();
+        if ((courante.journal ?? courante.compteId) === (journal ?? compteId)) throw new RegleComptableSansChangement();
+        const motif = motifCompteComptableValide(req.body?.motif);
+        if (!motif) throw new RegleComptableMotifManquant();
+        const apres = await tx.regleComptable.update({ where: { cle }, data: { compteId, journal }, include: { compte: true } });
+        await tx.journalRegleComptable.create({ data: { type: 'REGLE', cible: cle, action: 'REMAPPAGE', avant: (courante.journal ?? courante.compteId)!, apres: journal ?? compteId, motif, auteurId: req.user!.id, auteurNom: req.user!.name } });
+        return apres;
+      }
+      if (req.body?.motif !== undefined && !motifCompteComptableValide(req.body.motif)) throw new RegleComptableMotifManquant();
+      return tx.regleComptable.create({ data: { cle, compteId, journal }, include: { compte: true } });
     });
     res.json(regle);
   } catch (error) {
+    if (error instanceof RegleComptableVersionManquante) return res.status(400).json({ error: 'Version de la règle requise.' });
+    if (error instanceof RegleTvaPerimee) return res.status(409).json({ error: 'La règle a changé depuis son affichage. Actualisez avant de remapper.' });
+    if (error instanceof RegleComptableMotifManquant) return res.status(400).json({ error: 'Motif de 3 à 500 caractères sans caractère de contrôle requis.' });
+    if (error instanceof RegleComptableSansChangement) return res.status(409).json({ error: 'Règle inchangée.' });
     if (error instanceof CompteComptableInactif) return res.status(404).json({ error: 'Compte comptable actif introuvable.' });
     if (error instanceof NatureCompteInvalide) return res.status(400).json({ error: error.messageMetier });
     if ((error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'Modification concurrente de la règle : réessayez.' });
@@ -1311,12 +1334,39 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req, 
   }
 });
 
+app.delete('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  const cle = String(req.params.cle);
+  const body = req.body;
+  if (!CLES_COMPTABLES.includes(cle) || !body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).sort().join(',') !== 'expectedCompteId,expectedUpdatedAt,motif' ||
+      typeof body.expectedCompteId !== 'string' || !body.expectedCompteId ||
+      typeof body.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(body.expectedUpdatedAt)) ||
+      !motifCompteComptableValide(body.motif)) return res.status(400).json({ error: 'Version et motif de 3 à 500 caractères requis.' });
+  try {
+    const retire = await prisma.$transaction(async tx => {
+      await verrouillerParametrageComptable(tx);
+      const courante = await tx.regleComptable.findUnique({ where: { cle } });
+      if (!courante) return false;
+      if ((courante.journal ?? courante.compteId) !== body.expectedCompteId || courante.updatedAt.toISOString() !== body.expectedUpdatedAt) throw new RegleTvaPerimee();
+      await tx.regleComptable.delete({ where: { cle } });
+      await tx.journalRegleComptable.create({ data: { type: 'REGLE', cible: cle, action: 'RETRAIT', avant: body.expectedCompteId, motif: body.motif.trim(), auteurId: req.user!.id, auteurNom: req.user!.name } });
+      return true;
+    });
+    if (!retire) return res.status(404).json({ error: 'Règle comptable introuvable.' });
+    res.status(204).end();
+  } catch (error) {
+    if (error instanceof RegleTvaPerimee || (error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'La règle a changé depuis son affichage.' });
+    res.status(500).json({ error: 'Retrait de la règle impossible.' });
+  }
+});
+
 // Retrait explicite du mapping courant, jamais du compte ni des écritures figées.
 class RegleTvaPerimee extends Error {}
-app.delete('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const taux = nombreDecimalNonNegatif(req.params.taux, 3, true);
-  const { confirmation, expectedCompteId, expectedUpdatedAt } = req.body || {};
-  if (taux === null || taux > 100 || Object.keys(req.body || {}).sort().join(',') !== 'confirmation,expectedCompteId,expectedUpdatedAt' ||
+  const { confirmation, expectedCompteId, expectedUpdatedAt, motif } = req.body || {};
+  if (taux === null || taux > 100 || Object.keys(req.body || {}).sort().join(',') !== 'confirmation,expectedCompteId,expectedUpdatedAt,motif' ||
+      !motifCompteComptableValide(motif) ||
       typeof confirmation !== 'string' || confirmation.replace(',', '.') !== String(taux) ||
       typeof expectedCompteId !== 'string' || !expectedCompteId ||
       typeof expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(expectedUpdatedAt))) {
@@ -1329,6 +1379,7 @@ app.delete('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req,
       if (!courante) return false;
       if (courante.compteId !== expectedCompteId || courante.updatedAt.toISOString() !== expectedUpdatedAt) throw new RegleTvaPerimee();
       await tx.regleTvaComptable.delete({ where: { id: courante.id } });
+      await tx.journalRegleComptable.create({ data: { type: 'TVA', cible: String(taux), action: 'RETRAIT', avant: courante.compteId, motif: motif.trim(), auteurId: req.user!.id, auteurNom: req.user!.name } });
       return true;
     });
     if (!supprimee) return res.status(404).json({ error: 'Règle TVA introuvable.' });
@@ -1339,22 +1390,36 @@ app.delete('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req,
   }
 });
 
-app.put('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req, res) => {
+app.put('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try { const taux = nombreDecimalNonNegatif(req.params.taux, 3, true); const compteId = String(req.body?.compteId || '');
     if (taux === null || taux > 100) return res.status(400).json({ error: 'Taux de TVA invalide.' });
     const tauxDecimal = new Prisma.Decimal(taux.toFixed(2));
     const regle = await prisma.$transaction(async tx => {
+      await verrouillerParametrageComptable(tx);
       await verrouillerCompteComptable(tx, compteId);
       const compte = await tx.compteComptable.findFirst({ where: { id: compteId, actif: true } });
       if (!compte) throw new CompteComptableInactif();
       if (compte.nature !== 'TVA') throw new NatureCompteInvalide('Une règle TVA attend un compte de nature TVA.');
       const courante = await tx.regleTvaComptable.findUnique({ where: { taux: tauxDecimal } });
-      return courante
-        ? tx.regleTvaComptable.update({ where: { id: courante.id }, data: { compteId }, include: { compte: true } })
-        : tx.regleTvaComptable.create({ data: { taux: tauxDecimal, compteId }, include: { compte: true } });
+      if (courante) {
+        if (typeof req.body?.expectedCompteId !== 'string' || typeof req.body?.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(req.body.expectedUpdatedAt))) throw new RegleComptableVersionManquante();
+        if (courante.compteId !== req.body.expectedCompteId || courante.updatedAt.toISOString() !== req.body.expectedUpdatedAt) throw new RegleTvaPerimee();
+        if (courante.compteId === compteId) throw new RegleComptableSansChangement();
+        const motif = motifCompteComptableValide(req.body?.motif);
+        if (!motif) throw new RegleComptableMotifManquant();
+        const apres = await tx.regleTvaComptable.update({ where: { id: courante.id }, data: { compteId }, include: { compte: true } });
+        await tx.journalRegleComptable.create({ data: { type: 'TVA', cible: String(taux), action: 'REMAPPAGE', avant: courante.compteId, apres: compteId, motif, auteurId: req.user!.id, auteurNom: req.user!.name } });
+        return apres;
+      }
+      if (req.body?.motif !== undefined && !motifCompteComptableValide(req.body.motif)) throw new RegleComptableMotifManquant();
+      return tx.regleTvaComptable.create({ data: { taux: tauxDecimal, compteId }, include: { compte: true } });
     });
     res.json(regle);
   } catch (error) {
+    if (error instanceof RegleComptableVersionManquante) return res.status(400).json({ error: 'Version de la règle TVA requise.' });
+    if (error instanceof RegleTvaPerimee) return res.status(409).json({ error: 'La règle TVA a changé depuis son affichage. Actualisez avant de remapper.' });
+    if (error instanceof RegleComptableMotifManquant) return res.status(400).json({ error: 'Motif de 3 à 500 caractères sans caractère de contrôle requis.' });
+    if (error instanceof RegleComptableSansChangement) return res.status(409).json({ error: 'Règle inchangée.' });
     if (error instanceof CompteComptableInactif) return res.status(404).json({ error: 'Compte TVA actif introuvable.' });
     if (error instanceof NatureCompteInvalide) return res.status(400).json({ error: error.messageMetier });
     if ((error as { code?: string })?.code === 'P2034') return res.status(409).json({ error: 'Modification concurrente de la règle TVA : réessayez.' });
@@ -2914,7 +2979,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     }
     // Les clés étrangères RESTRICT restent le verrou contre une course ; ce contrôle rend le refus
     // lisible à l’administrateur lorsqu’un compte porte une preuve de traçabilité métier.
-    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie, journauxComptables, coutsHeuresCrees, coutsAchatsCrees, coutsHeuresArchives, coutsAchatsArchives] = await Promise.all([
+    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie, journauxComptables, journauxRegles, coutsHeuresCrees, coutsAchatsCrees, coutsHeuresArchives, coutsAchatsArchives] = await Promise.all([
       prisma.achatReel.count({ where: { createdById: id } }),
       prisma.achatReel.count({ where: { updatedById: id } }),
       prisma.achatReel.count({ where: { archivedById: id } }),
@@ -2923,12 +2988,13 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       prisma.pointageHeure.count({ where: { archivedById: id } }),
       prisma.journalSaisieChantier.count({ where: { auteurId: id } }),
       prisma.journalCompteComptable.count({ where: { auteurId: id } }),
+      prisma.journalRegleComptable.count({ where: { auteurId: id } }),
       prisma.coutInterventionHeure.count({ where: { createdById: id } }),
       prisma.coutInterventionAchat.count({ where: { createdById: id } }),
       prisma.coutInterventionHeure.count({ where: { archivedById: id } }),
       prisma.coutInterventionAchat.count({ where: { archivedById: id } }),
     ]);
-    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + journauxComptables + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives > 0) {
+    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + journauxComptables + journauxRegles + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives > 0) {
       return res.status(409).json({ error: 'Ce compte est l’auteur de données tracées : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
     await prisma.$transaction([

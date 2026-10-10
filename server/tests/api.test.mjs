@@ -29,9 +29,54 @@ if (!TEST_DATABASE_URL) {
   const { PrismaClient } = await import('@prisma/client');
   const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
+  // Fixtures historiques : leurs transitions restent motivées, même hors HTTP.
+  const auteurFixture = async tx => tx.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
+  const regleFixture = async (cle, compteId, db = prisma) => {
+    const ancienne = await db.regleComptable.findUnique({ where: { cle } });
+    const journal = cle === 'JOURNAL_VENTES' ? compteId : null;
+    const prochain = cle === 'JOURNAL_VENTES' ? journal : compteId;
+    if (ancienne && (ancienne.journal ?? ancienne.compteId) === prochain) return ancienne;
+    const mettre = async tx => {
+      const avant = await tx.regleComptable.findUnique({ where: { cle } });
+      const valeur = avant?.journal ?? avant?.compteId;
+      if (!avant) return tx.regleComptable.create({ data: { cle, compteId: journal ? null : compteId, journal } });
+      const apres = await tx.regleComptable.update({ where: { cle }, data: { compteId: journal ? null : compteId, journal } });
+      const auteur = await auteurFixture(tx);
+      await tx.journalRegleComptable.create({ data: { type: 'REGLE', cible: cle, action: 'REMAPPAGE', avant: valeur, apres: prochain, motif: 'Correction de fixture comptable', auteurId: auteur.id, auteurNom: auteur.name } });
+      return apres;
+    };
+    return db === prisma ? prisma.$transaction(mettre) : mettre(db);
+  };
+  const tvaFixture = async (taux, compteId, db = prisma) => {
+    const ancienne = await db.regleTvaComptable.findUnique({ where: { taux } });
+    if (ancienne?.compteId === compteId) return ancienne;
+    const mettre = async tx => {
+      const avant = await tx.regleTvaComptable.findUnique({ where: { taux } });
+      if (!avant) return tx.regleTvaComptable.create({ data: { taux, compteId } });
+      const apres = await tx.regleTvaComptable.update({ where: { taux }, data: { compteId } });
+      const auteur = await auteurFixture(tx);
+      await tx.journalRegleComptable.create({ data: { type: 'TVA', cible: String(taux), action: 'REMAPPAGE', avant: avant.compteId, apres: compteId, motif: 'Correction de fixture comptable', auteurId: auteur.id, auteurNom: auteur.name } });
+      return apres;
+    };
+    return db === prisma ? prisma.$transaction(mettre) : mettre(db);
+  };
+  const retirerTvaFixture = async taux => prisma.$transaction(async tx => {
+    const avant = await tx.regleTvaComptable.findUnique({ where: { taux } });
+    if (!avant) return;
+    await tx.regleTvaComptable.delete({ where: { taux } });
+    const auteur = await auteurFixture(tx);
+    await tx.journalRegleComptable.create({ data: { type: 'TVA', cible: String(taux), action: 'RETRAIT', avant: avant.compteId, motif: 'Retrait de fixture comptable', auteurId: auteur.id, auteurNom: auteur.name } });
+  });
+  const retirerRegleFixture = async cle => prisma.$transaction(async tx => {
+    const avant = await tx.regleComptable.findUnique({ where: { cle } });
+    if (!avant) return;
+    await tx.regleComptable.delete({ where: { cle } });
+    const auteur = await auteurFixture(tx);
+    await tx.journalRegleComptable.create({ data: { type: 'REGLE', cible: cle, action: 'RETRAIT', avant: avant.journal ?? avant.compteId, motif: 'Retrait de fixture comptable', auteurId: auteur.id, auteurNom: auteur.name } });
+  });
   const configurerTva55 = async () => {
     const compte = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
-    await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compte.id }, update: { compteId: compte.id } });
+    await tvaFixture(5.5, compte.id);
   };
   const purgerEcrituresJetables = async id => {
     try {
@@ -79,8 +124,33 @@ if (!TEST_DATABASE_URL) {
     await prisma.facture.deleteMany({ where: { type: 'AVOIR', client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.facture.deleteMany({ where: { type: 'FACTURE', client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.mentionsLegalesVersion.deleteMany({});
-    await prisma.regleComptable.deleteMany({});
-    await prisma.regleTvaComptable.deleteMany({});
+    try {
+      await prisma.$executeRawUnsafe('ALTER TABLE "JournalRegleComptable" DISABLE TRIGGER "journal_regle_append_only"');
+      await prisma.journalRegleComptable.deleteMany({});
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "JournalRegleComptable" ENABLE TRIGGER "journal_regle_append_only"');
+    }
+    try {
+      await prisma.$executeRawUnsafe('ALTER TABLE "TransitionRegleComptable" DISABLE TRIGGER "transition_regle_guard"');
+      await prisma.$executeRawUnsafe('DELETE FROM "TransitionRegleComptable"');
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "TransitionRegleComptable" ENABLE TRIGGER "transition_regle_guard"');
+    }
+    try {
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleComptable" DISABLE TRIGGER "regle_capturer_transition"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleTvaComptable" DISABLE TRIGGER "tva_capturer_transition"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleComptable" DISABLE TRIGGER "regle_journal_transition"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleComptable" DISABLE TRIGGER "regle_journal_transition_delete"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleTvaComptable" DISABLE TRIGGER "tva_journal_transition_delete"');
+      await prisma.regleComptable.deleteMany({});
+      await prisma.regleTvaComptable.deleteMany({});
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleComptable" ENABLE TRIGGER "regle_capturer_transition"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleTvaComptable" ENABLE TRIGGER "tva_capturer_transition"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleComptable" ENABLE TRIGGER "regle_journal_transition"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleComptable" ENABLE TRIGGER "regle_journal_transition_delete"');
+      await prisma.$executeRawUnsafe('ALTER TABLE "RegleTvaComptable" ENABLE TRIGGER "tva_journal_transition_delete"');
+    }
     await prisma.$executeRawUnsafe('ALTER TABLE "JournalCompteComptable" DROP CONSTRAINT IF EXISTS "journal_test_refus_insertion"');
     // Le journal est append-only : le nettoyage de la base jetable désactive le trigger
     // uniquement le temps de purger les fixtures, puis le réactive même en cas d'échec.
@@ -123,7 +193,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
-      'cycle.conducteur@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
+      'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
@@ -2476,6 +2546,143 @@ if (!TEST_DATABASE_URL) {
       assert.equal(refusInactif.status, 404, JSON.stringify(refusInactif.body));
     });
 
+    test('#95 : remappages et retrait exigent un motif, puis conservent une trace transactionnelle', async () => {
+      const auth = `Bearer ${session}`;
+      assert.equal((await request(app).get('/api/comptabilite/regles/journal')).status, 401);
+      const nonAdmin = await prisma.user.create({ data: { email: 'regles95@iris.test', name: 'TEST Règles #95', role: 'CONDUCTEUR_TRAVAUX' } });
+      const nonAdminAuth = `Bearer ${jwt.sign({ id: nonAdmin.id }, process.env.JWT_SECRET)}`;
+      assert.equal((await request(app).get('/api/comptabilite/regles/journal').set('Authorization', nonAdminAuth)).status, 403);
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', nonAdminAuth).send({ journal: 'VTE' })).status, 403);
+      const a = await prisma.compteComptable.create({ data: { code: '445895', libelle: 'TVA origine #95', nature: 'TVA' } });
+      const b = await prisma.compteComptable.create({ data: { code: '445896', libelle: 'TVA cible #95', nature: 'TVA' } });
+      const u = '/api/comptabilite/tva/9.5';
+      assert.equal((await request(app).put(u).set('Authorization', auth).send({ compteId: a.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', auth).send({ journal: 'VTE' })).status, 200);
+      for (const body of [{ compteId: b.id }, { compteId: b.id, motif: 'ab' }, { compteId: b.id, motif: 'invalide\u200b' }]) {
+        assert.equal((await request(app).put(u).set('Authorization', auth).send(body)).status, 400);
+        assert.equal((await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 9.5 } })).compteId, a.id);
+      }
+      const tvaAvant = await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 9.5 } });
+      assert.equal((await request(app).put(u).set('Authorization', auth).send({ compteId: b.id, expectedCompteId: a.id, expectedUpdatedAt: tvaAvant.updatedAt.toISOString(), motif: 'Changement du compte TVA' })).status, 200);
+      const journalAvant = await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'JOURNAL_VENTES' } });
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', auth).send({ journal: 'NOUV' })).status, 400);
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', auth).send({ journal: 'NOUV', expectedCompteId: 'VTE', expectedUpdatedAt: journalAvant.updatedAt.toISOString(), motif: 'Changement du journal' })).status, 200);
+      const actuel = await prisma.regleTvaComptable.findUniqueOrThrow({ where: { taux: 9.5 } });
+      const retrait = { confirmation: '9.5', expectedCompteId: b.id, expectedUpdatedAt: actuel.updatedAt.toISOString() };
+      assert.equal((await request(app).delete(u).set('Authorization', auth).send(retrait)).status, 400);
+      assert.equal((await request(app).delete(u).set('Authorization', auth).send({ ...retrait, motif: 'Retrait du taux TVA' })).status, 204);
+      const journal = await request(app).get('/api/comptabilite/regles/journal').set('Authorization', auth);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.deepEqual(journal.body.map(j => [j.type, j.action, j.avant, j.apres, j.motif]), [
+        ['TVA', 'REMAPPAGE', a.id, b.id, 'Changement du compte TVA'],
+        ['REGLE', 'REMAPPAGE', 'VTE', 'NOUV', 'Changement du journal'],
+        ['TVA', 'RETRAIT', b.id, null, 'Retrait du taux TVA'],
+      ]);
+      await assert.rejects(prisma.journalRegleComptable.update({ where: { id: journal.body[0].id }, data: { motif: 'Falsifié' } }), /immuable/);
+      await assert.rejects(prisma.journalRegleComptable.delete({ where: { id: journal.body[0].id } }), /immuable/);
+      await retirerRegleFixture('JOURNAL_VENTES');
+    });
+
+    test('#95 : SQL refuse un remappage sans preuve, et une preuve invalide', async () => {
+      const a = await prisma.compteComptable.create({ data: { code: '706895', libelle: 'Ventes source SQL', nature: 'PRODUIT' } });
+      const b = await prisma.compteComptable.create({ data: { code: '706896', libelle: 'Ventes cible SQL', nature: 'PRODUIT' } });
+      const auth = `Bearer ${session}`;
+      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', auth).send({ compteId: a.id })).status, 200);
+      await assert.rejects(prisma.regleComptable.update({ where: { cle: 'VENTE_ARTICLE' }, data: { compteId: b.id } }), /sans journal motivé/);
+      await assert.rejects(prisma.regleComptable.delete({ where: { cle: 'VENTE_ARTICLE' } }), /sans journal motivé/);
+      assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } })).compteId, a.id);
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      await assert.rejects(prisma.journalRegleComptable.create({ data: { type: 'REGLE', cible: 'VENTE_ARTICLE', action: 'REMAPPAGE', avant: a.id, apres: b.id, motif: 'ab', auteurId: auteur.id, auteurNom: auteur.name } }), /JournalRegleComptable_motif_check/);
+      await assert.rejects(prisma.journalRegleComptable.create({ data: { type: 'TVA', cible: '100.99', action: 'RETRAIT', avant: a.id, motif: 'Taux supérieur à cent', auteurId: auteur.id, auteurNom: auteur.name } }), /JournalRegleComptable_transition_check/);
+      await assert.rejects(prisma.journalRegleComptable.create({ data: { type: 'TVA', cible: '9.5', action: 'RETRAIT', avant: a.id, apres: b.id, motif: 'Retrait factice', auteurId: auteur.id, auteurNom: auteur.name } }), /JournalRegleComptable_transition_check/);
+      assert.equal(await prisma.journalRegleComptable.count({ where: { cible: 'VENTE_ARTICLE' } }), 0);
+      await retirerRegleFixture('VENTE_ARTICLE');
+    });
+
+    test('#95 : chaque transition SQL exige son propre événement, sans insertion fabriquée ni changement d’identité', async () => {
+      const auth = `Bearer ${session}`;
+      const a = await prisma.compteComptable.create({ data: { code: '706891', libelle: 'Source répétée', nature: 'PRODUIT' } });
+      const b = await prisma.compteComptable.create({ data: { code: '706892', libelle: 'Cible répétée', nature: 'PRODUIT' } });
+      const creee = await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', auth).send({ compteId: a.id });
+      assert.equal(creee.status, 200, JSON.stringify(creee.body));
+      const auteur = await auteurFixture(prisma);
+      const event = (avant, apres) => ({ type: 'REGLE', cible: 'VENTE_ARTICLE', action: 'REMAPPAGE', avant, apres, motif: 'Transition SQL répétée', auteurId: auteur.id, auteurNom: auteur.name });
+      await assert.rejects(prisma.journalRegleComptable.create({ data: event(a.id, b.id) }), /sans transition|sans journal motivé/);
+      assert.equal(await prisma.journalRegleComptable.count({ where: { motif: 'Transition SQL répétée' } }), 0);
+      await assert.rejects(prisma.$transaction(async tx => {
+        for (const [avant, apres] of [[a.id, b.id], [b.id, a.id], [a.id, b.id]]) {
+          await tx.regleComptable.update({ where: { cle: 'VENTE_ARTICLE' }, data: { compteId: apres } });
+        }
+        assert.equal((await tx.$queryRawUnsafe('SELECT count(*)::int AS n FROM "TransitionRegleComptable" WHERE "transactionId" = txid_current()'))[0].n, 3);
+        await tx.journalRegleComptable.create({ data: event(a.id, b.id) });
+        await tx.journalRegleComptable.create({ data: event(b.id, a.id) });
+        const counts = await tx.$queryRawUnsafe('SELECT (SELECT count(*)::int FROM "TransitionRegleComptable" WHERE "transactionId" = txid_current() AND "avant"=$1 AND "apres"=$2) AS transitions, (SELECT count(*)::int FROM "JournalRegleComptable" WHERE "avant"=$1 AND "apres"=$2) AS events', a.id, b.id);
+        assert.deepEqual(counts.map(x => [x.transitions, x.events]), [[2, 1]]);
+        const debug = await tx.$queryRawUnsafe('SELECT * FROM "TransitionRegleComptable" WHERE "transactionId" = txid_current();');
+        await tx.$executeRawUnsafe('DELETE FROM "TransitionRegleComptable"');
+        await tx.$queryRawUnsafe('SELECT * FROM "TransitionRegleComptable";');
+      }), /sans journal motivé/);
+      assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } })).compteId, a.id);
+      assert.equal(await prisma.journalRegleComptable.count({ where: { motif: 'Transition SQL répétée' } }), 0);
+      await assert.rejects(prisma.regleComptable.update({ where: { cle: 'VENTE_ARTICLE' }, data: { cle: 'CLIENT' } }), /identité|identite/);
+      const tva = await prisma.compteComptable.create({ data: { code: '445891', libelle: 'TVA identité', nature: 'TVA' } });
+      assert.equal((await request(app).put('/api/comptabilite/tva/9.5').set('Authorization', auth).send({ compteId: tva.id })).status, 200);
+      await assert.rejects(prisma.regleTvaComptable.update({ where: { taux: 9.5 }, data: { taux: 9.6 } }), /identité|identite/);
+      await retirerTvaFixture(9.5);
+      await retirerRegleFixture('VENTE_ARTICLE');
+    });
+
+    test('#95 : deux administrateurs ne peuvent pas écraser un remappage périmé', async () => {
+      const auth = `Bearer ${session}`;
+      const a = await prisma.compteComptable.create({ data: { code: '706883', libelle: 'Avant concurrent', nature: 'PRODUIT' } });
+      const b = await prisma.compteComptable.create({ data: { code: '706894', libelle: 'Après concurrent', nature: 'PRODUIT' } });
+      const c = await prisma.compteComptable.create({ data: { code: '706882', libelle: 'Périmé concurrent', nature: 'PRODUIT' } });
+      const url = '/api/comptabilite/regles/VENTE_ARTICLE';
+      const initial = await request(app).put(url).set('Authorization', auth).send({ compteId: a.id });
+      assert.equal(initial.status, 200, JSON.stringify(initial.body));
+      const attente = { expectedCompteId: a.id, expectedUpdatedAt: initial.body.updatedAt, motif: 'Changement concurrent' };
+      const premier = await request(app).put(url).set('Authorization', auth).send({ compteId: b.id, ...attente });
+      assert.equal(premier.status, 200, JSON.stringify(premier.body));
+      const perime = await request(app).put(url).set('Authorization', auth).send({ compteId: c.id, ...attente });
+      assert.equal(perime.status, 409, JSON.stringify(perime.body));
+      assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } })).compteId, b.id);
+      assert.equal(await prisma.journalRegleComptable.count({ where: { cible: 'VENTE_ARTICLE' } }), 1);
+      await retirerRegleFixture('VENTE_ARTICLE');
+    });
+
+    test('#95 : les codes et libellés des comptes restent figés après renommage', async () => {
+      const auth = `Bearer ${session}`;
+      const a = await prisma.compteComptable.create({ data: { code: '706889', libelle: 'Ancien libellé figé', nature: 'PRODUIT' } });
+      const b = await prisma.compteComptable.create({ data: { code: '706890', libelle: 'Nouveau libellé figé', nature: 'PRODUIT' } });
+      const url = '/api/comptabilite/regles/VENTE_ARTICLE';
+      const initial = await request(app).put(url).set('Authorization', auth).send({ compteId: a.id });
+      assert.equal(initial.status, 200, JSON.stringify(initial.body));
+      const change = await request(app).put(url).set('Authorization', auth).send({ compteId: b.id, expectedCompteId: a.id, expectedUpdatedAt: initial.body.updatedAt, motif: 'Figement des comptes' });
+      assert.equal(change.status, 200, JSON.stringify(change.body));
+      const trace = (await request(app).get('/api/comptabilite/regles/journal').set('Authorization', auth)).body.find(j => j.motif === 'Figement des comptes');
+      assert.deepEqual([trace.avantCode, trace.avantLibelle, trace.apresCode, trace.apresLibelle], ['706889', 'Ancien libellé figé', '706890', 'Nouveau libellé figé']);
+      await prisma.compteComptable.update({ where: { id: a.id }, data: { libelle: 'Renommé depuis', code: '706880' } });
+      await prisma.compteComptable.update({ where: { id: b.id }, data: { libelle: 'Renommé vers', code: '706881' } });
+      const figee = (await request(app).get('/api/comptabilite/regles/journal').set('Authorization', auth)).body.find(j => j.id === trace.id);
+      assert.deepEqual([figee.avantCode, figee.avantLibelle, figee.apresCode, figee.apresLibelle], ['706889', 'Ancien libellé figé', '706890', 'Nouveau libellé figé']);
+      await retirerRegleFixture('VENTE_ARTICLE');
+    });
+
+    test('#95 : retrait motivé d’une règle standard conserve le journal et bloque une émission future', async () => {
+      const auth = `Bearer ${session}`;
+      const compte = await prisma.compteComptable.create({ data: { code: '706897', libelle: 'Ventes à retirer', nature: 'PRODUIT' } });
+      const creee = await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', auth).send({ compteId: compte.id });
+      assert.equal(creee.status, 200, JSON.stringify(creee.body));
+      const body = { expectedCompteId: compte.id, expectedUpdatedAt: creee.body.updatedAt };
+      const u = '/api/comptabilite/regles/VENTE_ARTICLE';
+      assert.equal((await request(app).delete(u).set('Authorization', auth).send(body)).status, 400);
+      assert.equal((await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } })).compteId, compte.id);
+      assert.equal((await request(app).delete(u).set('Authorization', auth).send({ ...body, motif: 'Retrait du mapping des ventes' })).status, 204);
+      assert.equal(await prisma.regleComptable.findUnique({ where: { cle: 'VENTE_ARTICLE' } }), null);
+      const journal = (await request(app).get('/api/comptabilite/regles/journal').set('Authorization', auth)).body;
+      assert.deepEqual(journal.filter(j => j.cible === 'VENTE_ARTICLE' && j.motif === 'Retrait du mapping des ventes').map(j => [j.action, j.avant, j.apres, j.motif]), [['RETRAIT', compte.id, null, 'Retrait du mapping des ventes']]);
+    });
+
     test('TVA #92 : supprime seulement le taux ciblé, refuse les taux et corps invalides, protège la route', async () => {
       const auth = `Bearer ${session}`;
       const cible = await prisma.compteComptable.create({ data: { code: '445792', libelle: 'TVA #92', nature: 'TVA' } });
@@ -2490,7 +2697,7 @@ if (!TEST_DATABASE_URL) {
       const snapshot = (await request(app).get('/api/comptabilite').set('Authorization', auth)).body.reglesTva;
       const attendu = taux => {
         const regle = snapshot.find(r => r.taux === taux);
-        return { confirmation: String(taux), expectedCompteId: regle.compteId, expectedUpdatedAt: regle.updatedAt };
+        return { confirmation: String(taux), expectedCompteId: regle.compteId, expectedUpdatedAt: regle.updatedAt, motif: 'Retrait du taux comptable' };
       };
       assert.equal((await request(app).delete(url)).status, 401);
       assert.equal((await request(app).delete(url).set('Authorization', nonAdmin).send(attendu(7.7))).status, 403);
@@ -2524,7 +2731,7 @@ if (!TEST_DATABASE_URL) {
       const url = '/api/comptabilite/tva/5.5';
       assert.equal((await request(app).put(url).set('Authorization', auth).send({ compteId: compte.id })).status, 200);
       const regle = (await request(app).get('/api/comptabilite').set('Authorization', auth)).body.reglesTva.find(r => r.taux === 5.5);
-      const attendu = { expectedCompteId: regle.compteId, expectedUpdatedAt: regle.updatedAt };
+      const attendu = { expectedCompteId: regle.compteId, expectedUpdatedAt: regle.updatedAt, motif: 'Retrait du taux français' };
       assert.equal((await request(app).delete(url).set('Authorization', auth).send({ ...attendu, confirmation: '5,6' })).status, 400);
       assert.equal(await prisma.regleTvaComptable.count({ where: { taux: 5.5 } }), 1);
       assert.equal((await request(app).delete(url).set('Authorization', auth).send({ ...attendu, confirmation: '5,5' })).status, 204);
@@ -2540,16 +2747,16 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).put(url).set('Authorization', auth).send({ compteId: ancien.id })).status, 200);
       const photographie = (await request(app).get('/api/comptabilite').set('Authorization', auth)).body.reglesTva.find(r => r.taux === 8.8);
       assert.equal(photographie.compteId, ancien.id);
-      assert.equal((await request(app).put(url).set('Authorization', auth).send({ compteId: nouveau.id })).status, 200);
-      const refus = await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: photographie.compteId, expectedUpdatedAt: photographie.updatedAt });
+      assert.equal((await request(app).put(url).set('Authorization', auth).send({ compteId: nouveau.id, motif: 'Remappage avant retrait' })).status, 200);
+      const refus = await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: photographie.compteId, expectedUpdatedAt: photographie.updatedAt, motif: 'Retrait périmé' });
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
       assert.equal((await prisma.regleTvaComptable.findUniqueOrThrow({ where: { id: photographie.id } })).compteId, nouveau.id);
-      assert.equal((await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: nouveau.id, expectedUpdatedAt: photographie.updatedAt })).status, 409, 'la version périmée est aussi refusée');
+      assert.equal((await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: nouveau.id, expectedUpdatedAt: photographie.updatedAt, motif: 'Retrait périmé' })).status, 409, 'la version périmée est aussi refusée');
       const actuelle = (await request(app).get('/api/comptabilite').set('Authorization', auth)).body.reglesTva.find(r => r.taux === 8.8);
-      const mauvaisCompte = await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: ancien.id, expectedUpdatedAt: actuelle.updatedAt });
+      const mauvaisCompte = await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: ancien.id, expectedUpdatedAt: actuelle.updatedAt, motif: 'Retrait périmé' });
       assert.equal(mauvaisCompte.status, 409, JSON.stringify(mauvaisCompte.body));
       assert.equal((await prisma.regleTvaComptable.findUniqueOrThrow({ where: { id: photographie.id } })).compteId, nouveau.id);
-      assert.equal((await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: actuelle.compteId, expectedUpdatedAt: actuelle.updatedAt })).status, 204);
+      assert.equal((await request(app).delete(url).set('Authorization', auth).send({ confirmation: '8.8', expectedCompteId: actuelle.compteId, expectedUpdatedAt: actuelle.updatedAt, motif: 'Retrait du mapping' })).status, 204);
     });
 
     test('TVA #92 : le retrait attend le verrou global comptable puis ne retire que la règle', async () => {
@@ -2566,7 +2773,7 @@ if (!TEST_DATABASE_URL) {
         await attente;
       }, { timeout: 10_000 });
       await pose;
-      const retrait = request(app).delete('/api/comptabilite/tva/6.6').set('Authorization', `Bearer ${session}`).send({ confirmation: '6.6', expectedCompteId: snapshot.compteId, expectedUpdatedAt: snapshot.updatedAt }).then(r => r);
+      const retrait = request(app).delete('/api/comptabilite/tva/6.6').set('Authorization', `Bearer ${session}`).send({ confirmation: '6.6', expectedCompteId: snapshot.compteId, expectedUpdatedAt: snapshot.updatedAt, motif: 'Retrait sous verrou' }).then(r => r);
       let bloquee = false;
       try {
         for (let i = 0; i < 60; i++) {
@@ -2687,11 +2894,11 @@ if (!TEST_DATABASE_URL) {
       const premier = await prisma.compteComptable.create({ data: { code: `897${String(Date.now()).slice(-9)}`, libelle: 'Prestations liées', nature: 'PRODUIT' } });
       const second = await prisma.compteComptable.create({ data: { code: `896${String(Date.now()).slice(-9)}`, libelle: 'Prestations remplacement', nature: 'PRODUIT' } });
       const url = `/api/comptabilite/comptes/${premier.id}/activation`;
-      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: premier.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: premier.id })).status, 200);
       const conflit = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' });
       assert.equal(conflit.status, 409, JSON.stringify(conflit.body));
       assert.equal((await prisma.compteComptable.findUnique({ where: { id: premier.id } })).actif, true);
-      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: second.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: second.id })).status, 200);
       assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' })).status, 200);
     });
 
@@ -2699,11 +2906,11 @@ if (!TEST_DATABASE_URL) {
       const premier = await prisma.compteComptable.create({ data: { code: `895${String(Date.now()).slice(-9)}`, libelle: 'TVA liée', nature: 'TVA' } });
       const second = await prisma.compteComptable.create({ data: { code: `894${String(Date.now()).slice(-9)}`, libelle: 'TVA remplacement', nature: 'TVA' } });
       const url = `/api/comptabilite/comptes/${premier.id}/activation`;
-      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: premier.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: premier.id })).status, 200);
       const conflit = await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' });
       assert.equal(conflit.status, 409, JSON.stringify(conflit.body));
       assert.equal((await prisma.compteComptable.findUnique({ where: { id: premier.id } })).actif, true);
-      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: second.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: second.id })).status, 200);
       assert.equal((await request(app).patch(url).set('Authorization', `Bearer ${session}`).send({ actif: false, motif: 'Compte devenu inutile' })).status, 200);
     });
 
@@ -2714,8 +2921,8 @@ if (!TEST_DATABASE_URL) {
       ]) {
         const compte = await prisma.compteComptable.create({ data: { code: `${nature === 'TVA' ? '890' : '891'}${String(Date.now()).slice(-9)}`, libelle: 'Course activation', nature } });
         const source = await prisma.compteComptable.create({ data: { code: `${nature === 'TVA' ? '888' : '889'}${String(Date.now()).slice(-9)}`, libelle: 'Source du remappage', nature } });
-        if (nature === 'TVA') await prisma.regleTvaComptable.upsert({ where: { taux: 7.7 }, create: { taux: 7.7, compteId: source.id }, update: { compteId: source.id } });
-        else await prisma.regleComptable.upsert({ where: { cle: 'VENTE_ARTICLE' }, create: { cle: 'VENTE_ARTICLE', compteId: source.id }, update: { compteId: source.id } });
+        if (nature === 'TVA') await tvaFixture(7.7, source.id);
+        else await regleFixture('VENTE_ARTICLE', source.id);
         let liberer;
         let annoncer;
         const verrouPose = new Promise(resolve => { annoncer = resolve; });
@@ -2758,8 +2965,8 @@ if (!TEST_DATABASE_URL) {
         const libere = new Promise(resolve => { liberer = resolve; });
         const remappage = prisma.$transaction(async tx => {
           await tx.$queryRaw`SELECT "id" FROM "CompteComptable" WHERE "id" = ${cible.id} FOR UPDATE`;
-          if (cle) await tx.regleComptable.upsert({ where: { cle }, create: { cle, compteId: cible.id }, update: { compteId: cible.id } });
-          else await tx.regleTvaComptable.upsert({ where: { taux }, create: { taux, compteId: cible.id }, update: { compteId: cible.id } });
+          if (cle) await regleFixture(cle, cible.id, tx);
+          else await tvaFixture(taux, cible.id, tx);
           annoncer();
           await libere;
         }, { timeout: 10_000 });
@@ -2911,9 +3118,9 @@ if (!TEST_DATABASE_URL) {
       const vente = await prisma.compteComptable.create({ data: { code: `875${String(Date.now()).slice(-9)}`, libelle: 'Ventes liées', nature: 'PRODUIT' } });
       const tva = await prisma.compteComptable.create({ data: { code: `874${String(Date.now()).slice(-9)}`, libelle: 'TVA liée', nature: 'TVA' } });
       for (const [cle, compteId] of [['CLIENT', client.id], ['VENTE_PRESTATION', vente.id], ['VENTE_ARTICLE', vente.id]]) {
-        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ compteId })).status, 200);
+        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId })).status, 200);
       }
-      assert.equal((await request(app).put('/api/comptabilite/tva/17').set('Authorization', `Bearer ${session}`).send({ compteId: tva.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/17').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: tva.id })).status, 200);
       for (const compte of [client, vente, tva]) {
         const r = await request(app).patch(`/api/comptabilite/comptes/${compte.id}`).set('Authorization', `Bearer ${session}`).send({ libelle: 'Tentative', nature: 'CHARGE', motif: 'Changement de nature', expectedUpdatedAt: compte.updatedAt.toISOString() });
         assert.equal(r.status, 409, JSON.stringify(r.body));
@@ -2989,7 +3196,7 @@ if (!TEST_DATABASE_URL) {
       const barriere = new Promise(resolve => { liberer = resolve; });
       const transaction = prisma.$transaction(async tx => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(814086)::text`;
-        await tx.regleComptable.upsert({ where: { cle: 'VENTE_ARTICLE' }, create: { cle: 'VENTE_ARTICLE', compteId: compte.id }, update: { compteId: compte.id } });
+        await regleFixture('VENTE_ARTICLE', compte.id, tx);
         signalerVerrou();
         await barriere;
       }, { timeout: 20_000 });
@@ -3122,7 +3329,7 @@ if (!TEST_DATABASE_URL) {
       const lignes = Array.from({ length: 4900 }, (_, i) => ({ code: String(880000 + i), libelle: `Modifié ${i}`, nature: 'ACTIF' }));
       await prisma.compteComptable.createMany({ data: lignes.map(c => ({ ...c, libelle: `Initial ${c.code}`, nature: 'CHARGE' })) });
       const lie = await prisma.compteComptable.findUniqueOrThrow({ where: { code: lignes[0].code } });
-      await prisma.regleComptable.upsert({ where: { cle: 'CLIENT' }, create: { cle: 'CLIENT', compteId: lie.id }, update: { compteId: lie.id } });
+      await regleFixture('CLIENT', lie.id);
       // Compter les lectures applicatives (pas le temps machine) distingue un préchargement
       // borné d'une requête par compte, même sur une CI lente.
       const { prisma: prismaApp } = await import('../dist/index.js');
@@ -3242,10 +3449,10 @@ if (!TEST_DATABASE_URL) {
       const lignes = [{ code: '899870', libelle: 'Ne pas créer', nature: 'CHARGE' }, { code: source.code, libelle: 'Révisé', nature: 'PRODUIT' }];
       const envoyer = body => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', lignes, ...body });
       const regle = '/api/comptabilite/regles/VENTE_ARTICLE';
-      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: source.id })).status, 200);
+      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: source.id, motif: 'Configuration avant aperçu' })).status, 200);
       const apercu = await envoyer({ phase: 'apercu' });
       assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
-      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: cible.id })).status, 200);
+      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: cible.id, motif: 'Changement après aperçu' })).status, 200);
       const refus = await envoyer({ phase: 'confirmer', motif: 'Correction motivée', apercuId: apercu.body.apercuId });
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
       assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 0);
@@ -3259,10 +3466,10 @@ if (!TEST_DATABASE_URL) {
       const lignes = [{ code: '899873', libelle: 'Ne pas créer', nature: 'CHARGE' }, { code: source.code, libelle: 'Révisé', nature: 'TVA' }];
       const envoyer = body => request(app).post('/api/comptabilite/importer').set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', lignes, ...body });
       const regle = '/api/comptabilite/tva/20';
-      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: source.id })).status, 200);
+      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: source.id, motif: 'Configuration avant aperçu' })).status, 200);
       const apercu = await envoyer({ phase: 'apercu' });
       assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
-      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: cible.id })).status, 200);
+      assert.equal((await request(app).put(regle).set('Authorization', `Bearer ${session}`).send({ compteId: cible.id, motif: 'Changement après aperçu' })).status, 200);
       const refus = await envoyer({ phase: 'confirmer', motif: 'Correction motivée', apercuId: apercu.body.apercuId });
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
       assert.equal(await prisma.compteComptable.count({ where: { code: lignes[0].code } }), 0);
@@ -3283,7 +3490,7 @@ if (!TEST_DATABASE_URL) {
     test('mise à jour CSV refuse les inactifs et natures liées à des règles sans effet partiel', async () => {
       const inactif = await prisma.compteComptable.create({ data: { code: '899855', libelle: 'Inactif', nature: 'CHARGE', actif: false } });
       const lie = await prisma.compteComptable.create({ data: { code: '899856', libelle: 'Vente', nature: 'PRODUIT' } });
-      await prisma.regleComptable.upsert({ where: { cle: 'VENTE_ARTICLE' }, create: { cle: 'VENTE_ARTICLE', compteId: lie.id }, update: { compteId: lie.id } });
+      await regleFixture('VENTE_ARTICLE', lie.id);
       const url = '/api/comptabilite/importer';
       for (const [compte, attendu] of [[inactif, /inactif/], [lie, /nature incompatible/i]]) {
         const reponse = await request(app).post(url).set('Authorization', `Bearer ${session}`).send({ mode: 'mettre_a_jour', phase: 'apercu', lignes: [{ code: '899857', libelle: 'Ne pas créer', nature: 'CHARGE' }, { code: compte.code, libelle: 'Changé', nature: 'ACTIF' }] });
@@ -3516,18 +3723,18 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(await prisma.sequenceFacture.findUnique({ where: { annee: 2026 } }), avant);
       const compte = async code => (await prisma.compteComptable.findUnique({ where: { code } })).id;
       for (const [cle, code] of [['CLIENT', '411000'], ['VENTE_PRESTATION', '706100'], ['VENTE_ARTICLE', '706100']]) {
-        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ compteId: await compte(code) })).status, 200);
+        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: await compte(code) })).status, 200);
       }
-      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'VTE' })).status, 200);
-      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: await compte('445710') })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', journal: 'VTE' })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: await compte('445710') })).status, 200);
       assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
     });
 
     test('refuse à l’émission un taux de TVA sans compte, sans consommer de séquence', async () => {
       const compteTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
-      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: compteTva.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: compteTva.id })).status, 200);
       const mapping55 = (await request(app).get('/api/comptabilite').set('Authorization', `Bearer ${session}`)).body.reglesTva.find(r => r.taux === 5.5);
-      assert.equal((await request(app).delete('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ confirmation: '5.5', expectedCompteId: mapping55.compteId, expectedUpdatedAt: mapping55.updatedAt })).status, 204);
+      assert.equal((await request(app).delete('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ confirmation: '5.5', expectedCompteId: mapping55.compteId, expectedUpdatedAt: mapping55.updatedAt, motif: 'Retrait avant émission' })).status, 204);
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST TVA absente', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST taux réduit', quantite: 1, prixUnitaireHt: 9, tauxTva: 5.5 }] });
       assert.equal(brouillon.status, 201);
       const avant = await prisma.sequenceFacture.findUniqueOrThrow({ where: { annee: 2026 } });
@@ -3540,9 +3747,9 @@ if (!TEST_DATABASE_URL) {
 
     test('exige VENTE_ARTICLE même pour une facture sans ligne article', async () => {
       const article = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '706100' } });
-      await prisma.regleComptable.upsert({ where: { cle: 'VENTE_ARTICLE' }, create: { cle: 'VENTE_ARTICLE', compteId: article.id }, update: { compteId: article.id } });
+      await regleFixture('VENTE_ARTICLE', article.id);
       const regle = await prisma.regleComptable.findUniqueOrThrow({ where: { cle: 'VENTE_ARTICLE' } });
-      await prisma.regleComptable.delete({ where: { cle: 'VENTE_ARTICLE' } });
+      await retirerRegleFixture('VENTE_ARTICLE');
       try {
         const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST règle article obligatoire', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST prestation', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
         assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
@@ -3595,16 +3802,16 @@ if (!TEST_DATABASE_URL) {
       assert.equal(lignesPiece.reduce((somme, ligne) => somme + montant(ligne, 6), 0).toFixed(2), lignesPiece.reduce((somme, ligne) => somme + montant(ligne, 7), 0).toFixed(2));
       assert.ok(exportComptable.text.split('\n').some(ligne => ligne.includes('445710')), 'une ligne de TVA doit être exportée');
       const journal = await prisma.regleComptable.findUnique({ where: { cle: 'JOURNAL_VENTES' } });
-      await prisma.regleComptable.delete({ where: { cle: 'JOURNAL_VENTES' } });
+      await retirerRegleFixture('JOURNAL_VENTES');
       const exportIncomplet = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportIncomplet.status, 200);
       assert.equal(exportIncomplet.text, exportComptable.text, 'retirer le journal courant ne réécrit pas les pièces émises');
       await prisma.regleComptable.create({ data: { cle: 'JOURNAL_VENTES', journal: journal.journal } });
       const mapping20 = (await request(app).get('/api/comptabilite').set('Authorization', `Bearer ${session}`)).body.reglesTva.find(r => r.taux === 20);
-      assert.equal((await request(app).delete('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ confirmation: '20', expectedCompteId: mapping20.compteId, expectedUpdatedAt: mapping20.updatedAt })).status, 204);
+      assert.equal((await request(app).delete('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ confirmation: '20', expectedCompteId: mapping20.compteId, expectedUpdatedAt: mapping20.updatedAt, motif: 'Retrait après émission' })).status, 204);
       const exportSansTva = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(exportSansTva.status, 200); assert.equal(exportSansTva.text, exportComptable.text);
-      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/5.5').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: compte('445710').id })).status, 200);
       const diagSansTva = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
       const tvaDecouverte = diagSansTva.body.controles.find((controle) => controle.cle === 'TVA');
       assert.equal(tvaDecouverte.pret, false, JSON.stringify(tvaDecouverte));
@@ -3613,7 +3820,7 @@ if (!TEST_DATABASE_URL) {
       assert.match(tvaDecouverte.detail, /émission.*refusée/i);
       assert.doesNotMatch(tvaDecouverte.detail, /export.*refusé/i);
       assert.equal(diagSansTva.body.pret, false, JSON.stringify(diagSansTva.body.controles));
-      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
+      await retirerTvaFixture(5.5);
       await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: compte('445710').id });
       const diagAvecTva = await request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
       const tvaCouverte = diagAvecTva.body.controles.find((controle) => controle.cle === 'TVA');
@@ -3623,7 +3830,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(exportFige.status, 200); assert.match(exportFige.text, /TEST Client contrat maintenance/); assert.doesNotMatch(exportFige.text, /renommé/);
       await prisma.client.update({ where: { id: clientId }, data: { raisonSociale: 'TEST Client contrat maintenance' } });
       const piege = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '707999', libelle: '=1+1', nature: 'PRODUIT' }); assert.equal(piege.status, 201);
-      await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', `Bearer ${session}`).send({ compteId: piege.body.id });
+      const piegeRemappage = await request(app).put('/api/comptabilite/regles/VENTE_ARTICLE').set('Authorization', `Bearer ${session}`).send({ compteId: piege.body.id, motif: 'Vérification du CSV comptable' });
+      assert.equal(piegeRemappage.status, 200, JSON.stringify(piegeRemappage.body));
       const article = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Test de facturation', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST article CSV', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       const articleEmis = await request(app).post(`/api/factures/${article.body.id}/emettre`).set('Authorization', `Bearer ${session}`); const csvPiege = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       assert.equal(articleEmis.status, 200); assert.match(csvPiege.text, /;"'=1\+1";/);
@@ -3650,14 +3858,14 @@ if (!TEST_DATABASE_URL) {
       assert.equal(avant.length, 3);
       const nouveauCompte = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '706986', libelle: 'Nouveau compte de ventes', nature: 'PRODUIT' });
       assert.equal(nouveauCompte.status, 201);
-      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ compteId: nouveauCompte.body.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/VENTE_PRESTATION').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: nouveauCompte.body.id })).status, 200);
       const nouveauClient = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '411986', libelle: 'Nouveau compte client', nature: 'ACTIF' });
       const nouvelleTva = await request(app).post('/api/comptabilite/comptes').set('Authorization', `Bearer ${session}`).send({ code: '445986', libelle: 'Nouveau compte TVA', nature: 'TVA' });
       assert.equal(nouveauClient.status, 201);
       assert.equal(nouvelleTva.status, 201);
-      assert.equal((await request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ compteId: nouveauClient.body.id })).status, 200);
-      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: nouvelleTva.body.id })).status, 200);
-      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'NOUV' })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: nouveauClient.body.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: nouvelleTva.body.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', journal: 'NOUV' })).status, 200);
       const apres = piece((await exporter()).text, emis.body.numero);
       assert.deepEqual(apres, avant, 'les octets historiques ne dépendent plus des comptes client/vente/TVA ni du journal');
       const compteHistorique = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '706100' } });
@@ -3691,10 +3899,10 @@ if (!TEST_DATABASE_URL) {
       const originalClient = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '411000' } });
       const originalTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
       for (const [cle, id] of [['CLIENT', originalClient.id], ['VENTE_PRESTATION', compteHistorique.id]]) {
-        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ compteId: id })).status, 200);
+        assert.equal((await request(app).put(`/api/comptabilite/regles/${cle}`).set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: id })).status, 200);
       }
-      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: originalTva.id })).status, 200);
-      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'VTE' })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: originalTva.id })).status, 200);
+      assert.equal((await request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', journal: 'VTE' })).status, 200);
       const annulation = await request(app).post(`/api/factures/${second.body.id}/annuler`).set('Authorization', `Bearer ${session}`);
       assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
       assert.equal(annulation.body.avoir.ecrituresScellees, true, 'la réponse de l’avoir total reflète le scellement');
@@ -3716,33 +3924,33 @@ if (!TEST_DATABASE_URL) {
         await prisma.$transaction(async tx => {
           await tx.$queryRaw`SELECT pg_advisory_xact_lock(814086)::text`;
           const emission = request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`).then(r => r);
-          const remappage = request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ journal: 'NOUVEAU' }).then(r => r);
-          const regleClient = request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ compteId: clientCompteId }).then(r => r);
-          const regleTva = request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ compteId: tvaCompteId }).then(r => r);
+          const remappage = request(app).put('/api/comptabilite/regles/JOURNAL_VENTES').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', journal: 'NOUVEAU' }).then(r => r);
+          const regleClient = request(app).put('/api/comptabilite/regles/CLIENT').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: clientCompteId }).then(r => r);
+          const regleTva = request(app).put('/api/comptabilite/tva/20').set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: tvaCompteId }).then(r => r);
           course = Promise.all([emission, remappage, regleClient, regleTva]);
           const attendre = p => Promise.race([p.then(() => 'TERMINE'), new Promise(resolve => setTimeout(() => resolve('EN_ATTENTE'), 150))]);
           for (const operation of [emission, remappage, regleClient, regleTva]) assert.equal(await attendre(operation), 'EN_ATTENTE', 'toutes les mutations et l’émission attendent le verrou comptable');
         });
         const [emission, remappage, client, tva] = await course;
-        assert.equal(client.status, 200, JSON.stringify(client.body));
-        assert.equal(tva.status, 200, JSON.stringify(tva.body));
+        assert.equal(client.status, 409, JSON.stringify(client.body));
+        assert.equal(tva.status, 409, JSON.stringify(tva.body));
         assert.equal(emission.status, 200, JSON.stringify(emission.body));
         assert.equal(remappage.status, 200, JSON.stringify(remappage.body));
         const lignes = await prisma.ecritureFacture.findMany({ where: { factureId: brouillon.body.id } });
         assert.equal(new Set(lignes.map(e => e.journalCode)).size, 1);
         assert.ok(['VTE', 'NOUVEAU'].includes(lignes[0].journalCode));
       } finally {
-        await prisma.regleComptable.update({ where: { cle: 'JOURNAL_VENTES' }, data: { journal: ancienJournal } });
+        await regleFixture('JOURNAL_VENTES', ancienJournal);
       }
     });
 
     test('la base refuse un INSERT tardif et une pièce émise déséquilibrée ou vide', async () => {
       const compte = async (code, nature) => (await prisma.compteComptable.upsert({ where: { code }, create: { code, nature, libelle: `TEST ${code}` }, update: { actif: true } })).id;
       for (const [cle, code, nature] of [['CLIENT', '411000', 'ACTIF'], ['VENTE_PRESTATION', '706100', 'PRODUIT'], ['VENTE_ARTICLE', '706100', 'PRODUIT']]) {
-        await prisma.regleComptable.upsert({ where: { cle }, create: { cle, compteId: await compte(code, nature) }, update: { compteId: await compte(code, nature) } });
+        await regleFixture(cle, await compte(code, nature));
       }
-      await prisma.regleComptable.upsert({ where: { cle: 'JOURNAL_VENTES' }, create: { cle: 'JOURNAL_VENTES', journal: 'VTE' }, update: { journal: 'VTE' } });
-      await prisma.regleTvaComptable.upsert({ where: { taux: 20 }, create: { taux: 20, compteId: await compte('445710', 'TVA') }, update: { compteId: await compte('445710', 'TVA') } });
+      await regleFixture('JOURNAL_VENTES', 'VTE');
+      await tvaFixture(20, await compte('445710', 'TVA'));
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST scellement SQL', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST scellement', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(brouillon.status, 201);
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
@@ -4069,7 +4277,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
       const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
       assert.ok(compteTva, 'le compte TVA de test existe');
-      await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
+      await tvaFixture(5.5, compteTva.id);
       try {
       const creer = (lignes) => request(app).post(`/api/factures/${emission.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({ lignes });
 
@@ -4126,7 +4334,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(exportation.status, 200, exportation.text);
       assert.match(exportation.text, new RegExp(`Avoir ${premier.body.numero}`));
       } finally {
-      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
+      await retirerTvaFixture(5.5);
       }
     });
 
@@ -4145,7 +4353,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
       const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
       assert.ok(compteTva, 'le compte TVA de test existe');
-      await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
+      await tvaFixture(5.5, compteTva.id);
 
       const creer = () => request(app).post(`/api/factures/${emission.body.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({
         lignes: [{ designation: 'TEST avoir fractionné 5,5', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 9, tauxTva: 5.5 }],
@@ -4212,7 +4420,7 @@ if (!TEST_DATABASE_URL) {
       const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(emission.status, 200, JSON.stringify(emission.body));
       assert.equal((await request(app).post(`/api/factures/${emission.body.id}/annuler`).set('Authorization', `Bearer ${session}`)).status, 200);
-      await prisma.regleTvaComptable.deleteMany({ where: { taux: 5.5 } });
+      await retirerTvaFixture(5.5);
       try {
         const exportation = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
         assert.equal(exportation.status, 200, exportation.text);
@@ -4244,7 +4452,7 @@ if (!TEST_DATABASE_URL) {
       assert.ok(compteTva, 'le compte TVA de test existe');
       // Le compte du taux 5,5 permet l'émission de la source ; son export ultérieur
       // ne dépend plus de cette règle vivante, contrairement aux futures émissions.
-      await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
+      await tvaFixture(5.5, compteTva.id);
       // La numérotation est chronologique : on émet au jour de la dernière facture numérotée
       // plutôt qu'à une date fixe, sinon ce test dépendrait de son rang dans la suite.
       const derniere = await prisma.facture.findFirst({ where: { numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
@@ -4289,7 +4497,7 @@ if (!TEST_DATABASE_URL) {
     test('l’export date la contre-passation legacy dans le fuseau de la société', async () => {
       const compteTva = await prisma.compteComptable.findUnique({ where: { code: '445710' } });
       assert.ok(compteTva, 'le compte TVA de test existe');
-      await prisma.regleTvaComptable.upsert({ where: { taux: 5.5 }, create: { taux: 5.5, compteId: compteTva.id }, update: { compteId: compteTva.id } });
+      await tvaFixture(5.5, compteTva.id);
       const derniereFacture = await prisma.facture.findFirst({ where: { type: 'FACTURE', numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
       const datePiece = derniereFacture?.dateEmission || new Date('2026-09-09T00:00:00.000Z');
       const jourPiece = `${String(datePiece.getUTCDate()).padStart(2, '0')}-${String(datePiece.getUTCMonth() + 1).padStart(2, '0')}-${datePiece.getUTCFullYear()}`;
@@ -4441,7 +4649,7 @@ if (!TEST_DATABASE_URL) {
 
     test('ventile la TVA par taux dans le document PDF', async () => {
       const compteTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
-      await prisma.regleTvaComptable.upsert({ where: { taux: 10 }, create: { taux: 10, compteId: compteTva.id }, update: { compteId: compteTva.id } });
+      await tvaFixture(10, compteTva.id);
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST TVA PDF', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST TVA 20', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }, { designation: 'TEST TVA 10', quantite: 1, prixUnitaireHt: 100, tauxTva: 10 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
       assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
@@ -4543,13 +4751,13 @@ if (!TEST_DATABASE_URL) {
       assert.ok(compteTva);
       const exportAvant = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
       const aCouvrir = exportAvant.status === 409 ? (exportAvant.body.tauxManquants || []) : [];
-      for (const taux of aCouvrir) assert.equal((await request(app).put(`/api/comptabilite/tva/${taux}`).set('Authorization', `Bearer ${session}`).send({ compteId: compteTva.id })).status, 200);
+      for (const taux of aCouvrir) assert.equal((await request(app).put(`/api/comptabilite/tva/${taux}`).set('Authorization', `Bearer ${session}`).send({ motif: 'Révision de règle comptable testée', compteId: compteTva.id })).status, 200);
       const diagCouvert = await diagnostic();
       const tva = controle(diagCouvert.body, 'TVA');
       assert.equal(tva.bloquant, false); assert.doesNotMatch(tva.detail, /0 %.*facturé/i);
       assert.equal(controle(diagCouvert.body, 'PREFIXE_FACTURE').pret, false);
       assert.equal(diagCouvert.body.pret, true, JSON.stringify(diagCouvert.body.controles));
-      for (const taux of aCouvrir) await prisma.regleTvaComptable.deleteMany({ where: { taux } });
+      for (const taux of aCouvrir) await retirerTvaFixture(taux);
     });
 
     test('calcule la TVA sur la base HT cumulée par taux', async () => {
