@@ -12,6 +12,57 @@ function jetonPour(userId: string) {
 }
 
 test.describe('Facturation — parcours utilisateur', () => {
+  const hier = () => {
+    const [jour, mois, annee] = dateDuJour().split('-').map(Number);
+    const date = new Date(Date.UTC(annee, mois - 1, jour - 1));
+    return `${String(date.getUTCDate()).padStart(2, '0')}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${date.getUTCFullYear()}`;
+  };
+  const apiChronologie = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+  const brouillonChronologie = async (request: import('@playwright/test').APIRequestContext, token: string, clientId: string, date: string) => {
+    const reponse = await request.post(`${apiChronologie}/factures`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Chronologie E2E', dateEmission: date, dateEcheance: dateDuJour(), lignes: [{ designation: 'Contrôle chronologie', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] },
+    });
+    expect(reponse.status(), await reponse.text()).toBe(201);
+    return (await reponse.json() as { id: string }).id;
+  };
+
+  test('chronologie #101 : recharge après un 409 concurrent et conserve le motif serveur', async ({ allerSurPageAdmin, creerClient, request, session, page }) => {
+    const ancien = await creerClient('chronologie-concurrent');
+    const nouveau = await creerClient('chronologie-reference');
+    const ancienId = await brouillonChronologie(request, session.token, ancien.id, hier());
+    const nouveauId = await brouillonChronologie(request, session.token, nouveau.id, dateDuJour());
+    await page.route('**/api/factures/chronologie', async route => {
+      await route.fulfill({ json: { derniereDateEmission: null } });
+      await page.unroute('**/api/factures/chronologie');
+    });
+    await allerSurPageAdmin('/factures');
+    const ligne = page.locator('tbody tr', { hasText: ancien.raisonSociale });
+    await expect(ligne.getByRole('button', { name: 'Émettre' })).toBeEnabled();
+    const emission = await request.post(`${apiChronologie}/factures/${nouveauId}/emettre`, { headers: { Authorization: `Bearer ${session.token}` } });
+    expect(emission.status(), await emission.text()).toBe(200);
+    const refus = page.waitForResponse(response => response.url().endsWith(`/factures/${ancienId}/emettre`));
+    await ligne.getByRole('button', { name: 'Émettre' }).click();
+    expect((await refus).status()).toBe(409);
+    await expect(page.getByText(/La numérotation est chronologique : la dernière facture émise porte la date du/)).toBeVisible();
+    await expect(page.getByTestId('derniere-date-facture')).toContainText(dateDuJour());
+    await expect(ligne.getByRole('button', { name: /Émission impossible/ })).toBeDisabled();
+    await expect(page.getByText(/La numérotation est chronologique : la dernière facture émise porte la date du/)).toBeVisible();
+  });
+
+  test('chronologie #101 : affiche la date et désactive le brouillon antérieur, pas celui du même jour', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+    const ancien = await creerClient('chronologie-ancien');
+    const egal = await creerClient('chronologie-egal');
+    await brouillonChronologie(request, session.token, ancien.id, hier());
+    await brouillonChronologie(request, session.token, egal.id, dateDuJour());
+    const page = await allerSurPageAdmin('/factures');
+    await expect(page.getByTestId('derniere-date-facture')).toContainText(dateDuJour());
+    const ligneAncienne = page.locator('tbody tr', { hasText: ancien.raisonSociale });
+    await expect(ligneAncienne.getByRole('button', { name: /Émission impossible/ })).toBeDisabled();
+    await expect(ligneAncienne).toContainText(dateDuJour());
+    await expect(page.locator('tbody tr', { hasText: egal.raisonSociale }).getByRole('button', { name: 'Émettre' })).toBeEnabled();
+  });
+
   // Prépare une facture émise hors affaire et rend sa ligne de tableau.
   const emettreFactureSource = async (page: Page, client: { raisonSociale: string }, lignes: Array<[string, string, string]>) => {
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
