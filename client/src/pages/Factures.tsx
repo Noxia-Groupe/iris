@@ -66,18 +66,29 @@ export default function Factures() {
 
   const charger = async () => {
     try {
-      const reponses = await Promise.all(
-        ['/factures', '/clients', '/chantiers', '/interventions', '/contrats-maintenance', '/company', '/factures/chronologie'].map((path) => apiFetch(path)),
-      );
-      const donnees = await Promise.all(reponses.map((reponse) => reponse.json()));
-      if (!reponses.every((reponse) => reponse.ok)) throw new Error(donnees.find((donnee) => donnee?.error)?.error || 'Chargement impossible.');
-      setFactures(Array.isArray(donnees[0]) ? donnees[0] : []);
-      setClients(donnees[1].clients || donnees[1] || []);
-      setChantiers(Array.isArray(donnees[2]) ? donnees[2] : []);
-      setInterventions(Array.isArray(donnees[3]) ? donnees[3] : []);
-      setContrats(Array.isArray(donnees[4]) ? donnees[4] : []);
-      setFuseauHoraire(donnees[5]?.fuseauHoraire || 'Europe/Paris');
-      setDerniereDateEmission(donnees[6].derniereDateEmission);
+      const chemins = {
+        factures: '/factures', clients: '/clients', chantiers: '/chantiers',
+        interventions: '/interventions', contrats: '/contrats-maintenance',
+        societe: '/company', chronologie: '/factures/chronologie',
+      };
+      const entrees = await Promise.all(Object.entries(chemins).map(async ([cle, path]) => {
+        const reponse = await apiFetch(path);
+        const donnee = await reponse.json();
+        if (!reponse.ok) throw new Error(donnee?.error || 'Chargement impossible.');
+        return [cle, donnee];
+      }));
+      const {
+        factures: facturesData, clients: clientsData, chantiers: chantiersData,
+        interventions: interventionsData, contrats: contratsData, societe: societeData,
+        chronologie: chronologieData,
+      } = Object.fromEntries(entrees);
+      setFactures(Array.isArray(facturesData) ? facturesData : []);
+      setClients(clientsData.clients || clientsData || []);
+      setChantiers(Array.isArray(chantiersData) ? chantiersData : []);
+      setInterventions(Array.isArray(interventionsData) ? interventionsData : []);
+      setContrats(Array.isArray(contratsData) ? contratsData : []);
+      setFuseauHoraire(societeData?.fuseauHoraire || 'Europe/Paris');
+      setDerniereDateEmission(chronologieData.derniereDateEmission);
     } catch (e) {
       setErreur(e instanceof Error ? e.message : 'Chargement impossible.');
     }
