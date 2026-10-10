@@ -27,17 +27,37 @@ test('#95 : retrait de règle standard motivé dans le navigateur', async ({ all
   const plan = await (await apiAdmin.get('/comptabilite')).json() as { regles: Array<{ cle: string }> };
   expect(plan.regles.some(r => r.cle === 'VENTE_ARTICLE')).toBe(false);
   await page.getByRole('button', { name: 'Historique des règles' }).click();
-  await expect(page.getByRole('region', { name: 'Historique des règles' }).locator('p', { hasText: 'Révision des ventes articles' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Historique des règles' }).locator('p', { hasText: 'Révision des ventes articles' }).last()).toBeVisible();
 });
 
-test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans supprimer le compte', async ({ allerSurPageAdmin, apiAdmin, session, request }) => {
+test('#95 : création de règle standard motivée, sans mutation à la sélection', async ({ allerSurPageAdmin, apiAdmin }) => {
+  const page = await allerSurPageAdmin('/comptabilite');
+  await page.getByRole('button', { name: 'Retirer Ventes d’articles' }).click();
+  const retrait = page.getByRole('dialog', { name: 'Retirer la règle comptable' });
+  await retrait.getByRole('textbox', { name: /Motif du retrait/ }).fill('Recréation contrôlée dans le navigateur');
+  await retrait.getByRole('button', { name: 'Confirmer le retrait' }).click();
+  await expect(retrait).not.toBeVisible();
+  const compte = (await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ id: string; nature: string }> }).comptes.find(c => c.nature === 'PRODUIT')!;
+  await page.getByRole('combobox', { name: 'Ventes d’articles' }).selectOption(compte.id);
+  const creation = page.getByRole('dialog', { name: 'Motif de la création' });
+  await expect(creation).toBeVisible();
+  expect((await (await apiAdmin.get('/comptabilite')).json() as { regles: Array<{ cle: string }> }).regles.some(r => r.cle === 'VENTE_ARTICLE')).toBe(false);
+  await creation.getByRole('textbox', { name: /Motif/ }).fill('Création de la règle articles');
+  await creation.getByRole('button', { name: 'Confirmer la création' }).click();
+  await expect(creation).not.toBeVisible();
+  expect((await (await apiAdmin.get('/comptabilite')).json() as { regles: Array<{ cle: string }> }).regles.some(r => r.cle === 'VENTE_ARTICLE')).toBe(true);
+  await page.getByRole('button', { name: 'Historique des règles' }).click();
+  await expect(page.getByRole('region', { name: 'Historique des règles' }).locator('p', { hasText: 'Création de la règle articles' }).last()).toContainText('CREATION');
+});
+
+ test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans supprimer le compte', async ({ allerSurPageAdmin, apiAdmin, session, request }) => {
   const base = 'http://127.0.0.1:3001/api';
   const headers = { Authorization: `Bearer ${session.token}` };
   const code = `445${String(Date.now()).slice(-9)}`;
   const compte = await request.post(`${base}/comptabilite/comptes`, { headers, data: { code, libelle: 'TVA à conserver', nature: 'TVA' } });
   expect(compte.status()).toBe(201);
   const compteId = (await compte.json()).id;
-  expect((await request.put(`${base}/comptabilite/tva/7.7`, { headers, data: { compteId } })).status()).toBe(200);
+  expect((await request.put(`${base}/comptabilite/tva/7.7`, { headers, data: { compteId, motif: 'Création du taux de test' } })).status()).toBe(200);
   const page = await allerSurPageAdmin('/comptabilite');
   const ligne = page.getByRole('row', { name: /7,7 %/ });
   await expect(ligne).toContainText(`${code} — TVA à conserver`);
@@ -62,6 +82,7 @@ test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans sup
   expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; actif: boolean }> }).comptes.find(c => c.id === compteId)?.actif).toBe(true);
   await page.getByRole('textbox', { name: 'Taux de TVA (%)' }).fill('7.7');
   await page.getByRole('combobox', { name: 'Compte TVA à associer' }).selectOption(compteId);
+  await page.getByRole('textbox', { name: /Motif de création TVA/ }).fill('Retour du taux après retrait');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(ligne).toContainText(code);
 });
@@ -73,7 +94,7 @@ test('TVA #92 : confirmation française 5,5 dans le navigateur retire le mapping
   const compte = await request.post(`${base}/comptabilite/comptes`, { headers, data: { code, libelle: 'TVA virgule E2E', nature: 'TVA' } });
   expect(compte.status()).toBe(201);
   const compteId = (await compte.json() as { id: string }).id;
-  expect((await request.put(`${base}/comptabilite/tva/5.5`, { headers, data: { compteId } })).status()).toBe(200);
+  expect((await request.put(`${base}/comptabilite/tva/5.5`, { headers, data: { compteId, motif: 'Création du taux de test' } })).status()).toBe(200);
   const page = await allerSurPageAdmin('/comptabilite');
   const ligne = page.getByRole('row', { name: /5,5 %/ });
   await expect(ligne).toContainText(code);
@@ -100,7 +121,7 @@ test('TVA #92 : deux sessions, la confirmation ancienne ne retire pas le nouveau
   };
   const ancienId = await creerCompte('1');
   const nouveauId = await creerCompte('2');
-  expect((await request.put(`${base}/comptabilite/tva/8.9`, { headers, data: { compteId: ancienId } })).status()).toBe(200);
+  expect((await request.put(`${base}/comptabilite/tva/8.9`, { headers, data: { compteId: ancienId, motif: 'Création du taux de test' } })).status()).toBe(200);
   const ouvrir = async () => {
     const contexte = await browser.newContext();
     await contexte.addInitScript(([token, user]) => {

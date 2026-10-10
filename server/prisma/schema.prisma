@@ -687,8 +687,8 @@ model JournalRegleComptable {
   id        String   @id @default(uuid())
   type      String   // REGLE | TVA
   cible     String   // clé de règle ou taux canonique
-  action    String   // REMAPPAGE | RETRAIT
-  avant     String
+  action    String   // CREATION | REMAPPAGE | RETRAIT
+  avant     String?
   apres     String?
   avantCode String?
   avantLibelle String?
@@ -705,12 +705,13 @@ model JournalRegleComptable {
 }
 
 model TransitionRegleComptable {
+  // Ledger interne des transitions : la cardinalité empêche la réutilisation d'une preuve.
   id            BigInt @id @default(autoincrement())
   transactionId BigInt
   type          String
   cible         String
   action        String
-  avant         String
+  avant         String?
   apres         String?
 
   @@index([transactionId])

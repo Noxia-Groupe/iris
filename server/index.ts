@@ -1309,8 +1309,10 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req: 
       }
       const courante = await tx.regleComptable.findUnique({ where: { cle } });
       if (courante) {
-        if (typeof req.body?.expectedCompteId !== 'string' || typeof req.body?.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(req.body.expectedUpdatedAt))) throw new RegleComptableVersionManquante();
-        if ((courante.journal ?? courante.compteId) !== req.body.expectedCompteId || courante.updatedAt.toISOString() !== req.body.expectedUpdatedAt) throw new RegleTvaPerimee();
+        // expectedValeur porte le code du journal pour JOURNAL_VENTES, l'id du compte sinon.
+        // La TVA utilise séparément expectedCompteId : ne pas confondre les contrats.
+        if (typeof req.body?.expectedValeur !== 'string' || typeof req.body?.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(req.body.expectedUpdatedAt))) throw new RegleComptableVersionManquante();
+        if ((courante.journal ?? courante.compteId) !== req.body.expectedValeur || courante.updatedAt.toISOString() !== req.body.expectedUpdatedAt) throw new RegleTvaPerimee();
         if ((courante.journal ?? courante.compteId) === (journal ?? compteId)) throw new RegleComptableSansChangement();
         const motif = motifCompteComptableValide(req.body?.motif);
         if (!motif) throw new RegleComptableMotifManquant();
@@ -1318,8 +1320,11 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req: 
         await tx.journalRegleComptable.create({ data: { type: 'REGLE', cible: cle, action: 'REMAPPAGE', avant: (courante.journal ?? courante.compteId)!, apres: journal ?? compteId, motif, auteurId: req.user!.id, auteurNom: req.user!.name } });
         return apres;
       }
-      if (req.body?.motif !== undefined && !motifCompteComptableValide(req.body.motif)) throw new RegleComptableMotifManquant();
-      return tx.regleComptable.create({ data: { cle, compteId, journal }, include: { compte: true } });
+      const motif = motifCompteComptableValide(req.body?.motif);
+      if (!motif) throw new RegleComptableMotifManquant();
+      const creee = await tx.regleComptable.create({ data: { cle, compteId, journal }, include: { compte: true } });
+      await tx.journalRegleComptable.create({ data: { type: 'REGLE', cible: cle, action: 'CREATION', apres: journal ?? compteId, motif, auteurId: req.user!.id, auteurNom: req.user!.name } });
+      return creee;
     });
     res.json(regle);
   } catch (error) {
@@ -1338,8 +1343,8 @@ app.delete('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (re
   const cle = String(req.params.cle);
   const body = req.body;
   if (!CLES_COMPTABLES.includes(cle) || !body || typeof body !== 'object' || Array.isArray(body) ||
-      Object.keys(body).sort().join(',') !== 'expectedCompteId,expectedUpdatedAt,motif' ||
-      typeof body.expectedCompteId !== 'string' || !body.expectedCompteId ||
+      Object.keys(body).sort().join(',') !== 'expectedUpdatedAt,expectedValeur,motif' ||
+      typeof body.expectedValeur !== 'string' || !body.expectedValeur ||
       typeof body.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(body.expectedUpdatedAt)) ||
       !motifCompteComptableValide(body.motif)) return res.status(400).json({ error: 'Version et motif de 3 à 500 caractères requis.' });
   try {
@@ -1347,9 +1352,9 @@ app.delete('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (re
       await verrouillerParametrageComptable(tx);
       const courante = await tx.regleComptable.findUnique({ where: { cle } });
       if (!courante) return false;
-      if ((courante.journal ?? courante.compteId) !== body.expectedCompteId || courante.updatedAt.toISOString() !== body.expectedUpdatedAt) throw new RegleTvaPerimee();
+      if ((courante.journal ?? courante.compteId) !== body.expectedValeur || courante.updatedAt.toISOString() !== body.expectedUpdatedAt) throw new RegleTvaPerimee();
       await tx.regleComptable.delete({ where: { cle } });
-      await tx.journalRegleComptable.create({ data: { type: 'REGLE', cible: cle, action: 'RETRAIT', avant: body.expectedCompteId, motif: body.motif.trim(), auteurId: req.user!.id, auteurNom: req.user!.name } });
+      await tx.journalRegleComptable.create({ data: { type: 'REGLE', cible: cle, action: 'RETRAIT', avant: body.expectedValeur, motif: body.motif.trim(), auteurId: req.user!.id, auteurNom: req.user!.name } });
       return true;
     });
     if (!retire) return res.status(404).json({ error: 'Règle comptable introuvable.' });
@@ -1411,8 +1416,11 @@ app.put('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req: Au
         await tx.journalRegleComptable.create({ data: { type: 'TVA', cible: String(taux), action: 'REMAPPAGE', avant: courante.compteId, apres: compteId, motif, auteurId: req.user!.id, auteurNom: req.user!.name } });
         return apres;
       }
-      if (req.body?.motif !== undefined && !motifCompteComptableValide(req.body.motif)) throw new RegleComptableMotifManquant();
-      return tx.regleTvaComptable.create({ data: { taux: tauxDecimal, compteId }, include: { compte: true } });
+      const motif = motifCompteComptableValide(req.body?.motif);
+      if (!motif) throw new RegleComptableMotifManquant();
+      const creee = await tx.regleTvaComptable.create({ data: { taux: tauxDecimal, compteId }, include: { compte: true } });
+      await tx.journalRegleComptable.create({ data: { type: 'TVA', cible: String(taux), action: 'CREATION', apres: compteId, motif, auteurId: req.user!.id, auteurNom: req.user!.name } });
+      return creee;
     });
     res.json(regle);
   } catch (error) {
