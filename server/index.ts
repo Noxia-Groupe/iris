@@ -1538,7 +1538,7 @@ app.post('/api/mentions-legales/:version/publier', requireAuth, requireAdmin, as
       const cible = await tx.mentionsLegalesVersion.findUnique({ where: { version } });
       if (!cible) return null;
       await tx.mentionsLegalesVersion.updateMany({ where: { actif: true }, data: { actif: false } });
-      return tx.mentionsLegalesVersion.update({ where: { version }, data: { actif: true, publieeLe: new Date() } });
+      return tx.mentionsLegalesVersion.update({ where: { version }, data: { actif: true, ...(cible.publieeLe === null ? { publieeLe: new Date() } : {}) } });
     });
     if (!publiee) return res.status(404).json({ error: 'Version légale introuvable.' });
     res.json(publiee);

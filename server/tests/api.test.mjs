@@ -3834,6 +3834,61 @@ if (!TEST_DATABASE_URL) {
       assert.equal(versions.body.find((version) => version.actif)?.version, 2);
     });
 
+    test('conserve la date exacte de première publication après activation d’une autre version puis réactivation', async () => {
+      const creer = await request(app).post('/api/mentions-legales').set('Authorization', `Bearer ${session}`)
+        .send({ mentions: 'TEST Mentions version 3', cgv: 'TEST CGV version 3', penalites: 'TEST Pénalités version 3' });
+      assert.equal(creer.status, 201, JSON.stringify(creer.body));
+      assert.equal(creer.body.publieeLe, null);
+      const publier = version => request(app).post(`/api/mentions-legales/${version}/publier`).set('Authorization', `Bearer ${session}`);
+      const premiere = await publier(3);
+      assert.equal(premiere.status, 200, JSON.stringify(premiere.body));
+      assert.ok(premiere.body.publieeLe);
+      const originale = premiere.body.publieeLe;
+      assert.equal((await publier(2)).status, 200);
+      await new Promise(resolve => setTimeout(resolve, 20)); // éviter une égalité accidentelle à la milliseconde
+      const reactivee = await publier(3);
+      assert.equal(reactivee.status, 200, JSON.stringify(reactivee.body));
+      assert.equal(reactivee.body.publieeLe, originale);
+      const versions = await request(app).get('/api/mentions-legales').set('Authorization', `Bearer ${session}`);
+      assert.equal(versions.status, 200);
+      assert.equal(versions.body.filter(version => version.actif).length, 1);
+      assert.equal(versions.body.find(version => version.version === 3).publieeLe, originale);
+      assert.equal((await publier(2)).status, 200);
+      await prisma.mentionsLegalesVersion.delete({ where: { version: 3 } });
+    });
+
+    test('le garde SQL refuse le changement d’identifiant d’une version publiée', async () => {
+      const version = await prisma.mentionsLegalesVersion.create({ data: {
+        version: 991, mentions: 'TEST Mentions immuables', cgv: 'TEST CGV immuables',
+        penalites: 'TEST Pénalités immuables', actif: false, publieeLe: new Date(),
+      } });
+      try {
+        await assert.rejects(
+          () => prisma.$executeRaw`UPDATE "MentionsLegalesVersion" SET "id" = ${`${version.id}-modifie`} WHERE "id" = ${version.id}`,
+          erreur => /Une version légale publiée est immuable/.test(erreur.message),
+        );
+        assert.equal((await prisma.mentionsLegalesVersion.findUniqueOrThrow({ where: { version: 991 } })).id, version.id);
+      } finally {
+        await prisma.mentionsLegalesVersion.delete({ where: { version: 991 } });
+      }
+    });
+
+    test('le garde SQL refuse le changement de date publiée mais autorise le changement d’activation', async () => {
+      const avant = await prisma.mentionsLegalesVersion.findUniqueOrThrow({ where: { version: 2 } });
+      assert.ok(avant.publieeLe);
+      await assert.rejects(
+        () => prisma.$executeRaw`UPDATE "MentionsLegalesVersion" SET "publieeLe" = ${new Date('2000-01-01T00:00:00.000Z')} WHERE "id" = ${avant.id}`,
+        erreur => /Une version légale publiée est immuable/.test(erreur.message),
+      );
+      assert.equal((await prisma.mentionsLegalesVersion.findUniqueOrThrow({ where: { version: 2 } })).publieeLe.toISOString(), avant.publieeLe.toISOString());
+      await prisma.mentionsLegalesVersion.update({ where: { version: 2 }, data: { actif: false } });
+      await prisma.mentionsLegalesVersion.update({ where: { version: 1 }, data: { actif: true } });
+      assert.equal(await prisma.mentionsLegalesVersion.count({ where: { actif: true } }), 1);
+      await prisma.mentionsLegalesVersion.update({ where: { version: 1 }, data: { actif: false } });
+      await prisma.mentionsLegalesVersion.update({ where: { version: 2 }, data: { actif: true } });
+      assert.equal(await prisma.mentionsLegalesVersion.count({ where: { actif: true } }), 1);
+    });
+
     test('interdit de modifier le contenu d’une version publiée', async () => {
       await assert.rejects(() => prisma.mentionsLegalesVersion.update({ where: { version: 2 }, data: { cgv: 'TEST tentative de modification interdite' } }));
       const version = await prisma.mentionsLegalesVersion.findUnique({ where: { version: 2 } });
