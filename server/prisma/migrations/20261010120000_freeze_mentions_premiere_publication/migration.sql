@@ -2,6 +2,7 @@
 CREATE OR REPLACE FUNCTION "interdire_modification_mentions_publiees"() RETURNS trigger AS $$
 BEGIN
   IF OLD."publieeLe" IS NOT NULL AND (
+    NEW."id" IS DISTINCT FROM OLD."id" OR
     NEW."version" IS DISTINCT FROM OLD."version" OR
     NEW."mentions" IS DISTINCT FROM OLD."mentions" OR
     NEW."cgv" IS DISTINCT FROM OLD."cgv" OR

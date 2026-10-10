@@ -3857,6 +3857,22 @@ if (!TEST_DATABASE_URL) {
       await prisma.mentionsLegalesVersion.delete({ where: { version: 3 } });
     });
 
+    test('le garde SQL refuse le changement d’identifiant d’une version publiée', async () => {
+      const version = await prisma.mentionsLegalesVersion.create({ data: {
+        version: 991, mentions: 'TEST Mentions immuables', cgv: 'TEST CGV immuables',
+        penalites: 'TEST Pénalités immuables', actif: false, publieeLe: new Date(),
+      } });
+      try {
+        await assert.rejects(
+          () => prisma.$executeRaw`UPDATE "MentionsLegalesVersion" SET "id" = ${`${version.id}-modifie`} WHERE "id" = ${version.id}`,
+          erreur => /Une version légale publiée est immuable/.test(erreur.message),
+        );
+        assert.equal((await prisma.mentionsLegalesVersion.findUniqueOrThrow({ where: { version: 991 } })).id, version.id);
+      } finally {
+        await prisma.mentionsLegalesVersion.delete({ where: { version: 991 } });
+      }
+    });
+
     test('le garde SQL refuse le changement de date publiée mais autorise le changement d’activation', async () => {
       const avant = await prisma.mentionsLegalesVersion.findUniqueOrThrow({ where: { version: 2 } });
       assert.ok(avant.publieeLe);
