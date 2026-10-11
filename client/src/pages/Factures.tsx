@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Ban, CheckCircle2, Download, FilePlus2, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
 
@@ -7,6 +8,15 @@ type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
 type NatureLigne = 'PRESTATION' | 'ARTICLE';
 type Source = { id: string; nom?: string; titre?: string; reference?: string; clientId?: string; client?: Client };
 type Ligne = { designation: string; nature: NatureLigne; quantite: string; prixUnitaireHt: string; tauxTva: string };
+type Trace = {
+  facture: { id: string; origine: Origine; motifHorsAffaire: string | null; client: Client;
+    chantier: { id: string; nom: string; numeroDevis: string | null; statut: string } | null;
+    intervention: { id: string; reference: string; titre: string; chantierId: string | null } | null;
+    contratMaintenance: { id: string; titre: string } | null };
+  devis: { id: string; numero: string; objet: string } | null;
+  devisAmbigu: boolean;
+  interventionsLiees: { id: string; reference: string; titre: string }[];
+};
 type Facture = {
   id: string;
   numero: string | null;
@@ -63,6 +73,35 @@ export default function Factures() {
   const [fuseauHoraire, setFuseauHoraire] = useState('Europe/Paris');
   const [factureAvoir, setFactureAvoir] = useState<Facture | null>(null);
   const [lignesAvoir, setLignesAvoir] = useState<Ligne[]>([nouvelleLigne()]);
+  const [factureTraceId, setFactureTraceId] = useState<string | null>(null);
+  const [trace, setTrace] = useState<Trace | null>(null);
+  const [traceErreur, setTraceErreur] = useState('');
+  const [traceCharge, setTraceCharge] = useState(false);
+  const traceRequete = useRef(0);
+
+  const chargerTrace = async (id: string) => {
+    const requete = ++traceRequete.current;
+    setFactureTraceId(id);
+    setTrace(null);
+    setTraceErreur('');
+    setTraceCharge(true);
+    try {
+      const response = await apiFetch(`/factures/${id}/tracabilite`);
+      const donnees = await response.json();
+      if (!response.ok) throw new Error(donnees?.error || 'Lecture de l’origine impossible.');
+      if (requete === traceRequete.current) setTrace(donnees as Trace);
+    } catch (e) {
+      if (requete === traceRequete.current) setTraceErreur(e instanceof Error ? e.message : 'Lecture de l’origine impossible.');
+    } finally {
+      if (requete === traceRequete.current) setTraceCharge(false);
+    }
+  };
+
+  const fermerTrace = () => {
+    traceRequete.current += 1;
+    setFactureTraceId(null);
+    setTrace(null);
+  };
 
   const charger = async () => {
     try {
@@ -394,6 +433,7 @@ export default function Factures() {
                 <td className="p-3">{formatMontant(facture.totalTtc)}</td>
                 <td className="p-3">{facture.statut}</td>
                 <td className="p-3"><div className="flex flex-wrap gap-2">
+                  <button className="btn btn-secondary" aria-expanded={factureTraceId === facture.id} aria-controls="origine-facture" onClick={() => factureTraceId === facture.id ? fermerTrace() : void chargerTrace(facture.id)}>Voir l’origine</button>
                   {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && (emissionImpossible(facture)
                     ? <span className="text-sm text-amber-700"><button className="btn btn-secondary" disabled><Send size={16} /> Émission impossible</button> Date antérieure à la dernière facture numérotée du {formatDate(derniereDateEmission!)}</span>
                     : <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>)}
@@ -412,6 +452,32 @@ export default function Factures() {
           </tbody>
         </table>
       </div>
+      {factureTraceId && (
+        <section id="origine-facture" role="region" aria-label="Origine de la facture" className="rounded-xl border bg-white p-5 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold">Origine de la facture</h2>
+            <button type="button" className="btn btn-secondary" onClick={fermerTrace}>Fermer</button>
+          </div>
+          {traceCharge && <p role="status">Chargement de l’origine…</p>}
+          {traceErreur && <div role="alert"><p>{traceErreur}</p><button type="button" className="btn btn-secondary" onClick={() => void chargerTrace(factureTraceId)}>Réessayer</button></div>}
+          {trace && (
+            <div className="space-y-2 text-sm">
+              <p><strong>Origine :</strong> {{ CHANTIER: 'Affaire', INTERVENTION: 'Intervention SAV', CONTRAT: 'Contrat de maintenance', HORS_AFFAIRE: 'Hors affaire' }[trace.facture.origine]}</p>
+              <p><strong>Client :</strong> {trace.facture.client.raisonSociale}</p>
+              {trace.facture.origine === 'HORS_AFFAIRE' && <p><strong>Motif :</strong> {trace.facture.motifHorsAffaire || 'Motif non renseigné'}</p>}
+              {trace.facture.intervention && <p><strong>Intervention d’origine :</strong> {trace.facture.intervention.reference} — {trace.facture.intervention.titre}</p>}
+              {trace.facture.contratMaintenance && <p><strong>Contrat :</strong> {trace.facture.contratMaintenance.titre}</p>}
+              {trace.facture.chantier ? <p><strong>Affaire :</strong> {trace.facture.chantier.nom}{trace.facture.chantier.numeroDevis && ` — ${trace.facture.chantier.numeroDevis}`} <Link className="text-emerald-700 underline" to={`/chantiers/${trace.facture.chantier.id}`}>Voir l’affaire</Link></p>
+                : <p>Aucune affaire liée.</p>}
+              {trace.devisAmbigu ? <p role="alert"><strong>Devis :</strong> Plusieurs devis correspondent à cette affaire ; aucun lien de devis fiable ne peut être affiché.</p>
+                : <p><strong>Devis :</strong> {trace.devis ? `${trace.devis.numero} — ${trace.devis.objet}` : 'Aucun devis lié.'}</p>}
+              <div><strong>Interventions liées à l’affaire :</strong> {trace.interventionsLiees.length ? (
+                <ul className="list-disc pl-5">{trace.interventionsLiees.map((item) => <li key={item.id}>{item.reference} — {item.titre}</li>)}</ul>
+              ) : <span> Aucune intervention liée.</span>}</div>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
