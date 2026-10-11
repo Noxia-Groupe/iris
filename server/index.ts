@@ -2328,6 +2328,26 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
   }
 });
 
+// La file ne contient que les visites engendrées par un contrat et encore dépourvues
+// de projection. Le même filtre de périmètre gouverne la fiche SAV et son placement.
+app.get('/api/planning/interventions-a-planifier', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+  try {
+    const interventions = await prisma.intervention.findMany({
+      where: { contratMaintenanceId: { not: null }, contratMaintenance: { is: { statut: 'ACTIF' } }, statut: { in: ['A_PLANIFIER', 'PLANIFIEE'] }, planningEvent: { is: null }, ...getInterventionFilterForUser(req.user!) },
+      select: { id: true, reference: true, titre: true, echeanceContrat: true,
+        client: { select: { raisonSociale: true } }, site: { select: { nom: true, ville: true } },
+        contratMaintenance: { select: { id: true, titre: true, dureePrevisionnelleMinutes: true } } },
+      orderBy: [{ echeanceContrat: 'asc' }, { reference: 'asc' }],
+    });
+    res.json(interventions.map(({ contratMaintenance, ...intervention }) => ({
+      ...intervention, contratMaintenance,
+      dureePrevisionnelleMinutes: contratMaintenance!.dureePrevisionnelleMinutes,
+    })));
+  } catch (error) {
+    res.status(500).json({ error: 'Lecture de la file de planification impossible.' });
+  }
+});
+
 // Crée ou met à jour l'unique projection prévisionnelle d'un dossier SAV. La fiche
 // Intervention reste la source de vérité et les mêmes techniciens sont synchronisés dans
 // InterventionAffectation, afin qu'un planning ne donne jamais accès à un dossier sans affectation.
@@ -2336,9 +2356,22 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
     const id = paramId(req);
     const intervention = await prisma.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
+    if (!['A_PLANIFIER', 'PLANIFIEE'].includes(intervention.statut)) return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
     const { error, data, intervenantIds } = await validatePlanningEvent({ ...req.body, categorie: 'HORS_CHANTIER', titre: intervention.titre, client: intervention.client.raisonSociale });
     if (error) return res.status(400).json({ error });
     const event = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`);
+      const actuel = await tx.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
+      if (!actuel) throw new Error('INTERVENTION_HORS_PERIMETRE');
+      if (!['A_PLANIFIER', 'PLANIFIEE'].includes(actuel.statut)) throw new Error('INTERVENTION_NON_PLANIFIABLE');
+      // Conserver l'ordre intervention → contrat : le verrou du contrat sérialise
+      // ce placement avec suspension/réactivation, puis son statut est relu.
+      if (actuel.contratMaintenanceId) {
+        await verrouillerContratMaintenance(tx, actuel.contratMaintenanceId);
+        const contrat = await tx.contratMaintenance.findUniqueOrThrow({ where: { id: actuel.contratMaintenanceId }, select: { statut: true } });
+        if (contrat.statut === 'SUSPENDU') throw new Error('CONTRAT_SUSPENDU');
+        if (contrat.statut === 'TERMINE') throw new Error('CONTRAT_TERMINE');
+      }
       const planning = await tx.planningEvent.upsert({
         where: { interventionId: id },
         create: { ...data, interventionId: id, intervenants: { connect: intervenantIds!.map((intervenantId) => ({ id: intervenantId })) } } as never,
@@ -2346,10 +2379,18 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
         include: PLANNING_EVENT_INCLUDE,
       });
       await synchroniserAffectationsIntervention(tx, id, intervenantIds!);
+      if (actuel.statut === 'A_PLANIFIER') {
+        const modifiee = await tx.intervention.update({ where: { id }, data: { statut: 'PLANIFIEE' }, include: { client: { select: { raisonSociale: true } } } });
+        await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, actuel);
+      }
       return planning;
     });
     res.json(event);
   } catch (error) {
+    if ((error as Error).message === 'INTERVENTION_HORS_PERIMETRE') return res.status(404).json({ error: 'Intervention introuvable.' });
+    if ((error as Error).message === 'INTERVENTION_NON_PLANIFIABLE') return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
+    if ((error as Error).message === 'CONTRAT_SUSPENDU') return res.status(409).json({ error: 'Réactivez le contrat avant de planifier cette visite.' });
+    if ((error as Error).message === 'CONTRAT_TERMINE') return res.status(409).json({ error: 'Un contrat clos interdit tout nouveau placement de visite.' });
     console.error('Erreur de planification SAV', error);
     res.status(500).json({ error: 'Erreur lors de la planification de l’intervention.' });
   }
@@ -3387,13 +3428,15 @@ app.get('/api/planning/chantiers', requireAuth, blockCommercial, requirePlanning
 });
 
 // Affectations chevauchant la plage de jours [start, end] (bornes incluses).
-app.get('/api/planning/events', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+app.get('/api/planning/events', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
   try {
     const start = parsePlanningJour(req.query.start);
     const end = parsePlanningJour(req.query.end);
     if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, format YYYY-MM-DD).' });
     const events = await prisma.planningEvent.findMany({
-      where: { dateDebut: { lte: end }, dateFin: { gte: start } },
+      where: { dateDebut: { lte: end }, dateFin: { gte: start }, OR: [
+        { interventionId: null }, { intervention: { is: getInterventionFilterForUser(req.user!) } },
+      ] },
       include: PLANNING_EVENT_INCLUDE,
       orderBy: [{ dateDebut: 'asc' }, { createdAt: 'asc' }],
     });
@@ -3419,13 +3462,21 @@ app.post('/api/planning/events', requireAuth, blockCommercial, requirePlanningAc
 
 // Édition complète ou déplacement (glisser-déposer) : fusion existant + corps reçu,
 // puis revalidation de l'ensemble — cf. validatePlanningEvent.
-app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
   try {
     const existing = await prisma.planningEvent.findUnique({
       where: { id: paramId(req) },
       include: { intervenants: { select: { id: true } } },
     });
     if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
+    if (existing.interventionId) {
+      const autorisee = await prisma.intervention.findFirst({ where: { id: existing.interventionId, ...getInterventionFilterForUser(req.user!) }, select: { id: true, statut: true } });
+      if (!autorisee) return res.status(404).json({ error: 'Affectation introuvable.' });
+      if (!['A_PLANIFIER', 'PLANIFIEE'].includes(autorisee.statut)) return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
+      if (['categorie', 'titre', 'client', 'chantierId', 'typeEventId', 'interventionId'].some(cle => cle in req.body)) {
+        return res.status(400).json({ error: 'La projection liée conserve les données de son intervention.' });
+      }
+    }
 
     const merged = {
       categorie: existing.categorie,
@@ -3460,11 +3511,13 @@ app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlann
   }
 });
 
-app.delete('/api/planning/events/:id', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+app.delete('/api/planning/events/:id', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
   try {
     const existing = await prisma.planningEvent.findUnique({ where: { id: paramId(req) } });
     if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
     if (existing.interventionId) {
+      const autorisee = await prisma.intervention.findFirst({ where: { id: existing.interventionId, ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
+      if (!autorisee) return res.status(404).json({ error: 'Affectation introuvable.' });
       return res.status(409).json({ error: 'Suppression impossible : cette projection est liée à une intervention SAV. Modifiez ou annulez le dossier SAV.' });
     }
     await prisma.planningEvent.delete({ where: { id: existing.id } });

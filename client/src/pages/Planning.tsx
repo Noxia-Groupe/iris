@@ -10,6 +10,8 @@ import {
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
 import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
+import { formatDateOnly } from '../lib/dateFormatting';
+import { planningDayToIso } from '../lib/contractPlanningDate';
 
 // ---------------------------------------------------------------------------
 // Planning d'intervention (réservé aux administrateurs).
@@ -18,6 +20,13 @@ import { useModules } from '../modules';
 // chantier/intervention non suivi (ex: SAV) ou événement personnalisé (type + couleur).
 // Aucun lien avec les heures réelles : rien n'est écrit dans le Journal des Heures.
 // ---------------------------------------------------------------------------
+
+type ContractQueueItem = {
+  id: string; reference: string; titre: string; echeanceContrat: string;
+  client: { raisonSociale: string }; site: { nom: string; ville: string } | null;
+  contratMaintenance: { id: string; titre: string };
+  dureePrevisionnelleMinutes: number;
+};
 
 type ModalState =
   | { mode: 'create'; date: string; intervenantId?: string }
@@ -53,6 +62,8 @@ const Planning = () => {
   const [chantiers, setChantiers] = useState<ChantierLite[]>([]);
   const [types, setTypes] = useState<PlanningType[]>([]);
   const [events, setEvents] = useState<PlanningEvent[]>([]);
+  const [contractQueue, setContractQueue] = useState<ContractQueueItem[]>([]);
+  const [toPlace, setToPlace] = useState<ContractQueueItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOfWeek(new Date()));
   const [modal, setModal] = useState<ModalState | null>(null);
@@ -97,6 +108,15 @@ const Planning = () => {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const fetchQueue = async () => {
+    try {
+      const res = await apiFetch('/planning/interventions-a-planifier');
+      if (res.ok) setContractQueue(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => { fetchQueue(); }, []);
 
   const fetchEvents = async () => {
     try {
@@ -232,6 +252,20 @@ const Planning = () => {
         </div>
       )}
 
+      <section aria-label="Interventions contractuelles à planifier" className="mb-4 bg-white rounded-xl border p-4">
+        <h2 className="font-bold mb-2">Interventions contractuelles à planifier</h2>
+        {contractQueue.length === 0 ? <p className="text-sm text-muted">Aucune visite en attente.</p> : (
+          <table className="w-full text-sm"><thead><tr><th>Échéance</th><th>Référence</th><th>Client / site</th><th>Contrat</th><th>Durée</th><th></th></tr></thead>
+            <tbody>{contractQueue.map(item => <tr key={item.id} className="border-t">
+              <td>{formatDateOnly(item.echeanceContrat).replaceAll('/', '-')}</td><td>{item.reference}</td>
+              <td>{item.client.raisonSociale} — {item.site?.nom || 'Sans site'} {item.site?.ville || ''}</td>
+              <td>{item.contratMaintenance.titre}</td><td>{item.dureePrevisionnelleMinutes} min</td>
+              <td><button className="btn btn-primary" onClick={() => setToPlace(item)}>Placer</button></td>
+            </tr>)}</tbody>
+          </table>
+        )}
+      </section>
+
       {/* Navigation de semaine */}
       <div className="flex items-center justify-between gap-3 mb-4 bg-white px-4 py-3 rounded-xl shadow-sm border border-gray-100">
         <div className="flex items-center gap-2">
@@ -340,6 +374,8 @@ const Planning = () => {
         </div>
       )}
 
+      {toPlace && <ContractPlacement item={toPlace} intervenants={intervenants} onClose={() => setToPlace(null)} onSaved={() => { setToPlace(null); fetchQueue(); fetchEvents(); }} />}
+
       {modal && (
         <EventModal
           key={modal.mode === 'edit' ? modal.event.id : `create-${modal.date}-${modal.intervenantId || ''}`}
@@ -363,6 +399,56 @@ const Planning = () => {
       )}
     </div>
   );
+};
+
+const ContractPlacement = ({ item, intervenants, onClose, onSaved }: {
+  item: ContractQueueItem; intervenants: Intervenant[]; onClose: () => void; onSaved: () => void;
+}) => {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const dateDebut = planningDayToIso(String(fd.get('jour')));
+    if (!dateDebut) {
+      setError('Date invalide : saisissez un jour réel au format JJ-MM-AAAA.');
+      return;
+    }
+    const heureDebut = String(fd.get('heureDebut'));
+    const duree = Number(fd.get('duree'));
+    const depart = Number(heureDebut.slice(0, 2)) * 60 + Number(heureDebut.slice(3));
+    if (!Number.isInteger(duree) || duree < 1 || depart + duree >= 1440) {
+      setError('La durée doit être positive et se terminer le même jour.');
+      return;
+    }
+    const fin = depart + duree;
+    const heureFin = `${String(Math.floor(fin / 60)).padStart(2, '0')}:${String(fin % 60).padStart(2, '0')}`;
+    setSaving(true);
+    setError('');
+    try {
+      const res = await apiFetch(`/interventions/${item.id}/planning`, { method: 'PUT', body: JSON.stringify({
+        dateDebut, creneau: 'HEURES', heureDebut, heureFin,
+        intervenantIds: [String(fd.get('technicienId'))],
+      }) });
+      if (!res.ok) { const data = await res.json(); setError(data.error || 'Placement impossible.'); return; }
+      onSaved();
+    } catch { setError('Impossible de joindre le serveur.'); }
+    finally { setSaving(false); }
+  };
+  return <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+    <div role="dialog" aria-label={`Planifier ${item.reference}`} className="bg-white rounded-xl p-6 w-full max-w-md">
+      <h2 className="font-bold mb-2">Planifier {item.reference}</h2>
+      <p className="text-sm mb-4">{item.titre} — {item.client.raisonSociale}</p>
+      <form onSubmit={submit} className="flex flex-col gap-3">
+        <label>Technicien<select required name="technicienId" className="form-input" defaultValue=""><option value="" disabled>Choisir</option>{intervenants.map(i => <option key={i.id} value={i.id}>{i.nom}</option>)}</select></label>
+        <label>Jour<input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="jour" className="form-input" defaultValue={formatDateOnly(item.echeanceContrat).replaceAll('/', '-')} /></label>
+        <label>Heure de début<input required type="time" name="heureDebut" className="form-input" defaultValue="09:00" /></label>
+        <label>Durée (minutes)<input required type="number" name="duree" min="1" max="1439" className="form-input" defaultValue={item.dureePrevisionnelleMinutes} /></label>
+        {error && <p role="alert" className="text-red-700">{error}</p>}
+        <div className="flex gap-2"><button disabled={saving} className="btn btn-primary">Confirmer le placement</button><button type="button" className="btn" onClick={onClose}>Annuler</button></div>
+      </form>
+    </div>
+  </div>;
 };
 
 // ---------------------------------------------------------------------------
@@ -392,6 +478,7 @@ const EventModal = ({
 }) => {
   const isEdit = modal.mode === 'edit';
   const event = isEdit ? modal.event : null;
+  const linkedIntervention = !!(event as PlanningEvent & { interventionId?: string } | null)?.interventionId;
   const [categorie, setCategorie] = useState<PlanningEvent['categorie']>(event?.categorie || 'CHANTIER');
   const [creneau, setCreneau] = useState<PlanningEvent['creneau']>(event?.creneau || 'JOURNEE');
   const [typeSel, setTypeSel] = useState<string>(event?.typeEventId || '');
@@ -460,7 +547,11 @@ const EventModal = ({
       };
 
       const res = isEdit
-        ? await apiFetch(`/planning/events/${event!.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+        ? await apiFetch(`/planning/events/${event!.id}`, { method: 'PATCH', body: JSON.stringify(linkedIntervention ? {
+          dateDebut: payload.dateDebut, dateFin: payload.dateFin, creneau: payload.creneau,
+          heureDebut: payload.heureDebut, heureFin: payload.heureFin, intervenantIds: payload.intervenantIds,
+          adresse: payload.adresse, commentaire: payload.commentaire,
+        } : payload) })
         : await apiFetch('/planning/events', { method: 'POST', body: JSON.stringify(payload) });
       if (res.ok) {
         onSaved();
@@ -487,7 +578,7 @@ const EventModal = ({
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {/* Nature de l'affectation */}
-          <div>
+          {!linkedIntervention && <div>
             <label className="form-label">Nature</label>
             <div className="flex flex-wrap gap-2">
               {CATEGORIES.map((c) => (
@@ -501,7 +592,7 @@ const EventModal = ({
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
 
           {categorie === 'CHANTIER' && (
             <div className="form-group mb-0">
@@ -519,11 +610,11 @@ const EventModal = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="form-group mb-0">
                 <label className="form-label">Nom du chantier / intervention</label>
-                <input required name="titre" className="form-input" placeholder="Ex: SAV alarme entrepôt" defaultValue={event?.titre || ''} />
+                <input required name="titre" readOnly={linkedIntervention} className="form-input" placeholder="Ex: SAV alarme entrepôt" defaultValue={event?.titre || ''} />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Client (optionnel)</label>
-                <input name="client" className="form-input" defaultValue={event?.client || ''} placeholder="Nom du client" />
+                <input name="client" readOnly={linkedIntervention} className="form-input" defaultValue={event?.client || ''} placeholder="Nom du client" />
               </div>
               <div className="form-group mb-0 md:col-span-2">
                 <label className="form-label">Adresse du site (optionnel)</label>
@@ -619,7 +710,7 @@ const EventModal = ({
           <div className="flex gap-2 mt-2">
             <button disabled={saving} className="btn btn-primary px-8">{saving ? 'Enregistrement…' : isEdit ? 'Enregistrer' : 'Ajouter au planning'}</button>
             <button type="button" onClick={onClose} className="btn bg-white border">Annuler</button>
-            {isEdit && (
+            {isEdit && !linkedIntervention && (
               <button type="button" onClick={() => onDelete(event!)} className="btn ml-auto flex items-center gap-1.5 bg-red-100 hover:bg-red-200 text-red-700">
                 <Trash2 size={15} /> Supprimer
               </button>

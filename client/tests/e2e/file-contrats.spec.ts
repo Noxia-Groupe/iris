@@ -1,0 +1,97 @@
+import { test, expect } from './fixtures';
+
+const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+
+test('#103 : date française, refus local invalide, échec serveur visible puis nouvelle tentative', async ({ allerSurPageAdmin, session, request }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const client = await request.post(`${api}/clients`, { headers, data: { raisonSociale: `E2E File contrat ${Date.now()}` } });
+  expect(client.status()).toBe(201);
+  const contrat = await request.post(`${api}/contrats-maintenance`, { headers, data: { clientId: (await client.json()).id, titre: 'Visite préventive E2E', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' } });
+  expect(contrat.status(), await contrat.text()).toBe(201);
+  const generation = await request.post(`${api}/contrats-maintenance/${(await contrat.json()).id}/generer-intervention`, { headers });
+  expect(generation.status()).toBe(201);
+  const intervention = await generation.json();
+  const [annee, mois, jour] = intervention.echeanceContrat.slice(0, 10).split('-');
+  const echeanceFr = `${jour}-${mois}-${annee}`;
+  const technicien = await request.post(`${api}/intervenants`, { headers, data: { nom: `E2E Technicien file ${Date.now()}`, role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+  expect(technicien.status()).toBe(200);
+  const techniciens = [await technicien.json()];
+  const page = await allerSurPageAdmin('/planning');
+  const ligne = page.getByRole('row', { name: new RegExp(intervention.reference) });
+  await expect(ligne).toContainText('Visite préventive E2E');
+  await expect(ligne.getByRole('cell').first()).toHaveText(echeanceFr);
+  await ligne.getByRole('button', { name: 'Placer' }).click();
+  const dialogue = page.getByRole('dialog', { name: /Planifier/ });
+  await expect(dialogue.getByLabel('Durée (minutes)')).toHaveValue('90');
+  await expect(dialogue.getByLabel('Jour')).toHaveValue(echeanceFr);
+  await dialogue.getByLabel('Durée (minutes)').fill('120');
+  await dialogue.getByLabel('Jour').fill('31-02-2099');
+  await dialogue.getByLabel('Heure de début').fill('09:00');
+  await dialogue.getByLabel('Technicien').selectOption(techniciens[0].id);
+  let requests = 0;
+  page.on('request', req => { if (req.method() === 'PUT' && req.url().endsWith(`/interventions/${intervention.id}/planning`)) requests++; });
+  await dialogue.getByRole('button', { name: 'Confirmer le placement' }).click();
+  await expect(dialogue.getByRole('alert')).toContainText('Date invalide');
+  expect(requests).toBe(0);
+  await expect(ligne).toBeVisible();
+
+  await dialogue.getByLabel('Jour').fill('02-01-2099');
+  let rejected = false;
+  const planningPath = `**/api/interventions/${intervention.id}/planning`;
+  await page.route(planningPath, async route => {
+    rejected = true;
+    await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Conflit de planification, réessayez.' }) });
+    await page.unroute(planningPath);
+  });
+  await dialogue.getByRole('button', { name: 'Confirmer le placement' }).click();
+  await expect(dialogue.getByRole('alert')).toHaveText('Conflit de planification, réessayez.');
+  expect(rejected).toBe(true);
+  await expect(ligne).toBeVisible();
+  await expect(dialogue.getByLabel('Jour')).toHaveValue('02-01-2099');
+  await expect(dialogue.getByLabel('Durée (minutes)')).toHaveValue('120');
+
+  const suspension = await request.patch(`${api}/contrats-maintenance/${(await contrat.json()).id}/statut`, { headers, data: { statut: 'SUSPENDU', motif: 'Suspension E2E avant placement' } });
+  expect(suspension.status(), await suspension.text()).toBe(200);
+  await dialogue.getByRole('button', { name: 'Confirmer le placement' }).click();
+  await expect(dialogue.getByRole('alert')).toContainText('Réactivez le contrat');
+  await expect(ligne).toBeVisible();
+  const reprise = await request.patch(`${api}/contrats-maintenance/${(await contrat.json()).id}/statut`, { headers, data: { statut: 'ACTIF', motif: 'Réactivation E2E avant placement' } });
+  expect(reprise.status(), await reprise.text()).toBe(200);
+  await dialogue.getByRole('button', { name: 'Confirmer le placement' }).click();
+  await expect(dialogue).not.toBeVisible();
+  await expect(ligne).not.toBeVisible();
+  const projection = await request.get(`${api}/planning/events?start=2099-01-02&end=2099-01-02`, { headers });
+  expect(projection.status()).toBe(200);
+  const event = (await projection.json()).find((item: { interventionId: string }) => item.interventionId === intervention.id);
+  expect(event).toMatchObject({ heureDebut: '09:00', heureFin: '11:00', dateDebut: '2099-01-02T00:00:00.000Z' });
+});
+
+test('clôture réelle pendant un formulaire ouvert : refus visible puis visite retirée de la file', async ({ allerSurPageAdmin, session, request }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const client = await request.post(`${api}/clients`, { headers, data: { raisonSociale: `E2E Clôture file ${Date.now()}` } });
+  expect(client.status()).toBe(201);
+  const contrat = await request.post(`${api}/contrats-maintenance`, { headers, data: { clientId: (await client.json()).id, titre: 'Clôture avec formulaire ouvert', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' } });
+  expect(contrat.status(), await contrat.text()).toBe(201);
+  const contratId = (await contrat.json()).id;
+  const generation = await request.post(`${api}/contrats-maintenance/${contratId}/generer-intervention`, { headers });
+  expect(generation.status()).toBe(201);
+  const intervention = await generation.json();
+  const technicien = await request.post(`${api}/intervenants`, { headers, data: { nom: `E2E Technicien clôture ${Date.now()}`, role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+  expect(technicien.status()).toBe(200);
+  const page = await allerSurPageAdmin('/planning');
+  const ligne = page.getByRole('row', { name: new RegExp(intervention.reference) });
+  await expect(ligne).toBeVisible();
+  await ligne.getByRole('button', { name: 'Placer' }).click();
+  const dialogue = page.getByRole('dialog', { name: /Planifier/ });
+  await dialogue.getByLabel('Technicien').selectOption((await technicien.json()).id);
+  const cloture = await request.patch(`${api}/contrats-maintenance/${contratId}/statut`, { headers, data: { statut: 'TERMINE', motif: 'Clôture E2E avant placement' } });
+  expect(cloture.status(), await cloture.text()).toBe(200);
+  await dialogue.getByRole('button', { name: 'Confirmer le placement' }).click();
+  await expect(dialogue.getByRole('alert')).toContainText('contrat clos');
+  await expect(ligne).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('row', { name: new RegExp(intervention.reference) })).toHaveCount(0);
+  const projection = await request.get(`${api}/planning/events?start=2099-01-01&end=2099-01-01`, { headers });
+  expect(projection.status()).toBe(200);
+  expect((await projection.json()).some((item: { interventionId: string }) => item.interventionId === intervention.id)).toBe(false);
+});
