@@ -27,6 +27,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await post(`/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
     const chantier = await post(`/devis/${devis.id}/convertir`, { cible: 'CHANTIER' });
     const intervention = await post('/interventions', { clientId: client.id, chantierId: chantier.id, titre: 'SAV lié #105' });
+    const interventionLiee = await post('/interventions', { clientId: client.id, chantierId: chantier.id, titre: 'SAV non facturé #105' });
     await post('/factures', { clientId: client.id, origine: 'INTERVENTION', interventionId: intervention.id, dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'SAV', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
     const page = await allerSurPageAdmin('/factures');
     const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
@@ -38,6 +39,10 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(detail.locator('p').filter({ hasText: /^Affaire :/ })).toContainText(devis.numero);
     await expect(detail).not.toContainText('Affaire rattachée à l’intervention');
     await expect(detail).toContainText('SAV lié #105');
+    const listitems = detail.getByRole('listitem');
+    await expect(listitems).toHaveCount(2);
+    await expect(listitems.filter({ hasText: 'SAV non facturé #105' })).toContainText(interventionLiee.reference);
+    await expect(listitems.filter({ hasText: 'SAV lié #105' })).toContainText(intervention.reference);
     await expect(detail).toContainText(client.raisonSociale);
     await detail.getByRole('button', { name: 'Fermer' }).click();
     await page.route('**/api/factures/*/tracabilite', async route => {
@@ -93,6 +98,26 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(detail).toContainText('Exception actuelle #105');
     await expect(detail).toContainText('Aucune affaire liée');
     await expect(detail.getByRole('link', { name: /Voir l’affaire/ })).toHaveCount(0);
+
+    // Une erreur du premier chargement ne doit pas remplacer la trace du second.
+    let libererErreur!: () => void;
+    const attenteErreur = new Promise<void>(resolve => { libererErreur = resolve; });
+    await page.unroute(`**/api/factures/${ancien}/tracabilite`);
+    await page.route(`**/api/factures/${ancien}/tracabilite`, async route => {
+      await attenteErreur;
+      await route.fulfill({ status: 503, json: { error: 'Erreur ancienne #105' } });
+    });
+    await page.locator('tbody tr', { hasText: motifAncien }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await expect(detail).toContainText('Chargement');
+    await page.locator('tbody tr', { hasText: motifActuel }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await expect(detail).toContainText(motifActuel);
+    const erreurLivree = page.waitForResponse(response => response.url().endsWith(`/api/factures/${ancien}/tracabilite`) && response.status() === 503);
+    libererErreur();
+    const erreurReponse = await erreurLivree;
+    await erreurReponse.finished();
+    await expect(detail).toContainText(motifActuel);
+    await expect(detail).not.toContainText('Erreur ancienne #105');
+    await expect(detail.getByRole('alert')).toHaveCount(0);
   });
   const hier = () => {
     const [jour, mois, annee] = dateDuJour().split('-').map(Number);

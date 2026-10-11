@@ -2773,7 +2773,10 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
       const cibleId = String(req.body.clientId || '');
       const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true } });
       if (!cible) return res.status(404).json({ error: 'Client introuvable.' });
-      if (existant.clientId !== cibleId && await prisma.facture.count({ where: { chantierId: existant.id } })) {
+      if (existant.clientId !== cibleId && await prisma.facture.count({ where: { OR: [
+        { chantierId: existant.id },
+        { intervention: { is: { chantierId: existant.id } } },
+      ] } })) {
         return res.status(409).json({ error: 'Une affaire déjà facturée ne change pas de client.' });
       }
       data.clientId = cibleId;

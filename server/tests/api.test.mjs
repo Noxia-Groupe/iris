@@ -3499,16 +3499,38 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.status, 409, JSON.stringify(facture.body));
     });
 
+    test('#106 : une facture issue d’une intervention verrouille le client de l’affaire et préserve sa trace', async () => {
+      const auth = `Bearer ${session}`;
+      const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST destination #106' } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST affaire #106', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01'), budgetGlobalVendu: 100 } });
+      const intervention = await prisma.intervention.create({ data: { reference: `TEST-106-${Date.now()}`, titre: 'TEST intervention facturée', clientId, chantierId: chantier.id } });
+      const facture = await request(app).post('/api/factures').set('Authorization', auth).send({ clientId, origine: 'INTERVENTION', interventionId: intervention.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST intervention #106', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      assert.equal(facture.body.chantierId, null, 'La facture ne doit pas être directement liée à l’affaire.');
+      const traceUrl = `/api/factures/${facture.body.id}/tracabilite`;
+      const avant = await request(app).get(traceUrl).set('Authorization', auth);
+      assert.equal(avant.status, 200, JSON.stringify(avant.body));
+      assert.equal(avant.body.facture.chantier.id, chantier.id);
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set('Authorization', auth).send({ clientId: 'client-inexistant' })).status, 404);
+      const refus = await request(app).patch(`/api/chantiers/${chantier.id}`).set('Authorization', auth).send({ clientId: autreClient.id, nom: 'Modification refusée' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /déjà facturée/);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).clientId, clientId);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).nom, chantier.nom);
+      const apres = await request(app).get(traceUrl).set('Authorization', auth);
+      assert.equal(apres.status, 200, JSON.stringify(apres.body));
+      assert.deepEqual(apres.body, avant.body, 'La trace et les rattachements ne changent pas après le refus.');
+    });
+
     test('#105 : trace la chaîne devis → affaire → interventions selon l’origine de facture, sans fuite entre affaires ni clients', async () => {
       const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST trace autre client' } });
       const chantier = await prisma.chantier.create({ data: { nom: 'TEST Affaire traçable', numeroDevis: 'TEST-D-105-AFFAIRE', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01'), budgetGlobalVendu: 100 } });
       const autreChantier = await prisma.chantier.create({ data: { nom: 'TEST autre affaire', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01'), budgetGlobalVendu: 100 } });
       const devis = await prisma.devis.create({ data: { dossierId: `TEST-105-${Date.now()}`, numero: chantier.numeroDevis, version: 1, clientId, objet: 'TEST devis origine', totalHt: 100, totalTva: 20, totalTtc: 120 } });
       await prisma.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
-      const interventions = await Promise.all([
-        prisma.intervention.create({ data: { reference: `TEST-105-Z-${Date.now()}`, titre: 'TEST Z liée', clientId, chantierId: chantier.id } }),
-        prisma.intervention.create({ data: { reference: `TEST-105-A-${Date.now()}`, titre: 'TEST A liée', clientId, chantierId: chantier.id } }),
-      ]);
+      const interventionZ = await prisma.intervention.create({ data: { reference: `TEST-105-Z-${Date.now()}`, titre: 'TEST Z liée', clientId, chantierId: chantier.id } });
+      const interventionA = await prisma.intervention.create({ data: { reference: `TEST-105-A-${Date.now()}`, titre: 'TEST A liée', clientId, chantierId: chantier.id } });
+      const interventions = [interventionZ, interventionA];
       const etrangere = await prisma.intervention.create({ data: { reference: `TEST-105-X-${Date.now()}`, titre: 'TEST autre affaire', clientId, chantierId: autreChantier.id } });
       const autreClientIntervention = await prisma.intervention.create({ data: { reference: `TEST-105-Y-${Date.now()}`, titre: 'TEST autre client', clientId: autreClient.id, chantierId: chantier.id } });
       const creer = async (origine, rattachement) => {
