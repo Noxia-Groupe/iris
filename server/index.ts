@@ -2364,7 +2364,7 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
       const actuel = await tx.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
       if (!actuel) throw new Error('INTERVENTION_HORS_PERIMETRE');
       const projection = await tx.planningEvent.findUnique({ where: { interventionId: id }, select: { id: true } });
-      if (['TERMINEE', 'ANNULEE'].includes(actuel.statut) || (actuel.statut === 'EN_COURS' && !projection)) throw new Error('INTERVENTION_NON_PLANIFIABLE');
+      if (['TERMINEE', 'ANNULEE'].includes(actuel.statut)) throw new Error('INTERVENTION_NON_PLANIFIABLE');
       // Seulement au premier placement : ordre intervention → contrat pour sérialiser
       // la suspension/réactivation, puis relire le statut avant toute création.
       if (!projection && actuel.contratMaintenanceId) {
