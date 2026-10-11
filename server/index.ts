@@ -2356,17 +2356,18 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
     const id = paramId(req);
     const intervention = await prisma.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
-    if (!['A_PLANIFIER', 'PLANIFIEE'].includes(intervention.statut)) return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
+    if (['TERMINEE', 'ANNULEE'].includes(intervention.statut)) return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
     const { error, data, intervenantIds } = await validatePlanningEvent({ ...req.body, categorie: 'HORS_CHANTIER', titre: intervention.titre, client: intervention.client.raisonSociale });
     if (error) return res.status(400).json({ error });
     const event = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`);
       const actuel = await tx.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
       if (!actuel) throw new Error('INTERVENTION_HORS_PERIMETRE');
-      if (!['A_PLANIFIER', 'PLANIFIEE'].includes(actuel.statut)) throw new Error('INTERVENTION_NON_PLANIFIABLE');
-      // Conserver l'ordre intervention → contrat : le verrou du contrat sérialise
-      // ce placement avec suspension/réactivation, puis son statut est relu.
-      if (actuel.contratMaintenanceId) {
+      const projection = await tx.planningEvent.findUnique({ where: { interventionId: id }, select: { id: true } });
+      if (['TERMINEE', 'ANNULEE'].includes(actuel.statut) || (actuel.statut === 'EN_COURS' && !projection)) throw new Error('INTERVENTION_NON_PLANIFIABLE');
+      // Seulement au premier placement : ordre intervention → contrat pour sérialiser
+      // la suspension/réactivation, puis relire le statut avant toute création.
+      if (!projection && actuel.contratMaintenanceId) {
         await verrouillerContratMaintenance(tx, actuel.contratMaintenanceId);
         const contrat = await tx.contratMaintenance.findUniqueOrThrow({ where: { id: actuel.contratMaintenanceId }, select: { statut: true } });
         if (contrat.statut === 'SUSPENDU') throw new Error('CONTRAT_SUSPENDU');
@@ -2379,7 +2380,7 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
         include: PLANNING_EVENT_INCLUDE,
       });
       await synchroniserAffectationsIntervention(tx, id, intervenantIds!);
-      if (actuel.statut === 'A_PLANIFIER') {
+      if (!projection && actuel.statut === 'A_PLANIFIER') {
         const modifiee = await tx.intervention.update({ where: { id }, data: { statut: 'PLANIFIEE' }, include: { client: { select: { raisonSociale: true } } } });
         await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, actuel);
       }
@@ -3472,7 +3473,7 @@ app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlann
     if (existing.interventionId) {
       const autorisee = await prisma.intervention.findFirst({ where: { id: existing.interventionId, ...getInterventionFilterForUser(req.user!) }, select: { id: true, statut: true } });
       if (!autorisee) return res.status(404).json({ error: 'Affectation introuvable.' });
-      if (!['A_PLANIFIER', 'PLANIFIEE'].includes(autorisee.statut)) return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
+      if (['TERMINEE', 'ANNULEE'].includes(autorisee.statut)) return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
       if (['categorie', 'titre', 'client', 'chantierId', 'typeEventId', 'interventionId'].some(cle => cle in req.body)) {
         return res.status(400).json({ error: 'La projection liée conserve les données de son intervention.' });
       }
@@ -3497,6 +3498,20 @@ app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlann
     const { error, data, intervenantIds } = await validatePlanningEvent(merged);
     if (error) return res.status(400).json({ error });
     const event = await prisma.$transaction(async (tx) => {
+      if (existing.interventionId) {
+        await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" = ${existing.interventionId} FOR UPDATE`);
+        const autorisee = await tx.intervention.findFirst({ where: { id: existing.interventionId, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
+        if (!autorisee) throw new Error('INTERVENTION_HORS_PERIMETRE');
+        if (['TERMINEE', 'ANNULEE'].includes(autorisee.statut)) throw new Error('INTERVENTION_NON_PLANIFIABLE');
+        const projection = await tx.planningEvent.findUnique({ where: { id: existing.id }, select: { interventionId: true } });
+        if (projection?.interventionId !== autorisee.id) throw new Error('INTERVENTION_HORS_PERIMETRE');
+        // Les champs de source ne proviennent jamais du corps ni de l'ancienne projection.
+        data!.categorie = 'HORS_CHANTIER';
+        data!.titre = autorisee.titre;
+        data!.client = autorisee.client.raisonSociale;
+        data!.chantierId = null;
+        data!.typeEventId = null;
+      }
       const updated = await tx.planningEvent.update({
         where: { id: existing.id },
         data: { ...data, intervenants: { set: intervenantIds!.map((id) => ({ id })) } } as never,
@@ -3507,6 +3522,8 @@ app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlann
     });
     res.json(event);
   } catch (error) {
+    if ((error as Error).message === 'INTERVENTION_HORS_PERIMETRE') return res.status(404).json({ error: 'Affectation introuvable.' });
+    if ((error as Error).message === 'INTERVENTION_NON_PLANIFIABLE') return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
     res.status(500).json({ error: 'Error updating planning event' });
   }
 });
