@@ -2174,6 +2174,513 @@ if (!TEST_DATABASE_URL) {
       siteId = site.body.id;
     });
 
+    test('visite suspendue : absente de la file et PUT refusé sans mutation, puis éligible après réactivation', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const contrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: 'TEST Visite suspendue', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth);
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      const id = visite.body.id;
+      const queue = () => request(app).get('/api/planning/interventions-a-planifier').set(auth);
+      const changeStatut = statut => request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut, motif: `TEST transition ${statut}` });
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST Technicien visite suspendue', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const place = () => request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+      assert.equal((await queue()).body.some(item => item.id === id), true);
+      assert.equal((await changeStatut('SUSPENDU')).status, 200);
+      assert.equal((await queue()).body.some(item => item.id === id), false);
+      const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
+      const journalAvant = await prisma.journalSaisieChantier.count({ where: { interventionId: id } });
+      const refus = await place();
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.deepEqual(await prisma.intervention.findUniqueOrThrow({ where: { id } }), avant);
+      assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
+      assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: id } }), journalAvant);
+      assert.equal((await changeStatut('ACTIF')).status, 200);
+      assert.equal((await queue()).body.some(item => item.id === id), true);
+      const placee = await place();
+      assert.equal(placee.status, 200, JSON.stringify(placee.body));
+      assert.equal((await queue()).body.some(item => item.id === id), false);
+    });
+
+    test('clôture ACTIF ou SUSPENDU : visite déjà générée, même échue, absente de la file et PUT périmé sans effet', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST Technicien clôture visite', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      for (const statutInitial of ['ACTIF', 'SUSPENDU']) {
+        const contrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: `TEST Clôture ${statutInitial}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2026' });
+        assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+        const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth);
+        assert.equal(visite.status, 201, JSON.stringify(visite.body));
+        const id = visite.body.id;
+        assert.equal(visite.body.echeanceContrat.slice(0, 10), '2026-01-01');
+        const queue = () => request(app).get('/api/planning/interventions-a-planifier').set(auth);
+        if (statutInitial === 'SUSPENDU') {
+          const suspension = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut: 'SUSPENDU', motif: 'TEST suspension avant clôture' });
+          assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+        } else {
+          assert.equal((await queue()).body.some(item => item.id === id), true);
+        }
+        const cloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut: 'TERMINE', motif: 'TEST clôture avant placement' });
+        assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+        assert.equal((await queue()).body.some(item => item.id === id), false, `clôture depuis ${statutInitial}`);
+        const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
+        const journalAvant = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id } });
+        const refus = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2026-01-02', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /contrat clos/i);
+        assert.deepEqual(await prisma.intervention.findUniqueOrThrow({ where: { id } }), avant);
+        assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
+        assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0);
+        assert.deepEqual(await prisma.journalSaisieChantier.findMany({ where: { interventionId: id } }), journalAvant);
+        const reprise = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut: 'ACTIF', motif: 'TEST réouverture interdite' });
+        assert.equal(reprise.status, 409);
+        assert.equal((await queue()).body.some(item => item.id === id), false);
+      }
+    });
+
+    test('clôture après placement : la projection et les affectations existantes restent intactes', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const contrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: 'TEST Clôture projection existante', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth);
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST Technicien clôture placée', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const placement = await request(app).put(`/api/interventions/${visite.body.id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+      assert.equal(placement.status, 200, JSON.stringify(placement.body));
+      const avant = await prisma.intervention.findUniqueOrThrow({ where: { id: visite.body.id } });
+      const projection = await prisma.planningEvent.findUniqueOrThrow({ where: { interventionId: visite.body.id } });
+      const affectations = await prisma.interventionAffectation.findMany({ where: { interventionId: visite.body.id } });
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: visite.body.id }, orderBy: { id: 'asc' } });
+      const cloture = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut: 'TERMINE', motif: 'TEST clôture après placement' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      assert.deepEqual(await prisma.intervention.findUniqueOrThrow({ where: { id: visite.body.id } }), avant);
+      assert.deepEqual(await prisma.planningEvent.findUniqueOrThrow({ where: { interventionId: visite.body.id } }), projection);
+      assert.deepEqual(await prisma.interventionAffectation.findMany({ where: { interventionId: visite.body.id } }), affectations);
+      assert.deepEqual(await prisma.journalSaisieChantier.findMany({ where: { interventionId: visite.body.id }, orderBy: { id: 'asc' } }), journal);
+    });
+
+    test('suspension engagée pendant le PUT : relecture sous verrou et aucun placement', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const contrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: 'TEST Course suspension', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth);
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST Course suspension technicien', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      let liberer, pret;
+      const attente = new Promise(resolve => { liberer = resolve; });
+      const verrouPris = new Promise(resolve => { pret = resolve; });
+      const verrou = prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${contrat.body.id} FOR UPDATE`;
+        pret();
+        await attente;
+        // Simule la mutation de statut dans la transaction détentrice du verrou :
+        // le PUT avait déjà commencé et doit voir le nouveau statut à sa reprise.
+        await tx.contratMaintenance.update({ where: { id: contrat.body.id }, data: { statut: 'SUSPENDU' } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      let placement;
+      try {
+        placement = request(app).put(`/api/interventions/${visite.body.id}/planning`).set(auth)
+          .send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] }).then(result => result);
+        let bloque = false;
+        for (let tour = 0; tour < 150; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"ContratMaintenance"%FOR UPDATE%'`;
+          if (sessions.length) { bloque = true; break; }
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'le PUT doit attendre le verrou du contrat');
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const refus = await placement;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(await prisma.planningEvent.count({ where: { interventionId: visite.body.id } }), 0);
+      assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: visite.body.id } }), 0);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: visite.body.id } })).statut, 'A_PLANIFIER');
+    });
+
+    test('contrat ACTIF/SUSPENDU/TERMINE : premier placement seulement actif, déplacements PUT/PATCH conservés', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST matrice placement', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      for (const statutContrat of ['ACTIF', 'SUSPENDU', 'TERMINE']) {
+        const contrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: `TEST Matrice ${statutContrat}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+        assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+        const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth);
+        assert.equal(visite.status, 201, JSON.stringify(visite.body));
+        const id = visite.body.id;
+        const put = dateDebut => request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut, creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+        const placee = await put('2099-01-01');
+        assert.equal(placee.status, 200, JSON.stringify(placee.body));
+        if (statutContrat !== 'ACTIF') {
+          assert.equal((await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut: statutContrat, motif: 'TEST après placement' })).status, 200);
+          const autreContrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: `TEST Premier refus ${statutContrat}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+          assert.equal(autreContrat.status, 201);
+          const autreVisite = await request(app).post(`/api/contrats-maintenance/${autreContrat.body.id}/generer-intervention`).set(auth);
+          assert.equal(autreVisite.status, 201);
+          assert.equal((await request(app).patch(`/api/contrats-maintenance/${autreContrat.body.id}/statut`).set(auth).send({ statut: statutContrat, motif: 'TEST avant placement' })).status, 200);
+          const refus = await request(app).put(`/api/interventions/${autreVisite.body.id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+          assert.equal(refus.status, 409, JSON.stringify(refus.body));
+          assert.equal(await prisma.planningEvent.count({ where: { interventionId: autreVisite.body.id } }), 0);
+        }
+        const movedPut = await put('2099-01-02');
+        assert.equal(movedPut.status, 200, JSON.stringify(movedPut.body));
+        assert.equal(movedPut.body.id, placee.body.id);
+        const movedPatch = await request(app).patch(`/api/planning/events/${placee.body.id}`).set(auth).send({ dateDebut: '2099-01-03', dateFin: '2099-01-03' });
+        assert.equal(movedPatch.status, 200, JSON.stringify(movedPatch.body));
+        assert.equal((await prisma.planningEvent.findUniqueOrThrow({ where: { interventionId: id } })).dateDebut.toISOString().slice(0, 10), '2099-01-03');
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'PLANIFIEE');
+        const depart = await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: 'EN_COURS' });
+        assert.equal(depart.status, 200, JSON.stringify(depart.body));
+        assert.equal((await put('2099-01-04')).status, 200);
+        assert.equal((await request(app).patch(`/api/planning/events/${placee.body.id}`).set(auth).send({ dateDebut: '2099-01-05', dateFin: '2099-01-05' })).status, 200);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'EN_COURS');
+        assert.equal((await prisma.planningEvent.findUniqueOrThrow({ where: { interventionId: id } })).dateDebut.toISOString().slice(0, 10), '2099-01-05');
+      }
+    });
+
+    test('premier placement journalise sa propre transition avec instantanés et auteur', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const contrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: 'TEST Journal placement direct', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+      assert.equal(contrat.status, 201);
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth);
+      assert.equal(visite.status, 201);
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST journal placement', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const tracesAvant = await prisma.journalSaisieChantier.count({ where: { interventionId: visite.body.id, action: 'CHANGEMENT_STATUT' } });
+      assert.equal(tracesAvant, 0);
+      const placee = await request(app).put(`/api/interventions/${visite.body.id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+      assert.equal(placee.status, 200, JSON.stringify(placee.body));
+      const traces = await prisma.journalSaisieChantier.findMany({ where: { interventionId: visite.body.id, action: 'CHANGEMENT_STATUT' } });
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].avant.statut, 'A_PLANIFIER');
+      assert.equal(traces[0].apres.statut, 'PLANIFIEE');
+      assert.equal(traces[0].auteurId, jwt.verify(session, process.env.JWT_SECRET).id);
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { id: traces[0].auteurId } });
+      assert.equal(traces[0].auteurNom, auteur.name);
+    });
+
+    test('file #103 : seuls les dossiers contractuels non planifiés du périmètre sont proposés, placement journalisé sans doublon', async () => {
+      const auth = token => ({ Authorization: `Bearer ${token}` });
+      const contrat = await request(app).post('/api/contrats-maintenance').set(auth(session)).send({ clientId, siteId, titre: 'TEST File contrat', periodiciteMois: 12, dureePrevisionnelleMinutes: 105, dateDebut: '01-01-2099' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const generated = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth(session));
+      assert.equal(generated.status, 201, JSON.stringify(generated.body));
+      const id = generated.body.id;
+      const queue = () => request(app).get('/api/planning/interventions-a-planifier').set(auth(session));
+      const initial = await queue();
+      assert.equal(initial.status, 200, JSON.stringify(initial.body));
+      assert.deepEqual(initial.body.find(item => item.id === id) && {
+        reference: initial.body.find(item => item.id === id).reference,
+        client: initial.body.find(item => item.id === id).client.raisonSociale,
+        site: initial.body.find(item => item.id === id).site.nom,
+        duree: initial.body.find(item => item.id === id).dureePrevisionnelleMinutes,
+        echeance: initial.body.find(item => item.id === id).echeanceContrat,
+      }, { reference: generated.body.reference, client: 'TEST Client contrat maintenance', site: 'TEST Site maintenance', duree: 105, echeance: generated.body.echeanceContrat });
+      const manuel = await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: 'PLANIFIEE' });
+      assert.equal(manuel.status, 200, JSON.stringify(manuel.body));
+      assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
+      assert.equal((await queue()).body.some(item => item.id === id), true, 'la transition manuelle ne retire pas un dossier encore sans projection');
+      const tiers = await prisma.user.create({ data: { email: `file.tiers.${Date.now()}@iris.test`, name: 'TEST Tiers file', role: 'CONDUCTEUR_TRAVAUX' } });
+      assert.equal((await request(app).get('/api/planning/interventions-a-planifier').set(auth(jwt.sign({ id: tiers.id }, process.env.JWT_SECRET)))).body.some(item => item.id === id), false);
+      assert.equal((await request(app).get('/api/planning/interventions-a-planifier')).status, 401);
+      const technicien = await prisma.intervenant.create({ data: { nom: `TEST File technicien ${Date.now()}`, role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const place = body => request(app).put(`/api/interventions/${id}/planning`).set(auth(session)).send(body);
+      assert.equal((await place({ dateDebut: '2099-01-01', creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:45', intervenantIds: ['inconnu'] })).status, 400);
+      assert.equal((await queue()).body.some(item => item.id === id), true);
+      const payload = { dateDebut: '2099-01-01', creneau: 'HEURES', heureDebut: '09:00', heureFin: '11:00', intervenantIds: [technicien.id] };
+      const placed = await place(payload);
+      assert.equal(placed.status, 200, JSON.stringify(placed.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'PLANIFIEE');
+      assert.equal((await queue()).body.some(item => item.id === id), false);
+      const traces = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, action: 'CHANGEMENT_STATUT' } });
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].avant.statut, 'A_PLANIFIER');
+      assert.equal(traces[0].apres.statut, 'PLANIFIEE');
+      assert.equal(traces[0].auteurId, jwt.verify(session, process.env.JWT_SECRET).id);
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { id: traces[0].auteurId } });
+      assert.equal(traces[0].auteurNom, auteur.name);
+      const again = await place(payload);
+      assert.equal(again.status, 200, JSON.stringify(again.body));
+      assert.equal(again.body.id, placed.body.id);
+      assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 1);
+      const sqlProof = await prisma.$queryRaw`SELECT i."statut", count(DISTINCT p."id")::int AS projections, count(DISTINCT a."intervenantId")::int AS affectations FROM "Intervention" i JOIN "PlanningEvent" p ON p."interventionId" = i."id" LEFT JOIN "InterventionAffectation" a ON a."interventionId" = i."id" WHERE i."id" = ${id} GROUP BY i."statut"`;
+      assert.deepEqual(sqlProof, [{ statut: 'PLANIFIEE', projections: 1, affectations: 1 }]);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: id, action: 'CHANGEMENT_STATUT' } }), 1);
+      assert.equal((await request(app).put(`/api/interventions/${id}/planning`).set(auth(jwt.sign({ id: tiers.id }, process.env.JWT_SECRET))).send(payload)).status, 404);
+      const projectionUrl = `/api/planning/events/${placed.body.id}`;
+      const eventsTiers = await request(app).get('/api/planning/events?start=2099-01-01&end=2099-01-01').set(auth(jwt.sign({ id: tiers.id }, process.env.JWT_SECRET)));
+      assert.equal(eventsTiers.status, 200);
+      assert.equal(eventsTiers.body.some(event => event.interventionId === id), false);
+      assert.equal((await request(app).patch(projectionUrl).set(auth(jwt.sign({ id: tiers.id }, process.env.JWT_SECRET))).send({ intervenantIds: [] })).status, 404);
+      assert.equal((await request(app).patch(projectionUrl).set(auth(session)).send({ categorie: 'EVENEMENT' })).status, 400);
+      const projectionAvantTitre = await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id } });
+      const titreRefuse = await request(app).patch(projectionUrl).set(auth(session)).send({ titre: 'X' });
+      assert.equal(titreRefuse.status, 400, JSON.stringify(titreRefuse.body));
+      assert.deepEqual(await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id } }), projectionAvantTitre);
+      assert.equal((await request(app).patch(projectionUrl).set(auth(session)).send({ intervenantIds: ['inconnu'] })).status, 400);
+      assert.deepEqual((await prisma.interventionAffectation.findMany({ where: { interventionId: id }, select: { intervenantId: true } })).map(a => a.intervenantId), [technicien.id]);
+      const transition = await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: 'EN_COURS' });
+      assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      assert.equal((await place(payload)).status, 200);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'EN_COURS');
+      assert.equal((await queue()).body.some(item => item.id === id), false);
+    });
+
+    test('second passage EN_COURS sans projection : placement PUT et déplacement PATCH conservent le statut et synchronisent les affectations', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST Second passage', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      for (const source of ['hors contrat', 'contrat ACTIF']) {
+        let id;
+        if (source === 'hors contrat') {
+          const dossier = await request(app).post('/api/interventions').set(auth).send({ clientId, titre: 'TEST Second passage hors contrat' });
+          assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+          id = dossier.body.id;
+        } else {
+          const contrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: 'TEST Second passage contrat', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+          assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+          const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth);
+          assert.equal(visite.status, 201, JSON.stringify(visite.body));
+          id = visite.body.id;
+        }
+        assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: 'PLANIFIEE' })).status, 200);
+        assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: 'EN_COURS' })).status, 200);
+        assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
+        const placed = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+        assert.equal(placed.status, 200, `${source}: ${JSON.stringify(placed.body)}`);
+        assert.equal(placed.body.interventionId, id);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'EN_COURS');
+        assert.deepEqual((await prisma.interventionAffectation.findMany({ where: { interventionId: id }, select: { intervenantId: true } })).map(a => a.intervenantId), [technicien.id]);
+        const moved = await request(app).patch(`/api/planning/events/${placed.body.id}`).set(auth).send({ dateDebut: '2099-01-02', dateFin: '2099-01-02' });
+        assert.equal(moved.status, 200, JSON.stringify(moved.body));
+        assert.equal((await prisma.planningEvent.findUniqueOrThrow({ where: { interventionId: id } })).dateDebut.toISOString().slice(0, 10), '2099-01-02');
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'EN_COURS');
+        assert.deepEqual((await prisma.interventionAffectation.findMany({ where: { interventionId: id }, select: { intervenantId: true } })).map(a => a.intervenantId), [technicien.id]);
+      }
+    });
+
+    test('visite EN_COURS sans projection : contrat suspendu ou clos interdit le premier PUT sans effet', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST Second passage refus', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      for (const statut of ['SUSPENDU', 'TERMINE']) {
+        const contrat = await request(app).post('/api/contrats-maintenance').set(auth).send({ clientId, siteId, titre: `TEST Second passage ${statut}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+        assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+        const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(auth);
+        assert.equal(visite.status, 201, JSON.stringify(visite.body));
+        const id = visite.body.id;
+        for (const etape of ['PLANIFIEE', 'EN_COURS']) {
+          assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: etape })).status, 200);
+        }
+        assert.equal((await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut, motif: 'TEST premier passage refusé' })).status, 200);
+        const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
+        const journalAvant = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id } });
+        const refus = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.deepEqual(await prisma.intervention.findUniqueOrThrow({ where: { id } }), avant);
+        assert.deepEqual(await prisma.journalSaisieChantier.findMany({ where: { interventionId: id } }), journalAvant);
+        assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
+        assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0);
+      }
+    });
+
+    test('états terminaux sans projection : PUT interdit sans effet', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST Terminal sans projection', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      for (const statut of ['TERMINEE', 'ANNULEE']) {
+        const dossier = await request(app).post('/api/interventions').set(auth).send({ clientId, titre: `TEST Terminal sans projection ${statut}` });
+        assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+        const id = dossier.body.id;
+        const transitions = statut === 'TERMINEE' ? ['PLANIFIEE', 'EN_COURS', 'TERMINEE'] : ['ANNULEE'];
+        for (const etape of transitions) assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: etape })).status, 200);
+        const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
+        const refus = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.deepEqual(await prisma.intervention.findUniqueOrThrow({ where: { id } }), avant);
+        assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
+        assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0);
+      }
+    });
+
+    test('projection liée déplaçable EN_COURS, figée aux états terminaux, sans fuite de périmètre', async () => {
+      const auth = token => ({ Authorization: `Bearer ${token}` });
+      const conducteur = await prisma.user.create({ data: { email: `file.conducteur.${Date.now()}@iris.test`, name: 'TEST Conducteur projection', role: 'CONDUCTEUR_TRAVAUX' } });
+      const tiers = await prisma.user.create({ data: { email: `file.invisible.${Date.now()}@iris.test`, name: 'TEST Conducteur invisible', role: 'CONDUCTEUR_TRAVAUX' } });
+      const conducteurToken = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const tiersToken = jwt.sign({ id: tiers.id }, process.env.JWT_SECRET);
+      const premier = await prisma.intervenant.create({ data: { nom: 'TEST Projection premier', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const second = await prisma.intervenant.create({ data: { nom: 'TEST Projection second', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      for (const statut of ['EN_COURS', 'TERMINEE', 'ANNULEE']) {
+        const dossier = await request(app).post('/api/interventions').set(auth(conducteurToken)).send({ clientId, titre: `TEST Projection ${statut}` });
+        assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+        const id = dossier.body.id;
+        const placed = await request(app).put(`/api/interventions/${id}/planning`).set(auth(conducteurToken))
+          .send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [premier.id] });
+        assert.equal(placed.status, 200, JSON.stringify(placed.body));
+        const url = `/api/planning/events/${placed.body.id}`;
+        for (const next of statut === 'TERMINEE' ? ['EN_COURS', 'TERMINEE'] : [statut]) {
+          const transition = await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: next });
+          assert.equal(transition.status, 200, JSON.stringify(transition.body));
+        }
+        const avant = await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id }, include: { intervenants: { select: { id: true } } } });
+        const affectations = await prisma.interventionAffectation.findMany({ where: { interventionId: id }, select: { intervenantId: true } });
+        const mutation = { dateDebut: '2099-01-02', dateFin: '2099-01-02', intervenantIds: [second.id] };
+        assert.equal((await request(app).patch(url).set(auth(tiersToken)).send(mutation)).status, 404);
+        for (const token of [session, conducteurToken]) {
+          const resultat = await request(app).patch(url).set(auth(token)).send(mutation);
+          assert.equal(resultat.status, statut === 'EN_COURS' ? 200 : 409, JSON.stringify(resultat.body));
+        }
+        if (statut !== 'EN_COURS') {
+          const refusPut = await request(app).put(`/api/interventions/${id}/planning`).set(auth(session)).send({ dateDebut: '2099-01-03', creneau: 'JOURNEE', intervenantIds: [second.id] });
+          assert.equal(refusPut.status, 409, JSON.stringify(refusPut.body));
+        }
+        const apres = await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id }, include: { intervenants: { select: { id: true } } } });
+        if (statut === 'EN_COURS') {
+          assert.equal(apres.dateDebut.toISOString().slice(0, 10), '2099-01-02');
+          assert.deepEqual(apres.intervenants.map(i => i.id), [second.id]);
+          assert.deepEqual((await prisma.interventionAffectation.findMany({ where: { interventionId: id }, select: { intervenantId: true } })).map(a => a.intervenantId), [second.id]);
+        } else {
+          assert.deepEqual(apres, avant);
+          assert.deepEqual(await prisma.interventionAffectation.findMany({ where: { interventionId: id }, select: { intervenantId: true } }), affectations);
+        }
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, statut);
+      }
+    });
+
+    test('PUT attend le verrou puis rejette la transition terminale sans toucher projection ni affectations', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const dossier = await request(app).post('/api/interventions').set(auth).send({ clientId, titre: 'TEST PUT statut sous verrou' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      const id = dossier.body.id;
+      const premier = await prisma.intervenant.create({ data: { nom: 'TEST PUT verrou premier', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const second = await prisma.intervenant.create({ data: { nom: 'TEST PUT verrou second', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const placed = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [premier.id] });
+      assert.equal(placed.status, 200, JSON.stringify(placed.body));
+      const avant = await prisma.planningEvent.findUniqueOrThrow({ where: { interventionId: id }, include: { intervenants: { select: { id: true } } } });
+      const affectations = await prisma.interventionAffectation.findMany({ where: { interventionId: id } });
+      let liberer, pret;
+      const attente = new Promise(resolve => { liberer = resolve; });
+      const verrouPris = new Promise(resolve => { pret = resolve; });
+      const verrou = prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`;
+        pret();
+        await attente;
+        await tx.intervention.update({ where: { id }, data: { statut: 'TERMINEE' } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      let requete;
+      try {
+        requete = request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-02', creneau: 'JOURNEE', intervenantIds: [second.id] }).then(result => result);
+        let bloque = false;
+        for (let tour = 0; tour < 150; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+          if (sessions.length) { bloque = true; break; }
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'PUT doit attendre la mutation concurrente');
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const refus = await requete;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'TERMINEE');
+      assert.deepEqual(await prisma.planningEvent.findUniqueOrThrow({ where: { interventionId: id }, include: { intervenants: { select: { id: true } } } }), avant);
+      assert.deepEqual(await prisma.interventionAffectation.findMany({ where: { interventionId: id } }), affectations);
+    });
+
+    test('PATCH attend le verrou puis recontrôle statut et périmètre avant toute mutation', async () => {
+      const auth = token => ({ Authorization: `Bearer ${token}` });
+      const conducteur = await prisma.user.create({ data: { email: `file.patch.race.${Date.now()}@iris.test`, name: 'TEST Conducteur PATCH course', role: 'CONDUCTEUR_TRAVAUX' } });
+      const token = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier PATCH course', client: 'TEST Client contrat maintenance', clientId, dateDebut: new Date('2099-01-01'), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
+      const premier = await prisma.intervenant.create({ data: { nom: 'TEST PATCH verrou premier', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      const second = await prisma.intervenant.create({ data: { nom: 'TEST PATCH verrou second', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      for (const changement of ['statut', 'périmètre']) {
+        const dossier = await request(app).post('/api/interventions').set(auth(session)).send({ clientId, chantierId: chantier.id, titre: `TEST PATCH course ${changement}` });
+        assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+        const id = dossier.body.id;
+        const placed = await request(app).put(`/api/interventions/${id}/planning`).set(auth(session)).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [premier.id] });
+        assert.equal(placed.status, 200, JSON.stringify(placed.body));
+        const avant = await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id }, include: { intervenants: { select: { id: true } } } });
+        const affectations = await prisma.interventionAffectation.findMany({ where: { interventionId: id } });
+        let liberer, pret;
+        const attente = new Promise(resolve => { liberer = resolve; });
+        const verrouPris = new Promise(resolve => { pret = resolve; });
+        const verrou = prisma.$transaction(async tx => {
+          await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`;
+          pret();
+          await attente;
+          await tx.intervention.update({ where: { id }, data: { statut: 'TERMINEE' } });
+        }, { timeout: 15000 });
+        await verrouPris;
+        let requete;
+        try {
+          requete = request(app).patch(`/api/planning/events/${placed.body.id}`).set(auth(token))
+            .send({ dateDebut: '2099-01-02', dateFin: '2099-01-02', intervenantIds: [second.id] }).then(result => result);
+          let bloque = false;
+          for (let tour = 0; tour < 150; tour++) {
+            const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+            if (sessions.length) { bloque = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+          assert.equal(bloque, true, 'PATCH doit attendre le verrou après lecture autorisée');
+          if (changement === 'périmètre') await prisma.chantier.update({ where: { id: chantier.id }, data: { responsableId: null } });
+        } finally {
+          liberer();
+          await verrou;
+        }
+        const refus = await requete;
+        assert.equal(refus.status, changement === 'statut' ? 409 : 404, `${changement}: ${JSON.stringify(refus.body)}`);
+        assert.deepEqual(await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id }, include: { intervenants: { select: { id: true } } } }), avant);
+        assert.deepEqual(await prisma.interventionAffectation.findMany({ where: { interventionId: id } }), affectations);
+      }
+    });
+
+    test('PUT recontrôle le périmètre après verrouillage si le rattachement change pendant la requête', async () => {
+      const auth = token => ({ Authorization: `Bearer ${token}` });
+      const conducteur = await prisma.user.create({ data: { email: `file.race.${Date.now()}@iris.test`, name: 'TEST Conducteur course', role: 'CONDUCTEUR_TRAVAUX' } });
+      const token = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier course planning', client: 'TEST Client contrat maintenance', clientId, dateDebut: new Date('2099-01-01'), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
+      const dossier = await request(app).post('/api/interventions').set(auth(session)).send({ clientId, chantierId: chantier.id, titre: 'TEST Dossier course planning' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      const id = dossier.body.id;
+      const technicien = await prisma.intervenant.create({ data: { nom: 'TEST Technicien course', role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      assert.equal((await request(app).get('/api/interventions').set(auth(token))).body.some(item => item.id === id), true);
+      let liberer;
+      const attente = new Promise(resolve => { liberer = resolve; });
+      let verrouiller;
+      const pret = new Promise(resolve => { verrouiller = resolve; });
+      const verrou = prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`;
+        verrouiller();
+        await attente;
+      }, { timeout: 15000 });
+      await pret;
+      let requete;
+      try {
+        requete = request(app).put(`/api/interventions/${id}/planning`).set(auth(token))
+          .send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] }).then(result => result);
+        let bloque = false;
+        for (let tour = 0; tour < 150; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+          if (sessions.length) { bloque = true; break; }
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'le PUT doit être suspendu au verrou après sa première lecture autorisée');
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { responsableId: null } });
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const refus = await requete;
+      assert.equal(refus.status, 404, JSON.stringify(refus.body));
+      assert.equal((await request(app).get('/api/interventions').set(auth(token))).body.some(item => item.id === id), false);
+      assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'A_PLANIFIER');
+      const admin = await request(app).put(`/api/interventions/${id}/planning`).set(auth(session))
+        .send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
+      assert.equal(admin.status, 200, JSON.stringify(admin.body));
+    });
+
     test('crée un contrat actif rattaché à son client et son site', async () => {
       const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({
         clientId, siteId, titre: 'TEST Maintenance incendie', periodiciteMois: 6, dureePrevisionnelleMinutes: 120, dateDebut: '08-09-2026',
