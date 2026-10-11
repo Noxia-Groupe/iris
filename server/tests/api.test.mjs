@@ -217,7 +217,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
-      'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test',
+      'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
@@ -416,6 +416,101 @@ if (!TEST_DATABASE_URL) {
       assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
       assert.equal(fiche.body.prixVenteHt, 250);
     });
+  });
+
+  // Chaque scénario possède son commercial et son chantier : ni les autres coûts du
+  // harnais, ni un barème par défaut à zéro ne peuvent masquer une régression financière.
+  describe('Archivage Travaux : coûts, marge et commission éligible', () => {
+    for (const scenario of [
+      { nom: 'achat', chemin: '/api/achats', cible: 'ACHAT', cout: 120,
+        corps: (chantierId, categorieId, fournisseurId) => ({ chantierId, categorieId, fournisseurId, date: '2026-09-05', description: 'TEST achat financier', montantHT: 120 }) },
+      { nom: 'pointage', chemin: '/api/heures', cible: 'HEURE', cout: 80,
+        corps: (chantierId, _categorieId, _fournisseurId, intervenantId) => ({ chantierId, intervenantId, date: '2026-09-05', nbrHeures: 2 }) },
+    ]) {
+      test(`${scenario.nom} : avant, archive et restauration rétablissent marge et commission sans toucher au journal`, async () => {
+        const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+        assert.equal(login.status, 200);
+        const auth = { Authorization: `Bearer ${login.body.token}` };
+        const ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+        const anciennesRegles = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
+        try {
+          const activation = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true });
+          assert.equal(activation.status, 200);
+          const bareme = await request(app).put('/api/parametres/remuneration').set(auth).send({
+            baremeStandard: [{ plafond: null, taux: 10 }], baremeReduit: [], libelleBaremeReduit: 'Réduit',
+            objectifCaMensuel: 0, primeObjectifCa: 0, objectifMargeMensuel: 0,
+            primeObjectifMarge: 0, primeSuiviAdministratif: 0,
+          });
+          assert.equal(bareme.status, 200);
+          const commercial = await prisma.user.create({ data: {
+            email: `finances.archive.${scenario.nom}@iris.test`, name: `TEST Commercial ${scenario.nom}`, role: 'COMMERCIAL',
+          } });
+          const chantier = await prisma.chantier.create({ data: {
+            nom: `TEST Finances ${scenario.nom}`, client: 'TEST Client finances', dateDebut: new Date(),
+            budgetGlobalVendu: 1000, budgetMaterielVendu: 500, heuresVendues: 10, commercialId: commercial.id,
+          } });
+          const affectation = await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(auth).send({ commercialId: commercial.id });
+          assert.equal(affectation.status, 200, JSON.stringify(affectation.body));
+          const cloture = await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(auth).send({ statut: 'TERMINE' });
+          assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+          const encaisse = await request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(auth).send({ encaisse: true });
+          assert.equal(encaisse.status, 200, JSON.stringify(encaisse.body));
+          const ref = cloture.body.dateFin.slice(0, 7);
+          const categorie = await prisma.categorie.create({ data: { nom: `TEST Finances catégorie ${scenario.nom}` } });
+          const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Finances fournisseur ${scenario.nom}` } });
+          const intervenant = await prisma.intervenant.create({ data: { nom: `TEST Finances intervenant ${scenario.nom}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+          const creation = await request(app).post(scenario.chemin).set(auth)
+            .send(scenario.corps(chantier.id, categorie.id, fournisseur.id, intervenant.id));
+          assert.equal(creation.status, 200, JSON.stringify(creation.body));
+          const id = creation.body.id;
+          const verifier = async (cout, actif) => {
+            const detail = await request(app).get(`/api/chantiers/${chantier.id}`).set(auth);
+            assert.equal(detail.status, 200);
+            assert.equal(detail.body.metrics.materielReel, scenario.nom === 'achat' ? cout : 0);
+            assert.equal(detail.body.metrics.moReel, scenario.nom === 'pointage' ? cout : 0);
+            assert.equal(detail.body.metrics.heuresRealisees, scenario.nom === 'pointage' && actif ? 2 : 0);
+            assert.equal(detail.body.metrics.totalDepenses, cout);
+            assert.equal(detail.body.metrics.margeCommerciale, 1000 - cout);
+            assert.equal(detail.body[scenario.nom === 'achat' ? 'achats' : 'pointages'].some(ligne => ligne.id === id), actif);
+            const stats = await request(app).get('/api/stats/commerciaux').query({ period: 'month', ref }).set(auth);
+            assert.equal(stats.status, 200, JSON.stringify(stats.body));
+            const resultat = stats.body.commerciaux.find(ligne => ligne.id === commercial.id);
+            assert.ok(resultat, 'commercial isolé présent');
+            assert.equal(resultat.caTotal, 1000, 'affaire terminée et encaissée comptabilisée');
+            assert.equal(resultat.margeTotal, 1000 - cout);
+            assert.equal(resultat.commissionBareme, (1000 - cout) / 10);
+            assert.equal(resultat.commissionTotal, (1000 - cout) / 10);
+            const ligne = resultat.chantiers.find(c => c.id === chantier.id);
+            assert.equal(ligne.comptabiliseDansPeriode, true);
+            assert.equal(ligne.margeCommerciale, 1000 - cout);
+            assert.equal(ligne.commissionEstimee, (1000 - cout) / 10);
+          };
+          await verifier(scenario.cout, true);
+          const archive = await request(app).delete(`${scenario.chemin}/${id}`).set(auth).send({ motifArchivage: 'Saisie en double' });
+          assert.equal(archive.status, 200, JSON.stringify(archive.body));
+          await verifier(0, false);
+          const restauration = await request(app).post(`${scenario.chemin}/${id}/restaurer`).set(auth)
+            .send({ motifRestauration: 'Saisie vérifiée et rétablie' });
+          assert.equal(restauration.status, 200, JSON.stringify(restauration.body));
+          await verifier(scenario.cout, true);
+          const traces = await prisma.journalSaisieChantier.findMany({ where: { cible: scenario.cible, cibleId: id }, orderBy: { createdAt: 'asc' } });
+          assert.deepEqual(traces.map(t => t.action), ['CREATION', 'ARCHIVAGE', 'RESTAURATION']);
+          assert.equal(traces[1].motif, 'Saisie en double');
+          assert.equal(traces[2].motif, 'Saisie vérifiée et rétablie');
+          assert.ok(traces[1].apres.archivedAt);
+          assert.equal(traces[2].apres.archivedAt, null);
+        } finally {
+          if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: { margeCommercialeActive: ancienParametres.margeCommercialeActive } });
+          if (anciennesRegles) await prisma.parametresRemuneration.update({ where: { id: 'singleton' }, data: {
+            baremeStandard: anciennesRegles.baremeStandard, baremeReduit: anciennesRegles.baremeReduit,
+            libelleBaremeReduit: anciennesRegles.libelleBaremeReduit,
+            objectifCaMensuel: anciennesRegles.objectifCaMensuel, primeObjectifCa: anciennesRegles.primeObjectifCa,
+            objectifMargeMensuel: anciennesRegles.objectifMargeMensuel, primeObjectifMarge: anciennesRegles.primeObjectifMarge,
+            primeSuiviAdministratif: anciennesRegles.primeSuiviAdministratif,
+          } });
+        }
+      });
+    }
   });
 
   // Cœur de la correction : ces journaux renvoyaient TOUS les achats et TOUTES les heures
