@@ -12,6 +12,113 @@ function jetonPour(userId: string) {
 }
 
 test.describe('Facturation — parcours utilisateur', () => {
+  test('#105 : consulte la chaîne de l’affaire depuis la facture puis navigue vers la fiche affaire', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+    const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const client = await creerClient('origine-affaire');
+    const post = async (path: string, data: object) => {
+      const response = await request.post(`${api}${path}`, { headers, data });
+      expect(response.ok(), await response.text()).toBeTruthy();
+      return response.json();
+    };
+    const devis = await post('/devis', { clientId: client.id, objet: 'Chaîne affaire E2E', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+    const envoi = await request.put(`${api}/devis/${devis.id}/statut`, { headers, data: { statut: 'ENVOYE' } });
+    expect(envoi.ok(), await envoi.text()).toBeTruthy();
+    await post(`/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+    const chantier = await post(`/devis/${devis.id}/convertir`, { cible: 'CHANTIER' });
+    const intervention = await post('/interventions', { clientId: client.id, chantierId: chantier.id, titre: 'SAV lié #105' });
+    const interventionLiee = await post('/interventions', { clientId: client.id, chantierId: chantier.id, titre: 'SAV non facturé #105' });
+    await post('/factures', { clientId: client.id, origine: 'INTERVENTION', interventionId: intervention.id, dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'SAV', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+    const page = await allerSurPageAdmin('/factures');
+    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
+    await expect(page.getByRole('region', { name: 'Origine de la facture' })).toHaveCount(0);
+    await ligne.getByRole('button', { name: 'Voir l’origine' }).click();
+    const detail = page.getByRole('region', { name: 'Origine de la facture' });
+    await expect(detail).toContainText('Chaîne affaire E2E');
+    await expect(detail.locator('p').filter({ hasText: /^Affaire :/ })).toContainText(chantier.nom);
+    await expect(detail.locator('p').filter({ hasText: /^Affaire :/ })).toContainText(devis.numero);
+    await expect(detail).not.toContainText('Affaire rattachée à l’intervention');
+    await expect(detail).toContainText('SAV lié #105');
+    const listitems = detail.getByRole('listitem');
+    await expect(listitems).toHaveCount(2);
+    await expect(listitems.filter({ hasText: 'SAV non facturé #105' })).toContainText(interventionLiee.reference);
+    await expect(listitems.filter({ hasText: 'SAV lié #105' })).toContainText(intervention.reference);
+    await expect(detail).toContainText(client.raisonSociale);
+    await detail.getByRole('button', { name: 'Fermer' }).click();
+    await page.route('**/api/factures/*/tracabilite', async route => {
+      const response = await route.fetch();
+      const trace = await response.json();
+      await route.fulfill({ response, json: { ...trace, devis: null, devisAmbigu: true } });
+    });
+    await ligne.getByRole('button', { name: 'Voir l’origine' }).click();
+    await expect(detail.getByRole('alert')).toContainText('Plusieurs devis');
+    await expect(detail).not.toContainText('Aucun devis lié.');
+    await expect(detail.locator('p').filter({ hasText: /^Devis :/ })).not.toContainText(devis.numero);
+    await detail.getByRole('link', { name: /Voir l’affaire/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/chantiers/${chantier.id}$`));
+    await expect(page.getByRole('heading', { name: chantier.nom })).toBeVisible();
+  });
+
+  test('#105 : hors affaire, chargement, erreur et réponse périmée ne fabriquent pas d’affaire', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+    const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+    const client = await creerClient('origine-hors-affaire');
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const creer = async (motif: string) => {
+      const response = await request.post(`${api}/factures`, { headers, data: { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: motif, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] } });
+      expect(response.status(), await response.text()).toBe(201);
+      return (await response.json() as { id: string }).id;
+    };
+    const marqueur = Date.now();
+    const motifAncien = `Exception ancienne #105 ${marqueur}`;
+    const motifActuel = `Exception actuelle #105 ${marqueur}`;
+    const ancien = await creer(motifAncien);
+    const actuel = await creer(motifActuel);
+    const page = await allerSurPageAdmin('/factures');
+    let liberer!: () => void;
+    const attente = new Promise<void>(resolve => { liberer = resolve; });
+    await page.route(`**/api/factures/${ancien}/tracabilite`, async route => {
+      await attente;
+      await route.continue();
+    });
+    await page.locator('tbody tr', { hasText: motifAncien }).getByRole('button', { name: 'Voir l’origine' }).click();
+    const detail = page.getByRole('region', { name: 'Origine de la facture' });
+    await expect(detail).toContainText('Chargement');
+    await page.route(`**/api/factures/${actuel}/tracabilite`, async route => { await route.fulfill({ status: 503, json: { error: 'Lecture temporairement indisponible.' } }); });
+    await page.locator('tbody tr', { hasText: motifActuel }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await expect(detail).toContainText('Lecture temporairement indisponible.');
+    const ancienneLivree = page.waitForResponse(response => response.url().endsWith(`/api/factures/${ancien}/tracabilite`));
+    liberer();
+    const ancienneReponse = await ancienneLivree;
+    expect(ancienneReponse.ok()).toBeTruthy();
+    await ancienneReponse.finished();
+    await expect(detail.getByRole('alert')).toContainText('Lecture temporairement indisponible.');
+    await expect(detail).not.toContainText('Exception ancienne #105');
+    await page.unroute(`**/api/factures/${actuel}/tracabilite`);
+    await detail.getByRole('button', { name: 'Réessayer' }).click();
+    await expect(detail).toContainText('Exception actuelle #105');
+    await expect(detail).toContainText('Aucune affaire liée');
+    await expect(detail.getByRole('link', { name: /Voir l’affaire/ })).toHaveCount(0);
+
+    // Une erreur du premier chargement ne doit pas remplacer la trace du second.
+    let libererErreur!: () => void;
+    const attenteErreur = new Promise<void>(resolve => { libererErreur = resolve; });
+    await page.unroute(`**/api/factures/${ancien}/tracabilite`);
+    await page.route(`**/api/factures/${ancien}/tracabilite`, async route => {
+      await attenteErreur;
+      await route.fulfill({ status: 503, json: { error: 'Erreur ancienne #105' } });
+    });
+    await page.locator('tbody tr', { hasText: motifAncien }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await expect(detail).toContainText('Chargement');
+    await page.locator('tbody tr', { hasText: motifActuel }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await expect(detail).toContainText(motifActuel);
+    const erreurLivree = page.waitForResponse(response => response.url().endsWith(`/api/factures/${ancien}/tracabilite`) && response.status() === 503);
+    libererErreur();
+    const erreurReponse = await erreurLivree;
+    await erreurReponse.finished();
+    await expect(detail).toContainText(motifActuel);
+    await expect(detail).not.toContainText('Erreur ancienne #105');
+    await expect(detail.getByRole('alert')).toHaveCount(0);
+  });
   const hier = () => {
     const [jour, mois, annee] = dateDuJour().split('-').map(Number);
     const date = new Date(Date.UTC(annee, mois - 1, jour - 1));

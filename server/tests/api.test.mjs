@@ -3499,6 +3499,112 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.status, 409, JSON.stringify(facture.body));
     });
 
+    test('#106 : une facture issue d’une intervention verrouille le client de l’affaire et préserve sa trace', async () => {
+      const auth = `Bearer ${session}`;
+      const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST destination #106' } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST affaire #106', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01'), budgetGlobalVendu: 100 } });
+      const intervention = await prisma.intervention.create({ data: { reference: `TEST-106-${Date.now()}`, titre: 'TEST intervention facturée', clientId, chantierId: chantier.id } });
+      const facture = await request(app).post('/api/factures').set('Authorization', auth).send({ clientId, origine: 'INTERVENTION', interventionId: intervention.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST intervention #106', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      assert.equal(facture.body.chantierId, null, 'La facture ne doit pas être directement liée à l’affaire.');
+      const traceUrl = `/api/factures/${facture.body.id}/tracabilite`;
+      const avant = await request(app).get(traceUrl).set('Authorization', auth);
+      assert.equal(avant.status, 200, JSON.stringify(avant.body));
+      assert.equal(avant.body.facture.chantier.id, chantier.id);
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set('Authorization', auth).send({ clientId: 'client-inexistant' })).status, 404);
+      const refus = await request(app).patch(`/api/chantiers/${chantier.id}`).set('Authorization', auth).send({ clientId: autreClient.id, nom: 'Modification refusée' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /déjà facturée/);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).clientId, clientId);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).nom, chantier.nom);
+      const apres = await request(app).get(traceUrl).set('Authorization', auth);
+      assert.equal(apres.status, 200, JSON.stringify(apres.body));
+      assert.deepEqual(apres.body, avant.body, 'La trace et les rattachements ne changent pas après le refus.');
+    });
+
+    test('#105 : trace la chaîne devis → affaire → interventions selon l’origine de facture, sans fuite entre affaires ni clients', async () => {
+      const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST trace autre client' } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Affaire traçable', numeroDevis: 'TEST-D-105-AFFAIRE', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01'), budgetGlobalVendu: 100 } });
+      const autreChantier = await prisma.chantier.create({ data: { nom: 'TEST autre affaire', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01'), budgetGlobalVendu: 100 } });
+      const devis = await prisma.devis.create({ data: { dossierId: `TEST-105-${Date.now()}`, numero: chantier.numeroDevis, version: 1, clientId, objet: 'TEST devis origine', totalHt: 100, totalTva: 20, totalTtc: 120 } });
+      await prisma.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
+      const interventionZ = await prisma.intervention.create({ data: { reference: `TEST-105-Z-${Date.now()}`, titre: 'TEST Z liée', clientId, chantierId: chantier.id } });
+      const interventionA = await prisma.intervention.create({ data: { reference: `TEST-105-A-${Date.now()}`, titre: 'TEST A liée', clientId, chantierId: chantier.id } });
+      const interventions = [interventionZ, interventionA];
+      const etrangere = await prisma.intervention.create({ data: { reference: `TEST-105-X-${Date.now()}`, titre: 'TEST autre affaire', clientId, chantierId: autreChantier.id } });
+      const autreClientIntervention = await prisma.intervention.create({ data: { reference: `TEST-105-Y-${Date.now()}`, titre: 'TEST autre client', clientId: autreClient.id, chantierId: chantier.id } });
+      const creer = async (origine, rattachement) => {
+        const response = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine, ...rattachement, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST trace', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(response.status, 201, JSON.stringify(response.body));
+        return response.body.id;
+      };
+      for (const [origine, rattachement] of [['CHANTIER', { chantierId: chantier.id }], ['INTERVENTION', { interventionId: interventions[0].id }]]) {
+        const id = await creer(origine, rattachement);
+        const url = `/api/factures/${id}/tracabilite`;
+        assert.equal((await request(app).get(url)).status, 401);
+        const nonAdmin = await prisma.user.upsert({ where: { email: 'trace105.conducteur@iris.test' }, create: { email: 'trace105.conducteur@iris.test', name: 'TEST trace', role: 'CONDUCTEUR_TRAVAUX' }, update: {} });
+        assert.equal((await request(app).get(url).set('Authorization', `Bearer ${jwt.sign({ id: nonAdmin.id }, process.env.JWT_SECRET)}`)).status, 403);
+        const trace = await request(app).get(url).set('Authorization', `Bearer ${session}`);
+        assert.equal(trace.status, 200, JSON.stringify(trace.body));
+        assert.equal(trace.body.facture.client.id, clientId);
+        assert.equal(trace.body.facture.chantierId || trace.body.facture.intervention.chantierId, chantier.id);
+        assert.deepEqual(trace.body.facture.chantier, { id: chantier.id, nom: chantier.nom, numeroDevis: chantier.numeroDevis, statut: chantier.statut });
+        assert.equal(trace.body.devis.id, devis.id);
+        assert.equal(trace.body.devis.numero, trace.body.facture.chantier.numeroDevis);
+        assert.deepEqual(trace.body.interventionsLiees.map(item => item.id), [interventions[1].id, interventions[0].id]);
+        assert.ok(trace.body.interventionsLiees.every(item => item.clientId === clientId));
+        assert.ok(!trace.body.interventionsLiees.some(item => [etrangere.id, autreClientIntervention.id].includes(item.id)));
+      }
+      const factureIncoherente = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId: autreClient.id, origine: 'INTERVENTION', interventionId: autreClientIntervention.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST trace incohérente', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(factureIncoherente.status, 201, JSON.stringify(factureIncoherente.body));
+      const traceIncoherente = await request(app).get(`/api/factures/${factureIncoherente.body.id}/tracabilite`).set('Authorization', `Bearer ${session}`);
+      assert.equal(traceIncoherente.status, 200, JSON.stringify(traceIncoherente.body));
+      assert.equal(traceIncoherente.body.facture.chantier, null, 'Une affaire d’un autre client ne doit pas être proposée.');
+      assert.equal(traceIncoherente.body.devis, null);
+      assert.deepEqual(traceIncoherente.body.interventionsLiees, []);
+    });
+
+    test('#105 : une conversion étrangère ne fournit pas de devis à une affaire valide', async () => {
+      const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST devis étranger #105' } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST affaire sans devis client', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01'), budgetGlobalVendu: 100 } });
+      const devis = await prisma.devis.create({ data: { dossierId: `TEST-105-foreign-${Date.now()}`, numero: 'TEST-D-105-ETRANGER', version: 1, clientId: autreClient.id, objet: 'TEST devis étranger', totalHt: 100, totalTva: 20, totalTtc: 120 } });
+      await prisma.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CHANTIER', chantierId: chantier.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST étranger', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      const trace = await request(app).get(`/api/factures/${facture.body.id}/tracabilite`).set('Authorization', `Bearer ${session}`);
+      assert.equal(trace.status, 200, JSON.stringify(trace.body));
+      assert.equal(trace.body.facture.chantier.id, chantier.id);
+      assert.equal(trace.body.devis, null);
+    });
+
+    test('#105 : plusieurs conversions du même client vers une affaire sont ambiguës, sans devis arbitraire', async () => {
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST affaire ambiguë', client: 'TEST Client', clientId, dateDebut: new Date('2026-09-01'), budgetGlobalVendu: 100 } });
+      for (const suffixe of ['A', 'B']) {
+        const devis = await prisma.devis.create({ data: { dossierId: `TEST-105-duplicate-${suffixe}-${Date.now()}`, numero: `TEST-D-105-${suffixe}`, version: 1, clientId, objet: `TEST doublon ${suffixe}`, totalHt: 100, totalTva: 20, totalTtc: 120 } });
+        await prisma.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
+      }
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CHANTIER', chantierId: chantier.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST ambigu', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      const trace = await request(app).get(`/api/factures/${facture.body.id}/tracabilite`).set('Authorization', `Bearer ${session}`);
+      assert.equal(trace.status, 200, JSON.stringify(trace.body));
+      assert.equal(trace.body.facture.chantier.id, chantier.id);
+      assert.equal(trace.body.devis, null);
+      assert.equal(trace.body.devisAmbigu, true);
+    });
+
+    test('#105 : un contrat seul ne fabrique ni affaire ni interventions liées', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST contrat seul #105', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '08-09-2026' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CONTRAT', contratMaintenanceId: contrat.body.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST contrat #105', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      const trace = await request(app).get(`/api/factures/${facture.body.id}/tracabilite`).set('Authorization', `Bearer ${session}`);
+      assert.equal(trace.status, 200, JSON.stringify(trace.body));
+      assert.equal(trace.body.facture.contratMaintenance.id, contrat.body.id);
+      assert.equal(trace.body.facture.chantier, null);
+      assert.equal(trace.body.devis, null);
+      assert.deepEqual(trace.body.interventionsLiees, []);
+    });
+
     test('expose la traçabilité d’une facture hors affaire motivée', async () => {
       const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Refacturation de frais', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST frais', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(facture.status, 201, JSON.stringify(facture.body));
@@ -3506,6 +3612,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal(trace.status, 200, JSON.stringify(trace.body));
       assert.equal(trace.body.facture.origine, 'HORS_AFFAIRE');
       assert.equal(trace.body.facture.motifHorsAffaire, 'Refacturation de frais');
+      assert.equal(trace.body.devis, null);
+      assert.deepEqual(trace.body.interventionsLiees, []);
+      assert.equal(trace.body.facture.chantier, null);
+      assert.equal(trace.body.facture.intervention, null);
     });
 
     test('crée une facture brouillon avec des lignes fiscales figées', async () => {

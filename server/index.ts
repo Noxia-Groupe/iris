@@ -938,9 +938,15 @@ app.get('/api/factures/:id/tracabilite', requireAuth, requireAdmin, async (req, 
       contratMaintenance: { select: { id: true, titre: true, siteId: true } },
     } });
     if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
-    const chantierId = facture.chantierId || facture.intervention?.chantierId || null;
-    const devis = chantierId ? await prisma.devisConversion.findFirst({ where: { cibleType: 'CHANTIER', cibleId: chantierId }, include: { devis: { select: { id: true, numero: true, objet: true } } } }) : null;
-    res.json(decimalToNumber({ facture, devis: devis?.devis || null }));
+    const chantierId = facture.origine === 'CHANTIER' ? facture.chantierId
+      : facture.origine === 'INTERVENTION' ? facture.intervention?.chantierId : null;
+    // La facture détermine l'affaire ; valider le client avant de suivre ses relations.
+    const affaire = chantierId ? await prisma.chantier.findFirst({ where: { id: chantierId, clientId: facture.clientId }, select: { id: true, nom: true, numeroDevis: true, statut: true } }) : null;
+    const [conversions, interventionsLiees] = affaire ? await Promise.all([
+      prisma.devisConversion.findMany({ where: { cibleType: 'CHANTIER', cibleId: affaire.id, devis: { clientId: facture.clientId } }, orderBy: { id: 'asc' }, take: 2, include: { devis: { select: { id: true, numero: true, objet: true } } } }),
+      prisma.intervention.findMany({ where: { chantierId: affaire.id, clientId: facture.clientId }, select: { id: true, reference: true, titre: true, clientId: true, chantierId: true, statut: true }, orderBy: [{ reference: 'asc' }, { id: 'asc' }] }),
+    ]) : [[], []];
+    res.json(decimalToNumber({ facture: { ...facture, chantier: affaire }, devis: conversions.length === 1 ? conversions[0].devis : null, devisAmbigu: conversions.length > 1, interventionsLiees }));
   } catch { res.status(500).json({ error: 'Lecture de la traçabilité impossible.' }); }
 });
 
@@ -2767,7 +2773,10 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
       const cibleId = String(req.body.clientId || '');
       const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true } });
       if (!cible) return res.status(404).json({ error: 'Client introuvable.' });
-      if (existant.clientId !== cibleId && await prisma.facture.count({ where: { chantierId: existant.id } })) {
+      if (existant.clientId !== cibleId && await prisma.facture.count({ where: { OR: [
+        { chantierId: existant.id },
+        { intervention: { is: { chantierId: existant.id } } },
+      ] } })) {
         return res.status(409).json({ error: 'Une affaire déjà facturée ne change pas de client.' });
       }
       data.clientId = cibleId;
