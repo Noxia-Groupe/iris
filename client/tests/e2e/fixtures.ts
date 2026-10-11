@@ -55,7 +55,10 @@ async function preparerFacturation(request: APIRequestContext, token: string) {
 }
 
 async function creerClient(request: APIRequestContext, token: string, libelle: string, avecSite: boolean) {
-  const raisonSociale = `E2E ${libelle} ${Date.now()}`;
+  // /clients renvoie au plus 200 entrées triées par raison sociale : placer les
+  // nouvelles fixtures en tête pour que les sélecteurs et contacts les voient même
+  // lorsque cette base jetable a déjà servi à plusieurs exécutions E2E.
+  const raisonSociale = `E2E 0${String(9_999_999_999_999 - Date.now())} ${libelle}`;
   const response = await request.post(`${api}/clients`, { headers: headers(token), data: { raisonSociale } });
   expect(response.status(), await response.text()).toBe(201);
   const { id } = await response.json() as { id: string };

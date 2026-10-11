@@ -72,6 +72,7 @@ export default function Factures() {
   const [interventions, setInterventions] = useState<Source[]>([]);
   const [contrats, setContrats] = useState<Source[]>([]);
   const [erreur, setErreur] = useState('');
+  const [erreurListe, setErreurListe] = useState('');
   const [succes, setSucces] = useState('');
   const [ouvert, setOuvert] = useState(false);
   const [origine, setOrigine] = useState<Origine>('HORS_AFFAIRE');
@@ -112,6 +113,7 @@ export default function Factures() {
 
   const charger = async (pageDemandee = pageCourante.current) => {
     const requete = ++requeteListe.current;
+    setErreurListe('');
     setChargement(true);
     try {
       const chemins = {
@@ -137,7 +139,6 @@ export default function Factures() {
       }
       setFactures(facturesData.items);
       setTotal(facturesData.total);
-      setErreur('');
       setChargement(false);
       setClients(clientsData.clients || clientsData || []);
       setChantiers(Array.isArray(chantiersData) ? chantiersData : []);
@@ -148,7 +149,7 @@ export default function Factures() {
     } catch (e) {
       if (requete === requeteListe.current) {
         setChargement(false);
-        setErreur(e instanceof Error ? e.message : 'Chargement impossible.');
+        setErreurListe(e instanceof Error ? e.message : 'Chargement impossible.');
       }
     }
   };
@@ -158,7 +159,6 @@ export default function Factures() {
     pageCourante.current = nouvellePage;
     setPage(nouvellePage);
     setFactures([]);
-    setErreur('');
     fermerTrace();
     setFactureAvoir(null);
     void charger(nouvellePage);
@@ -259,7 +259,7 @@ export default function Factures() {
     const data = await res.json();
     if (!res.ok) return setErreur(data.error || 'Création impossible.');
     setOuvert(false);
-    setSucces('Brouillon créé : il ne porte aucun numéro tant qu’il n’est pas émis.');
+    setSucces('Brouillon créé : il ne porte aucun numéro tant qu’il n’est pas émis. La liste est triée par date d’émission décroissante : si le brouillon n’apparaît pas en page 1, parcourez les pages suivantes.');
     pageCourante.current = 1;
     setPage(1);
     setFactures([]);
@@ -347,6 +347,7 @@ export default function Factures() {
       </div>
 
       {erreur && <p className="text-red-600">{erreur}</p>}
+      {erreurListe && <p className="text-red-600">{erreurListe}</p>}
       <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
       {succes && <p className="text-emerald-700">{succes}</p>}
 
@@ -484,7 +485,7 @@ export default function Factures() {
               </tr>
             ))}
             {chargement && !factures.length && <tr><td colSpan={7} role="status" className="p-5 text-center text-gray-500">Chargement des factures…</td></tr>}
-            {!chargement && !factures.length && <tr><td colSpan={7} className="p-5 text-center text-gray-500">{erreur ? 'Factures indisponibles. Réessayez avec Actualiser.' : 'Aucune facture.'}</td></tr>}
+            {!chargement && !factures.length && <tr><td colSpan={7} className="p-5 text-center text-gray-500">{erreurListe ? 'Factures indisponibles. Réessayez avec Actualiser.' : 'Aucune facture.'}</td></tr>}
           </tbody>
         </table>
       </div>
