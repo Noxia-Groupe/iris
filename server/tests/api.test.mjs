@@ -217,7 +217,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.categorie.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
-      'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test',
+      'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
@@ -445,9 +445,13 @@ if (!TEST_DATABASE_URL) {
           const commercial = await prisma.user.create({ data: {
             email: `finances.archive.${scenario.nom}@iris.test`, name: `TEST Commercial ${scenario.nom}`, role: 'COMMERCIAL',
           } });
+          const conducteur = scenario.nom === 'pointage' ? await prisma.user.create({ data: {
+            email: `finances.archive.conducteur.${scenario.nom}@iris.test`, name: `TEST Conducteur ${scenario.nom}`, role: 'CONDUCTEUR_TRAVAUX',
+          } }) : null;
           const chantier = await prisma.chantier.create({ data: {
             nom: `TEST Finances ${scenario.nom}`, client: 'TEST Client finances', dateDebut: new Date(),
             budgetGlobalVendu: 1000, budgetMaterielVendu: 500, heuresVendues: 10, commercialId: commercial.id,
+            responsableId: conducteur?.id,
           } });
           const affectation = await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(auth).send({ commercialId: commercial.id });
           assert.equal(affectation.status, 200, JSON.stringify(affectation.body));
@@ -459,6 +463,17 @@ if (!TEST_DATABASE_URL) {
           const categorie = await prisma.categorie.create({ data: { nom: `TEST Finances catégorie ${scenario.nom}` } });
           const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Finances fournisseur ${scenario.nom}` } });
           const intervenant = await prisma.intervenant.create({ data: { nom: `TEST Finances intervenant ${scenario.nom}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+          // Le global n'expose pas les relations : épingler son total de période avec
+          // le rôle qui y a accès (admin pour achats, conducteur pour heures).
+          const authGlobal = conducteur
+            ? { Authorization: `Bearer ${jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET)}` }
+            : auth;
+          const global = () => request(app).get('/api/stats/global')
+            .query({ period: 'month', ref: '2026-09-05' }).set(authGlobal);
+          const totalGlobal = scenario.nom === 'achat' ? 'achatsTotal' : 'heuresTotal';
+          const avantGlobal = await global();
+          assert.equal(avantGlobal.status, 200, JSON.stringify(avantGlobal.body));
+          assert.equal(typeof avantGlobal.body[totalGlobal], 'number');
           const creation = await request(app).post(scenario.chemin).set(auth)
             .send(scenario.corps(chantier.id, categorie.id, fournisseur.id, intervenant.id));
           assert.equal(creation.status, 200, JSON.stringify(creation.body));
@@ -472,6 +487,22 @@ if (!TEST_DATABASE_URL) {
             assert.equal(detail.body.metrics.totalDepenses, cout);
             assert.equal(detail.body.metrics.margeCommerciale, 1000 - cout);
             assert.equal(detail.body[scenario.nom === 'achat' ? 'achats' : 'pointages'].some(ligne => ligne.id === id), actif);
+            const liste = await request(app).get('/api/chantiers').set(auth);
+            assert.equal(liste.status, 200, JSON.stringify(liste.body));
+            const chantierListe = liste.body.find(ligne => ligne.id === chantier.id);
+            assert.ok(chantierListe, 'chantier isolé présent dans la liste');
+            assert.equal(chantierListe[scenario.nom === 'achat' ? 'achats' : 'pointages'].some(ligne => ligne.id === id), actif,
+              `${scenario.nom} : relation de la liste exclut les archives`);
+            assert.equal(chantierListe.metrics.materielReel, scenario.nom === 'achat' ? cout : 0);
+            assert.equal(chantierListe.metrics.moReel, scenario.nom === 'pointage' ? cout : 0);
+            assert.equal(chantierListe.metrics.heuresRealisees, scenario.nom === 'pointage' && actif ? 2 : 0);
+            assert.equal(chantierListe.metrics.totalDepenses, cout);
+            assert.equal(chantierListe.metrics.margeCommerciale, 1000 - cout);
+            const statsGlobal = await global();
+            assert.equal(statsGlobal.status, 200, JSON.stringify(statsGlobal.body));
+            assert.equal(statsGlobal.body[totalGlobal], avantGlobal.body[totalGlobal]
+              + (actif ? scenario.nom === 'achat' ? scenario.cout : 2 : 0),
+              `${scenario.nom} : total global de période n'inclut que les saisies actives`);
             const stats = await request(app).get('/api/stats/commerciaux').query({ period: 'month', ref }).set(auth);
             assert.equal(stats.status, 200, JSON.stringify(stats.body));
             const resultat = stats.body.commerciaux.find(ligne => ligne.id === commercial.id);
