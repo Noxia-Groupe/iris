@@ -59,6 +59,13 @@ const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoi
 
 export default function Factures() {
   const [factures, setFactures] = useState<Facture[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [chargement, setChargement] = useState(false);
+  const pageCourante = useRef(1);
+  const requeteListe = useRef(0);
+  const taillePage = 25;
+  const nombrePages = Math.max(1, Math.ceil(total / taillePage));
   const [derniereDateEmission, setDerniereDateEmission] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [chantiers, setChantiers] = useState<Source[]>([]);
@@ -103,10 +110,12 @@ export default function Factures() {
     setTrace(null);
   };
 
-  const charger = async () => {
+  const charger = async (pageDemandee = pageCourante.current) => {
+    const requete = ++requeteListe.current;
+    setChargement(true);
     try {
       const chemins = {
-        factures: '/factures', clients: '/clients', chantiers: '/chantiers',
+        factures: `/factures?page=${pageDemandee}&pageSize=${taillePage}`, clients: '/clients', chantiers: '/chantiers',
         interventions: '/interventions', contrats: '/contrats-maintenance',
         societe: '/company', chronologie: '/factures/chronologie',
       };
@@ -116,12 +125,20 @@ export default function Factures() {
         if (!reponse.ok) throw new Error(donnee?.error || 'Chargement impossible.');
         return [cle, donnee];
       }));
+      if (requete !== requeteListe.current) return;
       const {
         factures: facturesData, clients: clientsData, chantiers: chantiersData,
         interventions: interventionsData, contrats: contratsData, societe: societeData,
         chronologie: chronologieData,
       } = Object.fromEntries(entrees);
-      setFactures(Array.isArray(facturesData) ? facturesData : []);
+      if (pageDemandee > 1 && facturesData.total <= (pageDemandee - 1) * taillePage) {
+        changerPage(Math.max(1, Math.ceil(facturesData.total / taillePage)));
+        return;
+      }
+      setFactures(facturesData.items);
+      setTotal(facturesData.total);
+      setErreur('');
+      setChargement(false);
       setClients(clientsData.clients || clientsData || []);
       setChantiers(Array.isArray(chantiersData) ? chantiersData : []);
       setInterventions(Array.isArray(interventionsData) ? interventionsData : []);
@@ -129,11 +146,25 @@ export default function Factures() {
       setFuseauHoraire(societeData?.fuseauHoraire || 'Europe/Paris');
       setDerniereDateEmission(chronologieData.derniereDateEmission);
     } catch (e) {
-      setErreur(e instanceof Error ? e.message : 'Chargement impossible.');
+      if (requete === requeteListe.current) {
+        setChargement(false);
+        setErreur(e instanceof Error ? e.message : 'Chargement impossible.');
+      }
     }
   };
 
-  useEffect(() => { void charger(); }, []);
+  const changerPage = (nouvellePage: number) => {
+    if (nouvellePage === pageCourante.current) return;
+    pageCourante.current = nouvellePage;
+    setPage(nouvellePage);
+    setFactures([]);
+    setErreur('');
+    fermerTrace();
+    setFactureAvoir(null);
+    void charger(nouvellePage);
+  };
+
+  useEffect(() => { void charger(); return () => { requeteListe.current += 1; }; }, []);
 
   const ouvrirFormulaire = () => {
     setErreur('');
@@ -229,7 +260,11 @@ export default function Factures() {
     if (!res.ok) return setErreur(data.error || 'Création impossible.');
     setOuvert(false);
     setSucces('Brouillon créé : il ne porte aucun numéro tant qu’il n’est pas émis.');
-    await charger();
+    pageCourante.current = 1;
+    setPage(1);
+    setFactures([]);
+    fermerTrace();
+    await charger(1);
   };
 
   const emettre = async (facture: Facture) => {
@@ -448,10 +483,16 @@ export default function Factures() {
                 </div></td>
               </tr>
             ))}
-            {!factures.length && <tr><td colSpan={7} className="p-5 text-center text-gray-500">Aucune facture.</td></tr>}
+            {chargement && !factures.length && <tr><td colSpan={7} role="status" className="p-5 text-center text-gray-500">Chargement des factures…</td></tr>}
+            {!chargement && !factures.length && <tr><td colSpan={7} className="p-5 text-center text-gray-500">{erreur ? 'Factures indisponibles. Réessayez avec Actualiser.' : 'Aucune facture.'}</td></tr>}
           </tbody>
         </table>
       </div>
+      <nav data-testid="pagination-factures" aria-label="Pagination des factures" className="flex items-center justify-between gap-3 text-sm">
+        <button type="button" className="btn btn-secondary" disabled={page <= 1} onClick={() => changerPage(page - 1)}>Page précédente</button>
+        <span>Page {page} sur {nombrePages} — {total} document(s)</span>
+        <button type="button" className="btn btn-secondary" disabled={page >= nombrePages} onClick={() => changerPage(page + 1)}>Page suivante</button>
+      </nav>
       {factureTraceId && (
         <section id="origine-facture" role="region" aria-label="Origine de la facture" className="rounded-xl border bg-white p-5 space-y-3">
           <div className="flex items-center justify-between gap-3">

@@ -12,6 +12,16 @@ function jetonPour(userId: string) {
 }
 
 test.describe('Facturation — parcours utilisateur', () => {
+  const afficherFacture = async (page: Page, raisonSociale: string) => {
+    const ligne = page.locator('tbody tr', { hasText: raisonSociale });
+    while (!(await ligne.count())) {
+      const suivante = page.getByRole('button', { name: 'Page suivante' });
+      expect(await suivante.isEnabled(), `facture ${raisonSociale} absente de la pagination`).toBeTruthy();
+      await suivante.click();
+      await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    }
+    return ligne;
+  };
   test('#105 : consulte la chaîne de l’affaire depuis la facture puis navigue vers la fiche affaire', async ({ allerSurPageAdmin, creerClient, request, session }) => {
     const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
     const headers = { Authorization: `Bearer ${session.token}` };
@@ -141,13 +151,13 @@ test.describe('Facturation — parcours utilisateur', () => {
     const nouveauId = await brouillonChronologie(request, session.token, nouveau.id, dateDuJour());
     await page.route('**/api/factures/chronologie', async route => {
       await route.fulfill({ json: { derniereDateEmission: null } });
-      await page.unroute('**/api/factures/chronologie');
     });
     await allerSurPageAdmin('/factures');
-    const ligne = page.locator('tbody tr', { hasText: ancien.raisonSociale });
+    const ligne = await afficherFacture(page, ancien.raisonSociale);
     await expect(ligne.getByRole('button', { name: 'Émettre' })).toBeEnabled();
     const emission = await request.post(`${apiChronologie}/factures/${nouveauId}/emettre`, { headers: { Authorization: `Bearer ${session.token}` } });
     expect(emission.status(), await emission.text()).toBe(200);
+    await page.unroute('**/api/factures/chronologie');
     const refus = page.waitForResponse(response => response.url().endsWith(`/factures/${ancienId}/emettre`));
     await ligne.getByRole('button', { name: 'Émettre' }).click();
     expect((await refus).status()).toBe(409);
@@ -164,10 +174,14 @@ test.describe('Facturation — parcours utilisateur', () => {
     await brouillonChronologie(request, session.token, egal.id, dateDuJour());
     const page = await allerSurPageAdmin('/factures');
     await expect(page.getByTestId('derniere-date-facture')).toContainText(dateDuJour());
-    const ligneAncienne = page.locator('tbody tr', { hasText: ancien.raisonSociale });
+    const ligneAncienne = await afficherFacture(page, ancien.raisonSociale);
     await expect(ligneAncienne.getByRole('button', { name: /Émission impossible/ })).toBeDisabled();
     await expect(ligneAncienne).toContainText(dateDuJour());
-    await expect(page.locator('tbody tr', { hasText: egal.raisonSociale }).getByRole('button', { name: 'Émettre' })).toBeEnabled();
+    while (await page.getByRole('button', { name: 'Page précédente' }).isEnabled()) {
+      await page.getByRole('button', { name: 'Page précédente' }).click();
+      await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    }
+    await expect((await afficherFacture(page, egal.raisonSociale)).getByRole('button', { name: 'Émettre' })).toBeEnabled();
   });
 
   // Prépare une facture émise hors affaire et rend sa ligne de tableau.

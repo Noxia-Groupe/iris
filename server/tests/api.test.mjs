@@ -25,7 +25,7 @@ if (!TEST_DATABASE_URL) {
   process.env.SUPERADMIN_EMAILS = 'secours@iris.test';
 
   const request = (await import('supertest')).default;
-  const { app, initDb, ensureSuperAdmins, jourCivilEntreprise } = await import('../dist/index.js');
+  const { app, initDb, ensureSuperAdmins, jourCivilEntreprise, prisma: appPrisma } = await import('../dist/index.js');
   const { PrismaClient } = await import('@prisma/client');
   const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
@@ -4589,6 +4589,78 @@ if (!TEST_DATABASE_URL) {
       const reponses = await Promise.all([envoyer('Premier'), envoyer('Second')]);
       assert.deepEqual(reponses.map(reponse => reponse.status).sort(), [201, 409], reponses.map(reponse => JSON.stringify(reponse.body)).join(' / '));
       assert.equal(await prisma.compteComptable.count({ where: { code: '899992' } }), 1);
+    });
+
+    test('pagination #109 : count et lignes lisent le même instant malgré une insertion concurrente', async () => {
+      const avant = await prisma.facture.count();
+      const transaction = appPrisma.$transaction.bind(appPrisma);
+      let inseree;
+      let observee = false;
+      appPrisma.$transaction = (operation, options) => transaction(async tx => {
+        const facture = new Proxy(tx.facture, { get(cible, methode) {
+          if (methode !== 'count') return cible[methode];
+          return async (...args) => {
+            const total = await cible.count(...args);
+            inseree = await prisma.facture.create({ data: {
+              clientId, clientRaisonSociale: 'TEST concurrent #109', origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST concurrent #109',
+              dateEmission: new Date('2026-09-08T00:00:00Z'), dateEcheance: new Date('2026-10-08T00:00:00Z'),
+              totalHt: 10, totalTva: 2, totalTtc: 12,
+            } });
+            observee = true;
+            return total;
+          };
+        } });
+        return operation(new Proxy(tx, { get(cible, propriete) { return propriete === 'facture' ? facture : cible[propriete]; } }));
+      }, options);
+      try {
+        const reponse = await request(app).get('/api/factures?page=1&pageSize=100').set('Authorization', `Bearer ${session}`);
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+        assert.equal(observee, true, 'la lecture paginée doit utiliser la transaction');
+        assert.equal(reponse.body.total, avant);
+        assert.ok(!reponse.body.items.some(item => item.id === inseree.id));
+        assert.equal(await prisma.facture.count(), avant + 1);
+      } finally {
+        appPrisma.$transaction = transaction;
+        if (inseree) await prisma.facture.delete({ where: { id: inseree.id } });
+      }
+    });
+
+    test('pagination #109 : contrat legacy, bornes, accès et ordre total stable', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const creer = async motif => {
+        const reponse = await request(app).post('/api/factures').set(auth).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: motif, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(reponse.status, 201);
+        return reponse.body.id;
+      };
+      const ids = await Promise.all(['TEST pagination A', 'TEST pagination B', 'TEST pagination C'].map(creer));
+      const memeInstant = new Date('2026-09-08T12:00:00Z');
+      await prisma.facture.updateMany({ where: { id: { in: ids } }, data: { createdAt: memeInstant } });
+      const legacy = await request(app).get('/api/factures').set(auth);
+      assert.equal(legacy.status, 200);
+      assert.ok(Array.isArray(legacy.body));
+      const attendu = [...ids].sort().reverse();
+      assert.deepEqual(legacy.body.filter(f => ids.includes(f.id)).map(f => f.id), attendu);
+      const premier = await request(app).get('/api/factures?page=1&pageSize=2').set(auth);
+      assert.equal(premier.status, 200);
+      assert.equal(premier.body.page, 1);
+      assert.equal(premier.body.pageSize, 2);
+      assert.equal(premier.body.total, legacy.body.length);
+      assert.deepEqual(premier.body.items.map(f => f.id), legacy.body.slice(0, 2).map(f => f.id));
+      assert.ok(premier.body.items[0].client && Array.isArray(premier.body.items[0].lignes));
+      const second = await request(app).get('/api/factures?page=2&pageSize=2').set(auth);
+      assert.deepEqual(second.body.items.map(f => f.id), legacy.body.slice(2, 4).map(f => f.id));
+      const vide = await request(app).get('/api/factures?page=999&pageSize=2').set(auth);
+      assert.deepEqual(vide.body.items, []);
+      assert.equal(vide.body.total, legacy.body.length);
+      for (const query of ['page=1', 'pageSize=2', 'page=0&pageSize=2', 'page=1&pageSize=0', 'page=1&pageSize=101', 'page=1.5&pageSize=2', 'page=1e2&pageSize=2', 'page=%2B1&pageSize=2', 'page=01&pageSize=2', 'page=1&page=2&pageSize=2', 'page=9007199254740992&pageSize=2']) {
+        const refus = await request(app).get(`/api/factures?${query}`).set(auth);
+        assert.equal(refus.status, 400, query);
+      }
+      assert.equal((await request(app).get('/api/factures?page=1&pageSize=2')).status, 401);
+      const nonAdmin = await prisma.user.create({ data: { email: 'facture.pagination@iris.test', name: 'TEST pagination', role: 'CONDUCTEUR_TRAVAUX' } });
+      try {
+        assert.equal((await request(app).get('/api/factures?page=1&pageSize=2').set('Authorization', `Bearer ${jwt.sign({ id: nonAdmin.id }, process.env.JWT_SECRET)}`)).status, 403);
+      } finally { await prisma.user.delete({ where: { id: nonAdmin.id } }); }
     });
 
     test('réserve factures et comptabilité à l’administration', async () => {

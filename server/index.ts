@@ -898,11 +898,30 @@ app.get('/api/factures/chronologie', requireAuth, requireAdmin, async (_req, res
   } catch { res.status(500).json({ error: 'Lecture de la chronologie impossible.' }); }
 });
 
-app.get('/api/factures', requireAuth, requireAdmin, async (_req, res) => {
+app.get('/api/factures', requireAuth, requireAdmin, async (req, res) => {
+  const pageQuery = req.query.page, tailleQuery = req.query.pageSize;
+  const entierStrict = (valeur: unknown): number | null => {
+    if (typeof valeur !== 'string' || !/^[1-9]\d*$/.test(valeur)) return null;
+    const nombre = Number(valeur);
+    return Number.isSafeInteger(nombre) ? nombre : null;
+  };
+  const pagine = pageQuery !== undefined || tailleQuery !== undefined;
+  const page = entierStrict(pageQuery), pageSize = entierStrict(tailleQuery);
+  if (pagine && (page === null || pageSize === null || pageSize > 100)) return res.status(400).json({ error: 'page et pageSize doivent être des entiers positifs (pageSize ≤ 100).' });
   try {
-    const factures = await prisma.facture.findMany({ include: factureInclude, orderBy: [{ dateEmission: 'desc' }, { createdAt: 'desc' }] });
-    res.json(decimalToNumber(factures));
-  } catch (error) { res.status(500).json({ error: 'Lecture des factures impossible.' }); }
+    const orderBy = [{ dateEmission: 'desc' as const }, { createdAt: 'desc' as const }, { id: 'desc' as const }];
+    if (!pagine) {
+      const factures = await prisma.facture.findMany({ include: factureInclude, orderBy });
+      return res.json(decimalToNumber(factures));
+    }
+    const skip = (page! - 1) * pageSize!;
+    const { total, items } = await prisma.$transaction(async tx => {
+      const total = await tx.facture.count();
+      const items = skip >= total ? [] : await tx.facture.findMany({ include: factureInclude, orderBy, skip, take: pageSize! });
+      return { total, items };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return res.json({ items: decimalToNumber(items), page, pageSize, total });
+  } catch (error) { return res.status(500).json({ error: 'Lecture des factures impossible.' }); }
 });
 
 app.get('/api/factures/:id/document.pdf', requireAuth, requireAdmin, async (req, res) => {
