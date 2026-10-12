@@ -306,6 +306,22 @@ if (!TEST_DATABASE_URL) {
       session = res.body.token;
     });
 
+    test('#111 : recherche un client au-delà des 200 premiers sans exposer les inactifs', async () => {
+      await prisma.client.createMany({ data: Array.from({ length: 201 }, (_, i) => ({ raisonSociale: `TEST 111 A ${String(i).padStart(3, '0')}` })) });
+      const cible = await prisma.client.create({ data: { raisonSociale: 'TEST 111 Z cible' } });
+      const inactif = await prisma.client.create({ data: { raisonSociale: 'TEST 111 Z inactif', actif: false } });
+      const get = (query) => request(app).get(`/api/clients${query}`).set('Authorization', `Bearer ${session}`);
+      const initial = await get('');
+      assert.equal(initial.status, 200);
+      assert.equal(initial.body.clients.length, 200);
+      assert.equal(initial.body.clients.some(c => c.id === cible.id), false);
+      const trouve = await get('?q=111%20Z');
+      assert.equal(trouve.status, 200);
+      assert.ok(trouve.body.clients.some(c => c.id === cible.id));
+      assert.equal(trouve.body.clients.some(c => c.id === inactif.id), false);
+      assert.equal((await get('?q=111%20Z&actif=false')).body.clients.some(c => c.id === inactif.id), true);
+    });
+
     test('crée un client puis le relit', async () => {
       const creation = await request(app).post('/api/clients')
         .set('Authorization', `Bearer ${session}`)

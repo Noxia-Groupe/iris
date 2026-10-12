@@ -12,6 +12,75 @@ function jetonPour(userId: string) {
 }
 
 test.describe('Facturation — parcours utilisateur', () => {
+  test('#111 : recherche un client hors des 200 premiers, ignore une réponse périmée et exclut un inactif', async ({ allerSurPageAdmin, request, session }) => {
+    const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const prefix = `E2E 111 ${Date.now()}`;
+    for (let index = 0; index < 201; index += 20) {
+      const creations = await Promise.all(Array.from({ length: Math.min(20, 201 - index) }, (_, offset) =>
+        request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefix} A ${String(index + offset).padStart(3, '0')}` } })));
+      for (const creation of creations) expect(creation.status(), await creation.text()).toBe(201);
+    }
+    const cibleNom = `${prefix} Z cible`;
+    const inactiveNom = `${prefix} Z inactive`;
+    const cible = await request.post(`${api}/clients`, { headers, data: { raisonSociale: cibleNom } });
+    expect(cible.status(), await cible.text()).toBe(201);
+    const cibleId = (await cible.json()).id;
+    const inactive = await request.post(`${api}/clients`, { headers, data: { raisonSociale: inactiveNom } });
+    expect(inactive.status(), await inactive.text()).toBe(201);
+    const inactiveId = (await inactive.json()).id;
+    expect((await request.delete(`${api}/clients/${inactiveId}`, { headers })).status()).toBe(200);
+    const liste = await request.get(`${api}/clients`, { headers });
+    expect((await liste.json()).clients.some((client: { id: string }) => client.id === cibleId)).toBe(false);
+
+    const page = await allerSurPageAdmin('/factures');
+    await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+    const recherche = page.getByRole('searchbox', { name: 'Rechercher un client' });
+    const select = page.locator('select[name="clientId"]');
+    await expect(select.locator(`option[value="${cibleId}"]`)).toHaveCount(0);
+    await recherche.fill(prefix);
+    await expect(select.locator('option')).toHaveCount(201); // 200 résultats + l'option vide
+    await expect(page.getByRole('status', { name: 'Limite des résultats clients' })).toContainText('200');
+    await expect(page.getByRole('status', { name: 'Limite des résultats clients' })).toContainText(/affiner.*recherche/i);
+    await expect(select.locator(`option[value="${cibleId}"]`)).toHaveCount(0);
+    let liberer!: () => void;
+    const attente = new Promise<void>(resolve => { liberer = resolve; });
+    await page.route('**/api/clients?q=*', async route => {
+      if (new URL(route.request().url()).searchParams.get('q') === `${prefix} A`) await attente;
+      await route.continue();
+    });
+    const premiereRecherche = page.waitForRequest(req => new URL(req.url()).searchParams.get('q') === `${prefix} A`);
+    await recherche.fill(`${prefix} A`);
+    await premiereRecherche;
+    await recherche.fill(`${prefix} Z`);
+    await expect(select.locator(`option[value="${cibleId}"]`)).toHaveCount(1);
+    await expect(page.getByRole('status', { name: 'Limite des résultats clients' })).toHaveCount(0);
+    await expect(select.locator(`option[value="${inactiveId}"]`)).toHaveCount(0);
+    await select.selectOption(cibleId);
+    const ancienne = page.waitForResponse(response => new URL(response.url()).searchParams.get('q') === `${prefix} A`);
+    liberer();
+    await (await ancienne).finished();
+    // response.finished() précède parfois response.json() et le commit React.
+    // Observer la sélection pendant toute la fenêtre post-réponse, pas seulement deux frames.
+    await page.evaluate(async (id) => {
+      const select = document.querySelector<HTMLSelectElement>('select[name="clientId"]');
+      if (!select) throw new Error('Sélection client absente');
+      const fin = performance.now() + 1000;
+      while (performance.now() < fin) {
+        if (select.value !== id || !select.querySelector(`option[value="${id}"]`)) throw new Error('Réponse périmée appliquée');
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    }, cibleId);
+    await expect(select).toHaveValue(cibleId);
+    await expect(select.locator(`option[value="${cibleId}"]`)).toHaveCount(1);
+    await page.locator('input[name="motifHorsAffaire"]').fill('Sélection au-delà de 200');
+    await page.getByRole('textbox', { name: 'Désignation ligne 1' }).fill('Prestation test');
+    await page.getByRole('textbox', { name: 'Prix unitaire HT ligne 1' }).fill('10');
+    await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    const factures = await request.get(`${api}/factures?page=1&pageSize=25`, { headers });
+    expect((await factures.json()).items.some((facture: { clientId: string }) => facture.clientId === cibleId)).toBe(true);
+  });
   const afficherFacture = async (page: Page, raisonSociale: string) => {
     const ligne = page.locator('tbody tr', { hasText: raisonSociale });
     await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
