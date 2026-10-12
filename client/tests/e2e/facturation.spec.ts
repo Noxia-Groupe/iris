@@ -53,6 +53,9 @@ test.describe('Facturation — parcours utilisateur', () => {
     await recherche.fill(`${prefix} A`);
     await premiereRecherche;
     await recherche.fill(`${prefix} Z`);
+    // V5 : une liste périmée ne doit pas rester sélectionnable pendant la recherche.
+    await expect(page.getByText('Recherche en cours…')).toBeVisible();
+    expect(await select.isDisabled(), 'le sélecteur doit être bloqué tant que la recherche est en cours').toBe(true);
     await expect(select.locator(`option[value="${cibleId}"]`)).toHaveCount(1);
     await expect(page.getByRole('status', { name: 'Limite des résultats clients' })).toHaveCount(0);
     await expect(select.locator(`option[value="${inactiveId}"]`)).toHaveCount(0);
@@ -73,6 +76,43 @@ test.describe('Facturation — parcours utilisateur', () => {
     }, cibleId);
     await expect(select).toHaveValue(cibleId);
     await expect(select.locator(`option[value="${cibleId}"]`)).toHaveCount(1);
+    await page.unroute('**/api/clients?q=*');
+
+    // V6 : l'échec d'une ancienne recherche arrive après la réussite de la nouvelle.
+    let libererEchec!: () => void;
+    let signalerEchec!: () => void;
+    const attenteEchec = new Promise<void>(resolve => { libererEchec = resolve; });
+    const requeteEchec = new Promise<void>(resolve => { signalerEchec = resolve; });
+    await page.route('**/api/clients?q=*', async route => {
+      if (new URL(route.request().url()).searchParams.get('q') === `${prefix} A`) {
+        signalerEchec();
+        await attenteEchec;
+        await route.fulfill({ status: 503, json: { error: 'Erreur périmée recherche #111' } });
+      } else await route.continue();
+    });
+    const echecLivree = page.waitForResponse(response => new URL(response.url()).searchParams.get('q') === `${prefix} A` && response.status() === 503);
+    await recherche.fill(`${prefix} A`);
+    await requeteEchec;
+    await recherche.fill(`${prefix} Z`);
+    try {
+      await expect(select.locator(`option[value="${cibleId}"]`)).toHaveCount(1);
+      await select.selectOption(cibleId);
+    } finally {
+      libererEchec();
+    }
+    await (await echecLivree).finished();
+    await page.evaluate(async (id) => {
+      const select = document.querySelector<HTMLSelectElement>('select[name="clientId"]');
+      if (!select) throw new Error('Sélection client absente');
+      const fin = performance.now() + 400;
+      while (performance.now() < fin) {
+        if (document.body.textContent?.includes('Erreur périmée recherche #111') || select.value !== id)
+          throw new Error('Échec périmé appliqué après la recherche réussie');
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    }, cibleId);
+    await expect(page.getByRole('alert', { name: 'Erreur périmée recherche #111' })).toHaveCount(0);
+    await page.unroute('**/api/clients?q=*');
     await page.locator('input[name="motifHorsAffaire"]').fill('Sélection au-delà de 200');
     await page.getByRole('textbox', { name: 'Désignation ligne 1' }).fill('Prestation test');
     await page.getByRole('textbox', { name: 'Prix unitaire HT ligne 1' }).fill('10');
@@ -80,6 +120,45 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
     const factures = await request.get(`${api}/factures?page=1&pageSize=25`, { headers });
     expect((await factures.json()).items.some((facture: { clientId: string }) => facture.clientId === cibleId)).toBe(true);
+
+    // V2 : retaper après une sélection efface l'ancien ID ; le POST doit porter le nouvel ID.
+    const autres = await request.get(`${api}/clients?q=${encodeURIComponent(`${prefix} A 00`)}`, { headers });
+    expect(autres.ok()).toBeTruthy();
+    const correspondances = (await autres.json() as { clients: { id: string; raisonSociale: string }[] }).clients;
+    const ancienId = correspondances.find(client => client.raisonSociale === `${prefix} A 000`)?.id;
+    const autreId = correspondances.find(client => client.raisonSociale === `${prefix} A 001`)?.id;
+    expect(ancienId).toBeTruthy();
+    expect(autreId).toBeTruthy();
+    await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+    await recherche.fill(`${prefix} A 000`);
+    await expect(select.locator(`option[value="${ancienId}"]`)).toHaveCount(1);
+    await select.selectOption(ancienId!);
+    // La recherche élargie inclut l'ancien client : le DOM ne peut pas effacer
+    // implicitement une option disparue. Seule la remise à zéro de l'état le fait.
+    await recherche.fill(`${prefix} A 00`);
+    await expect(select).toHaveValue('');
+    await expect(select).toBeDisabled();
+    await expect(select.locator(`option[value="${autreId}"]`)).toHaveCount(1);
+    await expect(select).toBeEnabled();
+    await expect(select).toHaveValue('');
+    await select.selectOption(autreId!);
+    await page.locator('input[name="motifHorsAffaire"]').fill('Nouvelle sélection #111');
+    await page.getByRole('textbox', { name: 'Désignation ligne 1' }).fill('Prestation nouvelle sélection');
+    await page.getByRole('textbox', { name: 'Prix unitaire HT ligne 1' }).fill('10');
+    const creationAutre = page.waitForResponse(response => response.url().endsWith('/api/factures') && response.request().method() === 'POST');
+    await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+    const reponseAutre = await creationAutre;
+    expect(reponseAutre.status(), await reponseAutre.text()).toBe(201);
+    const factureId = (await reponseAutre.json() as { id: string }).id;
+    let clientEnregistre: string | undefined;
+    for (let numeroPage = 1; ; numeroPage++) {
+      const liste = await request.get(`${api}/factures?page=${numeroPage}&pageSize=100`, { headers });
+      expect(liste.ok()).toBeTruthy();
+      const donnees = await liste.json() as { total: number; items: { id: string; clientId: string }[] };
+      clientEnregistre = donnees.items.find(item => item.id === factureId)?.clientId;
+      if (clientEnregistre || numeroPage * 100 >= donnees.total) break;
+    }
+    expect(clientEnregistre).toBe(autreId);
   });
   const afficherFacture = async (page: Page, raisonSociale: string) => {
     const ligne = page.locator('tbody tr', { hasText: raisonSociale });
