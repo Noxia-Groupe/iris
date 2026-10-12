@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FilePlus2, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../api';
 import { isAdminRole, useCurrentUser } from '../roles';
@@ -23,6 +23,16 @@ export default function Devis() {
   const utilisateur = useCurrentUser();
   const estAdmin = isAdminRole(utilisateur?.role);
   const [devis, setDevis] = useState<Devis[]>([]), [clients, setClients] = useState<Client[]>([]);
+  const [rechercheClient, setRechercheClient] = useState('');
+  const [resultatsClients, setResultatsClients] = useState<Client[] | null>(null);
+  const [rechercheEnCours, setRechercheEnCours] = useState(false);
+  const [erreurRechercheClient, setErreurRechercheClient] = useState('');
+  const [clientSelectionne, setClientSelectionne] = useState<Client | null>(null);
+  const requeteClients = useRef(0);
+  const [clientSignataire, setClientSignataire] = useState<Client | null>(null);
+  const [erreurClientSignataire, setErreurClientSignataire] = useState('');
+  const [chargementSignataires, setChargementSignataires] = useState(false);
+  const requeteSignataires = useRef(0);
   const [form, setForm] = useState<Formulaire>(formulaireVide());
   const [editionId, setEditionId] = useState<string | null>(null);
   const [devisASigner, setDevisASigner] = useState<Devis | null>(null);
@@ -39,7 +49,36 @@ export default function Devis() {
   } catch (e) { setError(e instanceof Error ? e.message : 'Chargement impossible.'); } finally { setLoading(false); } };
   useEffect(() => { void load(); }, []);
 
-  const resetForm = () => { setEditionId(null); setForm(formulaireVide()); };
+  useEffect(() => {
+    const q = rechercheClient.trim();
+    if (!q) return;
+    const requete = requeteClients.current;
+    const minuteur = window.setTimeout(async () => {
+      try {
+        const response = await apiFetch(`/clients?q=${encodeURIComponent(q)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error || 'Recherche impossible.');
+        if (requete === requeteClients.current) setResultatsClients(data.clients);
+      } catch (e) {
+        if (requete === requeteClients.current) setErreurRechercheClient(e instanceof Error ? e.message : 'Recherche impossible.');
+      } finally {
+        if (requete === requeteClients.current) setRechercheEnCours(false);
+      }
+    }, 250);
+    return () => window.clearTimeout(minuteur);
+  }, [rechercheClient]);
+
+  const chercherClient = (valeur: string) => {
+    requeteClients.current += 1;
+    setRechercheClient(valeur);
+    setForm(f => ({ ...f, clientId: '' }));
+    setClientSelectionne(null);
+    setResultatsClients(valeur.trim() ? [] : null);
+    setRechercheEnCours(Boolean(valeur.trim()));
+    setErreurRechercheClient('');
+  };
+
+  const resetForm = () => { chercherClient(''); setEditionId(null); setForm(formulaireVide()); };
   const submit = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); setError(''); try {
     const route = editionId ? `/devis/${editionId}` : '/devis';
     const res = await apiFetch(route, { method: editionId ? 'PATCH' : 'POST', body: JSON.stringify(form) });
@@ -49,6 +88,8 @@ export default function Devis() {
   } catch (e) { setError(e instanceof Error ? e.message : 'Enregistrement impossible.'); } finally { setSaving(false); } };
   const commencerEdition = (d: Devis) => {
     if (d.signature || !['BROUILLON', 'ENVOYE'].includes(d.statut) || d.conversion) return;
+    chercherClient('');
+    setClientSelectionne(d.client);
     setEditionId(d.id);
     setForm({ clientId: d.client.id, objet: d.objet, acompteExige: d.acompteExige, lignes: d.lignes.map(ligne => ({ ...ligne })) });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -58,7 +99,21 @@ export default function Devis() {
     if (!res.ok) throw new Error(data.error || 'Révision impossible.');
     commencerEdition(data); await load();
   } catch (e) { setError(e instanceof Error ? e.message : 'Révision impossible.'); } };
-  const ouvrirSignature = (d: Devis) => { setError(''); setDevisASigner(d); setSignataire(''); setConfirmationSignature(false); };
+  const ouvrirSignature = async (d: Devis) => {
+    const requete = ++requeteSignataires.current;
+    setError(''); setDevisASigner(d); setSignataire(''); setConfirmationSignature(false);
+    setClientSignataire(null); setErreurClientSignataire(''); setChargementSignataires(true);
+    try {
+      const response = await apiFetch(`/clients/${d.client.id}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || 'Chargement des contacts impossible.');
+      if (requete === requeteSignataires.current) setClientSignataire(data);
+    } catch (e) {
+      if (requete === requeteSignataires.current) setErreurClientSignataire(e instanceof Error ? e.message : 'Chargement des contacts impossible.');
+    } finally {
+      if (requete === requeteSignataires.current) setChargementSignataires(false);
+    }
+  };
   const signer = async (event: React.FormEvent) => { event.preventDefault(); if (!devisASigner) return; setError(''); setSaving(true); try {
     const res = await apiFetch(`/devis/${devisASigner.id}/signature`, { method: 'POST', body: JSON.stringify({ signataire, confirme: confirmationSignature }) }), data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Signature impossible.');
@@ -93,6 +148,7 @@ export default function Devis() {
   const addLine = () => setForm(f => ({ ...f, lignes: [...f.lignes, { ...ligneVide }] }));
   const removeLine = (index: number) => setForm(f => ({ ...f, lignes: f.lignes.filter((_, i) => i !== index) }));
   const estDerniereVersion = (d: Devis, inclureAnnulees = true) => !devis.some(autre => autre.dossierId === d.dossierId && autre.version > d.version && (inclureAnnulees || autre.statut !== 'ANNULE'));
+  const optionsClients = resultatsClients ?? clients;
 
   return <div className="max-w-6xl mx-auto space-y-6">
     <div className="flex items-center justify-between gap-3"><div><h1 className="text-2xl font-bold">Devis</h1><p className="text-gray-500">Éditables jusqu’à la signature du client, puis révisables par nouvelle version.</p></div><button className="btn border flex items-center gap-2" onClick={() => void load()}><RefreshCw size={16}/> Actualiser</button></div>
@@ -100,14 +156,16 @@ export default function Devis() {
     {devisASigner && <form role="dialog" aria-label="Signature client" onSubmit={signer} className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3">
       <div><h2 className="font-semibold">Signature client</h2><p className="text-sm text-gray-600">Le client confirme le devis figé. L’employé connecté enregistre son acceptation.</p></div>
       <label className="text-sm font-medium block">Enregistré par<input aria-label="Enregistré par" readOnly className="mt-1 w-full border rounded px-3 py-2 bg-gray-100" value={utilisateur?.name || 'Session interne active'}/></label>
-      <label className="text-sm font-medium block">Signataire client<select aria-label="Signataire client" className="mt-1 w-full border rounded px-3 py-2" value={signataire} onChange={e => setSignataire(e.target.value)}><option value="">Sélectionner un contact habilité…</option>{(clients.find(client => client.id === devisASigner.client.id)?.contacts || []).filter(contact => contact.estSignataire).map(contact => { const nom = `${contact.prenom ? `${contact.prenom} ` : ''}${contact.nom}`; return <option key={contact.id} value={nom}>{nom}</option>; })}</select></label>
+      <label className="text-sm font-medium block">Signataire client<select aria-label="Signataire client" className="mt-1 w-full border rounded px-3 py-2" value={signataire} onChange={e => setSignataire(e.target.value)} disabled={chargementSignataires || Boolean(erreurClientSignataire)}><option value="">Sélectionner un contact habilité…</option>{(clientSignataire?.contacts || []).filter(contact => contact.estSignataire).map(contact => { const nom = `${contact.prenom ? `${contact.prenom} ` : ''}${contact.nom}`; return <option key={contact.id} value={nom}>{nom}</option>; })}</select></label>
+      {chargementSignataires && <p role="status">Chargement des contacts…</p>}
+      {erreurClientSignataire && <p role="alert" className="text-red-600">{erreurClientSignataire}</p>}
       <label className="text-sm font-medium block">Ou saisir un autre signataire client<input aria-label="Autre signataire client" className="mt-1 w-full border rounded px-3 py-2" value={signataire} onChange={e => setSignataire(e.target.value)} placeholder="Nom complet du client"/></label>
       <label className="flex items-center gap-2 text-sm"><input aria-label="Confirmation du client" type="checkbox" checked={confirmationSignature} onChange={e => setConfirmationSignature(e.target.checked)}/><span>Le client confirme avoir lu et accepté ce devis.</span></label>
-      <div className="flex gap-2"><button type="button" className="btn border" onClick={() => setDevisASigner(null)}>Annuler</button><button disabled={saving || signataire.trim().length < 2 || !confirmationSignature} className="btn bg-blue-700 text-white">Enregistrer la signature client</button></div>
+      <div className="flex gap-2"><button type="button" className="btn border" onClick={() => { requeteSignataires.current += 1; setDevisASigner(null); }}>Annuler</button><button disabled={saving || signataire.trim().length < 2 || !confirmationSignature} className="btn bg-blue-700 text-white">Enregistrer la signature client</button></div>
     </form>}
     <form onSubmit={submit} className="bg-white border rounded-xl p-5 space-y-4">
       <div className="flex items-center justify-between"><h2 className="font-semibold flex gap-2 items-center"><FilePlus2 size={18}/>{editionId ? 'Modifier le brouillon' : 'Nouveau devis'}</h2>{editionId && <button type="button" className="btn border" onClick={resetForm}>Annuler l’édition</button>}</div>
-      <div className="grid md:grid-cols-2 gap-3"><label className="text-sm font-medium">Client<select required className="mt-1 w-full border rounded px-3 py-2" value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}><option value="">Sélectionner…</option>{clients.map(c => <option key={c.id} value={c.id}>{c.raisonSociale}</option>)}</select></label><label className="text-sm font-medium">Objet<input required className="mt-1 w-full border rounded px-3 py-2" value={form.objet} onChange={e => setForm(f => ({ ...f, objet: e.target.value }))}/></label></div>
+      <div className="grid md:grid-cols-2 gap-3"><div><label htmlFor="recherche-client-devis" className="text-sm font-medium">Rechercher un client</label><input id="recherche-client-devis" type="search" className="mt-1 w-full border rounded px-3 py-2" value={rechercheClient} onChange={e => chercherClient(e.target.value)} placeholder="Nom commercial, raison sociale ou SIREN" aria-controls="clientId-devis"/><select id="clientId-devis" name="clientId" aria-label="Client du devis" required className="mt-1 w-full border rounded px-3 py-2" value={form.clientId} disabled={rechercheEnCours || Boolean(erreurRechercheClient)} onChange={e => { const client = optionsClients.find(c => c.id === e.target.value) ?? clientSelectionne; setClientSelectionne(client?.id === e.target.value ? client : null); setForm(f => ({ ...f, clientId: e.target.value })); }}><option value="">Sélectionner…</option>{optionsClients.map(c => <option key={c.id} value={c.id}>{c.raisonSociale}</option>)}{clientSelectionne && !optionsClients.some(c => c.id === clientSelectionne.id) && <option value={clientSelectionne.id}>{clientSelectionne.raisonSociale}</option>}</select>{rechercheEnCours && <p role="status">Recherche en cours…</p>}{erreurRechercheClient && <p role="alert" className="text-red-600">{erreurRechercheClient}</p>}{resultatsClients?.length === 200 && !rechercheEnCours && <p role="status" aria-label="Limite des résultats clients">200 clients maximum affichés ; veuillez affiner votre recherche.</p>}{resultatsClients?.length === 0 && !rechercheEnCours && !erreurRechercheClient && <p role="status">Aucun client actif trouvé.</p>}</div><label className="text-sm font-medium">Objet<input required className="mt-1 w-full border rounded px-3 py-2" value={form.objet} onChange={e => setForm(f => ({ ...f, objet: e.target.value }))}/></label></div>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="w-4 h-4" checked={form.acompteExige} onChange={e => setForm(f => ({ ...f, acompteExige: e.target.checked }))}/><span>Exiger un acompte avant l’ouverture du chantier</span></label>
       <div className="space-y-2">{form.lignes.map((ligne, index) => <div key={index} className="grid md:grid-cols-[1fr_110px_110px_120px_100px_auto] gap-2 items-end"><label className="text-sm">Désignation<input required className="mt-1 w-full border rounded px-2 py-2" value={ligne.designation} onChange={e => updateLine(index, 'designation', e.target.value)}/></label><label className="text-sm">Nature<select className="mt-1 w-full border rounded px-2 py-2" value={ligne.nature} onChange={e => updateLine(index, 'nature', e.target.value)}><option value="MAIN_OEUVRE">Main-d’œuvre</option><option value="FOURNITURE">Fourniture</option></select></label><label className="text-sm">Qté<input required min="0.001" step="0.001" type="number" className="mt-1 w-full border rounded px-2 py-2" value={ligne.quantite} onChange={e => updateLine(index, 'quantite', e.target.value)}/></label><label className="text-sm">PU HT<input required min="0" step="0.01" type="number" className="mt-1 w-full border rounded px-2 py-2" value={ligne.prixUnitaireHt} onChange={e => updateLine(index, 'prixUnitaireHt', e.target.value)}/></label><label className="text-sm">TVA %<input required min="0" max="100" step="0.1" type="number" className="mt-1 w-full border rounded px-2 py-2" value={ligne.tauxTva} onChange={e => updateLine(index, 'tauxTva', e.target.value)}/></label>{form.lignes.length > 1 && <button type="button" className="btn border" onClick={() => removeLine(index)}>Retirer</button>}</div>)}</div>
       <div className="flex gap-2"><button type="button" className="btn border" onClick={addLine}>Ajouter une ligne</button><button disabled={saving} className="btn bg-blue-700 text-white">{saving ? 'Enregistrement…' : editionId ? 'Enregistrer le brouillon' : 'Créer le brouillon'}</button></div>
