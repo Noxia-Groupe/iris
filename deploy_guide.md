@@ -1,6 +1,6 @@
-# Guide de Déploiement (Hostinger VPS & Nginx Proxy Manager)
+# Guide technique de préparation au déploiement d'Iris (Hostinger VPS & Nginx Proxy Manager)
 
-Ce guide décrit comment déployer l'application NOXIA sur votre VPS Hostinger. L'application est entièrement dockérisée et sécurisée : **aucun port n'est exposé directement sur internet**. Tout passe par votre Nginx Proxy Manager (NPM).
+**Iris est encore en développement : ce document n'est pas une attestation de mise en production.** Consulter d'abord la [passation et ses critères de sortie](docs/ROADMAP-PASSATION.md) et la [configuration d'environnement](docs/CONFIGURATION-ENVIRONNEMENT.md). Les étapes ci-dessous décrivent une stack Docker derrière Nginx Proxy Manager (NPM), non une recette de sécurité, de sauvegarde/restauration ou de conformité déjà validée.
 
 ## 0. Prérequis : Clé de déploiement SSH (Dépôt Privé)
 
@@ -71,31 +71,24 @@ POSTGRES_DB=iris
 cp server/.env.example server/.env
 nano server/.env
 ```
-```env
-# OBLIGATOIRE en production : le serveur refuse de démarrer sans cette clé.
-JWT_SECRET="une_longue_chaine_aleatoire_et_secrete"
 
-# Identifiants du compte administrateur (créé automatiquement au 1er lancement)
-ADMIN_EMAIL="votre_email@domaine.com"
-ADMIN_PASSWORD="un_mot_de_passe_robuste"
+- Remplacer `JWT_SECRET` par une valeur aléatoire longue ; il est obligatoire en production.
+- Renseigner `SUPERADMIN_EMAILS` **avant le premier démarrage d'une base vierge**. Aucune adresse administrateur par défaut n'est créée lorsque la liste est vide.
+- Renseigner `AZURE_TENANT_ID` et `AZURE_CLIENT_ID` pour la connexion normale Microsoft Entra ID ; configurer la SPA et son URI de redirection propre à l'instance. Aucun mot de passe local `ADMIN_PASSWORD` ni `ADMIN_EMAIL` n'est utilisé pour créer un compte.
+- Prévoir `BREAK_GLASS_EMAIL` (compte `SUPERADMIN` actif) et `BREAK_GLASS_TOKEN` (secret aléatoire d'au moins 32 caractères) pour le secours, conservés hors Git. Ce secours est propre à l'instance, **pas** un accès plateforme universel.
 
-# Optionnel : comptes super administrateur, séparés par des virgules. Créés ou promus à
-# chaque démarrage. Vide = liste par défaut (nelson@noxia-groupe.fr, admin@cybexia.fr).
-SUPERADMIN_EMAILS=""
-
-PORT=3001
-```
+Utiliser [`server/.env.example`](server/.env.example) et le [guide de configuration](docs/CONFIGURATION-ENVIRONNEMENT.md) comme références détaillées. Ne jamais recopier les valeurs d'exemple dans une instance réelle.
 
 > Note : en Docker, `DATABASE_URL` est construite et injectée **automatiquement** par
 > docker-compose à partir du service `db` — inutile de la définir vous-même ici.
 
 ## 3. Lancement avec Docker Compose
 
-Revenez à la racine du projet (là où se trouve le `docker-compose.yml`) et lancez la construction et le démarrage des conteneurs :
+Vérifiez que vous êtes à la racine du dépôt (là où se trouve `docker-compose.yml`), puis contrôlez la configuration avant de construire les services :
 
 ```bash
-cd ..
-docker-compose up -d --build
+docker compose config
+docker compose up -d --build
 ```
 *Note : Le réseau externe `nginx-proxy` doit déjà exister sur votre VPS, car il est géré par votre NPM.*
 
@@ -113,7 +106,7 @@ backend (`prisma migrate deploy`). Pour faire évoluer le schéma par la suite :
 1. En local, modifiez `server/prisma/schema.prisma` puis créez la migration :
    `npx prisma migrate dev --name description_du_changement`
 2. Commitez le dossier généré dans `server/prisma/migrations/`.
-3. Sur le VPS, `docker-compose up -d --build` rejoue les nouvelles migrations.
+3. Sur le VPS, `docker compose up -d --build` rejoue les nouvelles migrations.
 
 ### Sauvegarde de la base
 
@@ -141,4 +134,4 @@ Dans l'onglet **SSL** :
 - Cochez "Force SSL".
 - Acceptez les conditions et enregistrez.
 
-L'application est maintenant accessible et sécurisée en HTTPS via votre nom de domaine. Le frontend se charge de communiquer avec le backend en interne via l'API, le tout protégé derrière NPM !
+Si le proxy HTTPS est configuré et la stack saine, vérifier l'accès, l'authentification Entra, le secours, les migrations et les parcours métier. Une sauvegarde ponctuelle ne valide pas une stratégie de reprise : tester aussi la restauration sur une base isolée. Le feu vert de production dépend de la [recette de sortie](docs/ROADMAP-PASSATION.md) et de la décision de Nelson.

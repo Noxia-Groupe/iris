@@ -129,23 +129,22 @@ remplacer — voir [`docs/ACCES-SANS-MICROSOFT.md`](docs/ACCES-SANS-MICROSOFT.md
 ## Propriété
 Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtiennent un accès à leur instance sans accès au code source. Chaque client dispose de son propre déploiement et de sa propre base de données ; aucune donnée métier n'est partagée entre sociétés.
 
-## Roadmap (ordre de travail)
-- [x] Phase 0 : Nettoyage initial et renommage du projet Iris
-- [x] Phase 1 : Audit final des liens hérités — configuration, identité technique, documentation et branding vérifiés ; aucun lien technique actif conservé.
-- [x] Authentification : Microsoft Entra ID uniquement (suppression connexion locale, mots de passe, seed de comptes locaux)
-- [x] Phase 2 : Paramétrage de l’instance — société (écran + registre des entreprises), modules, profils et rôles ; clés API d’intégration et accès de secours superadmin
-- [x] Phase 3 : Référentiel clients natif — clients, contacts, sites de facturation et d’intervention
-- [x] Phase 4 : Catalogue et parc d’équipements installé — modèles, migrations, catégories, API, écran de gestion, traçabilité série/IMEI/MAC, rattachement client/site, garantie et archivage historique.
-- [ ] Phase 5 : Devis versionnés et conversion contrôlée — socle livré : références d’affaires annuelles, révisions, statuts, conversion après acceptation, permissions effectives, contrôles clients/devis, et cycle de vie complet de l’affaire (acompte conditionnant l’ouverture du chantier, annulation tracée avec archivage, duplication). Reste à livrer : les cibles de conversion aval — intervention, contrat, facture — quand leurs modules existeront.
-- [x] Socle transversal avant Phase 6 : sécurité du suivi Travaux (issue #16) — périmètre d’écriture achats/heures borné à l’affaire, rattachement hiérarchique explicite des responsables, validation des montants et des dates, archivage tracé au lieu de la suppression, journal des saisies et statistiques cloisonnées. L’écran Travaux reste à livrer avec sa phase métier.
-- [ ] Commissionnement commercial configurable (issue #15) — profils versionnés et individualisables, attributions hiérarchiques, historique non rétroactif ; dépend du socle Travaux sécurisé.
-- [ ] Phase 6 : Interventions SAV + travaux, planning et application mobile technicien
-- [ ] Phase 7 : Contrats et maintenance cyclique — génération des interventions à planifier avec durée prévisionnelle
-- [ ] Phase 8 : Facturation française, exports comptables et conformité facturation électronique
-- [ ] Phase 9 : Paiements, abonnements télécom, financeurs et rapprochement bancaire
-- [ ] Phase 10 : Connecteurs Microsoft 365 (Outlook/Graph) et branding complet
-- [ ] Phase 11 : Auth Microsoft configurable à l'installation + accès plateforme de secours Noxia/OrizonLab
-- [ ] Phase 12 : Déploiement production dédié par client (VPS ou stack Docker + base PostgreSQL propre)
+## Roadmap et état de livraison
+
+**Source de passation à jour : [`docs/ROADMAP-PASSATION.md`](docs/ROADMAP-PASSATION.md).** État constaté sur `main` au commit `8e75c7e`, après la PR #114. « Code présent » ne signifie ni conformité validée ni mise en production. Chaque phase incomplète est détaillée dans la passation avec ses dépendances et les décisions à demander à Nelson.
+
+- [x] Phases 0–4 : identité du projet, accès Entra/secours, configuration d'instance, référentiel clients/sites/contacts, catalogue et parc d'équipements. Le catalogue et le plan comptable démarrent vides.
+- [ ] Phase 5 — **partielle** : devis versionnés, signature, acompte constaté, cycle de vie et conversion en chantier livrés ; cibles intervention/contrat/facture à cadrer et à réaliser. Sélection d'un client hors des 200 premiers livrée pour Devis (#114).
+- [ ] Suivi Travaux et commissionnement — **partiels** : sécurité, journaux, achats/heures et fiche chantier déjà présents ; ne pas recréer un écran fictif. Profils commerciaux versionnés et individualisés de l'issue #15 non livrés ; réévaluer les reliquats des issues #16 et #19 contre le code.
+- [ ] Phase 6 — **partielle** : SAV, rapports, planning et suivi chantier présents ; parcours mobile technicien dédié et autres parcours terrain à qualifier.
+- [ ] Phase 7 — **partielle** : contrats cycliques et génération idempotente d'interventions à planifier depuis une action métier ; automatisation de l'échéance et ses règles de déclenchement à arbitrer.
+- [ ] Phase 8 — **partielle** : factures, avoirs, PDF, plan comptable paramétrable et export CSV déjà présents. La conformité de facturation électronique et l'adaptateur de plateforme restent à concevoir/valider. Requalifier les anciennes issues #31, #33 et #35 avant de coder leur reliquat.
+- [ ] Phase 9 — **future comme chaîne automatisée** : paiements, abonnements télécom, financeurs, banque et rapprochement ; un statut de règlement manuel n'est pas un module bancaire.
+- [ ] Phase 10 — **à réaliser/qualifier** : Outlook/Graph et personnalisation documentaire restante ; le SSO Entra déjà présent n'est pas un connecteur Outlook.
+- [ ] Phase 11 — **partielle** : paramètres Entra et secours d'instance existants ; installation guidée et secours plateforme distinct non démontrés.
+- [ ] Phase 12 — **préparée, non validée** : Compose, migrations et CI existent ; recette, isolation SQL, sauvegarde/restauration, validations client et décision de mise en service restent requises.
+
+**Prochain découpage candidat :** achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
 
 ## Tests
 
@@ -160,6 +159,16 @@ via `TEST_DATABASE_URL` et s'annoncent ignorés sans elle — voir
 
 Un test qui relit le code source en texte n'en est pas un : il reste vert sur une branche
 qui ne compile même pas. Cette règle est la seule qui compte ici.
+
+Parcours navigateur (Playwright, base PostgreSQL jetable) :
+
+```bash
+cd client && E2E_DATABASE_URL=postgresql://…/iris_e2e npm run test:e2e:local
+```
+
+Cette commande recompile le backend et migre la base avant chaque exécution ; sans elle, Playwright
+peut tester un ancien `server/dist`. Détails dans
+[`docs/CONFIGURATION-ENVIRONNEMENT.md`](docs/CONFIGURATION-ENVIRONNEMENT.md#tests-et-ci).
 
 ## Audit de clôture des liens hérités
 
