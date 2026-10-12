@@ -211,6 +211,8 @@ test.describe('Facturation — parcours utilisateur', () => {
       }
     }
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
     const facture = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     // Un brouillon n'est pas créditable : attendre sa ligne rend l'assertion d'absence
     // significative, plutôt que vraie sur une ligne pas encore rendue.
@@ -287,6 +289,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Prestation à créditer');
     await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
     const facture = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await facture.getByRole('button', { name: /Émettre/ }).click();
     await expect(facture).toContainText('EMISE');
@@ -398,6 +402,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await prix.pressSequentially('480,50', { delay: 10 });
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
     const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(page.getByText(/émise et figée/)).toBeVisible();
@@ -421,6 +426,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle règlement');
     await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
     const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(ligne.getByRole('button', { name: /Marquer comme réglée/ })).toBeVisible();
@@ -445,6 +452,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle annulation');
     await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
     const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     let confirmationDemandee = '';
@@ -485,6 +494,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await prix.pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
     const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(page.getByText(/adresse de facturation/i)).toBeVisible();
