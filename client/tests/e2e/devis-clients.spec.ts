@@ -1,0 +1,199 @@
+import { test, expect } from './fixtures';
+
+const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+// La base E2E est volontairement conservée entre deux passages de la suite.
+test('#113 : recherche, édition et signature d’un client hors des 200 premiers', async ({ allerSurPageAdmin, request, session }) => {
+  const headers = auth(session.token);
+  const listeInitiale = await request.get(`${api}/clients`, { headers });
+  expect(listeInitiale.ok()).toBeTruthy();
+  if ((await listeInitiale.json()).clients.length < 200) {
+    const prefix = `E2E 113 A ${Date.now()}`;
+    for (let i = 0; i < 201; i += 20) {
+      const reponses = await Promise.all(Array.from({ length: Math.min(20, 201 - i) }, (_, j) =>
+        request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefix} ${String(i + j).padStart(3, '0')}` } })));
+      for (const reponse of reponses) expect(reponse.status(), await reponse.text()).toBe(201);
+    }
+  }
+  const prefix = `ZZZ E2E 113 ${Date.now()}`;
+  const cible = await request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefix} cible` } });
+  expect(cible.status(), await cible.text()).toBe(201);
+  const clientId = (await cible.json()).id as string;
+  const contact = await request.post(`${api}/clients/${clientId}/contacts`, { headers, data: { nom: 'Signataire113', prenom: 'Alice', estSignataire: true } });
+  expect(contact.status(), await contact.text()).toBe(201);
+  const nonHabilite = await request.post(`${api}/clients/${clientId}/contacts`, { headers, data: { nom: 'NonHabilite113', estSignataire: false } });
+  expect(nonHabilite.status(), await nonHabilite.text()).toBe(201);
+  expect((await (await request.get(`${api}/clients`, { headers })).json()).clients.some((c: { id: string }) => c.id === clientId)).toBe(false);
+  const fiche = await request.get(`${api}/clients/${clientId}`, { headers });
+  expect(fiche.status()).toBe(200);
+  expect((await fiche.json()).contacts.some((c: { nom: string; estSignataire: boolean }) => c.nom === 'Signataire113' && c.estSignataire)).toBe(true);
+  const cle = await request.post(`${api}/admin/api-keys`, { headers, data: { nom: `E2E devis 113 ${Date.now()}`, scopes: ['devis:read'] } });
+  expect(cle.status()).toBe(201);
+  const { apiKey, key } = await cle.json() as { apiKey: string; key: { id: string } };
+  try {
+    const refuse = await request.get(`${api}/v1/clients/${clientId}`, { headers: auth(apiKey) });
+    expect(refuse.status()).toBe(403);
+    expect((await refuse.json()).error).toMatch(/clients:read/);
+
+    const page = await allerSurPageAdmin('/devis');
+  const recherche = page.getByRole('searchbox', { name: 'Rechercher un client' });
+  const select = page.getByRole('combobox', { name: 'Client du devis' });
+  await expect(select.locator(`option[value="${clientId}"]`)).toHaveCount(0);
+  await recherche.fill(prefix);
+  await expect(select.locator(`option[value="${clientId}"]`)).toHaveCount(1);
+  await select.selectOption(clientId);
+  await page.getByRole('textbox', { name: 'Objet' }).fill(`Devis 113 ${prefix}`);
+  await page.getByRole('textbox', { name: 'Désignation' }).fill('Prestation test');
+  await page.getByRole('spinbutton', { name: 'PU HT' }).fill('10');
+  const creation = page.waitForResponse(r => r.url().endsWith('/api/devis') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Créer le brouillon' }).click();
+  const cree = await creation;
+  expect(cree.status(), await cree.text()).toBe(201);
+  const devisId = (await cree.json()).id as string;
+  const ligne = page.getByRole('listitem').filter({ hasText: `Devis 113 ${prefix}` });
+  await expect(ligne).toBeVisible();
+  await ligne.getByRole('button', { name: 'Modifier' }).click();
+  await expect(select).toHaveValue(clientId);
+  await expect(select.locator(`option[value="${clientId}"]`)).toHaveCount(1);
+  await page.getByRole('textbox', { name: 'Objet' }).fill(`Devis 113 modifié ${prefix}`);
+  const edition = page.waitForResponse(r => r.url().endsWith(`/api/devis/${devisId}`) && r.request().method() === 'PATCH');
+  await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
+  expect((await edition).status()).toBe(200);
+  const devisRelu = await request.get(`${api}/devis`, { headers });
+  expect(devisRelu.ok()).toBeTruthy();
+  expect((await devisRelu.json()).find((d: { id: string }) => d.id === devisId).client.id).toBe(clientId);
+  const ligneModifiee = page.getByRole('listitem').filter({ hasText: `Devis 113 modifié ${prefix}` });
+  await expect(ligneModifiee).toBeVisible();
+  await ligneModifiee.getByRole('button', { name: 'Faire signer le client' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Signature client' });
+  await expect(dialogue.getByRole('combobox', { name: 'Signataire client' }).getByRole('option', { name: 'Alice Signataire113' })).toBeAttached();
+  await expect(dialogue.getByRole('combobox', { name: 'Signataire client' }).getByRole('option', { name: 'NonHabilite113' })).toHaveCount(0);
+  await dialogue.getByRole('combobox', { name: 'Signataire client' }).selectOption({ label: 'Alice Signataire113' });
+  await dialogue.getByRole('checkbox', { name: 'Confirmation du client' }).check();
+  const signature = page.waitForResponse(r => r.url().endsWith(`/api/devis/${devisId}/signature`) && r.request().method() === 'POST');
+  await dialogue.getByRole('button', { name: 'Enregistrer la signature client' }).click();
+  expect((await signature).status()).toBe(201);
+  await expect(ligneModifiee).toContainText('Signature client : Alice Signataire113');
+  const revision = page.waitForResponse(r => r.url().endsWith(`/api/devis/${devisId}/revisions`) && r.request().method() === 'POST');
+  await ligneModifiee.getByRole('button', { name: 'Créer une révision' }).click();
+  const revisionCreee = await revision;
+  expect(revisionCreee.status()).toBe(201);
+  const revisionId = (await revisionCreee.json()).id as string;
+  await expect(page.getByRole('heading', { name: 'Modifier le brouillon' })).toBeVisible();
+  await expect(select).toHaveValue(clientId);
+  await expect(select.locator(`option[value="${clientId}"]`)).toHaveCount(1);
+  await page.getByRole('textbox', { name: 'Objet' }).fill(`Devis 113 révision ${prefix}`);
+  const sauvegardeRevision = page.waitForResponse(r => r.url().endsWith(`/api/devis/${revisionId}`) && r.request().method() === 'PATCH');
+  await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
+  expect((await sauvegardeRevision).status()).toBe(200);
+  const revisionsRelues = await request.get(`${api}/devis`, { headers });
+  expect(revisionsRelues.ok()).toBeTruthy();
+  const revisionRelue = (await revisionsRelues.json()).find((d: { id: string }) => d.id === revisionId);
+  expect(revisionRelue).toMatchObject({ id: revisionId, version: 2, objet: `Devis 113 révision ${prefix}`, client: { id: clientId } });
+  } finally {
+    const revoke = await request.post(`${api}/admin/api-keys/${key.id}/revoke`, { headers });
+    expect(revoke.status()).toBe(200);
+    const keys = await request.get(`${api}/admin/api-keys`, { headers });
+    expect(keys.status()).toBe(200);
+    expect((await keys.json() as { nom: string; actif: boolean }[]).filter(k => k.nom.startsWith('E2E devis 113 ') && k.actif)).toHaveLength(0);
+  }
+});
+
+test('#113 : les recherches périmées et leurs erreurs ne remplacent pas la sélection courante', async ({ allerSurPageAdmin, request, session }) => {
+  const headers = auth(session.token);
+  const prefix = `ZZZ E2E 113 recherche ${Date.now()}`;
+  const ids: string[] = [];
+  for (const nom of ['ancien', 'cible']) {
+    const response = await request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefix} ${nom}` } });
+    expect(response.status(), await response.text()).toBe(201);
+    ids.push((await response.json()).id);
+  }
+  const page = await allerSurPageAdmin('/devis');
+  const recherche = page.getByRole('searchbox', { name: 'Rechercher un client' });
+  const select = page.getByRole('combobox', { name: 'Client du devis' });
+  await recherche.fill(`${prefix} ancien`);
+  await expect(select.locator(`option[value="${ids[0]}"]`)).toHaveCount(1);
+  await select.selectOption(ids[0]);
+  await recherche.fill(prefix);
+  await expect(select).toHaveValue(''); // L'ancien ID doit être effacé même s'il reste dans les résultats.
+  await expect(select).toBeDisabled();
+  await expect(select.locator(`option[value="${ids[0]}"]`)).toHaveCount(1); // l'ancien est bien dans les résultats
+  await expect(select).toBeEnabled();
+  await expect(select).toHaveValue(''); // L'ancien ID doit être effacé même s'il reste dans les résultats.
+  await expect(select.locator(`option[value="${ids[1]}"]`)).toHaveCount(1);
+  await select.selectOption(ids[1]);
+
+  for (const echec of [false, true]) {
+    let liberer!: () => void;
+    const attente = new Promise<void>(resolve => { liberer = resolve; });
+    await page.route('**/api/clients?q=*', async route => {
+      if (new URL(route.request().url()).searchParams.get('q') === `${prefix} ancien`) {
+        await attente;
+        if (echec) await route.fulfill({ status: 503, json: { error: 'Erreur périmée devis 113' } });
+        else await route.continue();
+      } else await route.continue();
+    });
+    const envoyee = page.waitForRequest(r => new URL(r.url()).searchParams.get('q') === `${prefix} ancien`);
+    await recherche.fill(`${prefix} ancien`);
+    await envoyee;
+    await recherche.fill(`${prefix} cible`);
+    await expect(select).toBeDisabled();
+    await expect(select.locator(`option[value="${ids[1]}"]`)).toHaveCount(1);
+    await select.selectOption(ids[1]);
+    const retour = page.waitForResponse(r => new URL(r.url()).searchParams.get('q') === `${prefix} ancien`);
+    liberer();
+    await (await retour).finished();
+    await page.evaluate(async ({ cibleId, ancienId }) => {
+      const fin = performance.now() + 500;
+      while (performance.now() < fin) {
+        const select = document.querySelector<HTMLSelectElement>('select[name="clientId"]');
+        if (select?.value !== cibleId || select.querySelector(`option[value="${ancienId}"]`) || document.body.textContent?.includes('Erreur périmée devis 113')) throw new Error('Réponse périmée appliquée');
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    }, { cibleId: ids[1], ancienId: ids[0] });
+    await page.unroute('**/api/clients?q=*');
+  }
+  await page.route('**/api/clients?q=*', route => route.fulfill({ status: 503, json: { error: 'Recherche indisponible 113' } }));
+  await recherche.fill(`${prefix} erreur`);
+  await expect(page.getByRole('alert')).toContainText('Recherche indisponible 113');
+  await expect(select).toBeDisabled();
+});
+
+test('#113 : D5 — le chargement des signataires d’un devis A n’est pas réinjecté sur un devis B', async ({ allerSurPageAdmin, request, session }) => {
+  const headers = auth(session.token);
+  const aClient = await request.post(`${api}/clients`, { headers, data: { raisonSociale: 'Signataire D5 A' } });
+  expect(aClient.status(), await aClient.text()).toBe(201);
+  const aId = (await aClient.json()).id;
+  const aContact = await request.post(`${api}/clients/${aId}/contacts`, { headers, data: { nom: 'SignA', prenom: 'A', estSignataire: true } });
+  expect(aContact.status(), await aContact.text()).toBe(201);
+  const bClient = await request.post(`${api}/clients`, { headers, data: { raisonSociale: 'Signataire D5 B' } });
+  expect(bClient.status(), await bClient.text()).toBe(201);
+  const page = await allerSurPageAdmin('/devis');
+  const recherche = page.getByRole('searchbox', { name: 'Rechercher un client' });
+  await recherche.fill('Signataire D5');
+  await page.getByRole('combobox', { name: 'Client du devis' }).selectOption({ label: 'Signataire D5 A' });
+  await page.getByRole('textbox', { name: 'Objet' }).fill('D5 devis A');
+  await page.getByRole('textbox', { name: 'Désignation' }).fill('Prestation');
+  await page.getByRole('spinbutton', { name: 'PU HT' }).fill('1');
+  await page.getByRole('button', { name: 'Créer le brouillon' }).click();
+  await page.waitForResponse(r => r.url().endsWith('/api/devis') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Modifier' }).click();
+  await page.getByRole('button', { name: 'Faire signer le client' }).click();
+  const dialogue = page.getByRole('dialog', { name: 'Signature client' });
+  await expect(dialogue.getByRole('combobox', { name: 'Signataire client' }).getByRole('option', { name: 'A SignA' })).toBeAttached();
+  await dialogue.getByRole('button', { name: 'Annuler' }).click();
+  await recherche.fill('Signataire D5');
+  await page.getByRole('combobox', { name: 'Client du devis' }).selectOption({ label: 'Signataire D5 B' });
+  await page.getByRole('button', { name: 'Modifier' }).click();
+  await page.getByRole('textbox', { name: 'Objet' }).fill('D5 devis B');
+  await page.getByRole('spinbutton', { name: 'PU HT' }).fill('1');
+  await page.getByRole('button', { name: 'Créer le brouillon' }).click();
+  await page.waitForResponse(r => r.url().endsWith('/api/devis') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Modifier' }).click();
+  await page.getByRole('button', { name: 'Faire signer le client' }).click();
+  const dialogueB = page.getByRole('dialog', { name: 'Signature client' });
+  await expect(dialogueB.getByRole('combobox', { name: 'Signataire client' }).getByRole('option', { name: 'A SignA' })).toHaveCount(0);
+  await dialogueB.getByRole('button', { name: 'Annuler' }).click();
+  await page.getByRole('button', { name: 'Annuler' }).click();
+});
