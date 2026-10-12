@@ -72,6 +72,15 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 
 Les bases de test sont destructibles. Elles ne doivent jamais viser un volume de développement, ni une instance de production.
 
+En local, lancer les parcours Playwright avec `cd client && npm run test:e2e:local`. Avant Playwright, cette commande :
+
+- régénère le client Prisma et recompile le backend (`server/dist`), que Playwright démarre tel quel ;
+- applique les migrations sur `E2E_DATABASE_URL` ;
+- refuse une base dont le nom ne contient ni `e2e` ni `test` ;
+- refuse de démarrer si un serveur écoute déjà sur les ports API ou frontend, car Playwright le réutiliserait hors CI.
+
+`npm run test:e2e` seul suppose que ces étapes ont déjà été faites, comme dans la CI.
+
 ## Vérifier avant démarrage
 
 1. vérifier que les deux `.env` sont ignorés par Git : `git status --short` ne doit pas les afficher ;

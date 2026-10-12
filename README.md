@@ -160,6 +160,16 @@ via `TEST_DATABASE_URL` et s'annoncent ignorés sans elle — voir
 Un test qui relit le code source en texte n'en est pas un : il reste vert sur une branche
 qui ne compile même pas. Cette règle est la seule qui compte ici.
 
+Parcours navigateur (Playwright, base PostgreSQL jetable) :
+
+```bash
+cd client && E2E_DATABASE_URL=postgresql://…/iris_e2e npm run test:e2e:local
+```
+
+Cette commande recompile le backend et migre la base avant chaque exécution ; sans elle, Playwright
+peut tester un ancien `server/dist`. Détails dans
+[`docs/CONFIGURATION-ENVIRONNEMENT.md`](docs/CONFIGURATION-ENVIRONNEMENT.md#tests-et-ci).
+
 ## Audit de clôture des liens hérités
 
 Contrôlé le 04/09/2026 sur la branche dédiée `chore/phase-1-anti-amalgame-final` :
