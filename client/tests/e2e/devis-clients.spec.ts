@@ -160,40 +160,63 @@ test('#113 : les recherches périmées et leurs erreurs ne remplacent pas la sé
   await expect(select).toBeDisabled();
 });
 
-test('#113 : D5 — le chargement des signataires d’un devis A n’est pas réinjecté sur un devis B', async ({ allerSurPageAdmin, request, session }) => {
+test('#113 : D5 — une réponse signataire A tardive ne remplace pas les contacts du devis B', async ({ allerSurPageAdmin, request, session }) => {
   const headers = auth(session.token);
-  const aClient = await request.post(`${api}/clients`, { headers, data: { raisonSociale: 'Signataire D5 A' } });
-  expect(aClient.status(), await aClient.text()).toBe(201);
-  const aId = (await aClient.json()).id;
-  const aContact = await request.post(`${api}/clients/${aId}/contacts`, { headers, data: { nom: 'SignA', prenom: 'A', estSignataire: true } });
-  expect(aContact.status(), await aContact.text()).toBe(201);
-  const bClient = await request.post(`${api}/clients`, { headers, data: { raisonSociale: 'Signataire D5 B' } });
-  expect(bClient.status(), await bClient.text()).toBe(201);
+  const prefix = `D5 ${Date.now()}`;
+  const clients: string[] = [];
+  for (const nom of ['A', 'B']) {
+    const client = await request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefix} ${nom}` } });
+    expect(client.status(), await client.text()).toBe(201);
+    const clientId = (await client.json()).id as string;
+    clients.push(clientId);
+    const contact = await request.post(`${api}/clients/${clientId}/contacts`, { headers, data: { nom: `Sign${nom}`, estSignataire: true } });
+    expect(contact.status(), await contact.text()).toBe(201);
+    const devis = await request.post(`${api}/devis`, { headers, data: {
+      clientId, objet: `${prefix} devis ${nom}`, acompteExige: false,
+      lignes: [{ designation: 'Prestation D5', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }],
+    } });
+    expect(devis.status(), await devis.text()).toBe(201);
+  }
   const page = await allerSurPageAdmin('/devis');
-  const recherche = page.getByRole('searchbox', { name: 'Rechercher un client' });
-  await recherche.fill('Signataire D5');
-  await page.getByRole('combobox', { name: 'Client du devis' }).selectOption({ label: 'Signataire D5 A' });
-  await page.getByRole('textbox', { name: 'Objet' }).fill('D5 devis A');
-  await page.getByRole('textbox', { name: 'Désignation' }).fill('Prestation');
-  await page.getByRole('spinbutton', { name: 'PU HT' }).fill('1');
-  await page.getByRole('button', { name: 'Créer le brouillon' }).click();
-  await page.waitForResponse(r => r.url().endsWith('/api/devis') && r.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Modifier' }).click();
-  await page.getByRole('button', { name: 'Faire signer le client' }).click();
-  const dialogue = page.getByRole('dialog', { name: 'Signature client' });
-  await expect(dialogue.getByRole('combobox', { name: 'Signataire client' }).getByRole('option', { name: 'A SignA' })).toBeAttached();
-  await dialogue.getByRole('button', { name: 'Annuler' }).click();
-  await recherche.fill('Signataire D5');
-  await page.getByRole('combobox', { name: 'Client du devis' }).selectOption({ label: 'Signataire D5 B' });
-  await page.getByRole('button', { name: 'Modifier' }).click();
-  await page.getByRole('textbox', { name: 'Objet' }).fill('D5 devis B');
-  await page.getByRole('spinbutton', { name: 'PU HT' }).fill('1');
-  await page.getByRole('button', { name: 'Créer le brouillon' }).click();
-  await page.waitForResponse(r => r.url().endsWith('/api/devis') && r.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Modifier' }).click();
-  await page.getByRole('button', { name: 'Faire signer le client' }).click();
-  const dialogueB = page.getByRole('dialog', { name: 'Signature client' });
-  await expect(dialogueB.getByRole('combobox', { name: 'Signataire client' }).getByRole('option', { name: 'A SignA' })).toHaveCount(0);
-  await dialogueB.getByRole('button', { name: 'Annuler' }).click();
-  await page.getByRole('button', { name: 'Annuler' }).click();
+  const ligneA = page.getByRole('listitem').filter({ hasText: `${prefix} devis A` });
+  const ligneB = page.getByRole('listitem').filter({ hasText: `${prefix} devis B` });
+  await expect(ligneA).toBeVisible();
+  await expect(ligneB).toBeVisible();
+  let libererA!: () => void;
+  const attenteA = new Promise<void>(resolve => { libererA = resolve; });
+  await page.route(`**/api/clients/${clients[0]}`, async route => {
+    await attenteA;
+    await route.continue();
+  });
+  let attenteLiberee = false;
+  try {
+    const requeteA = page.waitForRequest(r => r.url().endsWith(`/api/clients/${clients[0]}`));
+    await ligneA.getByRole('button', { name: 'Faire signer le client' }).click();
+    await requeteA;
+    const dialogue = page.getByRole('dialog', { name: 'Signature client' });
+    await expect(dialogue.getByText('Chargement des contacts…')).toBeVisible();
+    await dialogue.getByRole('button', { name: 'Annuler' }).click();
+    const reponseB = page.waitForResponse(r => r.url().endsWith(`/api/clients/${clients[1]}`));
+    await ligneB.getByRole('button', { name: 'Faire signer le client' }).click();
+    const contactB = await reponseB;
+    expect(contactB.status()).toBe(200);
+    const signataires = page.getByRole('dialog', { name: 'Signature client' }).getByRole('combobox', { name: 'Signataire client' });
+    await expect(signataires.getByRole('option', { name: 'SignB' })).toBeAttached();
+    await expect(signataires.getByRole('option', { name: 'SignA' })).toHaveCount(0);
+    const reponseA = page.waitForResponse(r => r.url().endsWith(`/api/clients/${clients[0]}`));
+    libererA(); attenteLiberee = true;
+    expect((await reponseA).status()).toBe(200);
+    await (await reponseA).finished();
+    await page.evaluate(async () => {
+      const fin = performance.now() + 500;
+      while (performance.now() < fin) {
+        const select = document.querySelector<HTMLSelectElement>('select[aria-label="Signataire client"]');
+        if (!select || !Array.from(select.options).some(o => o.text === 'SignB') || Array.from(select.options).some(o => o.text === 'SignA')) throw new Error('Contacts du devis A appliqués à la signature de B');
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    });
+  } finally {
+    if (!attenteLiberee) libererA();
+    await page.unroute(`**/api/clients/${clients[0]}`);
+  }
 });
