@@ -6,15 +6,12 @@ const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 // La base E2E est volontairement conservée entre deux passages de la suite.
 test('#113 : recherche, édition et signature d’un client hors des 200 premiers', async ({ allerSurPageAdmin, request, session }) => {
   const headers = auth(session.token);
-  const listeInitiale = await request.get(`${api}/clients`, { headers });
-  expect(listeInitiale.ok()).toBeTruthy();
-  if ((await listeInitiale.json()).clients.length < 200) {
-    const prefix = `E2E 113 A ${Date.now()}`;
-    for (let i = 0; i < 201; i += 20) {
-      const reponses = await Promise.all(Array.from({ length: Math.min(20, 201 - i) }, (_, j) =>
-        request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefix} ${String(i + j).padStart(3, '0')}` } })));
-      for (const reponse of reponses) expect(reponse.status(), await reponse.text()).toBe(201);
-    }
+  // D8 : une recherche qui renvoie 200 résultats doit annoncer la limite, même sur une base déjà peuplée.
+  const prefixLimite = `E2E 113 limite ${Date.now()}`;
+  for (let i = 0; i < 200; i += 20) {
+    const reponses = await Promise.all(Array.from({ length: 20 }, (_, j) =>
+      request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefixLimite} ${String(i + j).padStart(3, '0')}` } })));
+    for (const reponse of reponses) expect(reponse.status(), await reponse.text()).toBe(201);
   }
   const prefix = `ZZZ E2E 113 ${Date.now()}`;
   const cible = await request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefix} cible` } });
@@ -37,9 +34,12 @@ test('#113 : recherche, édition et signature d’un client hors des 200 premier
     expect((await refuse.json()).error).toMatch(/clients:read/);
 
     const page = await allerSurPageAdmin('/devis');
-  const recherche = page.getByRole('searchbox', { name: 'Rechercher un client' });
-  const select = page.getByRole('combobox', { name: 'Client du devis' });
-  await expect(select.locator(`option[value="${clientId}"]`)).toHaveCount(0);
+    const recherche = page.getByRole('searchbox', { name: 'Rechercher un client' });
+    const select = page.getByRole('combobox', { name: 'Client du devis' });
+    await recherche.fill(prefixLimite);
+    await expect(select.locator('option')).toHaveCount(201); // option vide + 200 clients
+    await expect(page.getByRole('status', { name: 'Limite des résultats clients' })).toContainText('200 clients maximum');
+    await expect(select.locator(`option[value="${clientId}"]`)).toHaveCount(0);
   await recherche.fill(prefix);
   await expect(select.locator(`option[value="${clientId}"]`)).toHaveCount(1);
   await select.selectOption(clientId);
