@@ -68,6 +68,11 @@ export default function Factures() {
   const nombrePages = Math.max(1, Math.ceil(total / taillePage));
   const [derniereDateEmission, setDerniereDateEmission] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
+  const [rechercheClient, setRechercheClient] = useState('');
+  const [resultatsClients, setResultatsClients] = useState<Client[] | null>(null);
+  const [rechercheEnCours, setRechercheEnCours] = useState(false);
+  const [erreurRechercheClient, setErreurRechercheClient] = useState('');
+  const requeteClients = useRef(0);
   const [chantiers, setChantiers] = useState<Source[]>([]);
   const [interventions, setInterventions] = useState<Source[]>([]);
   const [contrats, setContrats] = useState<Source[]>([]);
@@ -166,10 +171,39 @@ export default function Factures() {
 
   useEffect(() => { void charger(); return () => { requeteListe.current += 1; }; }, []);
 
+  useEffect(() => {
+    const q = rechercheClient.trim();
+    if (!ouvert || !q) return;
+    const requete = requeteClients.current;
+    const minuteur = window.setTimeout(async () => {
+      try {
+        const response = await apiFetch(`/clients?q=${encodeURIComponent(q)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error || 'Recherche impossible.');
+        if (requete === requeteClients.current) setResultatsClients(data.clients);
+      } catch (e) {
+        if (requete === requeteClients.current) setErreurRechercheClient(e instanceof Error ? e.message : 'Recherche impossible.');
+      } finally {
+        if (requete === requeteClients.current) setRechercheEnCours(false);
+      }
+    }, 250);
+    return () => window.clearTimeout(minuteur);
+  }, [rechercheClient, ouvert]);
+
+  const chercherClient = (valeur: string) => {
+    requeteClients.current += 1;
+    setRechercheClient(valeur);
+    setClientSelection('');
+    setResultatsClients(valeur.trim() ? [] : null);
+    setRechercheEnCours(Boolean(valeur.trim()));
+    setErreurRechercheClient('');
+  };
+
   const ouvrirFormulaire = () => {
     setErreur('');
     setSucces('');
     setClientSelection('');
+    chercherClient('');
     setOrigine('HORS_AFFAIRE');
     setLignes([nouvelleLigne()]);
     setOuvert(true);
@@ -397,13 +431,21 @@ export default function Factures() {
         <form className="rounded-xl border bg-white p-5 space-y-4" onSubmit={creer}>
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Nouveau brouillon</h2>
-            <button type="button" className="btn btn-secondary" onClick={() => setOuvert(false)}>Annuler</button>
+            <button type="button" className="btn btn-secondary" onClick={() => { requeteClients.current += 1; setOuvert(false); }}>Annuler</button>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
-            <select required name="clientId" className="form-input" value={clientSelection} onChange={(e) => setClientSelection(e.target.value)}>
-              <option value="">Client…</option>
-              {clients.map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
-            </select>
+            <div className="space-y-1">
+              <label htmlFor="recherche-client-facture" className="block text-sm font-medium">Rechercher un client</label>
+              <input id="recherche-client-facture" type="search" className="form-input w-full" value={rechercheClient} onChange={(e) => chercherClient(e.target.value)} placeholder="Nom commercial, raison sociale ou SIREN" aria-controls="clientId-facture" />
+              <select id="clientId-facture" required name="clientId" aria-label="Client de la facture" className="form-input w-full" value={clientSelection} onChange={(e) => setClientSelection(e.target.value)} disabled={rechercheEnCours || Boolean(erreurRechercheClient)}>
+                <option value="">Client…</option>
+                {(resultatsClients ?? clients).map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
+              </select>
+              {rechercheEnCours && <p role="status" className="text-sm">Recherche en cours…</p>}
+              {erreurRechercheClient && <p role="alert" className="text-sm text-red-700">{erreurRechercheClient}</p>}
+              {resultatsClients?.length === 200 && !rechercheEnCours && !erreurRechercheClient && <p role="status" aria-label="Limite des résultats clients" className="text-sm">200 clients maximum affichés ; veuillez affiner votre recherche.</p>}
+              {resultatsClients?.length === 0 && !rechercheEnCours && !erreurRechercheClient && <p role="status" className="text-sm">Aucun client actif trouvé.</p>}
+            </div>
             <input required name="dateEmission" defaultValue={dateFrancaiseDuJour(fuseauHoraire)} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Émission (JJ-MM-AAAA)" />
             <input required name="dateEcheance" defaultValue={dateFrancaiseDuJour(fuseauHoraire)} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Échéance (JJ-MM-AAAA)" />
           </div>
