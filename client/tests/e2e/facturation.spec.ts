@@ -12,6 +12,24 @@ function jetonPour(userId: string) {
 }
 
 test.describe('Facturation — parcours utilisateur', () => {
+  const afficherFacture = async (page: Page, raisonSociale: string) => {
+    const ligne = page.locator('tbody tr', { hasText: raisonSociale });
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    // Deux factures créées à la suite peuvent tomber de part et d'autre d'une frontière
+    // de page ; repartir du début aussi bien pour l'ancienne que pour la nouvelle.
+    const precedente = page.getByRole('button', { name: 'Page précédente' });
+    while (await precedente.isEnabled()) {
+      await precedente.click();
+      await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    }
+    while (!(await ligne.count())) {
+      const suivante = page.getByRole('button', { name: 'Page suivante' });
+      expect(await suivante.isEnabled(), `facture ${raisonSociale} absente de la pagination`).toBeTruthy();
+      await suivante.click();
+      await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    }
+    return ligne;
+  };
   test('#105 : consulte la chaîne de l’affaire depuis la facture puis navigue vers la fiche affaire', async ({ allerSurPageAdmin, creerClient, request, session }) => {
     const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
     const headers = { Authorization: `Bearer ${session.token}` };
@@ -30,7 +48,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const interventionLiee = await post('/interventions', { clientId: client.id, chantierId: chantier.id, titre: 'SAV non facturé #105' });
     await post('/factures', { clientId: client.id, origine: 'INTERVENTION', interventionId: intervention.id, dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'SAV', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
     const page = await allerSurPageAdmin('/factures');
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale });
+    const ligne = await afficherFacture(page, client.raisonSociale);
     await expect(page.getByRole('region', { name: 'Origine de la facture' })).toHaveCount(0);
     await ligne.getByRole('button', { name: 'Voir l’origine' }).click();
     const detail = page.getByRole('region', { name: 'Origine de la facture' });
@@ -80,11 +98,11 @@ test.describe('Facturation — parcours utilisateur', () => {
       await attente;
       await route.continue();
     });
-    await page.locator('tbody tr', { hasText: motifAncien }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await (await afficherFacture(page, motifAncien)).getByRole('button', { name: 'Voir l’origine' }).click();
     const detail = page.getByRole('region', { name: 'Origine de la facture' });
     await expect(detail).toContainText('Chargement');
     await page.route(`**/api/factures/${actuel}/tracabilite`, async route => { await route.fulfill({ status: 503, json: { error: 'Lecture temporairement indisponible.' } }); });
-    await page.locator('tbody tr', { hasText: motifActuel }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await (await afficherFacture(page, motifActuel)).getByRole('button', { name: 'Voir l’origine' }).click();
     await expect(detail).toContainText('Lecture temporairement indisponible.');
     const ancienneLivree = page.waitForResponse(response => response.url().endsWith(`/api/factures/${ancien}/tracabilite`));
     liberer();
@@ -107,9 +125,9 @@ test.describe('Facturation — parcours utilisateur', () => {
       await attenteErreur;
       await route.fulfill({ status: 503, json: { error: 'Erreur ancienne #105' } });
     });
-    await page.locator('tbody tr', { hasText: motifAncien }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await (await afficherFacture(page, motifAncien)).getByRole('button', { name: 'Voir l’origine' }).click();
     await expect(detail).toContainText('Chargement');
-    await page.locator('tbody tr', { hasText: motifActuel }).getByRole('button', { name: 'Voir l’origine' }).click();
+    await (await afficherFacture(page, motifActuel)).getByRole('button', { name: 'Voir l’origine' }).click();
     await expect(detail).toContainText(motifActuel);
     const erreurLivree = page.waitForResponse(response => response.url().endsWith(`/api/factures/${ancien}/tracabilite`) && response.status() === 503);
     libererErreur();
@@ -141,13 +159,13 @@ test.describe('Facturation — parcours utilisateur', () => {
     const nouveauId = await brouillonChronologie(request, session.token, nouveau.id, dateDuJour());
     await page.route('**/api/factures/chronologie', async route => {
       await route.fulfill({ json: { derniereDateEmission: null } });
-      await page.unroute('**/api/factures/chronologie');
     });
     await allerSurPageAdmin('/factures');
-    const ligne = page.locator('tbody tr', { hasText: ancien.raisonSociale });
+    const ligne = await afficherFacture(page, ancien.raisonSociale);
     await expect(ligne.getByRole('button', { name: 'Émettre' })).toBeEnabled();
     const emission = await request.post(`${apiChronologie}/factures/${nouveauId}/emettre`, { headers: { Authorization: `Bearer ${session.token}` } });
     expect(emission.status(), await emission.text()).toBe(200);
+    await page.unroute('**/api/factures/chronologie');
     const refus = page.waitForResponse(response => response.url().endsWith(`/factures/${ancienId}/emettre`));
     await ligne.getByRole('button', { name: 'Émettre' }).click();
     expect((await refus).status()).toBe(409);
@@ -164,10 +182,14 @@ test.describe('Facturation — parcours utilisateur', () => {
     await brouillonChronologie(request, session.token, egal.id, dateDuJour());
     const page = await allerSurPageAdmin('/factures');
     await expect(page.getByTestId('derniere-date-facture')).toContainText(dateDuJour());
-    const ligneAncienne = page.locator('tbody tr', { hasText: ancien.raisonSociale });
+    const ligneAncienne = await afficherFacture(page, ancien.raisonSociale);
     await expect(ligneAncienne.getByRole('button', { name: /Émission impossible/ })).toBeDisabled();
     await expect(ligneAncienne).toContainText(dateDuJour());
-    await expect(page.locator('tbody tr', { hasText: egal.raisonSociale }).getByRole('button', { name: 'Émettre' })).toBeEnabled();
+    while (await page.getByRole('button', { name: 'Page précédente' }).isEnabled()) {
+      await page.getByRole('button', { name: 'Page précédente' }).click();
+      await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    }
+    await expect((await afficherFacture(page, egal.raisonSociale)).getByRole('button', { name: 'Émettre' })).toBeEnabled();
   });
 
   // Prépare une facture émise hors affaire et rend sa ligne de tableau.
@@ -189,7 +211,9 @@ test.describe('Facturation — parcours utilisateur', () => {
       }
     }
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
-    const facture = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    const facture = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     // Un brouillon n'est pas créditable : attendre sa ligne rend l'assertion d'absence
     // significative, plutôt que vraie sur une ligne pas encore rendue.
     await expect(facture).toContainText('BROUILLON');
@@ -242,7 +266,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
 
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+    const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await expect(ligne).toHaveCount(1);
     await expect(ligne).toContainText(/3\s*427,61\s*€/);
     const factures = await (await apiAdmin.get('/factures')).json() as Array<{ client: { id: string }; lignes: Array<{ ordre: number; nature: string; prixUnitaireHt: number }>; totalHt: number; totalTva: number; totalTtc: number }>;
@@ -265,7 +289,9 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Prestation à créditer');
     await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
-    const facture = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    const facture = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await facture.getByRole('button', { name: /Émettre/ }).click();
     await expect(facture).toContainText('EMISE');
 
@@ -284,7 +310,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
     await expect(page.getByText(/Avoir .* créé et émis/)).toBeVisible();
 
-    const avoir = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ has: page.getByText('Avoir', { exact: true }) });
+    const avoir = (await afficherFacture(page, client.raisonSociale)).filter({ has: page.getByText('Avoir', { exact: true }) });
     await expect(avoir).toHaveCount(1);
     await expect(avoir).toContainText(/60,00\s*€/);
     await expect(avoir).toContainText(/\d{2}[-/]\d{2}[-/]\d{4}/);
@@ -376,7 +402,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     await prix.pressSequentially('480,50', { delay: 10 });
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(page.getByText(/émise et figée/)).toBeVisible();
     await expect(ligne).toContainText(/\d{4}-\d{4}/);
@@ -399,7 +426,9 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle règlement');
     await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(ligne.getByRole('button', { name: /Marquer comme réglée/ })).toBeVisible();
     let confirmationDemandee = '';
@@ -423,7 +452,9 @@ test.describe('Facturation — parcours utilisateur', () => {
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle annulation');
     await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+    await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     let confirmationDemandee = '';
     page.once('dialog', (dialog) => { confirmationDemandee = dialog.message(); void dialog.accept(); });
@@ -463,7 +494,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     await prix.pressSequentially('100');
     await page.getByRole('button', { name: /Créer le brouillon/ }).click();
     await expect(page.getByText(/Brouillon créé/)).toBeVisible();
-    const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
     await expect(page.getByText(/adresse de facturation/i)).toBeVisible();
     await expect(ligne).toContainText('Brouillon');
@@ -661,9 +693,13 @@ test.describe('Facturation — parcours utilisateur', () => {
       await page.locator('input[name="motifHorsAffaire"]').fill('Parcours fuseau Gambier');
       await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle de la date proposée');
       await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
+      const rechargement = page.waitForResponse(response => response.url().includes('/api/factures?page=1&pageSize=25') && response.ok());
       await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+      await (await rechargement).finished();
+      await expect(page.getByText(/Brouillon créé/)).toBeVisible();
+      await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
 
-      const ligne = page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: 'Facture' });
+      const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
       await expect(ligne).toContainText('BROUILLON');
       await ligne.getByRole('button', { name: /Émettre/ }).click();
       await expect(ligne).toContainText('EMISE');
