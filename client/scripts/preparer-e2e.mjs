@@ -50,7 +50,11 @@ for (const [role, port] of ports) {
 
 const executer = (commande, args, env = process.env) => {
   console.log(`[préparation E2E] ${commande} ${args.join(' ')}`);
-  execFileSync(commande, args, { cwd: dossierServeur, env, stdio: 'inherit', shell: process.platform === 'win32' });
+  try {
+    execFileSync(commande, args, { cwd: dossierServeur, env, stdio: 'inherit', shell: process.platform === 'win32' });
+  } catch {
+    echec(`Échec de « ${commande} ${args.join(' ')} » : Playwright n’est pas lancé.`);
+  }
 };
 
 executer('npx', ['prisma', 'generate']);
