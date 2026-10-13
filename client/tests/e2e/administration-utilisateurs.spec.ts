@@ -2,10 +2,11 @@ import { test, expect } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
-// L'écran Utilisateurs ne construit qu'une liste de responsables à la fois, celle que l'on ouvre.
-// Proposer tous les comptes sur chaque ligne faisait croître la page comme le carré du nombre de
-// comptes. Fermée, une liste ne porte que « Aucun » et le responsable actuel.
-test('Administration > Utilisateurs : une seule liste de responsables construite à la fois', async ({ allerSurPageAdmin, request, session }) => {
+// L'écran Utilisateurs ne construit les listes de responsables qu'à la demande : au plus celle qui
+// a le focus et la dernière touchée. Proposer tous les comptes sur chaque ligne faisait croître la
+// page comme le carré du nombre de comptes. Fermée, une liste ne porte que « Aucun » et le
+// responsable actuel.
+test('Administration > Utilisateurs : listes de responsables construites à la demande', async ({ allerSurPageAdmin, request, session }) => {
   test.slow();
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'post' | 'patch', path: string, data: object) => {
@@ -32,10 +33,11 @@ test('Administration > Utilisateurs : une seule liste de responsables construite
     await admin.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
     const listes = admin.locator('select[aria-label^="Responsable hiérarchique de"]');
     const liste = (compte: { name: string }) => admin.getByRole('combobox', { name: `Responsable hiérarchique de ${compte.name}` });
+    const listesConstruites = () => listes.evaluateAll((selects) => selects.filter((s) => (s as HTMLSelectElement).options.length > 2).length);
     await expect(liste(premier)).toBeVisible();
 
     // Fermées : au plus deux options par liste, et le responsable actuel bien affiché.
-    expect(await listes.evaluateAll((selects) => selects.filter((s) => (s as HTMLSelectElement).options.length > 2).length)).toBe(0);
+    expect(await listesConstruites()).toBe(0);
     await expect(liste(premier)).toHaveValue(second.id);
     await expect(liste(premier).locator('option:checked')).toHaveText(second.name);
     await expect(liste(troisieme).locator('option:checked')).toHaveText(`${ancien.name} (compte désactivé)`);
@@ -58,6 +60,20 @@ test('Administration > Utilisateurs : une seule liste de responsables construite
     await expect(liste(premier).locator('option')).toHaveCount(2);
     await expect(liste(premier)).toHaveValue(second.id);
 
+    // Toucher des listes sans leur donner le focus (défilement tactile, aide technique) : seule la
+    // dernière touchée reste construite, et un défilement tactile la referme.
+    await admin.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    for (let i = 0; i < 10; i++) await listes.nth(i).dispatchEvent('touchstart');
+    expect(await listesConstruites()).toBeLessThanOrEqual(1);
+    await listes.nth(9).dispatchEvent('touchmove');
+    expect(await listesConstruites()).toBe(0);
+    // Une liste qui a le focus n'est jamais refermée par une autre que l'on touche.
+    await liste(premier).focus();
+    await liste(second).dispatchEvent('touchstart');
+    await expect(liste(premier).locator('option', { hasText: troisieme.name })).toHaveCount(1);
+    expect(await listesConstruites()).toBe(2);
+    await liste(premier).blur();
+
     // Parcours clavier : Tab depuis le type de compte, puis Flèche bas, rattache au premier proposé.
     const ligneClavier = admin.locator('tr').filter({ hasText: clavier.email });
     await ligneClavier.locator('select').first().focus();
@@ -65,9 +81,11 @@ test('Administration > Utilisateurs : une seule liste de responsables construite
     await expect(liste(clavier)).toBeFocused();
     const premierPropose = await liste(clavier).evaluate((s) => (s as HTMLSelectElement).options[1]?.value);
     expect(premierPropose, 'la liste est construite dès le focus clavier').toBeTruthy();
-    const rattachement = admin.waitForRequest((r) => r.url().endsWith(`/api/users/${clavier.id}/responsable-hierarchique`) && r.method() === 'PATCH');
+    const rattachement = admin.waitForResponse((r) => r.url().endsWith(`/api/users/${clavier.id}/responsable-hierarchique`) && r.request().method() === 'PATCH');
     await admin.keyboard.press('ArrowDown');
-    expect((await rattachement).postDataJSON()).toEqual({ responsableHierarchiqueId: premierPropose });
+    const reponse = await rattachement;
+    expect(reponse.status()).toBe(200);
+    expect(reponse.request().postDataJSON()).toEqual({ responsableHierarchiqueId: premierPropose });
   } finally {
     await request.patch(`${api}/users/${clavier.id}/responsable-hierarchique`, { headers, data: { responsableHierarchiqueId: null } }).catch(() => undefined);
   }

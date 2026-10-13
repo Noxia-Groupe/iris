@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type MutableRefObject } from 'react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN } from '../roles';
@@ -126,7 +126,12 @@ type CompteResume = { id: string; name: string };
 // ouverte (clic, clavier, toucher) : proposer tous les comptes sur chaque ligne faisait croître
 // la page comme le carré du nombre de comptes. L'état d'ouverture est local, pour qu'ouvrir ou
 // refermer une liste ne fasse pas refaire le rendu de tout le tableau.
-function ChoixResponsable({ compte, responsableActuel, responsableDesactive, desactive, titre, proposables, onChoix }: {
+//
+// Une liste peut s'ouvrir sans recevoir le focus (toucher en faisant défiler le tableau, aide
+// technique) : elle ne recevrait alors jamais de blur. La dernière liste ouverte sans focus est
+// donc refermée dès qu'une autre s'ouvre ou qu'un défilement tactile commence. Une liste qui a le
+// focus n'est jamais refermée par une autre : au plus deux listes sont construites à la fois.
+function ChoixResponsable({ compte, responsableActuel, responsableDesactive, desactive, titre, proposables, onChoix, derniereOuverte }: {
   compte: CompteResume;
   responsableActuel: CompteResume | null;
   responsableDesactive: boolean;
@@ -134,12 +139,22 @@ function ChoixResponsable({ compte, responsableActuel, responsableDesactive, des
   titre: string;
   proposables: (compteId: string) => CompteResume[];
   onChoix: (compteId: string, responsableId: string) => void;
+  derniereOuverte: MutableRefObject<(() => void) | null>;
 }) {
   const [ouverte, setOuverte] = useState(false);
-  const ouvrir = () => setOuverte(true);
+  const liste = useRef<HTMLSelectElement>(null);
+  const fermerSansFocus = useCallback(() => {
+    if (document.activeElement !== liste.current) setOuverte(false);
+  }, []);
+  const ouvrir = () => {
+    if (derniereOuverte.current && derniereOuverte.current !== fermerSansFocus) derniereOuverte.current();
+    derniereOuverte.current = fermerSansFocus;
+    setOuverte(true);
+  };
   const proposes = ouverte ? proposables(compte.id) : [];
   return (
     <select
+      ref={liste}
       className="form-input py-1 px-3 text-sm rounded min-w-[11rem]"
       value={responsableActuel?.id ?? ''}
       onChange={(e) => onChoix(compte.id, e.target.value)}
@@ -147,6 +162,8 @@ function ChoixResponsable({ compte, responsableActuel, responsableDesactive, des
       onMouseDown={ouvrir}
       onTouchStart={ouvrir}
       onKeyDown={ouvrir}
+      onTouchMove={fermerSansFocus}
+      onTouchCancel={fermerSansFocus}
       onBlur={() => setOuverte(false)}
       disabled={desactive}
       aria-label={`Responsable hiérarchique de ${compte.name}`}
@@ -403,6 +420,8 @@ const Admin = () => {
     }
     return branche;
   };
+  // Fermeture de la dernière liste de responsables ouverte (cf. ChoixResponsable).
+  const derniereListeOuverte = useRef<(() => void) | null>(null);
   // Responsables proposables pour la liste que l'on ouvre (cf. ChoixResponsable) : comptes actifs
   // hors de la branche du compte, une boucle étant refusée par le serveur.
   const responsablesProposables = (compteId: string) => {
@@ -1389,6 +1408,7 @@ const Admin = () => {
                         titre={!peutGererCompte(u) ? MESSAGE_COMPTE_SUPERADMIN : 'Rattacher ce compte à son responsable direct'}
                         proposables={responsablesProposables}
                         onChoix={handleResponsableHierarchique}
+                        derniereOuverte={derniereListeOuverte}
                       />
                     </td>
                     <td className="px-4 py-4">
