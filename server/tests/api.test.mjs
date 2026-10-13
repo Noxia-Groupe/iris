@@ -1847,11 +1847,15 @@ if (!TEST_DATABASE_URL) {
         for (let essai = 1; essai <= 5; essai++) {
           await prisma.companySettings.deleteMany({ where: { id: 'singleton' } });
           await prisma.parametres.deleteMany({ where: { id: 'singleton' } });
-          const [demarrage, ...reponses] = await Promise.all([
-            initDb().then(() => 'ok', (error) => error),
+          // Plusieurs initDb simultanés : sans eux, le premier gagnerait toujours la création
+          // (il part avant l'authentification des requêtes) et sa relance ne serait pas éprouvée.
+          const resultats = await Promise.all([
+            ...Array.from({ length: 3 }, () => initDb().then(() => 'ok', (error) => error)),
             ...Array.from({ length: 8 }, () => request(app).get('/api/chantiers').set('Authorization', `Bearer ${session}`)),
           ]);
-          assert.equal(demarrage, 'ok', `essai ${essai} : démarrage`);
+          const demarrages = resultats.slice(0, 3);
+          const reponses = resultats.slice(3);
+          assert.deepEqual(demarrages, ['ok', 'ok', 'ok'], `essai ${essai} : démarrage`);
           assert.deepEqual(reponses.map((r) => r.status), Array(8).fill(200), `essai ${essai} : ${JSON.stringify(reponses.find((r) => r.status !== 200)?.body)}`);
         }
         assert.equal(await prisma.companySettings.count(), 1);

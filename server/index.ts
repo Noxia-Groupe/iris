@@ -562,9 +562,9 @@ interface Parametres {
   rentabiliteConducteur: boolean; rentabiliteHierarchie: boolean; rentabiliteDirecteurs: boolean;
 }
 
-// Réglage unique (singleton) créé à sa première lecture. L'upsert de Prisma n'est pas
-// exécuté ici comme un INSERT … ON CONFLICT atomique : il lit, puis crée. Deux premières
-// requêtes simultanées peuvent donc toutes deux tenter la création ; celle qui perd
+// Réglage unique (singleton) créé à sa première lecture. Avec un `update` vide, Prisma
+// n'exécute pas l'upsert comme un INSERT … ON CONFLICT atomique : il lit, puis crée. Deux
+// premières requêtes simultanées peuvent donc toutes deux tenter la création ; celle qui perd
 // (violation d'unicité, P2002) rejoue l'upsert, qui trouve alors la ligne créée par l'autre.
 async function upsertSingleton<T>(upsert: () => Promise<T>): Promise<T> {
   try {
@@ -6530,7 +6530,8 @@ const ensureSuperAdmins = async () => {
 // Initialisation BDD (Seeding)
 const initDb = async () => {
   // Garantit l'existence de la ligne de paramètres (singleton) dès le démarrage. Le serveur
-  // écoute déjà : une première requête peut la créer au même instant.
+  // écoute déjà : une première requête peut la créer au même instant, et une erreur levée ici
+  // (rappel de listen) arrêterait le processus avant ensureSuperAdmins.
   await upsertSingleton(() => prisma.parametres.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } }));
 
 };
