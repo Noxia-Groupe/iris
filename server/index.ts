@@ -3532,7 +3532,8 @@ app.put('/api/users/:id/permissions', requireAuth, requireSuperAdmin, async (req
       return void res.status(400).json({ error: 'Liste de permissions invalide.' });
     }
     // Un technicien n'en reçoit aucun nouveau ; ceux enregistrés avant (règle, changement de
-    // type) restent sans effet et peuvent être conservés ou retirés, comme l'accès financier.
+    // type) restent sans effet et peuvent être conservés ou retirés. L'accès financier, lui, ne
+    // peut qu'être retiré : sa route refuse toute valeur vraie pour un technicien.
     const interdites = target.role === ROLE_TECHNICIEN
       ? permissions.filter((permission) => DROITS_INTERDITS_TECHNICIEN.includes(permission) && !target.permissions.includes(permission))
       : [];
