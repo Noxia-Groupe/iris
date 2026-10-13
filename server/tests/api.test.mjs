@@ -2082,6 +2082,43 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
+  // Base vierge : les réglages uniques (paramètres, société) se créent à leur première lecture.
+  // Des premières requêtes simultanées, ou une requête arrivée pendant le démarrage, ne doivent
+  // pas échouer sur leur création concurrente (l'administration plantait au premier chargement).
+  describe('Réglages uniques créés à la première lecture', () => {
+    let session = '';
+    before(async () => {
+      const res = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      session = res.body.token;
+    });
+
+    test('des premières requêtes simultanées et le démarrage réussissent sans réglages enregistrés', async () => {
+      const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+      const parametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      try {
+        for (let essai = 1; essai <= 5; essai++) {
+          await prisma.companySettings.deleteMany({ where: { id: 'singleton' } });
+          await prisma.parametres.deleteMany({ where: { id: 'singleton' } });
+          // Plusieurs initDb simultanés : sans eux, le premier gagnerait toujours la création
+          // (il part avant l'authentification des requêtes) et sa relance ne serait pas éprouvée.
+          const resultats = await Promise.all([
+            ...Array.from({ length: 3 }, () => initDb().then(() => 'ok', (error) => error)),
+            ...Array.from({ length: 8 }, () => request(app).get('/api/chantiers').set('Authorization', `Bearer ${session}`)),
+          ]);
+          const demarrages = resultats.slice(0, 3);
+          const reponses = resultats.slice(3);
+          assert.deepEqual(demarrages, ['ok', 'ok', 'ok'], `essai ${essai} : démarrage`);
+          assert.deepEqual(reponses.map((r) => r.status), Array(8).fill(200), `essai ${essai} : ${JSON.stringify(reponses.find((r) => r.status !== 200)?.body)}`);
+        }
+        assert.equal(await prisma.companySettings.count(), 1);
+        assert.equal(await prisma.parametres.count(), 1);
+      } finally {
+        if (parametres) await prisma.parametres.upsert({ where: { id: 'singleton' }, create: parametres, update: parametres });
+        if (societe) await prisma.companySettings.upsert({ where: { id: 'singleton' }, create: societe, update: societe });
+      }
+    });
+  });
+
   describe('Catalogue', () => {
     let session = '';
     before(async () => {

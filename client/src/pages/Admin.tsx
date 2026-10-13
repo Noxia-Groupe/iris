@@ -209,6 +209,10 @@ const Admin = () => {
   const [categories, setCategories] = useState<any[]>([]);
   const [remuneration, setRemuneration] = useState<any>(null);
   const [erreurRemuneration, setErreurRemuneration] = useState('');
+  // Onglet dont la liste n'a pas pu être chargée : le message ne s'affiche que sur cet onglet.
+  const [erreurListe, setErreurListe] = useState<string | null>(null);
+  // Numéro du dernier chargement de liste : la réponse d'un chargement plus ancien est ignorée.
+  const dernierChargementListe = useRef(0);
   const [messageRemuneration, setMessageRemuneration] = useState('');
   // Commerciaux rattachables à un chantier. Volontairement chargés depuis /commerciaux et
   // non déduits de la liste des comptes : celle-ci ne montre pas les super administrateurs
@@ -229,7 +233,11 @@ const Admin = () => {
   const [societe, setSociete] = useState<{ fuseauHoraire?: string | null } | null>(null);
   const [messageSociete, setMessageSociete] = useState<{ texte: string; ok: boolean } | null>(null);
 
+  // Onglet affiché, lu par fetchData : un rechargement demandé par un gestionnaire créé sur un
+  // onglet quitté depuis (fin d'une création, par exemple) recharge l'onglet affiché.
+  const ongletActif = useRef(activeTab);
   useEffect(() => {
+    ongletActif.current = activeTab;
     fetchData();
   }, [activeTab]);
 
@@ -250,13 +258,27 @@ const Admin = () => {
     };
 
     try {
-      if (endpoints[activeTab]) {
-        const res = await apiFetch(endpoints[activeTab]);
-        const data = await res.json();
-        if (activeTab === 'intervenants') setIntervenants(data);
-        else if (activeTab === 'fournisseurs') setFournisseurs(data);
-        else if (activeTab === 'categories') setCategories(data);
-        else setChantiers(data);
+      const onglet = ongletActif.current;
+      const chargement = ++dernierChargementListe.current;
+      setErreurListe(null);
+      if (endpoints[onglet]) {
+        // Une liste qui ne se charge pas (erreur serveur ou réseau, réponse illisible) ne
+        // remplace pas la précédente : l'écran reste utilisable et le signale sur son onglet,
+        // au lieu de planter sur la réponse d'erreur.
+        let data: unknown = null;
+        try {
+          const res = await apiFetch(endpoints[onglet]);
+          if (res.ok) data = await res.json();
+        } catch (e) {
+          console.error(e);
+        }
+        if (chargement === dernierChargementListe.current) {
+          if (!Array.isArray(data)) setErreurListe(onglet);
+          else if (onglet === 'intervenants') setIntervenants(data);
+          else if (onglet === 'fournisseurs') setFournisseurs(data);
+          else if (onglet === 'categories') setCategories(data);
+          else setChantiers(data);
+        }
       }
 
       // La liste des comptes est réservée aux administrateurs (403 pour un conducteur) :
@@ -266,12 +288,12 @@ const Admin = () => {
         if (usersRes.ok) setUsers(await usersRes.json());
       }
 
-      if (activeTab === 'chantiers' && isAdmin) {
+      if (onglet === 'chantiers' && isAdmin) {
         const comRes = await apiFetch('/commerciaux');
         if (comRes.ok) setCommerciaux(await comRes.json());
       }
 
-      if (activeTab === 'modules' && isSuper) {
+      if (onglet === 'modules' && isSuper) {
         const mRes = await apiFetch('/modules');
         if (mRes.ok) {
           const m = await mRes.json();
@@ -279,7 +301,7 @@ const Admin = () => {
         }
       }
 
-      if (activeTab === 'marges') {
+      if (onglet === 'marges') {
         const pRes = await apiFetch('/parametres');
         if (pRes.ok) setParametres(await pRes.json());
 
@@ -290,7 +312,7 @@ const Admin = () => {
         if (rRes.ok) setRemuneration(await rRes.json());
       }
 
-      if (activeTab === 'societe' && isSuper) {
+      if (onglet === 'societe' && isSuper) {
         const sRes = await apiFetch('/company');
         if (sRes.ok) setSociete(await sRes.json());
       }
@@ -656,7 +678,7 @@ const Admin = () => {
         <button className={`btn ${activeTab === 'categories' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('categories')}>Catégories</button>
         {isAdmin && (
           <>
-            <button className={`btn ${activeTab === 'marges' ? 'btn-primary' : 'bg-white'}`} onClick={() => { setActiveTab('marges'); fetchData(); }}>Marges & Commissions</button>
+            <button className={`btn ${activeTab === 'marges' ? 'btn-primary' : 'bg-white'}`} onClick={() => (activeTab === 'marges' ? fetchData() : setActiveTab('marges'))}>Marges & Commissions</button>
             <button className={`btn ${activeTab === 'utilisateurs' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('utilisateurs')}>Utilisateurs</button>
           </>
         )}
@@ -667,6 +689,10 @@ const Admin = () => {
           </>
         )}
       </div>
+
+      {erreurListe === activeTab && (
+        <div role="alert" className="mb-4 p-4 bg-red-50 text-red-800 rounded text-sm">Cette liste n’a pas pu être chargée. Rechargez la page pour réessayer.</div>
+      )}
 
       {!isAdmin && (
         <div className="mb-4 p-4 bg-blue-50 text-blue-800 rounded text-sm">
