@@ -93,12 +93,17 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       for (const [compte, responsable] of [[conducteur, secteur], [secteur, regional]]) {
         const choix = admin.getByRole('combobox', { name: `Responsable hiérarchique de ${compte.name}` });
         const reponse = admin.waitForResponse((r) => r.url().endsWith(`/api/users/${compte.id}/responsable-hierarchique`));
+        // La liste des responsables ne se construit qu'à l'ouverture (clic, clavier ou toucher).
+        await choix.focus();
         await choix.selectOption({ label: responsable.name });
         expect((await reponse).status()).toBe(200);
         await expect(choix).toHaveValue(responsable.id);
       }
       // Le régional ne peut pas relever de son propre conducteur : la boucle n'est même pas proposée.
       const choixRegional = admin.getByRole('combobox', { name: `Responsable hiérarchique de ${regional.name}` });
+      await choixRegional.focus();
+      // Témoin : la liste ouverte propose bien les autres comptes, le directeur par exemple.
+      await expect(choixRegional.locator('option', { hasText: directeur.name })).toHaveCount(1);
       await expect(choixRegional.locator('option', { hasText: secteur.name })).toHaveCount(0);
       await expect(choixRegional.locator('option', { hasText: conducteur.name })).toHaveCount(0);
 
