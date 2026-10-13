@@ -68,8 +68,8 @@ compte dans **Administration > Utilisateurs**. Les budgets par poste (matériel,
 main-d'œuvre, heures) restent visibles de tous ceux qui voient le chantier, pour suivre les
 dépassements : ils permettent d'en déduire le vendu, donc la marge du jour. Seule exception :
 le technicien ne reçoit ni les budgets matériel et main-d'œuvre ni leurs pourcentages de
-consommation, et ne peut pas les modifier ; ses alertes de dépassement lui sont signalées
-sans leur montant. Il garde le budget d'heures.
+consommation, et ne peut pas les modifier ; ses alertes de dépassement matériel et
+main-d'œuvre lui sont signalées sans leur montant. Il garde le budget d'heures.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.

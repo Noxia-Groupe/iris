@@ -394,7 +394,8 @@ function chantierDuJournalReduit(instantane: Prisma.JsonValue | null): Prisma.Js
 // Rentabilité d'un chantier — montant vendu global, marge du jour, marge estimée, alertes
 // « en perte » et « marge faible », facturation de la fiche : elle ne sort que pour ses
 // destinataires, décidés chantier par chantier. Les budgets par poste, eux, restent visibles
-// (suivi des dépassements) et permettent d'en déduire le vendu, donc la marge du jour.
+// (suivi des dépassements), sauf du technicien pour le matériel et la main-d'œuvre (cf.
+// voitBudgetsParPoste), et permettent d'en déduire le vendu, donc la marge du jour.
 // Côté clé d'intégration, le scope finances:read. Côté session :
 //  - un administrateur, toujours ;
 //  - un directeur, si la société laisse les directeurs destinataires ;
@@ -886,11 +887,12 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
 }
 
 // Sérialise un chantier pour le client en masquant les données commerciales à qui n'en
-// est pas destinataire (cf. canSeeMarge ci-dessus). Seul le montant vendu global est masqué :
-// les budgets par poste restent envoyés pour le suivi des dépassements ; ils en donnent la
-// somme, donc avec les dépenses la marge du jour.
-// Budgets par poste masqués au technicien (cf. voitBudgetsParPoste) : les alertes de
-// dépassement, calculées avant le masquage, restent signalées, sans leur montant.
+// est pas destinataire (cf. canSeeMarge ci-dessus). Pour la rentabilité, seul le montant vendu
+// global est masqué : les budgets par poste restent envoyés pour le suivi des dépassements ;
+// ils en donnent la somme, donc avec les dépenses la marge du jour.
+// Exception : les budgets matériel et main-d'œuvre et leurs pourcentages sont masqués au
+// technicien (cf. voitBudgetsParPoste) ; leurs alertes de dépassement, calculées avant le
+// masquage, restent signalées, sans leur montant.
 function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, budgetsParPoste = true) {
   const c = decimalToNumber(chantier);
   const metrics = computeChantierMetrics(c, params, canSeeMarge, contexte);

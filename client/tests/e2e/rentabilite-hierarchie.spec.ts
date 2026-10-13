@@ -141,7 +141,8 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       expect([apres.rentabiliteConducteur, apres.rentabiliteHierarchie, apres.rentabiliteDirecteurs]).toEqual([true, false, true]);
 
       await vueRegional.goto('/', { waitUntil: 'networkidle' });
-      await expect(ligne.locator('[data-alerte="MATERIEL_DEPASSE"]')).toBeVisible();
+      // Le montant du dépassement reste affiché : seul le technicien perd les budgets par poste.
+      await expect(ligne.locator('[data-alerte="MATERIEL_DEPASSE"]')).toHaveText(/Matériel \+150\s?€/);
       await expect(ligne.locator('[data-alerte="EN_PERTE"]')).toHaveCount(0);
       await expect(vueRegional.getByRole('region', { name: 'Rentabilité des chantiers en cours' })).toHaveCount(0);
       await vueRegional.goto('/chantiers', { waitUntil: 'networkidle' });
