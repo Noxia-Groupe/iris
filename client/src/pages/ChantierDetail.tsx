@@ -9,7 +9,7 @@ import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
 import { TYPES_CHANTIER } from '../chantierTypes';
-import { isAdminRole } from '../roles';
+import { isAdminRole, ROLE_TECHNICIEN } from '../roles';
 import { useModules } from '../modules';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
@@ -595,6 +595,10 @@ const ChantierDetail = () => {
   // sont modifiables par l'admin ou par le conducteur responsable du chantier, qui corrige
   // ainsi lui-même ses saisies — jamais par le commercial, ni par un autre conducteur.
   const canEditChantier = isAdminRole(userRole) || (userRole === 'CONDUCTEUR_TRAVAUX' && chantier.responsable?.id === currentUser?.id);
+  // Un technicien consulte sans modifier, et ne voit aucun montant (budgets par poste, coûts,
+  // taux) : le serveur ne les lui envoie pas, la fiche n'en affiche pas les sections.
+  const estTechnicien = userRole === ROLE_TECHNICIEN;
+  const montantsVisibles = !estTechnicien;
   const canEditCommercial = canEditChantier;
   const startEditCommercial = () => {
     if (commerciaux.length === 0) fetchCommerciaux();
@@ -613,6 +617,13 @@ const ChantierDetail = () => {
       </button>
 
       <div className="flex flex-col gap-6 w-full max-w-full">
+
+        {estTechnicien && (
+          <div role="note" data-consultation-seule className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <strong>Consultation seule.</strong> Un compte technicien n’est pas autorisé à modifier une affaire, à en
+            réattribuer le commercial ni à la clôturer. Pour toute modification, adressez-vous à votre responsable (N+1).
+          </div>
+        )}
 
         {/* Zone exportable en PDF */}
         <div ref={printRef} className="bg-white p-6 sm:p-8 rounded-2xl shadow-md border border-gray-100 relative">
@@ -854,6 +865,8 @@ const ChantierDetail = () => {
 
           {/* Progress Bars */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+            {/* Matériel et coût de main-d'œuvre : montants jamais montrés au technicien. */}
+            {montantsVisibles && (<>
             {/* Matériel */}
             <div>
               <div className="flex justify-between items-end mb-2">
@@ -900,6 +913,7 @@ const ChantierDetail = () => {
                 )}
               </div>
             </div>
+            </>)}
 
             {/* Heures */}
             <div>
@@ -921,6 +935,7 @@ const ChantierDetail = () => {
 
           {/* Répartitions */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {montantsVisibles && (<>
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
               <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
                 <Package size={16} className="text-accent" /> Achats par catégorie
@@ -933,6 +948,7 @@ const ChantierDetail = () => {
               </h3>
               <BarBreakdown rows={parFournisseur} color="#ea580c" formatValue={fmtEuro} emptyLabel="Aucun achat enregistré" />
             </div>
+            </>)}
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
               <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
                 <Users size={16} className="text-purple-500" /> Heures par intervenant
@@ -946,7 +962,9 @@ const ChantierDetail = () => {
         {/* Journaux (hors PDF) */}
         <div className="grid grid-cols-1 gap-6">
           {/* Journal complet des achats : toutes les dépenses du chantier, avec recherche,
-              filtres et tri pour retrouver une ligne précise et la corriger ou la supprimer. */}
+              filtres et tri pour retrouver une ligne précise et la corriger ou la supprimer.
+              C'est un journal de coûts : jamais montré au technicien. */}
+          {montantsVisibles && (
           <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
@@ -1084,6 +1102,7 @@ const ChantierDetail = () => {
               </div>
             )}
           </div>
+          )}
 
           {/* Journal complet des heures : tous les pointages du chantier, avec les mêmes
               outils de recherche que le journal des achats ci-dessus. */}

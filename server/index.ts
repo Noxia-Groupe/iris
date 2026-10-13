@@ -218,11 +218,17 @@ const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
   [ROLE_DIRECTEUR]: ['chantiers:read'],
 };
 
+// Droits jamais accordés à un technicien, ni par son type de compte ni individuellement : il ne
+// modifie aucune affaire et ne voit ni prix ni coûts (décisions de Nelson du 13-10-2026). Une
+// permission déjà enregistrée, par exemple avant un changement de type, reste sans effet.
+const DROITS_INTERDITS_TECHNICIEN = ['devis:read', 'devis:write', 'chantiers:write', 'chantiers:archive', 'finances:read'];
+
 function permissionsEffectives(user: { role: string; accesFinance?: boolean | null; permissions?: string[] }): string[] {
   const droits = new Set([...(DEFAULT_USER_PERMISSIONS[user.role] ?? []), ...(user.permissions ?? [])]);
   if (user.accesFinance) droits.add('finances:read');
   // Un superadministrateur ne dépend jamais d'une liste fragile de permissions.
   if (isSuperAdminRole(user.role)) API_SCOPES.forEach((permission) => droits.add(permission));
+  if (user.role === ROLE_TECHNICIEN) DROITS_INTERDITS_TECHNICIEN.forEach((permission) => droits.delete(permission));
   return [...droits].sort();
 }
 
@@ -394,8 +400,8 @@ function chantierDuJournalReduit(instantane: Prisma.JsonValue | null): Prisma.Js
 // Rentabilité d'un chantier — montant vendu global, marge du jour, marge estimée, alertes
 // « en perte » et « marge faible », facturation de la fiche : elle ne sort que pour ses
 // destinataires, décidés chantier par chantier. Les budgets par poste, eux, restent visibles
-// (suivi des dépassements), sauf du technicien pour le matériel et la main-d'œuvre (cf.
-// voitBudgetsParPoste), et permettent d'en déduire le vendu, donc la marge du jour.
+// (suivi des dépassements), sauf du technicien, à qui aucun montant n'est montré (cf.
+// voitMontantsChantier), et permettent d'en déduire le vendu, donc la marge du jour.
 // Côté clé d'intégration, le scope finances:read. Côté session :
 //  - un administrateur, toujours ;
 //  - un directeur, si la société laisse les directeurs destinataires ;
@@ -419,21 +425,67 @@ function voitRentabilite(req: express.Request, chantier: { responsableId?: strin
   return false;
 }
 
-// Budgets matériel et main-d'œuvre : visibles de tous ceux qui voient le chantier, sauf du
-// technicien (décision de Nelson du 13-10-2026). Les heures vendues lui restent visibles ;
-// les pourcentages de consommation, qui redonneraient ces budgets à partir du réel, non.
-// Une clé d'intégration garde son accès inchangé (scope chantiers:read).
-function voitBudgetsParPoste(req: express.Request): boolean {
+// Montants d'un chantier — budgets matériel et main-d'œuvre, coûts réels (achats, main-d'œuvre,
+// totaux), taux horaires — et alertes de dépassement de budget : jamais montrés au technicien
+// (décisions de Nelson du 13-10-2026). Il garde le chantier, ses heures vendues et réalisées et
+// l'alerte d'absence de saisie. Les autres profils voient ces montants dans leur périmètre ;
+// une clé d'intégration garde son accès inchangé (scope chantiers:read).
+function voitMontantsChantier(req: express.Request): boolean {
   if ((req as ApiRequest).apiKey) return true;
   return (req as AuthRequest).user?.role !== ROLE_TECHNICIEN;
 }
 
+const ALERTES_DEPASSEMENT = new Set(['MATERIEL_DEPASSE', 'MAIN_OEUVRE_DEPASSEE', 'HEURES_DEPASSEES']);
+// Clés monétaires des saisies (achats, pointages, intervenants), y compris dans les
+// instantanés du journal des saisies.
+const CLES_MONTANTS_SAISIE = ['montantHT', 'tauxHoraireApplique', 'tauxHoraireCharge'] as const;
+
+function sansMontantsSaisie<T>(valeur: T): T {
+  if (!valeur || typeof valeur !== 'object' || Array.isArray(valeur)) return valeur;
+  const copie: Record<string, unknown> = { ...(valeur as Record<string, unknown>) };
+  for (const cle of CLES_MONTANTS_SAISIE) if (cle in copie) delete copie[cle];
+  if (copie.intervenant) copie.intervenant = sansMontantsSaisie(copie.intervenant);
+  return copie as T;
+}
+
+// Chantier sérialisé, vu par un technicien : budgets par poste, coûts, taux et alertes de
+// dépassement retirés ; le pourcentage de consommation redonnerait un budget à partir du réel.
+function chantierSansMontants(c: any) {
+  return {
+    ...c,
+    budgetMaterielVendu: null,
+    budgetMainOeuvreVendu: null,
+    ...(Array.isArray(c.achats) ? { achats: c.achats.map(sansMontantsSaisie) } : {}),
+    ...(Array.isArray(c.pointages) ? { pointages: c.pointages.map(sansMontantsSaisie) } : {}),
+    ...(c.metrics ? { metrics: {
+      ...c.metrics,
+      materielReel: null, moReel: null, totalDepenses: null, pctMateriel: null, pctMainOeuvre: null,
+      alertes: (c.metrics.alertes ?? []).filter((alerte: string) => !ALERTES_DEPASSEMENT.has(alerte)),
+    } } : {}),
+  };
+}
+
+const REFUS_TECHNICIEN_MODIFICATION = 'Un compte technicien n’est pas autorisé à modifier une affaire. Adressez-vous à votre responsable.';
+const REFUS_TECHNICIEN_COMMERCIAL = 'Un compte technicien n’est pas autorisé à réattribuer le commercial d’une affaire. Adressez-vous à votre responsable.';
+const REFUS_TECHNICIEN_CLOTURE = 'Un compte technicien n’est pas autorisé à clôturer une affaire : la clôture revient à son responsable hiérarchique (N+1) ou au-dessus.';
+
+// Clôture d'une affaire en cours : l'administration ; son responsable s'il n'est pas technicien ;
+// et, pour l'affaire d'un technicien, les responsables de sa branche (N+1 et au-dessus).
+function peutCloturerChantier(user: AuthRequest['user'], chantier: { responsableId: string | null; responsableRole?: string | null }): boolean {
+  if (!user) return false;
+  if (isAdminRole(user.role)) return true;
+  if (user.role === 'COMMERCIAL' || user.role === ROLE_DIRECTEUR || user.role === ROLE_TECHNICIEN) return false;
+  if (chantier.responsableId === user.id) return true;
+  return user.role === ROLE_RESPONSABLE && !!chantier.responsableId
+    && chantier.responsableRole === ROLE_TECHNICIEN && user.equipeIds.includes(chantier.responsableId);
+}
+
 // Réponse d'une écriture sur un chantier : même masquage qu'en lecture (montant vendu selon
-// voitRentabilite, budgets par poste selon voitBudgetsParPoste), pour qu'un enregistrement
+// voitRentabilite, budgets par poste selon voitMontantsChantier), pour qu'un enregistrement
 // renvoyé tel quel ne contourne pas ces règles.
 async function chantierSelonRentabilite<T extends { responsableId: string | null; budgetGlobalVendu: unknown; budgetMaterielVendu: unknown; budgetMainOeuvreVendu: unknown }>(req: express.Request, chantier: T) {
   const sansVendu = voitRentabilite(req, chantier, await getParametres()) ? chantier : { ...chantier, budgetGlobalVendu: null };
-  return voitBudgetsParPoste(req) ? sansVendu : { ...sansVendu, budgetMaterielVendu: null, budgetMainOeuvreVendu: null };
+  return voitMontantsChantier(req) ? sansVendu : { ...sansVendu, budgetMaterielVendu: null, budgetMainOeuvreVendu: null };
 }
 
 // Accès aux données financières : accordé au cas par cas, indépendamment du rôle
@@ -890,18 +942,16 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
 // est pas destinataire (cf. canSeeMarge ci-dessus). Pour la rentabilité, seul le montant vendu
 // global est masqué : les budgets par poste restent envoyés pour le suivi des dépassements ;
 // ils en donnent la somme, donc avec les dépenses la marge du jour.
-// Exception : les budgets matériel et main-d'œuvre et leurs pourcentages sont masqués au
-// technicien (cf. voitBudgetsParPoste) ; leurs alertes de dépassement, calculées avant le
-// masquage, restent signalées, sans leur montant.
-function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, budgetsParPoste = true) {
+// Exception : au technicien, ni budgets par poste, ni coûts, ni taux, ni alertes de
+// dépassement (cf. voitMontantsChantier et chantierSansMontants).
+function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, montantsVisibles = true) {
   const c = decimalToNumber(chantier);
-  const metrics = computeChantierMetrics(c, params, canSeeMarge, contexte);
-  return {
+  const serialise = {
     ...c,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
-    ...(budgetsParPoste ? {} : { budgetMaterielVendu: null, budgetMainOeuvreVendu: null }),
-    metrics: budgetsParPoste ? metrics : { ...metrics, pctMateriel: null, pctMainOeuvre: null },
+    metrics: computeChantierMetrics(c, params, canSeeMarge, contexte),
   };
+  return montantsVisibles ? serialise : chantierSansMontants(serialise);
 }
 
 // --- Interventions SAV natives ---
@@ -2837,6 +2887,18 @@ app.put('/api/me/theme', requireAuth, async (req, res) => {
 // et un commercial rattaché peut être un super administrateur, dont le rôle ne doit pas
 // transparaître dans les données d'un chantier renvoyées à un simple administrateur.
 const RESPONSABLE_SELECT = { select: { id: true, name: true, email: true } } as const;
+// Le rôle du responsable ne sert qu'à décider qui peut clôturer (cf. peutCloturerChantier) :
+// il est retiré avant l'envoi, pour ne rien révéler d'un compte au-delà de son nom.
+const RESPONSABLE_SELECT_AVEC_ROLE = { select: { id: true, name: true, email: true, role: true } } as const;
+function avecDroitDeCloture<T extends { responsableId: string | null; responsable: { role: string } | null }>(user: AuthRequest['user'], chantier: T) {
+  const { responsable, ...reste } = chantier;
+  const { role, ...responsableSansRole } = responsable ?? { role: null };
+  return {
+    ...reste,
+    responsable: responsable ? responsableSansRole : null,
+    peutCloturer: peutCloturerChantier(user, { responsableId: chantier.responsableId, responsableRole: role }),
+  };
+}
 
 // Types de chantier (liste fermée, plusieurs possibles par chantier) — sert aussi de
 // liste blanche pour ne jamais stocker de valeur arbitraire envoyée par le client.
@@ -2858,7 +2920,7 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
     const chantiers = await prisma.chantier.findMany({
       where: perimetreChantiers(req),
       include: {
-        responsable: RESPONSABLE_SELECT,
+        responsable: RESPONSABLE_SELECT_AVEC_ROLE,
         commercial: RESPONSABLE_SELECT,
         achats: { where: { archivedAt: null } },
         pointages: { where: { archivedAt: null } },
@@ -2868,8 +2930,9 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
     // branche, pas forcément sur tous ceux de sa liste (cf. voitRentabilite).
     const visibles = chantiers.map((c) => voitRentabilite(req, c, params));
     const contexte = await contexteSuivi(params.margeCommercialeActive && visibles.some(Boolean));
-    const budgetsParPoste = voitBudgetsParPoste(req);
-    res.json(chantiers.map((c: any, i) => serializeChantier(c, params, visibles[i], contexte, budgetsParPoste)));
+    const montantsVisibles = voitMontantsChantier(req);
+    const user = (req as AuthRequest).user;
+    res.json(chantiers.map((c: any, i) => serializeChantier(avecDroitDeCloture(user, c), params, visibles[i], contexte, montantsVisibles)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
   }
@@ -2889,7 +2952,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     const chantier = await prisma.chantier.findUnique({
       where: { id: paramId(req) },
       include: {
-        responsable: RESPONSABLE_SELECT,
+        responsable: RESPONSABLE_SELECT_AVEC_ROLE,
         commercial: RESPONSABLE_SELECT,
         achats: { where: { archivedAt: null }, include: { categorie: true, fournisseur: true }, orderBy: { date: 'desc' } },
         pointages: { where: { archivedAt: null }, include: { intervenant: true }, orderBy: { date: 'desc' } },
@@ -2917,7 +2980,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     // évite toute fuite de montants vers les rôles qui ne voient pas la marge.
     const { factures, ...chantierSansFactures } = chantier;
     const contexte = await contexteSuivi(canSeeMarge && params.margeCommercialeActive);
-    const detail = serializeChantier(chantierSansFactures, params, canSeeMarge, contexte, voitBudgetsParPoste(req)) as Record<string, unknown>;
+    const detail = serializeChantier(avecDroitDeCloture(authUser, chantierSansFactures), params, canSeeMarge, contexte, voitMontantsChantier(req)) as Record<string, unknown>;
     if (canSeeMarge) {
       // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
       // facture annulée est visible mais ne contribue plus, son avoir la neutralise.
@@ -2944,11 +3007,12 @@ app.get('/api/chantiers/:id/journal-saisies', requireAuth, async (req, res) => {
       select: { id: true },
     });
     if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
-    const entrees = await prisma.journalSaisieChantier.findMany({
+    const entrees = decimalToNumber(await prisma.journalSaisieChantier.findMany({
       where: { chantierId },
       orderBy: { createdAt: 'desc' },
-    });
-    res.json(decimalToNumber(entrees));
+    }));
+    // Instantanés relus sans leurs montants pour un technicien : le journal reste intact en base.
+    res.json(voitMontantsChantier(req) ? entrees : entrees.map((entree: any) => ({ ...entree, avant: sansMontantsSaisie(entree.avant), apres: sansMontantsSaisie(entree.apres) })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching journal des saisies' });
   }
@@ -2978,6 +3042,11 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     });
     if (!existant || (!isAdminRole(authUser.role) && existant.responsableId !== authUser.id)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
+    }
+    // Un technicien consulte l'affaire dont il est chargé, sans pouvoir la modifier
+    // (décision de Nelson du 13-10-2026) : le refus le lui dit en clair.
+    if (authUser.role === ROLE_TECHNICIEN) {
+      return res.status(403).json({ error: REFUS_TECHNICIEN_MODIFICATION });
     }
     // Une affaire annulée est close : la corriger reviendrait à la faire revivre sans que
     // le devis annulé, lui, ait bougé.
@@ -3049,9 +3118,6 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     if ('budgetGlobalVendu' in req.body && !voitRentabilite(req, existant, await getParametres())) {
       return res.status(403).json({ error: 'Le montant vendu n’est modifiable que par qui suit la rentabilité de ce chantier.' });
     }
-    if (('budgetMaterielVendu' in req.body || 'budgetMainOeuvreVendu' in req.body) && !voitBudgetsParPoste(req)) {
-      return res.status(403).json({ error: 'Les budgets matériel et main-d’œuvre ne sont pas modifiables par un compte technicien.' });
-    }
     for (const key of numericFields) {
       if (key in req.body) data[key] = parseFloat(req.body[key]) || 0;
     }
@@ -3110,9 +3176,14 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req,
       return res.status(400).json({ error: 'Statut invalide.' });
     }
 
-    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) } });
-    if (!chantier || (!isAdmin && chantier.responsableId !== authUser.id)) {
+    const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) }, include: { responsable: { select: { role: true } } } });
+    const estN1OuAuDessus = !!chantier && peutCloturerChantier(authUser, { responsableId: chantier.responsableId, responsableRole: chantier.responsable?.role })
+      && chantier.responsableId !== authUser.id;
+    if (!chantier || (!isAdmin && chantier.responsableId !== authUser.id && !estN1OuAuDessus)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
+    }
+    if (authUser.role === ROLE_TECHNICIEN) {
+      return res.status(403).json({ error: REFUS_TECHNICIEN_CLOTURE });
     }
     // On ne rouvre pas, ni ne clôture, une affaire annulée : sa fin est déjà écrite, avec
     // son motif. La sortir de cet état supposerait d'annuler l'annulation, ce qui n'existe pas.
@@ -3156,6 +3227,9 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, blockCommercial, async (
     }
     if (!isAdmin && chantier.responsableId !== authUser.id) {
       return res.status(403).json({ error: 'Action non autorisée' });
+    }
+    if (authUser.role === ROLE_TECHNICIEN) {
+      return res.status(403).json({ error: REFUS_TECHNICIEN_COMMERCIAL });
     }
 
     let commercialId: string | null = null;
@@ -3257,6 +3331,9 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     // L'accès au Suivi financier ne s'accorde que par un superadmin (cf. peutVoirFinance) :
     // un administrateur qui pourrait cocher la case se l'attribuerait à lui-même.
     const accesFinance = isSuperAdminRole((req as AuthRequest).user?.role) && !!req.body.accesFinance;
+    if (accesFinance && role === ROLE_TECHNICIEN) {
+      return res.status(400).json({ error: 'L’accès financier ne s’accorde pas à un compte technicien.' });
+    }
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Adresse email invalide.' });
@@ -3449,6 +3526,10 @@ app.put('/api/users/:id/permissions', requireAuth, requireSuperAdmin, async (req
     if (!permissions || permissions.some((permission) => !(API_SCOPES as readonly string[]).includes(permission))) {
       return void res.status(400).json({ error: 'Liste de permissions invalide.' });
     }
+    const interdites = target.role === ROLE_TECHNICIEN ? permissions.filter((permission) => DROITS_INTERDITS_TECHNICIEN.includes(permission)) : [];
+    if (interdites.length) {
+      return void res.status(400).json({ error: `Ces droits ne s’accordent pas à un compte technicien : ${interdites.join(', ')}.` });
+    }
     const user = await prisma.user.update({ where: { id: target.id }, data: { permissions }, select: { id: true, name: true, email: true, role: true, permissions: true } });
     res.json(user);
   } catch { res.status(500).json({ error: 'Impossible de modifier les permissions individuelles.' }); }
@@ -3463,6 +3544,9 @@ app.patch('/api/users/:id/acces-finance', requireAuth, requireSuperAdmin, async 
     const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
     if (!target) {
       return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    if (req.body.accesFinance && target.role === ROLE_TECHNICIEN) {
+      return res.status(400).json({ error: 'L’accès financier ne s’accorde pas à un compte technicien.' });
     }
     const user = await prisma.user.update({
       where: { id: target.id },
@@ -3553,7 +3637,9 @@ app.get('/api/conducteurs', requireAuth, async (req, res) => {
 // Intervenants
 app.get('/api/intervenants', requireAuth, async (req, res) => {
   try {
-    res.json(decimalToNumber(await prisma.intervenant.findMany()));
+    const intervenants = decimalToNumber(await prisma.intervenant.findMany());
+    // Le taux horaire chargé de chacun n'est jamais envoyé à un technicien.
+    res.json(voitMontantsChantier(req) ? intervenants : intervenants.map(sansMontantsSaisie));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching intervenants' });
   }
@@ -4213,7 +4299,7 @@ function motifRestaurationValide(value: unknown): string | null {
 // Le contrôle d'accès n'a de valeur que s'il tient sur toutes les portes à la fois.
 const listerAchats: express.RequestHandler = async (req, res) => {
   try {
-    res.json(decimalToNumber(await prisma.achatReel.findMany({
+    const achats = decimalToNumber(await prisma.achatReel.findMany({
       where: { archivedAt: null, chantier: perimetreChantiers(req) },
       include: {
         chantier: { select: CHANTIER_LITE_SELECT },
@@ -4221,7 +4307,9 @@ const listerAchats: express.RequestHandler = async (req, res) => {
         fournisseur: true,
       },
       orderBy: { date: 'desc' },
-    })));
+    }));
+    // Un technicien ne voit aucun coût d'achat (cf. voitMontantsChantier).
+    res.json(voitMontantsChantier(req) ? achats : achats.map(sansMontantsSaisie));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching achats' });
   }
@@ -4366,14 +4454,16 @@ app.post('/api/achats/:id/restaurer', requireAuth, requireTravauxArchive, async 
 // Journal des heures : même correction et même raison que le journal des achats.
 const listerHeures: express.RequestHandler = async (req, res) => {
   try {
-    res.json(decimalToNumber(await prisma.pointageHeure.findMany({
+    const heures = decimalToNumber(await prisma.pointageHeure.findMany({
       where: { archivedAt: null, chantier: perimetreChantiers(req) },
       include: {
         chantier: { select: CHANTIER_LITE_SELECT },
         intervenant: true,
       },
       orderBy: { date: 'desc' },
-    })));
+    }));
+    // Ni taux appliqué ni taux de l'intervenant pour un technicien (cf. voitMontantsChantier).
+    res.json(voitMontantsChantier(req) ? heures : heures.map(sansMontantsSaisie));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching heures' });
   }
@@ -5725,9 +5815,10 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
       result.nbTerminesNonEncaisses = nbTerminesNonEncaisses;
     }
 
-    if (!isCommercial) {
+    if (!isCommercial && voitMontantsChantier(req)) {
       // ADMIN + CONDUCTEUR : total des achats de la période (peu importe le statut du
-      // chantier — un achat facturé ce mois compte, chantier ouvert ou non).
+      // chantier — un achat facturé ce mois compte, chantier ouvert ou non). Jamais pour un
+      // technicien, qui ne voit aucun coût.
       result.achatsTotal = achatsTotal;
     }
     if (!isAdmin && !isCommercial) {

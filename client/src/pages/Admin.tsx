@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
-import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN } from '../roles';
+import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from '../roles';
 import { refreshModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
 
@@ -1016,15 +1016,15 @@ const Admin = () => {
               {/* Destinataires de la rentabilité de chaque chantier : montant vendu global, marge du jour,
                   marge estimée, alertes « en perte » et « marge faible », facturation de la fiche, sur la
                   liste, le tableau de bord et la fiche. Les dépassements, l'absence de saisie et les budgets
-                  par poste restent visibles de tous ceux qui voient le chantier, sauf les budgets matériel et
-                  main-d'œuvre pour le technicien (cf. voitBudgetsParPoste côté serveur). */}
+                  par poste restent visibles de tous ceux qui voient le chantier, sauf du technicien, qui ne
+                  reçoit aucun montant (cf. voitMontantsChantier côté serveur). */}
               <fieldset className="border border-gray-100 rounded-lg p-4 space-y-2">
                 <legend className="text-sm font-bold text-gray-700 px-1">Qui suit la rentabilité des chantiers&nbsp;?</legend>
                 <p className="text-xs text-gray-500 m-0">
                   Montant vendu global, marge du jour, marge estimée, alertes « en perte » ou « marge faible » et
                   facturation de la fiche. Les administrateurs les voient toujours. Les budgets par poste (matériel,
                   main-d’œuvre, heures) restent affichés pour suivre les dépassements : ils permettent d’en déduire le vendu,
-                  donc la marge du jour. Exception : les techniciens ne voient pas les budgets matériel et main-d’œuvre.
+                  donc la marge du jour. Exception : les techniciens ne voient aucun montant, ni les alertes de dépassement.
                 </p>
                 <label className="flex items-center gap-2 cursor-pointer w-fit">
                   <input type="checkbox" name="rentabiliteConducteur" defaultChecked={parametres?.rentabiliteConducteur ?? true} className="w-4 h-4" />
@@ -1295,6 +1295,10 @@ const Admin = () => {
                   const branche = brancheDe(u.id);
                   const responsablesPossibles = users.filter((r) => r.id !== u.id && r.actif !== false && !branche.has(r.id));
                   const responsableActuel = u.responsableHierarchique as { id: string; name: string } | null;
+                  // Un technicien ne modifie aucune affaire et ne voit aucun montant : ni devis, ni
+                  // saisie ou archivage Travaux, ni accès financier (refusés aussi par le serveur).
+                  const estTechnicien = u.role === ROLE_TECHNICIEN;
+                  const MESSAGE_TECHNICIEN = 'Ce droit ne s’accorde pas à un compte technicien.';
                   return (
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
@@ -1370,12 +1374,14 @@ const Admin = () => {
                           <input
                             type="checkbox"
                             checked={!!u.accesFinance}
-                            disabled={!isSuper}
+                            disabled={!isSuper || (estTechnicien && !u.accesFinance)}
                             onChange={() => handleToggleAccesFinance(u.id, !!u.accesFinance)}
                             className="w-4 h-4"
-                            title={isSuper
-                              ? 'Autoriser ce compte à consulter le Suivi financier'
-                              : "Seul un super administrateur peut accorder l'accès au suivi financier."}
+                            title={estTechnicien
+                              ? MESSAGE_TECHNICIEN
+                              : isSuper
+                                ? 'Autoriser ce compte à consulter le Suivi financier'
+                                : "Seul un super administrateur peut accorder l'accès au suivi financier."}
                           />
                           <span className="text-xs text-gray-500">{u.accesFinance ? 'Oui' : 'Non'}</span>
                         </label>
@@ -1383,15 +1389,15 @@ const Admin = () => {
                     </td>
                     <td className="px-4 py-4">
                       <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <input type="checkbox" checked={aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROITS_DEVIS)} className="w-4 h-4" title={droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
+                        <input type="checkbox" checked={aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole || estTechnicien} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROITS_DEVIS)} className="w-4 h-4" title={estTechnicien ? MESSAGE_TECHNICIEN : droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
                         <span className="text-xs text-gray-500">Droit devis</span>
                       </label>
                     </td>
                     <td className="px-4 py-4">
-                      <input type="checkbox" checked={peutCorrigerTravaux} disabled={!isSuper || correctionVientDuRole} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROIT_TRAVAUX_CORRECTION)} className="w-4 h-4" title={correctionVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la saisie et la correction Travaux'} />
+                      <input type="checkbox" checked={peutCorrigerTravaux} disabled={!isSuper || correctionVientDuRole || estTechnicien} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROIT_TRAVAUX_CORRECTION)} className="w-4 h-4" title={estTechnicien ? MESSAGE_TECHNICIEN : correctionVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la saisie et la correction Travaux'} />
                     </td>
                     <td className="px-4 py-4">
-                      <input type="checkbox" checked={peutArchiverTravaux} disabled={!isSuper || archivageVientDuRole} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROIT_TRAVAUX_ARCHIVAGE)} className="w-4 h-4" title={archivageVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser l’archivage des écritures Travaux'} />
+                      <input type="checkbox" checked={peutArchiverTravaux} disabled={!isSuper || archivageVientDuRole || estTechnicien} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROIT_TRAVAUX_ARCHIVAGE)} className="w-4 h-4" title={estTechnicien ? MESSAGE_TECHNICIEN : archivageVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser l’archivage des écritures Travaux'} />
                     </td>
                     {/* Compte actif : décocher vaut départ de l'entreprise. La connexion est
                         refusée et le compte sort des listes d'attribution, mais son

@@ -11,8 +11,10 @@ export type AlerteChantier = typeof ALERTES_CHANTIER[number];
 
 export interface MetriquesChantier {
   heuresRealisees?: number;
-  materielReel?: number;
-  moReel?: number;
+  /** Null pour un compte technicien, qui ne voit aucun coût. */
+  materielReel?: number | null;
+  moReel?: number | null;
+  totalDepenses?: number | null;
   pctHeures?: number;
   pctMateriel?: number | null;
   pctMainOeuvre?: number | null;
@@ -50,6 +52,8 @@ export interface ChantierSuivi {
   responsable?: { id?: string; name?: string | null } | null;
   commercial?: { name?: string | null } | null;
   metrics?: MetriquesChantier;
+  /** Décidé par le serveur : clôture permise au compte connecté. */
+  peutCloturer?: boolean;
 }
 
 export type FiltreChantiers = 'TOUS' | 'A_SURVEILLER' | AlerteChantier;
