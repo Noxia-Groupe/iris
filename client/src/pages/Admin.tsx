@@ -120,6 +120,49 @@ const ONGLETS_CONDUCTEUR = ['fournisseurs', 'categories'];
 
 const MESSAGE_COMPTE_SUPERADMIN = "Seul un super administrateur peut gérer un compte super administrateur.";
 
+type CompteResume = { id: string; name: string };
+
+// Liste « Responsable hiérarchique » d'un compte. Elle ne construit ses options qu'une fois
+// ouverte (clic, clavier, toucher) : proposer tous les comptes sur chaque ligne faisait croître
+// la page comme le carré du nombre de comptes. L'état d'ouverture est local, pour qu'ouvrir ou
+// refermer une liste ne fasse pas refaire le rendu de tout le tableau.
+function ChoixResponsable({ compte, responsableActuel, responsableDesactive, desactive, titre, proposables, onChoix }: {
+  compte: CompteResume;
+  responsableActuel: CompteResume | null;
+  responsableDesactive: boolean;
+  desactive: boolean;
+  titre: string;
+  proposables: (compteId: string) => CompteResume[];
+  onChoix: (compteId: string, responsableId: string) => void;
+}) {
+  const [ouverte, setOuverte] = useState(false);
+  const ouvrir = () => setOuverte(true);
+  const proposes = ouverte ? proposables(compte.id) : [];
+  return (
+    <select
+      className="form-input py-1 px-3 text-sm rounded min-w-[11rem]"
+      value={responsableActuel?.id ?? ''}
+      onChange={(e) => onChoix(compte.id, e.target.value)}
+      onFocus={ouvrir}
+      onMouseDown={ouvrir}
+      onTouchStart={ouvrir}
+      onKeyDown={ouvrir}
+      onBlur={() => setOuverte(false)}
+      disabled={desactive}
+      aria-label={`Responsable hiérarchique de ${compte.name}`}
+      title={titre}
+    >
+      <option value="">Aucun</option>
+      {responsableActuel && !proposes.some((r) => r.id === responsableActuel.id) && (
+        <option value={responsableActuel.id}>
+          {responsableActuel.name}{responsableDesactive ? ' (compte désactivé)' : ''}
+        </option>
+      )}
+      {proposes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+    </select>
+  );
+}
+
 // Le droit d'établir un devis comprend le référentiel minimal nécessaire pour choisir le client.
 const DROITS_DEVIS = ['devis:read', 'devis:write', 'clients:read'];
 const DROIT_TRAVAUX_CORRECTION = 'chantiers:write';
@@ -360,10 +403,12 @@ const Admin = () => {
     }
     return branche;
   };
-  // Une seule liste de responsables construite à la fois : celle que l'on ouvre (clic, clavier
-  // ou toucher). Proposer tous les comptes sur chaque ligne faisait croître la page comme le
-  // carré du nombre de comptes (156 642 options et 18 s d'affichage pour 396 comptes).
-  const [listeResponsablesOuverte, setListeResponsablesOuverte] = useState<string | null>(null);
+  // Responsables proposables pour la liste que l'on ouvre (cf. ChoixResponsable) : comptes actifs
+  // hors de la branche du compte, une boucle étant refusée par le serveur.
+  const responsablesProposables = (compteId: string) => {
+    const branche = brancheDe(compteId);
+    return users.filter((r) => r.id !== compteId && r.actif !== false && !branche.has(r.id));
+  };
 
   const handleSubmit = async (e: React.FormEvent, type: string) => {
     e.preventDefault();
@@ -1303,13 +1348,7 @@ const Admin = () => {
                   const peutArchiverTravaux = (u.permissions || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
                   const correctionVientDuRole = peutCorrigerTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_CORRECTION);
                   const archivageVientDuRole = peutArchiverTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
-                  // Responsables proposables, seulement pour la liste ouverte : comptes actifs hors de
-                  // la branche de ce compte (une boucle serait refusée), plus le responsable actuel
-                  // s'il n'en fait pas partie. Fermée, la liste ne porte que le responsable actuel.
-                  const listeOuverte = listeResponsablesOuverte === u.id;
-                  const branche = listeOuverte ? brancheDe(u.id) : null;
-                  const responsablesPossibles = branche ? users.filter((r) => r.id !== u.id && r.actif !== false && !branche.has(r.id)) : [];
-                  const responsableActuel = u.responsableHierarchique as { id: string; name: string } | null;
+                  const responsableActuel = u.responsableHierarchique as CompteResume | null;
                   return (
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
@@ -1342,26 +1381,15 @@ const Admin = () => {
                       </select>
                     </td>
                     <td className="px-4 py-4">
-                      <select
-                        className="form-input py-1 px-3 text-sm rounded min-w-[11rem]"
-                        value={responsableActuel?.id ?? ''}
-                        onChange={(e) => handleResponsableHierarchique(u.id, e.target.value)}
-                        onFocus={() => setListeResponsablesOuverte(u.id)}
-                        onMouseDown={() => setListeResponsablesOuverte(u.id)}
-                        onTouchStart={() => setListeResponsablesOuverte(u.id)}
-                        onBlur={() => setListeResponsablesOuverte((ouverte) => (ouverte === u.id ? null : ouverte))}
-                        disabled={!peutGererCompte(u)}
-                        aria-label={`Responsable hiérarchique de ${u.name}`}
-                        title={!peutGererCompte(u) ? MESSAGE_COMPTE_SUPERADMIN : 'Rattacher ce compte à son responsable direct'}
-                      >
-                        <option value="">Aucun</option>
-                        {responsableActuel && !responsablesPossibles.some((r) => r.id === responsableActuel.id) && (
-                          <option value={responsableActuel.id}>
-                            {responsableActuel.name}{comptesParId.get(responsableActuel.id)?.actif === false ? ' (compte désactivé)' : ''}
-                          </option>
-                        )}
-                        {responsablesPossibles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
+                      <ChoixResponsable
+                        compte={u}
+                        responsableActuel={responsableActuel}
+                        responsableDesactive={!!responsableActuel && comptesParId.get(responsableActuel.id)?.actif === false}
+                        desactive={!peutGererCompte(u)}
+                        titre={!peutGererCompte(u) ? MESSAGE_COMPTE_SUPERADMIN : 'Rattacher ce compte à son responsable direct'}
+                        proposables={responsablesProposables}
+                        onChoix={handleResponsableHierarchique}
+                      />
                     </td>
                     <td className="px-4 py-4">
                       {isAdminRole(u.role) ? (
