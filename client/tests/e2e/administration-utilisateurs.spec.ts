@@ -64,7 +64,8 @@ test('Administration > Utilisateurs : listes de responsables construites à la d
     // dernière touchée reste construite, et un défilement tactile commencé sur elle la referme.
     await admin.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     // Les événements tactiles « continus » (touchmove) sont rendus par une tâche planifiée, pas
-    // dans la foulée : chaque compte est relu jusqu'à stabilisation.
+    // dans la foulée : le nombre de listes construites est relu (expect.poll) jusqu'à la valeur
+    // attendue.
     for (const compte of [premier, second, ancien, clavier, troisieme]) await liste(compte).dispatchEvent('touchstart');
     await expect.poll(listesConstruites).toBe(1);
     await expect(liste(troisieme).locator('option', { hasText: clavier.name })).toHaveCount(1);
