@@ -124,7 +124,11 @@ test('Administration : la liste de l’onglet ouvert pendant un enregistrement s
   expect(creation.ok(), await creation.text()).toBeTruthy();
 
   const admin = await allerSurPageAdmin('/admin');
+  // La lecture des fournisseurs due au clic est attendue avant d'installer les routes : elle ne
+  // doit pas être prise pour le rechargement attendu plus bas.
+  const listeFournisseurs = admin.waitForResponse((r) => r.url().endsWith('/api/fournisseurs') && r.request().method() === 'GET');
   await admin.getByRole('button', { name: 'Fournisseurs', exact: true }).click();
+  await listeFournisseurs;
   await expect(admin.getByRole('heading', { name: 'Ajouter un fournisseur' })).toBeVisible();
 
   // L'enregistrement du fournisseur et la première lecture des intervenants sont retenus.
