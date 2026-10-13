@@ -667,8 +667,18 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
   const diffHeures = chantier.heuresVendues - heuresRealisees;
   const pctMateriel = chantier.budgetMaterielVendu > 0 ? (materielReel / chantier.budgetMaterielVendu) * 100 : 0;
   const pctHeures = chantier.heuresVendues > 0 ? (heuresRealisees / chantier.heuresVendues) * 100 : 0;
+  const pctMainOeuvre = chantier.budgetMainOeuvreVendu > 0 ? (moReel / chantier.budgetMainOeuvreVendu) * 100 : 0;
 
-  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures };
+  // Dérives constatées, sans seuil inventé : le réel dépasse ce qui a été vendu. Ce sont
+  // les comparaisons déjà employées par les filtres de la liste et par la répartition des
+  // chantiers terminés, calculées ici une fois pour que liste, tableau de bord et API
+  // d'intégration disent la même chose.
+  const alertes: string[] = [];
+  if (heuresRealisees > chantier.heuresVendues) alertes.push('HEURES_DEPASSEES');
+  if (materielReel > chantier.budgetMaterielVendu) alertes.push('MATERIEL_DEPASSE');
+  if (moReel > chantier.budgetMainOeuvreVendu) alertes.push('MAIN_OEUVRE_DEPASSEE');
+
+  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures, pctMainOeuvre, alertes };
 
   if (!canSeeMarge || !params.margeCommercialeActive) {
     return { ...base, margeBrute: null, margeCommerciale: null, margePct: null };
@@ -684,8 +694,11 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
   const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
   const margeCommerciale = margeBrute;
   const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
+  // Le signe de la marge est une donnée commerciale : l'alerte « en perte » ne sort que
+  // pour qui voit déjà la marge, jamais pour un rôle ou une clé à qui elle est masquée.
+  const alertesMarge = margeCommerciale < 0 ? [...alertes, 'EN_PERTE'] : alertes;
 
-  return { ...base, margeBrute, margeCommerciale, margePct };
+  return { ...base, alertes: alertesMarge, margeBrute, margeCommerciale, margePct };
 }
 
 // Sérialise un chantier pour le client en masquant les données commerciales aux profils

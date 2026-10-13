@@ -218,7 +218,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1155,6 +1155,120 @@ if (!TEST_DATABASE_URL) {
       const res = await request(app).get('/api/v1/achats').set('Authorization', `Bearer ${r.body.apiKey}`);
       assert.equal(res.status, 403);
       assert.match(res.body.error, /chantiers:read/);
+    });
+  });
+
+  // Les alertes de suivi sont calculées par le serveur, une seule fois, pour que la liste,
+  // le tableau de bord et l'API d'intégration signalent les mêmes dérives. Le signe de la
+  // marge reste une donnée commerciale : « en perte » ne sort que là où la marge sort.
+  describe('Suivi de rentabilité : dérives et perte signalées par chantier', () => {
+    let auth = {};
+    let authConducteur = {};
+    let cleSansFinances = '';
+    let cleAvecFinances = '';
+    let derive;
+    let sain;
+    let ancienParametres;
+    const DERIVES = ['HEURES_DEPASSEES', 'MATERIEL_DEPASSE', 'MAIN_OEUVRE_DEPASSEE'];
+
+    before(async () => {
+      const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(login.status, 200);
+      auth = { Authorization: `Bearer ${login.body.token}` };
+      ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      const activation = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true });
+      assert.equal(activation.status, 200, JSON.stringify(activation.body));
+      const conducteur = await prisma.user.create({ data: {
+        email: 'rentabilite.conducteur@iris.test', name: 'TEST Conducteur rentabilité', role: 'CONDUCTEUR_TRAVAUX',
+      } });
+      authConducteur = { Authorization: `Bearer ${jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET)}` };
+      const categorie = await prisma.categorie.create({ data: { nom: 'TEST Rentabilité catégorie' } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Rentabilité fournisseur' } });
+      const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Rentabilité intervenant', role: 'Technicien', tauxHoraireCharge: 50 } });
+      // Même vente pour les deux affaires : 1 000 € dont 300 € de matériel et 700 € de
+      // main-d'œuvre pour 10 h.
+      const vente = { client: 'TEST Client rentabilité', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 10, responsableId: conducteur.id };
+      derive = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Rentabilité dérive' } });
+      sain = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Rentabilité sain' } });
+      const achat = (chantierId, montantHT) => request(app).post('/api/achats').set(auth)
+        .send({ chantierId, categorieId: categorie.id, fournisseurId: fournisseur.id, date: '2026-09-05', description: 'TEST achat rentabilité', montantHT });
+      const heures = (chantierId, nbrHeures) => request(app).post('/api/heures').set(auth)
+        .send({ chantierId, intervenantId: intervenant.id, date: '2026-09-05', nbrHeures });
+      // Dérive : 400 € de matériel et 16 h à 50 € (800 €), soit 1 200 € dépensés pour 1 000 € vendus.
+      for (const reponse of [await achat(derive.id, 400), await heures(derive.id, 16), await achat(sain.id, 100), await heures(sain.id, 4)]) {
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      }
+      // Une saisie archivée ne doit déclencher aucune alerte, même énorme.
+      const enDouble = await achat(sain.id, 5000);
+      assert.equal(enDouble.status, 200, JSON.stringify(enDouble.body));
+      const archive = await request(app).delete(`/api/achats/${enDouble.body.id}`).set(auth).send({ motifArchivage: 'Saisie en double' });
+      assert.equal(archive.status, 200, JSON.stringify(archive.body));
+      const creer = async (nom, scopes) => {
+        const r = await request(app).post('/api/admin/api-keys').set(auth).send({ nom, scopes });
+        assert.equal(r.status, 201, JSON.stringify(r.body));
+        return r.body.apiKey;
+      };
+      cleSansFinances = await creer('TEST agent rentabilité', ['chantiers:read']);
+      cleAvecFinances = await creer('TEST agent rentabilité finances', ['chantiers:read', 'finances:read']);
+    });
+
+    after(async () => {
+      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: { margeCommercialeActive: ancienParametres.margeCommercialeActive } });
+    });
+
+    const lire = async (chemin, entetes) => {
+      const res = await request(app).get(chemin).set(entetes);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      const trouver = id => {
+        const chantier = res.body.find(c => c.id === id);
+        assert.ok(chantier, `chantier ${id} absent de ${chemin}`);
+        return chantier;
+      };
+      return { derive: trouver(derive.id), sain: trouver(sain.id) };
+    };
+
+    test('un administrateur voit chaque dépassement et la perte, et rien sur une affaire saine', async () => {
+      const liste = await lire('/api/chantiers', auth);
+      assert.deepEqual(liste.derive.metrics.alertes, [...DERIVES, 'EN_PERTE']);
+      assert.equal(liste.derive.metrics.margeCommerciale, -200);
+      assert.equal(Math.round(liste.derive.metrics.pctMainOeuvre), Math.round(800 / 700 * 100));
+      assert.deepEqual(liste.sain.metrics.alertes, [], 'l’achat archivé ne compte pas');
+      assert.equal(liste.sain.metrics.materielReel, 100);
+      assert.equal(liste.sain.metrics.margeCommerciale, 700);
+    });
+
+    test('sur la liste, le conducteur voit les dépassements mais pas le signe de la marge', async () => {
+      const liste = await lire('/api/chantiers', authConducteur);
+      assert.deepEqual(liste.derive.metrics.alertes, DERIVES);
+      assert.equal(liste.derive.metrics.margeCommerciale, null);
+      assert.deepEqual(liste.sain.metrics.alertes, []);
+    });
+
+    test('sur SA fiche, où la marge lui est montrée, le conducteur voit aussi la perte', async () => {
+      const fiche = await request(app).get(`/api/chantiers/${derive.id}`).set(authConducteur);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      assert.equal(fiche.body.metrics.margeCommerciale, -200);
+      assert.deepEqual(fiche.body.metrics.alertes, [...DERIVES, 'EN_PERTE']);
+    });
+
+    test('une clé sans finances:read ne déduit pas la perte de l’alerte', async () => {
+      const sansFinances = await lire('/api/v1/chantiers', { Authorization: `Bearer ${cleSansFinances}` });
+      assert.deepEqual(sansFinances.derive.metrics.alertes, DERIVES);
+      const avecFinances = await lire('/api/v1/chantiers', { Authorization: `Bearer ${cleAvecFinances}` });
+      assert.deepEqual(avecFinances.derive.metrics.alertes, [...DERIVES, 'EN_PERTE']);
+    });
+
+    test('marge commerciale désactivée : plus d’alerte de perte, même pour un administrateur', async () => {
+      const desactivation = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: false });
+      assert.equal(desactivation.status, 200, JSON.stringify(desactivation.body));
+      try {
+        const liste = await lire('/api/chantiers', auth);
+        assert.deepEqual(liste.derive.metrics.alertes, DERIVES);
+        assert.equal(liste.derive.metrics.margeCommerciale, null);
+      } finally {
+        const reactivation = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true });
+        assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      }
     });
   });
 

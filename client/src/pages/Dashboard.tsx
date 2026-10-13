@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award, AlertTriangle } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award, AlertTriangle, FileText } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { SectionRepliable } from '../components/SectionRepliable';
-import { isAdminRole, roleLabel } from '../roles';
+import { AlertesChantier } from '../components/AlertesChantier';
+import { isAdminRole, peutAccederAuxDevis, roleLabel, useCurrentUser } from '../roles';
+import { estASurveiller, trierChantiers } from '../lib/suiviChantiers';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
 
@@ -20,6 +22,7 @@ const Dashboard = () => {
   // Commerciaux). Les listes de chantiers ci-dessous ne suivent pas ce choix.
   const [period, setPeriod] = useState<Period>('month');
   const navigate = useNavigate();
+  const utilisateur = useCurrentUser();
 
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -66,6 +69,10 @@ const Dashboard = () => {
   const enCours = chantiers
     .filter(c => c.statut === 'EN_COURS')
     .sort((a, b) => (b.metrics?.pctHeures ?? 0) - (a.metrics?.pctHeures ?? 0));
+  // Dérives signalées par le serveur (dépassements, perte si la marge est visible) : les
+  // cinq premières dans l'ordre où il faut les regarder, la suite sur la liste filtrée.
+  const aSurveiller = trierChantiers(enCours.filter(estASurveiller), 'PRIORITE');
+  const NB_A_SURVEILLER_AFFICHES = 5;
 
   // Un chantier archivé n'a pas toujours de date de fin renseignée : on retombe
   // sur sa dernière modification (le passage au statut archivé la met à jour).
@@ -229,10 +236,59 @@ const Dashboard = () => {
         <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
           <div className="text-6xl mb-4">🏗️</div>
           <h2 className="text-2xl font-bold text-gray-700 mb-2">Aucun chantier</h2>
-          <p className="text-muted max-w-md">Créez votre premier chantier depuis la liste des chantiers ou l'administration.</p>
+          {/* Un chantier n'a pas d'autre porte d'entrée que la conversion d'un devis accepté. */}
+          <p className="text-muted max-w-md">Un chantier s'ouvre en convertissant un devis accepté par le client.</p>
+          {peutAccederAuxDevis(utilisateur) && (
+            <Link to="/devis" className="btn btn-primary flex items-center gap-2 no-underline mt-6">
+              <FileText size={16} /> Aller aux devis
+            </Link>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-6">
+
+          {/* À surveiller : les chantiers en cours dont le réel dépasse le vendu (ou en
+              perte, pour qui voit la marge). Le bloc reste affiché quand tout va bien :
+              savoir qu'aucune affaire ne dérive est aussi une information. */}
+          {enCours.length > 0 && (
+            <section aria-label="Chantiers à surveiller" className={`bg-white rounded-2xl shadow-md border overflow-hidden ${aSurveiller.length > 0 ? 'border-red-200' : 'border-gray-100'}`}>
+              <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  {aSurveiller.length > 0
+                    ? <AlertTriangle size={18} className="text-red-600" />
+                    : <CheckCircle2 size={18} className="text-emerald-600" />}
+                  <h2 className="text-lg font-bold text-primary-dark m-0">À surveiller</h2>
+                </div>
+                {aSurveiller.length > 0 && (
+                  <Link to="/chantiers?filtre=A_SURVEILLER" className="text-xs font-bold text-accent hover:underline no-underline">
+                    {aSurveiller.length > NB_A_SURVEILLER_AFFICHES ? `Voir les ${aSurveiller.length} chantiers` : 'Ouvrir dans la liste'}
+                  </Link>
+                )}
+              </div>
+              {aSurveiller.length === 0 ? (
+                <div className="px-6 py-5 text-sm font-semibold text-emerald-700">
+                  Aucune dérive : heures, main-d’œuvre et matériel restent dans le vendu sur vos chantiers en cours.
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {aSurveiller.slice(0, NB_A_SURVEILLER_AFFICHES).map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => navigate(`/chantiers/${c.id}`)}
+                      className="w-full flex items-center gap-4 px-6 py-3.5 hover:bg-gray-50 transition-colors text-left group"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-gray-800 truncate group-hover:text-accent transition-colors">{c.nom}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{c.client}{c.responsable?.name ? ` · Resp. : ${c.responsable.name}` : ''}</div>
+                        <div className="mt-1.5"><AlertesChantier chantier={c} /></div>
+                      </div>
+                      <ChevronRight size={20} className="text-gray-300 group-hover:text-accent transition-colors shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Chantiers en cours — classés du plus avancé au moins avancé */}
           <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
@@ -263,6 +319,7 @@ const Dashboard = () => {
                           <span>Devis: {c.numeroDevis || 'N/A'}</span>
                           {c.responsable?.name && <span>Resp: {c.responsable.name}</span>}
                         </div>
+                        <div className="mt-1.5 empty:hidden"><AlertesChantier chantier={c} /></div>
                       </div>
 
                       <div className="hidden sm:flex flex-col items-end w-40 shrink-0">

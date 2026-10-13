@@ -60,6 +60,13 @@ les montants vendus et la marge.
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.
 
+Chaque chantier porte des alertes de suivi calculées par le serveur (`metrics.alertes`) :
+`HEURES_DEPASSEES`, `MAIN_OEUVRE_DEPASSEE` et `MATERIEL_DEPASSE` quand le réel dépasse ce
+qui a été vendu, sans autre seuil. `EN_PERTE` (dépenses réelles supérieures au montant
+vendu) suit la visibilité de la marge : il n'est jamais envoyé à un rôle ou une clé à qui
+la marge est masquée. La liste des chantiers et le tableau de bord s'en servent pour
+mettre les affaires à surveiller en tête.
+
 ## Cycle de vie d'une affaire
 
 Une affaire n'existe que par un devis. La conversion d'un devis accepté crée le chantier
