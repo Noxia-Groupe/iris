@@ -5415,15 +5415,16 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
       }
       data.tauxAcompteDefaut = taux;
     }
-    // Alertes de suivi des chantiers : une valeur vide (null ou chaîne vide) désactive
-    // l'alerte, toute autre valeur doit rester dans des bornes qui ont un sens métier.
+    // Alertes de suivi des chantiers : une valeur vide (null ou chaîne vide) désactive le
+    // délai sans saisie, ou retire le seuil de marge faible — une marge estimée négative reste
+    // alors signalée. Toute autre valeur doit rester dans des bornes qui ont un sens métier.
     if ('seuilMargeFaible' in req.body) {
       const brut = req.body.seuilMargeFaible;
       if (brut === null || brut === '') data.seuilMargeFaible = null;
       else {
         const seuil = nombreDecimalNonNegatif(brut, 3, true);
         if (seuil === null || seuil > 100) {
-          return res.status(400).json({ error: 'Le seuil de marge faible doit être un pourcentage compris entre 0 et 100, ou vide pour désactiver l’alerte.' });
+          return res.status(400).json({ error: 'Le seuil de marge faible doit être un pourcentage compris entre 0 et 100, ou vide pour le retirer (une marge estimée négative reste signalée).' });
         }
         data.seuilMargeFaible = seuil;
       }

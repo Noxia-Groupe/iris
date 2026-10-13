@@ -969,7 +969,8 @@ const Admin = () => {
                   <span className="text-sm text-gray-500">jours sans achat ni heure</span>
                 </label>
                 <p className="text-xs text-gray-500 m-0">
-                  Laisser un champ vide désactive l’alerte. La marge estimée compte, pour chaque poste, le plus élevé du
+                  Vider le délai désactive l’alerte « sans saisie ». Vider le seuil retire le seuil, mais une marge estimée
+                  négative reste toujours signalée. La marge estimée compte, pour chaque poste, le plus élevé du
                   réel déjà dépensé et du coût attendu : heures vendues au coût horaire moyen réellement appliqué, matériel
                   vendu au ratio d’achat observé sur les chantiers terminés (au prix de vente tant qu’aucun n’est terminé).
                 </p>

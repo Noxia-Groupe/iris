@@ -1332,7 +1332,7 @@ if (!TEST_DATABASE_URL) {
       return { sansHeure: trouver(sansHeure.id), endormi: trouver(endormi.id) };
     };
 
-    test('les réglages refusent les valeurs hors bornes et acceptent le vide pour désactiver', async () => {
+    test('les réglages refusent les valeurs hors bornes et acceptent le vide (délai désactivé, seuil retiré)', async () => {
       for (const corps of [{ seuilMargeFaible: 101 }, { seuilMargeFaible: -1 }, { seuilMargeFaible: 'abc' }, { joursSansSaisie: 0 }, { joursSansSaisie: 366 }, { joursSansSaisie: 2.5 }, { joursSansSaisie: '7j' }]) {
         const refus = await reglages(corps);
         assert.equal(refus.status, 400, `${JSON.stringify(corps)} → ${refus.status}`);
