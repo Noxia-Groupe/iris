@@ -1,6 +1,8 @@
 // Base d'API centralisée.
 // En production, le Dockerfile injecte VITE_API_URL=/api (même origine, derrière nginx).
 // En développement, on cible /api et le proxy Vite (voir vite.config.ts) redirige vers le backend.
+import { effacerCacheSociete } from './lib/cacheSociete';
+
 export const API_URL: string = import.meta.env.VITE_API_URL || '/api';
 
 /**
@@ -28,6 +30,7 @@ export function getToken(): string | null {
 function logoutAndRedirect() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
+  effacerCacheSociete();
   if (!window.location.pathname.startsWith('/login')) {
     window.location.href = '/login';
   }

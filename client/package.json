@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:local": "node scripts/preparer-e2e.mjs && playwright test",
-    "test:unit": "TZ=Pacific/Gambier tsx --test tests/dateDuJour.test.ts tests/dateFormatting.test.ts tests/archivesRestaurables.test.ts tests/planComptableCsv.test.ts tests/contractPlanningDate.test.ts tests/suiviChantiers.test.ts"
+    "test:unit": "TZ=Pacific/Gambier tsx --test tests/dateDuJour.test.ts tests/dateFormatting.test.ts tests/archivesRestaurables.test.ts tests/planComptableCsv.test.ts tests/contractPlanningDate.test.ts tests/suiviChantiers.test.ts tests/menu.test.ts"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.16.0",

@@ -1,7 +1,6 @@
 import type { JSX } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Sidebar from './components/Sidebar';
-import ThemeToggle from './components/ThemeToggle';
+import { AppLayout } from './components/AppLayout';
 import Dashboard from './pages/Dashboard';
 import ChantierDetail from './pages/ChantierDetail';
 import Login from './pages/Login';
@@ -44,9 +43,10 @@ const ROLES_TRAVAUX = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPON
 const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX.Element, requiredRoles?: string[], excludedRole?: string }) => {
   const token = localStorage.getItem('token');
   const userStr = localStorage.getItem('user');
-  // Compte resynchronisé avec le serveur à chaque changement d'écran : une promotion, une
-  // rétrogradation ou un accès accordé depuis la connexion se répercute aussitôt sur les
-  // menus et les écrans accessibles, sans obliger à se reconnecter.
+  // Compte relu auprès du serveur au chargement de l'application (le cadre n'est pas remonté
+  // à chaque changement d'écran) : une promotion, une rétrogradation ou un accès accordé
+  // depuis la connexion se répercute sur les menus et les écrans accessibles au prochain
+  // chargement, sans obliger à se reconnecter.
   const utilisateur = useCurrentUser();
   const role = utilisateur?.role || '';
 
@@ -63,17 +63,7 @@ const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX
 
   return (
     <CompanyTimezoneProvider>
-    <div className="layout">
-      <Sidebar />
-      <div className="content-area">
-        <header className="topbar bg-white border-b border-gray-100">
-          <ThemeToggle />
-        </header>
-        <main className="main-content">
-          {children}
-        </main>
-      </div>
-    </div>
+      <AppLayout>{children}</AppLayout>
     </CompanyTimezoneProvider>
   );
 };

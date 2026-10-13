@@ -172,8 +172,15 @@ select.form-input option {
   min-height: 100vh;
 }
 
+/* Sur grand écran, le menu reste visible pendant le défilement de la page et défile
+   lui-même s'il dépasse la hauteur de l'écran. */
 .sidebar {
-  width: 250px;
+  width: 264px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
   background: linear-gradient(180deg, var(--color-primary-dark) 0%, var(--color-primary) 100%);
   color: white;
   padding: var(--spacing-4);
@@ -201,6 +208,86 @@ select.form-input option {
   flex: 1;
   padding: var(--spacing-5);
   overflow-y: auto;
+}
+
+/* Le contenu reçoit le focus après une navigation depuis le tiroir (cf. AppLayout) : pas
+   de cadre de focus sur toute la page pour autant. */
+.main-content:focus {
+  outline: none;
+}
+
+/* Placé après les règles de base de la barre du haut et du contenu : à spécificité égale,
+   c'est l'ordre qui décide, et ces règles mobiles doivent l'emporter. */
+.menu-ouvrir,
+.sidebar-voile {
+  display: none;
+}
+
+/* Sous 1024 px (téléphone, tablette en portrait) : le menu devient un tiroir fermé par
+   défaut, la page occupe toute la largeur. `visibility` retire les liens du parcours au
+   clavier tant que le tiroir est fermé. */
+@media (max-width: 1023px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(290px, 85vw);
+    /* `inset` fixe le haut et le bas : pas de 100vh, plus haut que l'écran utile sur
+       mobile quand la barre du navigateur est affichée. */
+    height: auto;
+    /* Arrivé au bout du menu, le défilement ne passe pas à la page derrière. */
+    overscroll-behavior: contain;
+    transform: translateX(-100%);
+    visibility: hidden;
+    /* Fermeture : le tiroir glisse, puis devient invisible une fois sorti de l'écran. */
+    transition: transform 0.2s ease, visibility 0s linear 0.2s;
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* Ouverture : visible tout de suite, pour pouvoir y placer le focus dès l'ouverture. */
+  .sidebar.sidebar--ouvert {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease, visibility 0s;
+  }
+
+  .sidebar-voile {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 7, 38, 0.45);
+  }
+
+  .menu-ouvrir {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 6px 12px;
+    font: inherit;
+    font-weight: 600;
+    color: var(--color-text);
+    cursor: pointer;
+  }
+
+  .topbar {
+    justify-content: space-between;
+    padding: 0 var(--spacing-3);
+  }
+
+  .main-content {
+    padding: var(--spacing-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar.sidebar--ouvert {
+    transition: none;
+  }
 }
 
 /* Les utilitaires (flex, gap-*, mb-*, text-primary, ...) sont désormais fournis par Tailwind. */

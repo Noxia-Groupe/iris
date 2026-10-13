@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Building2, Search, Save, Palette } from 'lucide-react';
 import { apiFetch } from '../api';
+import { useSociete } from '../companyTimezoneContext';
 
 /**
  * Identité de la société exploitant cette instance Iris.
@@ -41,6 +42,8 @@ const CHAMPS_TEXTE: Array<{ cle: keyof Societe; libelle: string; type?: string; 
 ];
 
 const Societe = ({ modifiable }: { modifiable: boolean }) => {
+  // Le menu affiche le nom de la société : il est relu après chaque enregistrement.
+  const { rafraichir: rafraichirSociete } = useSociete();
   const [societe, setSociete] = useState<Societe | null>(null);
   const [recherche, setRecherche] = useState('');
   const [resultats, setResultats] = useState<ResultatRegistre[]>([]);
@@ -101,6 +104,7 @@ const Societe = ({ modifiable }: { modifiable: boolean }) => {
       const data = await res.json();
       if (!res.ok) { setErreur(data.error || 'Enregistrement impossible.'); return; }
       setSociete(data);
+      rafraichirSociete();
       setMessage('Identité de la société enregistrée.');
     } catch {
       setErreur('Impossible de joindre le serveur.');
