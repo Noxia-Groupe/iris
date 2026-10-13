@@ -140,8 +140,8 @@ function outilsComptes(request: APIRequestContext, token: string) {
     await envoyer('patch', `/users/${compte.id}/role`, { role: 'TECHNICIEN' });
     return compte;
   };
-  const conducteur = async (cle: string, permissions: string[]) => {
-    const compte = await creer(cle, 'CONDUCTEUR_TRAVAUX');
+  const conducteur = async (cle: string, permissions: string[], accesFinance = false) => {
+    const compte = await creer(cle, 'CONDUCTEUR_TRAVAUX', accesFinance);
     if (permissions.length) await envoyer('put', `/users/${compte.id}/permissions`, { permissions });
     return compte;
   };
@@ -241,9 +241,11 @@ test('Administration > Utilisateurs : droit seul enregistré, droit permis, et v
     const clientsSeul = await comptes.reconverti('clients-seul', ['clients:read']);
     const vuParAdmin = await comptes.reconverti('vu-par-admin', ['devis:read', 'chantiers:write'], true);
     const adminSimple = await comptes.creer('admin-simple', 'ADMIN');
-    // Témoins hors technicien : rien n'y est « Sans effet », et le droit devis s'accorde.
-    const conducteurDevis = await comptes.conducteur('conducteur-devis', ['devis:read', 'devis:write', 'clients:read']);
+    // Témoins hors technicien : rien n'y est « Sans effet », et chaque droit s'accorde.
+    const conducteurDevis = await comptes.conducteur('conducteur-devis', ['devis:read', 'devis:write', 'clients:read'], true);
     const conducteurSans = await comptes.conducteur('conducteur-sans', []);
+    // Un commercial n'a pas la saisie Travaux par défaut : sa case Corriger Travaux s'accorde.
+    const commercialSans = await comptes.creer('commercial-sans', 'COMMERCIAL');
 
     const superAdmin = await allerSurPageAdmin('/admin');
     await superAdmin.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
@@ -255,6 +257,11 @@ test('Administration > Utilisateurs : droit seul enregistré, droit permis, et v
     expect(await basculerPermissions(superAdmin, devisSeul, devis)).toEqual({ permissions: [] });
     await expect(devis.getByRole('checkbox')).not.toBeChecked();
     await expect(devis.getByRole('checkbox')).toBeDisabled();
+    // Droit Travaux jamais enregistré : ni cochable, ni signalé.
+    const correctionDevisSeul = (await ligneUtilisateur(superAdmin, devisSeul))('Corriger Travaux');
+    await expect(correctionDevisSeul.getByRole('checkbox')).not.toBeChecked();
+    await expect(correctionDevisSeul.getByRole('checkbox')).toBeDisabled();
+    await expect(correctionDevisSeul.getByRole('checkbox')).toHaveAttribute('title', INFOBULLE_INTERDIT);
 
     const archivage = (await ligneUtilisateur(superAdmin, archivageSeul))('Archiver Travaux');
     await expect(archivage.getByRole('checkbox')).toBeChecked();
@@ -272,16 +279,52 @@ test('Administration > Utilisateurs : droit seul enregistré, droit permis, et v
     await expect(devisClients.getByRole('checkbox')).toHaveAttribute('title', INFOBULLE_INTERDIT);
     await expect(devisClients).not.toContainText('Sans effet');
 
-    const devisConducteur = (await ligneUtilisateur(superAdmin, conducteurDevis))('Droit devis');
+    const celluleConducteurDevis = await ligneUtilisateur(superAdmin, conducteurDevis);
+    const devisConducteur = celluleConducteurDevis('Droit devis');
     await expect(devisConducteur.getByRole('checkbox')).toBeChecked();
     await expect(devisConducteur.getByRole('checkbox')).toBeEnabled();
     await expect(devisConducteur).toContainText('Droit devis');
     await expect(devisConducteur).not.toContainText('Sans effet');
-    const devisSans = (await ligneUtilisateur(superAdmin, conducteurSans))('Droit devis');
+    const financeConducteur = celluleConducteurDevis('Finance');
+    await expect(financeConducteur.getByRole('checkbox')).toBeChecked();
+    await expect(financeConducteur.getByRole('checkbox')).toBeEnabled();
+    await expect(financeConducteur).toContainText('Oui');
+    await expect(financeConducteur).not.toContainText('Sans effet');
+    const correctionConducteur = celluleConducteurDevis('Corriger Travaux');
+    await expect(correctionConducteur.getByRole('checkbox')).toBeChecked();
+    await expect(correctionConducteur.getByRole('checkbox')).toBeDisabled();
+    await expect(correctionConducteur.getByRole('checkbox')).toHaveAttribute('title', 'Droit accordé par le type de compte');
+
+    const celluleConducteurSans = await ligneUtilisateur(superAdmin, conducteurSans);
+    const devisSans = celluleConducteurSans('Droit devis');
     await expect(devisSans.getByRole('checkbox')).not.toBeChecked();
     await expect(devisSans.getByRole('checkbox')).toBeEnabled();
     expect(await basculerPermissions(superAdmin, conducteurSans, devisSans)).toEqual({ permissions: ['devis:read', 'devis:write', 'clients:read'] });
     await expect(devisSans.getByRole('checkbox')).toBeChecked();
+    const archivageSans = celluleConducteurSans('Archiver Travaux');
+    await expect(archivageSans.getByRole('checkbox')).not.toBeChecked();
+    await expect(archivageSans.getByRole('checkbox')).toBeEnabled();
+    expect(await basculerPermissions(superAdmin, conducteurSans, archivageSans)).toEqual({ permissions: ['devis:read', 'devis:write', 'clients:read', 'chantiers:archive'] });
+    await expect(archivageSans.getByRole('checkbox')).toBeChecked();
+    const financeSans = celluleConducteurSans('Finance');
+    await expect(financeSans.getByRole('checkbox')).not.toBeChecked();
+    await expect(financeSans.getByRole('checkbox')).toBeEnabled();
+    const octroiFinance = superAdmin.waitForResponse((r) => r.url().endsWith(`/api/users/${conducteurSans.id}/acces-finance`) && r.request().method() === 'PATCH');
+    await financeSans.getByRole('checkbox').click();
+    expect((await octroiFinance).status()).toBe(200);
+    await expect(financeSans.getByRole('checkbox')).toBeChecked();
+    await expect(financeSans).toContainText('Oui');
+
+    const correctionCommercial = (await ligneUtilisateur(superAdmin, commercialSans))('Corriger Travaux');
+    await expect(correctionCommercial.getByRole('checkbox')).not.toBeChecked();
+    await expect(correctionCommercial.getByRole('checkbox')).toBeEnabled();
+    expect(await basculerPermissions(superAdmin, commercialSans, correctionCommercial)).toEqual({ permissions: ['chantiers:write'] });
+    await expect(correctionCommercial.getByRole('checkbox')).toBeChecked();
+
+    // Chaque case de droit porte un nom accessible propre au compte.
+    for (const nom of ['Accès financier', 'Droit devis', 'Corriger Travaux', 'Archiver Travaux']) {
+      await expect(superAdmin.getByRole('checkbox', { name: `${nom} — ${conducteurSans.name}`, exact: true })).toHaveCount(1);
+    }
 
     // Un administrateur simple voit les droits enregistrés sans pouvoir les retirer.
     const vueAdmin = await pageDe(browser, adminSimple);
