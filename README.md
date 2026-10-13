@@ -65,8 +65,9 @@ défaut, se retirent un par un dans **Administration > Marges** pour s'adapter �
 l'organisation : le conducteur du chantier, ses responsables hiérarchiques à tous les
 niveaux (comptes Responsable), les directeurs. La chaîne hiérarchique se règle compte par
 compte dans **Administration > Utilisateurs**. Les budgets par poste (matériel,
-main-d'œuvre, heures) restent visibles de tous ceux qui voient le chantier, pour suivre les
-dépassements : ils permettent d'en déduire le vendu, donc la marge du jour.
+main-d'œuvre, heures) restent visibles de tous ceux qui voient le chantier, sauf du technicien
+(voir ci-dessous), pour suivre les dépassements : ils permettent d'en déduire le vendu, donc
+la marge du jour.
 
 Le **technicien** consulte le chantier dont il est chargé, avec son budget d'heures et ses
 heures réalisées, sans aucun montant : ni budgets matériel et main-d'œuvre, ni coûts (achats,

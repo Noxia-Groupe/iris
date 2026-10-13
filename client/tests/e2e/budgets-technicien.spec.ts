@@ -140,10 +140,18 @@ function outilsComptes(request: APIRequestContext, token: string) {
     await envoyer('patch', `/users/${compte.id}/role`, { role: 'TECHNICIEN' });
     return compte;
   };
-  const nettoyer = async () => {
-    for (const id of crees) await request.delete(`${api}/users/${id}`, { headers }).catch(() => undefined);
+  const conducteur = async (cle: string, permissions: string[]) => {
+    const compte = await creer(cle, 'CONDUCTEUR_TRAVAUX');
+    if (permissions.length) await envoyer('put', `/users/${compte.id}/permissions`, { permissions });
+    return compte;
   };
-  return { creer, reconverti, nettoyer };
+  const nettoyer = async () => {
+    for (const id of crees) {
+      const reponse = await request.delete(`${api}/users/${id}`, { headers }).catch(() => null);
+      if (!reponse?.ok()) console.warn(`Compte de test ${id} non supprimé : ${reponse ? `${reponse.status()} ${await reponse.text()}` : 'requête impossible'}`);
+    }
+  };
+  return { creer, reconverti, conducteur, nettoyer };
 }
 
 // Cellules d'un compte dans Administration > Utilisateurs, repérées par l'en-tête de colonne.
@@ -163,7 +171,7 @@ const INFOBULLE_INTERDIT = 'Ce droit ne s’accorde pas à un compte technicien.
 
 // Clic sur une case pilotée par le serveur (elle ne change qu'au rechargement qui suit la
 // réponse) ; renvoie la liste de permissions envoyée.
-async function retirerPermissions(page: Page, compte: Compte, td: Locator) {
+async function basculerPermissions(page: Page, compte: Compte, td: Locator) {
   const retrait = page.waitForResponse((r) => r.url().endsWith(`/api/users/${compte.id}/permissions`) && r.request().method() === 'PUT');
   await td.getByRole('checkbox').click();
   const reponse = await retrait;
@@ -199,8 +207,9 @@ test('Administration > Utilisateurs : les droits d’un compte devenu technicien
     await expect(archivage.getByRole('checkbox')).toHaveAttribute('title', INFOBULLE_INTERDIT);
     await expect(archivage).not.toContainText('Sans effet');
 
-    // Décocher le droit devis le retire seul ; le droit Travaux enregistré demeure, sans effet.
-    expect(await retirerPermissions(admin, compte, devis)).toEqual({ permissions: ['chantiers:write'] });
+    // Décocher le droit devis retire ses seuls droits interdits : l'annuaire (clients:read), permis
+    // au technicien, est conservé ; le droit Travaux enregistré demeure, sans effet.
+    expect(await basculerPermissions(admin, compte, devis)).toEqual({ permissions: ['clients:read', 'chantiers:write'] });
     await expect(devis.getByRole('checkbox')).not.toBeChecked();
     await expect(devis.getByRole('checkbox')).toBeDisabled();
     await expect(devis).toContainText('Droit devis');
@@ -223,6 +232,7 @@ test('Administration > Utilisateurs : les droits d’un compte devenu technicien
 // un droit permis au technicien (clients:read, jamais signalé), et la vue d'un administrateur
 // qui n'est pas super administrateur (il voit les droits sans pouvoir les retirer).
 test('Administration > Utilisateurs : droit seul enregistré, droit permis, et vue d’un administrateur simple', async ({ allerSurPageAdmin, request, session, browser }) => {
+  test.slow();
   const comptes = outilsComptes(request, session.token);
   const contextes: { close: () => Promise<void> }[] = [];
   try {
@@ -231,6 +241,9 @@ test('Administration > Utilisateurs : droit seul enregistré, droit permis, et v
     const clientsSeul = await comptes.reconverti('clients-seul', ['clients:read']);
     const vuParAdmin = await comptes.reconverti('vu-par-admin', ['devis:read', 'chantiers:write'], true);
     const adminSimple = await comptes.creer('admin-simple', 'ADMIN');
+    // Témoins hors technicien : rien n'y est « Sans effet », et le droit devis s'accorde.
+    const conducteurDevis = await comptes.conducteur('conducteur-devis', ['devis:read', 'devis:write', 'clients:read']);
+    const conducteurSans = await comptes.conducteur('conducteur-sans', []);
 
     const superAdmin = await allerSurPageAdmin('/admin');
     await superAdmin.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
@@ -239,7 +252,7 @@ test('Administration > Utilisateurs : droit seul enregistré, droit permis, et v
     await expect(devis.getByRole('checkbox')).toBeChecked();
     await expect(devis.getByRole('checkbox')).toBeEnabled();
     await expect(devis).toContainText('Sans effet');
-    expect(await retirerPermissions(superAdmin, devisSeul, devis)).toEqual({ permissions: [] });
+    expect(await basculerPermissions(superAdmin, devisSeul, devis)).toEqual({ permissions: [] });
     await expect(devis.getByRole('checkbox')).not.toBeChecked();
     await expect(devis.getByRole('checkbox')).toBeDisabled();
 
@@ -247,16 +260,28 @@ test('Administration > Utilisateurs : droit seul enregistré, droit permis, et v
     await expect(archivage.getByRole('checkbox')).toBeChecked();
     await expect(archivage.getByRole('checkbox')).toBeEnabled();
     await expect(archivage).toContainText('Sans effet');
-    expect(await retirerPermissions(superAdmin, archivageSeul, archivage)).toEqual({ permissions: [] });
+    expect(await basculerPermissions(superAdmin, archivageSeul, archivage)).toEqual({ permissions: [] });
     await expect(archivage.getByRole('checkbox')).not.toBeChecked();
     await expect(archivage.getByRole('checkbox')).toBeDisabled();
     await expect(archivage).not.toContainText('Sans effet');
+    await expect((await ligneUtilisateur(superAdmin, archivageSeul))('Corriger Travaux')).not.toContainText('Sans effet');
 
     const devisClients = (await ligneUtilisateur(superAdmin, clientsSeul))('Droit devis');
     await expect(devisClients.getByRole('checkbox')).not.toBeChecked();
     await expect(devisClients.getByRole('checkbox')).toBeDisabled();
     await expect(devisClients.getByRole('checkbox')).toHaveAttribute('title', INFOBULLE_INTERDIT);
     await expect(devisClients).not.toContainText('Sans effet');
+
+    const devisConducteur = (await ligneUtilisateur(superAdmin, conducteurDevis))('Droit devis');
+    await expect(devisConducteur.getByRole('checkbox')).toBeChecked();
+    await expect(devisConducteur.getByRole('checkbox')).toBeEnabled();
+    await expect(devisConducteur).toContainText('Droit devis');
+    await expect(devisConducteur).not.toContainText('Sans effet');
+    const devisSans = (await ligneUtilisateur(superAdmin, conducteurSans))('Droit devis');
+    await expect(devisSans.getByRole('checkbox')).not.toBeChecked();
+    await expect(devisSans.getByRole('checkbox')).toBeEnabled();
+    expect(await basculerPermissions(superAdmin, conducteurSans, devisSans)).toEqual({ permissions: ['devis:read', 'devis:write', 'clients:read'] });
+    await expect(devisSans.getByRole('checkbox')).toBeChecked();
 
     // Un administrateur simple voit les droits enregistrés sans pouvoir les retirer.
     const vueAdmin = await pageDe(browser, adminSimple);

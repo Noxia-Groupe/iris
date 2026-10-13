@@ -1387,7 +1387,9 @@ const Admin = () => {
                   const titreTechnicien = (enregistre: boolean) => enregistre
                     ? `Enregistré, sans effet pour un compte technicien ; il reprend effet si le compte change de type.${isSuper ? ' Décocher pour le retirer.' : ''}`
                     : MESSAGE_TECHNICIEN;
-                  const retirer = (droits: string[]) => handleTogglePermission(u.id, individuels, droits.filter((droit) => individuels.includes(droit)));
+                  // Le retrait ne porte que sur les droits interdits enregistrés : clients:read (annuaire),
+                  // permis au technicien par décision de Nelson, est conservé avec le droit devis.
+                  const retirer = (droits: string[]) => handleTogglePermission(u.id, individuels, droits.filter((droit) => DROITS_INTERDITS_TECHNICIEN.includes(droit) && individuels.includes(droit)));
                   return (
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
@@ -1456,6 +1458,7 @@ const Admin = () => {
                         <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
                           <input
                             type="checkbox"
+                            aria-label={`Accès financier — ${u.name}`}
                             checked={!!u.accesFinance}
                             disabled={!isSuper || (estTechnicien && !u.accesFinance)}
                             onChange={() => handleToggleAccesFinance(u.id, !!u.accesFinance)}
@@ -1472,7 +1475,7 @@ const Admin = () => {
                     </td>
                     <td className="px-4 py-4">
                       <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <input type="checkbox" checked={estTechnicien ? devisSansEffet : aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole || (estTechnicien && !devisSansEffet)} onChange={() => (estTechnicien ? retirer(DROITS_DEVIS) : handleTogglePermission(u.id, individuels, DROITS_DEVIS))} className="w-4 h-4" title={estTechnicien ? titreTechnicien(devisSansEffet) : droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
+                        <input type="checkbox" aria-label={`Droit devis — ${u.name}`} checked={estTechnicien ? devisSansEffet : aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole || (estTechnicien && !devisSansEffet)} onChange={() => (estTechnicien ? retirer(DROITS_DEVIS) : handleTogglePermission(u.id, individuels, DROITS_DEVIS))} className="w-4 h-4" title={estTechnicien ? titreTechnicien(devisSansEffet) : droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
                         <span className="text-xs text-gray-500">{devisSansEffet ? 'Sans effet' : 'Droit devis'}</span>
                       </label>
                     </td>
