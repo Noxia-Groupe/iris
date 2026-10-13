@@ -220,6 +220,7 @@ if (!TEST_DATABASE_URL) {
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
+      'budgets.technicien@iris.test', 'budgets.comptable@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1827,6 +1828,94 @@ if (!TEST_DATABASE_URL) {
       assert.equal(regional.status, 200, JSON.stringify(regional.body));
       const autre = await request(app).post('/api/achats').set(entete('autre.responsable')).send({ ...saisie, chantierId: chantier.id, montantHT: 10 });
       assert.equal(autre.status, 404, JSON.stringify(autre.body));
+    });
+  });
+
+  // Décision de Nelson (13-10-2026) : seul le technicien ne voit pas les budgets matériel et
+  // main-d'œuvre ; responsables, comptabilité, administratif et autres profils les voient.
+  describe('Budgets par poste : masqués au seul technicien', () => {
+    let auth = {};
+    let authTechnicien = {};
+    let authComptable = {};
+    let chantierTechnicien;
+    let chantierComptable;
+    let cle = '';
+
+    before(async () => {
+      const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(login.status, 200);
+      auth = { Authorization: `Bearer ${login.body.token}` };
+      const technicien = await prisma.user.create({ data: { email: 'budgets.technicien@iris.test', name: 'TEST Budgets technicien', role: 'TECHNICIEN' } });
+      const comptable = await prisma.user.create({ data: { email: 'budgets.comptable@iris.test', name: 'TEST Budgets comptable', role: 'COMPTABLE' } });
+      authTechnicien = { Authorization: `Bearer ${jwt.sign({ id: technicien.id }, process.env.JWT_SECRET)}` };
+      authComptable = { Authorization: `Bearer ${jwt.sign({ id: comptable.id }, process.env.JWT_SECRET)}` };
+      // Vendu 1 000 € dont 300 € de matériel et 700 € de main-d'œuvre ; 450 € d'achats : matériel dépassé.
+      const vente = { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 10 };
+      chantierTechnicien = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Budgets chantier du technicien', responsableId: technicien.id } });
+      chantierComptable = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Budgets chantier du comptable', responsableId: comptable.id } });
+      const categorie = await prisma.categorie.create({ data: { nom: 'TEST Budgets catégorie' } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Budgets fournisseur' } });
+      for (const chantier of [chantierTechnicien, chantierComptable]) {
+        const achat = await request(app).post('/api/achats').set(auth).send({ chantierId: chantier.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: jourCivilEntreprise(new Date()), description: 'TEST achat budgets', montantHT: 450 });
+        assert.equal(achat.status, 200, JSON.stringify(achat.body));
+      }
+      const creation = await request(app).post('/api/admin/api-keys').set(auth).send({ nom: 'TEST agent budgets', scopes: ['chantiers:read'] });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      cle = creation.body.apiKey;
+    });
+
+    const sansBudgets = (vue, qui) => {
+      assert.equal(vue.budgetMaterielVendu, null, qui);
+      assert.equal(vue.budgetMainOeuvreVendu, null, qui);
+      assert.equal(vue.metrics.pctMateriel, null, `${qui} : le pourcentage redonnerait le budget`);
+      assert.equal(vue.metrics.pctMainOeuvre, null, qui);
+      // Les heures vendues restent visibles, et le dépassement reste signalé.
+      assert.equal(vue.heuresVendues, 10, qui);
+      assert.ok(vue.metrics.alertes.includes('MATERIEL_DEPASSE'), qui);
+    };
+    const avecBudgets = (vue, qui) => {
+      assert.equal(vue.budgetMaterielVendu, 300, qui);
+      assert.equal(vue.budgetMainOeuvreVendu, 700, qui);
+      assert.equal(vue.metrics.pctMateriel, 150, qui);
+    };
+
+    test('le technicien ne reçoit les budgets matériel et main-d’œuvre ni sur la liste ni sur la fiche', async () => {
+      const liste = await request(app).get('/api/chantiers').set(authTechnicien);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      sansBudgets(liste.body.find((c) => c.id === chantierTechnicien.id), 'liste du technicien');
+      const fiche = await request(app).get(`/api/chantiers/${chantierTechnicien.id}`).set(authTechnicien);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      sansBudgets(fiche.body, 'fiche du technicien');
+      assert.equal(fiche.body.budgetGlobalVendu, null);
+    });
+
+    test('ses écritures ne les renvoient pas, et il ne peut pas les modifier', async () => {
+      const renommage = await request(app).patch(`/api/chantiers/${chantierTechnicien.id}`).set(authTechnicien).send({ nom: 'TEST Budgets chantier du technicien' });
+      assert.equal(renommage.status, 200, JSON.stringify(renommage.body));
+      assert.deepEqual([renommage.body.budgetMaterielVendu, renommage.body.budgetMainOeuvreVendu], [null, null]);
+      for (const champ of ['budgetMaterielVendu', 'budgetMainOeuvreVendu']) {
+        const refus = await request(app).patch(`/api/chantiers/${chantierTechnicien.id}`).set(authTechnicien).send({ [champ]: 1 });
+        assert.equal(refus.status, 403, `${champ} : ${JSON.stringify(refus.body)}`);
+      }
+      const enBase = await prisma.chantier.findUnique({ where: { id: chantierTechnicien.id } });
+      assert.deepEqual([Number(enBase.budgetMaterielVendu), Number(enBase.budgetMainOeuvreVendu)], [300, 700]);
+      const cloture = await request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authTechnicien).send({ statut: 'TERMINE' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      assert.deepEqual([cloture.body.budgetMaterielVendu, cloture.body.budgetMainOeuvreVendu], [null, null]);
+    });
+
+    test('les autres profils et les clés d’intégration les voient toujours', async () => {
+      const comptable = await request(app).get(`/api/chantiers/${chantierComptable.id}`).set(authComptable);
+      assert.equal(comptable.status, 200, JSON.stringify(comptable.body));
+      avecBudgets(comptable.body, 'comptable responsable du chantier');
+      const admin = (await request(app).get('/api/chantiers').set(auth)).body.find((c) => c.id === chantierTechnicien.id);
+      avecBudgets(admin, 'administrateur');
+      const parCle = (await request(app).get('/api/v1/chantiers').set({ Authorization: `Bearer ${cle}` })).body.find((c) => c.id === chantierTechnicien.id);
+      avecBudgets(parCle, 'clé d’intégration');
+      // L'administrateur corrige toujours ces budgets.
+      const correction = await request(app).patch(`/api/chantiers/${chantierComptable.id}`).set(auth).send({ budgetMaterielVendu: 320 });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      assert.equal(Number(correction.body.budgetMaterielVendu), 320);
     });
   });
 

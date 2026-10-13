@@ -783,11 +783,14 @@ const ChantierDetail = () => {
               </section>
             )}
 
+            {/* Budgets par poste : non communiqués à un compte technicien (null côté serveur). */}
+            {chantier.budgetMaterielVendu != null && (
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-16 h-16 bg-green-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Matériel Prévu</div>
               <div className="text-2xl font-black text-accent z-10">{chantier.budgetMaterielVendu.toLocaleString()} €</div>
             </div>
+            )}
 
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-16 h-16 bg-purple-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
@@ -795,11 +798,13 @@ const ChantierDetail = () => {
               <div className="text-2xl font-black text-purple-600 z-10">{chantier.heuresVendues} h</div>
             </div>
 
+            {chantier.budgetMainOeuvreVendu != null && (
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-16 h-16 bg-orange-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Coût MO Prévu</div>
               <div className="text-2xl font-black text-orange-600 z-10">{chantier.budgetMainOeuvreVendu.toLocaleString()} €</div>
             </div>
+            )}
           </div>
 
           {/* Marge Commerciale (admin, ou conducteur responsable sur sa fiche chantier — cf.
@@ -857,13 +862,17 @@ const ChantierDetail = () => {
                 </h3>
                 <div className="text-right">
                   <span className="text-xl font-black text-accent">{depenseMaterielReelle.toLocaleString()} €</span>
-                  <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.budgetMaterielVendu.toLocaleString()} €</span>
+                  {chantier.budgetMaterielVendu != null && <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.budgetMaterielVendu.toLocaleString()} €</span>}
                 </div>
               </div>
-              <ProgressMeter value={depenseMaterielReelle} max={chantier.budgetMaterielVendu} color="blue" striped />
-              <div className="mt-2 text-right text-xs font-bold text-gray-500">
-                {((depenseMaterielReelle / Math.max(1, chantier.budgetMaterielVendu)) * 100).toFixed(1)}%
-              </div>
+              {chantier.budgetMaterielVendu != null && (
+                <>
+                  <ProgressMeter value={depenseMaterielReelle} max={chantier.budgetMaterielVendu} color="blue" striped />
+                  <div className="mt-2 text-right text-xs font-bold text-gray-500">
+                    {((depenseMaterielReelle / Math.max(1, chantier.budgetMaterielVendu)) * 100).toFixed(1)}%
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Coût main d'oeuvre (€) — distinct de la barre "Heures" ci-dessous : un
@@ -876,17 +885,19 @@ const ChantierDetail = () => {
                 </h3>
                 <div className="text-right">
                   <span className="text-xl font-black text-orange-600">{coutMainOeuvreReel.toLocaleString()} €</span>
-                  <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.budgetMainOeuvreVendu.toLocaleString()} €</span>
+                  {chantier.budgetMainOeuvreVendu != null && <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.budgetMainOeuvreVendu.toLocaleString()} €</span>}
                 </div>
               </div>
-              <ProgressMeter value={coutMainOeuvreReel} max={chantier.budgetMainOeuvreVendu} color="orange" striped />
+              {chantier.budgetMainOeuvreVendu != null && <ProgressMeter value={coutMainOeuvreReel} max={chantier.budgetMainOeuvreVendu} color="orange" striped />}
               <div className="mt-2 flex justify-between items-center text-xs font-bold">
                 <span className={manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-gray-300'}>
                   {manqueAGagnerMainOeuvre > 0 ? `Manque à gagner : -${manqueAGagnerMainOeuvre.toLocaleString()} €` : ''}
                 </span>
-                <span className="text-gray-500">
-                  {((coutMainOeuvreReel / Math.max(1, chantier.budgetMainOeuvreVendu)) * 100).toFixed(1)}%
-                </span>
+                {chantier.budgetMainOeuvreVendu != null && (
+                  <span className="text-gray-500">
+                    {((coutMainOeuvreReel / Math.max(1, chantier.budgetMainOeuvreVendu)) * 100).toFixed(1)}%
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1338,14 +1349,19 @@ const ChantierDetail = () => {
                 <label className="form-label">Total Heures Vendues (h)</label>
                 <input required type="number" step="0.5" name="heuresVendues" defaultValue={chantier.heuresVendues} className="form-input" />
               </div>
-              <div className="form-group mb-0">
-                <label className="form-label">Dont Matériel (€ HT)</label>
-                <input required type="number" step="0.01" name="budgetMaterielVendu" defaultValue={chantier.budgetMaterielVendu} className="form-input" />
-              </div>
-              <div className="form-group mb-0">
-                <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
-                <input required type="number" step="0.01" name="budgetMainOeuvreVendu" defaultValue={chantier.budgetMainOeuvreVendu} className="form-input" />
-              </div>
+              {/* Budgets par poste : seulement pour qui les voit (le serveur refuse qu'un technicien les modifie). */}
+              {chantier.budgetMaterielVendu != null && (
+                <div className="form-group mb-0">
+                  <label className="form-label">Dont Matériel (€ HT)</label>
+                  <input required type="number" step="0.01" name="budgetMaterielVendu" defaultValue={chantier.budgetMaterielVendu} className="form-input" />
+                </div>
+              )}
+              {chantier.budgetMainOeuvreVendu != null && (
+                <div className="form-group mb-0">
+                  <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
+                  <input required type="number" step="0.01" name="budgetMainOeuvreVendu" defaultValue={chantier.budgetMainOeuvreVendu} className="form-input" />
+                </div>
+              )}
               <div className="form-group mb-0 md:col-span-2">
                 <label className="form-label">Type(s) de chantier</label>
                 <div className="flex flex-wrap gap-2">

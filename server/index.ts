@@ -418,10 +418,21 @@ function voitRentabilite(req: express.Request, chantier: { responsableId?: strin
   return false;
 }
 
-// Réponse d'une écriture sur un chantier : même masquage du montant vendu qu'en lecture,
-// pour qu'un enregistrement renvoyé tel quel ne contourne pas voitRentabilite.
-async function chantierSelonRentabilite<T extends { responsableId: string | null; budgetGlobalVendu: unknown }>(req: express.Request, chantier: T) {
-  return voitRentabilite(req, chantier, await getParametres()) ? chantier : { ...chantier, budgetGlobalVendu: null };
+// Budgets matériel et main-d'œuvre : visibles de tous ceux qui voient le chantier, sauf du
+// technicien (décision de Nelson du 13-10-2026). Les heures vendues lui restent visibles ;
+// les pourcentages de consommation, qui redonneraient ces budgets à partir du réel, non.
+// Une clé d'intégration garde son accès inchangé (scope chantiers:read).
+function voitBudgetsParPoste(req: express.Request): boolean {
+  if ((req as ApiRequest).apiKey) return true;
+  return (req as AuthRequest).user?.role !== ROLE_TECHNICIEN;
+}
+
+// Réponse d'une écriture sur un chantier : même masquage qu'en lecture (montant vendu selon
+// voitRentabilite, budgets par poste selon voitBudgetsParPoste), pour qu'un enregistrement
+// renvoyé tel quel ne contourne pas ces règles.
+async function chantierSelonRentabilite<T extends { responsableId: string | null; budgetGlobalVendu: unknown; budgetMaterielVendu: unknown; budgetMainOeuvreVendu: unknown }>(req: express.Request, chantier: T) {
+  const sansVendu = voitRentabilite(req, chantier, await getParametres()) ? chantier : { ...chantier, budgetGlobalVendu: null };
+  return voitBudgetsParPoste(req) ? sansVendu : { ...sansVendu, budgetMaterielVendu: null, budgetMainOeuvreVendu: null };
 }
 
 // Accès aux données financières : accordé au cas par cas, indépendamment du rôle
@@ -878,12 +889,16 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
 // est pas destinataire (cf. canSeeMarge ci-dessus). Seul le montant vendu global est masqué :
 // les budgets par poste restent envoyés pour le suivi des dépassements ; ils en donnent la
 // somme, donc avec les dépenses la marge du jour.
-function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi) {
+// Budgets par poste masqués au technicien (cf. voitBudgetsParPoste) : les alertes de
+// dépassement, calculées avant le masquage, restent signalées, sans leur montant.
+function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, budgetsParPoste = true) {
   const c = decimalToNumber(chantier);
+  const metrics = computeChantierMetrics(c, params, canSeeMarge, contexte);
   return {
     ...c,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
-    metrics: computeChantierMetrics(c, params, canSeeMarge, contexte),
+    ...(budgetsParPoste ? {} : { budgetMaterielVendu: null, budgetMainOeuvreVendu: null }),
+    metrics: budgetsParPoste ? metrics : { ...metrics, pctMateriel: null, pctMainOeuvre: null },
   };
 }
 
@@ -2851,7 +2866,8 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
     // branche, pas forcément sur tous ceux de sa liste (cf. voitRentabilite).
     const visibles = chantiers.map((c) => voitRentabilite(req, c, params));
     const contexte = await contexteSuivi(params.margeCommercialeActive && visibles.some(Boolean));
-    res.json(chantiers.map((c: any, i) => serializeChantier(c, params, visibles[i], contexte)));
+    const budgetsParPoste = voitBudgetsParPoste(req);
+    res.json(chantiers.map((c: any, i) => serializeChantier(c, params, visibles[i], contexte, budgetsParPoste)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
   }
@@ -2899,7 +2915,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     // évite toute fuite de montants vers les rôles qui ne voient pas la marge.
     const { factures, ...chantierSansFactures } = chantier;
     const contexte = await contexteSuivi(canSeeMarge && params.margeCommercialeActive);
-    const detail = serializeChantier(chantierSansFactures, params, canSeeMarge, contexte) as Record<string, unknown>;
+    const detail = serializeChantier(chantierSansFactures, params, canSeeMarge, contexte, voitBudgetsParPoste(req)) as Record<string, unknown>;
     if (canSeeMarge) {
       // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
       // facture annulée est visible mais ne contribue plus, son avoir la neutralise.
@@ -3030,6 +3046,9 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // retiré la rentabilité ne peut pas l'écraser à l'aveugle.
     if ('budgetGlobalVendu' in req.body && !voitRentabilite(req, existant, await getParametres())) {
       return res.status(403).json({ error: 'Le montant vendu n’est modifiable que par qui suit la rentabilité de ce chantier.' });
+    }
+    if (('budgetMaterielVendu' in req.body || 'budgetMainOeuvreVendu' in req.body) && !voitBudgetsParPoste(req)) {
+      return res.status(403).json({ error: 'Les budgets matériel et main-d’œuvre ne sont pas modifiables par un compte technicien.' });
     }
     for (const key of numericFields) {
       if (key in req.body) data[key] = parseFloat(req.body[key]) || 0;

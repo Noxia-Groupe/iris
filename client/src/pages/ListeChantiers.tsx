@@ -200,9 +200,10 @@ const ListeChantiers = () => {
                   </td>
                   <td className="px-4 py-4 hidden md:table-cell">
                     <div className="text-xs font-semibold text-gray-600 mb-1.5">
-                      {fmtEuro(materielReel)} <span className="text-gray-400">/ {fmtEuro(c.budgetMaterielVendu)}</span>
+                      {fmtEuro(materielReel)}{c.budgetMaterielVendu != null && <span className="text-gray-400"> / {fmtEuro(c.budgetMaterielVendu)}</span>}
                     </div>
-                    <ProgressMeter value={materielReel} max={c.budgetMaterielVendu} color="blue" size="sm" />
+                    {/* Budget matériel non communiqué (technicien) : le réel seul, sans barre. */}
+                    {c.budgetMaterielVendu != null && <ProgressMeter value={materielReel} max={c.budgetMaterielVendu} color="blue" size="sm" />}
                   </td>
                   <td className="px-4 py-4 text-right">
                     {margeVisible ? (

@@ -66,7 +66,10 @@ l'organisation : le conducteur du chantier, ses responsables hiérarchiques à t
 niveaux (comptes Responsable), les directeurs. La chaîne hiérarchique se règle compte par
 compte dans **Administration > Utilisateurs**. Les budgets par poste (matériel,
 main-d'œuvre, heures) restent visibles de tous ceux qui voient le chantier, pour suivre les
-dépassements : ils permettent d'en déduire le vendu, donc la marge du jour.
+dépassements : ils permettent d'en déduire le vendu, donc la marge du jour. Seule exception :
+le technicien ne reçoit ni les budgets matériel et main-d'œuvre ni leurs pourcentages de
+consommation, et ne peut pas les modifier ; ses alertes de dépassement lui sont signalées
+sans leur montant. Il garde le budget d'heures.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.

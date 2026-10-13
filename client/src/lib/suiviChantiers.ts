@@ -14,8 +14,8 @@ export interface MetriquesChantier {
   materielReel?: number;
   moReel?: number;
   pctHeures?: number;
-  pctMateriel?: number;
-  pctMainOeuvre?: number;
+  pctMateriel?: number | null;
+  pctMainOeuvre?: number | null;
   margeCommerciale?: number | null;
   margePct?: number | null;
   margeEstimee?: number | null;
@@ -44,8 +44,9 @@ export interface ChantierSuivi {
   numeroDevis?: string | null;
   statut: string;
   heuresVendues: number;
-  budgetMaterielVendu: number;
-  budgetMainOeuvreVendu: number;
+  /** Null pour un compte technicien : budgets matériel et main-d'œuvre non communiqués. */
+  budgetMaterielVendu: number | null;
+  budgetMainOeuvreVendu: number | null;
   responsable?: { id?: string; name?: string | null } | null;
   commercial?: { name?: string | null } | null;
   metrics?: MetriquesChantier;
@@ -145,10 +146,12 @@ export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): st
       return `Sans saisie depuis ${nombre(m.joursSansSaisie ?? 0)} j`;
     case 'HEURES_DEPASSEES':
       return `Heures +${nombre((m.heuresRealisees ?? 0) - chantier.heuresVendues, 1)} h`;
+    // Budget non communiqué (technicien) : le dépassement est signalé sans son montant, qui
+    // redonnerait le budget à partir du réel.
     case 'MAIN_OEUVRE_DEPASSEE':
-      return `Main-d’œuvre +${nombre((m.moReel ?? 0) - chantier.budgetMainOeuvreVendu)} €`;
+      return chantier.budgetMainOeuvreVendu == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${nombre((m.moReel ?? 0) - chantier.budgetMainOeuvreVendu)} €`;
     case 'MATERIEL_DEPASSE':
-      return `Matériel +${nombre((m.materielReel ?? 0) - chantier.budgetMaterielVendu)} €`;
+      return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : `Matériel +${nombre((m.materielReel ?? 0) - chantier.budgetMaterielVendu)} €`;
   }
 }
 
