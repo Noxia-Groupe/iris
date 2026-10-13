@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { effacerCacheSociete } from '../lib/cacheSociete';
 
 // Page affichée lorsqu'un compte s'authentifie via SSO Microsoft mais ne figure pas
 // dans la liste blanche d'autorisation (géré par un administrateur dans l'onglet
@@ -9,6 +10,7 @@ const AccesRefuse = () => {
   const retourConnexion = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    effacerCacheSociete();
     navigate('/login');
   };
 

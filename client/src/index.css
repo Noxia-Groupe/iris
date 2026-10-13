@@ -188,6 +188,36 @@ select.form-input option {
   flex-direction: column;
 }
 
+.content-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 56px;
+  padding: 0 var(--spacing-5);
+}
+
+.main-content {
+  flex: 1;
+  padding: var(--spacing-5);
+  overflow-y: auto;
+}
+
+/* Le contenu reçoit le focus après une navigation depuis le tiroir (cf. AppLayout) : pas
+   de cadre de focus sur toute la page pour autant. */
+.main-content:focus {
+  outline: none;
+}
+
+/* Placé après les règles de base de la barre du haut et du contenu : à spécificité égale,
+   c'est l'ordre qui décide, et ces règles mobiles doivent l'emporter. */
 .menu-ouvrir,
 .sidebar-voile {
   display: none;
@@ -202,6 +232,11 @@ select.form-input option {
     inset: 0 auto 0 0;
     z-index: 50;
     width: min(290px, 85vw);
+    /* `inset` fixe le haut et le bas : pas de 100vh, plus haut que l'écran utile sur
+       mobile quand la barre du navigateur est affichée. */
+    height: auto;
+    /* Arrivé au bout du menu, le défilement ne passe pas à la page derrière. */
+    overscroll-behavior: contain;
     transform: translateX(-100%);
     visibility: hidden;
     /* Fermeture : le tiroir glisse, puis devient invisible une fois sorti de l'écran. */
@@ -249,31 +284,10 @@ select.form-input option {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar {
+  .sidebar,
+  .sidebar.sidebar--ouvert {
     transition: none;
   }
-}
-
-.content-area {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.topbar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  height: 56px;
-  padding: 0 var(--spacing-5);
-}
-
-.main-content {
-  flex: 1;
-  padding: var(--spacing-5);
-  overflow-y: auto;
 }
 
 /* Les utilitaires (flex, gap-*, mb-*, text-primary, ...) sont désormais fournis par Tailwind. */

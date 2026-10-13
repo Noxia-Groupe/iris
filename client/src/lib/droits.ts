@@ -71,4 +71,3 @@ export function peutVoirStatistiques(user?: CurrentUser | null): boolean {
 export function peutAccederAuxDevis(user?: CurrentUser | null): boolean {
   return !!user && (isSuperAdminRole(user.role) || (user.permissions || []).includes('devis:read'));
 }
-

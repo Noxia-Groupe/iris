@@ -1,6 +1,8 @@
 // Menu principal, regroupé par thème. Fonction pure : elle reçoit le compte et l'état des
-// modules, et rend les seules entrées visibles — les règles sont exactement celles des
-// routes (App.tsx) et du serveur, qui refuse de toute façon ce que le menu n'affiche pas.
+// modules, et rend les seules entrées visibles. Les règles sont celles de l'ancien menu à
+// plat, cohérentes avec les routes (App.tsx) ; le serveur refuse de toute façon ce que le
+// menu n'affiche pas. Comme avant, un compte sans rôle connu est traité en conducteur
+// (User.role est obligatoire en base : seul un stockage local altéré y conduit).
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity, Award, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2, Clock, FileText, FolderOpen,

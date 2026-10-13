@@ -13,35 +13,65 @@ test.describe('Navigation — menu regroupé et tiroir mobile', () => {
   test.describe('sur téléphone', () => {
     test.use({ viewport: { width: 390, height: 844 } });
 
-    test('le menu est un tiroir fermé qui laisse toute la largeur à la page', async ({ allerSurPageAdmin }) => {
+    test('le menu est un tiroir modal qui laisse toute la largeur à la page', async ({ allerSurPageAdmin }) => {
       const page = await allerSurPageAdmin('/');
       const menu = page.locator('#menu-principal');
       const ouvrir = page.getByRole('button', { name: 'Menu', exact: true });
+      const fermerMenu = page.getByRole('button', { name: 'Fermer le menu' });
+      const debordementPage = () => page.evaluate(() => document.documentElement.style.overflow);
       await expect(menu).toBeHidden();
       await expect(ouvrir).toHaveAttribute('aria-expanded', 'false');
-      const largeur = (await page.locator('main').boundingBox())?.width ?? 0;
-      expect(largeur).toBeGreaterThan(360);
+      expect((await page.locator('main').boundingBox())?.width ?? 0).toBeGreaterThan(360);
+      // Barre du haut mobile : bouton « Menu » à gauche, pas collé au sélecteur de thème.
+      expect((await ouvrir.boundingBox())?.x ?? 999).toBeLessThan(40);
 
-      // Choisir une page ferme le tiroir.
+      // Ouvert : focus dans le menu, page derrière inerte et figée.
       await ouvrir.click();
       await expect(menu).toBeVisible();
       await expect(ouvrir).toHaveAttribute('aria-expanded', 'true');
-      await expect(page.getByRole('button', { name: 'Fermer le menu' })).toBeFocused();
-      await menu.getByRole('group', { name: 'Chantiers' }).getByRole('link', { name: 'Liste des chantiers' }).click();
-      await expect(page).toHaveURL(/\/chantiers$/);
-      await expect(menu).toBeHidden();
+      await expect(fermerMenu).toBeFocused();
+      expect(await debordementPage()).toBe('hidden');
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('Tab');
+        expect(await page.evaluate(() => document.activeElement?.closest('.content-area') == null), `tabulation ${i + 1} sortie du tiroir`).toBe(true);
+      }
 
-      // Échap, le voile et le bouton de fermeture le referment aussi.
-      await ouvrir.click();
-      await expect(menu).toBeVisible();
+      // Échap, le voile et le bouton de fermeture referment et rendent le focus au bouton « Menu ».
       await page.keyboard.press('Escape');
       await expect(menu).toBeHidden();
+      await expect(ouvrir).toBeFocused();
+      expect(await debordementPage()).toBe('');
       await ouvrir.click();
       await page.mouse.click(380, 420);
       await expect(menu).toBeHidden();
+      await expect(ouvrir).toBeFocused();
       await ouvrir.click();
-      await page.getByRole('button', { name: 'Fermer le menu' }).click();
+      await fermerMenu.click();
       await expect(menu).toBeHidden();
+      await expect(ouvrir).toBeFocused();
+
+      // Choisir une page ferme le tiroir et place le focus sur le contenu de la nouvelle page.
+      await ouvrir.click();
+      await menu.getByRole('group', { name: 'Chantiers' }).getByRole('link', { name: 'Liste des chantiers' }).click();
+      await expect(page).toHaveURL(/\/chantiers$/);
+      await expect(menu).toBeHidden();
+      await expect(page.locator('main')).toBeFocused();
+
+      // Retour arrière du navigateur, tiroir ouvert : il se referme sur la page précédente.
+      await ouvrir.click();
+      await expect(menu).toBeVisible();
+      await page.goBack();
+      await expect(page).toHaveURL(/\/$/);
+      await expect(menu).toBeHidden();
+      expect(await debordementPage()).toBe('');
+
+      // Passage en grand écran puis retour : le tiroir ne réapparaît pas ouvert.
+      await ouvrir.click();
+      await expect(menu).toBeVisible();
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(menu).toBeHidden();
+      await expect(ouvrir).toHaveAttribute('aria-expanded', 'false');
     });
   });
 
@@ -80,5 +110,26 @@ test.describe('Navigation — menu regroupé et tiroir mobile', () => {
     await expect(menu.getByRole('group', { name: 'Référentiels' })).toHaveCount(0);
     await expect(menu.getByRole('link', { name: 'API d’intégration' })).toHaveCount(0);
     await expect(menu).toContainText(nom);
+  });
+
+  test('l’en-tête porte le nom de la société et suit son enregistrement sans rechargement', async ({ allerSurPageAdmin, apiAdmin, request, session }) => {
+    const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const avant = await (await apiAdmin.get('/company')).json() as { nomCommercial: string | null; raisonSociale: string | null };
+    const titre = (page: import('@playwright/test').Page) => page.locator('#menu-principal .sidebar-titre');
+    const page = await allerSurPageAdmin('/admin');
+    await expect(titre(page)).toHaveText((avant.nomCommercial || avant.raisonSociale || '').trim() || 'Iris');
+    const nouveauNom = `Société menu E2E ${Date.now()}`;
+    try {
+      expect((await request.put(`${api}/company`, { headers, data: { nomCommercial: nouveauNom } })).ok()).toBeTruthy();
+      // Enregistrer le fuseau (inchangé) depuis Administration relit les paramètres société.
+      await page.getByRole('button', { name: 'Société', exact: true }).click();
+      const enregistrement = page.waitForResponse((r) => r.url().endsWith('/api/company') && r.request().method() === 'PUT');
+      await page.locator('form').filter({ has: page.locator('select[name="fuseauHoraire"]') }).getByRole('button', { name: 'Enregistrer' }).click();
+      expect((await enregistrement).ok()).toBeTruthy();
+      await expect(titre(page)).toHaveText(nouveauNom);
+    } finally {
+      await request.put(`${api}/company`, { headers, data: { nomCommercial: avant.nomCommercial ?? '' } });
+    }
   });
 });

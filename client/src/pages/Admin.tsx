@@ -3,6 +3,7 @@ import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN } from '../roles';
 import { refreshModules } from '../modules';
+import { useSociete } from '../companyTimezoneContext';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
@@ -125,6 +126,8 @@ const DROIT_TRAVAUX_CORRECTION = 'chantiers:write';
 const DROIT_TRAVAUX_ARCHIVAGE = 'chantiers:archive';
 
 const Admin = () => {
+  // Le fuseau enregistré ici sert aux dates de toute l'application : il est relu aussitôt.
+  const { rafraichir: rafraichirSociete } = useSociete();
   // Rôle réel du compte connecté (la page est fermée aux commerciaux, cf. App.tsx),
   // resynchronisé avec le serveur : l'onglet « Modules » d'un compte promu super
   // administrateur apparaît sans attendre une reconnexion.
@@ -240,6 +243,7 @@ const Admin = () => {
     const data = await res.json();
     if (!res.ok) return setMessageSociete({ texte: data.error || 'Enregistrement impossible.', ok: false });
     setSociete(data);
+    rafraichirSociete();
     setMessageSociete({ texte: 'Fuseau horaire de la société enregistré.', ok: true });
   };
 
@@ -919,7 +923,10 @@ const Admin = () => {
             <p className="text-sm text-muted mb-4">
               Réglages globaux. La marge commerciale est calculée côté serveur et n'est visible que par les administrateurs.
             </p>
-            <form key={parametres ? 'loaded' : 'loading'} onSubmit={handleParamsSubmit} className="space-y-4">
+            {/* Formulaire non contrôlé : il n'apparaît qu'une fois les paramètres chargés, sinon une
+                saisie faite avant leur arrivée serait effacée par le remplissage des valeurs. */}
+            {!parametres ? <p className="text-sm text-gray-400">Chargement des paramètres…</p> : (
+            <form onSubmit={handleParamsSubmit} className="space-y-4">
               <label className="flex items-center gap-2 cursor-pointer w-fit">
                 <input type="checkbox" name="margeCommercialeActive" defaultChecked={parametres?.margeCommercialeActive ?? true} className="w-4 h-4" />
                 <span className="text-sm font-semibold text-gray-700">Activer l'affichage et le calcul de la marge commerciale</span>
@@ -968,7 +975,7 @@ const Admin = () => {
                 </p>
               </fieldset>
               <button className="btn btn-primary">Enregistrer</button>
-            </form>
+            </form>)}
           </div>
 
           {/* Règles de rémunération commerciale : stockées en base, éditables par un

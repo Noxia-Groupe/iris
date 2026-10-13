@@ -26,7 +26,7 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
 }
 
 test('chaque rôle voit exactement les mêmes pages qu’avant le regroupement', () => {
-  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE']) {
+  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL']) {
     for (const planningActif of [true, false]) {
       for (const permissions of [[], ['devis:read']]) {
         assert.deepEqual(liens(role, planningActif, permissions), attendu(role, planningActif, permissions), `${role} planning=${planningActif} ${permissions.join(',')}`);
@@ -50,4 +50,13 @@ test('un commercial n’a que ses sections : ni facturation, ni réglages', () =
 test('seuls l’accueil et la liste des chantiers sont actifs sur leur chemin exact', () => {
   const entrees = sectionsMenu({ role: 'SUPERADMIN' }, true).flatMap((s) => s.entrees);
   assert.deepEqual(entrees.filter((e) => e.exact).map((e) => e.to), ['/', '/chantiers']);
+});
+
+test('sans compte connu, le menu reprend l’ancien repli : conducteur, sans les statistiques', () => {
+  // L'ancien menu traitait un rôle absent en conducteur, mais les statistiques (comme les
+  // devis) se décident sur le compte lui-même : sans compte, elles restaient masquées.
+  const versListe = (sections: ReturnType<typeof sectionsMenu>) => sections.flatMap((s) => s.entrees.map((e) => e.to)).sort();
+  const sansStatistiques = (planningActif: boolean) => attendu('CONDUCTEUR_TRAVAUX', planningActif, []).filter((to) => to !== '/statistiques');
+  assert.deepEqual(versListe(sectionsMenu(null, true)), sansStatistiques(true));
+  assert.deepEqual(versListe(sectionsMenu({}, false)), sansStatistiques(false));
 });
