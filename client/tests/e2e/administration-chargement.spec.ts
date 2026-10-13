@@ -7,9 +7,10 @@ const MESSAGE = 'Cette liste n’a pas pu être chargée';
 // Laisse au navigateur le temps de traiter une réponse déjà reçue (rendu React planifié).
 const laisserRendre = (page: Page) => page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)));
 
-// Liste des chantiers pilotée par un seul gestionnaire pour tout le test (aucun unroute pendant
-// une réponse retenue) : en erreur 500 tant que `enErreur` est vrai, retenue tant que `retenir`
-// est vrai et que `liberer` n'a pas été appelé. `recues` et `rendues` comptent les GET.
+// Liste des chantiers pilotée par un gestionnaire installé une fois pour tout le test (aucun
+// unroute pendant une réponse retenue) : en erreur 500 tant que `enErreur` est vrai, retenue tant
+// que `retenir` est vrai et que `liberer` n'a pas été appelé. `recues` et `rendues` comptent les
+// GET servis par Playwright (pas leur traitement par la page).
 async function chantiersPilotes(page: Page, retenir = false) {
   const etat = { retenir, enErreur: true, recues: 0, rendues: 0, liberer: () => {} };
   const verrou = new Promise<void>((resolve) => { etat.liberer = resolve; });
@@ -81,6 +82,10 @@ test('Administration : le message d’une liste en erreur reste attaché à son 
   await laisserRendre(admin);
   await expect(alerte).toHaveCount(0);
   expect(chantiers.recues, 'Marges ne recharge pas la liste des chantiers').toBe(avantMarges);
+  // Recliquer sur Marges déjà actif rafraîchit ses réglages.
+  const rafraichissement = admin.waitForRequest((r) => r.url().endsWith('/api/parametres/remuneration'), { timeout: 10_000 });
+  await admin.getByRole('button', { name: 'Marges & Commissions', exact: true }).click();
+  await rafraichissement;
 
   // Un échec réseau (requête interrompue) est signalé de même, sur l'onglet concerné.
   await admin.route('**/api/fournisseurs', (route) => (route.request().method() === 'GET' ? route.abort('failed') : route.continue()));
@@ -132,8 +137,16 @@ test('Administration : la liste de l’onglet ouvert pendant un enregistrement s
   let libererLecture = () => {};
   const lecture = new Promise<void>((resolve) => { libererLecture = resolve; });
   let lecturesIntervenants = 0;
+  let perimeeServie = false;
   await page.route('**/api/intervenants', async (route) => {
-    if (route.request().method() === 'GET' && ++lecturesIntervenants === 1) await lecture;
+    if (route.request().method() === 'GET' && ++lecturesIntervenants === 1) {
+      await lecture;
+      // Réponse périmée, et différente : une liste vide, qui ne doit pas remplacer la liste
+      // rechargée entre-temps.
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      perimeeServie = true;
+      return;
+    }
     await route.continue();
   });
 
@@ -143,10 +156,14 @@ test('Administration : la liste de l’onglet ouvert pendant un enregistrement s
   await admin.getByRole('button', { name: 'Intervenants', exact: true }).click();
   await expect.poll(() => lecturesIntervenants).toBe(1);
 
-  // L'enregistrement aboutit (son formulaire redemande un chargement), puis la première lecture.
+  // L'enregistrement aboutit, et son formulaire redemande un chargement, servi avant la première
+  // lecture, libérée ensuite.
+  const rechargement = admin.waitForResponse((r) => /\/api\/(intervenants|fournisseurs)$/.test(r.url()) && r.request().method() === 'GET');
   libererEnregistrement();
   expect((await reponseEnregistrement).ok()).toBeTruthy();
-  await laisserRendre(admin);
+  await rechargement;
   libererLecture();
+  await expect.poll(() => perimeeServie).toBe(true);
+  await laisserRendre(admin);
   await expect(admin.getByText(intervenant)).toBeVisible();
 });
