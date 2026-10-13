@@ -1016,14 +1016,15 @@ const Admin = () => {
               {/* Destinataires de la rentabilité de chaque chantier : montant vendu global, marge du jour,
                   marge estimée, alertes « en perte » et « marge faible », facturation de la fiche, sur la
                   liste, le tableau de bord et la fiche. Les dépassements, l'absence de saisie et les budgets
-                  par poste restent visibles de tous ceux qui voient le chantier. */}
+                  par poste restent visibles de tous ceux qui voient le chantier, sauf les budgets matériel et
+                  main-d'œuvre pour le technicien (cf. voitBudgetsParPoste côté serveur). */}
               <fieldset className="border border-gray-100 rounded-lg p-4 space-y-2">
                 <legend className="text-sm font-bold text-gray-700 px-1">Qui suit la rentabilité des chantiers&nbsp;?</legend>
                 <p className="text-xs text-gray-500 m-0">
                   Montant vendu global, marge du jour, marge estimée, alertes « en perte » ou « marge faible » et
                   facturation de la fiche. Les administrateurs les voient toujours. Les budgets par poste (matériel,
-                  main-d’œuvre, heures) restent affichés pour suivre les dépassements : ils permettent d’en déduire le vendu,
-                  donc la marge du jour.
+                  main-d’œuvre, heures) restent affichés pour suivre les dépassements, sauf les budgets matériel et
+                  main-d’œuvre pour les techniciens : ils permettent d’en déduire le vendu, donc la marge du jour.
                 </p>
                 <label className="flex items-center gap-2 cursor-pointer w-fit">
                   <input type="checkbox" name="rentabiliteConducteur" defaultChecked={parametres?.rentabiliteConducteur ?? true} className="w-4 h-4" />
