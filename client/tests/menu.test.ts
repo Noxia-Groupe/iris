@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sectionsMenu } from '../src/lib/menu.ts';
-import { estExcluDesOperations, roleLabel } from '../src/lib/droits.ts';
+import { estExcluDesOperations, peutVoirFinance, roleLabel } from '../src/lib/droits.ts';
 
 const liens = (role: string, planningActif = true, permissions: string[] = []) =>
   sectionsMenu({ role, permissions }, planningActif).flatMap((s) => s.entrees.map((e) => e.to)).sort();
@@ -71,4 +71,11 @@ test('un directeur pilote sans écran opérationnel : tableau de bord et chantie
   // Même exclusion que blockCommercial côté serveur : commercial et directeur seulement.
   assert.deepEqual(['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR']
     .filter((role) => estExcluDesOperations(role)), ['COMMERCIAL', 'DIRECTEUR']);
+});
+
+test('l’accès financier ne vaut jamais pour un technicien, même enregistré', () => {
+  assert.equal(peutVoirFinance({ role: 'TECHNICIEN', permissions: [], accesFinance: true }), false);
+  assert.equal(peutVoirFinance({ role: 'CONDUCTEUR_TRAVAUX', permissions: [], accesFinance: true }), true);
+  assert.equal(peutVoirFinance({ role: 'CONDUCTEUR_TRAVAUX', permissions: [], accesFinance: false }), false);
+  assert.equal(peutVoirFinance({ role: 'SUPERADMIN', permissions: [] }), true);
 });

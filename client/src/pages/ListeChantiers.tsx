@@ -5,7 +5,7 @@ import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { AlertesChantier } from '../components/AlertesChantier';
-import { estExcluDesOperations, isAdminRole, roleLabel } from '../roles';
+import { estExcluDesOperations, isAdminRole, roleLabel, ROLE_TECHNICIEN } from '../roles';
 import {
   alertesDuChantier, ancienneteSaisie, estASurveiller, filtrerChantiers, trierChantiers,
   type ChantierSuivi, type FiltreChantiers, type TriChantiers,
@@ -13,14 +13,14 @@ import {
 
 type ChantierListe = ChantierSuivi & { metrics?: ChantierSuivi['metrics'] & { diffHeures?: number } };
 
-const FILTRES: { valeur: FiltreChantiers; libelle: string; margeRequise?: boolean }[] = [
+const FILTRES: { valeur: FiltreChantiers; libelle: string; margeRequise?: boolean; montantsRequis?: boolean }[] = [
   { valeur: 'TOUS', libelle: 'Tous' },
   { valeur: 'A_SURVEILLER', libelle: 'À surveiller' },
   { valeur: 'EN_PERTE', libelle: 'En perte', margeRequise: true },
   { valeur: 'MARGE_FAIBLE', libelle: 'Marge faible', margeRequise: true },
-  { valeur: 'HEURES_DEPASSEES', libelle: 'Heures dépassées' },
-  { valeur: 'MAIN_OEUVRE_DEPASSEE', libelle: 'Main-d’œuvre dépassée' },
-  { valeur: 'MATERIEL_DEPASSE', libelle: 'Matériel dépassé' },
+  { valeur: 'HEURES_DEPASSEES', libelle: 'Heures dépassées', montantsRequis: true },
+  { valeur: 'MAIN_OEUVRE_DEPASSEE', libelle: 'Main-d’œuvre dépassée', montantsRequis: true },
+  { valeur: 'MATERIEL_DEPASSE', libelle: 'Matériel dépassé', montantsRequis: true },
   { valeur: 'SANS_SAISIE', libelle: 'Sans saisie' },
 ];
 const TRIS: { valeur: TriChantiers; libelle: string; margeRequise?: boolean }[] = [
@@ -93,8 +93,8 @@ const ListeChantiers = () => {
     }, { replace: true });
   };
 
-  // Clôturer un chantier (en cours -> terminé) : possible pour son responsable ou un
-  // admin. Une fois clôturé, plus aucune heure ni dépense ne peut y être ajoutée.
+  // Clôturer un chantier (en cours -> terminé) : quand le serveur le permet (peutCloturer).
+  // Une fois clôturé, plus aucune heure ni dépense ne peut y être ajoutée.
   const handleCloturer = async (id: string, nom: string) => {
     if (!confirm(`Clôturer « ${nom} » ? Il passera en Terminé/Archivé et il ne sera plus possible d'y ajouter des heures ou des dépenses.`)) return;
     try {
@@ -130,7 +130,10 @@ const ListeChantiers = () => {
   // Administration > Marges) et si le module est actif : la colonne Marge, le filtre « en
   // perte » et le tri par marge n'ont de sens que si au moins une marge est connue.
   const margeVisible = chantiers.some((c) => c.metrics?.margeCommerciale != null);
-  const filtresProposes = FILTRES.filter((f) => !f.margeRequise || margeVisible);
+  // Un technicien ne reçoit ni montants ni alertes de dépassement (règle du serveur) : ni colonne
+  // Matériel, ni filtre de dépassement qui resterait toujours vide.
+  const montantsVisibles = userRole !== ROLE_TECHNICIEN;
+  const filtresProposes = FILTRES.filter((f) => (!f.margeRequise || margeVisible) && (!f.montantsRequis || montantsVisibles));
   const trisProposes = TRIS.filter((t) => !t.margeRequise || margeVisible);
   const filtre = filtresProposes.some((f) => f.valeur === filtreDemande) ? filtreDemande : 'TOUS';
   const tri = trisProposes.some((t) => t.valeur === triDemande) ? triDemande : 'PRIORITE';
@@ -153,7 +156,7 @@ const ListeChantiers = () => {
             <tr className="bg-white text-xs uppercase text-gray-500 border-b border-gray-100">
               <th className="px-6 py-4 font-semibold">Chantier</th>
               <th className="px-4 py-4 font-semibold hidden sm:table-cell w-44">Heures</th>
-              <th className="px-4 py-4 font-semibold hidden md:table-cell w-44">Matériel</th>
+              {montantsVisibles && <th className="px-4 py-4 font-semibold hidden md:table-cell w-44">Matériel</th>}
               <th className="px-4 py-4 font-semibold text-right" title={margeVisible ? 'Marge du jour (vendu moins dépenses réelles) et marge estimée en fin de chantier' : 'Heures vendues moins heures réalisées'}>
                 {margeVisible ? 'Marge' : 'Solde heures'}
               </th>
@@ -163,7 +166,7 @@ const ListeChantiers = () => {
           <tbody className="divide-y divide-gray-100">
             {list.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-gray-400 italic">
+                <td colSpan={montantsVisibles ? 5 : 4} className="px-6 py-8 text-center text-gray-400 italic">
                   {emptyMessage}
                 </td>
               </tr>
@@ -198,12 +201,14 @@ const ListeChantiers = () => {
                     </div>
                     <ProgressMeter value={heuresRealisees} max={c.heuresVendues} color="purple" size="sm" />
                   </td>
+                  {montantsVisibles && (
                   <td className="px-4 py-4 hidden md:table-cell">
                     <div className="text-xs font-semibold text-gray-600 mb-1.5">
-                      {fmtEuro(materielReel)} <span className="text-gray-400">/ {fmtEuro(c.budgetMaterielVendu)}</span>
+                      {fmtEuro(materielReel)}{c.budgetMaterielVendu != null && <span className="text-gray-400"> / {fmtEuro(c.budgetMaterielVendu)}</span>}
                     </div>
-                    <ProgressMeter value={materielReel} max={c.budgetMaterielVendu} color="blue" size="sm" />
+                    {c.budgetMaterielVendu != null && <ProgressMeter value={materielReel} max={c.budgetMaterielVendu} color="blue" size="sm" />}
                   </td>
+                  )}
                   <td className="px-4 py-4 text-right">
                     {margeVisible ? (
                       margeCommerciale != null ? (
@@ -242,9 +247,10 @@ const ListeChantiers = () => {
                   </td>
                   <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end items-center gap-2">
-                      {/* Clôture : l'administration ou le conducteur du chantier (même règle que
-                          PATCH /chantiers/:id/statut) — pas un responsable sur sa branche. */}
-                      {c.statut === 'EN_COURS' && !estExcluDesOperations(userRole) && (isAdmin || (!!user?.id && c.responsable?.id === user.id)) && (
+                      {/* Clôture décidée par le serveur (peutCloturer, même règle que PATCH
+                          /chantiers/:id/statut) : l'administration, le responsable du chantier
+                          s'il n'est pas technicien, et le N+1 et au-dessus d'un technicien. */}
+                      {c.statut === 'EN_COURS' && c.peutCloturer && (
                         <button
                           onClick={() => handleCloturer(c.id, c.nom)}
                           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"

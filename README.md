@@ -66,7 +66,26 @@ l'organisation : le conducteur du chantier, ses responsables hiérarchiques à t
 niveaux (comptes Responsable), les directeurs. La chaîne hiérarchique se règle compte par
 compte dans **Administration > Utilisateurs**. Les budgets par poste (matériel,
 main-d'œuvre, heures) restent visibles de tous ceux qui voient le chantier, pour suivre les
-dépassements : ils permettent d'en déduire le vendu, donc la marge du jour.
+dépassements (le technicien ne voit que le budget d'heures, voir ci-dessous) : ils permettent
+d'en déduire le vendu, donc la marge du jour.
+
+Le **technicien** consulte le chantier dont il est chargé, avec son budget d'heures et ses
+heures réalisées, sans aucun montant : ni budgets matériel et main-d'œuvre, ni coûts (achats,
+main-d'œuvre, totaux), ni taux horaires, ni alertes de dépassement, dans la liste, la fiche,
+les journaux d'achats, d'heures et de saisies, le tableau de bord et la liste des
+intervenants. Il ne modifie pas l'affaire, n'en réattribue pas le commercial et ne la clôture
+pas : le serveur refuse avec un message explicite, et la fiche l'indique. La clôture d'une
+affaire revient à l'administration, à son responsable s'il n'est pas technicien et, pour
+l'affaire d'un technicien, aux responsables de sa branche (N+1 et au-dessus). Les droits
+devis, saisie ou archivage Travaux et l'accès financier ne s'accordent pas à un technicien ;
+ceux d'un compte qui devient technicien restent enregistrés, mais sans effet :
+l'écran Utilisateurs les signale « Sans effet » et un super administrateur peut les retirer.
+Nelson a décidé de lui ouvrir l'annuaire des clients (contacts et sites, sans devis ni
+montants) et l'historique des chantiers sans montant. Aujourd'hui, seul un droit `clients:read`
+enregistré sur son compte (déjà présent, ou accordé par un super administrateur par l'API, que
+l'écran Utilisateurs ne propose pas) lui donne l'annuaire (contacts et sites) ; le retrait de son
+droit devis le conserve ; un lot prévu le lui donnera par défaut, avec un menu, une fiche client en consultation
+seule et l'historique des chantiers sans montant.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.
@@ -89,7 +108,7 @@ matériel vendu observé sur les chantiers terminés (à défaut, au prix de ven
 chantier terminé est estimé à son réel. `EN_PERTE`, `MARGE_FAIBLE` et l'estimation suivent
 la visibilité de la marge : ils ne sont jamais envoyés à un rôle ou une clé à qui la marge
 est masquée. Les dépassements et `SANS_SAISIE` restent visibles de tous ceux qui voient le
-chantier. La liste des chantiers et le tableau de bord s'en servent pour mettre les
+chantier, sauf les dépassements pour le technicien. La liste des chantiers et le tableau de bord s'en servent pour mettre les
 affaires à surveiller en tête.
 
 ## Cycle de vie d'une affaire

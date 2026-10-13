@@ -11,11 +11,13 @@ export type AlerteChantier = typeof ALERTES_CHANTIER[number];
 
 export interface MetriquesChantier {
   heuresRealisees?: number;
-  materielReel?: number;
-  moReel?: number;
+  /** Null pour un compte technicien, qui ne voit aucun coût. */
+  materielReel?: number | null;
+  moReel?: number | null;
+  totalDepenses?: number | null;
   pctHeures?: number;
-  pctMateriel?: number;
-  pctMainOeuvre?: number;
+  pctMateriel?: number | null;
+  pctMainOeuvre?: number | null;
   margeCommerciale?: number | null;
   margePct?: number | null;
   margeEstimee?: number | null;
@@ -44,11 +46,14 @@ export interface ChantierSuivi {
   numeroDevis?: string | null;
   statut: string;
   heuresVendues: number;
-  budgetMaterielVendu: number;
-  budgetMainOeuvreVendu: number;
+  /** Null pour un compte technicien : budgets matériel et main-d'œuvre non communiqués. */
+  budgetMaterielVendu: number | null;
+  budgetMainOeuvreVendu: number | null;
   responsable?: { id?: string; name?: string | null } | null;
   commercial?: { name?: string | null } | null;
   metrics?: MetriquesChantier;
+  /** Décidé par le serveur : clôture permise au compte connecté. */
+  peutCloturer?: boolean;
 }
 
 export type FiltreChantiers = 'TOUS' | 'A_SURVEILLER' | AlerteChantier;
@@ -145,10 +150,12 @@ export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): st
       return `Sans saisie depuis ${nombre(m.joursSansSaisie ?? 0)} j`;
     case 'HEURES_DEPASSEES':
       return `Heures +${nombre((m.heuresRealisees ?? 0) - chantier.heuresVendues, 1)} h`;
+    // Garde défensive : un budget non communiqué ne doit jamais donner un montant de dépassement
+    // (le serveur ne transmet d'ailleurs pas ces alertes au technicien, seul à ne pas voir les budgets).
     case 'MAIN_OEUVRE_DEPASSEE':
-      return `Main-d’œuvre +${nombre((m.moReel ?? 0) - chantier.budgetMainOeuvreVendu)} €`;
+      return chantier.budgetMainOeuvreVendu == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${nombre((m.moReel ?? 0) - chantier.budgetMainOeuvreVendu)} €`;
     case 'MATERIEL_DEPASSE':
-      return `Matériel +${nombre((m.materielReel ?? 0) - chantier.budgetMaterielVendu)} €`;
+      return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : `Matériel +${nombre((m.materielReel ?? 0) - chantier.budgetMaterielVendu)} €`;
   }
 }
 
