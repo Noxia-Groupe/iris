@@ -13,9 +13,9 @@ const HOUR_RANGE = Array.from({ length: 14 }, (_, i) => i + 6);
 
 // Performances & assiduité des conducteurs de travaux — page réservée aux administrateurs
 // (extraite de l'onglet « Performances » d'Administration pour être son propre menu, cf.
-// Sidebar.tsx). La route elle-même est protégée côté client (PrivateRoute requiredRole)
-// et les données servies le sont également côté serveur (requireAdmin sur les deux routes
-// appelées ici).
+// lib/menu.ts). La route elle-même est protégée côté client (PrivateRoute requiredRoles).
+// Côté serveur, les deux routes appelées ici servent aussi un responsable, limité à sa
+// branche hiérarchique et, pour le CA et la marge, aux destinataires de la rentabilité.
 const Performances = () => {
   const [perf, setPerf] = useState<any[]>([]);
   const [assiduite, setAssiduite] = useState<any>(null);

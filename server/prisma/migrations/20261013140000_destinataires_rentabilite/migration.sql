@@ -7,5 +7,8 @@ ALTER TABLE "Parametres" ADD COLUMN "rentabiliteDirecteurs" BOOLEAN NOT NULL DEF
 
 -- Un compte n'est jamais son propre responsable hiérarchique, même écrit hors de l'API.
 -- Les boucles plus longues sont refusées par l'API, et la lecture de la branche y résiste.
+-- Un auto-rattachement déjà écrit en base (aucun écran ne permettait d'en créer) est
+-- d'abord retiré : il ne donnait aucun accès, et bloquerait la contrainte.
+UPDATE "User" SET "responsableHierarchiqueId" = NULL WHERE "responsableHierarchiqueId" = "id";
 ALTER TABLE "User" ADD CONSTRAINT "user_responsable_hierarchique_pas_soi"
   CHECK ("responsableHierarchiqueId" IS NULL OR "responsableHierarchiqueId" <> "id");

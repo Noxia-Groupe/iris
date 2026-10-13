@@ -41,6 +41,8 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
     const secteur = await creerCompte('secteur', 'Responsable secteur', 'RESPONSABLE');
     const regional = await creerCompte('regional', 'Responsable régional', 'RESPONSABLE');
     const directeur = await creerCompte('directeur', 'Directeur chaîne', 'DIRECTEUR');
+    // Commercial rattaché : le formulaire « Modifier » de la fiche l'exige dès qu'il en existe un.
+    const commercial = await creerCompte('commercial', 'Commercial chaîne', 'COMMERCIAL');
     const avant = await (await request.get(`${api}/parametres`, { headers })).json() as Record<string, unknown>;
 
     // 100 € de fourniture et 2 h de pose à 50 € : 200 € vendus ; 250 € d'achats → perte de 50 €.
@@ -56,6 +58,7 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
     try {
       await envoyer('put', '/parametres', { margeCommercialeActive: true, rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true });
       await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: conducteur.id });
+      await envoyer('patch', `/chantiers/${chantier.id}/commercial`, { commercialId: commercial.id });
       const categorie = await envoyer('post', '/categories', { nom: `Chaîne E2E ${suffixe} catégorie` });
       const fournisseur = await envoyer('post', '/fournisseurs', { nom: `Chaîne E2E ${suffixe} fournisseur` });
       await envoyer('post', '/achats', { chantierId: chantier.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: dateDuJour(), description: 'Matériel complémentaire', montantHT: 250 });
@@ -124,6 +127,27 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       // Le directeur, lui, la garde.
       await vueDirecteur.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
       await expect(vueDirecteur.locator('[data-alertes-fiche] [data-alerte="EN_PERTE"]')).toBeVisible();
+
+      // Rentabilité retirée au conducteur : il corrige sa fiche sans voir ni écraser le vendu.
+      await envoyer('put', '/parametres', { margeCommercialeActive: true, rentabiliteConducteur: false });
+      const vueConducteur = await pageDe(browser, conducteur);
+      contextes.push(vueConducteur.context());
+      await vueConducteur.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
+      await expect(vueConducteur.locator('[data-alertes-fiche] [data-alerte="EN_PERTE"]')).toHaveCount(0);
+      await vueConducteur.getByRole('button', { name: 'Modifier', exact: true }).first().click();
+      const formulaire = vueConducteur.locator('form').filter({ has: vueConducteur.getByRole('button', { name: 'Enregistrer les modifications' }) });
+      await expect(formulaire.locator('input[name="dateDebut"]')).toHaveValue(/^\d{2}-\d{2}-\d{4}$/);
+      await expect(formulaire.locator('input[name="budgetGlobalVendu"]')).toHaveCount(0);
+      await formulaire.locator('input[name="nom"]').fill(`${chantier.nom} corrigé`);
+      const correction = vueConducteur.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'PATCH');
+      await formulaire.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+      const reponseCorrection = await correction;
+      expect(reponseCorrection.status()).toBe(200);
+      expect((await reponseCorrection.json()).budgetGlobalVendu).toBeNull();
+      await expect(formulaire).toHaveCount(0);
+      const relu = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { nom: string; budgetGlobalVendu: number };
+      expect(relu.nom).toBe(`${chantier.nom} corrigé`);
+      expect(relu.budgetGlobalVendu).toBe(200);
     } finally {
       for (const contexte of contextes) await contexte.close();
       // Chantier clôturé et réglages d'origine : la base partagée reste lisible pour la suite.

@@ -224,7 +224,12 @@ const ListeChantiers = () => {
                           )}
                         </>
                       ) : (
-                        <span className="text-gray-400 text-sm">—</span>
+                        // Liste mixte : la rentabilité de ce chantier n'est pas communiquée à ce
+                        // compte (cf. Administration > Marges) ; le solde d'heures reste utile.
+                        <span className="text-gray-400 text-sm" title="Rentabilité non communiquée pour ce chantier">
+                          —
+                          <span className="block text-xs whitespace-nowrap">Solde : {diffHeures > 0 ? '+' : ''}{fmtHeures(diffHeures)}</span>
+                        </span>
                       )
                     ) : (
                       <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm whitespace-nowrap ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
@@ -234,7 +239,9 @@ const ListeChantiers = () => {
                   </td>
                   <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end items-center gap-2">
-                      {c.statut === 'EN_COURS' && !estExcluDesOperations(userRole) && (
+                      {/* Clôture : l'administration ou le conducteur du chantier (même règle que
+                          PATCH /chantiers/:id/statut) — pas un responsable sur sa branche. */}
+                      {c.statut === 'EN_COURS' && !estExcluDesOperations(userRole) && (isAdmin || (!!user?.id && c.responsable?.id === user.id)) && (
                         <button
                           onClick={() => handleCloturer(c.id, c.nom)}
                           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"

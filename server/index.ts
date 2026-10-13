@@ -195,7 +195,7 @@ const ROLE_DIRECTEUR_COMMERCIAL = 'DIRECTEUR_COMMERCIAL';
 const ROLE_RESPONSABLE = 'RESPONSABLE';
 // DIRECTEUR : pilotage de toute la société sans administration ni paramétrage. Il voit
 // tous les chantiers (non annulés), leur rentabilité et leurs alertes si la société l'a
-// laissé destinataire (Parametres.rentabiliteDirecteurs), et ne saisit rien par défaut.
+// laissé destinataire (Parametres.rentabiliteDirecteurs), et ne saisit rien.
 const ROLE_DIRECTEUR = 'DIRECTEUR';
 
 // Droits par défaut des types de compte. Ils restent volontairement limités aux modules
@@ -213,7 +213,8 @@ const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
   [ROLE_DIRECTEUR_COMMERCIAL]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_RESPONSABLE]: ['chantiers:read', 'chantiers:write', 'chantiers:archive'],
   [ROLE_TECHNICIEN]: ['chantiers:read'],
-  // Lecture seule : un droit de saisie ou de devis s'accorde individuellement si besoin.
+  // Lecture seule. Le droit devis peut s'accorder individuellement ; la saisie Travaux non :
+  // assertChantierWritable ne la permet qu'au conducteur, au responsable de branche et à l'administration.
   [ROLE_DIRECTEUR]: ['chantiers:read'],
 };
 
@@ -377,6 +378,9 @@ function perimetreDemandeur(req: express.Request): Prisma.ChantierWhereInput {
 // ceux à qui serializeChantier masque précisément ces montants ailleurs. Un `select`
 // explicite ferme la fuite par construction : ce qui n'est pas listé ne peut pas sortir.
 const CHANTIER_LITE_SELECT = { id: true, nom: true, client: true, statut: true } as const;
+// Même principe pour l'affaire rattachée à une intervention SAV, que voient le technicien
+// affecté et toute la chaîne de son responsable : de quoi la nommer, jamais son montant vendu.
+const CHANTIER_INTERVENTION_SELECT = { select: { id: true, nom: true, numeroDevis: true, client: true, statut: true, adresse: true } } as const;
 
 // Rentabilité d'un chantier — montant vendu, marge du jour, marge estimée, alertes « en
 // perte » et « marge faible » : elle ne sort que pour ses destinataires, décidés chantier par
@@ -401,6 +405,12 @@ function voitRentabilite(req: express.Request, chantier: { responsableId?: strin
   if (responsableId === user.id && (user.role === 'CONDUCTEUR_TRAVAUX' || user.role === ROLE_RESPONSABLE)) return params.rentabiliteConducteur;
   if (user.role === ROLE_RESPONSABLE && user.equipeIds.includes(responsableId)) return params.rentabiliteHierarchie;
   return false;
+}
+
+// Réponse d'une écriture sur un chantier : même masquage du montant vendu qu'en lecture,
+// pour qu'un enregistrement renvoyé tel quel ne contourne pas voitRentabilite.
+async function chantierSelonRentabilite<T extends { responsableId: string | null; budgetGlobalVendu: unknown }>(req: express.Request, chantier: T) {
+  return voitRentabilite(req, chantier, await getParametres()) ? chantier : { ...chantier, budgetGlobalVendu: null };
 }
 
 // Accès aux données financières : accordé au cas par cas, indépendamment du rôle
@@ -2109,7 +2119,7 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
       if (!contrat) return null;
       const existante = await tx.intervention.findFirst({
         where: { contratMaintenanceId: contrat.id, echeanceContrat: contrat.prochaineEcheance },
-        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
       });
       if (existante) return { intervention: existante, creee: false };
       const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
@@ -2130,7 +2140,7 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
             noteCouverture: contrat.noteCouverture,
           },
         },
-        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
       });
       await journaliserIntervention(tx, req, 'CREATION_CONTRAT', intervention);
       return { intervention, creee: true };
@@ -2145,7 +2155,7 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
       const existante = contrat && await prisma.intervention.findFirst({
         where: { contratMaintenanceId: paramId(req), echeanceContrat: contrat.prochaineEcheance },
         orderBy: { createdAt: 'desc' },
-        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
       });
       if (existante) return res.status(200).json(decimalToNumber(exposerIntervention(existante)));
     }
@@ -2195,7 +2205,7 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
       const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
       const cree = await tx.intervention.create({
         data: { reference, clientId, siteId, contactId, chantierId, titre, description, priorite, dateSouhaitee, dateDemande, createdById: req.user!.id },
-        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
       });
       await journaliserIntervention(tx, req, 'CREATION', cree);
       return cree;
@@ -2220,7 +2230,7 @@ app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequ
           inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
         ],
       },
-      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: true, rapports: { select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } }, signature: { select: { id: true, signataire: true, empreinte: true, accepteLe: true } } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
+      include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT, rapports: { select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } }, signature: { select: { id: true, signataire: true, empreinte: true, accepteLe: true } } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
       orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(interventions.map(exposerIntervention)));
@@ -3003,6 +3013,11 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
       }
       data.responsableId = responsableId;
     }
+    // Le montant vendu ne se corrige que par qui le voit : un conducteur à qui la société a
+    // retiré la rentabilité ne peut pas l'écraser à l'aveugle.
+    if ('budgetGlobalVendu' in req.body && !voitRentabilite(req, existant, await getParametres())) {
+      return res.status(403).json({ error: 'Le montant vendu n’est modifiable que par qui suit la rentabilité de ce chantier.' });
+    }
     for (const key of numericFields) {
       if (key in req.body) data[key] = parseFloat(req.body[key]) || 0;
     }
@@ -3027,7 +3042,7 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
       where: { id: paramId(req) },
       data
     });
-    res.json(chantier);
+    res.json(await chantierSelonRentabilite(req, chantier));
   } catch (error) {
     res.status(500).json({ error: 'Error updating chantier' });
   }
@@ -3087,15 +3102,17 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req,
     }
 
     const updated = await prisma.chantier.update({ where: { id: chantier.id }, data });
-    res.json(updated);
+    res.json(await chantierSelonRentabilite(req, updated));
   } catch (error) {
     res.status(500).json({ error: 'Error updating chantier status' });
   }
 });
 
 // Affectation du commercial sur un chantier déjà créé — modifiable par l'admin ou par
-// le conducteur responsable du chantier (pas par le commercial lui-même, ni par un tiers).
-app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
+// le conducteur responsable du chantier (pas par le commercial lui-même, ni par un tiers,
+// ni par un directeur resté responsable d'anciens chantiers : le commercial rattaché
+// alimente les commissions).
+app.patch('/api/chantiers/:id/commercial', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
     const isAdmin = isAdminRole(authUser.role);
@@ -3126,7 +3143,7 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, async (req, res) => {
       data: { commercialId },
       include: { commercial: RESPONSABLE_SELECT },
     });
-    res.json(updated);
+    res.json(await chantierSelonRentabilite(req, updated));
   } catch (error) {
     res.status(500).json({ error: 'Error updating commercial' });
   }
@@ -3146,9 +3163,7 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
       where: isSuper ? {} : { role: { not: ROLE_SUPERADMIN } },
       select: {
         id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true,
-        // Nom du responsable hiérarchique sans son rôle, comme un responsable de chantier :
-        // il peut être un super administrateur absent de cette liste.
-        responsableHierarchique: { select: { id: true, name: true } },
+        responsableHierarchique: { select: { id: true, name: true, role: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -3157,7 +3172,12 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
       accesFinance: u.accesFinance, actif: u.actif,
       permissions: permissionsEffectives(u),
       permissionsIndividuelles: u.permissions,
-      responsableHierarchique: u.responsableHierarchique,
+      // Sans son rôle ; et un super administrateur, qui n'existe pas pour un simple
+      // administrateur, n'apparaît pas non plus comme responsable. Il ne tire de toute façon
+      // aucun périmètre d'un rattachement : le masquer ne retire d'accès à personne.
+      responsableHierarchique: u.responsableHierarchique && (isSuper || !isSuperAdminRole(u.responsableHierarchique.role))
+        ? { id: u.responsableHierarchique.id, name: u.responsableHierarchique.name }
+        : null,
     })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching users' });
@@ -5511,9 +5531,10 @@ app.put('/api/parametres/remuneration', requireAuth, requireSuperAdmin, async (r
 // modifier, même en glissant le champ dans le corps de cette requête.
 app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const data: Record<string, unknown> = {
-      margeCommercialeActive: !!req.body.margeCommercialeActive,
-    };
+    // Comme les autres réglages, un champ absent garde sa valeur : un appel qui ne règle que
+    // les destinataires ne doit pas désactiver la marge commerciale au passage.
+    const data: Record<string, unknown> = {};
+    if ('margeCommercialeActive' in req.body) data.margeCommercialeActive = !!req.body.margeCommercialeActive;
     // Politique d'acompte de la société : jamais en dur dans le code, éditable ici.
     // Ne s'applique qu'aux devis émis ensuite (cf. Devis.tauxAcompte, figé à l'émission).
     if ('tauxAcompteDefaut' in req.body) {
@@ -5707,7 +5728,8 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
   }
 });
 
-// Statistiques par conducteur de travaux (admin uniquement) : marge/CA, avance/retard
+// Statistiques par conducteur de travaux (administration, et responsable sur sa branche —
+// CA et marge selon les destinataires de la rentabilité) : marge/CA, avance/retard
 // sur les chantiers en cours (heures et matériel), et taux d'objectifs respectés sur
 // les chantiers terminés (livrés sans dépassement).
 // NB : pas de "taux de remplissage heures" ici (heures réalisées / heures vendues) —
@@ -5718,7 +5740,8 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
 app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
-    if (!isAdminRole(authUser.role) && authUser.role !== ROLE_RESPONSABLE) return res.status(403).json({ error: 'Accès réservé à l’administration et aux responsables.' });
+    const isAdmin = isAdminRole(authUser.role);
+    if (!isAdmin && authUser.role !== ROLE_RESPONSABLE) return res.status(403).json({ error: 'Accès réservé à l’administration et aux responsables.' });
     const params = await getParametres();
     const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX', ...(authUser.role === ROLE_RESPONSABLE ? { id: { in: authUser.equipeIds } } : {}) }, select: { id: true, name: true, email: true } });
     const chantiers = decimalToNumber(await prisma.chantier.findMany({
@@ -5756,9 +5779,15 @@ app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, r
       agg.nbChantiers++;
       if (enCours) agg.nbChantiersEnCours++;
       if (termine) agg.nbChantiersTermines++;
-      agg.caTotal += c.budgetGlobalVendu;
       agg.depensesTotal += m.totalDepenses;
-      agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
+      // CA et marge : l'administration les voit toujours ; un responsable seulement sur les
+      // chantiers dont la société le laisse destinataire, marge commerciale active (cf.
+      // voitRentabilite) — sinon la branche lirait ici ce que la liste et la fiche lui masquent.
+      if (isAdmin || (params.margeCommercialeActive && voitRentabilite(req, c, params))) {
+        agg.montantsVisibles = true;
+        agg.caTotal += c.budgetGlobalVendu;
+        agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
+      }
 
       if (enCours) {
         if (m.diffHeures > 0) agg.nbEnAvanceHeures++;
@@ -5787,9 +5816,11 @@ app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, r
 
     const list = Object.values(byUser)
       .filter((a: any) => a.nbChantiers > 0)
-      .map((a: any) => ({
+      .map(({ montantsVisibles, ...a }: any) => ({
         ...a,
-        margePct: a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
+        caTotal: montantsVisibles ? a.caTotal : null,
+        margeTotal: montantsVisibles ? a.margeTotal : null,
+        margePct: !montantsVisibles ? null : a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
         tauxObjectifsRespectes: a.nbChantiersTermines > 0 ? (a.nbObjectifsRespectes / a.nbChantiersTermines) * 100 : null,
         // % d'heures consommées au-delà du total vendu, sur les seuls chantiers TERMINES
         // (résultat définitif) — un chantier en cours en avance compenserait à tort un
@@ -5798,7 +5829,7 @@ app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, r
           ? (Math.max(0, a.heuresRealiseesTermineTotal - a.heuresVenduesTermineTotal) / a.heuresVenduesTermineTotal) * 100
           : null,
       }))
-      .sort((x: any, y: any) => y.margeTotal - x.margeTotal);
+      .sort((x: any, y: any) => (y.margeTotal ?? -Infinity) - (x.margeTotal ?? -Infinity) || x.name.localeCompare(y.name));
 
     res.json(list);
   } catch (error) {
@@ -5858,7 +5889,7 @@ function weekBoundsFrom(weekParam: unknown, fuseauHoraire = FUSEAU_HORAIRE_PAR_D
 
 const JOURS_OUVRES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
 
-// Assiduité : administration globale, responsable limité à ses conducteurs directs.
+// Assiduité : administration globale, responsable limité aux conducteurs de sa branche.
 app.get('/api/stats/conducteurs/assiduite', requireAuth, requireTravauxRead, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;

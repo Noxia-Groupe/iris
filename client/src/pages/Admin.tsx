@@ -1019,11 +1019,12 @@ const Admin = () => {
               <fieldset className="border border-gray-100 rounded-lg p-4 space-y-2">
                 <legend className="text-sm font-bold text-gray-700 px-1">Qui suit la rentabilité des chantiers&nbsp;?</legend>
                 <p className="text-xs text-gray-500 m-0">
-                  Marge du jour, marge estimée et alertes « en perte » ou « marge faible ». Les administrateurs les voient toujours.
+                  Montant vendu, marge du jour, marge estimée, alertes « en perte » ou « marge faible » et facturation
+                  de la fiche. Les administrateurs les voient toujours.
                 </p>
                 <label className="flex items-center gap-2 cursor-pointer w-fit">
                   <input type="checkbox" name="rentabiliteConducteur" defaultChecked={parametres?.rentabiliteConducteur ?? true} className="w-4 h-4" />
-                  <span className="text-sm text-gray-700">Le conducteur du chantier</span>
+                  <span className="text-sm text-gray-700">Le conducteur (ou responsable) chargé du chantier</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer w-fit">
                   <input type="checkbox" name="rentabiliteHierarchie" defaultChecked={parametres?.rentabiliteHierarchie ?? true} className="w-4 h-4" />
@@ -1207,8 +1208,8 @@ const Admin = () => {
           <p className="mb-6 text-sm text-gray-600">
             <strong>Responsable hiérarchique</strong> : un compte <strong>Responsable</strong> voit les chantiers de toute
             sa branche — ses collaborateurs directs, puis les leurs — et, si la société le laisse (onglet « Marges &amp;
-            Commissions »), leur rentabilité. Un compte <strong>Directeur</strong> voit tous les chantiers et leur
-            rentabilité, sans rien modifier ni administrer.
+            Commissions »), leur rentabilité. Un compte <strong>Directeur</strong> voit tous les chantiers et, si la
+            société le laisse, leur rentabilité, sans rien modifier ni administrer.
           </p>
 
           <div className="mb-8 p-4 bg-gray-50 border rounded">
@@ -1332,7 +1333,9 @@ const Admin = () => {
                       >
                         <option value="">Aucun</option>
                         {responsableActuel && !responsablesPossibles.some((r) => r.id === responsableActuel.id) && (
-                          <option value={responsableActuel.id}>{responsableActuel.name}</option>
+                          <option value={responsableActuel.id}>
+                            {responsableActuel.name}{users.some((r) => r.id === responsableActuel.id && r.actif === false) ? ' (compte désactivé)' : ''}
+                          </option>
                         )}
                         {responsablesPossibles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
