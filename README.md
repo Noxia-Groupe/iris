@@ -164,7 +164,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [ ] Phase 11 — **partielle** : paramètres Entra et secours d'instance existants ; installation guidée et secours plateforme distinct non démontrés.
 - [ ] Phase 12 — **préparée, non validée** : Compose, migrations et CI existent ; recette, isolation SQL, sauvegarde/restauration, validations client et décision de mise en service restent requises.
 
-**Prochains découpages candidats, non ordonnés :** achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, adapter au téléphone les en-têtes des écrans encore serrés, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
+**Prochains découpages candidats, à ordonner avec Nelson :** achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, adapter au téléphone les en-têtes des écrans encore serrés, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
 
 ## Tests
 
