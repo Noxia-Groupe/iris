@@ -169,7 +169,11 @@ const Admin = () => {
   const [societe, setSociete] = useState<{ fuseauHoraire?: string | null } | null>(null);
   const [messageSociete, setMessageSociete] = useState<{ texte: string; ok: boolean } | null>(null);
 
+  // Onglet affiché, lu par fetchData : un rechargement demandé par un gestionnaire créé sur un
+  // onglet quitté depuis (fin d'une création, par exemple) recharge l'onglet affiché.
+  const ongletActif = useRef(activeTab);
   useEffect(() => {
+    ongletActif.current = activeTab;
     fetchData();
   }, [activeTab]);
 
@@ -190,7 +194,7 @@ const Admin = () => {
     };
 
     try {
-      const onglet = activeTab;
+      const onglet = ongletActif.current;
       const chargement = ++dernierChargementListe.current;
       setErreurListe(null);
       if (endpoints[onglet]) {
@@ -220,12 +224,12 @@ const Admin = () => {
         if (usersRes.ok) setUsers(await usersRes.json());
       }
 
-      if (activeTab === 'chantiers' && isAdmin) {
+      if (onglet === 'chantiers' && isAdmin) {
         const comRes = await apiFetch('/commerciaux');
         if (comRes.ok) setCommerciaux(await comRes.json());
       }
 
-      if (activeTab === 'modules' && isSuper) {
+      if (onglet === 'modules' && isSuper) {
         const mRes = await apiFetch('/modules');
         if (mRes.ok) {
           const m = await mRes.json();
@@ -233,7 +237,7 @@ const Admin = () => {
         }
       }
 
-      if (activeTab === 'marges') {
+      if (onglet === 'marges') {
         const pRes = await apiFetch('/parametres');
         if (pRes.ok) setParametres(await pRes.json());
 
@@ -244,7 +248,7 @@ const Admin = () => {
         if (rRes.ok) setRemuneration(await rRes.json());
       }
 
-      if (activeTab === 'societe' && isSuper) {
+      if (onglet === 'societe' && isSuper) {
         const sRes = await apiFetch('/company');
         if (sRes.ok) setSociete(await sRes.json());
       }
