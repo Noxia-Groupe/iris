@@ -1,11 +1,14 @@
-import { CheckCircle2, Clock3, Package, TrendingDown, Wallet } from 'lucide-react';
+import { CheckCircle2, Clock3, Hourglass, Package, Percent, TrendingDown, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { alertesDuChantier, explicationAlerte, libelleAlerte, type AlerteChantier, type ChantierSuivi } from '../lib/suiviChantiers';
 
-// Couleurs déjà redéfinies pour le mode sombre (cf. index.css) : rouge pour la perte,
-// orange/violet/bleu pour les postes, dans les teintes de leurs barres de consommation.
+// Couleurs déjà redéfinies pour le mode sombre (cf. index.css) : rouge pour la perte, jaune
+// pour la marge faible, orange/violet/bleu pour les postes (teintes de leurs barres de
+// consommation), gris pour l'absence de saisie.
 const STYLE: Record<AlerteChantier, { classes: string; icone: LucideIcon }> = {
   EN_PERTE: { classes: 'bg-red-100 text-red-700', icone: TrendingDown },
+  MARGE_FAIBLE: { classes: 'bg-yellow-50 text-yellow-800', icone: Percent },
+  SANS_SAISIE: { classes: 'bg-gray-100 text-gray-600', icone: Hourglass },
   HEURES_DEPASSEES: { classes: 'bg-purple-100 text-purple-600', icone: Clock3 },
   MAIN_OEUVRE_DEPASSEE: { classes: 'bg-orange-100 text-orange-600', icone: Wallet },
   MATERIEL_DEPASSE: { classes: 'bg-blue-100 text-blue-700', icone: Package },

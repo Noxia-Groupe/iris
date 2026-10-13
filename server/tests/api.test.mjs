@@ -218,7 +218,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1185,15 +1185,18 @@ if (!TEST_DATABASE_URL) {
       const categorie = await prisma.categorie.create({ data: { nom: 'TEST Rentabilité catégorie' } });
       const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Rentabilité fournisseur' } });
       const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Rentabilité intervenant', role: 'Technicien', tauxHoraireCharge: 50 } });
-      // Même vente pour les deux affaires : 1 000 € dont 300 € de matériel et 700 € de
-      // main-d'œuvre pour 10 h.
+      // Même devis pour les deux affaires : 300 € de matériel et 700 € de main-d'œuvre pour
+      // 10 h. La dérive est vendue 1 000 € ; l'affaire saine 3 000 €, pour que sa marge
+      // estimée reste nettement au-dessus du seuil quel que soit l'historique de la base.
       const vente = { client: 'TEST Client rentabilité', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 10, responsableId: conducteur.id };
       derive = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Rentabilité dérive' } });
-      sain = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Rentabilité sain' } });
+      sain = await prisma.chantier.create({ data: { ...vente, budgetGlobalVendu: 3000, nom: 'TEST Rentabilité sain' } });
+      // Saisies du jour : aucune de ces affaires n'est « sans saisie ».
+      const aujourdhui = jourCivilEntreprise(new Date());
       const achat = (chantierId, montantHT) => request(app).post('/api/achats').set(auth)
-        .send({ chantierId, categorieId: categorie.id, fournisseurId: fournisseur.id, date: '2026-09-05', description: 'TEST achat rentabilité', montantHT });
+        .send({ chantierId, categorieId: categorie.id, fournisseurId: fournisseur.id, date: aujourdhui, description: 'TEST achat rentabilité', montantHT });
       const heures = (chantierId, nbrHeures) => request(app).post('/api/heures').set(auth)
-        .send({ chantierId, intervenantId: intervenant.id, date: '2026-09-05', nbrHeures });
+        .send({ chantierId, intervenantId: intervenant.id, date: aujourdhui, nbrHeures });
       // Dérive : 400 € de matériel et 16 h à 50 € (800 €), soit 1 200 € dépensés pour 1 000 € vendus.
       for (const reponse of [await achat(derive.id, 400), await heures(derive.id, 16), await achat(sain.id, 100), await heures(sain.id, 4)]) {
         assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
@@ -1234,7 +1237,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(Math.round(liste.derive.metrics.pctMainOeuvre), Math.round(800 / 700 * 100));
       assert.deepEqual(liste.sain.metrics.alertes, [], 'l’achat archivé ne compte pas');
       assert.equal(liste.sain.metrics.materielReel, 100);
-      assert.equal(liste.sain.metrics.margeCommerciale, 700);
+      assert.equal(liste.sain.metrics.margeCommerciale, 2700);
     });
 
     test('sur la liste, le conducteur voit les dépassements mais pas le signe de la marge', async () => {
@@ -1268,6 +1271,149 @@ if (!TEST_DATABASE_URL) {
       } finally {
         const reactivation = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true });
         assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      }
+    });
+  });
+
+  // Le calcul lui-même est couvert par les tests unitaires (validation.test.mjs). Ici : les
+  // références société lues en base, les paramètres réglables, la contrainte SQL et la
+  // visibilité de l'estimation selon le rôle ou la clé.
+  describe('Marge estimée et alertes de suivi : paramètres, références société et visibilité', () => {
+    let auth = {};
+    let authConducteur = {};
+    let cleSansFinances = '';
+    let ancienParametres;
+    let sansHeure;
+    let endormi;
+    let ilYa30Jours = '';
+    const reglages = (corps) => request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true, ...corps });
+
+    before(async () => {
+      const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(login.status, 200);
+      auth = { Authorization: `Bearer ${login.body.token}` };
+      ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      const initial = await reglages({ seuilMargeFaible: 15, joursSansSaisie: 14 });
+      assert.equal(initial.status, 200, JSON.stringify(initial.body));
+      const conducteur = await prisma.user.create({ data: { email: 'suivi.conducteur@iris.test', name: 'TEST Conducteur suivi', role: 'CONDUCTEUR_TRAVAUX' } });
+      authConducteur = { Authorization: `Bearer ${jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET)}` };
+      const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+      const aujourdhui = jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris');
+      ilYa30Jours = new Date(Date.parse(`${aujourdhui}T00:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10);
+      const categorie = await prisma.categorie.create({ data: { nom: 'TEST Suivi catégorie' } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Suivi fournisseur' } });
+      const vente = { client: 'TEST Client suivi', budgetMaterielVendu: 500, budgetMainOeuvreVendu: 1500, heuresVendues: 20, responsableId: conducteur.id };
+      sansHeure = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Suivi sans heure', dateDebut: new Date(), budgetGlobalVendu: 2000 } });
+      endormi = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Suivi endormi', dateDebut: new Date(Date.now() - 60 * 86_400_000), budgetGlobalVendu: 5000 } });
+      const achat = await request(app).post('/api/achats').set(auth)
+        .send({ chantierId: endormi.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: ilYa30Jours, description: 'TEST achat ancien', montantHT: 50 });
+      assert.equal(achat.status, 200, JSON.stringify(achat.body));
+      const cle = await request(app).post('/api/admin/api-keys').set(auth).send({ nom: 'TEST agent suivi', scopes: ['chantiers:read'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      cleSansFinances = cle.body.apiKey;
+    });
+
+    after(async () => {
+      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: {
+        margeCommercialeActive: ancienParametres.margeCommercialeActive,
+        seuilMargeFaible: ancienParametres.seuilMargeFaible,
+        joursSansSaisie: ancienParametres.joursSansSaisie,
+      } });
+    });
+
+    const lire = async (chemin, entetes) => {
+      const res = await request(app).get(chemin).set(entetes);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      const trouver = id => {
+        const chantier = res.body.find(c => c.id === id);
+        assert.ok(chantier, `chantier ${id} absent de ${chemin}`);
+        return chantier;
+      };
+      return { sansHeure: trouver(sansHeure.id), endormi: trouver(endormi.id) };
+    };
+
+    test('les réglages refusent les valeurs hors bornes et acceptent le vide pour désactiver', async () => {
+      for (const corps of [{ seuilMargeFaible: 101 }, { seuilMargeFaible: -1 }, { seuilMargeFaible: 'abc' }, { joursSansSaisie: 0 }, { joursSansSaisie: 366 }, { joursSansSaisie: 2.5 }, { joursSansSaisie: '7j' }]) {
+        const refus = await reglages(corps);
+        assert.equal(refus.status, 400, `${JSON.stringify(corps)} → ${refus.status}`);
+      }
+      const inchange = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      assert.equal(Number(inchange.seuilMargeFaible), 15);
+      assert.equal(inchange.joursSansSaisie, 14);
+      const vide = await reglages({ seuilMargeFaible: '', joursSansSaisie: null });
+      assert.equal(vide.status, 200, JSON.stringify(vide.body));
+      assert.equal(vide.body.seuilMargeFaible, null);
+      assert.equal(vide.body.joursSansSaisie, null);
+      const decimal = await reglages({ seuilMargeFaible: '12,5', joursSansSaisie: '21' });
+      assert.equal(decimal.status, 200, JSON.stringify(decimal.body));
+      assert.equal(decimal.body.seuilMargeFaible, 12.5);
+      assert.equal(decimal.body.joursSansSaisie, 21);
+      assert.equal((await reglages({ seuilMargeFaible: 15, joursSansSaisie: 14 })).status, 200);
+    });
+
+    test('la base refuse un réglage hors bornes écrit sans passer par l’API', async () => {
+      await assert.rejects(prisma.parametres.update({ where: { id: 'singleton' }, data: { seuilMargeFaible: 150 } }));
+      await assert.rejects(prisma.parametres.update({ where: { id: 'singleton' }, data: { joursSansSaisie: 0 } }));
+    });
+
+    test('coût horaire et ratio matériel viennent des saisies réelles de la société', async () => {
+      // Références recalculées ici indépendamment de la requête SQL du serveur.
+      const pointages = await prisma.pointageHeure.findMany({ where: { archivedAt: null, chantier: { statut: { not: 'ANNULE' } } } });
+      const heures = pointages.reduce((s, p) => s + Number(p.nbrHeures), 0);
+      const coutHoraire = heures > 0 ? pointages.reduce((s, p) => s + Number(p.nbrHeures) * Number(p.tauxHoraireApplique), 0) / heures : null;
+      const termines = await prisma.chantier.findMany({ where: { statut: 'TERMINE', budgetMaterielVendu: { gt: 0 } }, include: { achats: { where: { archivedAt: null } } } });
+      const vendu = termines.reduce((s, c) => s + Number(c.budgetMaterielVendu), 0);
+      const ratio = vendu > 0 ? termines.reduce((s, c) => s + c.achats.reduce((t, a) => t + Number(a.montantHT), 0), 0) / vendu : null;
+
+      const { sansHeure: vue } = await lire('/api/chantiers', auth);
+      const e = vue.metrics.estimation;
+      assert.equal(e.sourceCoutHoraire, coutHoraire === null ? 'VENDU' : 'SOCIETE');
+      assert.equal(e.sourceMateriel, ratio === null ? 'VENDU' : 'HISTORIQUE');
+      if (coutHoraire !== null) assert.ok(Math.abs(e.coutHoraireReference - coutHoraire) < 1e-6, `${e.coutHoraireReference} ≠ ${coutHoraire}`);
+      assert.ok(Math.abs(e.ratioMateriel - (ratio ?? 1)) < 1e-6, `${e.ratioMateriel} ≠ ${ratio ?? 1}`);
+      const attendu = 2000 - (coutHoraire === null ? 1500 : 20 * coutHoraire) - 500 * (ratio ?? 1);
+      assert.ok(Math.abs(vue.metrics.margeEstimee - attendu) < 1e-6, `${vue.metrics.margeEstimee} ≠ ${attendu}`);
+    });
+
+    test('un chantier sans saisie depuis le délai réglé est signalé à tous ceux qui le voient', async () => {
+      const admin = await lire('/api/chantiers', auth);
+      assert.equal(admin.endormi.metrics.derniereSaisie, ilYa30Jours);
+      assert.equal(admin.endormi.metrics.joursSansSaisie, 30);
+      assert.ok(admin.endormi.metrics.alertes.includes('SANS_SAISIE'));
+      assert.ok(!admin.sansHeure.metrics.alertes.includes('SANS_SAISIE'), 'démarré aujourd’hui');
+      const conducteur = await lire('/api/chantiers', authConducteur);
+      assert.ok(conducteur.endormi.metrics.alertes.includes('SANS_SAISIE'));
+      try {
+        assert.equal((await reglages({ joursSansSaisie: 31 })).status, 200);
+        assert.ok(!(await lire('/api/chantiers', auth)).endormi.metrics.alertes.includes('SANS_SAISIE'));
+        assert.equal((await reglages({ joursSansSaisie: '' })).status, 200);
+        const desactive = await lire('/api/chantiers', auth);
+        assert.ok(!desactive.endormi.metrics.alertes.includes('SANS_SAISIE'));
+        assert.equal(desactive.endormi.metrics.joursSansSaisie, 30);
+      } finally {
+        assert.equal((await reglages({ joursSansSaisie: 14 })).status, 200);
+      }
+    });
+
+    test('la marge estimée et la marge faible ne sortent que pour qui voit la marge', async () => {
+      try {
+        // Seuil à 100 % : toute marge estimée positive est « faible », l'alerte est certaine.
+        assert.equal((await reglages({ seuilMargeFaible: 100 })).status, 200);
+        const admin = await lire('/api/chantiers', auth);
+        assert.ok(admin.sansHeure.metrics.alertes.includes('MARGE_FAIBLE'));
+        assert.equal(typeof admin.sansHeure.metrics.margeEstimee, 'number');
+        for (const [qui, entetes, chemin] of [['conducteur', authConducteur, '/api/chantiers'], ['clé sans finances:read', { Authorization: `Bearer ${cleSansFinances}` }, '/api/v1/chantiers']]) {
+          const vue = await lire(chemin, entetes);
+          assert.ok(!vue.sansHeure.metrics.alertes.includes('MARGE_FAIBLE'), qui);
+          assert.equal(vue.sansHeure.metrics.margeEstimee, null, qui);
+          assert.equal(vue.sansHeure.metrics.estimation, null, qui);
+        }
+        const fiche = await request(app).get(`/api/chantiers/${sansHeure.id}`).set(authConducteur);
+        assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+        assert.ok(fiche.body.metrics.alertes.includes('MARGE_FAIBLE'), 'sur sa fiche, où la marge lui est montrée');
+        assert.equal(typeof fiche.body.metrics.estimation.coutEstime, 'number');
+      } finally {
+        assert.equal((await reglages({ seuilMargeFaible: 15 })).status, 200);
       }
     });
   });

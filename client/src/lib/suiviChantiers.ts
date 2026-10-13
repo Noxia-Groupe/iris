@@ -5,7 +5,8 @@
 // « en perte » n'apparaît que pour qui voit déjà la marge — le serveur ne l'envoie pas
 // aux autres, et ce module n'essaie jamais de la reconstituer.
 
-export const ALERTES_CHANTIER = ['EN_PERTE', 'HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE', 'MATERIEL_DEPASSE'] as const;
+// Ordre de gravité : il sert à l'affichage des pastilles comme au tri « à surveiller d'abord ».
+export const ALERTES_CHANTIER = ['EN_PERTE', 'MARGE_FAIBLE', 'HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE', 'MATERIEL_DEPASSE', 'SANS_SAISIE'] as const;
 export type AlerteChantier = typeof ALERTES_CHANTIER[number];
 
 export interface MetriquesChantier {
@@ -17,7 +18,23 @@ export interface MetriquesChantier {
   pctMainOeuvre?: number;
   margeCommerciale?: number | null;
   margePct?: number | null;
+  margeEstimee?: number | null;
+  margeEstimeePct?: number | null;
+  estimation?: EstimationMarge | null;
+  derniereSaisie?: string | null;
+  joursSansSaisie?: number | null;
   alertes?: string[];
+}
+
+/** Hypothèses de la marge estimée en fin de chantier, telles que le serveur les a prises. */
+export interface EstimationMarge {
+  coutEstime: number;
+  coutMainOeuvreAttendu: number;
+  coutMaterielAttendu: number;
+  coutHoraireReference: number | null;
+  sourceCoutHoraire: 'CHANTIER' | 'SOCIETE' | 'VENDU' | 'REEL';
+  ratioMateriel: number | null;
+  sourceMateriel: 'HISTORIQUE' | 'VENDU' | 'REEL';
 }
 
 export interface ChantierSuivi {
@@ -74,10 +91,18 @@ export function filtrerChantiers<T extends ChantierSuivi>(chantiers: T[], recher
 const comparerNoms = (a: ChantierSuivi, b: ChantierSuivi) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
 const avancement = (c: ChantierSuivi) => c.metrics?.pctHeures ?? 0;
 
+const gravite = (c: ChantierSuivi) => {
+  const alertes = alertesDuChantier(c);
+  return alertes.length ? ALERTES_CHANTIER.indexOf(alertes[0]) : ALERTES_CHANTIER.length;
+};
+// La marge estimée en fin de chantier dit mieux qu'une marge du jour où l'affaire finira.
+const margeDeTri = (c: ChantierSuivi) => c.metrics?.margeEstimeePct ?? c.metrics?.margePct ?? null;
+
 /**
- * PRIORITE : une affaire en perte d'abord, puis celles qui cumulent le plus de dérives,
- * puis la plus avancée en heures — l'ordre dans lequel on veut les regarder.
- * MARGE : la marge la plus faible d'abord ; une marge non communiquée passe en dernier.
+ * PRIORITE : l'alerte la plus grave d'abord (perte, marge faible, dépassements, absence de
+ * saisie), puis le cumul de dérives, puis l'avancement en heures — l'ordre dans lequel on
+ * veut regarder les affaires.
+ * MARGE : la marge estimée la plus faible d'abord ; une marge non communiquée en dernier.
  */
 export function trierChantiers<T extends ChantierSuivi>(chantiers: T[], tri: TriChantiers): T[] {
   const copie = [...chantiers];
@@ -88,8 +113,8 @@ export function trierChantiers<T extends ChantierSuivi>(chantiers: T[], tri: Tri
       return copie.sort((a, b) => avancement(b) - avancement(a) || comparerNoms(a, b));
     case 'MARGE':
       return copie.sort((a, b) => {
-        const ma = a.metrics?.margePct;
-        const mb = b.metrics?.margePct;
+        const ma = margeDeTri(a);
+        const mb = margeDeTri(b);
         if (ma == null && mb == null) return comparerNoms(a, b);
         if (ma == null) return 1;
         if (mb == null) return -1;
@@ -98,10 +123,8 @@ export function trierChantiers<T extends ChantierSuivi>(chantiers: T[], tri: Tri
     case 'PRIORITE':
     default:
       return copie.sort((a, b) => {
-        const aa = alertesDuChantier(a);
-        const ab = alertesDuChantier(b);
-        return Number(ab.includes('EN_PERTE')) - Number(aa.includes('EN_PERTE'))
-          || ab.length - aa.length
+        return gravite(a) - gravite(b)
+          || alertesDuChantier(b).length - alertesDuChantier(a).length
           || avancement(b) - avancement(a)
           || comparerNoms(a, b);
       });
@@ -116,6 +139,10 @@ export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): st
   switch (code) {
     case 'EN_PERTE':
       return `En perte ${nombre(Math.abs(m.margeCommerciale ?? 0))} €`;
+    case 'MARGE_FAIBLE':
+      return `Marge estimée ${nombre(m.margeEstimeePct ?? 0, 1)} %`;
+    case 'SANS_SAISIE':
+      return `Sans saisie depuis ${nombre(m.joursSansSaisie ?? 0)} j`;
     case 'HEURES_DEPASSEES':
       return `Heures +${nombre((m.heuresRealisees ?? 0) - chantier.heuresVendues, 1)} h`;
     case 'MAIN_OEUVRE_DEPASSEE':
@@ -129,8 +156,37 @@ export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): st
 export function explicationAlerte(code: AlerteChantier): string {
   switch (code) {
     case 'EN_PERTE': return 'Les dépenses réelles dépassent le montant vendu.';
+    case 'MARGE_FAIBLE': return 'La marge estimée en fin de chantier est sous le seuil réglé par la société, ou négative.';
+    case 'SANS_SAISIE': return 'Aucun achat ni aucune heure saisi depuis le délai réglé par la société.';
     case 'HEURES_DEPASSEES': return 'Les heures réalisées dépassent les heures vendues.';
     case 'MAIN_OEUVRE_DEPASSEE': return 'Le coût réel de la main-d’œuvre dépasse le budget main-d’œuvre vendu.';
     case 'MATERIEL_DEPASSE': return 'Les achats de matériel dépassent le budget matériel vendu.';
+  }
+}
+
+/** « aujourd'hui », « hier », « il y a 12 j » : ancienneté de la dernière saisie. */
+export function ancienneteSaisie(jours: number): string {
+  if (jours <= 0) return 'aujourd’hui';
+  if (jours === 1) return 'hier';
+  return `il y a ${nombre(jours)} j`;
+}
+
+/** Libellé de l'hypothèse de coût horaire retenue pour l'estimation. */
+export function hypotheseCoutHoraire(e: EstimationMarge): string {
+  const taux = e.coutHoraireReference != null ? `${nombre(e.coutHoraireReference, 2)} €/h` : '';
+  switch (e.sourceCoutHoraire) {
+    case 'CHANTIER': return `heures vendues à ${taux}, coût moyen réellement appliqué sur ce chantier`;
+    case 'SOCIETE': return `heures vendues à ${taux}, coût moyen de la société (aucune heure encore saisie ici)`;
+    case 'VENDU': return 'budget main-d’œuvre vendu (aucun coût horaire connu)';
+    case 'REEL': return 'coût réel (chantier terminé)';
+  }
+}
+
+/** Libellé de l'hypothèse retenue pour le matériel. */
+export function hypotheseMateriel(e: EstimationMarge): string {
+  switch (e.sourceMateriel) {
+    case 'HISTORIQUE': return `matériel vendu × ${nombre((e.ratioMateriel ?? 1) * 100, 0)} %, ratio d’achat observé sur les chantiers terminés`;
+    case 'VENDU': return 'matériel restant compté à son prix de vente (aucun chantier terminé pour l’instant)';
+    case 'REEL': return 'achats réels (chantier terminé)';
   }
 }

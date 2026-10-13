@@ -73,6 +73,14 @@ const Dashboard = () => {
   // cinq premières dans l'ordre où il faut les regarder, la suite sur la liste filtrée.
   const aSurveiller = trierChantiers(enCours.filter(estASurveiller), 'PRIORITE');
   const NB_A_SURVEILLER_AFFICHES = 5;
+  // Rentabilité du portefeuille en cours : la marge estimée n'arrive que pour qui voit la
+  // marge (serveur), l'encart n'existe donc que pour ces profils.
+  const portefeuille = enCours.filter(c => c.metrics?.margeEstimee != null);
+  const venduEnCours = portefeuille.reduce((s, c) => s + (c.budgetGlobalVendu ?? 0), 0);
+  const depenseEnCours = portefeuille.reduce((s, c) => s + (c.metrics?.totalDepenses ?? 0), 0);
+  const margeEstimeeEnCours = portefeuille.reduce((s, c) => s + c.metrics.margeEstimee, 0);
+  const margeEstimeeEnCoursPct = venduEnCours > 0 ? (margeEstimeeEnCours / venduEnCours) * 100 : 0;
+  const euros = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} €`;
 
   // Un chantier archivé n'a pas toujours de date de fin renseignée : on retombe
   // sur sa dernière modification (le passage au statut archivé la met à jour).
@@ -247,9 +255,38 @@ const Dashboard = () => {
       ) : (
         <div className="flex flex-col gap-6">
 
-          {/* À surveiller : les chantiers en cours dont le réel dépasse le vendu (ou en
-              perte, pour qui voit la marge). Le bloc reste affiché quand tout va bien :
-              savoir qu'aucune affaire ne dérive est aussi une information. */}
+          {portefeuille.length > 0 && (
+            <section aria-label="Rentabilité des chantiers en cours" className="bg-white rounded-2xl shadow-md border border-gray-100 p-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+                <h2 className="text-lg font-bold text-primary-dark m-0 flex items-center gap-2"><TrendingUp size={18} className="text-accent" /> Rentabilité des chantiers en cours</h2>
+                <span className="text-xs text-gray-400">{portefeuille.length} chantier{portefeuille.length > 1 ? 's' : ''} · estimation : réel engagé + reste à faire au coût attendu</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Vendu</div>
+                  <div className="text-2xl font-black text-primary-dark mt-0.5">{euros(venduEnCours)}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Dépensé à ce jour</div>
+                  <div className="text-2xl font-black text-orange-600 mt-0.5">{euros(depenseEnCours)}</div>
+                  <div className="mt-1.5"><ProgressMeter value={depenseEnCours} max={venduEnCours || 1} color="orange" size="sm" /></div>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge estimée en fin de chantier</div>
+                  <div className={`text-2xl font-black mt-0.5 ${margeEstimeeEnCours >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-marge-portefeuille>
+                    {euros(margeEstimeeEnCours)}
+                  </div>
+                  <div className={`text-xs font-semibold ${margeEstimeeEnCours >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {margeEstimeeEnCoursPct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % du vendu
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* À surveiller : les chantiers en cours dont le réel dépasse le vendu, sans saisie
+              récente, ou — pour qui voit la marge — en perte ou à marge estimée faible. Le
+              bloc reste affiché quand tout va bien : c'est aussi une information. */}
           {enCours.length > 0 && (
             <section aria-label="Chantiers à surveiller" className={`bg-white rounded-2xl shadow-md border overflow-hidden ${aSurveiller.length > 0 ? 'border-red-200' : 'border-gray-100'}`}>
               <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
@@ -267,7 +304,7 @@ const Dashboard = () => {
               </div>
               {aSurveiller.length === 0 ? (
                 <div className="px-6 py-5 text-sm font-semibold text-emerald-700">
-                  Aucune dérive : heures, main-d’œuvre et matériel restent dans le vendu sur vos chantiers en cours.
+                  Aucune alerte : vos chantiers en cours restent dans le vendu et sont saisis régulièrement.
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">

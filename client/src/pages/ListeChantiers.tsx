@@ -7,7 +7,7 @@ import { ProgressMeter } from '../components/ProgressMeter';
 import { AlertesChantier } from '../components/AlertesChantier';
 import { isAdminRole, roleLabel } from '../roles';
 import {
-  alertesDuChantier, estASurveiller, filtrerChantiers, trierChantiers,
+  alertesDuChantier, ancienneteSaisie, estASurveiller, filtrerChantiers, trierChantiers,
   type ChantierSuivi, type FiltreChantiers, type TriChantiers,
 } from '../lib/suiviChantiers';
 
@@ -17,14 +17,16 @@ const FILTRES: { valeur: FiltreChantiers; libelle: string; margeRequise?: boolea
   { valeur: 'TOUS', libelle: 'Tous' },
   { valeur: 'A_SURVEILLER', libelle: 'À surveiller' },
   { valeur: 'EN_PERTE', libelle: 'En perte', margeRequise: true },
+  { valeur: 'MARGE_FAIBLE', libelle: 'Marge faible', margeRequise: true },
   { valeur: 'HEURES_DEPASSEES', libelle: 'Heures dépassées' },
   { valeur: 'MAIN_OEUVRE_DEPASSEE', libelle: 'Main-d’œuvre dépassée' },
   { valeur: 'MATERIEL_DEPASSE', libelle: 'Matériel dépassé' },
+  { valeur: 'SANS_SAISIE', libelle: 'Sans saisie' },
 ];
 const TRIS: { valeur: TriChantiers; libelle: string; margeRequise?: boolean }[] = [
   { valeur: 'PRIORITE', libelle: 'À surveiller d’abord' },
   { valeur: 'AVANCEMENT', libelle: 'Plus avancés d’abord' },
-  { valeur: 'MARGE', libelle: 'Marge la plus faible d’abord', margeRequise: true },
+  { valeur: 'MARGE', libelle: 'Marge estimée la plus faible d’abord', margeRequise: true },
   { valeur: 'NOM', libelle: 'Nom (A → Z)' },
 ];
 
@@ -151,8 +153,8 @@ const ListeChantiers = () => {
               <th className="px-6 py-4 font-semibold">Chantier</th>
               <th className="px-4 py-4 font-semibold hidden sm:table-cell w-44">Heures</th>
               <th className="px-4 py-4 font-semibold hidden md:table-cell w-44">Matériel</th>
-              <th className="px-4 py-4 font-semibold text-right" title={isAdmin ? 'Montant vendu moins les dépenses réelles enregistrées à ce jour' : 'Heures vendues moins heures réalisées'}>
-                {isAdmin ? 'Marge actuelle' : 'Solde heures'}
+              <th className="px-4 py-4 font-semibold text-right" title={isAdmin ? 'Marge du jour (vendu moins dépenses réelles) et marge estimée en fin de chantier' : 'Heures vendues moins heures réalisées'}>
+                {isAdmin ? 'Marge' : 'Solde heures'}
               </th>
               <th className="px-6 py-4 font-semibold text-right">Actions</th>
             </tr>
@@ -185,6 +187,7 @@ const ListeChantiers = () => {
                       <span>{c.client}</span>
                       <span>Devis : {c.numeroDevis || 'N/A'}</span>
                       {c.responsable?.name && <span>Resp. : {c.responsable.name}</span>}
+                      {metrics.joursSansSaisie != null && <span>Dernière saisie : {ancienneteSaisie(metrics.joursSansSaisie)}</span>}
                     </div>
                     <div className="mt-2 empty:hidden"><AlertesChantier chantier={c} /></div>
                   </td>
@@ -210,6 +213,12 @@ const ListeChantiers = () => {
                           {metrics.margePct != null && (
                             <div className={`text-xs font-semibold mt-1 ${margeCommerciale >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                               {metrics.margePct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % du vendu
+                            </div>
+                          )}
+                          {c.statut === 'EN_COURS' && metrics.margeEstimee != null && metrics.margeEstimeePct != null && (
+                            <div className="text-xs text-gray-500 mt-1 whitespace-nowrap" data-marge-estimee title="Marge estimée en fin de chantier : détail des hypothèses sur la fiche">
+                              Fin estimée : <strong className={metrics.margeEstimee >= 0 ? 'text-gray-700' : 'text-red-700'}>{fmtEuro(metrics.margeEstimee)}</strong>
+                              {' · '}{metrics.margeEstimeePct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %
                             </div>
                           )}
                         </>

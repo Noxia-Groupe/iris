@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { alertesDuChantier, filtrerChantiers, libelleAlerte, trierChantiers, type ChantierSuivi } from '../src/lib/suiviChantiers.ts';
+import { alertesDuChantier, ancienneteSaisie, filtrerChantiers, libelleAlerte, trierChantiers, type ChantierSuivi } from '../src/lib/suiviChantiers.ts';
 
 const chantier = (id: string, nom: string, metrics: ChantierSuivi['metrics'] = {}, extra: Partial<ChantierSuivi> = {}): ChantierSuivi => ({
   id, nom, client: 'Client', statut: 'EN_COURS', heuresVendues: 10, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, metrics, ...extra,
@@ -54,4 +54,26 @@ test('chaque alerte dit de combien le réel dépasse le vendu', () => {
   assert.equal(libelleAlerte('MATERIEL_DEPASSE', derive), 'Matériel +150 €');
   assert.equal(libelleAlerte('MAIN_OEUVRE_DEPASSEE', derive), 'Main-d’œuvre +120 €');
   assert.equal(libelleAlerte('EN_PERTE', derive), 'En perte 270 €');
+});
+
+test('marge faible et absence de saisie : libellés chiffrés et rang dans la priorité', () => {
+  const faible = chantier('f', 'Faible', { margeEstimeePct: 8.25, alertes: ['MARGE_FAIBLE'] });
+  const dormant = chantier('s', 'Dormant', { joursSansSaisie: 21, alertes: ['SANS_SAISIE'] });
+  assert.equal(libelleAlerte('MARGE_FAIBLE', faible), 'Marge estimée 8,3 %');
+  assert.equal(libelleAlerte('SANS_SAISIE', dormant), 'Sans saisie depuis 21 j');
+  // Perte > marge faible > dépassements (même cumulés) > absence de saisie > rien.
+  assert.deepEqual(trierChantiers([sain, dormant, cumul, faible, perte], 'PRIORITE').map((c) => c.id), ['c', 'f', 'd', 's', 'a']);
+  assert.deepEqual(filtrerChantiers([sain, dormant, faible], '', 'SANS_SAISIE').map((c) => c.id), ['s']);
+});
+
+test('le tri par marge suit la marge estimée en fin de chantier quand elle est connue', () => {
+  const bonDuJour = chantier('x', 'X', { margePct: 60, margeEstimeePct: 5 });
+  const moyen = chantier('y', 'Y', { margePct: 20, margeEstimeePct: 18 });
+  assert.deepEqual(trierChantiers([moyen, bonDuJour], 'MARGE').map((c) => c.id), ['x', 'y']);
+});
+
+test('ancienneté de la dernière saisie en mots simples', () => {
+  assert.equal(ancienneteSaisie(0), 'aujourd’hui');
+  assert.equal(ancienneteSaisie(1), 'hier');
+  assert.equal(ancienneteSaisie(12), 'il y a 12 j');
 });

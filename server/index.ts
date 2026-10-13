@@ -487,7 +487,7 @@ function decimalToNumber(value: any): any {
 }
 
 // --- Paramètres globaux (singleton) ---
-interface Parametres { margeCommercialeActive: boolean; planningActif: boolean; tauxAcompteDefaut: number }
+interface Parametres { margeCommercialeActive: boolean; planningActif: boolean; tauxAcompteDefaut: number; seuilMargeFaible: number | null; joursSansSaisie: number | null }
 
 // Retourne les paramètres avec les Decimal convertis en nombres.
 // upsert atomique (INSERT ... ON CONFLICT) pour éviter toute race entre requêtes
@@ -647,11 +647,58 @@ async function getCompanySettings() {
   });
 }
 
+// --- Contexte du suivi des chantiers ---
+// Ce que le calcul d'un chantier ne peut pas lire sur le chantier lui-même : le jour civil
+// de l'entreprise (délai sans saisie) et deux références société servant à estimer le
+// reste à dépenser quand le chantier ne suffit pas à le dire.
+interface ContexteSuivi {
+  aujourdhui: string;
+  fuseauHoraire: string;
+  // Coût horaire moyen réellement appliqué, pondéré par les heures, sur tous les pointages
+  // actifs des affaires non annulées. Sert seulement aux chantiers sans aucune heure.
+  coutHoraireSociete: number | null;
+  // Achats / matériel vendu sur les chantiers terminés : ce que coûte en moyenne, à
+  // l'achat, un euro de matériel vendu. Null tant qu'aucun chantier n'est terminé.
+  ratioMaterielHistorique: number | null;
+}
+
+async function contexteSuivi(avecEstimation: boolean): Promise<ContexteSuivi> {
+  const societe = await getCompanySettings();
+  const fuseauHoraire = societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+  const contexte: ContexteSuivi = { aujourdhui: aujourdHuiEntreprise(fuseauHoraire), fuseauHoraire, coutHoraireSociete: null, ratioMaterielHistorique: null };
+  if (!avecEstimation) return contexte;
+  const [cout] = await prisma.$queryRaw<{ valeur: Prisma.Decimal | null }[]>(Prisma.sql`
+    SELECT SUM(p."nbrHeures" * p."tauxHoraireApplique") / NULLIF(SUM(p."nbrHeures"), 0) AS valeur
+    FROM "PointageHeure" p JOIN "Chantier" c ON c."id" = p."chantierId"
+    WHERE p."archivedAt" IS NULL AND c."statut" <> 'ANNULE'`);
+  const [ratio] = await prisma.$queryRaw<{ valeur: Prisma.Decimal | null }[]>(Prisma.sql`
+    SELECT (
+      SELECT COALESCE(SUM(a."montantHT"), 0) FROM "AchatReel" a JOIN "Chantier" c ON c."id" = a."chantierId"
+      WHERE a."archivedAt" IS NULL AND c."statut" = 'TERMINE' AND c."budgetMaterielVendu" > 0
+    ) / NULLIF((
+      SELECT SUM("budgetMaterielVendu") FROM "Chantier" WHERE "statut" = 'TERMINE' AND "budgetMaterielVendu" > 0
+    ), 0) AS valeur`);
+  contexte.coutHoraireSociete = cout?.valeur == null ? null : Number(cout.valeur);
+  contexte.ratioMaterielHistorique = ratio?.valeur == null ? null : Number(ratio.valeur);
+  return contexte;
+}
+
+// Le début d'un chantier converti est un instant (lu dans le fuseau de l'entreprise) ; une
+// date corrigée à la main est une date-seule, stockée à minuit UTC et lue telle quelle.
+function jourCivilDeDebut(dateDebut: Date | string, fuseauHoraire: string): string {
+  const iso = new Date(dateDebut).toISOString();
+  return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : jourCivilEntreprise(new Date(dateDebut), fuseauHoraire);
+}
+
+function joursEntre(debut: string, fin: string): number {
+  return Math.round((Date.parse(`${fin}T00:00:00Z`) - Date.parse(`${debut}T00:00:00Z`)) / 86_400_000);
+}
+
 // --- Calcul centralisé des métriques d'un chantier (source unique de vérité) ---
 // La marge commerciale n'est calculée que si elle est activée ET pour les profils
 // autorisés à la voir (admin partout ; conducteur responsable sur SA fiche chantier
 // uniquement, cf. GET /api/chantiers/:id — pas sur la liste ni le tableau de bord).
-function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: boolean) {
+function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi) {
   // Défense en profondeur : une archive ne doit jamais déformer un coût, une marge ou une commission.
   const achats: any[] = (chantier.achats || []).filter((a: any) => !a.archivedAt);
   const pointages: any[] = (chantier.pointages || []).filter((p: any) => !p.archivedAt);
@@ -678,10 +725,24 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
   if (materielReel > chantier.budgetMaterielVendu) alertes.push('MATERIEL_DEPASSE');
   if (moReel > chantier.budgetMainOeuvreVendu) alertes.push('MAIN_OEUVRE_DEPASSEE');
 
-  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures, pctMainOeuvre, alertes };
+  // Dernière saisie : date métier du dernier achat ou pointage actif. Un chantier en cours
+  // sans aucune saisie compte son délai depuis son début.
+  let derniereSaisie: string | null = null;
+  for (const ligne of [...achats, ...pointages]) {
+    if (!ligne.date || Number.isNaN(new Date(ligne.date).getTime())) continue;
+    const jour = dateSeuleEnJourCivil(new Date(ligne.date));
+    if (!derniereSaisie || jour > derniereSaisie) derniereSaisie = jour;
+  }
+  let joursSansSaisie: number | null = null;
+  if (contexte && chantier.statut === 'EN_COURS') {
+    joursSansSaisie = Math.max(0, joursEntre(derniereSaisie ?? jourCivilDeDebut(chantier.dateDebut, contexte.fuseauHoraire), contexte.aujourdhui));
+    if (params.joursSansSaisie != null && joursSansSaisie >= params.joursSansSaisie) alertes.push('SANS_SAISIE');
+  }
+
+  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures, pctMainOeuvre, derniereSaisie, joursSansSaisie, alertes };
 
   if (!canSeeMarge || !params.margeCommercialeActive) {
-    return { ...base, margeBrute: null, margeCommerciale: null, margePct: null };
+    return { ...base, margeBrute: null, margeCommerciale: null, margePct: null, margeEstimee: null, margeEstimeePct: null, estimation: null };
   }
 
   // Marge commerciale = budget vendu − dépenses réelles (matériel + main d'œuvre).
@@ -696,19 +757,58 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
   const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
   // Le signe de la marge est une donnée commerciale : l'alerte « en perte » ne sort que
   // pour qui voit déjà la marge, jamais pour un rôle ou une clé à qui elle est masquée.
-  const alertesMarge = margeCommerciale < 0 ? [...alertes, 'EN_PERTE'] : alertes;
+  const alertesMarge = margeCommerciale < 0 ? [...alertes, 'EN_PERTE'] : [...alertes];
 
-  return { ...base, alertes: alertesMarge, margeBrute, margeCommerciale, margePct };
+  // Marge estimée en fin de chantier : ce qui restera du vendu une fois chaque poste
+  // dépensé comme attendu. Pour chaque poste, le coût attendu ne descend jamais sous le
+  // réel déjà engagé :
+  //  - main-d'œuvre : heures vendues × coût horaire de référence (celui réellement
+  //    appliqué sur ce chantier ; à défaut, la moyenne de la société ; à défaut, le
+  //    budget main-d'œuvre vendu) ;
+  //  - matériel : matériel vendu × ce que coûte en moyenne un euro de matériel vendu sur
+  //    les chantiers terminés ; sans historique, le matériel restant est compté à son prix
+  //    de vente — hypothèse prudente, faute de prix d'achat prévu sur le devis.
+  // Un chantier clos n'a plus de reste à faire : son estimation est son réel.
+  let estimation: Record<string, unknown> | null = null;
+  let margeEstimee: number | null = null;
+  let margeEstimeePct: number | null = null;
+  if (contexte) {
+    let coutMainOeuvreAttendu = moReel;
+    let coutMaterielAttendu = materielReel;
+    let coutHoraireReference: number | null = heuresRealisees > 0 ? moReel / heuresRealisees : null;
+    let sourceCoutHoraire = 'REEL';
+    let ratioMateriel: number | null = null;
+    let sourceMateriel = 'REEL';
+    if (chantier.statut === 'EN_COURS') {
+      sourceCoutHoraire = coutHoraireReference != null ? 'CHANTIER' : contexte.coutHoraireSociete != null ? 'SOCIETE' : 'VENDU';
+      coutHoraireReference ??= contexte.coutHoraireSociete;
+      const mainOeuvrePrevue = coutHoraireReference != null ? chantier.heuresVendues * coutHoraireReference : chantier.budgetMainOeuvreVendu;
+      coutMainOeuvreAttendu = Math.max(moReel, mainOeuvrePrevue);
+      ratioMateriel = contexte.ratioMaterielHistorique ?? 1;
+      sourceMateriel = contexte.ratioMaterielHistorique != null ? 'HISTORIQUE' : 'VENDU';
+      coutMaterielAttendu = Math.max(materielReel, chantier.budgetMaterielVendu * ratioMateriel);
+    }
+    const coutEstime = coutMainOeuvreAttendu + coutMaterielAttendu;
+    margeEstimee = chantier.budgetGlobalVendu - coutEstime;
+    margeEstimeePct = chantier.budgetGlobalVendu > 0 ? (margeEstimee / chantier.budgetGlobalVendu) * 100 : 0;
+    estimation = { coutEstime, coutMainOeuvreAttendu, coutMaterielAttendu, coutHoraireReference, sourceCoutHoraire, ratioMateriel, sourceMateriel };
+    // Une affaire déjà en perte porte l'alerte la plus forte ; sinon une marge estimée
+    // négative, ou sous le seuil réglé par la société, est signalée.
+    const seuil = params.seuilMargeFaible;
+    if (margeCommerciale >= 0 && (margeEstimee < 0 || (seuil != null && margeEstimeePct < seuil))) alertesMarge.push('MARGE_FAIBLE');
+  }
+
+  return { ...base, alertes: alertesMarge, margeBrute, margeCommerciale, margePct, margeEstimee, margeEstimeePct, estimation };
 }
 
 // Sérialise un chantier pour le client en masquant les données commerciales aux profils
 // non autorisés à les voir (cf. canSeeMarge ci-dessus).
-function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean) {
+function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi) {
   const c = decimalToNumber(chantier);
   return {
     ...c,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
-    metrics: computeChantierMetrics(c, params, canSeeMarge),
+    metrics: computeChantierMetrics(c, params, canSeeMarge, contexte),
   };
 }
 
@@ -2673,7 +2773,8 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
       }
     });
     const voitMontants = peutVoirMontantsVendus(req);
-    res.json(chantiers.map((c: any) => serializeChantier(c, params, voitMontants)));
+    const contexte = await contexteSuivi(voitMontants && params.margeCommercialeActive);
+    res.json(chantiers.map((c: any) => serializeChantier(c, params, voitMontants, contexte)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
   }
@@ -2718,7 +2819,8 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     // `serializeChantier` étale son entrée : sortir les factures avant sérialisation
     // évite toute fuite de montants vers les rôles qui ne voient pas la marge.
     const { factures, ...chantierSansFactures } = chantier;
-    const detail = serializeChantier(chantierSansFactures, params, canSeeMarge) as Record<string, unknown>;
+    const contexte = await contexteSuivi(canSeeMarge && params.margeCommercialeActive);
+    const detail = serializeChantier(chantierSansFactures, params, canSeeMarge, contexte) as Record<string, unknown>;
     if (canSeeMarge) {
       // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
       // facture annulée est visible mais ne contribue plus, son avoir la neutralise.
@@ -5312,6 +5414,30 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Le taux d’acompte par défaut doit être un pourcentage compris entre 0 et 100.' });
       }
       data.tauxAcompteDefaut = taux;
+    }
+    // Alertes de suivi des chantiers : une valeur vide (null ou chaîne vide) désactive
+    // l'alerte, toute autre valeur doit rester dans des bornes qui ont un sens métier.
+    if ('seuilMargeFaible' in req.body) {
+      const brut = req.body.seuilMargeFaible;
+      if (brut === null || brut === '') data.seuilMargeFaible = null;
+      else {
+        const seuil = nombreDecimalNonNegatif(brut, 3, true);
+        if (seuil === null || seuil > 100) {
+          return res.status(400).json({ error: 'Le seuil de marge faible doit être un pourcentage compris entre 0 et 100, ou vide pour désactiver l’alerte.' });
+        }
+        data.seuilMargeFaible = seuil;
+      }
+    }
+    if ('joursSansSaisie' in req.body) {
+      const brut = req.body.joursSansSaisie;
+      if (brut === null || brut === '') data.joursSansSaisie = null;
+      else {
+        const jours = typeof brut === 'number' ? brut : typeof brut === 'string' && /^\d+$/.test(brut.trim()) ? Number(brut.trim()) : NaN;
+        if (!Number.isInteger(jours) || jours < 1 || jours > 365) {
+          return res.status(400).json({ error: 'Le délai sans saisie doit être un nombre entier de jours entre 1 et 365, ou vide pour désactiver l’alerte.' });
+        }
+        data.joursSansSaisie = jours;
+      }
     }
     const p = await prisma.parametres.upsert({
       where: { id: 'singleton' },

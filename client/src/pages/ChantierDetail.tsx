@@ -14,6 +14,8 @@ import { useModules } from '../modules';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
 import { archivagesRestaurables } from '../lib/archivesRestaurables';
+import { AlertesChantier } from '../components/AlertesChantier';
+import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
 
 // Date ISO (avec ou sans heure) -> format métier français JJ-MM-AAAA.
 const toDateFrancaise = (d: string | null | undefined) => {
@@ -582,6 +584,7 @@ const ChantierDetail = () => {
   const showMarge = margeCommerciale !== null;
   const margeAffichee = margeCommerciale ?? 0;
   const showBudgetVendu = chantier.budgetGlobalVendu != null;
+  const estimation: EstimationMarge | null = metrics.estimation ?? null;
 
   const dateDebut = new Date(chantier.dateDebut);
   const dateFin = chantier.dateFin ? new Date(chantier.dateFin) : null;
@@ -671,6 +674,12 @@ const ChantierDetail = () => {
                 Démarré le {fmtDate(chantier.dateDebut)}
                 {isTermine && dateFin ? ` — terminé le ${fmtDate(chantier.dateFin)} (${joursEcoules} j)` : ` (il y a ${joursEcoules} j)`}
               </span>
+              {metrics.joursSansSaisie != null && (
+                <span className="flex items-center gap-1.5" data-derniere-saisie>
+                  <Clock3 size={14} className="text-gray-400" />
+                  Dernière saisie : {metrics.derniereSaisie ? `${toDateFrancaise(metrics.derniereSaisie)} (${ancienneteSaisie(metrics.joursSansSaisie)})` : 'aucune depuis le démarrage'}
+                </span>
+              )}
               {editingCommercial ? (
                 <span className="flex items-center gap-1.5">
                   <Briefcase size={14} className="text-gray-400" />
@@ -698,6 +707,11 @@ const ChantierDetail = () => {
                 </span>
               )}
             </div>
+          </div>
+
+          {/* Alertes de suivi, calculées par le serveur : une fiche saine le dit aussi. */}
+          <div className="-mt-4 mb-6" data-alertes-fiche>
+            <AlertesChantier chantier={chantier} afficherSiSain />
           </div>
 
           {/* Bannière de rappel : un chantier Terminé mais Non encaissé ne compte pas dans
@@ -812,6 +826,24 @@ const ChantierDetail = () => {
                   <div className="font-bold text-2xl text-gray-800">{totalDepensesReelles.toLocaleString()} €</div>
                 </div>
               </div>
+              {/* Marge estimée en fin de chantier : les hypothèses sont écrites en clair, pour
+                  qu'on sache d'où vient le chiffre et ce qui le ferait bouger. */}
+              {estimation && metrics.margeEstimee != null && !isTermine && (
+                <div className="z-10 bg-white/60 p-4 rounded-lg" data-estimation>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="text-xs text-gray-500 font-bold uppercase tracking-wider">Marge estimée en fin de chantier</div>
+                    <div className={`text-2xl font-black ${metrics.margeEstimee >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {fmtEuro(metrics.margeEstimee)}
+                      <span className="text-sm font-bold ml-2">{(metrics.margeEstimeePct ?? 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %</span>
+                    </div>
+                  </div>
+                  <ul className="mt-2 mb-0 pl-4 text-xs text-gray-600 space-y-0.5">
+                    <li>Main-d’œuvre attendue : <strong>{fmtEuro(estimation.coutMainOeuvreAttendu)}</strong> — {hypotheseCoutHoraire(estimation)}.</li>
+                    <li>Matériel attendu : <strong>{fmtEuro(estimation.coutMaterielAttendu)}</strong> — {hypotheseMateriel(estimation)}.</li>
+                    <li>Un poste n’est jamais estimé sous ce qui a déjà été dépensé.</li>
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 
