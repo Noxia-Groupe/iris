@@ -337,6 +337,11 @@ model Parametres {
   // Le devis fige SA valeur à l'émission (cf. Devis.tauxAcompte) — modifier ce paramètre
   // n'a donc aucun effet rétroactif sur les devis déjà émis.
   tauxAcompteDefaut      Decimal @default(30) @db.Decimal(5, 2)
+  // Alertes de suivi des chantiers, réglées par chaque société dans Administration > Marges.
+  // Vide (null) = alerte désactivée. Seuil en pourcentage du montant vendu, comparé à la
+  // marge ESTIMÉE en fin de chantier ; délai en jours civils sans achat ni heure saisis.
+  seuilMargeFaible       Decimal? @default(15) @db.Decimal(5, 2)
+  joursSansSaisie        Int?     @default(14)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

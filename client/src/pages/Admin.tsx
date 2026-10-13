@@ -285,11 +285,17 @@ const Admin = () => {
   const payload = {
       margeCommercialeActive: formData.get('margeCommercialeActive') === 'on',
       tauxAcompteDefaut: formData.get('tauxAcompteDefaut'),
+      // Champ vidé = alerte désactivée ; le serveur valide les bornes.
+      seuilMargeFaible: String(formData.get('seuilMargeFaible') ?? '').trim(),
+      joursSansSaisie: String(formData.get('joursSansSaisie') ?? '').trim(),
     };
     const res = await apiFetch('/parametres', { method: 'PUT', body: JSON.stringify(payload) });
     if (res.ok) {
       setParametres(await res.json());
       alert('Paramètres mis à jour');
+    } else {
+      const d = await res.json().catch(() => ({}));
+      alert(d.error || 'Erreur lors de l’enregistrement des paramètres.');
     }
   };
 
@@ -931,6 +937,36 @@ const Admin = () => {
                 />
                 <span className="text-sm text-gray-500">% du TTC</span>
               </label>
+              {/* Alertes du suivi des chantiers (liste et tableau de bord). Vider un champ
+                  désactive l'alerte correspondante. */}
+              <fieldset className="border border-gray-100 rounded-lg p-4 space-y-3">
+                <legend className="text-sm font-bold text-gray-700 px-1">Alertes de suivi des chantiers</legend>
+                <label className="flex flex-wrap items-center gap-3 w-fit">
+                  <span className="text-sm font-semibold text-gray-700">Marge faible : alerter sous</span>
+                  <input
+                    type="number" name="seuilMargeFaible" min="0" max="100" step="0.01"
+                    defaultValue={parametres?.seuilMargeFaible ?? ''}
+                    className="form-input w-28" style={{ margin: 0 }}
+                    aria-label="Seuil de marge faible en pourcentage"
+                  />
+                  <span className="text-sm text-gray-500">% de marge estimée en fin de chantier</span>
+                </label>
+                <label className="flex flex-wrap items-center gap-3 w-fit">
+                  <span className="text-sm font-semibold text-gray-700">Chantier sans saisie : alerter après</span>
+                  <input
+                    type="number" name="joursSansSaisie" min="1" max="365" step="1"
+                    defaultValue={parametres?.joursSansSaisie ?? ''}
+                    className="form-input w-28" style={{ margin: 0 }}
+                    aria-label="Nombre de jours sans saisie"
+                  />
+                  <span className="text-sm text-gray-500">jours sans achat ni heure</span>
+                </label>
+                <p className="text-xs text-gray-500 m-0">
+                  Laisser un champ vide désactive l’alerte. La marge estimée compte, pour chaque poste, le plus élevé du
+                  réel déjà dépensé et du coût attendu : heures vendues au coût horaire moyen réellement appliqué, matériel
+                  vendu au ratio d’achat observé sur les chantiers terminés (au prix de vente tant qu’aucun n’est terminé).
+                </p>
+              </fieldset>
               <button className="btn btn-primary">Enregistrer</button>
             </form>
           </div>

@@ -251,6 +251,117 @@ describe('Métriques de chantier', () => {
   });
 });
 
+describe('Marge estimée en fin de chantier et alertes de suivi', () => {
+  const params = { margeCommercialeActive: true, planningActif: true, tauxAcompteDefaut: 30, seuilMargeFaible: 15, joursSansSaisie: 14 };
+  const contexte = (surcharge = {}) => ({ aujourdhui: '2026-10-13', fuseauHoraire: 'Europe/Paris', coutHoraireSociete: 45, ratioMaterielHistorique: 0.7, ...surcharge });
+  // Vendu 10 000 € : 4 000 € de matériel, 6 000 € de main-d'œuvre pour 100 h.
+  const chantier = (surcharge = {}) => ({
+    statut: 'EN_COURS', dateDebut: '2026-10-01T08:00:00.000Z',
+    budgetGlobalVendu: 10000, budgetMaterielVendu: 4000, budgetMainOeuvreVendu: 6000, heuresVendues: 100,
+    achats: [{ montantHT: 1000, date: '2026-10-10T00:00:00.000Z' }],
+    pointages: [{ nbrHeures: 20, tauxHoraireApplique: 40, date: '2026-10-12T00:00:00.000Z' }],
+    ...surcharge,
+  });
+
+  test('main-d’œuvre au coût horaire du chantier, matériel au ratio des chantiers terminés', () => {
+    const vue = computeChantierMetrics(chantier(), params, true, contexte());
+    // 100 h × 40 € = 4 000 € ; 4 000 € × 0,7 = 2 800 € ; 10 000 − 6 800 = 3 200 €.
+    assert.equal(vue.estimation.coutMainOeuvreAttendu, 4000);
+    assert.equal(vue.estimation.coutMaterielAttendu, 2800);
+    assert.equal(vue.estimation.sourceCoutHoraire, 'CHANTIER');
+    assert.equal(vue.estimation.sourceMateriel, 'HISTORIQUE');
+    assert.equal(vue.margeEstimee, 3200);
+    assert.equal(vue.margeEstimeePct, 32);
+    assert.ok(!vue.alertes.includes('MARGE_FAIBLE'));
+  });
+
+  test('sans heure saisie : coût horaire moyen de la société, puis budget main-d’œuvre vendu', () => {
+    const societe = computeChantierMetrics(chantier({ pointages: [] }), params, true, contexte());
+    assert.equal(societe.estimation.sourceCoutHoraire, 'SOCIETE');
+    assert.equal(societe.estimation.coutMainOeuvreAttendu, 4500);
+    assert.equal(societe.margeEstimee, 10000 - 4500 - 2800);
+    const vendu = computeChantierMetrics(chantier({ pointages: [] }), params, true, contexte({ coutHoraireSociete: null }));
+    assert.equal(vendu.estimation.sourceCoutHoraire, 'VENDU');
+    assert.equal(vendu.estimation.coutMainOeuvreAttendu, 6000);
+    // 10 000 − 6 000 − 2 800 = 1 200 €, soit 12 % : sous le seuil de 15 %.
+    assert.equal(vendu.margeEstimeePct, 12);
+    assert.ok(vendu.alertes.includes('MARGE_FAIBLE'));
+  });
+
+  test('sans chantier terminé, le matériel restant est compté à son prix de vente', () => {
+    const vue = computeChantierMetrics(chantier(), params, true, contexte({ ratioMaterielHistorique: null }));
+    assert.equal(vue.estimation.sourceMateriel, 'VENDU');
+    assert.equal(vue.estimation.ratioMateriel, 1);
+    assert.equal(vue.estimation.coutMaterielAttendu, 4000);
+    assert.equal(vue.margeEstimee, 2000);
+  });
+
+  test('le coût attendu d’un poste ne descend jamais sous le réel déjà engagé', () => {
+    const vue = computeChantierMetrics(chantier({
+      achats: [{ montantHT: 5000, date: '2026-10-10T00:00:00.000Z' }],
+      pointages: [{ nbrHeures: 120, tauxHoraireApplique: 40, date: '2026-10-12T00:00:00.000Z' }],
+    }), params, true, contexte());
+    assert.equal(vue.estimation.coutMaterielAttendu, 5000);
+    assert.equal(vue.estimation.coutMainOeuvreAttendu, 4800);
+    assert.equal(vue.margeEstimee, 200);
+  });
+
+  test('seuil de marge faible : réglable, désactivable, et sans doublon avec la perte avérée', () => {
+    const tendu = chantier({ pointages: [] });
+    const sansSeuil = { ...params, seuilMargeFaible: null };
+    assert.ok(!computeChantierMetrics(tendu, sansSeuil, true, contexte({ coutHoraireSociete: null })).alertes.includes('MARGE_FAIBLE'));
+    assert.ok(!computeChantierMetrics(tendu, { ...params, seuilMargeFaible: 10 }, true, contexte({ coutHoraireSociete: null })).alertes.includes('MARGE_FAIBLE'));
+    // Même sans seuil, une marge estimée négative reste signalée.
+    const negatif = computeChantierMetrics(tendu, sansSeuil, true, contexte({ coutHoraireSociete: 80 }));
+    assert.ok(negatif.margeEstimee < 0);
+    assert.ok(negatif.alertes.includes('MARGE_FAIBLE'));
+    // Déjà en perte : seule l'alerte la plus forte est portée.
+    const perte = computeChantierMetrics(chantier({ achats: [{ montantHT: 9500, date: '2026-10-10T00:00:00.000Z' }] }), params, true, contexte());
+    assert.ok(perte.alertes.includes('EN_PERTE'));
+    assert.ok(!perte.alertes.includes('MARGE_FAIBLE'));
+  });
+
+  test('un chantier terminé n’a plus de reste à faire ni de délai sans saisie', () => {
+    const vue = computeChantierMetrics(chantier({ statut: 'TERMINE', achats: [{ montantHT: 1000, date: '2026-01-05T00:00:00.000Z' }] }), params, true, contexte());
+    assert.equal(vue.margeEstimee, vue.margeCommerciale);
+    assert.equal(vue.estimation.sourceMateriel, 'REEL');
+    assert.equal(vue.joursSansSaisie, null);
+    assert.ok(!vue.alertes.includes('SANS_SAISIE'));
+  });
+
+  test('délai sans saisie : dernière date métier active, à défaut le jour civil du début', () => {
+    const a15jours = computeChantierMetrics(chantier({ achats: [{ montantHT: 10, date: '2026-09-28T00:00:00.000Z' }], pointages: [] }), params, false, contexte());
+    assert.equal(a15jours.derniereSaisie, '2026-09-28');
+    assert.equal(a15jours.joursSansSaisie, 15);
+    assert.ok(a15jours.alertes.includes('SANS_SAISIE'));
+    const a13jours = computeChantierMetrics(chantier({ achats: [{ montantHT: 10, date: '2026-09-30T00:00:00.000Z' }], pointages: [] }), params, false, contexte());
+    assert.ok(!a13jours.alertes.includes('SANS_SAISIE'));
+    // Une saisie archivée ne remet pas le compteur à zéro.
+    const archive = computeChantierMetrics(chantier({ achats: [{ montantHT: 10, date: '2026-09-28T00:00:00.000Z' }, { montantHT: 10, date: '2026-10-12T00:00:00.000Z', archivedAt: '2026-10-12T10:00:00.000Z' }], pointages: [] }), params, false, contexte());
+    assert.equal(archive.joursSansSaisie, 15);
+    // Sans aucune saisie : un début converti le 28/09 à 23 h 30 UTC est le 29/09 à Paris.
+    const instant = computeChantierMetrics(chantier({ achats: [], pointages: [], dateDebut: '2026-09-28T23:30:00.000Z' }), params, false, contexte());
+    assert.equal(instant.derniereSaisie, null);
+    assert.equal(instant.joursSansSaisie, 14);
+    assert.ok(instant.alertes.includes('SANS_SAISIE'));
+    // Une date-seule corrigée à la main n'est pas relue dans un fuseau.
+    const dateSeule = computeChantierMetrics(chantier({ achats: [], pointages: [], dateDebut: '2026-09-30T00:00:00.000Z' }), params, false, contexte({ fuseauHoraire: 'America/Guadeloupe' }));
+    assert.equal(dateSeule.joursSansSaisie, 13);
+    // Alerte désactivée : le délai reste lisible, sans alerte.
+    const desactive = computeChantierMetrics(chantier({ achats: [{ montantHT: 10, date: '2026-09-01T00:00:00.000Z' }], pointages: [] }), { ...params, joursSansSaisie: null }, false, contexte());
+    assert.equal(desactive.joursSansSaisie, 42);
+    assert.ok(!desactive.alertes.includes('SANS_SAISIE'));
+  });
+
+  test('l’estimation et la marge faible restent masquées à qui ne voit pas la marge', () => {
+    const vue = computeChantierMetrics(chantier({ pointages: [] }), params, false, contexte({ coutHoraireSociete: null }));
+    assert.equal(vue.margeEstimee, null);
+    assert.equal(vue.margeEstimeePct, null);
+    assert.equal(vue.estimation, null);
+    assert.ok(!vue.alertes.includes('MARGE_FAIBLE'));
+  });
+});
+
 describe('Barèmes de rémunération configurables', () => {
   test('un plafond null devient la tranche non plafonnée', () => {
     // JSON ne représente pas Infinity : la dernière tranche est stockée avec plafond null.

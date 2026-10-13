@@ -1,16 +1,66 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Archive, RotateCcw, Filter } from 'lucide-react';
+import { useState, useEffect, type ReactNode } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Archive, RotateCcw, Search, X, AlertTriangle, CheckCircle2, Building2, TrendingDown } from 'lucide-react';
 import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
+import { ProgressMeter } from '../components/ProgressMeter';
+import { AlertesChantier } from '../components/AlertesChantier';
 import { isAdminRole, roleLabel } from '../roles';
+import {
+  alertesDuChantier, ancienneteSaisie, estASurveiller, filtrerChantiers, trierChantiers,
+  type ChantierSuivi, type FiltreChantiers, type TriChantiers,
+} from '../lib/suiviChantiers';
+
+type ChantierListe = ChantierSuivi & { metrics?: ChantierSuivi['metrics'] & { diffHeures?: number } };
+
+const FILTRES: { valeur: FiltreChantiers; libelle: string; margeRequise?: boolean }[] = [
+  { valeur: 'TOUS', libelle: 'Tous' },
+  { valeur: 'A_SURVEILLER', libelle: 'À surveiller' },
+  { valeur: 'EN_PERTE', libelle: 'En perte', margeRequise: true },
+  { valeur: 'MARGE_FAIBLE', libelle: 'Marge faible', margeRequise: true },
+  { valeur: 'HEURES_DEPASSEES', libelle: 'Heures dépassées' },
+  { valeur: 'MAIN_OEUVRE_DEPASSEE', libelle: 'Main-d’œuvre dépassée' },
+  { valeur: 'MATERIEL_DEPASSE', libelle: 'Matériel dépassé' },
+  { valeur: 'SANS_SAISIE', libelle: 'Sans saisie' },
+];
+const TRIS: { valeur: TriChantiers; libelle: string; margeRequise?: boolean }[] = [
+  { valeur: 'PRIORITE', libelle: 'À surveiller d’abord' },
+  { valeur: 'AVANCEMENT', libelle: 'Plus avancés d’abord' },
+  { valeur: 'MARGE', libelle: 'Marge estimée la plus faible d’abord', margeRequise: true },
+  { valeur: 'NOM', libelle: 'Nom (A → Z)' },
+];
+
+const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
+const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
+
+// Compteurs cliquables : un chiffre qui intrigue mène directement à la liste filtrée.
+function Compteur({ valeur, libelle, icone, actif, alerte = false, onClick }: { valeur: number; libelle: string; icone: ReactNode; actif: boolean; alerte?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={actif}
+      className={`bg-white p-4 rounded-xl shadow-sm border text-left flex items-start gap-3 transition-colors hover:bg-gray-50 ${actif ? 'border-accent' : alerte ? 'border-red-200' : 'border-gray-100'}`}
+    >
+      <div className={`p-2 rounded-lg ${alerte ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-accent'}`}>{icone}</div>
+      <div>
+        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">{libelle}</div>
+        <div className={`text-2xl font-black mt-0.5 ${alerte ? 'text-red-600' : 'text-primary-dark'}`}>{valeur}</div>
+      </div>
+    </button>
+  );
+}
 
 const ListeChantiers = () => {
   const navigate = useNavigate();
-  const [chantiers, setChantiers] = useState<any[]>([]);
+  const [chantiers, setChantiers] = useState<ChantierListe[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterMaterielDepasse, setFilterMaterielDepasse] = useState(false);
-  const [filterHeuresDepasse, setFilterHeuresDepasse] = useState(false);
+  // Recherche, filtre et tri vivent dans l'URL : revenir d'une fiche chantier retrouve la
+  // liste telle qu'on l'avait laissée, et un lien « à surveiller » s'ouvre déjà filtré.
+  const [parametres, setParametres] = useSearchParams();
+  const recherche = parametres.get('q') ?? '';
+  const filtreDemande = (parametres.get('filtre') ?? 'TOUS') as FiltreChantiers;
+  const triDemande = (parametres.get('tri') ?? 'PRIORITE') as TriChantiers;
 
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -32,6 +82,15 @@ const ListeChantiers = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const majParametre = (cle: string, valeur: string, parDefaut: string) => {
+    setParametres((actuels) => {
+      const suivants = new URLSearchParams(actuels);
+      if (valeur && valeur !== parDefaut) suivants.set(cle, valeur);
+      else suivants.delete(cle);
+      return suivants;
+    }, { replace: true });
   };
 
   // Clôturer un chantier (en cours -> terminé) : possible pour son responsable ou un
@@ -66,19 +125,36 @@ const ListeChantiers = () => {
     </div>
   );
 
+  const isAdmin = isAdminRole(userRole);
+  // La marge n'arrive que pour les profils autorisés et si le module est actif : le filtre
+  // « en perte » et le tri par marge n'ont de sens que si au moins une marge est connue.
+  const margeVisible = chantiers.some((c) => c.metrics?.margeCommerciale != null);
+  const filtresProposes = FILTRES.filter((f) => !f.margeRequise || margeVisible);
+  const trisProposes = TRIS.filter((t) => !t.margeRequise || margeVisible);
+  const filtre = filtresProposes.some((f) => f.valeur === filtreDemande) ? filtreDemande : 'TOUS';
+  const tri = trisProposes.some((t) => t.valeur === triDemande) ? triDemande : 'PRIORITE';
+
+  const tousEnCours = chantiers.filter((c) => c.statut === 'EN_COURS');
+  const nbASurveiller = tousEnCours.filter(estASurveiller).length;
+  const nbEnPerte = tousEnCours.filter((c) => alertesDuChantier(c).includes('EN_PERTE')).length;
+  const chantiersEnCours = trierChantiers(filtrerChantiers(tousEnCours, recherche, filtre), tri);
+  const chantiersTermines = trierChantiers(filtrerChantiers(chantiers.filter((c) => c.statut === 'TERMINE'), recherche, filtre), tri);
+  const filtresActifs = filtre !== 'TOUS' || recherche.trim() !== '';
+  const reinitialiser = () => setParametres(new URLSearchParams(), { replace: true });
+
   // `repliable` : la liste des chantiers archivés est masquée tant qu'on ne l'ouvre pas,
   // pour ne pas noyer les chantiers en cours sous des dossiers clos.
-  const renderTable = (list: any[], title: string, emptyMessage: string, repliable = false) => {
+  const renderTable = (list: ChantierListe[], title: string, emptyMessage: string, repliable = false) => {
     const tableau = (
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-white text-xs uppercase text-gray-500 border-b border-gray-100">
               <th className="px-6 py-4 font-semibold">Chantier</th>
-              <th className="px-6 py-4 font-semibold">Client</th>
-              <th className="px-6 py-4 font-semibold text-center">Avancement</th>
-              <th className="px-6 py-4 font-semibold text-right">
-                {isAdminRole(userRole) ? 'Marge Actuelle' : 'Solde Heures'}
+              <th className="px-4 py-4 font-semibold hidden sm:table-cell w-44">Heures</th>
+              <th className="px-4 py-4 font-semibold hidden md:table-cell w-44">Matériel</th>
+              <th className="px-4 py-4 font-semibold text-right" title={isAdmin ? 'Marge du jour (vendu moins dépenses réelles) et marge estimée en fin de chantier' : 'Heures vendues moins heures réalisées'}>
+                {isAdmin ? 'Marge' : 'Solde heures'}
               </th>
               <th className="px-6 py-4 font-semibold text-right">Actions</th>
             </tr>
@@ -94,41 +170,64 @@ const ListeChantiers = () => {
               // Métriques calculées côté serveur (marge masquée pour les non-admins)
               const metrics = c.metrics || {};
               const heuresRealisees = metrics.heuresRealisees || 0;
+              const materielReel = metrics.materielReel || 0;
               const diffHeures = metrics.diffHeures ?? (c.heuresVendues - heuresRealisees);
-              const margeCommerciale: number | null = metrics.margeCommerciale ?? null;
-              const progressPct = Math.min(100, Math.max(0, metrics.pctHeures ?? 0));
+              const margeCommerciale = metrics.margeCommerciale ?? null;
 
               return (
                 <tr
                   key={c.id}
+                  data-chantier={c.id}
                   onClick={() => navigate(`/chantiers/${c.id}`)}
-                  className="hover:bg-gray-50 transition-colors cursor-pointer"
+                  className="hover:bg-gray-50 transition-colors cursor-pointer align-top"
                 >
                   <td className="px-6 py-4">
                     <div className="font-bold text-gray-800">{c.nom}</div>
-                    <div className="text-xs text-gray-400">Devis: {c.numeroDevis || 'N/A'}</div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{c.client}</td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${progressPct}%` }}></div>
-                      </div>
-                      <span className="text-xs font-semibold text-gray-500 w-8">{progressPct.toFixed(0)}%</span>
+                    <div className="text-xs text-gray-400 mt-0.5 flex flex-wrap gap-x-3">
+                      <span>{c.client}</span>
+                      <span>Devis : {c.numeroDevis || 'N/A'}</span>
+                      {c.responsable?.name && <span>Resp. : {c.responsable.name}</span>}
+                      {metrics.joursSansSaisie != null && <span>Dernière saisie : {ancienneteSaisie(metrics.joursSansSaisie)}</span>}
                     </div>
+                    <div className="mt-2 empty:hidden"><AlertesChantier chantier={c} /></div>
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    {isAdminRole(userRole) ? (
+                  <td className="px-4 py-4 hidden sm:table-cell">
+                    <div className="text-xs font-semibold text-gray-600 mb-1.5">
+                      {fmtHeures(heuresRealisees)} <span className="text-gray-400">/ {fmtHeures(c.heuresVendues)}</span>
+                    </div>
+                    <ProgressMeter value={heuresRealisees} max={c.heuresVendues} color="purple" size="sm" />
+                  </td>
+                  <td className="px-4 py-4 hidden md:table-cell">
+                    <div className="text-xs font-semibold text-gray-600 mb-1.5">
+                      {fmtEuro(materielReel)} <span className="text-gray-400">/ {fmtEuro(c.budgetMaterielVendu)}</span>
+                    </div>
+                    <ProgressMeter value={materielReel} max={c.budgetMaterielVendu} color="blue" size="sm" />
+                  </td>
+                  <td className="px-4 py-4 text-right">
+                    {isAdmin ? (
                       margeCommerciale !== null ? (
-                        <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                          {margeCommerciale > 0 ? '+' : ''}{margeCommerciale.toLocaleString()} €
-                        </span>
+                        <>
+                          <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm whitespace-nowrap ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                            {margeCommerciale > 0 ? '+' : ''}{fmtEuro(margeCommerciale)}
+                          </span>
+                          {metrics.margePct != null && (
+                            <div className={`text-xs font-semibold mt-1 ${margeCommerciale >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                              {metrics.margePct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % du vendu
+                            </div>
+                          )}
+                          {c.statut === 'EN_COURS' && metrics.margeEstimee != null && metrics.margeEstimeePct != null && (
+                            <div className="text-xs text-gray-500 mt-1 whitespace-nowrap" data-marge-estimee title="Marge estimée en fin de chantier : détail des hypothèses sur la fiche">
+                              Fin estimée : <strong className={metrics.margeEstimee >= 0 ? 'text-gray-700' : 'text-red-700'}>{fmtEuro(metrics.margeEstimee)}</strong>
+                              {' · '}{metrics.margeEstimeePct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %
+                            </div>
+                          )}
+                        </>
                       ) : (
                         <span className="text-gray-400 text-sm">—</span>
                       )
                     ) : (
-                      <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                        {diffHeures > 0 ? '+' : ''}{diffHeures.toFixed(2)} h
+                      <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm whitespace-nowrap ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        {diffHeures > 0 ? '+' : ''}{fmtHeures(diffHeures)}
                       </span>
                     )}
                   </td>
@@ -143,7 +242,7 @@ const ListeChantiers = () => {
                           <Archive size={14} /> Clôturer
                         </button>
                       )}
-                      {c.statut === 'TERMINE' && isAdminRole(userRole) && (
+                      {c.statut === 'TERMINE' && isAdmin && (
                         <button
                           onClick={() => handleReouvrir(c.id, c.nom)}
                           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-blue-50 text-accent hover:bg-blue-100 rounded-lg transition-colors"
@@ -182,8 +281,11 @@ const ListeChantiers = () => {
           </SectionRepliable>
         ) : (
           <>
-            <div className="bg-gray-50 border-b border-gray-100 px-6 py-4">
-              <h2 className="text-lg font-bold text-primary-dark">{title}</h2>
+            <div className="bg-gray-50 border-b border-gray-100 px-6 py-4 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-primary-dark m-0">{title}</h2>
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider shrink-0">
+                {list.length} chantier{list.length > 1 ? 's' : ''}
+              </span>
             </div>
             {tableau}
           </>
@@ -192,29 +294,17 @@ const ListeChantiers = () => {
     );
   };
 
-  // Filtres de dépassement — appliqués aux deux tableaux (en cours et terminés/archivés).
-  const matchesFilters = (c: any) => {
-    const metrics = c.metrics || {};
-    if (filterMaterielDepasse && !((metrics.materielReel || 0) > (c.budgetMaterielVendu || 0))) return false;
-    if (filterHeuresDepasse && !((metrics.heuresRealisees || 0) > (c.heuresVendues || 0))) return false;
-    return true;
-  };
-
-  const chantiersEnCours = chantiers.filter(c => c.statut === 'EN_COURS').filter(matchesFilters);
-  const chantiersTermines = chantiers.filter(c => c.statut === 'TERMINE').filter(matchesFilters);
-  const filtresActifs = filterMaterielDepasse || filterHeuresDepasse;
-
   return (
     <div className="flex flex-col h-full overflow-x-hidden">
-      
+
       {/* Header global */}
-      <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-primary-dark m-0 leading-tight">Liste des Chantiers</h1>
-          <p className="text-sm text-muted mt-1">Vue globale et gestion du stockage</p>
+          <p className="text-sm text-muted mt-1">Avancement, dépenses et rentabilité de vos chantiers</p>
         </div>
-        
-        <div className="flex items-center gap-3">
+
+        <div className="flex flex-wrap items-center gap-3">
           {userRole !== 'COMMERCIAL' && (
             <button onClick={() => navigate('/devis')} className="btn btn-primary flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
@@ -230,27 +320,72 @@ const ListeChantiers = () => {
         </div>
       </div>
 
-
-      <div className="flex flex-wrap items-center gap-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <span className="text-sm font-semibold text-gray-500 flex items-center gap-2"><Filter size={16} /> Filtrer :</span>
-        <label className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-lg cursor-pointer border transition-colors ${filterMaterielDepasse ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100'}`}>
-          <input type="checkbox" checked={filterMaterielDepasse} onChange={(e) => setFilterMaterielDepasse(e.target.checked)} className="w-4 h-4" />
-          Budget matériel dépassé
-        </label>
-        <label className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-lg cursor-pointer border transition-colors ${filterHeuresDepasse ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100'}`}>
-          <input type="checkbox" checked={filterHeuresDepasse} onChange={(e) => setFilterHeuresDepasse(e.target.checked)} className="w-4 h-4" />
-          Heures prévues dépassées
-        </label>
-        {filtresActifs && (
-          <button onClick={() => { setFilterMaterielDepasse(false); setFilterHeuresDepasse(false); }} className="text-xs font-semibold text-accent hover:underline ml-auto">
-            Réinitialiser
-          </button>
+      {/* Vue d'ensemble des chantiers en cours, indépendante de la recherche. */}
+      <div className={`grid grid-cols-2 ${margeVisible ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 mb-6`}>
+        <Compteur valeur={tousEnCours.length} libelle="En cours" icone={<Building2 size={18} />}
+          actif={filtre === 'TOUS'} onClick={() => majParametre('filtre', 'TOUS', 'TOUS')} />
+        <Compteur valeur={nbASurveiller} libelle="À surveiller" icone={<AlertTriangle size={18} />} alerte={nbASurveiller > 0}
+          actif={filtre === 'A_SURVEILLER'} onClick={() => majParametre('filtre', 'A_SURVEILLER', 'TOUS')} />
+        {margeVisible && (
+          <Compteur valeur={nbEnPerte} libelle="En perte" icone={<TrendingDown size={18} />} alerte={nbEnPerte > 0}
+            actif={filtre === 'EN_PERTE'} onClick={() => majParametre('filtre', 'EN_PERTE', 'TOUS')} />
         )}
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+          <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600"><CheckCircle2 size={18} /></div>
+          <div>
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Dans le budget</div>
+            <div className="text-2xl font-black text-emerald-600 mt-0.5">{tousEnCours.length - nbASurveiller}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <label className="relative flex-1">
+            <span className="sr-only">Rechercher un chantier</span>
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input
+              type="search"
+              value={recherche}
+              onChange={(e) => majParametre('q', e.target.value, '')}
+              placeholder="Rechercher un chantier, un client, un n° de devis, un responsable…"
+              className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm font-semibold text-gray-500">
+            Trier
+            <select
+              value={tri}
+              onChange={(e) => majParametre('tri', e.target.value, 'PRIORITE')}
+              className="border border-gray-200 rounded-lg px-2 py-2 text-sm font-normal"
+            >
+              {trisProposes.map((t) => <option key={t.valeur} value={t.valeur}>{t.libelle}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtrer les chantiers">
+          {filtresProposes.map((f) => (
+            <button
+              key={f.valeur}
+              type="button"
+              aria-pressed={filtre === f.valeur}
+              onClick={() => majParametre('filtre', f.valeur, 'TOUS')}
+              className={`text-sm font-semibold px-3 py-1.5 rounded-full border transition-colors ${filtre === f.valeur ? 'bg-primary/10 border-primary text-primary-dark' : 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100'}`}
+            >
+              {f.libelle}
+            </button>
+          ))}
+          {filtresActifs && (
+            <button type="button" onClick={reinitialiser} className="flex items-center gap-1 text-xs font-semibold text-accent hover:underline ml-auto">
+              <X size={14} /> Réinitialiser
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1">
-        {renderTable(chantiersEnCours, "Chantiers En Cours", filtresActifs ? "Aucun chantier en cours ne correspond aux filtres." : "Aucun chantier en cours.")}
-        {renderTable(chantiersTermines, "Chantiers Terminés / Archivés", filtresActifs ? "Aucun chantier archivé ne correspond aux filtres." : "Aucun chantier archivé.", true)}
+        {renderTable(chantiersEnCours, "Chantiers En Cours", filtresActifs ? "Aucun chantier en cours ne correspond à la recherche." : "Aucun chantier en cours.")}
+        {renderTable(chantiersTermines, "Chantiers Terminés / Archivés", filtresActifs ? "Aucun chantier archivé ne correspond à la recherche." : "Aucun chantier archivé.", true)}
       </div>
 
     </div>
