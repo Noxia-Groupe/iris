@@ -3531,7 +3531,11 @@ app.put('/api/users/:id/permissions', requireAuth, requireSuperAdmin, async (req
     if (!permissions || permissions.some((permission) => !(API_SCOPES as readonly string[]).includes(permission))) {
       return void res.status(400).json({ error: 'Liste de permissions invalide.' });
     }
-    const interdites = target.role === ROLE_TECHNICIEN ? permissions.filter((permission) => DROITS_INTERDITS_TECHNICIEN.includes(permission)) : [];
+    // Un technicien n'en reçoit aucun nouveau ; ceux enregistrés avant (règle, changement de
+    // type) restent sans effet et peuvent être conservés ou retirés, comme l'accès financier.
+    const interdites = target.role === ROLE_TECHNICIEN
+      ? permissions.filter((permission) => DROITS_INTERDITS_TECHNICIEN.includes(permission) && !target.permissions.includes(permission))
+      : [];
     if (interdites.length) {
       return void res.status(400).json({ error: `Ces droits ne s’accordent pas à un compte technicien : ${interdites.join(', ')}.` });
     }

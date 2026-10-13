@@ -2051,6 +2051,15 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await request(app).get('/api/devis').set(authTechnicien)).status, 403);
         const compte = (await request(app).get('/api/users').set(auth)).body.find((u) => u.id === technicien.id);
         assert.deepEqual(compte.permissions, ['chantiers:read']);
+        // Ces droits enregistrés se conservent ou se retirent, sans qu'aucun ne s'y ajoute.
+        const ajout = await request(app).put(`/api/users/${technicien.id}/permissions`).set(auth).send({ permissions: ['devis:read', 'chantiers:write', 'chantiers:archive'] });
+        assert.equal(ajout.status, 400, JSON.stringify(ajout.body));
+        assert.match(ajout.body.error, /chantiers:archive/);
+        assert.doesNotMatch(ajout.body.error, /devis:read|chantiers:write/);
+        const retrait = await request(app).put(`/api/users/${technicien.id}/permissions`).set(auth).send({ permissions: ['devis:read', 'clients:read'] });
+        assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+        assert.deepEqual((await prisma.user.findUnique({ where: { id: technicien.id } })).permissions, ['devis:read', 'clients:read']);
+        assert.equal((await request(app).get('/api/devis').set(authTechnicien)).status, 403, 'toujours sans effet');
         // Ni à la création d'un technicien…
         const creation = await request(app).post('/api/users').set(auth).send({ email: 'budgets.finance.technicien@iris.test', name: 'TEST Budgets finance technicien', role: 'TECHNICIEN', accesFinance: true });
         assert.equal(creation.status, 400, JSON.stringify(creation.body));

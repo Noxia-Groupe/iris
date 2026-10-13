@@ -124,6 +124,9 @@ const MESSAGE_COMPTE_SUPERADMIN = "Seul un super administrateur peut gérer un c
 const DROITS_DEVIS = ['devis:read', 'devis:write', 'clients:read'];
 const DROIT_TRAVAUX_CORRECTION = 'chantiers:write';
 const DROIT_TRAVAUX_ARCHIVAGE = 'chantiers:archive';
+// Droits individuels qu'un technicien ne reçoit pas (miroir du serveur ; l'accès financier, lui,
+// est porté par accesFinance).
+const DROITS_INTERDITS_TECHNICIEN = ['devis:read', 'devis:write', DROIT_TRAVAUX_CORRECTION, DROIT_TRAVAUX_ARCHIVAGE];
 
 const Admin = () => {
   // Le fuseau enregistré ici sert aux dates de toute l'application : il est relu aussitôt.
@@ -1297,8 +1300,19 @@ const Admin = () => {
                   const responsableActuel = u.responsableHierarchique as { id: string; name: string } | null;
                   // Un technicien ne modifie aucune affaire et ne voit aucun montant : ni devis, ni
                   // saisie ou archivage Travaux, ni accès financier (refusés aussi par le serveur).
+                  // Ceux enregistrés avant (règle, changement de type) restent affichés « Sans
+                  // effet » : ils reprennent effet s'il change de type, et peuvent seulement être retirés.
                   const estTechnicien = u.role === ROLE_TECHNICIEN;
+                  const individuels = u.permissionsIndividuelles || [];
+                  const sansEffet = (droits: string[]) => estTechnicien && droits.some((droit) => DROITS_INTERDITS_TECHNICIEN.includes(droit) && individuels.includes(droit));
+                  const devisSansEffet = sansEffet(DROITS_DEVIS);
+                  const correctionSansEffet = sansEffet([DROIT_TRAVAUX_CORRECTION]);
+                  const archivageSansEffet = sansEffet([DROIT_TRAVAUX_ARCHIVAGE]);
                   const MESSAGE_TECHNICIEN = 'Ce droit ne s’accorde pas à un compte technicien.';
+                  const titreTechnicien = (enregistre: boolean) => enregistre
+                    ? `Enregistré, sans effet pour un compte technicien ; il reprend effet si le compte change de type.${isSuper ? ' Décocher pour le retirer.' : ''}`
+                    : MESSAGE_TECHNICIEN;
+                  const retirer = (droits: string[]) => handleTogglePermission(u.id, individuels, droits.filter((droit) => individuels.includes(droit)));
                   return (
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
@@ -1378,7 +1392,7 @@ const Admin = () => {
                             onChange={() => handleToggleAccesFinance(u.id, !!u.accesFinance)}
                             className="w-4 h-4"
                             title={estTechnicien
-                              ? MESSAGE_TECHNICIEN
+                              ? titreTechnicien(!!u.accesFinance)
                               : isSuper
                                 ? 'Autoriser ce compte à consulter le Suivi financier'
                                 : "Seul un super administrateur peut accorder l'accès au suivi financier."}
@@ -1389,15 +1403,17 @@ const Admin = () => {
                     </td>
                     <td className="px-4 py-4">
                       <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <input type="checkbox" checked={aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole || estTechnicien} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROITS_DEVIS)} className="w-4 h-4" title={estTechnicien ? MESSAGE_TECHNICIEN : droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
-                        <span className="text-xs text-gray-500">Droit devis</span>
+                        <input type="checkbox" checked={estTechnicien ? devisSansEffet : aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole || (estTechnicien && !devisSansEffet)} onChange={() => (estTechnicien ? retirer(DROITS_DEVIS) : handleTogglePermission(u.id, individuels, DROITS_DEVIS))} className="w-4 h-4" title={estTechnicien ? titreTechnicien(devisSansEffet) : droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
+                        <span className="text-xs text-gray-500">{devisSansEffet ? 'Sans effet' : 'Droit devis'}</span>
                       </label>
                     </td>
                     <td className="px-4 py-4">
-                      <input type="checkbox" checked={peutCorrigerTravaux} disabled={!isSuper || correctionVientDuRole || estTechnicien} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROIT_TRAVAUX_CORRECTION)} className="w-4 h-4" title={estTechnicien ? MESSAGE_TECHNICIEN : correctionVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la saisie et la correction Travaux'} />
+                      <input type="checkbox" checked={estTechnicien ? correctionSansEffet : peutCorrigerTravaux} disabled={!isSuper || correctionVientDuRole || (estTechnicien && !correctionSansEffet)} onChange={() => (estTechnicien ? retirer([DROIT_TRAVAUX_CORRECTION]) : handleTogglePermission(u.id, individuels, DROIT_TRAVAUX_CORRECTION))} className="w-4 h-4" title={estTechnicien ? titreTechnicien(correctionSansEffet) : correctionVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la saisie et la correction Travaux'} />
+                      {correctionSansEffet && <span className="ml-2 text-xs text-gray-500">Sans effet</span>}
                     </td>
                     <td className="px-4 py-4">
-                      <input type="checkbox" checked={peutArchiverTravaux} disabled={!isSuper || archivageVientDuRole || estTechnicien} onChange={() => handleTogglePermission(u.id, u.permissionsIndividuelles || [], DROIT_TRAVAUX_ARCHIVAGE)} className="w-4 h-4" title={estTechnicien ? MESSAGE_TECHNICIEN : archivageVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser l’archivage des écritures Travaux'} />
+                      <input type="checkbox" checked={estTechnicien ? archivageSansEffet : peutArchiverTravaux} disabled={!isSuper || archivageVientDuRole || (estTechnicien && !archivageSansEffet)} onChange={() => (estTechnicien ? retirer([DROIT_TRAVAUX_ARCHIVAGE]) : handleTogglePermission(u.id, individuels, DROIT_TRAVAUX_ARCHIVAGE))} className="w-4 h-4" title={estTechnicien ? titreTechnicien(archivageSansEffet) : archivageVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser l’archivage des écritures Travaux'} />
+                      {archivageSansEffet && <span className="ml-2 text-xs text-gray-500">Sans effet</span>}
                     </td>
                     {/* Compte actif : décocher vaut départ de l'entreprise. La connexion est
                         refusée et le compte sort des listes d'attribution, mais son
