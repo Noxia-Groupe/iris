@@ -1023,8 +1023,8 @@ const Admin = () => {
                 <p className="text-xs text-gray-500 m-0">
                   Montant vendu global, marge du jour, marge estimée, alertes « en perte » ou « marge faible » et
                   facturation de la fiche. Les administrateurs les voient toujours. Les budgets par poste (matériel,
-                  main-d’œuvre, heures) restent affichés pour suivre les dépassements, sauf les budgets matériel et
-                  main-d’œuvre pour les techniciens : ils permettent d’en déduire le vendu, donc la marge du jour.
+                  main-d’œuvre, heures) restent affichés pour suivre les dépassements : ils permettent d’en déduire le vendu,
+                  donc la marge du jour. Exception : les techniciens ne voient pas les budgets matériel et main-d’œuvre.
                 </p>
                 <label className="flex items-center gap-2 cursor-pointer w-fit">
                   <input type="checkbox" name="rentabiliteConducteur" defaultChecked={parametres?.rentabiliteConducteur ?? true} className="w-4 h-4" />
