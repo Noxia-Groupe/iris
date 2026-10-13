@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback, type MutableRefObject } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type RefObject } from 'react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN } from '../roles';
@@ -129,8 +129,8 @@ type CompteResume = { id: string; name: string };
 //
 // Une liste peut s'ouvrir sans recevoir le focus (toucher en faisant défiler le tableau, aide
 // technique) : elle ne recevrait alors jamais de blur. La dernière liste ouverte sans focus est
-// donc refermée dès qu'une autre s'ouvre ou qu'un défilement tactile commence. Une liste qui a le
-// focus n'est jamais refermée par une autre : au plus deux listes sont construites à la fois.
+// donc refermée dès qu'une autre s'ouvre ou qu'un défilement tactile commence sur elle. Une liste
+// qui a le focus n'est jamais refermée par une autre : au plus deux listes sont construites à la fois.
 function ChoixResponsable({ compte, responsableActuel, responsableDesactive, desactive, titre, proposables, onChoix, derniereOuverte }: {
   compte: CompteResume;
   responsableActuel: CompteResume | null;
@@ -139,7 +139,7 @@ function ChoixResponsable({ compte, responsableActuel, responsableDesactive, des
   titre: string;
   proposables: (compteId: string) => CompteResume[];
   onChoix: (compteId: string, responsableId: string) => void;
-  derniereOuverte: MutableRefObject<(() => void) | null>;
+  derniereOuverte: RefObject<(() => void) | null>;
 }) {
   const [ouverte, setOuverte] = useState(false);
   const liste = useRef<HTMLSelectElement>(null);

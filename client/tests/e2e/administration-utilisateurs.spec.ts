@@ -61,11 +61,15 @@ test('Administration > Utilisateurs : listes de responsables construites à la d
     await expect(liste(premier)).toHaveValue(second.id);
 
     // Toucher des listes sans leur donner le focus (défilement tactile, aide technique) : seule la
-    // dernière touchée reste construite, et un défilement tactile la referme.
+    // dernière touchée reste construite, et un défilement tactile commencé sur elle la referme.
     await admin.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    for (let i = 0; i < 10; i++) await listes.nth(i).dispatchEvent('touchstart');
-    expect(await listesConstruites()).toBeLessThanOrEqual(1);
-    await listes.nth(9).dispatchEvent('touchmove');
+    for (const compte of [premier, second, ancien, clavier, troisieme]) await liste(compte).dispatchEvent('touchstart');
+    expect(await listesConstruites()).toBe(1);
+    await expect(liste(troisieme).locator('option', { hasText: clavier.name })).toHaveCount(1);
+    await liste(troisieme).dispatchEvent('touchmove');
+    expect(await listesConstruites()).toBe(0);
+    await liste(troisieme).dispatchEvent('touchstart');
+    await liste(troisieme).dispatchEvent('touchcancel');
     expect(await listesConstruites()).toBe(0);
     // Une liste qui a le focus n'est jamais refermée par une autre que l'on touche.
     await liste(premier).focus();

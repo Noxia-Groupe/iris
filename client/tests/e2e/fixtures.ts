@@ -90,6 +90,11 @@ export const test = base.extend<Outils>({
   session: async ({ request }, fournir) => {
     const session = await ouvrirSession(request);
     await preparerFacturation(request, session.token);
+    // Base vierge : une première lecture crée les réglages uniques (paramètres, société) avant
+    // les requêtes simultanées du premier écran. Leur création concurrente échoue encore parfois
+    // côté serveur (violation d'unicité sur le singleton), ce qui fait planter l'administration
+    // au premier chargement : défaut préexistant, signalé pour un lot séparé.
+    expect((await request.get(`${api}/chantiers`, { headers: headers(session.token) })).ok()).toBeTruthy();
     await fournir(session);
   },
   allerSurPageAdmin: async ({ page, session }, fournir) => {
