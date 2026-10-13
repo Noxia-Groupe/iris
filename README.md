@@ -60,6 +60,26 @@ les montants vendus et la marge.
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.
 
+Chaque chantier porte des alertes de suivi calculées par le serveur (`metrics.alertes`) :
+
+- `HEURES_DEPASSEES`, `MAIN_OEUVRE_DEPASSEE`, `MATERIEL_DEPASSE` : le réel dépasse ce qui a
+  été vendu ;
+- `SANS_SAISIE` : chantier en cours sans achat ni heure depuis le délai réglé dans
+  **Administration > Marges** (14 jours par défaut, champ vide = alerte désactivée) ;
+- `EN_PERTE` : dépenses réelles supérieures au montant vendu ;
+- `MARGE_FAIBLE` : marge **estimée en fin de chantier** négative, ou sous le seuil réglé
+  dans **Administration > Marges** (15 % par défaut, champ vide = seuil désactivé).
+
+La marge estimée (`metrics.margeEstimee`, hypothèses dans `metrics.estimation`) compte,
+pour chaque poste, le plus élevé du réel déjà dépensé et du coût attendu : heures vendues
+au coût horaire moyen réellement appliqué sur le chantier (à défaut celui de la société,
+à défaut le budget main-d'œuvre vendu) ; matériel vendu multiplié par le ratio achats /
+matériel vendu observé sur les chantiers terminés (à défaut, au prix de vente). Un
+chantier terminé est estimé à son réel. `EN_PERTE`, `MARGE_FAIBLE` et l'estimation suivent
+la visibilité de la marge : ils ne sont jamais envoyés à un rôle ou une clé à qui la marge
+est masquée. La liste des chantiers et le tableau de bord s'en servent pour mettre les
+affaires à surveiller en tête.
+
 ## Cycle de vie d'une affaire
 
 Une affaire n'existe que par un devis. La conversion d'un devis accepté crée le chantier

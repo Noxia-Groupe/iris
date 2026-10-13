@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award, AlertTriangle } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ChevronRight, Building2, CheckCircle2, TrendingUp, Wallet, Clock3, ShoppingCart, Award, AlertTriangle, FileText } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { SectionRepliable } from '../components/SectionRepliable';
-import { isAdminRole, roleLabel } from '../roles';
+import { AlertesChantier } from '../components/AlertesChantier';
+import { isAdminRole, peutAccederAuxDevis, roleLabel, useCurrentUser } from '../roles';
+import { estASurveiller, trierChantiers } from '../lib/suiviChantiers';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
 
@@ -20,6 +22,7 @@ const Dashboard = () => {
   // Commerciaux). Les listes de chantiers ci-dessous ne suivent pas ce choix.
   const [period, setPeriod] = useState<Period>('month');
   const navigate = useNavigate();
+  const utilisateur = useCurrentUser();
 
   // Rôle réel
   const userStr = localStorage.getItem('user');
@@ -66,6 +69,18 @@ const Dashboard = () => {
   const enCours = chantiers
     .filter(c => c.statut === 'EN_COURS')
     .sort((a, b) => (b.metrics?.pctHeures ?? 0) - (a.metrics?.pctHeures ?? 0));
+  // Dérives signalées par le serveur (dépassements, perte si la marge est visible) : les
+  // cinq premières dans l'ordre où il faut les regarder, la suite sur la liste filtrée.
+  const aSurveiller = trierChantiers(enCours.filter(estASurveiller), 'PRIORITE');
+  const NB_A_SURVEILLER_AFFICHES = 5;
+  // Rentabilité du portefeuille en cours : la marge estimée n'arrive que pour qui voit la
+  // marge (serveur), l'encart n'existe donc que pour ces profils.
+  const portefeuille = enCours.filter(c => c.metrics?.margeEstimee != null);
+  const venduEnCours = portefeuille.reduce((s, c) => s + (c.budgetGlobalVendu ?? 0), 0);
+  const depenseEnCours = portefeuille.reduce((s, c) => s + (c.metrics?.totalDepenses ?? 0), 0);
+  const margeEstimeeEnCours = portefeuille.reduce((s, c) => s + c.metrics.margeEstimee, 0);
+  const margeEstimeeEnCoursPct = venduEnCours > 0 ? (margeEstimeeEnCours / venduEnCours) * 100 : 0;
+  const euros = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} €`;
 
   // Un chantier archivé n'a pas toujours de date de fin renseignée : on retombe
   // sur sa dernière modification (le passage au statut archivé la met à jour).
@@ -229,10 +244,88 @@ const Dashboard = () => {
         <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
           <div className="text-6xl mb-4">🏗️</div>
           <h2 className="text-2xl font-bold text-gray-700 mb-2">Aucun chantier</h2>
-          <p className="text-muted max-w-md">Créez votre premier chantier depuis la liste des chantiers ou l'administration.</p>
+          {/* Un chantier n'a pas d'autre porte d'entrée que la conversion d'un devis accepté. */}
+          <p className="text-muted max-w-md">Un chantier s'ouvre en convertissant un devis accepté par le client.</p>
+          {peutAccederAuxDevis(utilisateur) && (
+            <Link to="/devis" className="btn btn-primary flex items-center gap-2 no-underline mt-6">
+              <FileText size={16} /> Aller aux devis
+            </Link>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-6">
+
+          {portefeuille.length > 0 && (
+            <section aria-label="Rentabilité des chantiers en cours" className="bg-white rounded-2xl shadow-md border border-gray-100 p-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+                <h2 className="text-lg font-bold text-primary-dark m-0 flex items-center gap-2"><TrendingUp size={18} className="text-accent" /> Rentabilité des chantiers en cours</h2>
+                <span className="text-xs text-gray-400">{portefeuille.length} chantier{portefeuille.length > 1 ? 's' : ''} · estimation : réel engagé + reste à faire au coût attendu</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Vendu</div>
+                  <div className="text-2xl font-black text-primary-dark mt-0.5">{euros(venduEnCours)}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Dépensé à ce jour</div>
+                  <div className="text-2xl font-black text-orange-600 mt-0.5">{euros(depenseEnCours)}</div>
+                  <div className="mt-1.5"><ProgressMeter value={depenseEnCours} max={venduEnCours || 1} color="orange" size="sm" /></div>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge estimée en fin de chantier</div>
+                  <div className={`text-2xl font-black mt-0.5 ${margeEstimeeEnCours >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-marge-portefeuille>
+                    {euros(margeEstimeeEnCours)}
+                  </div>
+                  <div className={`text-xs font-semibold ${margeEstimeeEnCours >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {margeEstimeeEnCoursPct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % du vendu
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* À surveiller : les chantiers en cours dont le réel dépasse le vendu, sans saisie
+              récente, ou — pour qui voit la marge — en perte ou à marge estimée faible. Le
+              bloc reste affiché quand tout va bien : c'est aussi une information. */}
+          {enCours.length > 0 && (
+            <section aria-label="Chantiers à surveiller" className={`bg-white rounded-2xl shadow-md border overflow-hidden ${aSurveiller.length > 0 ? 'border-red-200' : 'border-gray-100'}`}>
+              <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  {aSurveiller.length > 0
+                    ? <AlertTriangle size={18} className="text-red-600" />
+                    : <CheckCircle2 size={18} className="text-emerald-600" />}
+                  <h2 className="text-lg font-bold text-primary-dark m-0">À surveiller</h2>
+                </div>
+                {aSurveiller.length > 0 && (
+                  <Link to="/chantiers?filtre=A_SURVEILLER" className="text-xs font-bold text-accent hover:underline no-underline">
+                    {aSurveiller.length > NB_A_SURVEILLER_AFFICHES ? `Voir les ${aSurveiller.length} chantiers` : 'Ouvrir dans la liste'}
+                  </Link>
+                )}
+              </div>
+              {aSurveiller.length === 0 ? (
+                <div className="px-6 py-5 text-sm font-semibold text-emerald-700">
+                  Aucune alerte : vos chantiers en cours restent dans le vendu et sont saisis régulièrement.
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {aSurveiller.slice(0, NB_A_SURVEILLER_AFFICHES).map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => navigate(`/chantiers/${c.id}`)}
+                      className="w-full flex items-center gap-4 px-6 py-3.5 hover:bg-gray-50 transition-colors text-left group"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-gray-800 truncate group-hover:text-accent transition-colors">{c.nom}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{c.client}{c.responsable?.name ? ` · Resp. : ${c.responsable.name}` : ''}</div>
+                        <div className="mt-1.5"><AlertesChantier chantier={c} /></div>
+                      </div>
+                      <ChevronRight size={20} className="text-gray-300 group-hover:text-accent transition-colors shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Chantiers en cours — classés du plus avancé au moins avancé */}
           <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
@@ -263,6 +356,7 @@ const Dashboard = () => {
                           <span>Devis: {c.numeroDevis || 'N/A'}</span>
                           {c.responsable?.name && <span>Resp: {c.responsable.name}</span>}
                         </div>
+                        <div className="mt-1.5 empty:hidden"><AlertesChantier chantier={c} /></div>
                       </div>
 
                       <div className="hidden sm:flex flex-col items-end w-40 shrink-0">
