@@ -381,6 +381,15 @@ const CHANTIER_LITE_SELECT = { id: true, nom: true, client: true, statut: true }
 // Même principe pour l'affaire rattachée à une intervention SAV, que voient le technicien
 // affecté et toute la chaîne de son responsable : de quoi la nommer, jamais son montant vendu.
 const CHANTIER_INTERVENTION_SELECT = { select: { id: true, nom: true, numeroDevis: true, client: true, statut: true, adresse: true } } as const;
+// Les instantanés plus anciens du journal SAV portent l'affaire complète, montant vendu
+// compris : à la lecture, elle est ramenée aux mêmes champs, sans réécrire le journal.
+function chantierDuJournalReduit(instantane: Prisma.JsonValue | null): Prisma.JsonValue | null {
+  if (!instantane || typeof instantane !== 'object' || Array.isArray(instantane)) return instantane;
+  const chantier = (instantane as Prisma.JsonObject).chantier;
+  if (!chantier || typeof chantier !== 'object' || Array.isArray(chantier)) return instantane;
+  const reduit = Object.fromEntries(Object.keys(CHANTIER_INTERVENTION_SELECT.select).filter((cle) => cle in chantier).map((cle) => [cle, (chantier as Prisma.JsonObject)[cle]]));
+  return { ...(instantane as Prisma.JsonObject), chantier: reduit };
+}
 
 // Rentabilité d'un chantier — montant vendu, marge du jour, marge estimée, alertes « en
 // perte » et « marge faible » : elle ne sort que pour ses destinataires, décidés chantier par
@@ -864,7 +873,8 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
 }
 
 // Sérialise un chantier pour le client en masquant les données commerciales à qui n'en
-// est pas destinataire (cf. canSeeMarge ci-dessus).
+// est pas destinataire (cf. canSeeMarge ci-dessus). Seul le montant vendu global est masqué :
+// les budgets par poste restent envoyés pour le suivi des dépassements, et en donnent la somme.
 function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi) {
   const c = decimalToNumber(chantier);
   return {
@@ -2442,7 +2452,7 @@ app.get('/api/interventions/:id/journal-saisies', requireAuth, blockCommercial, 
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
     if (req.user!.role === ROLE_TECHNICIEN) return res.status(403).json({ error: 'Le journal financier est réservé à l’encadrement.' });
     const entrees = await prisma.journalSaisieChantier.findMany({ where: { interventionId: intervention.id }, orderBy: { createdAt: 'desc' } });
-    res.json(decimalToNumber(entrees));
+    res.json(decimalToNumber(entrees.map((entree) => ({ ...entree, avant: chantierDuJournalReduit(entree.avant), apres: chantierDuJournalReduit(entree.apres) }))));
   } catch (error) {
     console.error('Erreur journal intervention SAV', error);
     res.status(500).json({ error: 'Erreur lors de la lecture du journal de l’intervention.' });
@@ -5534,7 +5544,12 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
     // Comme les autres réglages, un champ absent garde sa valeur : un appel qui ne règle que
     // les destinataires ne doit pas désactiver la marge commerciale au passage.
     const data: Record<string, unknown> = {};
-    if ('margeCommercialeActive' in req.body) data.margeCommercialeActive = !!req.body.margeCommercialeActive;
+    if ('margeCommercialeActive' in req.body) {
+      if (typeof req.body.margeCommercialeActive !== 'boolean') {
+        return res.status(400).json({ error: 'L’activation de la marge commerciale se règle par oui ou non.' });
+      }
+      data.margeCommercialeActive = req.body.margeCommercialeActive;
+    }
     // Politique d'acompte de la société : jamais en dur dans le code, éditable ici.
     // Ne s'applique qu'aux devis émis ensuite (cf. Devis.tauxAcompte, figé à l'émission).
     if ('tauxAcompteDefaut' in req.body) {

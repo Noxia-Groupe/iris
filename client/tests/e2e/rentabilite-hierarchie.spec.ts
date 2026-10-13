@@ -27,6 +27,25 @@ async function pageDe(browser: Browser, compte: Compte) {
 // Parcours de Nelson : la perte d'un chantier doit atteindre le conducteur, toute sa chaîne
 // hiérarchique et la direction, et chaque société doit pouvoir retirer une catégorie.
 test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () => {
+  // Réglages relus avant le parcours et restaurés après lui, même s'il dépasse son délai :
+  // un afterEach s'exécute avec son propre budget de temps, là où le finally d'un test
+  // interrompu peut ne jamais atteindre la restauration et laisser la base partagée décochée.
+  let reglagesAvant: Record<string, unknown> | null = null;
+  test.beforeEach(async ({ apiAdmin }) => {
+    reglagesAvant = await (await apiAdmin.get('/parametres')).json() as Record<string, unknown>;
+  });
+  test.afterEach(async ({ request, session }) => {
+    if (!reglagesAvant) return;
+    const restauration = await request.put(`${api}/parametres`, { headers: { Authorization: `Bearer ${session.token}` }, data: {
+      margeCommercialeActive: reglagesAvant.margeCommercialeActive,
+      rentabiliteConducteur: reglagesAvant.rentabiliteConducteur ?? true,
+      rentabiliteHierarchie: reglagesAvant.rentabiliteHierarchie ?? true,
+      rentabiliteDirecteurs: reglagesAvant.rentabiliteDirecteurs ?? true,
+    } });
+    expect(restauration.ok(), await restauration.text()).toBeTruthy();
+    reglagesAvant = null;
+  });
+
   test('la perte d’un chantier remonte toute la chaîne et au directeur, selon les destinataires réglés', async ({ allerSurPageAdmin, creerClient, request, session, browser }) => {
     const headers = { Authorization: `Bearer ${session.token}` };
     const envoyer = async (methode: 'post' | 'patch' | 'put', path: string, data: object) => {
@@ -43,7 +62,6 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
     const directeur = await creerCompte('directeur', 'Directeur chaîne', 'DIRECTEUR');
     // Commercial rattaché : le formulaire « Modifier » de la fiche l'exige dès qu'il en existe un.
     const commercial = await creerCompte('commercial', 'Commercial chaîne', 'COMMERCIAL');
-    const avant = await (await request.get(`${api}/parametres`, { headers })).json() as Record<string, unknown>;
 
     // 100 € de fourniture et 2 h de pose à 50 € : 200 € vendus ; 250 € d'achats → perte de 50 €.
     const client = await creerClient('rentabilite-hierarchie', false);
@@ -149,15 +167,10 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       expect(relu.nom).toBe(`${chantier.nom} corrigé`);
       expect(relu.budgetGlobalVendu).toBe(200);
     } finally {
-      for (const contexte of contextes) await contexte.close();
-      // Chantier clôturé et réglages d'origine : la base partagée reste lisible pour la suite.
-      await request.patch(`${api}/chantiers/${chantier.id}/statut`, { headers, data: { statut: 'TERMINE' } });
-      await request.put(`${api}/parametres`, { headers, data: {
-        margeCommercialeActive: avant.margeCommercialeActive,
-        rentabiliteConducteur: avant.rentabiliteConducteur ?? true,
-        rentabiliteHierarchie: avant.rentabiliteHierarchie ?? true,
-        rentabiliteDirecteurs: avant.rentabiliteDirecteurs ?? true,
-      } });
+      // Chantier clôturé : la base partagée reste lisible pour la suite. Les réglages, eux,
+      // sont restaurés par l'afterEach.
+      await request.patch(`${api}/chantiers/${chantier.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
+      for (const contexte of contextes) await contexte.close().catch(() => undefined);
     }
   });
 });

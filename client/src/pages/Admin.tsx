@@ -1019,8 +1019,9 @@ const Admin = () => {
               <fieldset className="border border-gray-100 rounded-lg p-4 space-y-2">
                 <legend className="text-sm font-bold text-gray-700 px-1">Qui suit la rentabilité des chantiers&nbsp;?</legend>
                 <p className="text-xs text-gray-500 m-0">
-                  Montant vendu, marge du jour, marge estimée, alertes « en perte » ou « marge faible » et facturation
-                  de la fiche. Les administrateurs les voient toujours.
+                  Montant vendu global, marge du jour, marge estimée, alertes « en perte » ou « marge faible » et
+                  facturation de la fiche. Les administrateurs les voient toujours. Les budgets par poste (matériel,
+                  main-d’œuvre, heures) restent affichés pour suivre les dépassements : ils permettent d’en déduire le vendu.
                 </p>
                 <label className="flex items-center gap-2 cursor-pointer w-fit">
                   <input type="checkbox" name="rentabiliteConducteur" defaultChecked={parametres?.rentabiliteConducteur ?? true} className="w-4 h-4" />

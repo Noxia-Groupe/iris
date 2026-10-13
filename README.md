@@ -63,7 +63,9 @@ La **rentabilité** d'un chantier (montant vendu, marge du jour, marge estimée,
 voient toujours ; les autres destinataires, actifs par défaut, se retirent un par un dans
 **Administration > Marges** pour s'adapter à l'organisation : le conducteur du chantier, ses
 responsables hiérarchiques à tous les niveaux (comptes Responsable), les directeurs. La
-chaîne hiérarchique se règle compte par compte dans **Administration > Utilisateurs**.
+chaîne hiérarchique se règle compte par compte dans **Administration > Utilisateurs**. Les
+budgets par poste (matériel, main-d'œuvre, heures) restent visibles de tous ceux qui voient
+le chantier, pour suivre les dépassements : ils permettent d'en déduire le vendu.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.

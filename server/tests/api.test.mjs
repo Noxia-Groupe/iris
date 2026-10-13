@@ -219,7 +219,7 @@ if (!TEST_DATABASE_URL) {
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
-      'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test',
+      'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1290,9 +1290,17 @@ if (!TEST_DATABASE_URL) {
         assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1000);
         const vueAdmin = await request(app).patch(`/api/chantiers/${derive.id}`).set(auth).send({ nom: 'TEST Rentabilité dérive' });
         assert.equal(Number(vueAdmin.body.budgetGlobalVendu), 1000, 'l’administrateur reçoit toujours le vendu');
+        // L'administrateur, lui, corrige toujours le vendu.
+        const correctionAdmin = await request(app).patch(`/api/chantiers/${derive.id}`).set(auth).send({ budgetGlobalVendu: 1500 });
+        assert.equal(correctionAdmin.status, 200, JSON.stringify(correctionAdmin.body));
+        assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1500);
       } finally {
         const retour = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true, rentabiliteConducteur: true });
         assert.equal(retour.status, 200, JSON.stringify(retour.body));
+        // Redevenu destinataire, le conducteur corrige de nouveau le vendu de son chantier.
+        const correctionConducteur = await request(app).patch(`/api/chantiers/${derive.id}`).set(authConducteur).send({ budgetGlobalVendu: 1000 });
+        assert.equal(correctionConducteur.status, 200, JSON.stringify(correctionConducteur.body));
+        assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1000);
       }
     });
 
@@ -1712,6 +1720,11 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await reglages({ rentabiliteHierarchie: true, rentabiliteDirecteurs: false })).status, 200);
         await voitLaPerte('directeur', false);
         await voitLaPerte('regional', true);
+        // Marge commerciale désactivée : plus de CA ni de marge pour la branche, même cochée.
+        assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: false })).status, 200);
+        const sansMarge = (await request(app).get('/api/stats/conducteurs').set(entete('regional'))).body.find((l) => l.id === comptes.conducteur.id);
+        assert.deepEqual([sansMarge.caTotal, sansMarge.margeTotal, sansMarge.margePct], [null, null, null]);
+        assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: 'false' })).status, 400, 'un vrai booléen est exigé');
         // Tout retiré : seuls les administrateurs la voient encore.
         assert.equal((await reglages({ rentabiliteConducteur: false, rentabiliteHierarchie: false, rentabiliteDirecteurs: false })).status, 200);
         for (const qui of ['conducteur', 'secteur', 'regional', 'directeur']) await voitLaPerte(qui, false);
@@ -1723,6 +1736,37 @@ if (!TEST_DATABASE_URL) {
       } finally {
         assert.equal((await reglages({ rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true })).status, 200);
       }
+    });
+
+    test('un commercial ou un technicien désigné responsable d’un chantier n’en reçoit jamais la rentabilité', async () => {
+      for (const [qui, role] of [['commercial', 'COMMERCIAL'], ['technicien', 'TECHNICIEN']]) {
+        const compte = await prisma.user.create({ data: { email: `chaine.${qui}@iris.test`, name: `TEST Chaîne ${qui}`, role } });
+        const sien = await prisma.chantier.create({ data: { nom: `TEST Chaîne chantier du ${qui}`, client: 'TEST Client chaîne', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300, responsableId: compte.id } });
+        const fiche = await request(app).get(`/api/chantiers/${sien.id}`).set({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+        assert.equal(fiche.status, 200, `${qui} : ${JSON.stringify(fiche.body)}`);
+        assert.equal(fiche.body.budgetGlobalVendu, null, qui);
+        assert.equal(fiche.body.metrics.margeCommerciale, null, qui);
+        assert.equal(fiche.body.metrics.estimation, null, qui);
+      }
+    });
+
+    test('le journal d’une intervention ne restitue pas le montant vendu d’un ancien instantané', async () => {
+      const dossier = await prisma.intervention.findFirst({ where: { chantierId: chantier.id }, select: { id: true } });
+      assert.ok(dossier, 'intervention créée par le test précédent');
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
+      // Instantané au format antérieur : l'affaire entière, montant vendu compris.
+      await prisma.journalSaisieChantier.create({ data: {
+        chantierId: null, interventionId: dossier.id, cible: 'INTERVENTION', cibleId: dossier.id, action: 'CREATION',
+        auteurId: auteur.id, auteurNom: auteur.name,
+        apres: { id: dossier.id, chantier: { id: chantier.id, nom: 'TEST Chaîne chantier', budgetGlobalVendu: 1000, budgetMaterielVendu: 300 } },
+      } });
+      const journal = await request(app).get(`/api/interventions/${dossier.id}/journal-saisies`).set(entete('regional'));
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.ok(journal.body.length > 0);
+      for (const entree of journal.body) {
+        assert.equal(JSON.stringify(entree).includes('budgetGlobalVendu'), false, JSON.stringify(entree));
+      }
+      assert.ok(journal.body.some((entree) => entree.apres?.chantier?.nom === 'TEST Chaîne chantier'), 'l’affaire reste identifiée');
     });
 
     test('deux rattachements croisés simultanés ne forment jamais de boucle', async () => {
