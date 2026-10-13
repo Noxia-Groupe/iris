@@ -145,6 +145,7 @@ const Admin = () => {
   const [categories, setCategories] = useState<any[]>([]);
   const [remuneration, setRemuneration] = useState<any>(null);
   const [erreurRemuneration, setErreurRemuneration] = useState('');
+  const [erreurListe, setErreurListe] = useState('');
   const [messageRemuneration, setMessageRemuneration] = useState('');
   // Commerciaux rattachables à un chantier. Volontairement chargés depuis /commerciaux et
   // non déduits de la liste des comptes : celle-ci ne montre pas les super administrateurs
@@ -186,13 +187,20 @@ const Admin = () => {
     };
 
     try {
+      setErreurListe('');
       if (endpoints[activeTab]) {
         const res = await apiFetch(endpoints[activeTab]);
-        const data = await res.json();
-        if (activeTab === 'intervenants') setIntervenants(data);
-        else if (activeTab === 'fournisseurs') setFournisseurs(data);
-        else if (activeTab === 'categories') setCategories(data);
-        else setChantiers(data);
+        // Une liste qui ne se charge pas ne remplace pas la précédente : l'écran reste
+        // utilisable et le signale, au lieu de planter sur la réponse d'erreur.
+        if (!res.ok) {
+          setErreurListe('Cette liste n’a pas pu être chargée. Rechargez la page pour réessayer.');
+        } else {
+          const data = await res.json();
+          if (activeTab === 'intervenants') setIntervenants(data);
+          else if (activeTab === 'fournisseurs') setFournisseurs(data);
+          else if (activeTab === 'categories') setCategories(data);
+          else setChantiers(data);
+        }
       }
 
       // La liste des comptes est réservée aux administrateurs (403 pour un conducteur) :
@@ -585,6 +593,10 @@ const Admin = () => {
           </>
         )}
       </div>
+
+      {erreurListe && (
+        <div role="alert" className="mb-4 p-4 bg-red-50 text-red-800 rounded text-sm">{erreurListe}</div>
+      )}
 
       {!isAdmin && (
         <div className="mb-4 p-4 bg-blue-50 text-blue-800 rounded text-sm">

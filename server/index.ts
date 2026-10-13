@@ -562,15 +562,26 @@ interface Parametres {
   rentabiliteConducteur: boolean; rentabiliteHierarchie: boolean; rentabiliteDirecteurs: boolean;
 }
 
+// Réglage unique (singleton) créé à sa première lecture. L'upsert de Prisma n'est pas
+// exécuté ici comme un INSERT … ON CONFLICT atomique : il lit, puis crée. Deux premières
+// requêtes simultanées peuvent donc toutes deux tenter la création ; celle qui perd
+// (violation d'unicité, P2002) rejoue l'upsert, qui trouve alors la ligne créée par l'autre.
+async function upsertSingleton<T>(upsert: () => Promise<T>): Promise<T> {
+  try {
+    return await upsert();
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return upsert();
+    throw error;
+  }
+}
+
 // Retourne les paramètres avec les Decimal convertis en nombres.
-// upsert atomique (INSERT ... ON CONFLICT) pour éviter toute race entre requêtes
-// concurrentes au premier chargement (deux créations simultanées du singleton).
 async function getParametres(): Promise<Parametres> {
-  const p = await prisma.parametres.upsert({
+  const p = await upsertSingleton(() => prisma.parametres.upsert({
     where: { id: 'singleton' },
     update: {},
     create: { id: 'singleton' },
-  });
+  }));
   return decimalToNumber(p) as Parametres;
 }
 
@@ -713,11 +724,11 @@ function sitePayload(body: Record<string, unknown>, creation = false) {
 }
 
 async function getCompanySettings() {
-  return prisma.companySettings.upsert({
+  return upsertSingleton(() => prisma.companySettings.upsert({
     where: { id: 'singleton' },
     update: {},
     create: { id: 'singleton' },
-  });
+  }));
 }
 
 // --- Contexte du suivi des chantiers ---
@@ -6518,8 +6529,9 @@ const ensureSuperAdmins = async () => {
 
 // Initialisation BDD (Seeding)
 const initDb = async () => {
-  // Garantit l'existence de la ligne de paramètres (singleton) dès le démarrage.
-  await prisma.parametres.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
+  // Garantit l'existence de la ligne de paramètres (singleton) dès le démarrage. Le serveur
+  // écoute déjà : une première requête peut la créer au même instant.
+  await upsertSingleton(() => prisma.parametres.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } }));
 
 };
 
