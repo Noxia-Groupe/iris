@@ -289,7 +289,8 @@ const Admin = () => {
   const payload = {
       margeCommercialeActive: formData.get('margeCommercialeActive') === 'on',
       tauxAcompteDefaut: formData.get('tauxAcompteDefaut'),
-      // Champ vidé = alerte désactivée ; le serveur valide les bornes.
+      // Champ vidé = délai sans saisie désactivé, ou seuil de marge faible retiré (une marge
+      // estimée négative reste signalée) ; le serveur valide les bornes.
       seuilMargeFaible: String(formData.get('seuilMargeFaible') ?? '').trim(),
       joursSansSaisie: String(formData.get('joursSansSaisie') ?? '').trim(),
     };
@@ -944,8 +945,8 @@ const Admin = () => {
                 />
                 <span className="text-sm text-gray-500">% du TTC</span>
               </label>
-              {/* Alertes du suivi des chantiers (liste et tableau de bord). Vider un champ
-                  désactive l'alerte correspondante. */}
+              {/* Alertes du suivi des chantiers (liste et tableau de bord). Vider le délai désactive
+                  l'alerte sans saisie ; vider le seuil le retire, une marge estimée négative restant signalée. */}
               <fieldset className="border border-gray-100 rounded-lg p-4 space-y-3">
                 <legend className="text-sm font-bold text-gray-700 px-1">Alertes de suivi des chantiers</legend>
                 <label className="flex flex-wrap items-center gap-3 w-fit">
@@ -970,7 +971,7 @@ const Admin = () => {
                 </label>
                 <p className="text-xs text-gray-500 m-0">
                   Vider le délai désactive l’alerte « sans saisie ». Vider le seuil retire le seuil, mais une marge estimée
-                  négative reste toujours signalée. La marge estimée compte, pour chaque poste, le plus élevé du
+                  négative reste signalée. La marge estimée compte, pour chaque poste, le plus élevé du
                   réel déjà dépensé et du coût attendu : heures vendues au coût horaire moyen réellement appliqué, matériel
                   vendu au ratio d’achat observé sur les chantiers terminés (au prix de vente tant qu’aucun n’est terminé).
                 </p>
