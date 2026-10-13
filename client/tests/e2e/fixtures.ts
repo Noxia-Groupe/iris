@@ -90,6 +90,14 @@ export const test = base.extend<Outils>({
   session: async ({ request }, fournir) => {
     const session = await ouvrirSession(request);
     await preparerFacturation(request, session.token);
+    // Base vierge : une première lecture crée le réglage unique de la société (et les paramètres,
+    // si le démarrage du serveur ne l'a pas encore fait) avant les requêtes simultanées du premier
+    // écran. Sans elle, leur création concurrente échoue par intermittence côté serveur (violation
+    // d'unicité, réponse 500 ; taux très variable selon la machine), et l'administration peut
+    // planter au premier chargement. Défaut préexistant corrigé dans #125 (en attente) ; cette
+    // lecture pourra être retirée une fois #125 fusionnée.
+    const prechauffage = await request.get(`${api}/chantiers`, { headers: headers(session.token) });
+    expect(prechauffage.ok(), `préchauffage des réglages : ${prechauffage.status()} ${await prechauffage.text()}`).toBeTruthy();
     await fournir(session);
   },
   allerSurPageAdmin: async ({ page, session }, fournir) => {

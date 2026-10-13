@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type RefObject } from 'react';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN } from '../roles';
@@ -119,6 +119,67 @@ const PrimeTable = ({ title, rows }: { title: string; rows: { label: string; pri
 const ONGLETS_CONDUCTEUR = ['fournisseurs', 'categories'];
 
 const MESSAGE_COMPTE_SUPERADMIN = "Seul un super administrateur peut gérer un compte super administrateur.";
+
+type CompteResume = { id: string; name: string };
+
+// Liste « Responsable hiérarchique » d'un compte. Elle ne construit ses options qu'une fois
+// ouverte (clic, clavier, toucher) : proposer tous les comptes sur chaque ligne faisait croître
+// la page comme le carré du nombre de comptes. L'état d'ouverture est local, pour qu'ouvrir ou
+// refermer une liste ne fasse pas refaire le rendu de tout le tableau.
+//
+// Une liste peut s'ouvrir sans recevoir le focus (toucher en faisant défiler le tableau, aide
+// technique) : elle ne recevrait alors jamais de blur. La dernière liste ouverte sans focus est
+// donc refermée dès qu'une autre s'ouvre ou qu'un défilement ou une annulation tactile commencent
+// sur elle. Une liste qui a le focus n'est jamais refermée par une autre : au plus deux listes sont
+// construites à la fois.
+function ChoixResponsable({ compte, responsableActuel, responsableDesactive, desactive, titre, proposables, onChoix, derniereOuverte }: {
+  compte: CompteResume;
+  responsableActuel: CompteResume | null;
+  responsableDesactive: boolean;
+  desactive: boolean;
+  titre: string;
+  proposables: (compteId: string) => CompteResume[];
+  onChoix: (compteId: string, responsableId: string) => void;
+  derniereOuverte: RefObject<(() => void) | null>;
+}) {
+  const [ouverte, setOuverte] = useState(false);
+  const liste = useRef<HTMLSelectElement>(null);
+  const fermerSansFocus = useCallback(() => {
+    if (document.activeElement !== liste.current) setOuverte(false);
+  }, []);
+  const ouvrir = () => {
+    if (derniereOuverte.current && derniereOuverte.current !== fermerSansFocus) derniereOuverte.current();
+    derniereOuverte.current = fermerSansFocus;
+    setOuverte(true);
+  };
+  const proposes = ouverte ? proposables(compte.id) : [];
+  return (
+    <select
+      ref={liste}
+      className="form-input py-1 px-3 text-sm rounded min-w-[11rem]"
+      value={responsableActuel?.id ?? ''}
+      onChange={(e) => onChoix(compte.id, e.target.value)}
+      onFocus={ouvrir}
+      onMouseDown={ouvrir}
+      onTouchStart={ouvrir}
+      onKeyDown={ouvrir}
+      onTouchMove={fermerSansFocus}
+      onTouchCancel={fermerSansFocus}
+      onBlur={() => setOuverte(false)}
+      disabled={desactive}
+      aria-label={`Responsable hiérarchique de ${compte.name}`}
+      title={titre}
+    >
+      <option value="">Aucun</option>
+      {responsableActuel && !proposes.some((r) => r.id === responsableActuel.id) && (
+        <option value={responsableActuel.id}>
+          {responsableActuel.name}{responsableDesactive ? ' (compte désactivé)' : ''}
+        </option>
+      )}
+      {proposes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+    </select>
+  );
+}
 
 // Le droit d'établir un devis comprend le référentiel minimal nécessaire pour choisir le client.
 const DROITS_DEVIS = ['devis:read', 'devis:write', 'clients:read'];
@@ -335,20 +396,38 @@ const Admin = () => {
   // serveur (refuseSuperAdminTarget) : sans cela, un simple administrateur pourrait
   // s'emparer des droits de la direction en se promouvant ou en réinitialisant un accès.
   const peutGererCompte = (u: { role: string }) => isSuper || !isSuperAdminRole(u.role);
+  // Comptes par identifiant et collaborateurs directs de chacun, calculés une fois par
+  // chargement de la liste : la branche d'un compte se parcourt alors en un seul passage.
+  const comptesParId = useMemo(() => new Map(users.map((c) => [c.id, c])), [users]);
+  const collaborateursDe = useMemo(() => {
+    const collaborateurs = new Map<string, string[]>();
+    for (const c of users) {
+      const chef = c.responsableHierarchique?.id;
+      if (chef) collaborateurs.set(chef, [...(collaborateurs.get(chef) ?? []), c.id]);
+    }
+    return collaborateurs;
+  }, [users]);
   // Branche hiérarchique d'un compte d'après la liste affichée : ses collaborateurs, puis les leurs.
   const brancheDe = (id: string) => {
     const branche = new Set<string>();
     const aVisiter = [id];
     while (aVisiter.length) {
-      const courant = aVisiter.pop();
-      for (const c of users) {
-        if (c.responsableHierarchique?.id === courant && !branche.has(c.id) && c.id !== id) {
-          branche.add(c.id);
-          aVisiter.push(c.id);
+      for (const collaborateur of collaborateursDe.get(aVisiter.pop()!) ?? []) {
+        if (collaborateur !== id && !branche.has(collaborateur)) {
+          branche.add(collaborateur);
+          aVisiter.push(collaborateur);
         }
       }
     }
     return branche;
+  };
+  // Fermeture de la dernière liste de responsables ouverte (cf. ChoixResponsable).
+  const derniereListeOuverte = useRef<(() => void) | null>(null);
+  // Responsables proposables pour la liste que l'on ouvre (cf. ChoixResponsable) : comptes actifs
+  // hors de la branche du compte, une boucle étant refusée par le serveur.
+  const responsablesProposables = (compteId: string) => {
+    const branche = brancheDe(compteId);
+    return users.filter((r) => r.id !== compteId && r.actif !== false && !branche.has(r.id));
   };
 
   const handleSubmit = async (e: React.FormEvent, type: string) => {
@@ -1289,11 +1368,7 @@ const Admin = () => {
                   const peutArchiverTravaux = (u.permissions || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
                   const correctionVientDuRole = peutCorrigerTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_CORRECTION);
                   const archivageVientDuRole = peutArchiverTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
-                  // Responsables proposables : comptes actifs hors de la branche de ce compte (une
-                  // boucle serait refusée), plus le responsable actuel s'il n'en fait pas partie.
-                  const branche = brancheDe(u.id);
-                  const responsablesPossibles = users.filter((r) => r.id !== u.id && r.actif !== false && !branche.has(r.id));
-                  const responsableActuel = u.responsableHierarchique as { id: string; name: string } | null;
+                  const responsableActuel = u.responsableHierarchique as CompteResume | null;
                   return (
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
@@ -1326,22 +1401,16 @@ const Admin = () => {
                       </select>
                     </td>
                     <td className="px-4 py-4">
-                      <select
-                        className="form-input py-1 px-3 text-sm rounded min-w-[11rem]"
-                        value={responsableActuel?.id ?? ''}
-                        onChange={(e) => handleResponsableHierarchique(u.id, e.target.value)}
-                        disabled={!peutGererCompte(u)}
-                        aria-label={`Responsable hiérarchique de ${u.name}`}
-                        title={!peutGererCompte(u) ? MESSAGE_COMPTE_SUPERADMIN : 'Rattacher ce compte à son responsable direct'}
-                      >
-                        <option value="">Aucun</option>
-                        {responsableActuel && !responsablesPossibles.some((r) => r.id === responsableActuel.id) && (
-                          <option value={responsableActuel.id}>
-                            {responsableActuel.name}{users.some((r) => r.id === responsableActuel.id && r.actif === false) ? ' (compte désactivé)' : ''}
-                          </option>
-                        )}
-                        {responsablesPossibles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
+                      <ChoixResponsable
+                        compte={u}
+                        responsableActuel={responsableActuel}
+                        responsableDesactive={!!responsableActuel && comptesParId.get(responsableActuel.id)?.actif === false}
+                        desactive={!peutGererCompte(u)}
+                        titre={!peutGererCompte(u) ? MESSAGE_COMPTE_SUPERADMIN : 'Rattacher ce compte à son responsable direct'}
+                        proposables={responsablesProposables}
+                        onChoix={handleResponsableHierarchique}
+                        derniereOuverte={derniereListeOuverte}
+                      />
                     </td>
                     <td className="px-4 py-4">
                       {isAdminRole(u.role) ? (
