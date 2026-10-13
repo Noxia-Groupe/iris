@@ -306,7 +306,7 @@ describe('Marge estimée en fin de chantier et alertes de suivi', () => {
     assert.equal(vue.margeEstimee, 200);
   });
 
-  test('seuil de marge faible : réglable, désactivable, et sans doublon avec la perte avérée', () => {
+  test('seuil de marge faible : réglable, retirable (la marge estimée négative reste signalée), et sans doublon avec la perte avérée', () => {
     const tendu = chantier({ pointages: [] });
     const sansSeuil = { ...params, seuilMargeFaible: null };
     assert.ok(!computeChantierMetrics(tendu, sansSeuil, true, contexte({ coutHoraireSociete: null })).alertes.includes('MARGE_FAIBLE'));
