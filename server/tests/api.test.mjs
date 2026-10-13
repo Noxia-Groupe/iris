@@ -2026,6 +2026,7 @@ if (!TEST_DATABASE_URL) {
       responsableSansRole(admin, 'administrateur');
       const parCle = (await request(app).get('/api/v1/chantiers').set({ Authorization: `Bearer ${cle}` })).body.find((c) => c.id === chantierTechnicien.id);
       avecMontants(parCle, 'clé d’intégration', 500);
+      responsableSansRole(parCle, 'clé d’intégration');
       // Sans objet pour une clé, qui ne clôture rien.
       assert.equal('peutCloturer' in parCle, false);
       // L'administrateur corrige toujours ces budgets.
@@ -2055,11 +2056,17 @@ if (!TEST_DATABASE_URL) {
         assert.equal(creation.status, 400, JSON.stringify(creation.body));
         assert.match(creation.body.error, /technicien/);
         assert.equal(await prisma.user.count({ where: { email: 'budgets.finance.technicien@iris.test' } }), 0);
-        // … ni conservé par un compte qui devient technicien.
+        // … et un accès financier enregistré reste sans effet pour un compte devenu technicien,
+        // sans être effacé : il retrouve son effet si le compte reprend un autre type.
         const reconverti = await prisma.user.create({ data: { email: 'budgets.reconversion@iris.test', name: 'TEST Budgets reconversion', role: 'CONDUCTEUR_TRAVAUX', accesFinance: true } });
-        const passage = await request(app).patch(`/api/users/${reconverti.id}/role`).set(auth).send({ role: 'TECHNICIEN' });
-        assert.equal(passage.status, 200, JSON.stringify(passage.body));
-        assert.equal((await prisma.user.findUnique({ where: { id: reconverti.id } })).accesFinance, false);
+        const droitsDe = async (id) => (await request(app).get('/api/users').set(auth)).body.find((u) => u.id === id).permissions;
+        assert.ok((await droitsDe(reconverti.id)).includes('finances:read'), 'témoin : conducteur avec accès financier');
+        for (const [role, finance] of [['TECHNICIEN', false], ['CONDUCTEUR_TRAVAUX', true]]) {
+          const passage = await request(app).patch(`/api/users/${reconverti.id}/role`).set(auth).send({ role });
+          assert.equal(passage.status, 200, JSON.stringify(passage.body));
+          assert.equal((await prisma.user.findUnique({ where: { id: reconverti.id } })).accesFinance, true, `${role} : donnée conservée`);
+          assert.equal((await droitsDe(reconverti.id)).includes('finances:read'), finance, `${role} : effet`);
+        }
       } finally {
         await prisma.user.update({ where: { id: technicien.id }, data: { permissions: [], accesFinance: false } });
       }

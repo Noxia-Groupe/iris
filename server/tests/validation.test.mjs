@@ -12,7 +12,7 @@ const {
   anneeEntreprise, dateEmissionEstFuture, dateDemandeCurative,
   periodBounds, weekBoundsFrom,
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
-  commissionBaremeProgressif, computeChantierMetrics, voitRentabilite,
+  commissionBaremeProgressif, computeChantierMetrics, voitRentabilite, peutVoirFinance,
   parseBareme, serialiseBareme, validerBareme,
   arrondiCommercialLigneHt, centimesTtcLigne, devisPayload,
   libelleComptableValide,
@@ -499,4 +499,11 @@ describe('Arrondi commercial des devis', () => {
     assert.equal(devis.totalTva, 0.01);
     assert.equal(devis.totalTtc, 0.11);
   });
+});
+
+test('peutVoirFinance : jamais pour un technicien, même avec un accès financier enregistré', () => {
+  assert.equal(peutVoirFinance({ role: 'TECHNICIEN', accesFinance: true }), false);
+  assert.equal(peutVoirFinance({ role: 'CONDUCTEUR_TRAVAUX', accesFinance: true }), true);
+  assert.equal(peutVoirFinance({ role: 'CONDUCTEUR_TRAVAUX', accesFinance: false }), false);
+  assert.equal(peutVoirFinance({ role: 'SUPERADMIN', accesFinance: false }), true);
 });

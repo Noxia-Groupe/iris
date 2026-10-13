@@ -77,7 +77,7 @@ pas : le serveur refuse avec un message explicite, et la fiche l'indique. La cl�
 affaire revient à l'administration, à son responsable s'il n'est pas technicien et, pour
 l'affaire d'un technicien, aux responsables de sa branche (N+1 et au-dessus). Les droits
 devis, saisie ou archivage Travaux et l'accès financier ne s'accordent pas à un technicien ;
-un compte qui devient technicien perd son accès financier.
+ceux d'un compte qui devient technicien restent enregistrés, mais sans effet.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.

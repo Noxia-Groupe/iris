@@ -3433,10 +3433,11 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
       // compte quitte ces rôles, pour ne pas laisser un état orphelin qui réapparaîtrait
       // s'il y revenait plus tard sans qu'on l'ait explicitement redemandé.
-      // accesFinance n'est pas touché : il ne dépend pas du rôle, un conducteur comme un
-      // commercial peut le conserver en changeant de fonction. Seule exception, le passage en
-      // technicien le retire : ce type de compte ne voit aucun montant.
-      data: isAdminRole(role) ? { role } : { role, estCommercial: false, ...(role === ROLE_TECHNICIEN ? { accesFinance: false } : {}) },
+      // accesFinance n'est PAS touché : il ne dépend pas du rôle, un conducteur comme un
+      // commercial peut le conserver en changeant de fonction. Pour un technicien, il reste
+      // enregistré mais sans effet (cf. DROITS_INTERDITS_TECHNICIEN, peutVoirFinance), comme ses
+      // droits individuels : il retrouve son effet si le compte reprend un autre type.
+      data: isAdminRole(role) ? { role } : { role, estCommercial: false },
       select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
     });
     res.json(user);
