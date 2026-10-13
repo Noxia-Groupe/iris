@@ -129,8 +129,9 @@ type CompteResume = { id: string; name: string };
 //
 // Une liste peut s'ouvrir sans recevoir le focus (toucher en faisant défiler le tableau, aide
 // technique) : elle ne recevrait alors jamais de blur. La dernière liste ouverte sans focus est
-// donc refermée dès qu'une autre s'ouvre ou qu'un défilement tactile commence sur elle. Une liste
-// qui a le focus n'est jamais refermée par une autre : au plus deux listes sont construites à la fois.
+// donc refermée dès qu'une autre s'ouvre ou qu'un défilement ou une annulation tactile commencent
+// sur elle. Une liste qui a le focus n'est jamais refermée par une autre : au plus deux listes sont
+// construites à la fois.
 function ChoixResponsable({ compte, responsableActuel, responsableDesactive, desactive, titre, proposables, onChoix, derniereOuverte }: {
   compte: CompteResume;
   responsableActuel: CompteResume | null;

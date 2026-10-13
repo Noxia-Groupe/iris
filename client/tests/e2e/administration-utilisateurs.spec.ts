@@ -61,7 +61,8 @@ test('Administration > Utilisateurs : listes de responsables construites à la d
     await expect(liste(premier)).toHaveValue(second.id);
 
     // Toucher des listes sans leur donner le focus (défilement tactile, aide technique) : seule la
-    // dernière touchée reste construite, et un défilement tactile commencé sur elle la referme.
+    // dernière touchée reste construite, et un défilement ou une annulation tactile commencés sur
+    // elle la referment.
     await admin.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     // Les événements tactiles « continus » (touchmove) sont rendus par une tâche planifiée, pas
     // dans la foulée : le nombre de listes construites est relu (expect.poll) jusqu'à la valeur
@@ -76,7 +77,7 @@ test('Administration > Utilisateurs : listes de responsables construites à la d
     await liste(troisieme).dispatchEvent('touchcancel');
     await expect.poll(listesConstruites).toBe(0);
     // Une liste qui a le focus n'est jamais refermée par une autre que l'on touche, ni par un
-    // défilement tactile commencé sur elle.
+    // défilement ou une annulation tactile commencés sur elle.
     await liste(premier).focus();
     await liste(second).dispatchEvent('touchstart');
     await expect(liste(premier).locator('option', { hasText: troisieme.name })).toHaveCount(1);
