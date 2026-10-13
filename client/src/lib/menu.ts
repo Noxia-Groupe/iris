@@ -9,7 +9,7 @@ import {
   KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
 } from 'lucide-react';
 import {
-  isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutVoirStatistiques,
+  estExcluDesOperations, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutVoirStatistiques,
   ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
 } from './droits';
 
@@ -30,6 +30,7 @@ export interface SectionMenu {
 export function sectionsMenu(user: CurrentUser | null | undefined, planningActif: boolean): SectionMenu[] {
   const role = user?.role || ROLE_CONDUCTEUR;
   const isCommercial = role === ROLE_COMMERCIAL;
+  const horsOperations = estExcluDesOperations(role);
   const isAdmin = isAdminRole(role);
   const peutVoirInterventions = isAdmin || role === ROLE_CONDUCTEUR || role === ROLE_RESPONSABLE || role === ROLE_TECHNICIEN;
   const peutVoirTravaux = isAdmin || role === ROLE_CONDUCTEUR || role === ROLE_RESPONSABLE;
@@ -42,8 +43,8 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
       { to: '/chantiers', libelle: 'Liste des chantiers', icone: FolderOpen, exact: true, visible: true },
       { to: '/devis', libelle: 'Devis', icone: FileText, visible: peutAccederAuxDevis(user) },
       // Planning : masqué pour tous (administrateurs compris) quand un superadmin a
-      // désactivé le module ; jamais proposé aux commerciaux.
-      { to: '/planning', libelle: 'Planning', icone: CalendarDays, visible: !isCommercial && planningActif },
+      // désactivé le module ; jamais proposé aux commerciaux ni aux directeurs.
+      { to: '/planning', libelle: 'Planning', icone: CalendarDays, visible: !horsOperations && planningActif },
       { to: '/achats', libelle: 'Journal des achats', icone: ShoppingCart, visible: peutVoirTravaux },
       { to: '/heures', libelle: 'Journal des heures', icone: Clock, visible: peutVoirTravaux },
     ] },
@@ -69,8 +70,9 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
     ] },
     { titre: 'Réglages', entrees: [
       // Administration : complète pour les administrateurs, réduite aux référentiels
-      // Fournisseurs et Catégories pour les conducteurs de travaux (cf. Admin.tsx).
-      { to: '/admin', libelle: 'Administration', icone: Settings, visible: !isCommercial },
+      // Fournisseurs et Catégories pour les conducteurs de travaux (cf. Admin.tsx) ; ni
+      // commercial ni directeur, qui ne paramètrent rien.
+      { to: '/admin', libelle: 'Administration', icone: Settings, visible: !horsOperations },
       { to: '/societe', libelle: 'Société', icone: Briefcase, visible: isAdmin },
       { to: '/administration/api', libelle: 'API d’intégration', icone: KeyRound, visible: isSuperAdminRole(role) },
     ] },

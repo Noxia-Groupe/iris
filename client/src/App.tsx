@@ -30,7 +30,7 @@ import Comptabilite from './pages/Comptabilite';
 import MentionsLegales from './pages/MentionsLegales';
 import PreteAFacturer from './pages/PreteAFacturer';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
+import { useCurrentUser, estExcluDesOperations, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
 import { useModules } from './modules';
 import { CompanyTimezoneProvider } from './companyTimezone';
 
@@ -40,7 +40,7 @@ const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
 const ROLES_INTERVENTIONS = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
 const ROLES_TRAVAUX = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE];
 
-const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX.Element, requiredRoles?: string[], excludedRole?: string }) => {
+const PrivateRoute = ({ children, requiredRoles, horsOperations }: { children: JSX.Element, requiredRoles?: string[], horsOperations?: boolean }) => {
   const token = localStorage.getItem('token');
   const userStr = localStorage.getItem('user');
   // Compte relu auprès du serveur au chargement de l'application (le cadre n'est pas remonté
@@ -57,7 +57,8 @@ const PrivateRoute = ({ children, requiredRoles, excludedRole }: { children: JSX
   if (requiredRoles && !requiredRoles.includes(role)) {
     return <Navigate to="/" />; // Redirect to dashboard if not authorized
   }
-  if (excludedRole && role === excludedRole) {
+  // Écran opérationnel : fermé au commercial et au directeur (cf. estExcluDesOperations).
+  if (horsOperations && estExcluDesOperations(role)) {
     return <Navigate to="/" />;
   }
 
@@ -195,7 +196,7 @@ function App() {
         } />
 
         <Route path="/planning" element={
-          <PrivateRoute excludedRole="COMMERCIAL">
+          <PrivateRoute horsOperations>
             <PlanningRoute />
           </PrivateRoute>
         } />
@@ -203,7 +204,7 @@ function App() {
         {/* Administration : accessible aussi aux conducteurs de travaux, qui n'y voient
             que les référentiels Fournisseurs et Catégories (cf. pages/Admin.tsx). */}
         <Route path="/admin" element={
-          <PrivateRoute excludedRole="COMMERCIAL">
+          <PrivateRoute horsOperations>
             <Admin />
           </PrivateRoute>
         } />

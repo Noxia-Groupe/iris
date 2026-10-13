@@ -1008,7 +1008,7 @@ const ChantierDetail = () => {
                       onSubmit={(e) => handleAchatSubmit(e, a.id)}
                       className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 px-6 py-3 bg-gray-50"
                     >
-                      <input required type="text" inputMode="numeric" pattern="\\d{2}-\\d{2}-\\d{4}" placeholder="JJ-MM-AAAA" name="date" defaultValue={toDateFrancaise(a.date)} className="form-input text-sm" />
+                      <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="date" defaultValue={toDateFrancaise(a.date)} className="form-input text-sm" />
                       <input required type="number" step="0.01" name="montantHT" defaultValue={a.montantHT} placeholder="Montant HT" className="form-input text-sm" />
                       <select required name="fournisseurId" defaultValue={a.fournisseurId} className="form-input text-sm">
                         {fournisseurs.length === 0 && <option value={a.fournisseurId}>{a.fournisseur?.nom}</option>}
@@ -1144,7 +1144,7 @@ const ChantierDetail = () => {
                       onSubmit={(e) => handlePointageSubmit(e, p.id)}
                       className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 px-6 py-3 bg-gray-50"
                     >
-                      <input required type="text" inputMode="numeric" pattern="\\d{2}-\\d{2}-\\d{4}" placeholder="JJ-MM-AAAA" name="date" defaultValue={toDateFrancaise(p.date)} className="form-input text-sm" />
+                      <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="date" defaultValue={toDateFrancaise(p.date)} className="form-input text-sm" />
                       <select required name="intervenantId" defaultValue={p.intervenantId} className="form-input text-sm">
                         {intervenants.length === 0 && <option value={p.intervenantId}>{p.intervenant?.nom}</option>}
                         {intervenants.map((i) => <option key={i.id} value={i.id}>{i.nom} ({i.role})</option>)}
@@ -1320,16 +1320,20 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Date Début</label>
-                <input required type="text" inputMode="numeric" pattern="\\d{2}-\\d{2}-\\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" defaultValue={toDateFrancaise(chantier.dateDebut)} className="form-input" />
+                <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" defaultValue={toDateFrancaise(chantier.dateDebut)} className="form-input" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Date Fin</label>
-                <input type="text" inputMode="numeric" pattern="\\d{2}-\\d{2}-\\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" defaultValue={toDateFrancaise(chantier.dateFin)} className="form-input" />
+                <input type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" defaultValue={toDateFrancaise(chantier.dateFin)} className="form-input" />
               </div>
-              <div className="form-group mb-0">
-                <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
-                <input ref={editChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
-              </div>
+              {/* Montant vendu : seulement pour qui le voit (le serveur refuse qu'un autre le
+                  modifie) ; sinon le champ arriverait vide et l'enregistrer l'écraserait. */}
+              {chantier.budgetGlobalVendu != null && (
+                <div className="form-group mb-0">
+                  <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
+                  <input ref={editChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
+                </div>
+              )}
               <div className="form-group mb-0">
                 <label className="form-label">Total Heures Vendues (h)</label>
                 <input required type="number" step="0.5" name="heuresVendues" defaultValue={chantier.heuresVendues} className="form-input" />

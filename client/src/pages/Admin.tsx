@@ -293,6 +293,9 @@ const Admin = () => {
       // estimée négative reste signalée) ; le serveur valide les bornes.
       seuilMargeFaible: String(formData.get('seuilMargeFaible') ?? '').trim(),
       joursSansSaisie: String(formData.get('joursSansSaisie') ?? '').trim(),
+      rentabiliteConducteur: formData.get('rentabiliteConducteur') === 'on',
+      rentabiliteHierarchie: formData.get('rentabiliteHierarchie') === 'on',
+      rentabiliteDirecteurs: formData.get('rentabiliteDirecteurs') === 'on',
     };
     const res = await apiFetch('/parametres', { method: 'PUT', body: JSON.stringify(payload) });
     if (res.ok) {
@@ -332,6 +335,21 @@ const Admin = () => {
   // serveur (refuseSuperAdminTarget) : sans cela, un simple administrateur pourrait
   // s'emparer des droits de la direction en se promouvant ou en réinitialisant un accès.
   const peutGererCompte = (u: { role: string }) => isSuper || !isSuperAdminRole(u.role);
+  // Branche hiérarchique d'un compte d'après la liste affichée : ses collaborateurs, puis les leurs.
+  const brancheDe = (id: string) => {
+    const branche = new Set<string>();
+    const aVisiter = [id];
+    while (aVisiter.length) {
+      const courant = aVisiter.pop();
+      for (const c of users) {
+        if (c.responsableHierarchique?.id === courant && !branche.has(c.id) && c.id !== id) {
+          branche.add(c.id);
+          aVisiter.push(c.id);
+        }
+      }
+    }
+    return branche;
+  };
 
   const handleSubmit = async (e: React.FormEvent, type: string) => {
     e.preventDefault();
@@ -359,6 +377,24 @@ const Admin = () => {
     } catch (e) {
       alert("Erreur lors de la mise à jour du rôle");
     }
+  };
+
+  // Rattachement hiérarchique : le serveur refuse soi-même, un compte désactivé et une boucle,
+  // et renvoie la raison, affichée telle quelle.
+  const handleResponsableHierarchique = async (userId: string, responsableId: string) => {
+    try {
+      const res = await apiFetch(`/users/${userId}/responsable-hierarchique`, {
+        method: 'PATCH',
+        body: JSON.stringify({ responsableHierarchiqueId: responsableId || null }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'Erreur lors du rattachement hiérarchique.');
+      }
+    } catch {
+      alert('Erreur lors du rattachement hiérarchique.');
+    }
+    fetchData();
   };
 
   // Bascule "estCommercial" sur un compte ADMIN : il reste administrateur à part entière,
@@ -922,7 +958,8 @@ const Admin = () => {
           <div className="card mb-4">
             <h2 className="mb-2 text-primary-dark">Paramètres de la Marge Commerciale</h2>
             <p className="text-sm text-muted mb-4">
-              Réglages globaux. La marge commerciale est calculée côté serveur et n'est visible que par les administrateurs.
+              Réglages globaux. La marge commerciale est calculée côté serveur ; elle n'est montrée qu'aux
+              administrateurs et aux destinataires choisis ci-dessous.
             </p>
             {/* Formulaire non contrôlé : il n'apparaît qu'une fois les paramètres chargés, sinon une
                 saisie faite avant leur arrivée serait effacée par le remplissage des valeurs. */}
@@ -974,6 +1011,34 @@ const Admin = () => {
                   négative reste signalée. La marge estimée compte, pour chaque poste, le plus élevé du
                   réel déjà dépensé et du coût attendu : heures vendues au coût horaire moyen réellement appliqué, matériel
                   vendu au ratio d’achat observé sur les chantiers terminés (au prix de vente tant qu’aucun n’est terminé).
+                </p>
+              </fieldset>
+              {/* Destinataires de la rentabilité de chaque chantier : montant vendu global, marge du jour,
+                  marge estimée, alertes « en perte » et « marge faible », facturation de la fiche, sur la
+                  liste, le tableau de bord et la fiche. Les dépassements, l'absence de saisie et les budgets
+                  par poste restent visibles de tous ceux qui voient le chantier. */}
+              <fieldset className="border border-gray-100 rounded-lg p-4 space-y-2">
+                <legend className="text-sm font-bold text-gray-700 px-1">Qui suit la rentabilité des chantiers&nbsp;?</legend>
+                <p className="text-xs text-gray-500 m-0">
+                  Montant vendu global, marge du jour, marge estimée, alertes « en perte » ou « marge faible » et
+                  facturation de la fiche. Les administrateurs les voient toujours. Les budgets par poste (matériel,
+                  main-d’œuvre, heures) restent affichés pour suivre les dépassements : ils permettent d’en déduire le vendu,
+                  donc la marge du jour.
+                </p>
+                <label className="flex items-center gap-2 cursor-pointer w-fit">
+                  <input type="checkbox" name="rentabiliteConducteur" defaultChecked={parametres?.rentabiliteConducteur ?? true} className="w-4 h-4" />
+                  <span className="text-sm text-gray-700">Le conducteur (ou responsable) chargé du chantier</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer w-fit">
+                  <input type="checkbox" name="rentabiliteHierarchie" defaultChecked={parametres?.rentabiliteHierarchie ?? true} className="w-4 h-4" />
+                  <span className="text-sm text-gray-700">Ses responsables hiérarchiques, à tous les niveaux</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer w-fit">
+                  <input type="checkbox" name="rentabiliteDirecteurs" defaultChecked={parametres?.rentabiliteDirecteurs ?? true} className="w-4 h-4" />
+                  <span className="text-sm text-gray-700">Les directeurs (tous les chantiers)</span>
+                </label>
+                <p className="text-xs text-gray-500 m-0">
+                  La chaîne hiérarchique se règle dans l’onglet « Utilisateurs », compte par compte.
                 </p>
               </fieldset>
               <button className="btn btn-primary">Enregistrer</button>
@@ -1143,6 +1208,12 @@ const Admin = () => {
             toute personne <strong>absente de la liste</strong> se voit refuser l'accès (écran « Accès refusé, contactez
             l'administrateur »). Ajoutez ci-dessous chaque personne autorisée et son rôle.
           </p>
+          <p className="mb-6 text-sm text-gray-600">
+            <strong>Responsable hiérarchique</strong> : un compte <strong>Responsable</strong> voit les chantiers de toute
+            sa branche — ses collaborateurs directs, puis les leurs — et, si la société le laisse (onglet « Marges &amp;
+            Commissions »), leur rentabilité. Un compte <strong>Directeur</strong> voit tous les chantiers et, si la
+            société le laisse, leur rentabilité, sans rien modifier ni administrer.
+          </p>
 
           <div className="mb-8 p-4 bg-gray-50 border rounded">
             <h3 className="mb-4 text-primary-dark">Autoriser un compte</h3>
@@ -1165,6 +1236,7 @@ const Admin = () => {
                   <option value="COMPTABLE">Comptable</option>
                   <option value="DIRECTEUR_COMMERCIAL">Directeur commercial</option>
                   <option value="RESPONSABLE">Responsable</option>
+                  <option value="DIRECTEUR">Directeur</option>
                   <option value="ADMIN">Administrateur</option>
                   {/* Seul un super administrateur peut en désigner un autre. */}
                   {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
@@ -1199,6 +1271,7 @@ const Admin = () => {
                   <th className="px-4 py-4 font-semibold">Email</th>
 
                   <th className="px-4 py-4 font-semibold">Rôle d'accès</th>
+                  <th className="px-4 py-4 font-semibold">Responsable hiérarchique</th>
                   <th className="px-4 py-4 font-semibold">Commercial</th>
                   <th className="px-4 py-4 font-semibold">Finance</th>
                   <th className="px-4 py-4 font-semibold">Droit devis</th>
@@ -1216,6 +1289,11 @@ const Admin = () => {
                   const peutArchiverTravaux = (u.permissions || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
                   const correctionVientDuRole = peutCorrigerTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_CORRECTION);
                   const archivageVientDuRole = peutArchiverTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
+                  // Responsables proposables : comptes actifs hors de la branche de ce compte (une
+                  // boucle serait refusée), plus le responsable actuel s'il n'en fait pas partie.
+                  const branche = brancheDe(u.id);
+                  const responsablesPossibles = users.filter((r) => r.id !== u.id && r.actif !== false && !branche.has(r.id));
+                  const responsableActuel = u.responsableHierarchique as { id: string; name: string } | null;
                   return (
                   <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.actif === false ? 'bg-gray-50 text-gray-400' : ''}`}>
                     <td className="px-4 py-4 font-bold text-gray-800">{u.name}</td>
@@ -1242,8 +1320,27 @@ const Admin = () => {
                   <option value="COMPTABLE">Comptable</option>
                   <option value="DIRECTEUR_COMMERCIAL">Directeur commercial</option>
                   <option value="RESPONSABLE">Responsable</option>
+                  <option value="DIRECTEUR">Directeur</option>
                         <option value="ADMIN">Administrateur</option>
                         {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
+                      </select>
+                    </td>
+                    <td className="px-4 py-4">
+                      <select
+                        className="form-input py-1 px-3 text-sm rounded min-w-[11rem]"
+                        value={responsableActuel?.id ?? ''}
+                        onChange={(e) => handleResponsableHierarchique(u.id, e.target.value)}
+                        disabled={!peutGererCompte(u)}
+                        aria-label={`Responsable hiérarchique de ${u.name}`}
+                        title={!peutGererCompte(u) ? MESSAGE_COMPTE_SUPERADMIN : 'Rattacher ce compte à son responsable direct'}
+                      >
+                        <option value="">Aucun</option>
+                        {responsableActuel && !responsablesPossibles.some((r) => r.id === responsableActuel.id) && (
+                          <option value={responsableActuel.id}>
+                            {responsableActuel.name}{users.some((r) => r.id === responsableActuel.id && r.actif === false) ? ' (compte désactivé)' : ''}
+                          </option>
+                        )}
+                        {responsablesPossibles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
                     </td>
                     <td className="px-4 py-4">

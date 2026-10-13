@@ -5,7 +5,7 @@ import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { AlertesChantier } from '../components/AlertesChantier';
-import { isAdminRole, roleLabel } from '../roles';
+import { estExcluDesOperations, isAdminRole, roleLabel } from '../roles';
 import {
   alertesDuChantier, ancienneteSaisie, estASurveiller, filtrerChantiers, trierChantiers,
   type ChantierSuivi, type FiltreChantiers, type TriChantiers,
@@ -126,8 +126,9 @@ const ListeChantiers = () => {
   );
 
   const isAdmin = isAdminRole(userRole);
-  // La marge n'arrive que pour les profils autorisés et si le module est actif : le filtre
-  // « en perte » et le tri par marge n'ont de sens que si au moins une marge est connue.
+  // La marge n'arrive que pour les destinataires de la rentabilité de chaque chantier (cf.
+  // Administration > Marges) et si le module est actif : la colonne Marge, le filtre « en
+  // perte » et le tri par marge n'ont de sens que si au moins une marge est connue.
   const margeVisible = chantiers.some((c) => c.metrics?.margeCommerciale != null);
   const filtresProposes = FILTRES.filter((f) => !f.margeRequise || margeVisible);
   const trisProposes = TRIS.filter((t) => !t.margeRequise || margeVisible);
@@ -153,8 +154,8 @@ const ListeChantiers = () => {
               <th className="px-6 py-4 font-semibold">Chantier</th>
               <th className="px-4 py-4 font-semibold hidden sm:table-cell w-44">Heures</th>
               <th className="px-4 py-4 font-semibold hidden md:table-cell w-44">Matériel</th>
-              <th className="px-4 py-4 font-semibold text-right" title={isAdmin ? 'Marge du jour (vendu moins dépenses réelles) et marge estimée en fin de chantier' : 'Heures vendues moins heures réalisées'}>
-                {isAdmin ? 'Marge' : 'Solde heures'}
+              <th className="px-4 py-4 font-semibold text-right" title={margeVisible ? 'Marge du jour (vendu moins dépenses réelles) et marge estimée en fin de chantier' : 'Heures vendues moins heures réalisées'}>
+                {margeVisible ? 'Marge' : 'Solde heures'}
               </th>
               <th className="px-6 py-4 font-semibold text-right">Actions</th>
             </tr>
@@ -204,8 +205,8 @@ const ListeChantiers = () => {
                     <ProgressMeter value={materielReel} max={c.budgetMaterielVendu} color="blue" size="sm" />
                   </td>
                   <td className="px-4 py-4 text-right">
-                    {isAdmin ? (
-                      margeCommerciale !== null ? (
+                    {margeVisible ? (
+                      margeCommerciale != null ? (
                         <>
                           <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm whitespace-nowrap ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                             {margeCommerciale > 0 ? '+' : ''}{fmtEuro(margeCommerciale)}
@@ -223,7 +224,15 @@ const ListeChantiers = () => {
                           )}
                         </>
                       ) : (
-                        <span className="text-gray-400 text-sm">—</span>
+                        // Liste mixte : la rentabilité de ce chantier n'est pas communiquée à ce
+                        // compte (cf. Administration > Marges) ; le solde d'heures reste utile.
+                        <span className="inline-flex flex-col items-end gap-1" title="Rentabilité non communiquée pour ce chantier">
+                          <span className="text-gray-400 text-sm" aria-hidden="true">—</span>
+                          <span className="sr-only">Rentabilité non communiquée ;</span>
+                          <span className={`inline-block px-3 py-1 rounded-md font-bold text-xs whitespace-nowrap ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                            Solde : {diffHeures > 0 ? '+' : ''}{fmtHeures(diffHeures)}
+                          </span>
+                        </span>
                       )
                     ) : (
                       <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm whitespace-nowrap ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
@@ -233,7 +242,9 @@ const ListeChantiers = () => {
                   </td>
                   <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end items-center gap-2">
-                      {c.statut === 'EN_COURS' && userRole !== 'COMMERCIAL' && (
+                      {/* Clôture : l'administration ou le conducteur du chantier (même règle que
+                          PATCH /chantiers/:id/statut) — pas un responsable sur sa branche. */}
+                      {c.statut === 'EN_COURS' && !estExcluDesOperations(userRole) && (isAdmin || (!!user?.id && c.responsable?.id === user.id)) && (
                         <button
                           onClick={() => handleCloturer(c.id, c.nom)}
                           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
@@ -305,7 +316,7 @@ const ListeChantiers = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {userRole !== 'COMMERCIAL' && (
+          {!estExcluDesOperations(userRole) && (
             <button onClick={() => navigate('/devis')} className="btn btn-primary flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
               Créer une affaire (devis)

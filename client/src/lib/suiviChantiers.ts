@@ -46,7 +46,7 @@ export interface ChantierSuivi {
   heuresVendues: number;
   budgetMaterielVendu: number;
   budgetMainOeuvreVendu: number;
-  responsable?: { name?: string | null } | null;
+  responsable?: { id?: string; name?: string | null } | null;
   commercial?: { name?: string | null } | null;
   metrics?: MetriquesChantier;
 }

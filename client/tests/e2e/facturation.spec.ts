@@ -727,8 +727,11 @@ test.describe('Facturation — parcours utilisateur', () => {
     const conversion = await request.post(`${api}/devis/${devisId}/convertir`, { headers, data: { cible: 'CHANTIER' } });
     expect(conversion.ok(), await conversion.text()).toBeTruthy();
     const { id: chantierId } = await conversion.json() as { id: string };
-    // Conducteur désigné responsable : c'est la configuration où le serveur lui livre
-    // le bloc facturation. Le tableau visible rend l'absence du PDF significative.
+    // Conducteur désigné responsable, et laissé destinataire de la rentabilité (réglage par
+    // défaut, rappelé ici car la base est partagée) : c'est la configuration où le serveur
+    // lui livre le bloc facturation. Le tableau visible rend l'absence du PDF significative.
+    const reglage = await request.put(`${api}/parametres`, { headers, data: { rentabiliteConducteur: true } });
+    expect(reglage.ok(), await reglage.text()).toBeTruthy();
     const nom = 'Conducteur factures liées';
     const creation = await request.post(`${api}/users`, {
       headers,

@@ -12,7 +12,7 @@ const {
   anneeEntreprise, dateEmissionEstFuture, dateDemandeCurative,
   periodBounds, weekBoundsFrom,
   cataloguePayload, catalogueExtraPayload, catalogueFamily,
-  commissionBaremeProgressif, computeChantierMetrics,
+  commissionBaremeProgressif, computeChantierMetrics, voitRentabilite,
   parseBareme, serialiseBareme, validerBareme,
   arrondiCommercialLigneHt, centimesTtcLigne, devisPayload,
   libelleComptableValide,
@@ -248,6 +248,58 @@ describe('Métriques de chantier', () => {
   test('la marge désactivée dans les paramètres masque le calcul même pour un admin', () => {
     const vue = computeChantierMetrics(chantier, { margeCommercialeActive: false, planningActif: true }, true);
     assert.equal(vue.margeCommerciale, null);
+  });
+});
+
+describe('Destinataires de la rentabilité d’un chantier', () => {
+  // Organisation : Régional → Secteur → Conducteur ; le chantier est confié au conducteur.
+  const chantier = { responsableId: 'conducteur' };
+  const tous = { rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true };
+  const session = (id, role, equipeIds = []) => ({ user: { id, role, equipeIds } });
+  const comptes = {
+    administrateur: session('admin', 'ADMIN'),
+    superadministrateur: session('super', 'SUPERADMIN'),
+    directeur: session('dir', 'DIRECTEUR'),
+    conducteur: session('conducteur', 'CONDUCTEUR_TRAVAUX'),
+    secteur: session('secteur', 'RESPONSABLE', ['conducteur']),
+    regional: session('regional', 'RESPONSABLE', ['secteur', 'conducteur']),
+    'responsable d’une autre branche': session('autre', 'RESPONSABLE', ['autre.conducteur']),
+    'autre conducteur': session('autre.conducteur', 'CONDUCTEUR_TRAVAUX'),
+    commercial: session('commercial', 'COMMERCIAL'),
+    // Un rattachement ne donne rien à un rôle sans périmètre hiérarchique, et un technicien
+    // ne voit jamais de montant, même désigné par erreur sur le chantier.
+    'directeur commercial supérieur': session('dc', 'DIRECTEUR_COMMERCIAL', ['conducteur']),
+    'technicien désigné': session('conducteur', 'TECHNICIEN'),
+  };
+  const voient = (params, cible = chantier) => Object.entries(comptes).filter(([, req]) => voitRentabilite(req, cible, params)).map(([nom]) => nom);
+
+  test('par défaut : administrateurs, directeur, conducteur du chantier et toute sa chaîne', () => {
+    assert.deepEqual(voient(tous), ['administrateur', 'superadministrateur', 'directeur', 'conducteur', 'secteur', 'regional']);
+  });
+
+  test('chaque catégorie se retire seule ; les administrateurs restent toujours destinataires', () => {
+    assert.deepEqual(voient({ ...tous, rentabiliteConducteur: false }), ['administrateur', 'superadministrateur', 'directeur', 'secteur', 'regional']);
+    assert.deepEqual(voient({ ...tous, rentabiliteHierarchie: false }), ['administrateur', 'superadministrateur', 'directeur', 'conducteur']);
+    assert.deepEqual(voient({ ...tous, rentabiliteDirecteurs: false }), ['administrateur', 'superadministrateur', 'conducteur', 'secteur', 'regional']);
+    assert.deepEqual(voient({ rentabiliteConducteur: false, rentabiliteHierarchie: false, rentabiliteDirecteurs: false }), ['administrateur', 'superadministrateur']);
+  });
+
+  test('un responsable chargé lui-même du chantier relève de la catégorie conducteur', () => {
+    const sien = { responsableId: 'secteur' };
+    assert.equal(voitRentabilite(comptes.secteur, sien, tous), true);
+    assert.equal(voitRentabilite(comptes.secteur, sien, { ...tous, rentabiliteConducteur: false }), false);
+    assert.equal(voitRentabilite(comptes.regional, sien, { ...tous, rentabiliteConducteur: false }), true, 'son propre responsable le voit toujours au titre de la chaîne');
+  });
+
+  test('un chantier sans conducteur n’a de destinataires que l’administration et la direction', () => {
+    assert.deepEqual(voient(tous, { responsableId: null }), ['administrateur', 'superadministrateur', 'directeur']);
+  });
+
+  test('une clé d’intégration suit son scope finances:read, quels que soient les réglages', () => {
+    const aucun = { rentabiliteConducteur: false, rentabiliteHierarchie: false, rentabiliteDirecteurs: false };
+    assert.equal(voitRentabilite({ apiKey: { scopes: ['chantiers:read', 'finances:read'] } }, chantier, aucun), true);
+    assert.equal(voitRentabilite({ apiKey: { scopes: ['chantiers:read'] } }, chantier, tous), false);
+    assert.equal(voitRentabilite({}, chantier, tous), false, 'sans porteur identifié');
   });
 });
 

@@ -219,6 +219,7 @@ if (!TEST_DATABASE_URL) {
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1176,7 +1177,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(login.status, 200);
       auth = { Authorization: `Bearer ${login.body.token}` };
       ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
-      const activation = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true });
+      const activation = await request(app).put('/api/parametres').set(auth)
+        .send({ margeCommercialeActive: true, rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true });
       assert.equal(activation.status, 200, JSON.stringify(activation.body));
       const conducteur = await prisma.user.create({ data: {
         email: 'rentabilite.conducteur@iris.test', name: 'TEST Conducteur rentabilité', role: 'CONDUCTEUR_TRAVAUX',
@@ -1216,7 +1218,10 @@ if (!TEST_DATABASE_URL) {
     });
 
     after(async () => {
-      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: { margeCommercialeActive: ancienParametres.margeCommercialeActive } });
+      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: {
+        margeCommercialeActive: ancienParametres.margeCommercialeActive,
+        rentabiliteConducteur: ancienParametres.rentabiliteConducteur,
+      } });
     });
 
     const lire = async (chemin, entetes) => {
@@ -1240,18 +1245,73 @@ if (!TEST_DATABASE_URL) {
       assert.equal(liste.sain.metrics.margeCommerciale, 2700);
     });
 
-    test('sur la liste, le conducteur voit les dépassements mais pas le signe de la marge', async () => {
+    test('destinataire par défaut, le conducteur voit la perte de son chantier sur la liste comme sur sa fiche', async () => {
       const liste = await lire('/api/chantiers', authConducteur);
-      assert.deepEqual(liste.derive.metrics.alertes, DERIVES);
-      assert.equal(liste.derive.metrics.margeCommerciale, null);
+      assert.deepEqual(liste.derive.metrics.alertes, [...DERIVES, 'EN_PERTE']);
+      assert.equal(liste.derive.metrics.margeCommerciale, -200);
+      assert.equal(liste.derive.budgetGlobalVendu, 1000);
       assert.deepEqual(liste.sain.metrics.alertes, []);
-    });
-
-    test('sur SA fiche, où la marge lui est montrée, le conducteur voit aussi la perte', async () => {
       const fiche = await request(app).get(`/api/chantiers/${derive.id}`).set(authConducteur);
       assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
       assert.equal(fiche.body.metrics.margeCommerciale, -200);
       assert.deepEqual(fiche.body.metrics.alertes, [...DERIVES, 'EN_PERTE']);
+    });
+
+    test('la société peut retirer la rentabilité au conducteur : il garde les dépassements, sans le signe de la marge', async () => {
+      const retrait = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true, rentabiliteConducteur: false });
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      try {
+        const liste = await lire('/api/chantiers', authConducteur);
+        assert.deepEqual(liste.derive.metrics.alertes, DERIVES);
+        assert.equal(liste.derive.metrics.margeCommerciale, null);
+        assert.equal(liste.derive.budgetGlobalVendu, null);
+        const fiche = await request(app).get(`/api/chantiers/${derive.id}`).set(authConducteur);
+        assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+        assert.deepEqual(fiche.body.metrics.alertes, DERIVES);
+        assert.equal(fiche.body.metrics.margeCommerciale, null);
+        assert.equal(fiche.body.budgetGlobalVendu, null);
+        assert.equal(fiche.body.facturation, undefined, 'la facturation suit la marge');
+        // Les écritures qu'il garde ne lui renvoient pas le vendu, et il ne peut pas l'écraser.
+        const renommage = await request(app).patch(`/api/chantiers/${derive.id}`).set(authConducteur).send({ nom: 'TEST Rentabilité dérive' });
+        assert.equal(renommage.status, 200, JSON.stringify(renommage.body));
+        assert.equal(renommage.body.budgetGlobalVendu, null);
+        const ecrasement = await request(app).patch(`/api/chantiers/${derive.id}`).set(authConducteur).send({ budgetGlobalVendu: 1 });
+        assert.equal(ecrasement.status, 403, JSON.stringify(ecrasement.body));
+        const commercial = await prisma.user.findFirst({ where: { role: 'COMMERCIAL', actif: true }, select: { id: true } });
+        const affectation = await request(app).patch(`/api/chantiers/${derive.id}/commercial`).set(authConducteur).send({ commercialId: commercial?.id ?? null });
+        assert.equal(affectation.status, 200, JSON.stringify(affectation.body));
+        assert.equal(affectation.body.budgetGlobalVendu, null);
+        const aClore = await prisma.chantier.create({ data: { nom: 'TEST Rentabilité clôture', client: 'TEST Client rentabilité', dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: derive.responsableId } });
+        const cloture = await request(app).patch(`/api/chantiers/${aClore.id}/statut`).set(authConducteur).send({ statut: 'TERMINE' });
+        assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+        assert.equal(cloture.body.budgetGlobalVendu, null);
+        // L'administrateur, lui, la voit toujours, et le vendu est intact.
+        assert.deepEqual((await lire('/api/chantiers', auth)).derive.metrics.alertes, [...DERIVES, 'EN_PERTE']);
+        assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1000);
+        const vueAdmin = await request(app).patch(`/api/chantiers/${derive.id}`).set(auth).send({ nom: 'TEST Rentabilité dérive' });
+        assert.equal(Number(vueAdmin.body.budgetGlobalVendu), 1000, 'l’administrateur reçoit toujours le vendu');
+        // L'administrateur, lui, corrige toujours le vendu.
+        const correctionAdmin = await request(app).patch(`/api/chantiers/${derive.id}`).set(auth).send({ budgetGlobalVendu: 1500 });
+        assert.equal(correctionAdmin.status, 200, JSON.stringify(correctionAdmin.body));
+        assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1500);
+      } finally {
+        // Remise en état directe : un échec ci-dessus ne doit pas fausser les tests suivants.
+        await prisma.chantier.update({ where: { id: derive.id }, data: { budgetGlobalVendu: 1000 } });
+        const retour = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true, rentabiliteConducteur: true });
+        assert.equal(retour.status, 200, JSON.stringify(retour.body));
+      }
+    });
+
+    test('destinataire, le conducteur corrige le vendu de son chantier', async () => {
+      try {
+        // Une vraie valeur nouvelle : une écriture ignorée en silence ne passerait pas.
+        const correction = await request(app).patch(`/api/chantiers/${derive.id}`).set(authConducteur).send({ budgetGlobalVendu: 1200 });
+        assert.equal(correction.status, 200, JSON.stringify(correction.body));
+        assert.equal(Number(correction.body.budgetGlobalVendu), 1200);
+        assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1200);
+      } finally {
+        await prisma.chantier.update({ where: { id: derive.id }, data: { budgetGlobalVendu: 1000 } });
+      }
     });
 
     test('une clé sans finances:read ne déduit pas la perte de l’alerte', async () => {
@@ -1293,7 +1353,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(login.status, 200);
       auth = { Authorization: `Bearer ${login.body.token}` };
       ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
-      const initial = await reglages({ seuilMargeFaible: 15, joursSansSaisie: 14 });
+      const initial = await reglages({ seuilMargeFaible: 15, joursSansSaisie: 14, rentabiliteConducteur: true });
       assert.equal(initial.status, 200, JSON.stringify(initial.body));
       const conducteur = await prisma.user.create({ data: { email: 'suivi.conducteur@iris.test', name: 'TEST Conducteur suivi', role: 'CONDUCTEUR_TRAVAUX' } });
       authConducteur = { Authorization: `Bearer ${jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET)}` };
@@ -1318,6 +1378,7 @@ if (!TEST_DATABASE_URL) {
         margeCommercialeActive: ancienParametres.margeCommercialeActive,
         seuilMargeFaible: ancienParametres.seuilMargeFaible,
         joursSansSaisie: ancienParametres.joursSansSaisie,
+        rentabiliteConducteur: ancienParametres.rentabiliteConducteur,
       } });
     });
 
@@ -1383,7 +1444,14 @@ if (!TEST_DATABASE_URL) {
       assert.ok(!admin.sansHeure.metrics.alertes.includes('SANS_SAISIE'), 'démarré aujourd’hui');
       const conducteur = await lire('/api/chantiers', authConducteur);
       assert.ok(conducteur.endormi.metrics.alertes.includes('SANS_SAISIE'));
+      const fiche = await request(app).get(`/api/chantiers/${endormi.id}`).set(authConducteur);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      assert.ok(fiche.body.metrics.alertes.includes('SANS_SAISIE'), 'sur la fiche du conducteur aussi');
       try {
+        // Ce n'est pas une donnée de rentabilité : la retirer au conducteur ne la masque pas.
+        assert.equal((await reglages({ rentabiliteConducteur: false })).status, 200);
+        assert.ok((await lire('/api/chantiers', authConducteur)).endormi.metrics.alertes.includes('SANS_SAISIE'));
+        assert.equal((await reglages({ rentabiliteConducteur: true })).status, 200);
         assert.equal((await reglages({ joursSansSaisie: 31 })).status, 200);
         assert.ok(!(await lire('/api/chantiers', auth)).endormi.metrics.alertes.includes('SANS_SAISIE'));
         assert.equal((await reglages({ joursSansSaisie: '' })).status, 200);
@@ -1395,26 +1463,370 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    test('la marge estimée et la marge faible ne sortent que pour qui voit la marge', async () => {
+    test('la marge estimée et la marge faible ne sortent que pour les destinataires de la rentabilité', async () => {
+      const sansRentabilite = async (qui, entetes, chemin) => {
+        const vue = await lire(chemin, entetes);
+        assert.ok(!vue.sansHeure.metrics.alertes.includes('MARGE_FAIBLE'), qui);
+        assert.equal(vue.sansHeure.metrics.margeEstimee, null, qui);
+        assert.equal(vue.sansHeure.metrics.estimation, null, qui);
+      };
       try {
         // Seuil à 100 % : toute marge estimée positive est « faible », l'alerte est certaine.
         assert.equal((await reglages({ seuilMargeFaible: 100 })).status, 200);
         const admin = await lire('/api/chantiers', auth);
         assert.ok(admin.sansHeure.metrics.alertes.includes('MARGE_FAIBLE'));
         assert.equal(typeof admin.sansHeure.metrics.margeEstimee, 'number');
-        for (const [qui, entetes, chemin] of [['conducteur', authConducteur, '/api/chantiers'], ['clé sans finances:read', { Authorization: `Bearer ${cleSansFinances}` }, '/api/v1/chantiers']]) {
-          const vue = await lire(chemin, entetes);
-          assert.ok(!vue.sansHeure.metrics.alertes.includes('MARGE_FAIBLE'), qui);
-          assert.equal(vue.sansHeure.metrics.margeEstimee, null, qui);
-          assert.equal(vue.sansHeure.metrics.estimation, null, qui);
-        }
+        // Le conducteur du chantier en est destinataire par défaut, sur la liste comme sur sa fiche.
+        const conducteur = await lire('/api/chantiers', authConducteur);
+        assert.ok(conducteur.sansHeure.metrics.alertes.includes('MARGE_FAIBLE'));
+        assert.equal(conducteur.sansHeure.metrics.margeEstimee, admin.sansHeure.metrics.margeEstimee);
         const fiche = await request(app).get(`/api/chantiers/${sansHeure.id}`).set(authConducteur);
         assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
-        assert.ok(fiche.body.metrics.alertes.includes('MARGE_FAIBLE'), 'sur sa fiche, où la marge lui est montrée');
+        assert.ok(fiche.body.metrics.alertes.includes('MARGE_FAIBLE'));
         assert.equal(typeof fiche.body.metrics.estimation.coutEstime, 'number');
+        await sansRentabilite('clé sans finances:read', { Authorization: `Bearer ${cleSansFinances}` }, '/api/v1/chantiers');
+        // Retirée au conducteur : ni sur la liste, ni sur la fiche.
+        assert.equal((await reglages({ rentabiliteConducteur: false })).status, 200);
+        await sansRentabilite('conducteur retiré', authConducteur, '/api/chantiers');
+        const ficheRetiree = await request(app).get(`/api/chantiers/${sansHeure.id}`).set(authConducteur);
+        assert.equal(ficheRetiree.status, 200, JSON.stringify(ficheRetiree.body));
+        assert.ok(!ficheRetiree.body.metrics.alertes.includes('MARGE_FAIBLE'));
+        assert.equal(ficheRetiree.body.metrics.estimation, null);
       } finally {
-        assert.equal((await reglages({ seuilMargeFaible: 15 })).status, 200);
+        assert.equal((await reglages({ seuilMargeFaible: 15, rentabiliteConducteur: true })).status, 200);
       }
+    });
+  });
+
+  // Organisation testée : Régional → Secteur → Conducteur, chantier confié au conducteur ;
+  // un autre responsable dirige une autre branche ; un directeur pilote toute la société.
+  describe('Rentabilité selon la hiérarchie, profil Directeur et rattachements', () => {
+    let auth = {};
+    let superId = '';
+    let ancienParametres;
+    const comptes = {};
+    const jetons = {};
+    let chantier;
+    let chantierAutreBranche;
+    let chantierDuDirecteur;
+    let saisie = {};
+    const entete = (qui) => ({ Authorization: `Bearer ${jetons[qui]}` });
+    const reglages = (corps) => request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true, ...corps });
+    const rattacher = (qui, responsableId, entetes = auth) => request(app).patch(`/api/users/${comptes[qui].id}/responsable-hierarchique`).set(entetes)
+      .send({ responsableHierarchiqueId: responsableId });
+    const vue = async (qui, cible = chantier) => {
+      const liste = await request(app).get('/api/chantiers').set(entete(qui));
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      const fiche = await request(app).get(`/api/chantiers/${cible.id}`).set(entete(qui));
+      return { liste: liste.body.find((c) => c.id === cible.id), fiche };
+    };
+    const voitLaPerte = async (qui, attendu) => {
+      const { liste, fiche } = await vue(qui);
+      assert.ok(liste, `${qui} doit voir le chantier dans sa liste`);
+      assert.equal(fiche.status, 200, `${qui} : ${JSON.stringify(fiche.body)}`);
+      if (attendu) {
+        assert.equal(liste.metrics.margeCommerciale, -200, qui);
+        assert.ok(liste.metrics.alertes.includes('EN_PERTE'), qui);
+        assert.equal(liste.budgetGlobalVendu, 1000, qui);
+        assert.equal(fiche.body.metrics.margeCommerciale, -200, qui);
+        assert.equal(typeof fiche.body.metrics.estimation?.coutEstime, 'number', qui);
+      } else {
+        assert.equal(liste.metrics.margeCommerciale, null, qui);
+        assert.ok(!liste.metrics.alertes.includes('EN_PERTE'), qui);
+        assert.equal(liste.budgetGlobalVendu, null, qui);
+        assert.equal(fiche.body.metrics.margeCommerciale, null, qui);
+        assert.equal(fiche.body.metrics.estimation, null, qui);
+        assert.equal(fiche.body.budgetGlobalVendu, null, qui);
+      }
+      // Les dépassements ne sont pas une donnée de rentabilité : chacun les voit.
+      assert.ok(liste.metrics.alertes.includes('MATERIEL_DEPASSE'), qui);
+    };
+
+    before(async () => {
+      const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(login.status, 200);
+      auth = { Authorization: `Bearer ${login.body.token}` };
+      superId = login.body.user.id;
+      ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      assert.equal((await reglages({ rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true })).status, 200);
+      const creer = async (qui, role, actif = true) => {
+        comptes[qui] = await prisma.user.create({ data: { email: `chaine.${qui}@iris.test`, name: `TEST Chaîne ${qui}`, role, actif } });
+        jetons[qui] = jwt.sign({ id: comptes[qui].id }, process.env.JWT_SECRET);
+      };
+      await creer('conducteur', 'CONDUCTEUR_TRAVAUX');
+      await creer('secteur', 'RESPONSABLE');
+      await creer('regional', 'RESPONSABLE');
+      await creer('autre.responsable', 'RESPONSABLE');
+      await creer('autre.conducteur', 'CONDUCTEUR_TRAVAUX');
+      await creer('admin', 'ADMIN');
+      await creer('inactif', 'RESPONSABLE', false);
+      // Le directeur est créé par l'API : le type de compte fait partie des rôles autorisés.
+      const directeur = await request(app).post('/api/users').set(auth).send({ email: 'chaine.directeur@iris.test', name: 'TEST Chaîne directeur', role: 'DIRECTEUR' });
+      assert.equal(directeur.status, 201, JSON.stringify(directeur.body));
+      assert.equal(directeur.body.role, 'DIRECTEUR');
+      comptes.directeur = directeur.body;
+      jetons.directeur = jwt.sign({ id: directeur.body.id }, process.env.JWT_SECRET);
+      // Vendu 1 000 € dont 300 € de matériel ; 1 200 € d'achats : chantier en perte de 200 €.
+      const vente = { client: 'TEST Client chaîne', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 10 };
+      chantier = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Chaîne chantier', responsableId: comptes.conducteur.id } });
+      chantierAutreBranche = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Chaîne autre branche', responsableId: comptes['autre.conducteur'].id } });
+      // Chantier resté au nom d'un compte devenu directeur (conducteur promu, par exemple).
+      chantierDuDirecteur = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Chaîne ancien chantier du directeur', responsableId: comptes.directeur.id } });
+      const categorie = await prisma.categorie.create({ data: { nom: 'TEST Chaîne catégorie' } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Chaîne fournisseur' } });
+      saisie = { categorieId: categorie.id, fournisseurId: fournisseur.id, date: jourCivilEntreprise(new Date()), description: 'TEST achat chaîne' };
+      const achat = await request(app).post('/api/achats').set(auth).send({ ...saisie, chantierId: chantier.id, montantHT: 1200 });
+      assert.equal(achat.status, 200, JSON.stringify(achat.body));
+    });
+
+    after(async () => {
+      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: {
+        margeCommercialeActive: ancienParametres.margeCommercialeActive,
+        rentabiliteConducteur: ancienParametres.rentabiliteConducteur,
+        rentabiliteHierarchie: ancienParametres.rentabiliteHierarchie,
+        rentabiliteDirecteurs: ancienParametres.rentabiliteDirecteurs,
+      } });
+    });
+
+    test('les rattachements se règlent par l’administration et refusent soi-même, l’inconnu, l’inactif et la boucle', async () => {
+      const direct = await rattacher('conducteur', comptes.secteur.id);
+      assert.equal(direct.status, 200, JSON.stringify(direct.body));
+      assert.deepEqual(direct.body.responsableHierarchique, { id: comptes.secteur.id, name: 'TEST Chaîne secteur' });
+      assert.equal((await rattacher('secteur', comptes.regional.id)).status, 200);
+      const refus = [
+        ['soi-même', await rattacher('regional', comptes.regional.id)],
+        ['boucle', await rattacher('regional', comptes.conducteur.id)],
+        ['boucle directe', await rattacher('secteur', comptes.conducteur.id)],
+        ['inconnu', await rattacher('regional', '00000000-0000-0000-0000-000000000000')],
+        ['inactif', await rattacher('regional', comptes.inactif.id)],
+        ['type invalide', await rattacher('regional', 42)],
+        // Un tableau serait lu comme l'identifiant qu'il contient sans le contrôle de type.
+        ['tableau', await rattacher('autre.conducteur', [comptes.secteur.id])],
+      ];
+      for (const [cas, reponse] of refus) assert.equal(reponse.status, 400, `${cas} → ${reponse.status} ${JSON.stringify(reponse.body)}`);
+      assert.match(refus[1][1].body.error, /boucle/);
+      // Réservé à l'administration, et un simple administrateur ne rattache personne à un
+      // super administrateur, qu'il ne voit pas.
+      assert.equal((await rattacher('autre.conducteur', comptes.regional.id, entete('regional'))).status, 403);
+      assert.equal((await rattacher('autre.conducteur', comptes.regional.id, entete('directeur'))).status, 403);
+      assert.equal((await rattacher('autre.conducteur', superId, entete('admin'))).status, 400);
+      assert.equal((await request(app).patch(`/api/users/${superId}/responsable-hierarchique`).set(entete('admin')).send({ responsableHierarchiqueId: comptes.admin.id })).status, 403);
+      // La liste des comptes montre le rattachement ; la base refuse l'auto-rattachement écrit hors API.
+      const utilisateurs = await request(app).get('/api/users').set(auth);
+      assert.deepEqual(utilisateurs.body.find((u) => u.id === comptes.secteur.id).responsableHierarchique, { id: comptes.regional.id, name: 'TEST Chaîne regional' });
+      assert.equal(utilisateurs.body.find((u) => u.id === comptes.regional.id).responsableHierarchique, null);
+      await assert.rejects(prisma.user.update({ where: { id: comptes.regional.id }, data: { responsableHierarchiqueId: comptes.regional.id } }));
+      // Un super administrateur responsable n'apparaît pas à un simple administrateur.
+      assert.equal((await rattacher('autre.conducteur', superId)).status, 200);
+      try {
+        const vuParAdmin = await request(app).get('/api/users').set(entete('admin'));
+        assert.equal(vuParAdmin.body.find((u) => u.id === comptes['autre.conducteur'].id).responsableHierarchique, null);
+        assert.equal(JSON.stringify(vuParAdmin.body).includes(superId), false);
+        const vuParSuper = await request(app).get('/api/users').set(auth);
+        assert.equal(vuParSuper.body.find((u) => u.id === comptes['autre.conducteur'].id).responsableHierarchique.id, superId);
+      } finally {
+        assert.equal((await rattacher('autre.conducteur', null)).status, 200);
+      }
+      const chaine = await prisma.user.findMany({ where: { id: { in: [comptes.conducteur.id, comptes.secteur.id, comptes.regional.id] } }, select: { id: true, responsableHierarchiqueId: true } });
+      assert.deepEqual(Object.fromEntries(chaine.map((u) => [u.id, u.responsableHierarchiqueId])), {
+        [comptes.conducteur.id]: comptes.secteur.id, [comptes.secteur.id]: comptes.regional.id, [comptes.regional.id]: null,
+      });
+    });
+
+    test('toute la chaîne hiérarchique voit le chantier et sa rentabilité ; une autre branche n’en voit rien', async () => {
+      await voitLaPerte('conducteur', true);
+      await voitLaPerte('secteur', true);
+      await voitLaPerte('regional', true);
+      const autre = await vue('autre.responsable');
+      assert.equal(autre.liste, undefined);
+      assert.equal(autre.fiche.status, 404);
+      // Le responsable régional voit le conducteur dans ses statistiques, comme son N+1.
+      const statistiques = await request(app).get('/api/stats/conducteurs').set(entete('regional'));
+      assert.equal(statistiques.status, 200, JSON.stringify(statistiques.body));
+      assert.ok(statistiques.body.some((ligne) => ligne.id === comptes.conducteur.id));
+      assert.ok(!statistiques.body.some((ligne) => ligne.id === comptes['autre.conducteur'].id));
+    });
+
+    test('la branche suit chaque rattachement sans reconnexion', async () => {
+      try {
+        assert.equal((await rattacher('secteur', null)).status, 200);
+        const detache = await vue('regional');
+        assert.equal(detache.liste, undefined);
+        assert.equal(detache.fiche.status, 404);
+        await voitLaPerte('secteur', true);
+      } finally {
+        assert.equal((await rattacher('secteur', comptes.regional.id)).status, 200);
+      }
+      await voitLaPerte('regional', true);
+    });
+
+    test('le directeur voit tous les chantiers et leur rentabilité, sans rien administrer ni saisir', async () => {
+      await voitLaPerte('directeur', true);
+      const autreBranche = await vue('directeur', chantierAutreBranche);
+      assert.ok(autreBranche.liste, 'tous les chantiers, hors de toute hiérarchie');
+      assert.equal(autreBranche.fiche.status, 200);
+      const moi = await request(app).get('/api/me').set(entete('directeur'));
+      assert.deepEqual(moi.body.permissions, ['chantiers:read']);
+      const refus = [
+        ['saisie d’un achat', () => request(app).post('/api/achats').set(entete('directeur')).send({ chantierId: chantier.id, montantHT: 1 })],
+        ['modification du chantier', () => request(app).patch(`/api/chantiers/${chantier.id}`).set(entete('directeur')).send({ nom: 'TEST piraté' })],
+        ['clôture', () => request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(entete('directeur')).send({ statut: 'TERMINE' })],
+        ['réglages', () => request(app).put('/api/parametres').set(entete('directeur')).send({ rentabiliteDirecteurs: true })],
+        ['comptes', () => request(app).get('/api/users').set(entete('directeur'))],
+        ['référentiel', () => request(app).post('/api/categories').set(entete('directeur')).send({ nom: 'TEST directeur' })],
+        ['planning', () => request(app).get('/api/planning/events').set(entete('directeur'))],
+        ['SAV', () => request(app).get('/api/interventions').set(entete('directeur'))],
+        ['statistiques Travaux', () => request(app).get('/api/stats/conducteurs').set(entete('directeur'))],
+        ['commercial d’un chantier resté à son nom', () => request(app).patch(`/api/chantiers/${chantierDuDirecteur.id}/commercial`).set(entete('directeur')).send({ commercialId: null })],
+      ];
+      // Appels différés : supertest ouvre un serveur dès la création de la requête, et un
+      // appel jamais attendu après un premier échec empêcherait la suite de se terminer.
+      for (const [cas, appel] of refus) {
+        const reponse = await appel();
+        assert.equal(reponse.status, 403, `${cas} → ${reponse.status} ${JSON.stringify(reponse.body)}`);
+      }
+      assert.equal((await prisma.chantier.findUnique({ where: { id: chantier.id } })).nom, 'TEST Chaîne chantier');
+    });
+
+    test('l’affaire rattachée à une intervention ne montre jamais son montant vendu', async () => {
+      const client = await request(app).post('/api/clients').set(auth).send({ raisonSociale: 'TEST Client chaîne' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      const dossier = await request(app).post('/api/interventions').set(auth).send({ clientId: client.body.id, chantierId: chantier.id, titre: 'TEST Intervention sur chantier de la chaîne' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      assert.equal(dossier.body.chantier.nom, 'TEST Chaîne chantier');
+      assert.equal('budgetGlobalVendu' in dossier.body.chantier, false);
+      for (const qui of ['conducteur', 'regional']) {
+        const liste = await request(app).get('/api/interventions').set(entete(qui));
+        assert.equal(liste.status, 200, JSON.stringify(liste.body));
+        const vu = liste.body.find((item) => item.id === dossier.body.id);
+        assert.ok(vu, `${qui} voit l’intervention de son périmètre`);
+        assert.deepEqual(Object.keys(vu.chantier).sort(), ['adresse', 'client', 'id', 'nom', 'numeroDevis', 'statut'], qui);
+      }
+    });
+
+    test('chaque catégorie de destinataires se retire seule, sans réduire le périmètre de lecture', async () => {
+      for (const corps of [{ rentabiliteHierarchie: 'false' }, { rentabiliteDirecteurs: 1 }, { rentabiliteConducteur: null }]) {
+        const refus = await reglages(corps);
+        assert.equal(refus.status, 400, `${JSON.stringify(corps)} → ${refus.status}`);
+      }
+      const inchange = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      assert.deepEqual([inchange.rentabiliteConducteur, inchange.rentabiliteHierarchie, inchange.rentabiliteDirecteurs], [true, true, true]);
+      try {
+        const sansChaine = await reglages({ rentabiliteHierarchie: false });
+        assert.equal(sansChaine.status, 200, JSON.stringify(sansChaine.body));
+        assert.equal(sansChaine.body.rentabiliteHierarchie, false);
+        await voitLaPerte('secteur', false);
+        await voitLaPerte('regional', false);
+        await voitLaPerte('conducteur', true);
+        await voitLaPerte('directeur', true);
+        // Les statistiques Travaux de la branche ne rendent pas ce que la liste masque.
+        const statistiques = await request(app).get('/api/stats/conducteurs').set(entete('regional'));
+        assert.equal(statistiques.status, 200, JSON.stringify(statistiques.body));
+        const ligne = statistiques.body.find((l) => l.id === comptes.conducteur.id);
+        assert.deepEqual([ligne.caTotal, ligne.margeTotal, ligne.margePct], [null, null, null]);
+        assert.equal(ligne.nbChantiers, 1, 'le suivi opérationnel reste');
+        const statsAdmin = await request(app).get('/api/stats/conducteurs').set(auth);
+        assert.equal(statsAdmin.body.find((l) => l.id === comptes.conducteur.id).caTotal, 1000);
+        assert.equal((await reglages({ rentabiliteHierarchie: true, rentabiliteDirecteurs: false })).status, 200);
+        await voitLaPerte('directeur', false);
+        await voitLaPerte('regional', true);
+        // Marge commerciale désactivée : comme sur la liste, la branche garde le vendu (CA) mais
+        // plus la marge ; l'administration, elle, garde l'un et l'autre.
+        assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: false })).status, 200);
+        const sansMarge = (await request(app).get('/api/stats/conducteurs').set(entete('regional'))).body.find((l) => l.id === comptes.conducteur.id);
+        assert.deepEqual([sansMarge.caTotal, sansMarge.margeTotal, sansMarge.margePct], [1000, null, null]);
+        const listeSansMarge = (await request(app).get('/api/chantiers').set(entete('regional'))).body.find((c) => c.id === chantier.id);
+        assert.deepEqual([listeSansMarge.budgetGlobalVendu, listeSansMarge.metrics.margeCommerciale], [1000, null], 'même règle que la liste');
+        const adminSansMarge = (await request(app).get('/api/stats/conducteurs').set(auth)).body.find((l) => l.id === comptes.conducteur.id);
+        assert.deepEqual([adminSansMarge.caTotal, adminSansMarge.margeTotal], [1000, -200]);
+        assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: 'false' })).status, 400, 'un vrai booléen est exigé');
+        // Tout retiré : seuls les administrateurs la voient encore.
+        assert.equal((await reglages({ rentabiliteConducteur: false, rentabiliteHierarchie: false, rentabiliteDirecteurs: false })).status, 200);
+        for (const qui of ['conducteur', 'secteur', 'regional', 'directeur']) await voitLaPerte(qui, false);
+        await voitLaPerte('admin', true);
+        // Un appel qui ne règle que les destinataires laisse la marge commerciale active.
+        const partiel = await request(app).put('/api/parametres').set(auth).send({ rentabiliteDirecteurs: true });
+        assert.equal(partiel.status, 200, JSON.stringify(partiel.body));
+        assert.equal(partiel.body.margeCommercialeActive, true);
+      } finally {
+        assert.equal((await reglages({ rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true })).status, 200);
+      }
+    });
+
+    test('un commercial ou un technicien désigné responsable d’un chantier n’en reçoit jamais la rentabilité', async () => {
+      for (const [qui, role] of [['commercial', 'COMMERCIAL'], ['technicien', 'TECHNICIEN']]) {
+        const compte = await prisma.user.create({ data: { email: `chaine.${qui}@iris.test`, name: `TEST Chaîne ${qui}`, role } });
+        const sien = await prisma.chantier.create({ data: { nom: `TEST Chaîne chantier du ${qui}`, client: 'TEST Client chaîne', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300, responsableId: compte.id } });
+        const fiche = await request(app).get(`/api/chantiers/${sien.id}`).set({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+        assert.equal(fiche.status, 200, `${qui} : ${JSON.stringify(fiche.body)}`);
+        assert.equal(fiche.body.budgetGlobalVendu, null, qui);
+        assert.equal(fiche.body.metrics.margeCommerciale, null, qui);
+        assert.equal(fiche.body.metrics.estimation, null, qui);
+      }
+    });
+
+    test('le journal d’une intervention ne restitue pas le montant vendu d’un ancien instantané', async () => {
+      const dossier = await prisma.intervention.findFirst({ where: { chantierId: chantier.id }, select: { id: true } });
+      assert.ok(dossier, 'intervention créée par le test précédent');
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
+      // Instantané au format antérieur : l'affaire entière, montant vendu compris.
+      await prisma.journalSaisieChantier.create({ data: {
+        chantierId: null, interventionId: dossier.id, cible: 'INTERVENTION', cibleId: dossier.id, action: 'CREATION',
+        auteurId: auteur.id, auteurNom: auteur.name,
+        avant: { id: dossier.id, chantier: { id: chantier.id, nom: 'TEST Chaîne chantier', budgetGlobalVendu: 1000, budgetMainOeuvreVendu: 700, responsableId: comptes.conducteur.id } },
+        apres: { id: dossier.id, chantier: { id: chantier.id, nom: 'TEST Chaîne chantier', budgetGlobalVendu: 1000, budgetMaterielVendu: 300 } },
+      } });
+      const journal = await request(app).get(`/api/interventions/${dossier.id}/journal-saisies`).set(entete('regional'));
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.ok(journal.body.length > 0);
+      // Liste blanche : l'affaire d'un instantané ne garde que son identification, ni vendu,
+      // ni budgets par poste, ni responsable.
+      const autorisees = ['adresse', 'client', 'id', 'nom', 'numeroDevis', 'statut'];
+      for (const entree of journal.body) {
+        for (const instantane of [entree.avant, entree.apres]) {
+          if (!instantane?.chantier) continue;
+          assert.deepEqual(Object.keys(instantane.chantier).filter((cle) => !autorisees.includes(cle)), [], JSON.stringify(instantane.chantier));
+        }
+      }
+      assert.ok(journal.body.some((entree) => entree.avant?.chantier?.nom === 'TEST Chaîne chantier'), 'l’ancien « avant » est aussi projeté');
+      assert.ok(journal.body.some((entree) => entree.apres?.chantier?.nom === 'TEST Chaîne chantier'), 'l’affaire reste identifiée');
+    });
+
+    test('deux rattachements croisés simultanés ne forment jamais de boucle', async () => {
+      const [a, b] = [comptes['autre.responsable'], comptes.inactif];
+      await prisma.user.update({ where: { id: b.id }, data: { actif: true } });
+      try {
+        for (let essai = 0; essai < 15; essai++) {
+          await prisma.user.updateMany({ where: { id: { in: [a.id, b.id] } }, data: { responsableHierarchiqueId: null } });
+          const reponses = await Promise.all([rattacher('autre.responsable', b.id), rattacher('inactif', a.id)]);
+          assert.deepEqual(reponses.map((r) => r.status).sort(), [200, 400], `essai ${essai} : ${reponses.map((r) => r.status)}`);
+          const lus = await prisma.user.findMany({ where: { id: { in: [a.id, b.id] } }, select: { id: true, responsableHierarchiqueId: true } });
+          assert.ok(!lus.every((u) => u.responsableHierarchiqueId), `essai ${essai} : boucle formée`);
+        }
+      } finally {
+        await prisma.user.updateMany({ where: { id: { in: [a.id, b.id] } }, data: { responsableHierarchiqueId: null } });
+        await prisma.user.update({ where: { id: b.id }, data: { actif: false } });
+      }
+    });
+
+    test('une boucle écrite directement en base ne bloque pas la lecture de la branche', async () => {
+      const [a, b] = [comptes['autre.responsable'], comptes.inactif];
+      await prisma.user.update({ where: { id: a.id }, data: { responsableHierarchiqueId: b.id } });
+      await prisma.user.update({ where: { id: b.id }, data: { responsableHierarchiqueId: a.id } });
+      try {
+        const liste = await request(app).get('/api/chantiers').set(entete('autre.responsable'));
+        assert.equal(liste.status, 200, JSON.stringify(liste.body));
+        assert.equal(liste.body.some((c) => c.id === chantier.id), false);
+      } finally {
+        await prisma.user.updateMany({ where: { id: { in: [a.id, b.id] } }, data: { responsableHierarchiqueId: null } });
+      }
+    });
+
+    test('un responsable saisit sur toute sa branche, pas sur une autre', async () => {
+      const regional = await request(app).post('/api/achats').set(entete('regional')).send({ ...saisie, chantierId: chantier.id, montantHT: 10 });
+      assert.equal(regional.status, 200, JSON.stringify(regional.body));
+      const autre = await request(app).post('/api/achats').set(entete('autre.responsable')).send({ ...saisie, chantierId: chantier.id, montantHT: 10 });
+      assert.equal(autre.status, 404, JSON.stringify(autre.body));
     });
   });
 
