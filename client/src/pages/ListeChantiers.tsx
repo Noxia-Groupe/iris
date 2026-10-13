@@ -93,8 +93,8 @@ const ListeChantiers = () => {
     }, { replace: true });
   };
 
-  // Clôturer un chantier (en cours -> terminé) : possible pour son responsable ou un
-  // admin. Une fois clôturé, plus aucune heure ni dépense ne peut y être ajoutée.
+  // Clôturer un chantier (en cours -> terminé) : quand le serveur le permet (peutCloturer).
+  // Une fois clôturé, plus aucune heure ni dépense ne peut y être ajoutée.
   const handleCloturer = async (id: string, nom: string) => {
     if (!confirm(`Clôturer « ${nom} » ? Il passera en Terminé/Archivé et il ne sera plus possible d'y ajouter des heures ou des dépenses.`)) return;
     try {

@@ -498,6 +498,8 @@ async function chantierSelonRentabilite<T extends { responsableId: string | null
 // retirer imposerait de supprimer la colonne pour la recréer à l'identique deux phases
 // plus loin, en perdant au passage les droits déjà accordés aux utilisateurs.
 export function peutVoirFinance(user: { role: string; accesFinance?: boolean | null } | undefined): boolean {
+  // Jamais pour un technicien, qui ne voit aucun montant (cf. DROITS_INTERDITS_TECHNICIEN).
+  if (user?.role === ROLE_TECHNICIEN) return false;
   return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
 }
 
@@ -2896,7 +2898,8 @@ function avecDroitDeCloture<T extends { responsableId: string | null; responsabl
   return {
     ...reste,
     responsable: responsable ? responsableSansRole : null,
-    peutCloturer: peutCloturerChantier(user, { responsableId: chantier.responsableId, responsableRole: role }),
+    // Sans objet pour une clé d'intégration, qui ne clôture rien : le champ n'est envoyé qu'aux sessions.
+    ...(user ? { peutCloturer: peutCloturerChantier(user, { responsableId: chantier.responsableId, responsableRole: role }) } : {}),
   };
 }
 
@@ -3430,9 +3433,10 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
       // compte quitte ces rôles, pour ne pas laisser un état orphelin qui réapparaîtrait
       // s'il y revenait plus tard sans qu'on l'ait explicitement redemandé.
-      // accesFinance n'est PAS touché : il ne dépend pas du rôle, un conducteur comme un
-      // commercial peut le conserver en changeant de fonction.
-      data: isAdminRole(role) ? { role } : { role, estCommercial: false },
+      // accesFinance n'est pas touché : il ne dépend pas du rôle, un conducteur comme un
+      // commercial peut le conserver en changeant de fonction. Seule exception, le passage en
+      // technicien le retire : ce type de compte ne voit aucun montant.
+      data: isAdminRole(role) ? { role } : { role, estCommercial: false, ...(role === ROLE_TECHNICIEN ? { accesFinance: false } : {}) },
       select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
     });
     res.json(user);

@@ -1383,7 +1383,7 @@ const Admin = () => {
                                 ? 'Autoriser ce compte à consulter le Suivi financier'
                                 : "Seul un super administrateur peut accorder l'accès au suivi financier."}
                           />
-                          <span className="text-xs text-gray-500">{u.accesFinance ? 'Oui' : 'Non'}</span>
+                          <span className="text-xs text-gray-500">{u.accesFinance ? (estTechnicien ? 'Sans effet' : 'Oui') : 'Non'}</span>
                         </label>
                       )}
                     </td>

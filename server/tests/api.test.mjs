@@ -220,7 +220,7 @@ if (!TEST_DATABASE_URL) {
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
-      'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test',
+      'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1866,18 +1866,24 @@ if (!TEST_DATABASE_URL) {
       authComptable = jeton(comptable);
       authDe = { responsable: jeton(responsable), autreResponsable: jeton(autreResponsable), conducteur: jeton(conducteur), directeur: jeton(directeur), commercial: jeton(commercial) };
       // Vendu 1 000 € dont 300 € de matériel et 700 € de main-d'œuvre, 10 h vendues ; 450 €
-      // d'achats (matériel dépassé). Sur le chantier du technicien, 12 h à 42 €/h en plus
-      // (heures dépassées, 504 € de main-d'œuvre).
+      // d'achats (matériel dépassé). Sur le chantier du technicien, 500 € de main-d'œuvre vendue
+      // et 12 h à 42 €/h pointées : heures et main-d'œuvre (504 €) dépassées aussi.
       const vente = { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 10 };
-      chantierTechnicien = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Budgets chantier du technicien', responsableId: technicien.id } });
+      chantierTechnicien = await prisma.chantier.create({ data: { ...vente, budgetMainOeuvreVendu: 500, nom: 'TEST Budgets chantier du technicien', responsableId: technicien.id } });
       chantierComptable = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Budgets chantier du comptable', responsableId: comptable.id, commercialId: commercial.id } });
       chantierConducteur = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Budgets chantier du conducteur', responsableId: conducteur.id } });
       const categorie = await prisma.categorie.create({ data: { nom: 'TEST Budgets catégorie' } });
       const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Budgets fournisseur' } });
+      const achats = [];
       for (const chantier of [chantierTechnicien, chantierComptable, chantierConducteur]) {
         const achat = await request(app).post('/api/achats').set(auth).send({ chantierId: chantier.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: jourCivilEntreprise(new Date()), description: 'TEST achat budgets', montantHT: 450 });
         assert.equal(achat.status, 200, JSON.stringify(achat.body));
+        achats.push(achat.body);
       }
+      // Une correction journalise l'achat entier avant et après : montant compris, même
+      // quand seule la description change.
+      const correction = await request(app).patch(`/api/achats/${achats[0].id}`).set(auth).send({ description: 'TEST achat budgets corrigé', motifCorrection: 'TEST correction du libellé' });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
       const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Budgets intervenant', role: 'TECHNICIEN', tauxHoraireCharge: 42 } });
       const heures = await request(app).post('/api/heures').set(auth).send({ chantierId: chantierTechnicien.id, intervenantId: intervenant.id, date: jourCivilEntreprise(new Date()), nbrHeures: 12 });
       assert.equal(heures.status, 200, JSON.stringify(heures.body));
@@ -1888,8 +1894,10 @@ if (!TEST_DATABASE_URL) {
 
     // Aucune valeur monétaire du jeu de données (budgets, achats, taux, main-d'œuvre) ni les
     // pourcentages qui en découlent, où qu'elle se trouve dans la réponse.
-    const MONTANTS = /":\s*(300|700|450|42|504|150|72)(\.0+)?[,}\]]/;
+    const MONTANTS = /":\s*(300|500|700|1000|450|42|504|150|100\.8)(\.0+)?[,}\]]/;
     const sansMontants = (corps, qui) => assert.doesNotMatch(JSON.stringify(corps), MONTANTS, `${qui} : un montant est exposé`);
+    // Le responsable d'un chantier n'expose que son identité, jamais son type de compte.
+    const responsableSansRole = (vue, qui) => assert.deepEqual(Object.keys(vue.responsable).sort(), ['email', 'id', 'name'], qui);
     const sansDepassement = (vue, qui) => {
       for (const alerte of ['MATERIEL_DEPASSE', 'MAIN_OEUVRE_DEPASSEE', 'HEURES_DEPASSEES']) assert.ok(!vue.metrics.alertes.includes(alerte), `${qui} : ${alerte}`);
     };
@@ -1900,10 +1908,12 @@ if (!TEST_DATABASE_URL) {
       const ligne = liste.body.find((c) => c.id === chantierTechnicien.id);
       sansMontants(ligne, 'liste du technicien');
       sansDepassement(ligne, 'liste du technicien');
+      responsableSansRole(ligne, 'liste du technicien');
       const fiche = await request(app).get(`/api/chantiers/${chantierTechnicien.id}`).set(authTechnicien);
       assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
       sansMontants(fiche.body, 'fiche du technicien');
       sansDepassement(fiche.body, 'fiche du technicien');
+      responsableSansRole(fiche.body, 'fiche du technicien');
       for (const champ of ['budgetGlobalVendu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu']) assert.equal(fiche.body[champ], null, champ);
       for (const champ of ['materielReel', 'moReel', 'totalDepenses', 'pctMateriel', 'pctMainOeuvre']) assert.equal(fiche.body.metrics[champ], null, champ);
       assert.equal(fiche.body.achats[0].montantHT, undefined);
@@ -1925,7 +1935,8 @@ if (!TEST_DATABASE_URL) {
       sansMontants(heures.body, 'journal des heures');
       const journal = await request(app).get(`/api/chantiers/${chantierTechnicien.id}/journal-saisies`).set(authTechnicien);
       assert.equal(journal.status, 200, JSON.stringify(journal.body));
-      assert.ok(journal.body.length >= 2, 'création de l’achat et du pointage journalisée');
+      assert.ok(journal.body.length >= 3, 'création de l’achat et du pointage, correction de l’achat');
+      assert.ok(journal.body.some((entree) => entree.action === 'CORRECTION' && entree.avant && entree.apres), 'instantanés avant et après d’une correction');
       sansMontants(journal.body, 'journal des saisies');
       const tableau = await request(app).get('/api/stats/global').set(authTechnicien);
       assert.equal(tableau.status, 200, JSON.stringify(tableau.body));
@@ -1957,7 +1968,7 @@ if (!TEST_DATABASE_URL) {
       const enBase = await prisma.chantier.findUnique({ where: { id: chantierTechnicien.id } });
       assert.deepEqual(
         [enBase.nom, enBase.statut, enBase.commercialId, Number(enBase.budgetMaterielVendu), Number(enBase.budgetMainOeuvreVendu), Number(enBase.heuresVendues)],
-        ['TEST Budgets chantier du technicien', 'EN_COURS', null, 300, 700, 10],
+        ['TEST Budgets chantier du technicien', 'EN_COURS', null, 300, 500, 10],
       );
     });
 
@@ -1977,9 +1988,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal(reouverture.status, 403, 'seul un administrateur rouvre');
     });
 
-    const avecMontants = (vue, qui) => {
+    const avecMontants = (vue, qui, budgetMainOeuvre = 700) => {
       assert.equal(vue.budgetMaterielVendu, 300, qui);
-      assert.equal(vue.budgetMainOeuvreVendu, 700, qui);
+      assert.equal(vue.budgetMainOeuvreVendu, budgetMainOeuvre, qui);
       assert.equal(vue.metrics.pctMateriel, 150, qui);
       assert.equal(vue.metrics.materielReel, 450, qui);
       assert.ok(vue.metrics.alertes.includes('MATERIEL_DEPASSE'), qui);
@@ -1990,26 +2001,33 @@ if (!TEST_DATABASE_URL) {
       assert.equal(comptable.status, 200, JSON.stringify(comptable.body));
       avecMontants(comptable.body, 'comptable responsable du chantier');
       const vues = [
-        ['responsable du technicien', authDe.responsable, chantierTechnicien],
-        ['conducteur du chantier', authDe.conducteur, chantierConducteur],
-        ['directeur', authDe.directeur, chantierTechnicien],
-        ['commercial vendeur', authDe.commercial, chantierComptable],
+        ['responsable du technicien', authDe.responsable, chantierTechnicien, 500],
+        ['conducteur du chantier', authDe.conducteur, chantierConducteur, 700],
+        ['directeur', authDe.directeur, chantierTechnicien, 500],
+        ['commercial vendeur', authDe.commercial, chantierComptable, 700],
       ];
-      for (const [qui, entetes, chantier] of vues) {
+      for (const [qui, entetes, chantier, budgetMainOeuvre] of vues) {
         const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(entetes);
         assert.equal(fiche.status, 200, `${qui} : ${JSON.stringify(fiche.body)}`);
-        avecMontants(fiche.body, `fiche, ${qui}`);
+        avecMontants(fiche.body, `fiche, ${qui}`, budgetMainOeuvre);
+        responsableSansRole(fiche.body, `fiche, ${qui}`);
         const liste = await request(app).get('/api/chantiers').set(entetes);
-        avecMontants(liste.body.find((c) => c.id === chantier.id), `liste, ${qui}`);
+        const ligne = liste.body.find((c) => c.id === chantier.id);
+        avecMontants(ligne, `liste, ${qui}`, budgetMainOeuvre);
+        responsableSansRole(ligne, `liste, ${qui}`);
       }
-      // Le N+1 voit la main-d'œuvre et le dépassement d'heures du chantier de son technicien.
+      // Le N+1 voit la main-d'œuvre et les dépassements d'heures et de main-d'œuvre du chantier
+      // de son technicien.
       const vueResponsable = (await request(app).get(`/api/chantiers/${chantierTechnicien.id}`).set(authDe.responsable)).body;
       assert.equal(vueResponsable.metrics.moReel, 504);
-      assert.ok(vueResponsable.metrics.alertes.includes('HEURES_DEPASSEES'));
+      for (const alerte of ['HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE']) assert.ok(vueResponsable.metrics.alertes.includes(alerte), alerte);
       const admin = (await request(app).get('/api/chantiers').set(auth)).body.find((c) => c.id === chantierTechnicien.id);
-      avecMontants(admin, 'administrateur');
+      avecMontants(admin, 'administrateur', 500);
+      responsableSansRole(admin, 'administrateur');
       const parCle = (await request(app).get('/api/v1/chantiers').set({ Authorization: `Bearer ${cle}` })).body.find((c) => c.id === chantierTechnicien.id);
-      avecMontants(parCle, 'clé d’intégration');
+      avecMontants(parCle, 'clé d’intégration', 500);
+      // Sans objet pour une clé, qui ne clôture rien.
+      assert.equal('peutCloturer' in parCle, false);
       // L'administrateur corrige toujours ces budgets.
       const correction = await request(app).patch(`/api/chantiers/${chantierComptable.id}`).set(auth).send({ budgetMaterielVendu: 320 });
       assert.equal(correction.status, 200, JSON.stringify(correction.body));
@@ -2032,6 +2050,16 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await request(app).get('/api/devis').set(authTechnicien)).status, 403);
         const compte = (await request(app).get('/api/users').set(auth)).body.find((u) => u.id === technicien.id);
         assert.deepEqual(compte.permissions, ['chantiers:read']);
+        // Ni à la création d'un technicien…
+        const creation = await request(app).post('/api/users').set(auth).send({ email: 'budgets.finance.technicien@iris.test', name: 'TEST Budgets finance technicien', role: 'TECHNICIEN', accesFinance: true });
+        assert.equal(creation.status, 400, JSON.stringify(creation.body));
+        assert.match(creation.body.error, /technicien/);
+        assert.equal(await prisma.user.count({ where: { email: 'budgets.finance.technicien@iris.test' } }), 0);
+        // … ni conservé par un compte qui devient technicien.
+        const reconverti = await prisma.user.create({ data: { email: 'budgets.reconversion@iris.test', name: 'TEST Budgets reconversion', role: 'CONDUCTEUR_TRAVAUX', accesFinance: true } });
+        const passage = await request(app).patch(`/api/users/${reconverti.id}/role`).set(auth).send({ role: 'TECHNICIEN' });
+        assert.equal(passage.status, 200, JSON.stringify(passage.body));
+        assert.equal((await prisma.user.findUnique({ where: { id: reconverti.id } })).accesFinance, false);
       } finally {
         await prisma.user.update({ where: { id: technicien.id }, data: { permissions: [], accesFinance: false } });
       }
@@ -3494,11 +3522,12 @@ if (!TEST_DATABASE_URL) {
         }
         assert.equal((await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut, motif: 'TEST premier passage refusé' })).status, 200);
         const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
-        const journalAvant = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id } });
+        // Lectures ordonnées : sans orderBy, PostgreSQL peut rendre les mêmes lignes dans un autre ordre.
+        const journalAvant = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id }, orderBy: { id: 'asc' } });
         const refus = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
         assert.equal(refus.status, 409, JSON.stringify(refus.body));
         assert.deepEqual(await prisma.intervention.findUniqueOrThrow({ where: { id } }), avant);
-        assert.deepEqual(await prisma.journalSaisieChantier.findMany({ where: { interventionId: id } }), journalAvant);
+        assert.deepEqual(await prisma.journalSaisieChantier.findMany({ where: { interventionId: id }, orderBy: { id: 'asc' } }), journalAvant);
         assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
         assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0);
       }

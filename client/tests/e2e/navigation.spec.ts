@@ -69,6 +69,9 @@ test.describe('Navigation — menu regroupé et tiroir mobile', () => {
       await ouvrir.click();
       await expect(menu).toBeVisible();
       await page.setViewportSize({ width: 1280, height: 800 });
+      // Attendre la fermeture en grand écran : deux redimensionnements enchaînés sans attente
+      // peuvent ne laisser au navigateur aucune occasion de réévaluer les media queries.
+      await expect(menu).not.toHaveClass(/sidebar--ouvert/);
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(menu).toBeHidden();
       await expect(ouvrir).toHaveAttribute('aria-expanded', 'false');

@@ -73,6 +73,10 @@ test('un technicien consulte son chantier sans montant ni alerte de dépassement
     await expect(vueTechnicien.getByRole('columnheader', { name: 'Matériel' })).toHaveCount(0);
     await expect(ligne.locator('[data-alerte]')).toHaveCount(0);
     await expect(ligne.getByRole('button', { name: 'Clôturer' })).toHaveCount(0);
+    const FILTRES_DE_DEPASSEMENT = ['Heures dépassées', 'Main-d’œuvre dépassée', 'Matériel dépassé'];
+    for (const filtre of FILTRES_DE_DEPASSEMENT) {
+      await expect(vueTechnicien.getByRole('button', { name: filtre, exact: true })).toHaveCount(0);
+    }
 
     // Fiche : avertissement de consultation seule ; aucune section de montant, aucun euro.
     await vueTechnicien.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
@@ -96,6 +100,10 @@ test('un technicien consulte son chantier sans montant ni alerte de dépassement
     }
     await expect(vueResponsable.locator('[data-consultation-seule]')).toHaveCount(0);
     await vueResponsable.goto('/chantiers', { waitUntil: 'networkidle' });
+    // Témoin : le N+1 dispose bien des filtres de dépassement.
+    for (const filtre of FILTRES_DE_DEPASSEMENT) {
+      await expect(vueResponsable.getByRole('button', { name: filtre, exact: true })).toBeVisible();
+    }
     const ligneResponsable = vueResponsable.locator(`tr[data-chantier="${chantier.id}"]`);
     await expect(ligneResponsable.locator('[data-alerte="MATERIEL_DEPASSE"]')).toHaveText(/Matériel \+150\s?€/);
     vueResponsable.once('dialog', (dialog) => void dialog.accept());

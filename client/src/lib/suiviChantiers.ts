@@ -150,8 +150,8 @@ export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): st
       return `Sans saisie depuis ${nombre(m.joursSansSaisie ?? 0)} j`;
     case 'HEURES_DEPASSEES':
       return `Heures +${nombre((m.heuresRealisees ?? 0) - chantier.heuresVendues, 1)} h`;
-    // Budget non communiqué (technicien) : le dépassement est signalé sans son montant, qui
-    // redonnerait le budget à partir du réel.
+    // Garde défensive : un budget non communiqué ne doit jamais donner un montant de dépassement
+    // (le serveur ne transmet d'ailleurs pas ces alertes au technicien, seul à ne pas voir les budgets).
     case 'MAIN_OEUVRE_DEPASSEE':
       return chantier.budgetMainOeuvreVendu == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${nombre((m.moReel ?? 0) - chantier.budgetMainOeuvreVendu)} €`;
     case 'MATERIEL_DEPASSE':
