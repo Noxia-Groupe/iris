@@ -77,3 +77,11 @@ test('ancienneté de la dernière saisie en mots simples', () => {
   assert.equal(ancienneteSaisie(1), 'hier');
   assert.equal(ancienneteSaisie(12), 'il y a 12 j');
 });
+
+test('budget non communiqué : un libellé de dépassement ne donne jamais de montant', () => {
+  const technicien = chantier('t', 'Vu par un technicien', { materielReel: 450, moReel: 820, alertes: ['MATERIEL_DEPASSE', 'MAIN_OEUVRE_DEPASSEE'] },
+    { budgetMaterielVendu: null, budgetMainOeuvreVendu: null });
+  assert.equal(libelleAlerte('MATERIEL_DEPASSE', technicien), 'Matériel dépassé');
+  assert.equal(libelleAlerte('MAIN_OEUVRE_DEPASSEE', technicien), 'Main-d’œuvre dépassée');
+  assert.deepEqual(alertesDuChantier(technicien), ['MAIN_OEUVRE_DEPASSEE', 'MATERIEL_DEPASSE']);
+});

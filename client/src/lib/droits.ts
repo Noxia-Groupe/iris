@@ -62,6 +62,8 @@ export interface CurrentUser {
  * puis les paiements et le rapprochement bancaire (phase 9), qu'elle gardera.
  */
 export function peutVoirFinance(user?: CurrentUser | null): boolean {
+  // Jamais pour un technicien, qui ne voit aucun montant.
+  if (user?.role === ROLE_TECHNICIEN) return false;
   return !!user && (isSuperAdminRole(user.role) || !!user.accesFinance);
 }
 

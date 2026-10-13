@@ -220,6 +220,7 @@ if (!TEST_DATABASE_URL) {
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
+      'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1830,6 +1831,257 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
+  // Décisions de Nelson (13-10-2026) : le technicien ne voit ni budgets matériel et main-d'œuvre,
+  // ni coûts (achats, main-d'œuvre, taux horaires), ni alertes de dépassement ; il garde le budget
+  // d'heures. Il ne modifie pas l'affaire dont il est chargé, n'en réattribue pas le commercial et
+  // ne la clôture pas : la clôture revient à son N+1 et au-dessus. Les autres profils voient les
+  // montants dans leur périmètre.
+  describe('Technicien : ni montants ni modification, clôture par son N+1', () => {
+    let auth = {};
+    let authTechnicien = {};
+    let authComptable = {};
+    let authDe = {};
+    let technicien;
+    let commercial;
+    let chantierTechnicien;
+    let chantierComptable;
+    let chantierConducteur;
+    let cle = '';
+
+    before(async () => {
+      const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(login.status, 200);
+      auth = { Authorization: `Bearer ${login.body.token}` };
+      const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+      // Le technicien et le conducteur relèvent du même responsable ; un second responsable
+      // reste hors de cette branche.
+      const responsable = await prisma.user.create({ data: { email: 'budgets.responsable@iris.test', name: 'TEST Budgets responsable', role: 'RESPONSABLE' } });
+      const autreResponsable = await prisma.user.create({ data: { email: 'budgets.autre.responsable@iris.test', name: 'TEST Budgets autre responsable', role: 'RESPONSABLE' } });
+      technicien = await prisma.user.create({ data: { email: 'budgets.technicien@iris.test', name: 'TEST Budgets technicien', role: 'TECHNICIEN', responsableHierarchiqueId: responsable.id } });
+      const comptable = await prisma.user.create({ data: { email: 'budgets.comptable@iris.test', name: 'TEST Budgets comptable', role: 'COMPTABLE' } });
+      const conducteur = await prisma.user.create({ data: { email: 'budgets.conducteur@iris.test', name: 'TEST Budgets conducteur', role: 'CONDUCTEUR_TRAVAUX', responsableHierarchiqueId: responsable.id } });
+      const directeur = await prisma.user.create({ data: { email: 'budgets.directeur@iris.test', name: 'TEST Budgets directeur', role: 'DIRECTEUR' } });
+      commercial = await prisma.user.create({ data: { email: 'budgets.commercial@iris.test', name: 'TEST Budgets commercial', role: 'COMMERCIAL' } });
+      authTechnicien = jeton(technicien);
+      authComptable = jeton(comptable);
+      authDe = { responsable: jeton(responsable), autreResponsable: jeton(autreResponsable), conducteur: jeton(conducteur), directeur: jeton(directeur), commercial: jeton(commercial) };
+      // Vendu 1 000 € dont 300 € de matériel et 700 € de main-d'œuvre, 10 h vendues ; 450 €
+      // d'achats (matériel dépassé). Sur le chantier du technicien, 500 € de main-d'œuvre vendue
+      // et 12 h à 42 €/h pointées : heures et main-d'œuvre (504 €) dépassées aussi.
+      const vente = { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 10 };
+      chantierTechnicien = await prisma.chantier.create({ data: { ...vente, budgetMainOeuvreVendu: 500, nom: 'TEST Budgets chantier du technicien', responsableId: technicien.id } });
+      chantierComptable = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Budgets chantier du comptable', responsableId: comptable.id, commercialId: commercial.id } });
+      chantierConducteur = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Budgets chantier du conducteur', responsableId: conducteur.id } });
+      const categorie = await prisma.categorie.create({ data: { nom: 'TEST Budgets catégorie' } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Budgets fournisseur' } });
+      const achats = [];
+      for (const chantier of [chantierTechnicien, chantierComptable, chantierConducteur]) {
+        const achat = await request(app).post('/api/achats').set(auth).send({ chantierId: chantier.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: jourCivilEntreprise(new Date()), description: 'TEST achat budgets', montantHT: 450 });
+        assert.equal(achat.status, 200, JSON.stringify(achat.body));
+        achats.push(achat.body);
+      }
+      // Une correction journalise l'achat entier avant et après : montant compris, même
+      // quand seule la description change.
+      const correction = await request(app).patch(`/api/achats/${achats[0].id}`).set(auth).send({ description: 'TEST achat budgets corrigé', motifCorrection: 'TEST correction du libellé' });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Budgets intervenant', role: 'TECHNICIEN', tauxHoraireCharge: 42 } });
+      const heures = await request(app).post('/api/heures').set(auth).send({ chantierId: chantierTechnicien.id, intervenantId: intervenant.id, date: jourCivilEntreprise(new Date()), nbrHeures: 12 });
+      assert.equal(heures.status, 200, JSON.stringify(heures.body));
+      const creation = await request(app).post('/api/admin/api-keys').set(auth).send({ nom: 'TEST agent budgets', scopes: ['chantiers:read'] });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      cle = creation.body.apiKey;
+    });
+
+    // Aucune valeur monétaire du jeu de données (budgets, achats, taux, main-d'œuvre) ni les
+    // pourcentages qui en découlent, où qu'elle se trouve dans la réponse.
+    const MONTANTS = /":\s*(300|500|700|1000|450|42|504|150|100\.8)(\.0+)?[,}\]]/;
+    const sansMontants = (corps, qui) => assert.doesNotMatch(JSON.stringify(corps), MONTANTS, `${qui} : un montant est exposé`);
+    // Le responsable d'un chantier n'expose que son identité, jamais son type de compte.
+    const responsableSansRole = (vue, qui) => assert.deepEqual(Object.keys(vue.responsable).sort(), ['email', 'id', 'name'], qui);
+    const sansDepassement = (vue, qui) => {
+      for (const alerte of ['MATERIEL_DEPASSE', 'MAIN_OEUVRE_DEPASSEE', 'HEURES_DEPASSEES']) assert.ok(!vue.metrics.alertes.includes(alerte), `${qui} : ${alerte}`);
+    };
+
+    test('le technicien ne voit ni budgets, ni coûts, ni taux, ni alertes de dépassement ; il garde ses heures', async () => {
+      const liste = await request(app).get('/api/chantiers').set(authTechnicien);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      const ligne = liste.body.find((c) => c.id === chantierTechnicien.id);
+      sansMontants(ligne, 'liste du technicien');
+      sansDepassement(ligne, 'liste du technicien');
+      responsableSansRole(ligne, 'liste du technicien');
+      const fiche = await request(app).get(`/api/chantiers/${chantierTechnicien.id}`).set(authTechnicien);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      sansMontants(fiche.body, 'fiche du technicien');
+      sansDepassement(fiche.body, 'fiche du technicien');
+      responsableSansRole(fiche.body, 'fiche du technicien');
+      for (const champ of ['budgetGlobalVendu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu']) assert.equal(fiche.body[champ], null, champ);
+      for (const champ of ['materielReel', 'moReel', 'totalDepenses', 'pctMateriel', 'pctMainOeuvre']) assert.equal(fiche.body.metrics[champ], null, champ);
+      assert.equal(fiche.body.achats[0].montantHT, undefined);
+      assert.equal(fiche.body.pointages[0].tauxHoraireApplique, undefined);
+      assert.equal(fiche.body.pointages[0].intervenant.tauxHoraireCharge, undefined);
+      // Le budget d'heures et les heures réalisées restent visibles, sans montant.
+      assert.deepEqual([fiche.body.heuresVendues, fiche.body.metrics.heuresRealisees], [10, 12]);
+      assert.equal(fiche.body.peutCloturer, false);
+    });
+
+    test('ni ses journaux, ni son tableau de bord, ni la liste des intervenants ne portent de montant', async () => {
+      const achats = await request(app).get('/api/achats').set(authTechnicien);
+      assert.equal(achats.status, 200, JSON.stringify(achats.body));
+      assert.ok(achats.body.some((a) => a.chantierId === chantierTechnicien.id));
+      sansMontants(achats.body, 'journal des achats');
+      const heures = await request(app).get('/api/heures').set(authTechnicien);
+      assert.equal(heures.status, 200, JSON.stringify(heures.body));
+      assert.ok(heures.body.some((h) => h.chantierId === chantierTechnicien.id));
+      sansMontants(heures.body, 'journal des heures');
+      const journal = await request(app).get(`/api/chantiers/${chantierTechnicien.id}/journal-saisies`).set(authTechnicien);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.ok(journal.body.length >= 3, 'création de l’achat et du pointage, correction de l’achat');
+      assert.ok(journal.body.some((entree) => entree.action === 'CORRECTION' && entree.avant && entree.apres), 'instantanés avant et après d’une correction');
+      sansMontants(journal.body, 'journal des saisies');
+      const tableau = await request(app).get('/api/stats/global').set(authTechnicien);
+      assert.equal(tableau.status, 200, JSON.stringify(tableau.body));
+      assert.equal(tableau.body.achatsTotal, undefined);
+      const intervenants = await request(app).get('/api/intervenants').set(authTechnicien);
+      assert.equal(intervenants.status, 200, JSON.stringify(intervenants.body));
+      assert.ok(intervenants.body.length > 0 && intervenants.body.every((i) => !('tauxHoraireCharge' in i)));
+      // Témoin : le journal relu par l'administration garde ses montants.
+      const journalAdmin = await request(app).get(`/api/chantiers/${chantierTechnicien.id}/journal-saisies`).set(auth);
+      assert.match(JSON.stringify(journalAdmin.body), MONTANTS);
+    });
+
+    test('il ne modifie pas l’affaire, n’en réattribue pas le commercial, ne la clôture pas, et le refus le lui dit', async () => {
+      const essais = [
+        ['modification', () => request(app).patch(`/api/chantiers/${chantierTechnicien.id}`).set(authTechnicien).send({ nom: 'TEST renommé par le technicien' }), /technicien n’est pas autorisé à modifier/],
+        ['commercial', () => request(app).patch(`/api/chantiers/${chantierTechnicien.id}/commercial`).set(authTechnicien).send({ commercialId: commercial.id }), /technicien n’est pas autorisé à réattribuer/],
+        ['clôture', () => request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authTechnicien).send({ statut: 'TERMINE' }), /N\+1/],
+      ];
+      for (const champ of ['budgetMaterielVendu', 'budgetMainOeuvreVendu', 'heuresVendues']) {
+        for (const valeur of [1, 0, null, '']) {
+          essais.push([`${champ} = ${JSON.stringify(valeur)}`, () => request(app).patch(`/api/chantiers/${chantierTechnicien.id}`).set(authTechnicien).send({ [champ]: valeur }), /technicien n’est pas autorisé à modifier/]);
+        }
+      }
+      for (const [quoi, essai, message] of essais) {
+        const refus = await essai();
+        assert.equal(refus.status, 403, `${quoi} : ${JSON.stringify(refus.body)}`);
+        assert.match(refus.body.error, message, quoi);
+      }
+      const enBase = await prisma.chantier.findUnique({ where: { id: chantierTechnicien.id } });
+      assert.deepEqual(
+        [enBase.nom, enBase.statut, enBase.commercialId, Number(enBase.budgetMaterielVendu), Number(enBase.budgetMainOeuvreVendu), Number(enBase.heuresVendues)],
+        ['TEST Budgets chantier du technicien', 'EN_COURS', null, 300, 500, 10],
+      );
+    });
+
+    test('son N+1 clôture son affaire ; un responsable hors de sa branche ne le peut pas, ni le N+1 l’affaire d’un conducteur', async () => {
+      const ligne = async (entetes, chantier) => (await request(app).get('/api/chantiers').set(entetes)).body.find((c) => c.id === chantier.id);
+      assert.equal((await ligne(authDe.responsable, chantierTechnicien)).peutCloturer, true);
+      // La règle du conducteur reste celle d'avant : lui seul (et l'administration) clôture son affaire.
+      assert.equal((await ligne(authDe.responsable, chantierConducteur)).peutCloturer, false);
+      assert.equal((await ligne(authDe.conducteur, chantierConducteur)).peutCloturer, true);
+      assert.equal((await request(app).patch(`/api/chantiers/${chantierConducteur.id}/statut`).set(authDe.responsable).send({ statut: 'TERMINE' })).status, 404);
+      const horsBranche = await request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authDe.autreResponsable).send({ statut: 'TERMINE' });
+      assert.equal(horsBranche.status, 404, JSON.stringify(horsBranche.body));
+      const cloture = await request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authDe.responsable).send({ statut: 'TERMINE' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      assert.equal(cloture.body.statut, 'TERMINE');
+      const reouverture = await request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authDe.responsable).send({ statut: 'EN_COURS' });
+      assert.equal(reouverture.status, 403, 'seul un administrateur rouvre');
+    });
+
+    const avecMontants = (vue, qui, budgetMainOeuvre = 700) => {
+      assert.equal(vue.budgetMaterielVendu, 300, qui);
+      assert.equal(vue.budgetMainOeuvreVendu, budgetMainOeuvre, qui);
+      assert.equal(vue.metrics.pctMateriel, 150, qui);
+      assert.equal(vue.metrics.materielReel, 450, qui);
+      assert.ok(vue.metrics.alertes.includes('MATERIEL_DEPASSE'), qui);
+    };
+
+    test('les autres profils et les clés d’intégration voient toujours budgets, coûts et alertes', async () => {
+      const comptable = await request(app).get(`/api/chantiers/${chantierComptable.id}`).set(authComptable);
+      assert.equal(comptable.status, 200, JSON.stringify(comptable.body));
+      avecMontants(comptable.body, 'comptable responsable du chantier');
+      const vues = [
+        ['responsable du technicien', authDe.responsable, chantierTechnicien, 500],
+        ['conducteur du chantier', authDe.conducteur, chantierConducteur, 700],
+        ['directeur', authDe.directeur, chantierTechnicien, 500],
+        ['commercial vendeur', authDe.commercial, chantierComptable, 700],
+      ];
+      for (const [qui, entetes, chantier, budgetMainOeuvre] of vues) {
+        const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(entetes);
+        assert.equal(fiche.status, 200, `${qui} : ${JSON.stringify(fiche.body)}`);
+        avecMontants(fiche.body, `fiche, ${qui}`, budgetMainOeuvre);
+        responsableSansRole(fiche.body, `fiche, ${qui}`);
+        const liste = await request(app).get('/api/chantiers').set(entetes);
+        const ligne = liste.body.find((c) => c.id === chantier.id);
+        avecMontants(ligne, `liste, ${qui}`, budgetMainOeuvre);
+        responsableSansRole(ligne, `liste, ${qui}`);
+      }
+      // Le N+1 voit la main-d'œuvre et les dépassements d'heures et de main-d'œuvre du chantier
+      // de son technicien.
+      const vueResponsable = (await request(app).get(`/api/chantiers/${chantierTechnicien.id}`).set(authDe.responsable)).body;
+      assert.equal(vueResponsable.metrics.moReel, 504);
+      for (const alerte of ['HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE']) assert.ok(vueResponsable.metrics.alertes.includes(alerte), alerte);
+      const admin = (await request(app).get('/api/chantiers').set(auth)).body.find((c) => c.id === chantierTechnicien.id);
+      avecMontants(admin, 'administrateur', 500);
+      responsableSansRole(admin, 'administrateur');
+      const parCle = (await request(app).get('/api/v1/chantiers').set({ Authorization: `Bearer ${cle}` })).body.find((c) => c.id === chantierTechnicien.id);
+      avecMontants(parCle, 'clé d’intégration', 500);
+      responsableSansRole(parCle, 'clé d’intégration');
+      // Sans objet pour une clé, qui ne clôture rien.
+      assert.equal('peutCloturer' in parCle, false);
+      // L'administrateur corrige toujours ces budgets.
+      const correction = await request(app).patch(`/api/chantiers/${chantierComptable.id}`).set(auth).send({ budgetMaterielVendu: 320 });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      assert.equal(Number(correction.body.budgetMaterielVendu), 320);
+    });
+
+    test('ni devis, ni saisie ou archivage Travaux, ni accès financier ne s’accordent à un technicien', async () => {
+      try {
+        for (const permission of ['devis:read', 'devis:write', 'chantiers:write', 'chantiers:archive']) {
+          const refus = await request(app).put(`/api/users/${technicien.id}/permissions`).set(auth).send({ permissions: [permission] });
+          assert.equal(refus.status, 400, `${permission} : ${JSON.stringify(refus.body)}`);
+          assert.match(refus.body.error, /technicien/);
+        }
+        assert.equal((await request(app).put(`/api/users/${technicien.id}/permissions`).set(auth).send({ permissions: ['clients:read'] })).status, 200);
+        const finance = await request(app).patch(`/api/users/${technicien.id}/acces-finance`).set(auth).send({ accesFinance: true });
+        assert.equal(finance.status, 400, JSON.stringify(finance.body));
+        assert.equal((await request(app).patch(`/api/users/${technicien.id}/acces-finance`).set(auth).send({ accesFinance: false })).status, 200);
+        // Droits enregistrés avant la règle, ou avant un changement de type : sans effet.
+        await prisma.user.update({ where: { id: technicien.id }, data: { permissions: ['devis:read', 'chantiers:write'], accesFinance: true } });
+        assert.equal((await request(app).get('/api/devis').set(authTechnicien)).status, 403);
+        const compte = (await request(app).get('/api/users').set(auth)).body.find((u) => u.id === technicien.id);
+        assert.deepEqual(compte.permissions, ['chantiers:read']);
+        // Ces droits enregistrés se conservent ou se retirent, sans qu'aucun ne s'y ajoute.
+        const ajout = await request(app).put(`/api/users/${technicien.id}/permissions`).set(auth).send({ permissions: ['devis:read', 'chantiers:write', 'chantiers:archive'] });
+        assert.equal(ajout.status, 400, JSON.stringify(ajout.body));
+        assert.match(ajout.body.error, /chantiers:archive/);
+        assert.doesNotMatch(ajout.body.error, /devis:read|chantiers:write/);
+        const retrait = await request(app).put(`/api/users/${technicien.id}/permissions`).set(auth).send({ permissions: ['devis:read', 'clients:read'] });
+        assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+        assert.deepEqual((await prisma.user.findUnique({ where: { id: technicien.id } })).permissions, ['devis:read', 'clients:read']);
+        assert.equal((await request(app).get('/api/devis').set(authTechnicien)).status, 403, 'toujours sans effet');
+        // Ni à la création d'un technicien…
+        const creation = await request(app).post('/api/users').set(auth).send({ email: 'budgets.finance.technicien@iris.test', name: 'TEST Budgets finance technicien', role: 'TECHNICIEN', accesFinance: true });
+        assert.equal(creation.status, 400, JSON.stringify(creation.body));
+        assert.match(creation.body.error, /technicien/);
+        assert.equal(await prisma.user.count({ where: { email: 'budgets.finance.technicien@iris.test' } }), 0);
+        // … et un accès financier enregistré reste sans effet pour un compte devenu technicien,
+        // sans être effacé : il retrouve son effet si le compte reprend un autre type.
+        const reconverti = await prisma.user.create({ data: { email: 'budgets.reconversion@iris.test', name: 'TEST Budgets reconversion', role: 'CONDUCTEUR_TRAVAUX', accesFinance: true } });
+        const droitsDe = async (id) => (await request(app).get('/api/users').set(auth)).body.find((u) => u.id === id).permissions;
+        assert.ok((await droitsDe(reconverti.id)).includes('finances:read'), 'témoin : conducteur avec accès financier');
+        for (const [role, finance] of [['TECHNICIEN', false], ['CONDUCTEUR_TRAVAUX', true]]) {
+          const passage = await request(app).patch(`/api/users/${reconverti.id}/role`).set(auth).send({ role });
+          assert.equal(passage.status, 200, JSON.stringify(passage.body));
+          assert.equal((await prisma.user.findUnique({ where: { id: reconverti.id } })).accesFinance, true, `${role} : donnée conservée`);
+          assert.equal((await droitsDe(reconverti.id)).includes('finances:read'), finance, `${role} : effet`);
+        }
+      } finally {
+        await prisma.user.update({ where: { id: technicien.id }, data: { permissions: [], accesFinance: false } });
+      }
+    });
+  });
+
   // Base vierge : les réglages uniques (paramètres, société) se créent à leur première lecture.
   // Des premières requêtes simultanées, ou une requête arrivée pendant le démarrage, ne doivent
   // pas échouer sur leur création concurrente (l'administration plantait au premier chargement).
@@ -3323,11 +3575,12 @@ if (!TEST_DATABASE_URL) {
         }
         assert.equal((await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(auth).send({ statut, motif: 'TEST premier passage refusé' })).status, 200);
         const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
-        const journalAvant = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id } });
+        // Lectures ordonnées : sans orderBy, PostgreSQL peut rendre les mêmes lignes dans un autre ordre.
+        const journalAvant = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id }, orderBy: { id: 'asc' } });
         const refus = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
         assert.equal(refus.status, 409, JSON.stringify(refus.body));
         assert.deepEqual(await prisma.intervention.findUniqueOrThrow({ where: { id } }), avant);
-        assert.deepEqual(await prisma.journalSaisieChantier.findMany({ where: { interventionId: id } }), journalAvant);
+        assert.deepEqual(await prisma.journalSaisieChantier.findMany({ where: { interventionId: id }, orderBy: { id: 'asc' } }), journalAvant);
         assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
         assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0);
       }
