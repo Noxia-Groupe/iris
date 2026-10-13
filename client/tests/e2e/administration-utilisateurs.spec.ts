@@ -63,19 +63,29 @@ test('Administration > Utilisateurs : listes de responsables construites à la d
     // Toucher des listes sans leur donner le focus (défilement tactile, aide technique) : seule la
     // dernière touchée reste construite, et un défilement tactile commencé sur elle la referme.
     await admin.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    // Les événements tactiles « continus » (touchmove) sont rendus par une tâche planifiée, pas
+    // dans la foulée : chaque compte est relu jusqu'à stabilisation.
     for (const compte of [premier, second, ancien, clavier, troisieme]) await liste(compte).dispatchEvent('touchstart');
-    expect(await listesConstruites()).toBe(1);
+    await expect.poll(listesConstruites).toBe(1);
     await expect(liste(troisieme).locator('option', { hasText: clavier.name })).toHaveCount(1);
     await liste(troisieme).dispatchEvent('touchmove');
-    expect(await listesConstruites()).toBe(0);
+    await expect.poll(listesConstruites).toBe(0);
     await liste(troisieme).dispatchEvent('touchstart');
+    await expect.poll(listesConstruites).toBe(1);
     await liste(troisieme).dispatchEvent('touchcancel');
-    expect(await listesConstruites()).toBe(0);
-    // Une liste qui a le focus n'est jamais refermée par une autre que l'on touche.
+    await expect.poll(listesConstruites).toBe(0);
+    // Une liste qui a le focus n'est jamais refermée par une autre que l'on touche, ni par un
+    // défilement tactile commencé sur elle.
     await liste(premier).focus();
     await liste(second).dispatchEvent('touchstart');
     await expect(liste(premier).locator('option', { hasText: troisieme.name })).toHaveCount(1);
-    expect(await listesConstruites()).toBe(2);
+    await expect.poll(listesConstruites).toBe(2);
+    await liste(premier).dispatchEvent('touchmove');
+    await liste(premier).dispatchEvent('touchcancel');
+    // Témoin rendu après eux : la liste touchée sans focus, elle, se referme.
+    await liste(second).dispatchEvent('touchmove');
+    await expect.poll(listesConstruites).toBe(1);
+    await expect(liste(premier).locator('option', { hasText: troisieme.name })).toHaveCount(1);
     await liste(premier).blur();
 
     // Parcours clavier : Tab depuis le type de compte, puis Flèche bas, rattache au premier proposé.

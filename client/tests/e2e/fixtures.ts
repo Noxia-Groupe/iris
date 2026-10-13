@@ -90,11 +90,13 @@ export const test = base.extend<Outils>({
   session: async ({ request }, fournir) => {
     const session = await ouvrirSession(request);
     await preparerFacturation(request, session.token);
-    // Base vierge : une première lecture crée les réglages uniques (paramètres, société) avant
-    // les requêtes simultanées du premier écran. Leur création concurrente échoue encore parfois
-    // côté serveur (violation d'unicité sur le singleton), ce qui fait planter l'administration
-    // au premier chargement : défaut préexistant, signalé pour un lot séparé.
-    expect((await request.get(`${api}/chantiers`, { headers: headers(session.token) })).ok()).toBeTruthy();
+    // Base vierge : une première lecture crée le réglage unique de la société (et les paramètres,
+    // si le démarrage du serveur ne l'a pas encore fait) avant les requêtes simultanées du premier
+    // écran. Sans elle, leur création concurrente échoue presque toujours côté serveur (violation
+    // d'unicité, réponse 500), et l'administration plante environ une fois sur cinq au premier
+    // chargement. Défaut préexistant corrigé par #125 ; cette lecture pourra alors être retirée.
+    const prechauffage = await request.get(`${api}/chantiers`, { headers: headers(session.token) });
+    expect(prechauffage.ok(), `préchauffage des réglages : ${prechauffage.status()} ${await prechauffage.text()}`).toBeTruthy();
     await fournir(session);
   },
   allerSurPageAdmin: async ({ page, session }, fournir) => {
