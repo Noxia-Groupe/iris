@@ -350,8 +350,8 @@ model Parametres {
   // jour, marge estimée, alertes « en perte » et « marge faible », facturation de la fiche —
   // partout où le chantier leur est montré (liste, tableau de bord, fiche). Les budgets par
   // poste restent visibles de tous ceux qui voient le chantier. Les administrateurs les
-  // reçoivent toujours. Chaque
-  // catégorie se désactive pour s'adapter à l'organisation de la société :
+  // reçoivent toujours. Chaque catégorie se désactive pour s'adapter à l'organisation de la
+  // société :
   //  - le conducteur (ou responsable) du chantier ;
   //  - la chaîne hiérarchique de ce conducteur, jusqu'au sommet (comptes Responsable) ;
   //  - les comptes Directeur, qui voient tous les chantiers.

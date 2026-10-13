@@ -47,6 +47,8 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
   });
 
   test('la perte d’un chantier remonte toute la chaîne et au directeur, selon les destinataires réglés', async ({ allerSurPageAdmin, creerClient, request, session, browser }) => {
+    // Parcours long (quatre sessions, deux affaires) : délai triplé pour les runners lents.
+    test.slow();
     const headers = { Authorization: `Bearer ${session.token}` };
     const envoyer = async (methode: 'post' | 'patch' | 'put', path: string, data: object) => {
       const response = await request[methode](`${api}${path}`, { headers, data });
@@ -183,8 +185,9 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       await expect(vueSecteur.getByRole('columnheader', { name: 'Marge' }).first()).toBeVisible();
       await expect(vueSecteur.locator(`tr[data-chantier="${chantier.id}"]`)).toContainText(/[-−]50\s€/);
       const celluleSienne = vueSecteur.locator(`tr[data-chantier="${sien.id}"] td`).filter({ hasText: 'Solde :' });
-      await expect(celluleSienne).toContainText('Rentabilité non communiquée');
-      await expect(celluleSienne).toContainText('Solde : +2 h');
+      // Nom accessible, et non simple texte : un texte rendu muet pour les lecteurs d'écran
+      // (aria-hidden, display: none) ferait échouer ce contrôle.
+      await expect(celluleSienne).toHaveAccessibleName('Rentabilité non communiquée ; Solde : +2 h');
       await expect(celluleSienne.getByText('Solde : +2 h')).toHaveClass(/bg-emerald-100/);
       await expect(celluleSienne.locator('[data-marge-estimee]')).toHaveCount(0);
     } finally {
