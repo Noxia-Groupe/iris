@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sectionsMenu } from '../src/lib/menu.ts';
+import { estExcluDesOperations, roleLabel } from '../src/lib/droits.ts';
 
 const liens = (role: string, planningActif = true, permissions: string[] = []) =>
   sectionsMenu({ role, permissions }, planningActif).flatMap((s) => s.entrees.map((e) => e.to)).sort();
@@ -59,4 +60,15 @@ test('sans compte connu, le menu reprend l’ancien repli : conducteur, sans les
   const sansStatistiques = (planningActif: boolean) => attendu('CONDUCTEUR_TRAVAUX', planningActif, []).filter((to) => to !== '/statistiques');
   assert.deepEqual(versListe(sectionsMenu(null, true)), sansStatistiques(true));
   assert.deepEqual(versListe(sectionsMenu({}, false)), sansStatistiques(false));
+});
+
+test('un directeur pilote sans écran opérationnel : tableau de bord et chantiers, devis s’il en a reçu le droit', () => {
+  for (const planningActif of [true, false]) {
+    assert.deepEqual(liens('DIRECTEUR', planningActif), ['/', '/chantiers']);
+    assert.deepEqual(liens('DIRECTEUR', planningActif, ['devis:read']), ['/', '/chantiers', '/devis']);
+  }
+  assert.equal(roleLabel('DIRECTEUR'), 'Directeur');
+  // Même exclusion que blockCommercial côté serveur : commercial et directeur seulement.
+  assert.deepEqual(['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR']
+    .filter((role) => estExcluDesOperations(role)), ['COMMERCIAL', 'DIRECTEUR']);
 });

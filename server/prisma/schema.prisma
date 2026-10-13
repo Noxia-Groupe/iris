@@ -11,7 +11,8 @@ model User {
   id            String  @id @default(uuid())
   email         String  @unique
   name          String
-  // SUPERADMIN, ADMIN, CONDUCTEUR_TRAVAUX ou COMMERCIAL.
+  // SUPERADMIN, ADMIN, CONDUCTEUR_TRAVAUX, COMMERCIAL, ou l'un des types complémentaires
+  // (cf. docs/MODELE-DROITS-COMPTES.md et ALLOWED_ROLES côté serveur).
   // SUPERADMIN = tous les droits d'un ADMIN + les réglages réservés à la direction
   // (gestion des comptes superadmin, activation/désactivation des modules — cf.
   // Parametres.planningActif). Un ADMIN ne peut ni créer, ni modifier, ni supprimer
@@ -35,7 +36,9 @@ model User {
   // évolution distincte, pour préserver les accès historiques lors de la migration.
   permissions   String[] @default([])
   // Rattachement hiérarchique explicite, indépendant du rôle : un collaborateur relève
-  // d'un responsable déterminé (sûreté, informatique, télécom…).
+  // d'un responsable déterminé (sûreté, informatique, télécom…). Réglé dans Administration >
+  // Utilisateurs ; un compte Responsable supervise toute sa branche (collaborateurs directs,
+  // puis les leurs). Jamais soi-même (contrainte SQL), ni en boucle (refusé par l'API).
   responsableHierarchiqueId String?
   responsableHierarchique   User? @relation("ResponsableCollaborateurs", fields: [responsableHierarchiqueId], references: [id])
   collaborateurs User[] @relation("ResponsableCollaborateurs")
@@ -343,6 +346,16 @@ model Parametres {
   // civils sans achat ni heure saisis ; vide (null), l'alerte « sans saisie » est désactivée.
   seuilMargeFaible       Decimal? @default(15) @db.Decimal(5, 2)
   joursSansSaisie        Int?     @default(14)
+  // Destinataires du suivi de rentabilité d'un chantier — marge du jour, marge estimée,
+  // alertes « en perte » et « marge faible » — partout où le chantier leur est montré
+  // (liste, tableau de bord, fiche). Les administrateurs les reçoivent toujours. Chaque
+  // catégorie se désactive pour s'adapter à l'organisation de la société :
+  //  - le conducteur (ou responsable) du chantier ;
+  //  - la chaîne hiérarchique de ce conducteur, jusqu'au sommet (comptes Responsable) ;
+  //  - les comptes Directeur, qui voient tous les chantiers.
+  rentabiliteConducteur  Boolean  @default(true)
+  rentabiliteHierarchie  Boolean  @default(true)
+  rentabiliteDirecteurs  Boolean  @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -13,6 +13,8 @@ export const ROLE_TECHNICIEN = 'TECHNICIEN';
 export const ROLE_COMPTABLE = 'COMPTABLE';
 export const ROLE_DIRECTEUR_COMMERCIAL = 'DIRECTEUR_COMMERCIAL';
 export const ROLE_RESPONSABLE = 'RESPONSABLE';
+/** Pilotage de toute la société, en lecture seule, sans administration ni paramétrage. */
+export const ROLE_DIRECTEUR = 'DIRECTEUR';
 
 /** Un SUPERADMIN possède TOUS les droits d'un ADMIN, plus ceux réservés à la direction. */
 export function isAdminRole(role?: string | null): boolean {
@@ -34,6 +36,7 @@ export function roleLabel(role?: string | null): string {
     case ROLE_COMPTABLE: return 'Comptable';
     case ROLE_DIRECTEUR_COMMERCIAL: return 'Directeur commercial';
     case ROLE_RESPONSABLE: return 'Responsable';
+    case ROLE_DIRECTEUR: return 'Directeur';
     default: return 'Conducteur';
   }
 }
@@ -65,6 +68,15 @@ export function peutVoirFinance(user?: CurrentUser | null): boolean {
 /** Statistiques Travaux : admin global, responsable équipe, conducteur sur ses affaires. Les commerciaux ont leur écran Résultat commercial dédié. */
 export function peutVoirStatistiques(user?: CurrentUser | null): boolean {
   return !!user && (isAdminRole(user.role) || user.role === ROLE_RESPONSABLE || user.role === ROLE_CONDUCTEUR);
+}
+
+/**
+ * Comptes exclus des écrans opérationnels (planning, administration, saisies) : le
+ * commercial, qui a son propre résultat, et le directeur, qui consulte sans modifier.
+ * Même règle que blockCommercial côté serveur.
+ */
+export function estExcluDesOperations(role?: string | null): boolean {
+  return role === ROLE_COMMERCIAL || role === ROLE_DIRECTEUR;
 }
 
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */

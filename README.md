@@ -52,10 +52,18 @@ d'administration n'est créé.
 ## Périmètre de lecture
 
 Les listes du domaine chantier (chantiers, achats, heures) ne renvoient que ce que le
-demandeur a le droit de voir : un conducteur ses chantiers, un commercial ceux qu'il a
-vendus, un administrateur l'ensemble. Une clé d'intégration, qui n'a pas de rôle, est
-cadrée par ses scopes — `chantiers:read` pour le domaine, `finances:read` pour y ajouter
-les montants vendus et la marge.
+demandeur a le droit de voir : un conducteur ses chantiers, un responsable les siens et
+ceux de toute sa branche hiérarchique (ses collaborateurs directs, puis les leurs), un
+commercial ceux qu'il a vendus, un directeur ou un administrateur l'ensemble. Une clé
+d'intégration, qui n'a pas de rôle, est cadrée par ses scopes — `chantiers:read` pour le
+domaine, `finances:read` pour y ajouter les montants vendus et la marge.
+
+La **rentabilité** d'un chantier (montant vendu, marge du jour, marge estimée, alertes
+`EN_PERTE` et `MARGE_FAIBLE`) est décidée chantier par chantier. Les administrateurs la
+voient toujours ; les autres destinataires, actifs par défaut, se retirent un par un dans
+**Administration > Marges** pour s'adapter à l'organisation : le conducteur du chantier, ses
+responsables hiérarchiques à tous les niveaux (comptes Responsable), les directeurs. La
+chaîne hiérarchique se règle compte par compte dans **Administration > Utilisateurs**.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.
@@ -77,7 +85,8 @@ au coût horaire moyen réellement appliqué sur le chantier (à défaut celui d
 matériel vendu observé sur les chantiers terminés (à défaut, au prix de vente). Un
 chantier terminé est estimé à son réel. `EN_PERTE`, `MARGE_FAIBLE` et l'estimation suivent
 la visibilité de la marge : ils ne sont jamais envoyés à un rôle ou une clé à qui la marge
-est masquée. La liste des chantiers et le tableau de bord s'en servent pour mettre les
+est masquée. Les dépassements et `SANS_SAISIE` restent visibles de tous ceux qui voient le
+chantier. La liste des chantiers et le tableau de bord s'en servent pour mettre les
 affaires à surveiller en tête.
 
 ## Cycle de vie d'une affaire
