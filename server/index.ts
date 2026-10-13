@@ -394,7 +394,8 @@ function chantierDuJournalReduit(instantane: Prisma.JsonValue | null): Prisma.Js
 // Rentabilité d'un chantier — montant vendu global, marge du jour, marge estimée, alertes
 // « en perte » et « marge faible », facturation de la fiche : elle ne sort que pour ses
 // destinataires, décidés chantier par chantier. Les budgets par poste, eux, restent visibles
-// (suivi des dépassements) et permettent d'en déduire le vendu, donc la marge du jour. Côté clé d'intégration, le scope finances:read. Côté session :
+// (suivi des dépassements) et permettent d'en déduire le vendu, donc la marge du jour.
+// Côté clé d'intégration, le scope finances:read. Côté session :
 //  - un administrateur, toujours ;
 //  - un directeur, si la société laisse les directeurs destinataires ;
 //  - le conducteur (ou responsable) du chantier, si elle laisse le conducteur destinataire ;

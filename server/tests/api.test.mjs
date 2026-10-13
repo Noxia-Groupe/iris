@@ -1303,10 +1303,15 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('destinataire, le conducteur corrige le vendu de son chantier', async () => {
-      const correction = await request(app).patch(`/api/chantiers/${derive.id}`).set(authConducteur).send({ budgetGlobalVendu: 1000 });
-      assert.equal(correction.status, 200, JSON.stringify(correction.body));
-      assert.equal(Number(correction.body.budgetGlobalVendu), 1000);
-      assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1000);
+      try {
+        // Une vraie valeur nouvelle : une écriture ignorée en silence ne passerait pas.
+        const correction = await request(app).patch(`/api/chantiers/${derive.id}`).set(authConducteur).send({ budgetGlobalVendu: 1200 });
+        assert.equal(correction.status, 200, JSON.stringify(correction.body));
+        assert.equal(Number(correction.body.budgetGlobalVendu), 1200);
+        assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1200);
+      } finally {
+        await prisma.chantier.update({ where: { id: derive.id }, data: { budgetGlobalVendu: 1000 } });
+      }
     });
 
     test('une clé sans finances:read ne déduit pas la perte de l’alerte', async () => {

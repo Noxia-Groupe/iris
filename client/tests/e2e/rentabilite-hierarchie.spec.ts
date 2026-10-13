@@ -65,13 +65,17 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
 
     // 100 € de fourniture et 2 h de pose à 50 € : 200 € vendus ; 250 € d'achats → perte de 50 €.
     const client = await creerClient('rentabilite-hierarchie', false);
-    const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Chaîne E2E ${suffixe}`, lignes: [
-      { designation: 'Caméra', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
-      { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 50, tauxTva: 20 },
-    ] });
-    await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
-    await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
-    const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+    const ouvrirAffaire = async (objet: string) => {
+      const devis = await envoyer('post', '/devis', { clientId: client.id, objet, lignes: [
+        { designation: 'Caméra', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
+        { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 50, tauxTva: 20 },
+      ] });
+      await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+      await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+      return envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as Promise<{ id: string; nom: string }>;
+    };
+    const chantier = await ouvrirAffaire(`Chaîne E2E ${suffixe}`);
+    const chantiers = [chantier];
     const contextes: { close: () => Promise<void> }[] = [];
     try {
       await envoyer('put', '/parametres', { margeCommercialeActive: true, rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true });
@@ -166,10 +170,29 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       const relu = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { nom: string; budgetGlobalVendu: number };
       expect(relu.nom).toBe(`${chantier.nom} corrigé`);
       expect(relu.budgetGlobalVendu).toBe(200);
+
+      // Liste mixte : le responsable de secteur, chargé lui-même d'un chantier, n'en suit plus la
+      // rentabilité (« conducteur » décoché) mais garde celle de sa branche (« hiérarchie » cochée).
+      const sien = await ouvrirAffaire(`Chaîne E2E ${suffixe} secteur`);
+      chantiers.push(sien);
+      await envoyer('patch', `/chantiers/${sien.id}`, { responsableId: secteur.id });
+      await envoyer('put', '/parametres', { rentabiliteConducteur: false, rentabiliteHierarchie: true });
+      const vueSecteur = await pageDe(browser, secteur);
+      contextes.push(vueSecteur.context());
+      await vueSecteur.goto('/chantiers', { waitUntil: 'networkidle' });
+      await expect(vueSecteur.getByRole('columnheader', { name: 'Marge' }).first()).toBeVisible();
+      await expect(vueSecteur.locator(`tr[data-chantier="${chantier.id}"]`)).toContainText(/[-−]50\s€/);
+      const celluleSienne = vueSecteur.locator(`tr[data-chantier="${sien.id}"] td`).filter({ hasText: 'Solde :' });
+      await expect(celluleSienne).toContainText('Rentabilité non communiquée');
+      await expect(celluleSienne).toContainText('Solde : +2 h');
+      await expect(celluleSienne.getByText('Solde : +2 h')).toHaveClass(/bg-emerald-100/);
+      await expect(celluleSienne.locator('[data-marge-estimee]')).toHaveCount(0);
     } finally {
-      // Chantier clôturé : la base partagée reste lisible pour la suite. Les réglages, eux,
+      // Chantiers clôturés : la base partagée reste lisible pour la suite. Les réglages, eux,
       // sont restaurés par l'afterEach.
-      await request.patch(`${api}/chantiers/${chantier.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
+      for (const ouvert of chantiers) {
+        await request.patch(`${api}/chantiers/${ouvert.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
+      }
       for (const contexte of contextes) await contexte.close().catch(() => undefined);
     }
   });
