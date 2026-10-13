@@ -1,0 +1,83 @@
+// Menu principal, regroupé par thème. Fonction pure : elle reçoit le compte et l'état des
+// modules, et rend les seules entrées visibles — les règles sont exactement celles des
+// routes (App.tsx) et du serveur, qui refuse de toute façon ce que le menu n'affiche pas.
+import type { LucideIcon } from 'lucide-react';
+import {
+  Activity, Award, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2, Clock, FileText, FolderOpen,
+  KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
+} from 'lucide-react';
+import {
+  isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutVoirStatistiques,
+  ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
+} from './droits';
+
+export interface EntreeMenu {
+  to: string;
+  libelle: string;
+  icone: LucideIcon;
+  /** Actif uniquement sur ce chemin exact (sinon aussi sur ses sous-pages). */
+  exact?: boolean;
+}
+
+export interface SectionMenu {
+  /** Absent pour la première section (accueil). */
+  titre?: string;
+  entrees: EntreeMenu[];
+}
+
+export function sectionsMenu(user: CurrentUser | null | undefined, planningActif: boolean): SectionMenu[] {
+  const role = user?.role || ROLE_CONDUCTEUR;
+  const isCommercial = role === ROLE_COMMERCIAL;
+  const isAdmin = isAdminRole(role);
+  const peutVoirInterventions = isAdmin || role === ROLE_CONDUCTEUR || role === ROLE_RESPONSABLE || role === ROLE_TECHNICIEN;
+  const peutVoirTravaux = isAdmin || role === ROLE_CONDUCTEUR || role === ROLE_RESPONSABLE;
+
+  const sections: { titre?: string; entrees: (EntreeMenu & { visible: boolean })[] }[] = [
+    { entrees: [
+      { to: '/', libelle: 'Tableau de bord', icone: LayoutDashboard, exact: true, visible: true },
+    ] },
+    { titre: 'Chantiers', entrees: [
+      { to: '/chantiers', libelle: 'Liste des chantiers', icone: FolderOpen, exact: true, visible: true },
+      { to: '/devis', libelle: 'Devis', icone: FileText, visible: peutAccederAuxDevis(user) },
+      // Planning : masqué pour tous (administrateurs compris) quand un superadmin a
+      // désactivé le module ; jamais proposé aux commerciaux.
+      { to: '/planning', libelle: 'Planning', icone: CalendarDays, visible: !isCommercial && planningActif },
+      { to: '/achats', libelle: 'Journal des achats', icone: ShoppingCart, visible: peutVoirTravaux },
+      { to: '/heures', libelle: 'Journal des heures', icone: Clock, visible: peutVoirTravaux },
+    ] },
+    { titre: 'Interventions', entrees: [
+      { to: '/interventions', libelle: 'Interventions SAV', icone: Wrench, visible: peutVoirInterventions },
+      { to: '/contrats-maintenance', libelle: 'Contrats de maintenance', icone: Repeat, visible: isAdmin },
+    ] },
+    { titre: 'Facturation', entrees: [
+      { to: '/prete-a-facturer', libelle: 'Prêt à facturer', icone: CheckCircle2, visible: isAdmin },
+      { to: '/factures', libelle: 'Factures', icone: Receipt, visible: isAdmin },
+      { to: '/mentions-legales', libelle: 'Mentions & CGV', icone: ScrollText, visible: isAdmin },
+      { to: '/comptabilite', libelle: 'Plan comptable', icone: Landmark, visible: isAdmin },
+    ] },
+    { titre: 'Pilotage', entrees: [
+      { to: '/statistiques', libelle: 'Statistiques', icone: PieChart, visible: peutVoirStatistiques(user) },
+      { to: '/resultat-commercial', libelle: 'Résultat commercial', icone: TrendingUp, visible: isCommercial },
+      { to: '/performances', libelle: 'Performances', icone: Activity, visible: isAdmin },
+      { to: '/commerciaux', libelle: 'Mes commerciaux', icone: Award, visible: isAdmin },
+    ] },
+    { titre: 'Référentiels', entrees: [
+      { to: '/clients', libelle: 'Clients', icone: Building2, visible: isAdmin },
+      { to: '/catalogue', libelle: 'Catalogue', icone: BookOpen, visible: isAdmin },
+    ] },
+    { titre: 'Réglages', entrees: [
+      // Administration : complète pour les administrateurs, réduite aux référentiels
+      // Fournisseurs et Catégories pour les conducteurs de travaux (cf. Admin.tsx).
+      { to: '/admin', libelle: 'Administration', icone: Settings, visible: !isCommercial },
+      { to: '/societe', libelle: 'Société', icone: Briefcase, visible: isAdmin },
+      { to: '/administration/api', libelle: 'API d’intégration', icone: KeyRound, visible: isSuperAdminRole(role) },
+    ] },
+  ];
+
+  return sections
+    .map(({ titre, entrees }) => ({
+      ...(titre ? { titre } : {}),
+      entrees: entrees.filter((e) => e.visible).map(({ visible: _visible, ...entree }) => entree),
+    }))
+    .filter((section) => section.entrees.length > 0);
+}
