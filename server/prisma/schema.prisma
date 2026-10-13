@@ -346,9 +346,10 @@ model Parametres {
   // civils sans achat ni heure saisis ; vide (null), l'alerte « sans saisie » est désactivée.
   seuilMargeFaible       Decimal? @default(15) @db.Decimal(5, 2)
   joursSansSaisie        Int?     @default(14)
-  // Destinataires du suivi de rentabilité d'un chantier — marge du jour, marge estimée,
-  // alertes « en perte » et « marge faible » — partout où le chantier leur est montré
-  // (liste, tableau de bord, fiche). Les administrateurs les reçoivent toujours. Chaque
+  // Destinataires du suivi de rentabilité d'un chantier — montant vendu global, marge du
+  // jour, marge estimée, alertes « en perte » et « marge faible », facturation de la fiche —
+  // partout où le chantier leur est montré (liste, tableau de bord, fiche). Les budgets par
+  // poste restent visibles de tous. Les administrateurs les reçoivent toujours. Chaque
   // catégorie se désactive pour s'adapter à l'organisation de la société :
   //  - le conducteur (ou responsable) du chantier ;
   //  - la chaîne hiérarchique de ce conducteur, jusqu'au sommet (comptes Responsable) ;

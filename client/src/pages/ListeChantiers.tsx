@@ -226,9 +226,12 @@ const ListeChantiers = () => {
                       ) : (
                         // Liste mixte : la rentabilité de ce chantier n'est pas communiquée à ce
                         // compte (cf. Administration > Marges) ; le solde d'heures reste utile.
-                        <span className="text-gray-400 text-sm" title="Rentabilité non communiquée pour ce chantier">
-                          —
-                          <span className="block text-xs whitespace-nowrap">Solde : {diffHeures > 0 ? '+' : ''}{fmtHeures(diffHeures)}</span>
+                        <span className="inline-flex flex-col items-end gap-1" title="Rentabilité non communiquée pour ce chantier">
+                          <span className="text-gray-400 text-sm" aria-hidden="true">—</span>
+                          <span className="sr-only">Rentabilité non communiquée ;</span>
+                          <span className={`inline-block px-3 py-1 rounded-md font-bold text-xs whitespace-nowrap ${diffHeures >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                            Solde : {diffHeures > 0 ? '+' : ''}{fmtHeures(diffHeures)}
+                          </span>
                         </span>
                       )
                     ) : (

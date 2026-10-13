@@ -1295,13 +1295,18 @@ if (!TEST_DATABASE_URL) {
         assert.equal(correctionAdmin.status, 200, JSON.stringify(correctionAdmin.body));
         assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1500);
       } finally {
+        // Remise en état directe : un échec ci-dessus ne doit pas fausser les tests suivants.
+        await prisma.chantier.update({ where: { id: derive.id }, data: { budgetGlobalVendu: 1000 } });
         const retour = await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true, rentabiliteConducteur: true });
         assert.equal(retour.status, 200, JSON.stringify(retour.body));
-        // Redevenu destinataire, le conducteur corrige de nouveau le vendu de son chantier.
-        const correctionConducteur = await request(app).patch(`/api/chantiers/${derive.id}`).set(authConducteur).send({ budgetGlobalVendu: 1000 });
-        assert.equal(correctionConducteur.status, 200, JSON.stringify(correctionConducteur.body));
-        assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1000);
       }
+    });
+
+    test('destinataire, le conducteur corrige le vendu de son chantier', async () => {
+      const correction = await request(app).patch(`/api/chantiers/${derive.id}`).set(authConducteur).send({ budgetGlobalVendu: 1000 });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      assert.equal(Number(correction.body.budgetGlobalVendu), 1000);
+      assert.equal(Number((await prisma.chantier.findUnique({ where: { id: derive.id } })).budgetGlobalVendu), 1000);
     });
 
     test('une clé sans finances:read ne déduit pas la perte de l’alerte', async () => {
@@ -1720,10 +1725,15 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await reglages({ rentabiliteHierarchie: true, rentabiliteDirecteurs: false })).status, 200);
         await voitLaPerte('directeur', false);
         await voitLaPerte('regional', true);
-        // Marge commerciale désactivée : plus de CA ni de marge pour la branche, même cochée.
+        // Marge commerciale désactivée : comme sur la liste, la branche garde le vendu (CA) mais
+        // plus la marge ; l'administration, elle, garde l'un et l'autre.
         assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: false })).status, 200);
         const sansMarge = (await request(app).get('/api/stats/conducteurs').set(entete('regional'))).body.find((l) => l.id === comptes.conducteur.id);
-        assert.deepEqual([sansMarge.caTotal, sansMarge.margeTotal, sansMarge.margePct], [null, null, null]);
+        assert.deepEqual([sansMarge.caTotal, sansMarge.margeTotal, sansMarge.margePct], [1000, null, null]);
+        const listeSansMarge = (await request(app).get('/api/chantiers').set(entete('regional'))).body.find((c) => c.id === chantier.id);
+        assert.deepEqual([listeSansMarge.budgetGlobalVendu, listeSansMarge.metrics.margeCommerciale], [1000, null], 'même règle que la liste');
+        const adminSansMarge = (await request(app).get('/api/stats/conducteurs').set(auth)).body.find((l) => l.id === comptes.conducteur.id);
+        assert.deepEqual([adminSansMarge.caTotal, adminSansMarge.margeTotal], [1000, -200]);
         assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: 'false' })).status, 400, 'un vrai booléen est exigé');
         // Tout retiré : seuls les administrateurs la voient encore.
         assert.equal((await reglages({ rentabiliteConducteur: false, rentabiliteHierarchie: false, rentabiliteDirecteurs: false })).status, 200);
@@ -1758,14 +1768,22 @@ if (!TEST_DATABASE_URL) {
       await prisma.journalSaisieChantier.create({ data: {
         chantierId: null, interventionId: dossier.id, cible: 'INTERVENTION', cibleId: dossier.id, action: 'CREATION',
         auteurId: auteur.id, auteurNom: auteur.name,
+        avant: { id: dossier.id, chantier: { id: chantier.id, nom: 'TEST Chaîne chantier', budgetGlobalVendu: 1000, budgetMainOeuvreVendu: 700, responsableId: comptes.conducteur.id } },
         apres: { id: dossier.id, chantier: { id: chantier.id, nom: 'TEST Chaîne chantier', budgetGlobalVendu: 1000, budgetMaterielVendu: 300 } },
       } });
       const journal = await request(app).get(`/api/interventions/${dossier.id}/journal-saisies`).set(entete('regional'));
       assert.equal(journal.status, 200, JSON.stringify(journal.body));
       assert.ok(journal.body.length > 0);
+      // Liste blanche : l'affaire d'un instantané ne garde que son identification, ni vendu,
+      // ni budgets par poste, ni responsable.
+      const autorisees = ['adresse', 'client', 'id', 'nom', 'numeroDevis', 'statut'];
       for (const entree of journal.body) {
-        assert.equal(JSON.stringify(entree).includes('budgetGlobalVendu'), false, JSON.stringify(entree));
+        for (const instantane of [entree.avant, entree.apres]) {
+          if (!instantane?.chantier) continue;
+          assert.deepEqual(Object.keys(instantane.chantier).filter((cle) => !autorisees.includes(cle)), [], JSON.stringify(instantane.chantier));
+        }
       }
+      assert.ok(journal.body.some((entree) => entree.avant?.chantier?.nom === 'TEST Chaîne chantier'), 'l’ancien « avant » est aussi projeté');
       assert.ok(journal.body.some((entree) => entree.apres?.chantier?.nom === 'TEST Chaîne chantier'), 'l’affaire reste identifiée');
     });
 

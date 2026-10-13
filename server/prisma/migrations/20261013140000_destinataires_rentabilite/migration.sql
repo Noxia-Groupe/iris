@@ -1,5 +1,5 @@
--- Destinataires du suivi de rentabilité d'un chantier (marge du jour, marge estimée,
--- alertes « en perte » et « marge faible »), réglés par chaque société. Les
+-- Destinataires du suivi de rentabilité d'un chantier (montant vendu global, marge du jour,
+-- marge estimée, alertes « en perte » et « marge faible », facturation), réglés par chaque société. Les
 -- administrateurs les reçoivent toujours ; les autres catégories sont actives par défaut.
 ALTER TABLE "Parametres" ADD COLUMN "rentabiliteConducteur" BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE "Parametres" ADD COLUMN "rentabiliteHierarchie" BOOLEAN NOT NULL DEFAULT true;

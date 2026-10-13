@@ -391,9 +391,10 @@ function chantierDuJournalReduit(instantane: Prisma.JsonValue | null): Prisma.Js
   return { ...(instantane as Prisma.JsonObject), chantier: reduit };
 }
 
-// Rentabilité d'un chantier — montant vendu, marge du jour, marge estimée, alertes « en
-// perte » et « marge faible » : elle ne sort que pour ses destinataires, décidés chantier par
-// chantier. Côté clé d'intégration, le scope finances:read. Côté session :
+// Rentabilité d'un chantier — montant vendu global, marge du jour, marge estimée, alertes
+// « en perte » et « marge faible », facturation de la fiche : elle ne sort que pour ses
+// destinataires, décidés chantier par chantier. Les budgets par poste, eux, restent visibles
+// (suivi des dépassements) et permettent d'en déduire le vendu, donc la marge du jour. Côté clé d'intégration, le scope finances:read. Côté session :
 //  - un administrateur, toujours ;
 //  - un directeur, si la société laisse les directeurs destinataires ;
 //  - le conducteur (ou responsable) du chantier, si elle laisse le conducteur destinataire ;
@@ -874,7 +875,8 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
 
 // Sérialise un chantier pour le client en masquant les données commerciales à qui n'en
 // est pas destinataire (cf. canSeeMarge ci-dessus). Seul le montant vendu global est masqué :
-// les budgets par poste restent envoyés pour le suivi des dépassements, et en donnent la somme.
+// les budgets par poste restent envoyés pour le suivi des dépassements ; ils en donnent la
+// somme, donc avec les dépenses la marge du jour.
 function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi) {
   const c = decimalToNumber(chantier);
   return {
@@ -5795,13 +5797,16 @@ app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, r
       if (enCours) agg.nbChantiersEnCours++;
       if (termine) agg.nbChantiersTermines++;
       agg.depensesTotal += m.totalDepenses;
-      // CA et marge : l'administration les voit toujours ; un responsable seulement sur les
-      // chantiers dont la société le laisse destinataire, marge commerciale active (cf.
-      // voitRentabilite) — sinon la branche lirait ici ce que la liste et la fiche lui masquent.
-      if (isAdmin || (params.margeCommercialeActive && voitRentabilite(req, c, params))) {
-        agg.montantsVisibles = true;
+      // CA et marge : l'administration les voit toujours. Un responsable, comme sur la liste et
+      // la fiche : le CA (le vendu) sur les chantiers dont la société le laisse destinataire (cf.
+      // voitRentabilite), la marge en plus seulement si la marge commerciale est active.
+      if (isAdmin || voitRentabilite(req, c, params)) {
+        agg.caVisible = true;
         agg.caTotal += c.budgetGlobalVendu;
-        agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
+        if (isAdmin || params.margeCommercialeActive) {
+          agg.margeVisible = true;
+          agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
+        }
       }
 
       if (enCours) {
@@ -5831,11 +5836,11 @@ app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, r
 
     const list = Object.values(byUser)
       .filter((a: any) => a.nbChantiers > 0)
-      .map(({ montantsVisibles, ...a }: any) => ({
+      .map(({ caVisible, margeVisible, ...a }: any) => ({
         ...a,
-        caTotal: montantsVisibles ? a.caTotal : null,
-        margeTotal: montantsVisibles ? a.margeTotal : null,
-        margePct: !montantsVisibles ? null : a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
+        caTotal: caVisible ? a.caTotal : null,
+        margeTotal: margeVisible ? a.margeTotal : null,
+        margePct: !margeVisible ? null : a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
         tauxObjectifsRespectes: a.nbChantiersTermines > 0 ? (a.nbObjectifsRespectes / a.nbChantiersTermines) * 100 : null,
         // % d'heures consommées au-delà du total vendu, sur les seuls chantiers TERMINES
         // (résultat définitif) — un chantier en cours en avance compenserait à tort un
