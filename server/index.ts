@@ -212,7 +212,9 @@ const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
   [ROLE_COMPTABLE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_DIRECTEUR_COMMERCIAL]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_RESPONSABLE]: ['chantiers:read', 'chantiers:write', 'chantiers:archive'],
-  [ROLE_TECHNICIEN]: ['chantiers:read'],
+  // Annuaire des clients (clients, contacts, sites) en consultation, par exemple pour retrouver
+  // une adresse ; ni devis ni montants (décision de Nelson du 13-10-2026).
+  [ROLE_TECHNICIEN]: ['chantiers:read', 'clients:read'],
   // Lecture seule. Le droit devis peut s'accorder individuellement ; la saisie Travaux non :
   // assertChantierWritable ne la permet qu'au conducteur, au responsable de branche et à l'administration.
   [ROLE_DIRECTEUR]: ['chantiers:read'],
@@ -5034,6 +5036,26 @@ routeMixte('put', '/clients/:clientId/sites/:id', 'clients:write', modifierSite)
 routeMixte('get', '/clients/:clientId/equipements', 'equipements:read', listerEquipementsClient);
 routeMixte('post', '/clients/:clientId/equipements', 'equipements:write', creerEquipementClient);
 routeMixte('post', '/clients/:clientId/equipements/:id/archiver', 'equipements:write', archiverEquipementClient);
+
+// Historique des chantiers d'un client, sans aucun montant : de quoi les retrouver (nom,
+// adresse, période, statut), dans le périmètre de lecture du demandeur (cf. perimetreChantiers) ;
+// un technicien n'y voit que les chantiers dont il est chargé. Seuls les chantiers reliés à la
+// fiche (clientId) y figurent : un chantier qui ne porte que le libellé du client n'y est pas.
+const CHANTIER_HISTORIQUE_CLIENT_SELECT = { id: true, nom: true, adresse: true, statut: true, dateDebut: true, dateFin: true } as const;
+app.get('/api/clients/:id/chantiers', requireAuth, requirePermission('clients:read'), requirePermission('chantiers:read'), async (req, res) => {
+  try {
+    const client = await prisma.client.findUnique({ where: { id: paramId(req) }, select: { id: true } });
+    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    res.json(await prisma.chantier.findMany({
+      where: { clientId: client.id, ...perimetreChantiers(req) },
+      select: CHANTIER_HISTORIQUE_CLIENT_SELECT,
+      orderBy: [{ dateDebut: 'desc' }, { nom: 'asc' }],
+    }));
+  } catch (error) {
+    console.error('Erreur historique des chantiers du client', error);
+    res.status(500).json({ error: 'Lecture de l’historique des chantiers impossible.' });
+  }
+});
 
 // --- Catalogue natif Iris ---
 // Trois familles partagent la même forme (référence, nom, prix, TVA, catégorie) et sont

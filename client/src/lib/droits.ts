@@ -81,6 +81,15 @@ export function estExcluDesOperations(role?: string | null): boolean {
   return role === ROLE_COMMERCIAL || role === ROLE_DIRECTEUR;
 }
 
+/**
+ * Annuaire des clients (clients, contacts, sites) : les administrateurs, qui le tiennent à jour,
+ * et le technicien, en consultation seule (décision de Nelson du 13-10-2026), par exemple pour
+ * retrouver une adresse. Le serveur applique la permission clients:read.
+ */
+export function peutConsulterAnnuaire(user?: CurrentUser | null): boolean {
+  return !!user && (isAdminRole(user.role) || user.role === ROLE_TECHNICIEN);
+}
+
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */
 export function peutAccederAuxDevis(user?: CurrentUser | null): boolean {
   return !!user && (isSuperAdminRole(user.role) || (user.permissions || []).includes('devis:read'));

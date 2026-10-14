@@ -80,12 +80,13 @@ l'affaire d'un technicien, aux responsables de sa branche (N+1 et au-dessus). Le
 devis, saisie ou archivage Travaux et l'accès financier ne s'accordent pas à un technicien ;
 ceux d'un compte qui devient technicien restent enregistrés, mais sans effet :
 l'écran Utilisateurs les signale « Sans effet » et un super administrateur peut les retirer.
-Nelson a décidé de lui ouvrir l'annuaire des clients (contacts et sites, sans devis ni
-montants) et l'historique des chantiers sans montant. Aujourd'hui, seul un droit `clients:read`
-enregistré sur son compte (déjà présent, ou accordé par un super administrateur par l'API, que
-l'écran Utilisateurs ne propose pas) lui donne l'annuaire (contacts et sites) ; le retrait de son
-droit devis le conserve ; un lot prévu le lui donnera par défaut, avec un menu, une fiche client en consultation
-seule et l'historique des chantiers sans montant.
+Il consulte l'**annuaire des clients** (décision de Nelson), par exemple pour retrouver une
+adresse : son type de compte porte `clients:read`, et le menu Clients lui ouvre la liste et la
+fiche de chaque client (coordonnées, contacts avec leur téléphone, sites avec leur adresse), en
+consultation seule, sans parc d'équipements ni catalogue, donc sans prix. La fiche montre
+l'historique des chantiers du client, sans montant (nom, adresse, statut, dates), limité aux
+chantiers dont il est chargé ; l'administration y voit tous les chantiers reliés à la fiche.
+Il ne voit aucun devis.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté.

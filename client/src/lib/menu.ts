@@ -9,7 +9,7 @@ import {
   KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
 } from 'lucide-react';
 import {
-  estExcluDesOperations, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutVoirStatistiques,
+  estExcluDesOperations, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutVoirStatistiques,
   ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
 } from './droits';
 
@@ -65,7 +65,7 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
       { to: '/commerciaux', libelle: 'Mes commerciaux', icone: Award, visible: isAdmin },
     ] },
     { titre: 'Référentiels', entrees: [
-      { to: '/clients', libelle: 'Clients', icone: Building2, visible: isAdmin },
+      { to: '/clients', libelle: 'Clients', icone: Building2, visible: peutConsulterAnnuaire(user) },
       { to: '/catalogue', libelle: 'Catalogue', icone: BookOpen, visible: isAdmin },
     ] },
     { titre: 'Réglages', entrees: [
