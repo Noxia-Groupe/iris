@@ -531,7 +531,7 @@ const blockCommercial: express.RequestHandler = (req, res, next) => {
     return;
   }
   if (role === ROLE_DIRECTEUR) {
-    res.status(403).json({ error: 'Accès non autorisé pour un compte directeur : il consulte les chantiers sans les modifier, hors leur clôture.' });
+    res.status(403).json({ error: 'Accès non autorisé pour un compte directeur.' });
     return;
   }
   next();

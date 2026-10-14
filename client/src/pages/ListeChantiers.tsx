@@ -249,8 +249,8 @@ const ListeChantiers = () => {
                     <div className="flex justify-end items-center gap-2">
                       {/* Clôture décidée par le serveur (peutCloturer, même règle que PATCH
                           /chantiers/:id/statut) : l'administration et les directeurs, le
-                          responsable du chantier s'il n'est pas technicien, et les comptes
-                          Responsable de la branche d'un technicien. */}
+                          responsable du chantier s'il n'est ni technicien ni commercial, et les
+                          comptes Responsable de la branche d'un technicien. */}
                       {c.statut === 'EN_COURS' && c.peutCloturer && (
                         <button
                           onClick={() => handleCloturer(c.id, c.nom)}

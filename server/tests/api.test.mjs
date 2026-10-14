@@ -2004,13 +2004,24 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.chantier.findUnique({ where: { id: chantier.id } })).statut, 'TERMINE');
       // Un conducteur ne clôture que l'affaire dont il est chargé.
       assert.equal((await request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authDe.conducteur).send({ statut: 'TERMINE' })).status, 404);
+      // N'importe quel chantier : celui d'un technicien comme celui qui n'a pas encore de titulaire.
+      for (const [qui, responsableId] of [['technicien', technicien.id], ['sans titulaire', null]]) {
+        const autre = await prisma.chantier.create({ data: { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, nom: `TEST Budgets chantier ${qui} clôturé par la direction`, responsableId } });
+        assert.equal((await request(app).get('/api/chantiers').set(authDe.directeur)).body.find((c) => c.id === autre.id)?.peutCloturer, true, qui);
+        const clotureAutre = await request(app).patch(`/api/chantiers/${autre.id}/statut`).set(authDe.directeur).send({ statut: 'TERMINE' });
+        assert.equal(clotureAutre.status, 200, `${qui} : ${JSON.stringify(clotureAutre.body)}`);
+      }
     });
 
     // La route de statut ne ferme plus que le commercial (blockCommercialSeulement). Un compte
     // commercial peut être titulaire d'un chantier (tout compte actif peut l'être, et un compte
     // change de type) : il ne le clôture pas pour autant.
     test('un commercial titulaire d’un chantier ne le clôture pas (403)', async () => {
-      const chantier = await prisma.chantier.create({ data: { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, nom: 'TEST Budgets chantier au nom du commercial', responsableId: commercial.id } });
+      // Titulaire et commercial du chantier, il le voit dans sa liste : sans bouton « Clôturer ».
+      const chantier = await prisma.chantier.create({ data: { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, nom: 'TEST Budgets chantier au nom du commercial', responsableId: commercial.id, commercialId: commercial.id } });
+      const ligne = (await request(app).get('/api/chantiers').set(authDe.commercial)).body.find((c) => c.id === chantier.id);
+      assert.ok(ligne, 'le commercial voit le chantier qu’il a vendu');
+      assert.equal(ligne.peutCloturer, false);
       const refus = await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(authDe.commercial).send({ statut: 'TERMINE' });
       assert.equal(refus.status, 403, JSON.stringify(refus.body));
       const enBase = await prisma.chantier.findUnique({ where: { id: chantier.id } });

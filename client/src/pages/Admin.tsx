@@ -1322,7 +1322,7 @@ const Admin = () => {
             sa branche — ses collaborateurs directs, puis les leurs — et, si la société le laisse (onglet « Marges &amp;
             Commissions »), leur rentabilité. Un compte <strong>Directeur</strong> voit tous les chantiers et, si la
             société le laisse, leur rentabilité ; il clôture tout chantier en cours, sans rien administrer ni modifier
-            d'autre (seule l'administration rouvre un chantier).
+            d'autre sur les chantiers (seule l'administration rouvre un chantier).
           </p>
 
           <div className="mb-8 p-4 bg-gray-50 border rounded">
