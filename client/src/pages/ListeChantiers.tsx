@@ -248,8 +248,9 @@ const ListeChantiers = () => {
                   <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end items-center gap-2">
                       {/* Clôture décidée par le serveur (peutCloturer, même règle que PATCH
-                          /chantiers/:id/statut) : l'administration, le responsable du chantier
-                          s'il n'est pas technicien, et le N+1 et au-dessus d'un technicien. */}
+                          /chantiers/:id/statut) : l'administration et les directeurs, le
+                          responsable du chantier s'il n'est pas technicien, et les comptes
+                          Responsable de la branche d'un technicien. */}
                       {c.statut === 'EN_COURS' && c.peutCloturer && (
                         <button
                           onClick={() => handleCloturer(c.id, c.nom)}
