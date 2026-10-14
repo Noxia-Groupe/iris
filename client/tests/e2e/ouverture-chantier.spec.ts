@@ -176,8 +176,9 @@ test('un conducteur confie son chantier à un autre conducteur depuis la fiche, 
 });
 
 // Un refus de la fiche (ici une référence d'affaire déjà prise) laisse la fenêtre ouverte avec
-// la saisie, pour corriger le champ refusé ; le commercial, enregistré juste avant, s'affiche
-// tel qu'il est désormais. Relire toute la fiche aurait démonté la fenêtre et vidé la saisie.
+// la saisie, pour corriger le champ refusé ; le message dit que le commercial, enregistré juste
+// avant, l'est resté. Relire toute la fiche aurait démonté la fenêtre et vidé la saisie. Une fois
+// la référence corrigée, la fiche s'enregistre sans renvoyer le commercial, et l'affiche.
 test('un refus de la fiche garde la saisie, et le commercial déjà enregistré s’affiche', async ({ allerSurPageAdmin, creerClient, request, session }) => {
   test.slow();
   const { headers, envoyer, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'refus');
@@ -192,6 +193,8 @@ test('un refus de la fiche garde la saisie, et le commercial déjà enregistré 
   await envoyer('post', `/devis/${autreDevis.id}/convertir`, { cible: 'CHANTIER' });
 
   const admin = await allerSurPageAdmin(`/chantiers/${ouvert.id}`);
+  const appelsCommercial: string[] = [];
+  admin.on('request', (r) => { if (r.url().endsWith(`/api/chantiers/${ouvert.id}/commercial`)) appelsCommercial.push(r.method()); });
   await admin.getByRole('button', { name: 'Modifier' }).first().click();
   const nouveauNom = `Nom corrigé E2E ${suffixe}`;
   await admin.locator('input[name="nom"]').fill(nouveauNom);
@@ -201,13 +204,29 @@ test('un refus de la fiche garde la saisie, et le commercial déjà enregistré 
   admin.once('dialog', (dialogue) => { alerte = dialogue.message(); void dialogue.accept(); });
   await admin.getByRole('button', { name: 'Enregistrer les modifications' }).click();
   await expect.poll(() => alerte).toContain('déjà rattaché à un autre chantier');
+  expect(alerte).toMatch(/^Le commercial a été enregistré, mais pas les autres modifications : /);
   // La fenêtre et la saisie sont intactes.
   await expect(admin.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
   await expect(admin.locator('input[name="nom"]')).toHaveValue(nouveauNom);
   await expect(admin.locator('input[name="numeroDevis"]')).toHaveValue(autreDevis.numero);
   await expect(admin.locator('select[name="commercialId"]')).toHaveValue(autreCommercial.id);
   // Le commercial est enregistré, la fiche ne l'est pas.
-  const relu = await (await request.get(`${api}/chantiers/${ouvert.id}`, { headers })).json() as { nom: string; commercial: Compte };
+  const relu = await (await request.get(`${api}/chantiers/${ouvert.id}`, { headers })).json() as { nom: string; commercial: Compte; numeroDevis: string };
   expect(relu.commercial.id).toBe(autreCommercial.id);
   expect(relu.nom).toBe(ouvert.nom);
+
+  // Référence corrigée dans la même fenêtre : la fiche s'enregistre, et le commercial, déjà
+  // enregistré, n'est pas renvoyé.
+  await admin.locator('input[name="numeroDevis"]').fill(relu.numeroDevis);
+  const enregistrement = admin.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${ouvert.id}`) && r.request().method() === 'PATCH');
+  await admin.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+  expect((await enregistrement).status()).toBe(200);
+  await expect(admin.getByRole('heading', { name: 'Modifier le chantier' })).toHaveCount(0);
+  expect(appelsCommercial).toEqual(['PATCH']);
+  await expect(admin.getByText(nouveauNom).first()).toBeVisible();
+  await expect(admin.getByText(autreCommercial.name).first()).toBeVisible();
+  const final = await (await request.get(`${api}/chantiers/${ouvert.id}`, { headers })).json() as { nom: string; commercial: Compte; numeroDevis: string };
+  expect(final.nom).toBe(nouveauNom);
+  expect(final.commercial.id).toBe(autreCommercial.id);
+  expect(final.numeroDevis).toBe(relu.numeroDevis);
 });

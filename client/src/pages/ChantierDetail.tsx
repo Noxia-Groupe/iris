@@ -217,6 +217,8 @@ const ChantierDetail = () => {
     // explicitement true/false pour que décocher l'enregistre bien (cf. 'types' ci-dessous).
     const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), baremeReduit: formData.get('baremeReduit') === 'true' };
     setSavingChantier(true);
+    // Le commercial, enregistré d'abord, le reste si la suite échoue : le message le dit.
+    let commercialEnregistre = false;
     try {
       if (commercialId !== (chantier?.commercial?.id || '')) {
         const commRes = await apiFetch(`/chantiers/${id}/commercial`, { method: 'PATCH', body: JSON.stringify({ commercialId: commercialId || null }) });
@@ -228,12 +230,14 @@ const ChantierDetail = () => {
         // Commercial enregistré : la fiche le reflète aussitôt, même si la suite est refusée.
         // Pas de relecture complète ici : elle démonterait la fenêtre et effacerait la saisie.
         setChantier((c: any) => (c ? { ...c, commercial: d.commercial ?? null } : c));
+        commercialEnregistre = true;
       }
       const res = await apiFetch(`/chantiers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         // La fenêtre reste ouverte avec la saisie, pour corriger le champ refusé.
-        alert(d.error || 'Erreur lors de la modification du chantier.');
+        const motif = d.error || 'Erreur lors de la modification du chantier.';
+        alert(commercialEnregistre ? `Le commercial a été enregistré, mais pas les autres modifications : ${motif}` : motif);
         return;
       }
       setEditingChantier(false);
@@ -245,7 +249,7 @@ const ChantierDetail = () => {
       }
       fetchChantier();
     } catch (e) {
-      alert('Impossible de joindre le serveur.');
+      alert(commercialEnregistre ? 'Le commercial a été enregistré, mais pas les autres modifications : impossible de joindre le serveur.' : 'Impossible de joindre le serveur.');
     } finally {
       setSavingChantier(false);
     }

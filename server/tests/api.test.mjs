@@ -3127,6 +3127,50 @@ if (!TEST_DATABASE_URL) {
         assert.equal(await prisma.chantier.count({ where: { numeroDevis: premiere.numero } }), 1, 'pas de second chantier pour l’affaire');
       });
 
+      // Même affaire, mais la référence du chantier de la révision a été corrigée avant son
+      // annulation : seule la conversion d'une autre version du dossier signale que l'affaire a
+      // déjà eu son chantier (la référence, elle, est libre).
+      test('une autre version déjà convertie bloque l’affaire, même si son chantier a changé de référence', async () => {
+        const premiere = await devisAccepte('TEST Ouverture autre version');
+        const revision = await request(app).post(`/api/devis/${premiere.id}/revisions`).set(admin());
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        await request(app).put(`/api/devis/${revision.body.id}/statut`).set(admin()).send({ statut: 'ENVOYE' });
+        const signature = await request(app).post(`/api/devis/${revision.body.id}/signature`).set(admin()).send({ signataire: 'TEST Signataire autre version', confirme: true });
+        assert.equal(signature.status, 201, JSON.stringify(signature.body));
+        const conversion = await convertir(revision.body.id);
+        assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+        const referenceLibre = `A99-${String(Date.now()).slice(-7)}`;
+        const correction = await request(app).patch(`/api/chantiers/${conversion.body.id}`).set(admin()).send({ numeroDevis: referenceLibre });
+        assert.equal(correction.status, 200, JSON.stringify(correction.body));
+        const annulation = await request(app).post(`/api/devis/${revision.body.id}/annulation`).set(admin()).send({ motif: 'TEST autre version annulée' });
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        assert.ok(!(await aConvertir()).some((d) => d.id === premiere.id), 'la version précédente n’est plus proposée');
+        const refus = await ouvrir(premiere.id, { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /Une autre version de ce devis a déjà ouvert le chantier de l’affaire.*dupliquez le devis/);
+        assert.equal(await prisma.chantier.count({ where: { numeroDevis: premiere.numero } }), 0, 'aucun chantier ouvert sous la référence');
+      });
+
+      // La référence d'une affaire portée par le chantier, annulé depuis, d'un autre devis : la
+      // fiche annulée ne se corrige plus, le refus oriente donc vers la duplication du devis.
+      test('une référence portée par un chantier annulé renvoie vers la duplication', async () => {
+        const cible = await devisAccepte('TEST Ouverture référence annulée');
+        const autre = await devisAccepte('TEST Ouverture référence annulée autre');
+        const conversion = await convertir(autre.id);
+        assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+        const correction = await request(app).patch(`/api/chantiers/${conversion.body.id}`).set(admin()).send({ numeroDevis: cible.numero });
+        assert.equal(correction.status, 200, JSON.stringify(correction.body));
+        const annulation = await request(app).post(`/api/devis/${autre.id}/annulation`).set(admin()).send({ motif: 'TEST chantier de la référence annulé' });
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        assert.ok(!(await aConvertir()).some((d) => d.id === cible.id), 'le devis n’est pas proposé');
+        const refus = await ouvrir(cible.id, { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, new RegExp(`L’affaire ${cible.numero} a déjà eu un chantier, annulé depuis : pour la reprendre, dupliquez le devis`));
+        const duplication = await request(app).post(`/api/devis/${cible.id}/duplication`).set(admin());
+        assert.equal(duplication.status, 201, JSON.stringify(duplication.body));
+        assert.notEqual(duplication.body.numero, cible.numero);
+      });
+
       test('refuse un titulaire, un commercial ou une date invalides, sans rien ouvrir', async () => {
         const devis = await devisAccepte('TEST Ouverture refusée');
         const cas = [
