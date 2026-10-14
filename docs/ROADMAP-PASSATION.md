@@ -69,7 +69,7 @@ Le catalogue et le plan comptable commencent vides et sont paramétrés par la s
   - les formulaires voisins de l'Administration (intervenants, fournisseurs, catégories) affichent les refus du serveur ; un fournisseur ou une catégorie déjà existants répondent 409 au lieu d'une erreur 500.
 
   Un titulaire autre qu'un conducteur (technicien, responsable) ne s'attribue toujours que par l'API : question plus bas.
-- **(g) Correctif « socket hang up »** (décision du 14-10-2026, après (e) et (f)) : un « socket hang up » a fait échouer une fois la CI E2E de #123 (cause probable : connexion réutilisée au moment où le serveur la ferme), puis une réinitialisation de connexion (`read ECONNRESET`) celle de #129, de cause probablement identique. Correctifs proposés dans #123 : allonger `keepAliveTimeout` et `headersTimeout` côté serveur, ou relancer la requête côté tests.
+- **(g) Correctif « socket hang up »** (décision du 14-10-2026, après (e) et (f)) : un « socket hang up » a fait échouer une fois la CI E2E de #123 (cause probable : connexion réutilisée au moment où le serveur la ferme), puis une réinitialisation de connexion (`read ECONNRESET`, `facturation.spec.ts`) a fait échouer de même la première tentative de la CI E2E de #129 (`37de8d0`, verte après relance), de cause probablement identique (non reproduite). Correctifs proposés dans #123 : allonger `keepAliveTimeout` et `headersTimeout` côté serveur, ou relancer la requête côté tests.
 
 ## Constats préexistants
 
