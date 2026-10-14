@@ -574,7 +574,7 @@ test('sans réponse du serveur après l’enregistrement du commercial, le messa
 });
 
 // Écran Devis : un devis converti mène à la fiche de son chantier pour l'administration ; un autre
-// porteur du droit devis (ici un commercial) lit « Chantier ouvert. », sans lien vers une fiche
+// porteur du droit devis (ici un commercial) lit « Chantier issu de ce devis. », sans lien vers une fiche
 // qu'il ne peut pas forcément consulter.
 test('l’écran Devis ne donne le lien vers la fiche du chantier ouvert qu’à l’administration', async ({ allerSurPageAdmin, browser, creerClient, request, session }) => {
   const { envoyer, devis, commercial } = await preparer(request, session.token, creerClient, 'lien-devis');
@@ -596,17 +596,17 @@ test('l’écran Devis ne donne le lien vers la fiche du chantier ouvert qu’à
     }, [jetonPour(commercial.id), JSON.stringify({ ...commercial, role: 'COMMERCIAL', permissions: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'] })]);
     await page.goto('/devis', { waitUntil: 'networkidle' });
     const ligne = page.locator('li', { hasText: devis.numero });
-    await expect(ligne).toContainText('Chantier ouvert.');
+    await expect(ligne).toContainText('Chantier issu de ce devis.');
     await expect(ligne.getByRole('link', { name: 'voir la fiche' })).toHaveCount(0);
   } finally {
     await contexte.close();
   }
 
-  // Le devis annulé emporte son chantier : la ligne ne le dit plus ouvert, et la fiche reste
-  // accessible à l'administration.
+  // Le devis annulé emporte son chantier : la ligne le dit annulé, et la fiche reste accessible à
+  // l'administration.
   await envoyer('post', `/devis/${devis.id}/annulation`, { motif: 'Annulation E2E après ouverture' });
   await admin.goto('/devis', { waitUntil: 'networkidle' });
   await expect(ligneAdmin).toContainText('Chantier annulé avec le devis : voir la fiche');
-  await expect(ligneAdmin).not.toContainText('Chantier ouvert');
+  await expect(ligneAdmin).not.toContainText('Chantier issu de ce devis');
   await expect(ligneAdmin.getByRole('link', { name: 'voir la fiche' })).toHaveAttribute('href', `/chantiers/${ouvert.id}`);
 });
