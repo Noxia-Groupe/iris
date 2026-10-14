@@ -147,9 +147,8 @@ ACCEPTÉ ou converti ──[annulation administrateur + motif]──→ ANNULÉ 
 **Acompte.** Une case sur le devis initial conditionne l'ouverture du chantier à la
 réception d'un acompte. Le taux par défaut se règle dans **Administration > Marges**, et
 chaque devis **fige le sien à l'émission** : changer la politique de la société ne réécrit
-aucun devis déjà émis, même règle de non-rétroactivité que les barèmes de commission. Tant
-que le module paiements n'existe pas, un administrateur constate la réception à la main
-(date, montant, référence) ; le rapprochement bancaire alimentera ces mêmes champs plus
+aucun devis déjà émis. Tant que le module paiements n'existe pas, un administrateur
+constate la réception à la main (date, montant, référence) ; le rapprochement bancaire alimentera ces mêmes champs plus
 tard sans changer la règle.
 
 **Annulation.** C'est le seul retour en arrière possible sur une affaire ouverte par

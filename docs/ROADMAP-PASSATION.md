@@ -92,8 +92,15 @@ Le catalogue et le plan comptable commencent vides et sont paramétrés par la s
     - « en développé » : une commission sur le total des paiements prévus pendant toute la durée du contrat ;
     - ou à la prise de commande de l'abonnement ou de la location : un nombre de mois, ou un pourcentage du montant mensuel.
 
-  Aujourd'hui, le barème progressif, les objectifs, les primes et le barème réduit (`ParametresRemuneration`, Administration > Rémunération commerciale) valent pour toute la société, et une commission se rattache au mois de clôture du chantier. Tout changement de montant reste soumis à la validation comptable de Nelson. Questions de cadrage plus bas.
-- **(j) Horaires de la société et astreintes** (décision du 14-10-2026) : chaque société peut avoir son propre fonctionnement, avec des horaires de nuit ou de week-end. Si elle propose un service d'astreinte, Iris attribue des temps d'astreinte spécifiques et organise un roulement automatique ou semi-automatique suivant les règles de rotation de la société. Questions de cadrage plus bas.
+  Le lot reprend les profils de commission attribués par personne, versionnés et non rétroactifs de l'[issue #15](https://github.com/Noxia-Groupe/iris/issues/15) (transversal « commissionnement » ci-dessus). Existant à prendre en compte :
+  - le barème progressif, les objectifs, les primes et le barème réduit (`ParametresRemuneration`, Administration > Marges & Commissions) valent pour toute la société ; une commission ne naît que d'un chantier encaissé et se rattache au mois de sa clôture ;
+  - ces règles sont relues à chaque calcul : modifier un barème recalcule aussi les mois passés. Le plan commercial devra figer les règles applicables à chaque période ;
+  - le devis ne porte pas de commercial, qui se fixe sur le chantier : la commande signée comme fait générateur suppose de le connaître dès le devis ;
+  - les commissions sur abonnements et locations supposent des contrats qui n'existent pas encore : `ContratMaintenance` ne porte ni montant, ni durée d'engagement, ni date de signature, ni commercial, et Iris n'a pas de contrat de location (ventes récurrentes, phase 9) ;
+  - les commissions sur contrats récurrents et les primes affichées en texte dans l'onglet de rémunération ne sont pas calculées.
+
+  Tout changement de montant reste soumis à la validation comptable de Nelson. Questions de cadrage plus bas.
+- **(j) Horaires de la société et astreintes** (décision du 14-10-2026) : chaque société peut avoir son propre fonctionnement, avec des horaires de nuit ou de week-end. Si elle propose un service d'astreinte, Iris attribue des temps d'astreinte spécifiques et organise un roulement automatique ou semi-automatique suivant les règles de rotation de la société. Aujourd'hui, Iris ne connaît ni horaires de la société, ni jours fériés, ni astreinte. Les heures saisies ne portent ni heure de début ni type, avec un seul taux par intervenant. Une affectation du planning ne peut pas passer minuit, et le week-end n'y est que grisé. Questions de cadrage plus bas.
 
 ## Constats préexistants
 
