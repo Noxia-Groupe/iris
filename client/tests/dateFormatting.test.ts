@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { companyDateInputValue, decalerReference, formatCompanyDate, formatCompanyDateTime, formatDateOnly, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre } from '../src/lib/dateFormatting.ts';
+import { companyDateInputValue, decalerReference, formatCompanyDate, formatCompanyDateTime, formatDateOnly, instantaneLisible, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre } from '../src/lib/dateFormatting.ts';
 
 test('formatDateOnly always preserves a date-only value in UTC', () => {
   assert.equal(formatDateOnly('2026-01-01T00:00:00.000Z'), '01/01/2026');
@@ -62,4 +62,13 @@ test('joursCivilsEntre compte des jours civils, et non des tranches de 24 h', ()
   const aujourdhui = jourCivilEntrepriseIso('Europe/Paris', new Date('2026-10-16T21:00:00.000Z'));
   assert.deepEqual([debut, aujourdhui], ['2026-10-15', '2026-10-16']);
   assert.equal(joursCivilsEntre(debut, aujourdhui), 1);
+});
+
+test('instantaneLisible rend une date-seule en JJ-MM-AAAA et un instant au jour et à l’heure de la société', () => {
+  const instantane = { date: '2026-10-15T00:00:00.000Z', createdAt: '2026-10-14T13:30:00.000Z', heures: 7.5, commentaire: '2026-10-14 noté à la main' };
+  assert.equal(
+    instantaneLisible(instantane, 'Pacific/Noumea'),
+    '{"date":"15-10-2026","createdAt":"15-10-2026 00:30","heures":7.5,"commentaire":"2026-10-14 noté à la main"}',
+  );
+  assert.equal(instantaneLisible({ createdAt: '2026-10-14T13:30:00Z' }, 'Europe/Paris'), '{"createdAt":"14-10-2026 15:30"}');
 });

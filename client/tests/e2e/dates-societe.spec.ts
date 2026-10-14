@@ -180,15 +180,18 @@ test.describe('navigateur à Gambier, société à Wallis : périodes', () => {
   });
 });
 
-test.describe('navigateur à Gambier, société à Paris : fiche chantier', () => {
+test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', () => {
   test.use({ timezoneId: 'Pacific/Gambier' });
 
-  // Un chantier converti avant ce lot commence à un instant : 14-10-2026 à 22:30 UTC, soit le
-  // 15-10 à 00:30 à Paris. La fiche l'affiche et le préremplit au 15, et enregistrer la fiche
-  // sans y toucher garde le 15 (avant, le jour UTC était réenregistré : le 14). Lue le 16 à
-  // 23:00 à Paris, elle compte un jour civil écoulé, et non 46 h 30 arrondies à 2 jours.
-  test('la fiche lit un début horodaté au jour de la société, et l’enregistre sans le décaler', async ({ allerSurPageAdmin, creerClient, page, request, session }) => {
-    await page.clock.install({ time: new Date('2026-10-16T21:00:00Z') });
+  // Un chantier converti avant ce lot commence à un instant : 14-10-2026 à 13:30 UTC, soit le
+  // 15-10 à 00:30 à Nouméa (encore le 14 à Paris, fuseau par défaut, en UTC et à Gambier). La
+  // fiche l'affiche et le préremplit au 15, et enregistrer la fiche sans y toucher garde le 15
+  // (avant, le jour UTC était réenregistré : le 14). Lue le 16 à 23:00 à Nouméa, elle compte un
+  // jour civil écoulé, et non 46 h 30 arrondies à 2 jours. Le formulaire est ouvert pendant que la
+  // lecture du fuseau est retenue : il montre d'abord le jour du fuseau par défaut, puis celui de
+  // la société une fois le fuseau lu.
+  test('la fiche lit un début horodaté au jour de la société, et l’enregistre sans le décaler', async ({ creerClient, page, request, session }) => {
+    await page.clock.install({ time: new Date('2026-10-16T12:00:00Z') });
     const headers = { Authorization: `Bearer ${session.token}` };
     const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
       const response = await request[methode](`${api}${path}`, { headers, data });
@@ -208,13 +211,25 @@ test.describe('navigateur à Gambier, société à Paris : fiche chantier', () =
       if (route.request().method() !== 'GET') return route.continue();
       const reponse = await route.fetch();
       const corps = await reponse.json();
-      await route.fulfill({ response: reponse, json: { ...corps, dateDebut: '2026-10-14T22:30:00.000Z' } });
+      await route.fulfill({ response: reponse, json: { ...corps, dateDebut: '2026-10-14T13:30:00.000Z' } });
     });
-    await avecFuseauSociete(request, session.token, 'Europe/Paris', async () => {
-      await allerSurPageAdmin(`/chantiers/${chantier.id}`);
-      await expect(page.getByText('Démarré le 15-10-2026 (il y a 1 j)')).toBeVisible();
-      await page.getByRole('button', { name: 'Modifier' }).first().click();
+    await avecFuseauSociete(request, session.token, 'Pacific/Noumea', async () => {
+      let libererSociete = () => {};
+      const societeRetenue = new Promise<void>((resolve) => { libererSociete = resolve; });
+      await page.route('**/api/company', async (route) => {
+        if (route.request().method() === 'GET') await societeRetenue;
+        await route.continue();
+      });
+      try {
+        await ouvrirSansAttendre(page, `/chantiers/${chantier.id}`, session.token, session.user);
+        await expect(page.getByText('Démarré le 14-10-2026')).toBeVisible();
+        await page.getByRole('button', { name: 'Modifier' }).first().click();
+        await expect(page.locator('input[name="dateDebut"]')).toHaveValue('14-10-2026');
+      } finally {
+        libererSociete();
+      }
       await expect(page.locator('input[name="dateDebut"]')).toHaveValue('15-10-2026');
+      await expect(page.getByText('Démarré le 15-10-2026 (il y a 1 j)')).toBeVisible();
       const enregistrement = page.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'PATCH');
       await page.getByRole('button', { name: 'Enregistrer les modifications' }).click();
       expect((await enregistrement).status()).toBe(200);

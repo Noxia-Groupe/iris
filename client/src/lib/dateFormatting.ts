@@ -84,3 +84,15 @@ export function decalerReference(ref: string, periode: PeriodeNavigable, sens: 1
     : new Date(Date.UTC(annee, mois - 1 + sens * (periode === 'month' ? 1 : periode === 'quarter' ? 3 : 12), 1));
   return date.toISOString().slice(0, 10);
 }
+
+// Instantané d'une saisie journalisée, rendu lisible : une date-seule en JJ-MM-AAAA, un
+// horodatage (création, archivage…) à la date et à l'heure de la société, et non en UTC ; le
+// reste est rendu tel quel, en JSON.
+const INSTANT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+export function instantaneLisible(valeur: unknown, fuseau: string): string {
+  return JSON.stringify(valeur, (_cle, v) => {
+    if (typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
+    const jour = jourCivilChantier(v, fuseau);
+    return v.endsWith('T00:00:00.000Z') ? jour : `${jour} ${formatCompanyDateTime(v, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
+  });
+}

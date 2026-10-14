@@ -10,13 +10,16 @@ import { createHash, createHmac } from 'node:crypto';
 import test, { after, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
 
-// Fige l'horloge du processus (Date seulement : ni les minuteries ni la base) à 21 h UTC du jour :
-// Wallis y est déjà au lendemain, si bien que le jour de la société diffère toujours de celui
-// d'UTC. Sans cela, entre 10 h et 12 h UTC, aucun fuseau admis (UTC−10 à UTC+12) n'en diffère et
-// un test du jour de la société ne distinguerait plus le bon calcul du jour UTC.
+// Fige l'horloge du processus (Date seulement : ni les minuteries ni la base) au dernier 21 h UTC
+// passé : Wallis y est déjà au lendemain, si bien que le jour de la société diffère toujours de
+// celui d'UTC. Sans cela, entre 10 h et 12 h UTC, aucun fuseau admis (UTC−10 à UTC+12) n'en
+// diffère et un test du jour de la société ne distinguerait plus le bon calcul du jour UTC.
+// L'horloge ne part jamais dans le futur : les sessions de test, valables une heure à compter de
+// leur ouverture, y seraient expirées.
 function figerHorlogeA21hUtc() {
   const maintenant = new Date();
-  mock.timers.enable({ apis: ['Date'], now: Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth(), maintenant.getUTCDate(), 21) });
+  const aujourdhui21h = Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth(), maintenant.getUTCDate(), 21);
+  mock.timers.enable({ apis: ['Date'], now: aujourdhui21h <= maintenant.getTime() ? aujourdhui21h : aujourdhui21h - 86_400_000 });
 }
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;

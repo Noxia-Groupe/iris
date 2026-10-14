@@ -7,3 +7,7 @@ uploads/
 
 # Notes de travail de l’agent, hors dépôt
 .hermes/
+
+# Restes de patch
+*.orig
+*.rej

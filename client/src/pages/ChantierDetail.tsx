@@ -12,7 +12,7 @@ import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole, ROLE_TECHNICIEN } from '../roles';
 import { useModules } from '../modules';
 import { useCompanyTimezone } from '../companyTimezoneContext';
-import { formatCompanyDate, formatCompanyDateTime, formatDateOnly, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre } from '../lib/dateFormatting';
+import { formatCompanyDate, formatDateOnly, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre, instantaneLisible } from '../lib/dateFormatting';
 import { archivagesRestaurables } from '../lib/archivesRestaurables';
 import { AlertesChantier } from '../components/AlertesChantier';
 import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
@@ -25,14 +25,6 @@ const toDateFrancaise = (d: string | null | undefined) => {
 };
 
 const fmtDate = (d: string) => formatDateOnly(d, { day: '2-digit', month: 'long', year: 'numeric' });
-// Instantané d'une saisie journalisée, rendu lisible : une date-seule en JJ-MM-AAAA, un
-// horodatage (création, archivage…) à la date et à l'heure de la société, et non en UTC.
-const INSTANT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-const instantaneLisible = (valeur: unknown, fuseau: string) => JSON.stringify(valeur, (_cle, v) => {
-  if (typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
-  const jour = jourCivilChantier(v, fuseau);
-  return v.endsWith('T00:00:00.000Z') ? jour : `${jour} ${formatCompanyDateTime(v, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
-});
 const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
 // Heures pointées : demi-heures possibles, mais pas de décimale inutile (8 h, 7,5 h).
 const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
