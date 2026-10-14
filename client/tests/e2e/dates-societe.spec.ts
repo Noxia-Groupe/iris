@@ -165,8 +165,21 @@ test.describe('navigateur à Gambier, société à Wallis', () => {
 });
 
 // Fuseau de la société illisible : aucune date du jour n'est préremplie (ce serait le jour
-// d'Europe/Paris, fuseau par défaut), elle reste à saisir.
-test('sans le fuseau de la société, les dates du jour ne sont pas préremplies', async ({ page, session }) => {
+// d'Europe/Paris, fuseau par défaut), elle reste à saisir. Le formulaire d'ouverture n'affiche
+// ses champs qu'avec un devis prêt : le test signe le sien, sans dépendre des autres parcours.
+test('sans le fuseau de la société, les dates du jour ne sont pas préremplies', async ({ page, request, session, creerClient }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const envoyer = async (path: string, methode: 'post' | 'put', data: object) => {
+    const response = await request[methode](`${api}${path}`, { headers, data });
+    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+    return response.json();
+  };
+  const client = await creerClient('fuseau illisible', false);
+  const devis = await envoyer('/devis', 'post', { clientId: client.id, objet: `Fuseau illisible E2E ${Date.now()}`, lignes: [
+    { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
+  ] }) as { id: string };
+  await envoyer(`/devis/${devis.id}/statut`, 'put', { statut: 'ENVOYE' });
+  await envoyer(`/devis/${devis.id}/signature`, 'post', { signataire: 'Client E2E', confirme: true });
   await page.route('**/api/company', (route) => (route.request().method() === 'GET'
     ? route.fulfill({ status: 500, json: { error: 'Paramètres indisponibles.' } })
     : route.continue()));
@@ -176,6 +189,7 @@ test('sans le fuseau de la société, les dates du jour ne sont pas préremplies
   }, [session.token, JSON.stringify(session.user)]);
   await page.goto('/admin', { waitUntil: 'networkidle' });
   await expect(page.getByRole('heading', { name: 'Ouvrir le chantier d’une affaire' })).toBeVisible();
+  await expect(page.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(1);
   await expect(page.getByLabel('Date de début')).toHaveValue('');
   await page.goto('/heures', { waitUntil: 'networkidle' });
   await expect(page.locator('input[name="date"]')).toHaveValue('');
