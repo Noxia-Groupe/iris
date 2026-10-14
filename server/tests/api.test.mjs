@@ -3106,7 +3106,9 @@ if (!TEST_DATABASE_URL) {
       test('une annulation lancée en même temps que la conversion archive le chantier ouvert', async () => {
         for (let tour = 0; tour < 3; tour += 1) {
           const devis = await devisAccepte(`TEST Ouverture et annulation simultanées ${tour}`);
-          await Promise.all([convertir(devis.id), request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST annulation simultanée' })]);
+          const [conversion, annulation] = await Promise.all([convertir(devis.id), request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST annulation simultanée' })]);
+          assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+          assert.ok(conversion.status === 201 || (conversion.status === 400 && /annulé/.test(conversion.body.error)), JSON.stringify(conversion.body));
           const relu = await prisma.devis.findUnique({ where: { id: devis.id }, select: { statut: true } });
           const chantiers = await prisma.chantier.findMany({ where: { numeroDevis: devis.numero }, select: { statut: true } });
           assert.equal(relu.statut, 'ANNULE');
@@ -3119,9 +3121,44 @@ if (!TEST_DATABASE_URL) {
           const devis = await devisAccepte(`TEST Ouverture et statut simultanés ${tour}`, { acompteExige: true });
           const acompte = await request(app).post(`/api/devis/${devis.id}/acompte`).set(admin()).send({ recuLe: '01-10-2026', montant: 60, reference: `TEST-VIR-STATUT-${tour}` });
           assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
-          await Promise.all([convertir(devis.id), request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' })]);
+          const reponses = await Promise.all([convertir(devis.id), request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' })]);
+          assert.equal(reponses.filter((r) => r.status < 300).length, 1, JSON.stringify(reponses.map((r) => [r.status, r.body.error])));
+          assert.ok(reponses.every((r) => r.status < 500), JSON.stringify(reponses.map((r) => [r.status, r.body.error])));
           const relu = await prisma.devis.findUnique({ where: { id: devis.id }, include: { conversion: true } });
           assert.ok(!(relu.conversion && relu.statut !== 'ACCEPTE'), `devis converti au statut ${relu.statut}`);
+        }
+      });
+
+      // L'acompte verrouille lui aussi le devis : constaté pendant une annulation, il ne fait pas
+      // repasser le devis annulé à « accepté » (il lirait l'ancien statut, puis l'écraserait).
+      test('un acompte constaté en même temps qu’une annulation ne fait pas revivre le devis', async () => {
+        for (let tour = 0; tour < 3; tour += 1) {
+          const devis = await devisAccepte(`TEST Acompte et annulation simultanés ${tour}`, { acompteExige: true });
+          const attente = await request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' });
+          assert.equal(attente.status, 200, JSON.stringify(attente.body));
+          const [acompte, annulation] = await Promise.all([
+            request(app).post(`/api/devis/${devis.id}/acompte`).set(admin()).send({ recuLe: '01-10-2026', montant: 60, reference: `TEST-VIR-ANNUL-${tour}` }),
+            request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST annulation simultanée' }),
+          ]);
+          assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+          assert.ok(acompte.status === 200 || acompte.status === 400, JSON.stringify(acompte.body));
+          assert.equal((await prisma.devis.findUnique({ where: { id: devis.id } })).statut, 'ANNULE');
+        }
+      });
+
+      // Sous verrou, un devis inexistant répond toujours 404 au statut (par les deux portes) et à
+      // l'acompte, avant toute validation du corps.
+      test('le statut et l’acompte d’un devis inexistant répondent 404', async () => {
+        const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST agent statut devis', scopes: ['devis:write'] });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        const reponses = [
+          await request(app).put('/api/devis/devis-inexistant/statut').set(admin()).send({ statut: 'ENVOYE' }),
+          await request(app).put('/api/v1/devis/devis-inexistant/statut').set('Authorization', `Bearer ${cle.body.apiKey}`).send({ statut: 'ENVOYE' }),
+          await request(app).post('/api/devis/devis-inexistant/acompte').set(admin()).send({}),
+        ];
+        for (const reponse of reponses) {
+          assert.equal(reponse.status, 404, JSON.stringify(reponse.body));
+          assert.equal(reponse.body.error, 'Devis introuvable.');
         }
       });
 

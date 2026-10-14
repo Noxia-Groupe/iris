@@ -117,6 +117,22 @@ test('l’ouverture d’un devis converti entre-temps est refusée avec un messa
   expect(chantiers.filter((c) => c.numeroDevis === devis.numero)).toHaveLength(1);
 });
 
+// Un devis annulé entre l'affichage du formulaire et son envoi : le refus (400) s'affiche, et la
+// liste relue ne le propose plus.
+test('l’ouverture d’un devis annulé entre-temps est refusée avec un message, et le devis n’est plus proposé', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { headers, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'annule');
+  const admin = await allerSurPageAdmin('/admin');
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
+  await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
+  const annulation = await request.post(`${api}/devis/${devis.id}/annulation`, { headers, data: { motif: 'Annulé pendant le formulaire E2E' } });
+  expect(annulation.status(), await annulation.text()).toBe(200);
+
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('alert').filter({ hasText: 'Ce devis est annulé' })).toBeVisible();
+  await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
+});
+
 // Formulaires voisins de l'Administration : un ajout refusé (nom déjà pris) est signalé, et la
 // saisie conservée pour être corrigée.
 test('un fournisseur déjà enregistré est refusé avec un message, sans vider la saisie', async ({ allerSurPageAdmin, request, session }) => {

@@ -5591,10 +5591,12 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   });
   res.status(201).json(decimalToNumber(resultat));
 } catch (error) {
-  // Filet des contraintes uniques de DevisConversion : le verrou fait passer l'une après l'autre
-  // deux conversions du même devis, si bien que seules deux versions d'un même dossier peuvent
-  // encore s'y heurter (cas limite d'une annulation concurrente). La seconde est refusée, et son
-  // chantier annulé avec la transaction.
+  // Défense en profondeur : les contraintes uniques de DevisConversion. Les verrous du devis
+  // (conversion, révision, annulation) les rendent inatteignables en fonctionnement normal : deux
+  // conversions du même devis passent l'une après l'autre, et une autre version du dossier ne se
+  // convertit qu'une fois la conversion précédente visible, que le contrôle du dossier refuse.
+  // Si le filet servait malgré tout, la seconde serait refusée et son chantier annulé avec la
+  // transaction.
   if ((error as { code?: string })?.code === 'P2002') return void res.status(409).json({ error: 'Une autre version de ce devis vient d’ouvrir le chantier de l’affaire : chaque affaire n’en ouvre qu’un.' });
   devisErreur(res, error);
 } };

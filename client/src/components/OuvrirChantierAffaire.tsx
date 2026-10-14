@@ -79,8 +79,9 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setResultat({ ok: false, texte: data.error || 'Ouverture du chantier impossible.' });
-        // Devis converti entre-temps : la liste est relue pour ne plus le proposer.
-        if (res.status === 409) void charger();
+        // Devis converti, annulé ou remis en attente d'acompte entre-temps, compte désactivé : la
+        // liste est relue pour ne plus proposer ce qui ne peut plus ouvrir de chantier.
+        void charger();
         return;
       }
       setResultat({ ok: true, texte: `Chantier « ${data.nom} » ouvert pour l’affaire ${data.numeroDevis}.`, chantierId: data.id });
