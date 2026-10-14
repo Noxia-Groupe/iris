@@ -248,13 +248,23 @@ test('sans réponse du serveur après l’enregistrement du commercial, le messa
   const admin = await allerSurPageAdmin(`/chantiers/${ouvert.id}`);
   await admin.route(`**/api/chantiers/${ouvert.id}`, (route) => (route.request().method() === 'PATCH' ? route.abort('failed') : route.continue()));
   await admin.getByRole('button', { name: 'Modifier' }).first().click();
-  await admin.locator('input[name="nom"]').fill(`Nom sans réponse ${Date.now()}`);
+  const nomSaisi = `Nom sans réponse ${Date.now()}`;
+  await admin.locator('input[name="nom"]').fill(nomSaisi);
+  // Commercial inchangé : le message réseau seul.
+  let premiereAlerte = '';
+  admin.once('dialog', (dialogue) => { premiereAlerte = dialogue.message(); void dialogue.accept(); });
+  await admin.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+  await expect.poll(() => premiereAlerte).toBe('Impossible de joindre le serveur.');
+  // Autre commercial : enregistré, puis la fiche reste sans réponse.
   await admin.locator('select[name="commercialId"]').selectOption(autreCommercial.id);
   let alerte = '';
   admin.once('dialog', (dialogue) => { alerte = dialogue.message(); void dialogue.accept(); });
   await admin.getByRole('button', { name: 'Enregistrer les modifications' }).click();
   await expect.poll(() => alerte).toBe('Le commercial a été enregistré ; l’enregistrement des autres modifications n’a pas pu être confirmé : impossible de joindre le serveur.');
+  // La fenêtre reste ouverte avec la saisie.
   await expect(admin.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
+  await expect(admin.locator('input[name="nom"]')).toHaveValue(nomSaisi);
+  await expect(admin.locator('select[name="commercialId"]')).toHaveValue(autreCommercial.id);
   const relu = await (await request.get(`${api}/chantiers/${ouvert.id}`, { headers })).json() as { nom: string; commercial: Compte };
   expect(relu.commercial.id).toBe(autreCommercial.id);
   expect(relu.nom).toBe(ouvert.nom);

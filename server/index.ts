@@ -5480,15 +5480,20 @@ function refusStatutFige(devis: { statut: string; conversion?: unknown }): strin
 }
 const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
   const statut = String((req.body ?? {}).statut || '');
-  const devis = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: { conversion: true } });
-  if (!devis) return void res.status(404).json({ error: 'Devis introuvable.' });
-  const fige = refusStatutFige(devis);
-  if (fige) throw new DevisSaisieError(fige);
-  if (!TRANSITIONS_DEVIS[devis.statut]?.includes(statut)) throw new DevisSaisieError(`Transition ${devis.statut} → ${statut} interdite.`);
-  // Passer en attente d'acompte n'a de sens que si le devis en exige un.
-  if (statut === 'EN_ATTENTE_ACOMPTE' && !devis.acompteExige) throw new DevisSaisieError('Ce devis n’exige pas d’acompte.');
-  if (statut === 'ACCEPTE' && devis.statut === 'EN_ATTENTE_ACOMPTE' && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte de ce devis n’a pas encore été constaté.');
-  const maj = await prisma.devis.update({ where: { id: devis.id }, data: { statut }, include: devisInclude });
+  // Sous le verrou du devis : un changement de statut concurrent d'une conversion attend sa fin
+  // et lit alors le chantier ouvert (statut figé), au lieu d'écraser le statut d'un devis converti.
+  const maj = await prisma.$transaction(async tx => {
+    if (!await verrouillerDevis(tx, paramId(req))) return null;
+    const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { conversion: true } });
+    const fige = refusStatutFige(devis);
+    if (fige) throw new DevisSaisieError(fige);
+    if (!TRANSITIONS_DEVIS[devis.statut]?.includes(statut)) throw new DevisSaisieError(`Transition ${devis.statut} → ${statut} interdite.`);
+    // Passer en attente d'acompte n'a de sens que si le devis en exige un.
+    if (statut === 'EN_ATTENTE_ACOMPTE' && !devis.acompteExige) throw new DevisSaisieError('Ce devis n’exige pas d’acompte.');
+    if (statut === 'ACCEPTE' && devis.statut === 'EN_ATTENTE_ACOMPTE' && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte de ce devis n’a pas encore été constaté.');
+    return tx.devis.update({ where: { id: devis.id }, data: { statut }, include: devisInclude });
+  });
+  if (!maj) return void res.status(404).json({ error: 'Devis introuvable.' });
   res.json(decimalToNumber(maj));
 } catch (error) { devisErreur(res, error); } };
 routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requirePermission('devis:write')]);
@@ -5497,9 +5502,9 @@ routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requi
 // les cibles intervention, contrat et facture seront activées par leurs modules respectifs.
 //
 // Chaque affaire a son chantier, un seul (décision de Nelson du 14-10-2026) : un devis déjà
-// converti, un dossier dont une autre version l'est déjà (contraintes uniques de
-// DevisConversion, y compris entre deux conversions simultanées) et une référence d'affaire
-// déjà portée par un chantier sont refusés (409).
+// converti, un dossier dont une autre version l'est déjà et une référence d'affaire déjà portée
+// par un chantier sont refusés (409). Le verrou du devis fait passer l'une après l'autre deux
+// conversions du même devis ; les contraintes uniques de DevisConversion restent le filet.
 //
 // Depuis l'Administration, la même conversion ouvre le chantier avec son titulaire, son
 // commercial, ses types et sa date de début. Ces choix relèvent de la fiche, que seuls
@@ -5539,10 +5544,11 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   }
   const ouverture = await ouvertureChantier(body);
   const resultat = await prisma.$transaction(async tx => {
-    // Verrou du devis, comme pour ses autres écritures : deux conversions simultanées du même
-    // devis passent l'une après l'autre, et la seconde lit la conversion de la première (« déjà
-    // converti ») au lieu de tomber, selon le moment, sur le contrôle du dossier ou de la référence
-    // avec un message inexact. La contrainte unique du dossier reste le filet (P2002 → 409).
+    // Verrou du devis, comme pour sa modification, sa révision, sa signature, son statut, son
+    // acompte et son annulation : ces écritures et deux conversions simultanées du même devis
+    // passent l'une après l'autre. La seconde conversion lit celle de la première (« déjà
+    // converti »), au lieu de tomber, selon le moment, sur le contrôle du dossier ou de la
+    // référence avec un message inexact.
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, signature: true, lignes: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
@@ -5585,9 +5591,11 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   });
   res.status(201).json(decimalToNumber(resultat));
 } catch (error) {
-  // Deux conversions simultanées passent toutes deux la vérification ci-dessus : la contrainte
-  // unique de DevisConversion refuse la seconde, dont le chantier est annulé avec la transaction.
-  if ((error as { code?: string })?.code === 'P2002') return void res.status(409).json({ error: REFUS_DOUBLE_CONVERSION });
+  // Filet des contraintes uniques de DevisConversion : le verrou fait passer l'une après l'autre
+  // deux conversions du même devis, si bien que seules deux versions d'un même dossier peuvent
+  // encore s'y heurter (cas limite d'une annulation concurrente). La seconde est refusée, et son
+  // chantier annulé avec la transaction.
+  if ((error as { code?: string })?.code === 'P2002') return void res.status(409).json({ error: 'Une autre version de ce devis vient d’ouvrir le chantier de l’affaire : chaque affaire n’en ouvre qu’un.' });
   devisErreur(res, error);
 } };
 routeMixte('post', '/devis/:id/convertir', 'devis:write', convertirDevis, [requirePermission('devis:write')]);
@@ -5624,29 +5632,33 @@ app.get('/api/devis/a-convertir', requireAuth, requirePermission('devis:read'), 
 // Réservée aux administrateurs : constater un encaissement débloque l'ouverture d'un
 // chantier, ce n'est pas un geste que celui qui a vendu l'affaire se rend à lui-même.
 app.post('/api/devis/:id/acompte', requireAuth, requireAdmin, async (req, res) => { try {
-  const devis = await prisma.devis.findUnique({ where: { id: paramId(req) } });
-  if (!devis) return void res.status(404).json({ error: 'Devis introuvable.' });
-  if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé.');
-  if (!devis.acompteExige) throw new DevisSaisieError('Ce devis n’exige pas d’acompte.');
-  if (devis.acompteRecuLe) throw new DevisSaisieError('L’acompte de ce devis a déjà été constaté.');
+  // Sous le verrou du devis, comme son statut, qu'il peut faire passer à « accepté ».
+  const maj = await prisma.$transaction(async tx => {
+    if (!await verrouillerDevis(tx, paramId(req))) return null;
+    const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) } });
+    if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé.');
+    if (!devis.acompteExige) throw new DevisSaisieError('Ce devis n’exige pas d’acompte.');
+    if (devis.acompteRecuLe) throw new DevisSaisieError('L’acompte de ce devis a déjà été constaté.');
 
-  const recuLe = dateIsoStricte((req.body ?? {}).recuLe);
-  if (!recuLe) throw new DevisSaisieError('La date de réception doit être valide au format JJ-MM-AAAA.');
-  const montant = nombreDecimalNonNegatif((req.body ?? {}).montant, 10);
-  if (montant === null) throw new DevisSaisieError('Le montant de l’acompte doit être un nombre strictement positif.');
-  const reference = String((req.body ?? {}).reference ?? '').trim();
-  if (!reference) throw new DevisSaisieError('La référence du règlement est requise.');
+    const recuLe = dateIsoStricte((req.body ?? {}).recuLe);
+    if (!recuLe) throw new DevisSaisieError('La date de réception doit être valide au format JJ-MM-AAAA.');
+    const montant = nombreDecimalNonNegatif((req.body ?? {}).montant, 10);
+    if (montant === null) throw new DevisSaisieError('Le montant de l’acompte doit être un nombre strictement positif.');
+    const reference = String((req.body ?? {}).reference ?? '').trim();
+    if (!reference) throw new DevisSaisieError('La référence du règlement est requise.');
 
-  const maj = await prisma.devis.update({
-    where: { id: devis.id },
-    data: {
-      acompteRecuLe: recuLe, acompteMontant: montant, acompteReference: reference,
-      acompteConstateParId: (req as AuthRequest).user!.id,
-      // Constater l'acompte remet le devis en état d'être converti.
-      statut: devis.statut === 'EN_ATTENTE_ACOMPTE' ? 'ACCEPTE' : devis.statut,
-    },
-    include: devisInclude,
+    return tx.devis.update({
+      where: { id: devis.id },
+      data: {
+        acompteRecuLe: recuLe, acompteMontant: montant, acompteReference: reference,
+        acompteConstateParId: (req as AuthRequest).user!.id,
+        // Constater l'acompte remet le devis en état d'être converti.
+        statut: devis.statut === 'EN_ATTENTE_ACOMPTE' ? 'ACCEPTE' : devis.statut,
+      },
+      include: devisInclude,
+    });
   });
+  if (!maj) return void res.status(404).json({ error: 'Devis introuvable.' });
   res.json(decimalToNumber(maj));
 } catch (error) { devisErreur(res, error); } });
 
@@ -5664,6 +5676,10 @@ app.post('/api/devis/:id/annulation', requireAuth, requireAdmin, async (req, res
   if (!motif) throw new DevisSaisieError('Un motif d’annulation est obligatoire.');
 
   const resultat = await prisma.$transaction(async tx => {
+    // Verrou du devis d'abord, puis du chantier, dans le même ordre que la conversion : une
+    // annulation concurrente d'une conversion attend sa fin et archive alors le chantier ouvert,
+    // au lieu d'annuler le devis en laissant son chantier en cours.
+    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { conversion: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
     if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est déjà annulé.');

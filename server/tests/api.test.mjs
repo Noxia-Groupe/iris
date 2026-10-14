@@ -3089,6 +3089,42 @@ if (!TEST_DATABASE_URL) {
         assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 1);
       });
 
+      // Les écritures d'un devis concurrentes de sa conversion passent l'une après l'autre (verrou
+      // du devis). Sans lui, une révision, une annulation ou un changement de statut lancés en même
+      // temps réussissaient aussi, et laissaient un état incohérent. Trois tours par cas.
+      test('une révision lancée en même temps que la conversion ne passe pas avec elle', async () => {
+        for (let tour = 0; tour < 3; tour += 1) {
+          const devis = await devisAccepte(`TEST Ouverture et révision simultanées ${tour}`);
+          const [conversion, revision] = await Promise.all([convertir(devis.id), request(app).post(`/api/devis/${devis.id}/revisions`).set(admin())]);
+          assert.deepEqual([conversion.status, revision.status].sort(), [201, 409], JSON.stringify([conversion.body, revision.body]));
+          const converti = await prisma.devisConversion.count({ where: { devisId: devis.id } });
+          const revise = await prisma.devis.count({ where: { dossierId: devis.dossierId, version: { gt: devis.version } } });
+          assert.equal(converti + revise, 1, 'jamais à la fois une conversion et une révision du devis');
+        }
+      });
+
+      test('une annulation lancée en même temps que la conversion archive le chantier ouvert', async () => {
+        for (let tour = 0; tour < 3; tour += 1) {
+          const devis = await devisAccepte(`TEST Ouverture et annulation simultanées ${tour}`);
+          await Promise.all([convertir(devis.id), request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST annulation simultanée' })]);
+          const relu = await prisma.devis.findUnique({ where: { id: devis.id }, select: { statut: true } });
+          const chantiers = await prisma.chantier.findMany({ where: { numeroDevis: devis.numero }, select: { statut: true } });
+          assert.equal(relu.statut, 'ANNULE');
+          assert.ok(chantiers.every((c) => c.statut === 'ANNULE'), `devis annulé, chantier ${JSON.stringify(chantiers)}`);
+        }
+      });
+
+      test('un changement de statut lancé en même temps que la conversion ne modifie pas un devis converti', async () => {
+        for (let tour = 0; tour < 3; tour += 1) {
+          const devis = await devisAccepte(`TEST Ouverture et statut simultanés ${tour}`, { acompteExige: true });
+          const acompte = await request(app).post(`/api/devis/${devis.id}/acompte`).set(admin()).send({ recuLe: '01-10-2026', montant: 60, reference: `TEST-VIR-STATUT-${tour}` });
+          assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
+          await Promise.all([convertir(devis.id), request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' })]);
+          const relu = await prisma.devis.findUnique({ where: { id: devis.id }, include: { conversion: true } });
+          assert.ok(!(relu.conversion && relu.statut !== 'ACCEPTE'), `devis converti au statut ${relu.statut}`);
+        }
+      });
+
       test('une référence d’affaire déjà portée par un chantier n’en ouvre pas un second', async () => {
         const devis = await devisAccepte('TEST Ouverture référence prise');
         const existant = await prisma.chantier.create({ data: { nom: 'TEST Ouverture chantier saisi à la main', client: 'TEST Client cycle', numeroDevis: devis.numero, dateDebut: new Date('2026-10-01T00:00:00.000Z'), budgetGlobalVendu: 0 } });
