@@ -45,6 +45,9 @@ const PlanningPublic = () => {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Seule la dernière lecture s'affiche : une réponse dépassée (semaine changée pendant un
+  // rafraîchissement, par exemple) est ignorée.
+  const requeteRef = useRef(0);
 
   const weekStartStr = semaineChoisie ?? (societe ? lundiDe(societe.debut) : null);
   const jours = weekStartStr ? joursDeLaSemaine(weekStartStr) : [];
@@ -62,10 +65,12 @@ const PlanningPublic = () => {
 
   const fetchData = useCallback(async (silent = false) => {
     if (!token) return;
+    const requete = ++requeteRef.current;
     if (!silent) setLoading(true);
     try {
       const res = await fetch(`${API_URL}/planning/public/${encodeURIComponent(token)}${plage}`);
       const data = await res.json();
+      if (requete !== requeteRef.current) return;
       if (!res.ok) {
         setError(data.error || "Ce lien de planning n'est plus disponible.");
       } else {
@@ -76,9 +81,9 @@ const PlanningPublic = () => {
         setLastUpdated(new Date());
       }
     } catch {
-      setError('Impossible de joindre le serveur. Vérifiez votre connexion.');
+      if (requete === requeteRef.current) setError('Impossible de joindre le serveur. Vérifiez votre connexion.');
     } finally {
-      setLoading(false);
+      if (requete === requeteRef.current) setLoading(false);
     }
   }, [token, plage]);
 

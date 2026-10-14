@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { companyDateInputValue, decalerReference, formatCompanyDate, formatCompanyDateTime, formatDateOnly, jourCivilChantier, jourCivilEntrepriseIso } from '../src/lib/dateFormatting.ts';
+import { companyDateInputValue, decalerReference, formatCompanyDate, formatCompanyDateTime, formatDateOnly, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre } from '../src/lib/dateFormatting.ts';
 
 test('formatDateOnly always preserves a date-only value in UTC', () => {
   assert.equal(formatDateOnly('2026-01-01T00:00:00.000Z'), '01/01/2026');
@@ -48,4 +48,18 @@ test('decalerReference ne déborde pas d’un mois depuis le 31, ni d’une ann�
   assert.equal(decalerReference('2028-02-29', 'year', 1), '2029-02-01');
   assert.equal(decalerReference('2026-10-31', 'week', 1), '2026-11-07');
   assert.equal(decalerReference('2026-03-02', 'week', -1), '2026-02-23');
+});
+
+test('joursCivilsEntre compte des jours civils, et non des tranches de 24 h', () => {
+  assert.equal(joursCivilsEntre('2026-10-15', '2026-10-16'), 1);
+  // Passage à l'heure d'hiver (25-10-2026) et changement d'année : toujours des jours entiers.
+  assert.equal(joursCivilsEntre('2026-10-24', '2026-10-26'), 2);
+  assert.equal(joursCivilsEntre('2026-12-31', '2027-01-01'), 1);
+  assert.equal(joursCivilsEntre('2026-10-16', '2026-10-16'), 0);
+  // Début à 00:30 à Paris (22:30 UTC la veille), lu le lendemain à 23:00 : 46 h 30 se sont
+  // écoulées, mais un seul jour civil (des tranches de 24 h arrondies en donnaient 2).
+  const debut = jourCivilChantierIso('2026-10-14T22:30:00.000Z', 'Europe/Paris');
+  const aujourdhui = jourCivilEntrepriseIso('Europe/Paris', new Date('2026-10-16T21:00:00.000Z'));
+  assert.deepEqual([debut, aujourdhui], ['2026-10-15', '2026-10-16']);
+  assert.equal(joursCivilsEntre(debut, aujourdhui), 1);
 });

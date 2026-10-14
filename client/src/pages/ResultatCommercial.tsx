@@ -32,10 +32,13 @@ const ResultatCommercial = () => {
   const [data, setData] = useState<any>(null);
 
   useEffect(() => {
+    // Une réponse dépassée (période changée, ou fuseau de la société lu entre-temps) est ignorée.
+    let actuelle = true;
     apiFetch(`/stats/commerciaux?period=${period}&ref=${ref}`)
       .then((res) => (res.ok ? res.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
+      .then((donnees) => { if (actuelle) setData(donnees); })
+      .catch(() => { if (actuelle) setData(null); });
+    return () => { actuelle = false; };
   }, [period, ref]);
 
   const moi = data?.commerciaux?.[0] || null;

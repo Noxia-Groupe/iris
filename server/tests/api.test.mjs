@@ -7,8 +7,17 @@
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
-import test, { after, before, describe } from 'node:test';
+import test, { after, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
+
+// Fige l'horloge du processus (Date seulement : ni les minuteries ni la base) à 21 h UTC du jour :
+// Wallis y est déjà au lendemain, si bien que le jour de la société diffère toujours de celui
+// d'UTC. Sans cela, entre 10 h et 12 h UTC, aucun fuseau admis (UTC−10 à UTC+12) n'en diffère et
+// un test du jour de la société ne distinguerait plus le bon calcul du jour UTC.
+function figerHorlogeA21hUtc() {
+  const maintenant = new Date();
+  mock.timers.enable({ apis: ['Date'], now: Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth(), maintenant.getUTCDate(), 21) });
+}
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 
@@ -3102,20 +3111,22 @@ if (!TEST_DATABASE_URL) {
       });
 
       // Décision de Nelson (14-10-2026) : le début d'un chantier ouvert sans date choisie est le
-      // jour civil de la société, en date-seule. Le fuseau est choisi pour que ce jour diffère de
-      // celui d'UTC (Wallis l'après-midi UTC, Tahiti le matin ; entre 10 h et 12 h UTC, aucun
-      // fuseau français ne change de jour, et le test vérifie Wallis sans écart).
+      // jour civil de la société, en date-seule. L'horloge est figée à 21 h UTC, où le jour de
+      // Wallis diffère de celui d'UTC.
       test('une conversion sans date de début pose le jour civil de la société', async () => {
         const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-        const fuseau = ['Pacific/Wallis', 'Pacific/Tahiti'].find((f) => jourDans(f) !== jourDans('UTC')) ?? 'Pacific/Wallis';
+        const fuseau = 'Pacific/Wallis';
         const fuseauInitial = (await request(app).get('/api/company').set(admin())).body.fuseauHoraire;
         try {
+          figerHorlogeA21hUtc();
+          assert.notEqual(jourDans(fuseau), jourDans('UTC'), 'le jour de la société diffère de celui d’UTC');
           assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: fuseau })).status, 200);
           const devis = await devisAccepte('TEST Ouverture jour de la société');
           const ouvert = await convertir(devis.id);
           assert.equal(ouvert.status, 201, JSON.stringify(ouvert.body));
           assert.equal(ouvert.body.dateDebut, `${jourDans(fuseau)}T00:00:00.000Z`);
         } finally {
+          mock.timers.reset();
           await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
         }
       });
@@ -7692,16 +7703,17 @@ if (!TEST_DATABASE_URL) {
 
     // Décision de Nelson (14-10-2026) : toutes les dates suivent la société, où que se trouve le
     // lecteur. La page publique n'a pas de session : le serveur lui donne le jour, la semaine et
-    // le fuseau de la société. Le fuseau est choisi, parmi ceux qu'accepte la société, pour que
-    // son jour diffère de celui d'UTC (Wallis l'après-midi UTC, Tahiti le matin ; entre 10 h et
-    // 12 h UTC, aucun fuseau français ne change de jour, et le test vérifie Wallis sans écart).
+    // le fuseau de la société. L'horloge est figée à 21 h UTC, où le jour de Wallis diffère de
+    // celui d'UTC.
     test('le planning public donne le jour, la semaine et le fuseau de la société', async () => {
       const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-      const fuseau = ['Pacific/Wallis', 'Pacific/Tahiti'].find((f) => jourDans(f) !== jourDans('UTC')) ?? 'Pacific/Wallis';
+      const fuseau = 'Pacific/Wallis';
       const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
       const partageInitial = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
       const token = `test-planning-public-${Date.now()}`;
       try {
+        figerHorlogeA21hUtc();
+        assert.notEqual(jourDans(fuseau), jourDans('UTC'), 'le jour de la société diffère de celui d’UTC');
         assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
         await prisma.planningPublicShare.upsert({ where: { id: 'singleton' }, update: { token, active: true }, create: { id: 'singleton', token, active: true } });
         const aujourdhui = jourDans(fuseau);
@@ -7720,13 +7732,14 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual([plage.body.debut, plage.body.fin, plage.body.aujourdhui], ['2026-03-02', '2026-03-08', aujourdhui]);
         assert.equal((await request(app).get(`/api/planning/public/${token}`).query({ start: '2026-03-02' })).status, 400, 'une plage incomplète reste refusée');
       } finally {
+        mock.timers.reset();
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
         if (partageInitial) await prisma.planningPublicShare.update({ where: { id: 'singleton' }, data: { token: partageInitial.token, active: partageInitial.active } });
         else await prisma.planningPublicShare.deleteMany({ where: { id: 'singleton' } });
       }
     });
 
-    // Un chantier converti commence à un instant, une fiche corrigée à une date-seule : chacun
+    // Un chantier converti avant #130 commence à un instant, les autres à une date-seule : chacun
     // compte au jour civil de la société, et non au jour UTC.
     test('les statistiques par type comptent un chantier au jour civil de son début dans la société', async () => {
       const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Activity } from 'lucide-react';
 import { apiFetch } from '../api';
 import { decalerReference } from '../lib/dateFormatting';
@@ -23,6 +23,9 @@ const Performances = () => {
   const [assiduite, setAssiduite] = useState<any>(null);
   // N'importe quelle date de la semaine affichée (le serveur calcule lundi-vendredi).
   const [weekRef, setWeekRef] = useReferencePeriode();
+  // Seule la dernière demande d'assiduité s'affiche : une réponse dépassée (semaine changée, ou
+  // fuseau de la société lu entre-temps) est ignorée.
+  const requeteAssiduite = useRef(0);
 
   useEffect(() => {
     fetchPerf();
@@ -43,9 +46,11 @@ const Performances = () => {
   };
 
   const fetchAssiduite = async () => {
+    const requete = ++requeteAssiduite.current;
     try {
       const res = await apiFetch(`/stats/conducteurs/assiduite?week=${weekRef}`);
-      if (res.ok) setAssiduite(await res.json());
+      const donnees = res.ok ? await res.json() : null;
+      if (donnees && requete === requeteAssiduite.current) setAssiduite(donnees);
     } catch (e) {
       console.error(e);
     }

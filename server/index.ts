@@ -837,8 +837,9 @@ async function contexteSuivi(avecEstimation: boolean): Promise<ContexteSuivi> {
   return contexte;
 }
 
-// Le début d'un chantier converti est un instant (lu dans le fuseau de l'entreprise) ; une
-// date corrigée à la main est une date-seule, stockée à minuit UTC et lue telle quelle.
+// Le début d'un chantier converti avant #130 est un instant (lu dans le fuseau de l'entreprise) ;
+// depuis, la conversion pose une date-seule, comme une date corrigée à la main : stockée à minuit
+// UTC et lue telle quelle.
 function jourCivilDeDebut(dateDebut: Date | string, fuseauHoraire: string): string {
   const iso = new Date(dateDebut).toISOString();
   return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : jourCivilEntreprise(new Date(dateDebut), fuseauHoraire);
@@ -4116,7 +4117,7 @@ app.get('/api/planning/public/:token', async (req, res) => {
     const sansPlage = req.query.start === undefined && req.query.end === undefined;
     const start = parsePlanningJour(sansPlage ? lundi : req.query.start);
     const end = parsePlanningJour(sansPlage ? ajouterJoursCivils(lundi, 6) : req.query.end);
-    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, format YYYY-MM-DD).' });
+    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide : start et end vont ensemble, au format YYYY-MM-DD.' });
 
     // `select` explicite (plutôt qu'`include`, qui renverrait aussi tous les champs
     // scalaires bruts de PlanningEvent) : n'expose que ce qui est utile à un technicien,
@@ -6486,7 +6487,7 @@ app.get('/api/stats/types-chantiers', requireAuth, requireTravauxRead, async (re
     const fuseauHoraire = societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
     const { start, endExclusive } = periodBounds(period, req.query.ref, fuseauHoraire);
 
-    // Le début d'un chantier converti est un instant, celui d'une fiche corrigée une date-seule :
+    // Le début d'un chantier converti avant #130 est un instant, les autres une date-seule :
     // chacun compte au jour civil de la société (jourCivilDeDebut), d'où une marge d'un jour
     // de part et d'autre de la période, puis un tri sur ce jour civil.
     const debutCivil = start.toISOString().slice(0, 10);

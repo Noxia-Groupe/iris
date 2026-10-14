@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Award, CheckCircle2, Circle } from 'lucide-react';
 import { apiFetch } from '../api';
 import { decalerReference } from '../lib/dateFormatting';
@@ -38,6 +38,9 @@ const MesCommerciaux = () => {
   const [commerciauxMeta, setCommerciauxMeta] = useState<any>(null);
   const [commerciauxPeriod, setCommerciauxPeriod] = useState<CommPeriod>('month');
   const [commerciauxRef, setCommerciauxRef] = useReferencePeriode();
+  // Seule la dernière demande s'affiche : une réponse dépassée (période changée, ou fuseau de la
+  // société lu entre-temps) est ignorée.
+  const requeteCommerciaux = useRef(0);
   const [expandedCommercialId, setExpandedCommercialId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,10 +49,12 @@ const MesCommerciaux = () => {
   }, [commerciauxPeriod, commerciauxRef]);
 
   const fetchCommerciaux = async () => {
+    const requete = ++requeteCommerciaux.current;
     try {
       const res = await apiFetch(`/stats/commerciaux?period=${commerciauxPeriod}&ref=${commerciauxRef}`);
       if (res.ok) {
         const data = await res.json();
+        if (requete !== requeteCommerciaux.current) return;
         setCommerciaux(data.commerciaux || []);
         setCommerciauxMeta(data);
       }

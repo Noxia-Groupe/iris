@@ -137,17 +137,25 @@ function ChantiersTab() {
   );
 }
 
+// Lit une statistique pour la période affichée. Une réponse dépassée (période changée, ou fuseau
+// de la société lu entre-temps) est ignorée, même arrivée la dernière.
+function useStatistique(chemin: string, period: Period, ref: string) {
+  const [data, setData] = useState<any>(null);
+  useEffect(() => {
+    let actuelle = true;
+    apiFetch(`${chemin}?period=${period}&ref=${ref}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((donnees) => { if (actuelle) setData(donnees); })
+      .catch(() => { if (actuelle) setData(null); });
+    return () => { actuelle = false; };
+  }, [chemin, period, ref]);
+  return data;
+}
+
 function IntervenantsTab() {
   const [period, setPeriod] = useState<Period>('week');
   const [ref, setRef] = useReferencePeriode();
-  const [data, setData] = useState<any>(null);
-
-  useEffect(() => {
-    apiFetch(`/stats/intervenants?period=${period}&ref=${ref}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
-  }, [period, ref]);
+  const data = useStatistique('/stats/intervenants', period, ref);
 
   const list = data?.intervenants || [];
   const maxHeures = Math.max(1, ...list.map((i: any) => i.heures));
@@ -199,14 +207,7 @@ function IntervenantsTab() {
 function FournisseursTab() {
   const [period, setPeriod] = useState<Period>('month');
   const [ref, setRef] = useReferencePeriode();
-  const [data, setData] = useState<any>(null);
-
-  useEffect(() => {
-    apiFetch(`/stats/fournisseurs?period=${period}&ref=${ref}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
-  }, [period, ref]);
+  const data = useStatistique('/stats/fournisseurs', period, ref);
 
   const list = data?.fournisseurs || [];
   const maxTotal = Math.max(1, ...list.map((f: any) => f.total));
@@ -257,14 +258,7 @@ function FournisseursTab() {
 function TypesChantiersTab() {
   const [period, setPeriod] = useState<Period>('month');
   const [ref, setRef] = useReferencePeriode();
-  const [data, setData] = useState<any>(null);
-
-  useEffect(() => {
-    apiFetch(`/stats/types-chantiers?period=${period}&ref=${ref}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
-  }, [period, ref]);
+  const data = useStatistique('/stats/types-chantiers', period, ref);
 
   const list = data?.types || [];
   const totalChantiers = data?.totalChantiers || 0;

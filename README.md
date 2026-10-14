@@ -148,8 +148,8 @@ ACCEPTÉ ou converti ──[annulation administrateur + motif]──→ ANNULÉ 
 réception d'un acompte. Le taux par défaut se règle dans **Administration > Marges**, et
 chaque devis **fige le sien à l'émission** : changer la politique de la société ne réécrit
 aucun devis déjà émis. Tant que le module paiements n'existe pas, un administrateur
-constate la réception à la main (date, montant, référence) ; le rapprochement bancaire alimentera ces mêmes champs plus
-tard sans changer la règle.
+constate la réception à la main (date, montant, référence) ; le rapprochement bancaire
+alimentera ces mêmes champs plus tard sans changer la règle.
 
 **Annulation.** C'est le seul retour en arrière possible sur une affaire ouverte par
 erreur. Réservée aux administrateurs, elle exige un motif, **archive** le chantier lié au
@@ -174,7 +174,9 @@ où que se trouve celui qui consulte ou saisit (décision de Nelson du 14-10-202
 - un **instant** (horodatage d'une signature, d'une écriture de journal, d'une mise à jour)
   s'affiche à la date et à l'heure de la société ;
 - « aujourd'hui » est le jour de la société : préremplissages, semaine et mois affichés par
-  défaut (statistiques, performances, commissions, planning, planning public), jour surligné ;
+  défaut (statistiques, performances, commissions, planning, planning public), jour surligné.
+  Tant que son fuseau n'est pas lu, aucune date du jour n'est préremplie ; la période affichée
+  suit provisoirement Europe/Paris, puis se recale, et une réponse dépassée est ignorée ;
 - un chantier ouvert sans date choisie commence le jour civil de la société. Un début
   horodaté plus ancien (conversion antérieure) se lit dans ce fuseau, et enregistrer la fiche
   le fixe à ce même jour ;

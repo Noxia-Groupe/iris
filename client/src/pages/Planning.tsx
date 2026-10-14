@@ -11,7 +11,7 @@ import ShareModal, { type PlanningShareState } from '../components/PlanningShare
 import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
 import { formatDateOnly, jourCivilEntrepriseIso } from '../lib/dateFormatting';
-import { useCompanyTimezone } from '../companyTimezoneContext';
+import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { planningDayToIso } from '../lib/contractPlanningDate';
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,11 @@ const Planning = () => {
   const dragRef = useRef<{ eventId: string; fromIntervenantId: string; fromDate: string } | null>(null);
 
   const fuseau = useCompanyTimezone();
+  const fuseauConnu = useFuseauSocieteConnu();
   const todayStr = jourCivilEntrepriseIso(fuseau);
+  // Seule la dernière demande d'affectations s'affiche : une réponse dépassée (semaine changée,
+  // ou fuseau de la société lu entre-temps) est ignorée.
+  const requeteEvents = useRef(0);
   const weekStartStr = semaineChoisie ?? lundiDe(todayStr);
   const jours = joursDeLaSemaine(weekStartStr);
   const weekEndStr = jours[6];
@@ -122,10 +126,11 @@ const Planning = () => {
   useEffect(() => { fetchQueue(); }, []);
 
   const fetchEvents = async () => {
+    const requete = ++requeteEvents.current;
     try {
       const res = await apiFetch(`/planning/events?start=${weekStartStr}&end=${weekEndStr}`);
       const data = await res.json();
-      if (Array.isArray(data)) setEvents(data);
+      if (Array.isArray(data) && requete === requeteEvents.current) setEvents(data);
     } catch (e) {
       console.error(e);
     }
@@ -236,7 +241,8 @@ const Planning = () => {
           <button onClick={() => setShowTypes(true)} className="btn btn-secondary flex items-center gap-2">
             <Tags size={16} /> Types d'événements
           </button>
-          <button onClick={() => setModal({ mode: 'create', date: todayStr })} className="btn btn-primary flex items-center gap-2">
+          {/* Date du jour préremplie seulement une fois le fuseau de la société lu (sinon, celui d'Europe/Paris) : à saisir sinon. */}
+          <button onClick={() => setModal({ mode: 'create', date: fuseauConnu ? todayStr : '' })} className="btn btn-primary flex items-center gap-2">
             <Plus size={16} /> Affectation
           </button>
         </div>

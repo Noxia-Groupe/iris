@@ -1,4 +1,5 @@
-import type { APIRequestContext } from '@playwright/test';
+import { createHmac } from 'node:crypto';
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
@@ -20,24 +21,162 @@ async function avecFuseauSociete(request: APIRequestContext, token: string, fuse
   }
 }
 
-test.describe('navigateur à Gambier, société à Paris', () => {
+// Ouvre une page en session sans attendre la fin du réseau : une lecture peut y être retenue.
+async function ouvrirSansAttendre(page: Page, chemin: string, token: string, user: object) {
+  await page.addInitScript(([jeton, utilisateur]) => {
+    localStorage.setItem('token', jeton as string);
+    localStorage.setItem('user', utilisateur as string);
+  }, [token, JSON.stringify(user)]);
+  await page.goto(chemin, { waitUntil: 'domcontentloaded' });
+}
+
+// Même procédé que les autres parcours : un jeton signé avec le secret du backend jetable ouvre
+// une session dans un rôle non administrateur.
+const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toString('base64url');
+function jetonPour(userId: string) {
+  const corps = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
+  return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
+}
+
+// Avant la lecture du fuseau, un écran calcule sa période au fuseau par défaut (Europe/Paris) et
+// la demande ; une fois le fuseau lu, il demande celle de la société. La lecture du fuseau est
+// retenue jusqu'à la première demande, et la réponse à celle-ci jusqu'à l'affichage de la période
+// de la société : arrivée la dernière, cette réponse dépassée ne doit pas l'écraser.
+async function verifierReponseDepassee(page: Page, options: {
+  demande: string;
+  estDepassee: (url: URL) => boolean;
+  ouvrir: () => Promise<void>;
+  attendu: Locator;
+  depasse?: Locator;
+}) {
+  let libererSociete = () => {};
+  const societeRetenue = new Promise<void>((resolve) => { libererSociete = resolve; });
+  let libererDepassee = () => {};
+  const depasseeRetenue = new Promise<void>((resolve) => { libererDepassee = resolve; });
+  let depasseeDemandee = false;
+  await page.route('**/api/company', async (route) => {
+    if (route.request().method() === 'GET') await societeRetenue;
+    await route.continue();
+  });
+  await page.route(options.demande, async (route) => {
+    if (options.estDepassee(new URL(route.request().url()))) {
+      depasseeDemandee = true;
+      libererSociete();
+      await depasseeRetenue;
+    }
+    await route.continue();
+  });
+  try {
+    await options.ouvrir();
+    await expect(options.attendu).toBeVisible();
+    expect(depasseeDemandee, 'la période du fuseau par défaut a d’abord été demandée').toBe(true);
+    const reponseDepassee = page.waitForResponse((r) => r.request().method() === 'GET' && options.estDepassee(new URL(r.url())));
+    libererDepassee();
+    await (await reponseDepassee).finished();
+    // Laisse à la page le temps d'appliquer cette réponse, si elle ne l'écartait pas.
+    await page.waitForTimeout(500);
+    await expect(options.attendu).toBeVisible();
+    if (options.depasse) await expect(options.depasse).toHaveCount(0);
+  } finally {
+    libererSociete();
+    libererDepassee();
+  }
+}
+
+test.describe('navigateur à Gambier, société à Wallis : périodes', () => {
   test.use({ timezoneId: 'Pacific/Gambier' });
 
-  // 31-10-2026 à 23:30 UTC : déjà le 1er novembre à Paris, encore le 31 octobre en UTC et à
-  // Gambier. Le mois affiché par défaut est celui de la société.
-  test('les statistiques ouvrent le mois de la société, pas celui d’UTC ni du navigateur', async ({ allerSurPageAdmin, page, request, session }) => {
-    await page.clock.install({ time: new Date('2026-10-31T23:30:00Z') });
-    await avecFuseauSociete(request, session.token, 'Europe/Paris', async () => {
-      const reference = page.waitForRequest((r) => r.url().includes('/api/stats/types-chantiers'));
-      await allerSurPageAdmin('/statistiques');
-      await page.getByRole('button', { name: 'Types de chantiers' }).click();
-      expect(new URL((await reference).url()).searchParams.get('ref')).toBe('2026-11-01');
-      await expect(page.getByText('Novembre 2026', { exact: true })).toBeVisible();
+  // 31-10-2026 à 13:00 UTC : déjà le 1er novembre à Wallis, encore le 31 octobre à Paris (fuseau
+  // par défaut de l'écran), en UTC et à Gambier. Le mois affiché est celui de la société.
+  test('les statistiques ouvrent le mois de la société, et une réponse dépassée ne l’écrase pas', async ({ page, request, session }) => {
+    await page.clock.install({ time: new Date('2026-10-31T13:00:00Z') });
+    await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
+      await verifierReponseDepassee(page, {
+        demande: '**/api/stats/types-chantiers?*',
+        estDepassee: (url) => url.searchParams.get('ref') === '2026-10-31',
+        ouvrir: async () => {
+          await ouvrirSansAttendre(page, '/statistiques', session.token, session.user);
+          await page.getByRole('button', { name: 'Types de chantiers' }).click();
+        },
+        attendu: page.getByText('Novembre 2026', { exact: true }),
+        depasse: page.getByText('Octobre 2026', { exact: true }),
+      });
       await page.getByTitle('Période précédente').click();
       await expect(page.getByText('Octobre 2026', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: "Aujourd'hui" }).click();
       await expect(page.getByText('Novembre 2026', { exact: true })).toBeVisible();
     });
+  });
+
+  test('« Mes commerciaux » ouvre le mois de la société, et une réponse dépassée ne l’écrase pas', async ({ page, request, session }) => {
+    await page.clock.install({ time: new Date('2026-10-31T13:00:00Z') });
+    await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
+      await verifierReponseDepassee(page, {
+        demande: '**/api/stats/commerciaux?*',
+        estDepassee: (url) => url.searchParams.get('ref') === '2026-10-31',
+        ouvrir: () => ouvrirSansAttendre(page, '/commerciaux', session.token, session.user),
+        attendu: page.getByText('Novembre 2026', { exact: true }),
+        depasse: page.getByText('Octobre 2026', { exact: true }),
+      });
+    });
+  });
+
+  test('« Résultat commercial » ouvre le mois de la société, et une réponse dépassée ne l’écrase pas', async ({ page, request, session }) => {
+    await page.clock.install({ time: new Date('2026-10-31T13:00:00Z') });
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    const creation = await request.post(`${api}/users`, { headers, data: { email: `dates.periode.commercial.${suffixe}@iris.test`, name: `Commercial période ${suffixe}`, role: 'COMMERCIAL' } });
+    expect(creation.ok(), await creation.text()).toBeTruthy();
+    const commercial = await creation.json() as { id: string; name: string; email: string };
+    await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
+      await verifierReponseDepassee(page, {
+        demande: '**/api/stats/commerciaux?*',
+        estDepassee: (url) => url.searchParams.get('ref') === '2026-10-31',
+        ouvrir: () => ouvrirSansAttendre(page, '/resultat-commercial', jetonPour(commercial.id), { ...commercial, role: 'COMMERCIAL', permissions: [] }),
+        attendu: page.getByText('Novembre 2026', { exact: true }),
+        depasse: page.getByText('Octobre 2026', { exact: true }),
+      });
+    });
+  });
+
+  // Dimanche 18-10-2026 à 13:00 UTC : semaine du 12 à Paris (et à Gambier), lundi 19 à Wallis.
+  test('les performances ouvrent la semaine de la société, et une réponse dépassée ne l’écrase pas', async ({ page, request, session }) => {
+    await page.clock.install({ time: new Date('2026-10-18T13:00:00Z') });
+    await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
+      await verifierReponseDepassee(page, {
+        demande: '**/api/stats/conducteurs/assiduite?*',
+        estDepassee: (url) => url.searchParams.get('week') === '2026-10-18',
+        ouvrir: () => ouvrirSansAttendre(page, '/performances', session.token, session.user),
+        attendu: page.getByText(/Semaine du 19\/10 au 23\/10/),
+        depasse: page.getByText(/Semaine du 12\/10/),
+      });
+    });
+  });
+
+  test('le planning garde les affectations de la semaine de la société malgré une réponse dépassée', async ({ page, request, session }) => {
+    await page.clock.install({ time: new Date('2026-10-18T13:00:00Z') });
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const intervenant = await request.post(`${api}/intervenants`, { headers, data: { nom: `Intervenant période E2E ${Date.now()}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+    expect(intervenant.ok(), await intervenant.text()).toBeTruthy();
+    const { id: intervenantId } = await intervenant.json() as { id: string };
+    const titre = `Affectation du 19-10 E2E ${Date.now()}`;
+    const evenement = await request.post(`${api}/planning/events`, { headers, data: { categorie: 'HORS_CHANTIER', dateDebut: '2026-10-19', titre, intervenantIds: [intervenantId] } });
+    expect(evenement.ok(), await evenement.text()).toBeTruthy();
+    const { id: evenementId } = await evenement.json() as { id: string };
+    try {
+      await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
+        await verifierReponseDepassee(page, {
+          demande: '**/api/planning/events?*',
+          estDepassee: (url) => url.searchParams.get('start') === '2026-10-12',
+          ouvrir: () => ouvrirSansAttendre(page, '/planning', session.token, session.user),
+          attendu: page.getByText(titre),
+        });
+        await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
+      });
+    } finally {
+      await request.delete(`${api}/planning/events/${evenementId}`, { headers });
+      await request.delete(`${api}/intervenants/${intervenantId}`, { headers });
+    }
   });
 });
 
@@ -46,8 +185,10 @@ test.describe('navigateur à Gambier, société à Paris : fiche chantier', () =
 
   // Un chantier converti avant ce lot commence à un instant : 14-10-2026 à 22:30 UTC, soit le
   // 15-10 à 00:30 à Paris. La fiche l'affiche et le préremplit au 15, et enregistrer la fiche
-  // sans y toucher garde le 15 (avant, le jour UTC était réenregistré : le 14).
+  // sans y toucher garde le 15 (avant, le jour UTC était réenregistré : le 14). Lue le 16 à
+  // 23:00 à Paris, elle compte un jour civil écoulé, et non 46 h 30 arrondies à 2 jours.
   test('la fiche lit un début horodaté au jour de la société, et l’enregistre sans le décaler', async ({ allerSurPageAdmin, creerClient, page, request, session }) => {
+    await page.clock.install({ time: new Date('2026-10-16T21:00:00Z') });
     const headers = { Authorization: `Bearer ${session.token}` };
     const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
       const response = await request[methode](`${api}${path}`, { headers, data });
@@ -71,7 +212,7 @@ test.describe('navigateur à Gambier, société à Paris : fiche chantier', () =
     });
     await avecFuseauSociete(request, session.token, 'Europe/Paris', async () => {
       await allerSurPageAdmin(`/chantiers/${chantier.id}`);
-      await expect(page.getByText(/Démarré le 15-10-2026/)).toBeVisible();
+      await expect(page.getByText('Démarré le 15-10-2026 (il y a 1 j)')).toBeVisible();
       await page.getByRole('button', { name: 'Modifier' }).first().click();
       await expect(page.locator('input[name="dateDebut"]')).toHaveValue('15-10-2026');
       const enregistrement = page.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'PATCH');
@@ -130,6 +271,48 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     // 13:00 UTC = 01:00 à Wallis.
     await expect(page.getByText(/Mis à jour à 01:00/)).toBeVisible();
   });
+
+  // Un rafraîchissement lancé avant un changement de semaine ne doit pas, arrivé le dernier,
+  // remplacer les affectations de la semaine choisie.
+  test('le planning public ignore une lecture dépassée par un changement de semaine', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-10-14T13:00:00Z') });
+    const titre = 'Affectation semaine 43 E2E';
+    const evenement = { id: 'e2e-semaine-43', categorie: 'HORS_CHANTIER', dateDebut: '2026-10-21T00:00:00.000Z', dateFin: '2026-10-21T00:00:00.000Z', creneau: 'JOURNEE', heureDebut: null, heureFin: null, chantier: null, titre, client: null, typeEvent: null, commentaire: null, intervenants: [] };
+    let retenir = false;
+    let libererRetenue = () => {};
+    let signalerRetenue = () => {};
+    const retenueDemandee = new Promise<void>((resolve) => { signalerRetenue = resolve; });
+    await page.route('**/api/planning/public/**', async (route) => {
+      const debut = new URL(route.request().url()).searchParams.get('start');
+      if (!debut && retenir) {
+        retenir = false;
+        signalerRetenue();
+        await new Promise<void>((resolve) => { libererRetenue = resolve; });
+      }
+      const semaine43 = debut === '2026-10-19';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({ events: semaine43 ? [evenement] : [], intervenants: [], fuseauHoraire: 'Pacific/Wallis', aujourdhui: '2026-10-15', debut: semaine43 ? '2026-10-19' : '2026-10-12', fin: semaine43 ? '2026-10-25' : '2026-10-18' }),
+      });
+    });
+    await page.goto('/planning/public/jeton-e2e-depassee', { waitUntil: 'networkidle' });
+    await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
+    // Rafraîchissement de la semaine courante (retour sur l'onglet), retenu pendant que l'on
+    // passe à la semaine suivante.
+    retenir = true;
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await retenueDemandee;
+    await page.getByTitle('Semaine suivante').click();
+    await expect(page.getByText(titre)).toBeVisible();
+    const depassee = page.waitForResponse((r) => r.url().includes('/api/planning/public/') && !new URL(r.url()).searchParams.get('start'));
+    libererRetenue();
+    await (await depassee).finished();
+    // Laisse à la page le temps d'appliquer cette réponse, si elle ne l'écartait pas.
+    await page.waitForTimeout(500);
+    await expect(page.getByText(titre)).toBeVisible();
+  });
 });
 
 test.describe('navigateur à Gambier, société à Wallis', () => {
@@ -165,7 +348,8 @@ test.describe('navigateur à Gambier, société à Wallis', () => {
 });
 
 // Fuseau de la société illisible : aucune date du jour n'est préremplie (ce serait le jour
-// d'Europe/Paris, fuseau par défaut), elle reste à saisir. Le formulaire d'ouverture n'affiche
+// d'Europe/Paris, fuseau par défaut), elle reste à saisir : ouverture d'un chantier, heures,
+// achats, contrats de maintenance et affectation du planning. Le formulaire d'ouverture n'affiche
 // ses champs qu'avec un devis prêt : le test signe le sien, sans dépendre des autres parcours.
 test('sans le fuseau de la société, les dates du jour ne sont pas préremplies', async ({ page, request, session, creerClient }) => {
   const headers = { Authorization: `Bearer ${session.token}` };
@@ -193,4 +377,12 @@ test('sans le fuseau de la société, les dates du jour ne sont pas préremplies
   await expect(page.getByLabel('Date de début')).toHaveValue('');
   await page.goto('/heures', { waitUntil: 'networkidle' });
   await expect(page.locator('input[name="date"]')).toHaveValue('');
+  await page.goto('/achats', { waitUntil: 'networkidle' });
+  await expect(page.locator('input[name="date"]')).toHaveValue('');
+  await page.goto('/contrats-maintenance', { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Nouveau contrat' }).click();
+  await expect(page.locator('input[name="dateDebut"]')).toHaveValue('');
+  await page.goto('/planning', { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Affectation', exact: true }).click();
+  await expect(page.locator('input[name="dateDebut"]')).toHaveValue('');
 });
