@@ -5683,7 +5683,8 @@ app.post('/api/devis/:id/annulation', requireAuth, requireAdmin, async (req, res
     // Verrou du devis d'abord, comme la conversion : une annulation concurrente d'une conversion
     // attend sa fin et archive alors le chantier ouvert, au lieu d'annuler le devis en laissant
     // son chantier en cours. Le chantier, lui, n'est verrouillé que par sa mise à jour, après le
-    // comptage des saisies (course avec une saisie simultanée : question 7 de la passation).
+    // comptage des saisies (course avec une saisie simultanée, non corrigée : constat « Saisie sur
+    // un chantier pendant l'annulation de son devis » de docs/ROADMAP-PASSATION.md).
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { conversion: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');

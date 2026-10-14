@@ -370,7 +370,8 @@ test('l’échec d’un chargement dépassé n’affiche pas d’erreur', async 
 });
 
 // Sans aucun commercial actif, la liste est désactivée et le chantier s'ouvre sans commercial,
-// sans envoyer de commercial vide, que le serveur refuserait (comportement de la question 8).
+// sans envoyer de commercial vide, que le serveur refuserait (question du commercial exigé, lot (f)
+// de docs/ROADMAP-PASSATION.md).
 test('sans commercial actif, le formulaire ouvre le chantier sans commercial', async ({ allerSurPageAdmin, creerClient, request, session }) => {
   const { headers, conducteur, devis } = await preparer(request, session.token, creerClient, 'sans-commercial');
   const admin = await allerSurPageAdmin('/admin');
