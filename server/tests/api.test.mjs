@@ -222,6 +222,7 @@ if (!TEST_DATABASE_URL) {
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
+      'ouverture.conducteur@iris.test', 'ouverture.autre.conducteur@iris.test', 'ouverture.commercial@iris.test', 'ouverture.commercial.inactif@iris.test', 'ouverture.ancien.conducteur@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -2700,7 +2701,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(conversion.body.numeroDevis, nonSigne.body.numero);
       assert.ok((await prisma.chantier.findUnique({ where: { id: conversion.body.id } })).clientId, 'la conversion doit rattacher l’affaire à son client');
       const doublon = await request(app).post(`/api/devis/${nonSigne.body.id}/convertir`).set('Authorization', `Bearer ${session}`).send({ cible: 'CHANTIER' });
-      assert.equal(doublon.status, 400);
+      assert.equal(doublon.status, 409, 'chaque affaire n’ouvre qu’un chantier');
     });
 
     test('refuse la création directe historique d’un chantier', async () => {
@@ -3011,6 +3012,204 @@ if (!TEST_DATABASE_URL) {
       // La duplication, elle, relève du droit devis et non de l'administration.
       const duplicata = await request(app).post(`/api/devis/${devis.id}/duplication`).set('Authorization', `Bearer ${sessionConducteur}`);
       assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+    });
+
+    // Ouverture du chantier d'une affaire depuis l'Administration (décision de Nelson du
+    // 14-10-2026) : la conversion du devis signé fixe aussitôt titulaire, commercial, types et
+    // date de début, et chaque affaire n'a qu'un chantier.
+    describe('Ouverture du chantier d’une affaire depuis l’Administration', () => {
+      let jwt;
+      const comptes = {};
+      const entete = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+      const admin = () => ({ Authorization: `Bearer ${session}` });
+      const ouvrir = (id, corps, auth = admin()) => request(app).post(`/api/devis/${id}/convertir`).set(auth).send({ cible: 'CHANTIER', ...corps });
+      const aConvertir = async (auth = admin()) => {
+        const liste = await request(app).get('/api/devis/a-convertir').set(auth);
+        assert.equal(liste.status, 200, JSON.stringify(liste.body));
+        return liste.body;
+      };
+
+      before(async () => {
+        jwt = (await import('jsonwebtoken')).default;
+        const compte = async (cle, role, extra = {}) => {
+          const email = `ouverture.${cle}@iris.test`;
+          comptes[cle] = await prisma.user.upsert({
+            where: { email },
+            update: { role, actif: true, estCommercial: false, permissions: [], ...extra },
+            create: { email, name: `TEST Ouverture ${cle}`, role, ...extra },
+          });
+        };
+        await compte('conducteur', 'CONDUCTEUR_TRAVAUX');
+        await compte('autre.conducteur', 'CONDUCTEUR_TRAVAUX');
+        await compte('commercial', 'COMMERCIAL');
+        await compte('commercial.inactif', 'COMMERCIAL', { actif: false });
+        await compte('ancien.conducteur', 'CONDUCTEUR_TRAVAUX', { actif: false });
+      });
+
+      test('ouvre le chantier avec son titulaire, son commercial, ses types et sa date de début', async () => {
+        const devis = await devisAccepte('TEST Ouverture complète');
+        const proposes = await aConvertir();
+        const propose = proposes.find((d) => d.id === devis.id);
+        assert.ok(propose, 'un devis accepté et signé est proposé à l’ouverture');
+        assert.deepEqual(Object.keys(propose).sort(), ['client', 'dossierId', 'id', 'numero', 'objet', 'totalHt', 'version']);
+        assert.equal(propose.client.raisonSociale, 'TEST Client cycle');
+
+        const ouvert = await ouvrir(devis.id, {
+          responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id, types: ['Vidéo', 'Inventé', 'Alarme'], dateDebut: '05-10-2026',
+        });
+        assert.equal(ouvert.status, 201, JSON.stringify(ouvert.body));
+        const chantier = await prisma.chantier.findUnique({ where: { id: ouvert.body.id } });
+        assert.equal(chantier.responsableId, comptes.conducteur.id);
+        assert.equal(chantier.commercialId, comptes.commercial.id);
+        assert.deepEqual(chantier.types, ['Vidéo', 'Alarme'], 'seuls les types connus sont gardés');
+        assert.equal(chantier.dateDebut.toISOString(), '2026-10-05T00:00:00.000Z', 'la date de début saisie est un jour civil');
+        assert.equal(chantier.numeroDevis, devis.numero);
+        assert.equal(Number(chantier.budgetGlobalVendu), 200, 'le vendu est celui du devis');
+        assert.equal(Number(chantier.heuresVendues), 2);
+
+        // Le conducteur désigné voit aussitôt son chantier.
+        const liste = await request(app).get('/api/chantiers').set(entete('conducteur'));
+        assert.equal(liste.status, 200, JSON.stringify(liste.body));
+        assert.ok(liste.body.some((c) => c.id === chantier.id), 'le titulaire voit le chantier ouvert pour lui');
+        assert.ok(!(await aConvertir()).some((d) => d.id === devis.id), 'un devis converti n’est plus proposé');
+
+        // Chaque affaire n'a qu'un chantier : une seconde ouverture est refusée.
+        const doublon = await ouvrir(devis.id, { responsableId: comptes['autre.conducteur'].id });
+        assert.equal(doublon.status, 409, JSON.stringify(doublon.body));
+        assert.match(doublon.body.error, /déjà été converti/);
+        assert.equal(await prisma.chantier.count({ where: { numeroDevis: devis.numero } }), 1);
+      });
+
+      test('deux ouvertures simultanées du même devis n’ouvrent qu’un chantier', async () => {
+        const devis = await devisAccepte('TEST Ouverture simultanée');
+        const reponses = await Promise.all([comptes.conducteur, comptes['autre.conducteur']].map((c) => ouvrir(devis.id, { responsableId: c.id, commercialId: comptes.commercial.id })));
+        assert.deepEqual(reponses.map((r) => r.status).sort(), [201, 409], JSON.stringify(reponses.map((r) => r.body)));
+        assert.match(reponses.find((r) => r.status === 409).body.error, /déjà été converti/);
+        assert.equal(await prisma.chantier.count({ where: { numeroDevis: devis.numero } }), 1);
+        assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 1);
+      });
+
+      test('une référence d’affaire déjà portée par un chantier n’en ouvre pas un second', async () => {
+        const devis = await devisAccepte('TEST Ouverture référence prise');
+        const existant = await prisma.chantier.create({ data: { nom: 'TEST Ouverture chantier saisi à la main', client: 'TEST Client cycle', numeroDevis: devis.numero, dateDebut: new Date('2026-10-01T00:00:00.000Z'), budgetGlobalVendu: 0 } });
+        try {
+          const refus = await ouvrir(devis.id, { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id });
+          assert.equal(refus.status, 409, JSON.stringify(refus.body));
+          assert.match(refus.body.error, new RegExp(`L’affaire ${devis.numero} a déjà un chantier`));
+          // Sans les choix de l'Administration, la conversion de l'écran Devis est refusée de même.
+          assert.equal((await convertir(devis.id)).status, 409);
+          assert.equal(await prisma.chantier.count({ where: { numeroDevis: devis.numero } }), 1);
+          assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 0);
+        } finally {
+          await prisma.chantier.delete({ where: { id: existant.id } });
+        }
+      });
+
+      test('refuse un titulaire, un commercial ou une date invalides, sans rien ouvrir', async () => {
+        const devis = await devisAccepte('TEST Ouverture refusée');
+        const cas = [
+          [{ responsableId: '' }, /toujours avoir un conducteur responsable/],
+          [{ responsableId: 'inconnu' }, /Conducteur responsable introuvable/],
+          [{ responsableId: comptes['ancien.conducteur'].id }, /Conducteur responsable introuvable/],
+          [{ responsableId: comptes.conducteur.id, commercialId: comptes.conducteur.id }, /Commercial introuvable/],
+          [{ responsableId: comptes.conducteur.id, commercialId: comptes['commercial.inactif'].id }, /Commercial introuvable/],
+          [{ responsableId: comptes.conducteur.id, commercialId: '' }, /toujours avoir un commercial rattaché/],
+          [{ responsableId: comptes.conducteur.id, dateDebut: '31-02-2026' }, /date de début doit être valide/],
+        ];
+        for (const [corps, motif] of cas) {
+          const refus = await ouvrir(devis.id, corps);
+          assert.equal(refus.status, 400, `${JSON.stringify(corps)} : ${JSON.stringify(refus.body)}`);
+          assert.match(refus.body.error, motif);
+        }
+        assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 0, 'aucune conversion après un refus');
+        assert.ok((await aConvertir()).some((d) => d.id === devis.id), 'le devis reste proposé');
+      });
+
+      test('seule une session administrateur fixe le titulaire à l’ouverture ; la conversion de l’écran Devis reste ouverte', async () => {
+        const devis = await devisAccepte('TEST Ouverture par un commercial');
+        const refus = await ouvrir(devis.id, { responsableId: comptes.conducteur.id }, entete('commercial'));
+        assert.equal(refus.status, 403, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /Seule l’administration choisit le titulaire/);
+        for (const champ of ['commercialId', 'types', 'dateDebut']) {
+          assert.equal((await ouvrir(devis.id, { [champ]: champ === 'types' ? [] : '' }, entete('commercial'))).status, 403, champ);
+        }
+        const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST agent ouverture', scopes: ['devis:write'] });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        const parCle = await request(app).post(`/api/v1/devis/${devis.id}/convertir`).set('Authorization', `Bearer ${cle.body.apiKey}`).send({ cible: 'CHANTIER', responsableId: comptes.conducteur.id });
+        assert.equal(parCle.status, 403, JSON.stringify(parCle.body));
+        assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 0);
+
+        // La conversion sans ces choix, celle de l'écran Devis, reste ouverte au droit devis.
+        const ouvert = await ouvrir(devis.id, {}, entete('commercial'));
+        assert.equal(ouvert.status, 201, JSON.stringify(ouvert.body));
+        assert.equal(ouvert.body.responsableId, null);
+      });
+
+      test('la liste des devis à convertir suit les conditions de la conversion', async () => {
+        const avecAcompte = await devisAccepte('TEST Ouverture acompte attendu', { acompteExige: true });
+        const revise = await devisAccepte('TEST Ouverture révisé');
+        const revision = await request(app).post(`/api/devis/${revise.id}/revisions`).set(admin());
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        const nonSigne = await request(app).post('/api/devis').set(admin()).send({ clientId, objet: 'TEST Ouverture non signé', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(nonSigne.status, 201, JSON.stringify(nonSigne.body));
+        const proposes = (await aConvertir()).map((d) => d.id);
+        for (const [devis, motif] of [[avecAcompte, 'acompte non constaté'], [revise, 'version dépassée par une révision'], [nonSigne.body, 'devis non signé'], [revision.body, 'révision brouillon']]) {
+          assert.ok(!proposes.includes(devis.id), `${motif} : proposé à tort`);
+        }
+        // Une fois l'acompte constaté, le devis est proposé.
+        const acompte = await request(app).post(`/api/devis/${avecAcompte.id}/acompte`).set(admin()).send({ recuLe: '01-10-2026', montant: 60, reference: 'TEST-VIR-OUVERTURE' });
+        assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
+        assert.ok((await aConvertir()).some((d) => d.id === avecAcompte.id));
+        // Liste réservée à qui peut convertir.
+        assert.equal((await request(app).get('/api/devis/a-convertir').set(entete('conducteur'))).status, 403);
+        assert.equal((await request(app).get('/api/v1/devis/a-convertir').set('Authorization', `Bearer ${cleApi}`)).status, 404);
+      });
+
+      // Formulaires voisins de l'Administration : un doublon remontait en erreur 500, sans message.
+      test('fournisseurs et catégories refusent un nom vide ou déjà pris, avec un message', async () => {
+        for (const [chemin, nom, motif] of [['/api/fournisseurs', 'TEST Ouverture fournisseur', /Un fournisseur porte déjà ce nom/], ['/api/categories', 'TEST Ouverture catégorie', /Une catégorie porte déjà ce nom/]]) {
+          const cree = await request(app).post(chemin).set(admin()).send({ nom: `  ${nom}  ` });
+          assert.equal(cree.status, 200, JSON.stringify(cree.body));
+          assert.equal(cree.body.nom, nom, 'le nom est enregistré sans espaces autour');
+          const doublon = await request(app).post(chemin).set(admin()).send({ nom });
+          assert.equal(doublon.status, 409, JSON.stringify(doublon.body));
+          assert.match(doublon.body.error, motif);
+          const vide = await request(app).post(chemin).set(admin()).send({ nom: '   ' });
+          assert.equal(vide.status, 400, JSON.stringify(vide.body));
+          assert.match(vide.body.error, /est obligatoire/);
+        }
+      });
+
+      test('un chantier se réattribue à un autre conducteur au départ de son titulaire', async () => {
+        const devis = await devisAccepte('TEST Ouverture départ du conducteur');
+        const ouvert = await ouvrir(devis.id, { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id });
+        assert.equal(ouvert.status, 201, JSON.stringify(ouvert.body));
+        await prisma.user.update({ where: { id: comptes.conducteur.id }, data: { actif: false } });
+        try {
+          // Corriger la fiche sans toucher au titulaire désactivé reste possible.
+          const correction = await request(app).patch(`/api/chantiers/${ouvert.body.id}`).set(admin()).send({ nom: 'TEST Ouverture départ corrigé', responsableId: comptes.conducteur.id });
+          assert.equal(correction.status, 200, JSON.stringify(correction.body));
+          // Il ne peut pas être réattribué à un compte désactivé, mais à un conducteur actif, oui.
+          const versInactif = await request(app).patch(`/api/chantiers/${ouvert.body.id}`).set(admin()).send({ responsableId: comptes['ancien.conducteur'].id });
+          assert.equal(versInactif.status, 400, JSON.stringify(versInactif.body));
+          const reattribution = await request(app).patch(`/api/chantiers/${ouvert.body.id}`).set(admin()).send({ responsableId: comptes['autre.conducteur'].id });
+          assert.equal(reattribution.status, 200, JSON.stringify(reattribution.body));
+          assert.equal((await prisma.chantier.findUnique({ where: { id: ouvert.body.id } })).responsableId, comptes['autre.conducteur'].id);
+          const fiche = await request(app).get(`/api/chantiers/${ouvert.body.id}`).set(entete('autre.conducteur'));
+          assert.equal(fiche.status, 200, 'le nouveau titulaire voit le chantier');
+          // Le commercial désactivé reste rattaché ; un commercial inactif ne se choisit pas.
+          await prisma.user.update({ where: { id: comptes.commercial.id }, data: { actif: false } });
+          const commercialInchange = await request(app).patch(`/api/chantiers/${ouvert.body.id}/commercial`).set(admin()).send({ commercialId: comptes.commercial.id });
+          assert.equal(commercialInchange.status, 200, JSON.stringify(commercialInchange.body));
+          const commercialInactif = await request(app).patch(`/api/chantiers/${ouvert.body.id}/commercial`).set(admin()).send({ commercialId: comptes['commercial.inactif'].id });
+          assert.equal(commercialInactif.status, 400, JSON.stringify(commercialInactif.body));
+          const sansCommercial = await request(app).patch(`/api/chantiers/${ouvert.body.id}/commercial`).set(admin()).send({ commercialId: null });
+          assert.equal(sansCommercial.status, 400, JSON.stringify(sansCommercial.body));
+          assert.match(sansCommercial.body.error, /toujours avoir un commercial rattaché/);
+        } finally {
+          await prisma.user.updateMany({ where: { id: { in: [comptes.conducteur.id, comptes.commercial.id] } }, data: { actif: true } });
+        }
+      });
     });
   });
 

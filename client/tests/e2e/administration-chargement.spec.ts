@@ -33,7 +33,7 @@ test('Administration : une liste qui ne se charge pas est signalée, sans faire 
   const admin = await allerSurPageAdmin('/admin');
   const alerte = admin.getByRole('alert').filter({ hasText: MESSAGE });
   await expect(alerte).toBeVisible();
-  await expect(admin.getByRole('heading', { name: 'Créer un nouveau chantier' })).toBeVisible();
+  await expect(admin.getByRole('heading', { name: 'Ouvrir le chantier d’une affaire' })).toBeVisible();
 
   // L'écran reste utilisable : un autre onglet charge sa liste, sans message.
   const fournisseur = `Fournisseur chargement E2E ${Date.now()}`;

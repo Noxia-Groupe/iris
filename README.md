@@ -125,6 +125,17 @@ Une affaire n'existe que par un devis. La conversion d'un devis accepté crée l
 et vaut, par le même geste, validation définitive du devis — il n'y a pas d'autre porte :
 `POST /api/chantiers` répond 410, et un chantier ne se supprime plus.
 
+Chaque affaire a son chantier, un seul (décision de Nelson du 14-10-2026) : un devis déjà
+converti, un dossier dont une autre version l'est déjà, y compris entre deux conversions
+simultanées, et une référence d'affaire déjà portée par un chantier sont refusés (409). Le
+chantier s'ouvre depuis l'écran Devis (« Ouvrir le chantier ») ou depuis **Administration >
+Chantiers** (« Ouvrir le chantier d'une affaire »). Ce second formulaire part du devis signé,
+dont le chantier reprend le client, la référence, le montant et les heures vendus, et fixe en
+même temps le responsable, le commercial, les types et la date de début ; ces choix
+d'ouverture sont réservés à l'administration. Le chantier se modifie et se réattribue ensuite
+depuis sa fiche (bouton « Modifier »), par l'administration ou par son titulaire, par exemple
+au départ d'un conducteur.
+
 ```text
 BROUILLON → ENVOYÉ → ACCEPTÉ ─┬─ valider ───────────────────────→ chantier ouvert
                               └─ en attente d'acompte → acompte constaté → chantier ouvert
@@ -190,13 +201,13 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 
 ## Roadmap et état de livraison
 
-**Source de passation à jour : [`docs/ROADMAP-PASSATION.md`](docs/ROADMAP-PASSATION.md).** État constaté sur `main` au commit `f62cfd2`, après les PR #122 à #125, puis les PR #127 (annuaire des clients pour le technicien) et #128 (arbitrages de droits du 14-10-2026). « Code présent » ne signifie ni conformité validée ni mise en production. Chaque phase incomplète est détaillée dans la passation avec ses dépendances et les décisions à demander à Nelson.
+**Source de passation à jour : [`docs/ROADMAP-PASSATION.md`](docs/ROADMAP-PASSATION.md).** État constaté sur `main` au commit `f62cfd2`, après les PR #122 à #125, puis les PR #127 (annuaire des clients pour le technicien), #128 (arbitrages de droits du 14-10-2026) et #129 (ouverture du chantier d'une affaire depuis l'Administration, réattribution depuis la fiche). « Code présent » ne signifie ni conformité validée ni mise en production. Chaque phase incomplète est détaillée dans la passation avec ses dépendances et les décisions à demander à Nelson.
 
 - [x] Phases 0–4 : identité du projet, accès Entra/secours, configuration d'instance, référentiel clients/sites/contacts, catalogue et parc d'équipements. Le catalogue et le plan comptable démarrent vides. L'écran Utilisateurs est allégé (#124) ; sur une installation neuve, la création des réglages uniques (paramètres, société) ne provoque plus d'erreur lors des premières requêtes simultanées, et une liste d'Administration qui ne se charge pas est signalée sans plantage (#125).
 - [ ] Phase 5 — **partielle** : devis versionnés, signature, acompte constaté, cycle de vie et conversion en chantier livrés ; cibles intervention/contrat/facture à cadrer et à réaliser. Sélection d'un client hors des 200 premiers livrée pour Devis (#114).
 - [ ] Suivi Travaux et commissionnement — **partiels** : sécurité, journaux, achats/heures et fiche chantier déjà présents ; suivi de rentabilité (alertes, marge estimée en fin de chantier) implémenté par #117, et adressé selon la chaîne hiérarchique et au profil Directeur depuis #121 ; ne pas recréer un écran fictif. Profils commerciaux versionnés et individualisés de l'issue #15 non livrés ; réévaluer les reliquats des issues #16 et #19 contre le code.
 - [ ] Phase 6 — **partielle** : SAV, rapports, planning et suivi chantier présents ; navigation utilisable sur téléphone depuis #118 ; parcours mobile technicien dédié et autres parcours terrain à qualifier.
-- [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire — **implémenté** par #123 ; annuaire des clients pour le technicien, sans montant ni devis — **implémenté** par #127 ; clôture de tout chantier par les directeurs et clients désactivés fermés au technicien dans l'annuaire — **implémentés** par #128 ; **prévus** : toutes les dates au fuseau de la société, création du chantier d'une affaire depuis l'Administration et réattribution sans l'API, correctif « socket hang up » (décidés le 14-10-2026), journal des paramètres et des droits, taux horaire réservé aux administrateurs (décidés le 13-10-2026). Ordre proposé, à confirmer par Nelson : voir la passation.
+- [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire — **implémenté** par #123 ; annuaire des clients pour le technicien, sans montant ni devis — **implémenté** par #127 ; clôture de tout chantier par les directeurs et clients désactivés fermés au technicien dans l'annuaire — **implémentés** par #128 ; ouverture du chantier d'une affaire depuis l'Administration, sans doublon, et réattribution depuis la fiche — **implémentées** par #129 ; **prévus** : toutes les dates au fuseau de la société, correctif « socket hang up » (décidés le 14-10-2026), journal des paramètres et des droits, taux horaire réservé aux administrateurs (décidés le 13-10-2026). Ordre proposé, à confirmer par Nelson : voir la passation.
 - [ ] Phase 7 — **partielle** : contrats cycliques et génération idempotente d'interventions à planifier depuis une action métier ; automatisation de l'échéance et ses règles de déclenchement à arbitrer.
 - [ ] Phase 8 — **partielle** : factures, avoirs, PDF, plan comptable paramétrable et export CSV déjà présents. La conformité de facturation électronique et l'adaptateur de plateforme restent à concevoir/valider. Requalifier les anciennes issues #31, #33 et #35 avant de coder leur reliquat.
 - [ ] Phase 9 — **future comme chaîne automatisée** : paiements, abonnements télécom, financeurs, banque et rapprochement ; un statut de règlement manuel n'est pas un module bancaire.
@@ -204,7 +215,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [ ] Phase 11 — **partielle** : paramètres Entra et secours d'instance existants ; installation guidée et secours plateforme distinct non démontrés.
 - [ ] Phase 12 — **préparée, non validée** : Compose, migrations et CI existent ; recette, isolation SQL, sauvegarde/restauration, validations client et décision de mise en service restent requises.
 
-**Prochains découpages candidats, à ordonner avec Nelson :** livrer les lots décidés restants (dates au fuseau de la société, création et réattribution de chantier depuis l'interface, correctif « socket hang up », journal des paramètres et des droits, taux horaire réservé aux administrateurs), achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, adapter au téléphone les en-têtes des écrans encore serrés, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
+**Prochains découpages candidats, à ordonner avec Nelson :** livrer les lots décidés restants (dates au fuseau de la société, correctif « socket hang up », journal des paramètres et des droits, taux horaire réservé aux administrateurs), achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, adapter au téléphone les en-têtes des écrans encore serrés, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
 
 ## Tests
 

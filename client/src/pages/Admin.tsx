@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback, type RefObject } from 'react';
 import { apiFetch } from '../api';
-import { TYPES_CHANTIER } from '../chantierTypes';
+import { Link } from 'react-router-dom';
 import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from '../roles';
 import { refreshModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
+import OuvrirChantierAffaire from '../components/OuvrirChantierAffaire';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
@@ -214,19 +215,11 @@ const Admin = () => {
   // Numéro du dernier chargement de liste : la réponse d'un chargement plus ancien est ignorée.
   const dernierChargementListe = useRef(0);
   const [messageRemuneration, setMessageRemuneration] = useState('');
-  // Commerciaux rattachables à un chantier. Volontairement chargés depuis /commerciaux et
-  // non déduits de la liste des comptes : celle-ci ne montre pas les super administrateurs
-  // à un simple administrateur, et un superadmin « aussi commercial » doit malgré tout
-  // rester sélectionnable ici.
-  const [commerciaux, setCommerciaux] = useState<any[]>([]);
   // Ligne en cours d'édition : { type: 'intervenant'|'fournisseur'|'categorie', id, ...champs }
   const [editRow, setEditRow] = useState<any>(null);
   // Rôle sélectionné dans le formulaire "Autoriser un compte" — contrôlé uniquement pour
   // afficher la case "estCommercial" quand le rôle choisi est Administrateur.
   const [newUserRole, setNewUserRole] = useState('CONDUCTEUR_TRAVAUX');
-  // Préremplissage du budget global vendu depuis la référence d'affaire saisie (formulaire
-  // de création de chantier ci-dessous) — champ non contrôlé, on écrit directement dedans.
-  const nouveauChantierBudgetRef = useRef<HTMLInputElement>(null);
   // Modules activables (onglet « Modules », superadmin) : état global du Planning.
   const [planningActif, setPlanningActif] = useState<boolean | null>(null);
   const [modulesMessage, setModulesMessage] = useState('');
@@ -286,11 +279,6 @@ const Admin = () => {
       if (isAdmin) {
         const usersRes = await apiFetch('/users');
         if (usersRes.ok) setUsers(await usersRes.json());
-      }
-
-      if (onglet === 'chantiers' && isAdmin) {
-        const comRes = await apiFetch('/commerciaux');
-        if (comRes.ok) setCommerciaux(await comRes.json());
       }
 
       if (onglet === 'modules' && isSuper) {
@@ -455,19 +443,27 @@ const Admin = () => {
     return users.filter((r) => r.id !== compteId && r.actif !== false && !branche.has(r.id));
   };
 
-  const handleSubmit = async (e: React.FormEvent, type: string) => {
+  // Ajout d'un intervenant, d'un fournisseur ou d'une catégorie. Un refus du serveur est
+  // affiché, et la saisie conservée pour être corrigée ; elle n'est vidée qu'après l'ajout.
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>, type: string) => {
     e.preventDefault();
-    const formData = new FormData(e.target as HTMLFormElement);
-    const data: Record<string, unknown> = Object.fromEntries(formData.entries());
-    // Plusieurs cases "types" partagent le même name : entries() n'en garderait qu'une.
-    if (type === 'chantiers') data.types = formData.getAll('types');
-
-    await apiFetch(`/${type}`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-
-    (e.target as HTMLFormElement).reset();
+    const form = e.currentTarget;
+    const data: Record<string, unknown> = Object.fromEntries(new FormData(form).entries());
+    try {
+      const res = await apiFetch(`/${type}`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'L’enregistrement a échoué.');
+        return;
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
+      return;
+    }
+    form.reset();
     fetchData();
   };
 
@@ -704,78 +700,7 @@ const Admin = () => {
 
       {activeTab === 'chantiers' && isAdmin && (
         <div className="card">
-          <h2 className="mb-4 text-primary-dark">Créer un nouveau chantier</h2>
-          <form onSubmit={(e) => handleSubmit(e, 'chantiers')} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="form-group mb-0">
-              <label className="form-label">Nom du Chantier</label>
-              <input required name="nom" className="form-input" />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Client</label>
-              <input required name="client" className="form-input" placeholder="Nom du client" />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">N° de Devis</label>
-              <input required name="numeroDevis" className="form-input" placeholder="Référence d'affaire (ex : A26-0001)" />
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Responsable Chantier</label>
-              <select required name="responsableId" className="form-input" defaultValue="">
-                <option value="" disabled>Sélectionner un conducteur...</option>
-                {/* Un compte désactivé ne peut plus recevoir de chantier (son historique, lui, reste). */}
-                {users.filter(u => u.role === 'CONDUCTEUR_TRAVAUX' && u.actif !== false).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
-              <select required={commerciaux.length > 0} name="commercialId" className="form-input" defaultValue="">
-                <option value="" disabled>Sélectionner un commercial...</option>
-                {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="form-group mb-0">
-              <label className="form-label">Date Début</label>
-              <input required type="date" name="dateDebut" className="form-input" />
-            </div>
-            
-            <div className="col-span-1 md:col-span-2 mt-4 p-4 bg-gray-50 rounded border">
-              <h3 className="text-primary mb-4 border-b pb-2">Détails Budgétaires Vendus</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="form-group mb-0">
-                  <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
-                  <input ref={nouveauChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" className="form-input" />
-                </div>
-                <div className="form-group mb-0">
-                  <label className="form-label">Dont Matériel (€ HT)</label>
-                  <input required type="number" step="0.01" name="budgetMaterielVendu" className="form-input" />
-                </div>
-                <div className="form-group mb-0">
-                  <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
-                  <input required type="number" step="0.01" name="budgetMainOeuvreVendu" className="form-input" />
-                </div>
-                <div className="form-group mb-0">
-                  <label className="form-label">Total Heures Vendues (h)</label>
-                  <input required type="number" step="0.5" name="heuresVendues" className="form-input" />
-                </div>
-              </div>
-            </div>
-
-            <div className="form-group mb-0 md:col-span-2">
-              <label className="form-label">Type(s) de chantier</label>
-              <div className="flex flex-wrap gap-2">
-                {TYPES_CHANTIER.map((t) => (
-                  <label key={t} className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
-                    <input type="checkbox" name="types" value={t} className="w-4 h-4" />
-                    {t}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="col-span-1 md:col-span-2 mt-2">
-              <button className="btn btn-primary w-full md:w-auto px-8">Enregistrer le chantier</button>
-            </div>
-          </form>
+          <OuvrirChantierAffaire onOuvert={fetchData} />
 
           <h3 className="mt-10 mb-4 text-primary-dark">Base de données des Chantiers</h3>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -783,9 +708,15 @@ const Admin = () => {
               <div key={c.id} className="p-4 bg-white border rounded shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start mb-2">
                   <div>
-                    <h4 className="font-bold text-lg text-primary">{c.nom}</h4>
+                    <h4 className="font-bold text-lg text-primary break-words">
+                      <Link to={`/chantiers/${c.id}`} className="hover:underline">{c.nom}</Link>
+                    </h4>
                     <span className="text-sm text-muted">Client : {c.client} | Devis : {c.numeroDevis || 'Non spécifié'}</span>
-                    <div className="text-sm text-muted mt-0.5">Responsable : <strong className="text-gray-700">{c.responsable?.name || 'Non affecté'}</strong></div>
+                    {/* Titulaire et commercial se modifient depuis la fiche (bouton « Modifier »),
+                        par exemple au départ d'un conducteur en cours de chantier. */}
+                    <div className="text-sm text-muted mt-0.5">Responsable : {c.responsable
+                      ? <strong className="text-gray-700">{c.responsable.name}</strong>
+                      : <strong className="text-amber-700">Non affecté — à attribuer depuis la fiche</strong>}</div>
                     {c.types && c.types.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1.5">
                         {c.types.map((t: string) => (

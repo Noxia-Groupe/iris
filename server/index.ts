@@ -2926,6 +2926,23 @@ function sanitizeTypes(input: unknown): string[] {
   return TYPES_CHANTIER.filter((t) => arr.includes(t));
 }
 
+// Titulaire et commercial d'un chantier : mêmes contrôles à l'ouverture du chantier (conversion
+// d'un devis) et à la modification de sa fiche. Un compte désactivé (départ de l'entreprise)
+// reste titulaire ou commercial des chantiers qu'il a suivis, son historique étant conservé,
+// mais ne reçoit plus de nouvelle affectation. Chacune renvoie le motif du refus, ou null.
+async function refusTitulaire(responsableId: string, actuelId: string | null): Promise<string | null> {
+  if (!responsableId) return 'Un chantier doit toujours avoir un conducteur responsable.';
+  const responsable = await prisma.user.findUnique({ where: { id: responsableId }, select: { actif: true } });
+  return !responsable || (!responsable.actif && responsableId !== actuelId) ? 'Conducteur responsable introuvable.' : null;
+}
+async function refusCommercial(commercialId: string, actuelId: string | null): Promise<string | null> {
+  if (!commercialId) {
+    return (await prisma.user.count({ where: { OR: COMMERCIAL_OR_FILTER } })) > 0 ? 'Un chantier doit toujours avoir un commercial rattaché.' : null;
+  }
+  const commercial = await prisma.user.findUnique({ where: { id: commercialId }, select: { role: true, estCommercial: true, actif: true } });
+  return !commercial || !isCommercialLike(commercial) || (!commercial.actif && commercialId !== actuelId) ? 'Commercial introuvable.' : null;
+}
+
 // Chantiers — un conducteur ne voit que les chantiers dont il est responsable, un
 // responsable ceux de sa branche ; un admin ou un directeur voit tout. Un chantier sans
 // responsable reste invisible aux conducteurs jusqu'à ce qu'un admin lui en affecte un.
@@ -3120,15 +3137,8 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // leurs chantiers) : on interdit de le vider, et on vérifie qu'il existe.
     if ('responsableId' in req.body) {
       const responsableId = String(req.body.responsableId || '');
-      if (!responsableId) {
-        return res.status(400).json({ error: 'Un chantier doit toujours avoir un conducteur responsable.' });
-      }
-      const responsable = await prisma.user.findUnique({ where: { id: responsableId }, select: { id: true, actif: true } });
-      // Un compte désactivé (départ de l'entreprise) reste responsable des chantiers qu'il a
-      // suivis — son historique est conservé — mais ne peut plus recevoir de nouvelle affectation.
-      if (!responsable || (!responsable.actif && responsableId !== existant.responsableId)) {
-        return res.status(400).json({ error: 'Conducteur responsable introuvable.' });
-      }
+      const refus = await refusTitulaire(responsableId, existant.responsableId);
+      if (refus) return res.status(400).json({ error: refus });
       data.responsableId = responsableId;
     }
     // Le montant vendu ne se corrige que par qui le voit : un conducteur à qui la société a
@@ -3265,19 +3275,9 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, blockCommercial, async (
       return res.status(403).json({ error: REFUS_TECHNICIEN_COMMERCIAL });
     }
 
-    let commercialId: string | null = null;
-    if (req.body.commercialId) {
-      const commercial = await prisma.user.findUnique({ where: { id: String(req.body.commercialId) } });
-      // Un commercial désactivé reste rattaché aux chantiers qu'il a vendus (historique
-      // conservé), mais ne peut plus être choisi pour une nouvelle affectation.
-      const inchange = commercial?.id === chantier.commercialId;
-      if (!commercial || !isCommercialLike(commercial) || (!commercial.actif && !inchange)) {
-        return res.status(400).json({ error: 'Commercial introuvable.' });
-      }
-      commercialId = commercial.id;
-    } else if ((await prisma.user.count({ where: { OR: COMMERCIAL_OR_FILTER } })) > 0) {
-      return res.status(400).json({ error: 'Un chantier doit toujours avoir un commercial rattaché.' });
-    }
+    const commercialId = req.body.commercialId ? String(req.body.commercialId) : null;
+    const refus = await refusCommercial(commercialId ?? '', chantier.commercialId);
+    if (refus) return res.status(400).json({ error: refus });
 
     const updated = await prisma.chantier.update({
       where: { id: chantier.id },
@@ -4141,7 +4141,18 @@ app.get('/api/planning/public/:token', async (req, res) => {
 // attendre la Direction), d'où `blockCommercial` plutôt que `requireAdmin` : seuls les
 // commerciaux, dont l'accès est strictement en lecture, en restent exclus.
 app.get('/api/categories', requireAuth, async (req, res) => res.json(await prisma.categorie.findMany({ orderBy: { nom: 'asc' } })));
-app.post('/api/categories', requireAuth, blockCommercial, async (req, res) => res.json(await prisma.categorie.create({ data: { nom: req.body.nom, description: req.body.description || null } })));
+// Un nom vide ou déjà pris est refusé avec un message, comme à la modification : sans cela,
+// la contrainte d'unicité remontait en erreur 500 et le formulaire n'en disait rien.
+app.post('/api/categories', requireAuth, blockCommercial, async (req, res) => {
+  const nom = typeof req.body?.nom === 'string' ? req.body.nom.trim() : '';
+  if (!nom) return res.status(400).json({ error: 'Le nom de la catégorie est obligatoire.' });
+  try {
+    res.json(await prisma.categorie.create({ data: { nom, description: req.body.description || null } }));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une catégorie porte déjà ce nom.' });
+    res.status(500).json({ error: 'Error creating categorie' });
+  }
+});
 
 // Modifier une catégorie (nom, description).
 app.put('/api/categories/:id', requireAuth, blockCommercial, async (req, res) => {
@@ -4173,7 +4184,16 @@ app.delete('/api/categories/:id', requireAuth, blockCommercial, async (req, res)
 });
 
 app.get('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.findMany({ orderBy: { nom: 'asc' } })));
-app.post('/api/fournisseurs', requireAuth, blockCommercial, async (req, res) => res.json(await prisma.fournisseur.create({ data: { nom: req.body.nom, contact: req.body.contact || null } })));
+app.post('/api/fournisseurs', requireAuth, blockCommercial, async (req, res) => {
+  const nom = typeof req.body?.nom === 'string' ? req.body.nom.trim() : '';
+  if (!nom) return res.status(400).json({ error: 'Le nom du fournisseur est obligatoire.' });
+  try {
+    res.json(await prisma.fournisseur.create({ data: { nom, contact: req.body.contact || null } }));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Un fournisseur porte déjà ce nom.' });
+    res.status(500).json({ error: 'Error creating fournisseur' });
+  }
+});
 
 // Modifier un fournisseur (nom, contact).
 app.put('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, res) => {
@@ -5475,9 +5495,49 @@ routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requi
 
 // Une conversion ne démarre qu'après acceptation. Phase 5 cible le chantier, déjà natif ;
 // les cibles intervention, contrat et facture seront activées par leurs modules respectifs.
+//
+// Chaque affaire a son chantier, un seul (décision de Nelson du 14-10-2026) : un devis déjà
+// converti, un dossier dont une autre version l'est déjà (contraintes uniques de
+// DevisConversion, y compris entre deux conversions simultanées) et une référence d'affaire
+// déjà portée par un chantier sont refusés (409).
+//
+// Depuis l'Administration, la même conversion ouvre le chantier avec son titulaire, son
+// commercial, ses types et sa date de début. Ces choix relèvent de la fiche, que seuls
+// l'administration et le titulaire modifient : ils ne sont acceptés que d'une session
+// administrateur. Sans eux, c'est la conversion de l'écran Devis, et le chantier s'attribue
+// ensuite depuis sa fiche.
+const CHAMPS_OUVERTURE_CHANTIER = ['responsableId', 'commercialId', 'types', 'dateDebut'];
+const REFUS_DOUBLE_CONVERSION = 'Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier.';
+async function ouvertureChantier(body: Record<string, unknown>): Promise<{ responsableId?: string; commercialId?: string | null; types?: string[]; dateDebut?: string }> {
+  const ouverture: { responsableId?: string; commercialId?: string | null; types?: string[]; dateDebut?: string } = {};
+  if ('responsableId' in body) {
+    const responsableId = String(body.responsableId || '');
+    const refus = await refusTitulaire(responsableId, null);
+    if (refus) throw new DevisSaisieError(refus);
+    ouverture.responsableId = responsableId;
+  }
+  if ('commercialId' in body) {
+    const commercialId = String(body.commercialId || '');
+    const refus = await refusCommercial(commercialId, null);
+    if (refus) throw new DevisSaisieError(refus);
+    ouverture.commercialId = commercialId || null;
+  }
+  if ('types' in body) ouverture.types = sanitizeTypes(body.types);
+  if ('dateDebut' in body && body.dateDebut) {
+    const dateDebut = dateIsoStricte(body.dateDebut);
+    if (!dateDebut) throw new DevisSaisieError('La date de début doit être valide au format JJ-MM-AAAA.');
+    ouverture.dateDebut = dateDebut;
+  }
+  return ouverture;
+}
 const convertirDevis: express.RequestHandler = async (req, res) => { try {
-  const cible = String((req.body ?? {}).cible || '');
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const cible = String(body.cible || '');
   if (cible !== 'CHANTIER') throw new DevisSaisieError('Cible de conversion non disponible.');
+  if (CHAMPS_OUVERTURE_CHANTIER.some(cle => cle in body) && ((req as ApiRequest).apiKey || !isAdminRole((req as AuthRequest).user?.role))) {
+    return void res.status(403).json({ error: 'Seule l’administration choisit le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche.' });
+  }
+  const ouverture = await ouvertureChantier(body);
   const resultat = await prisma.$transaction(async tx => {
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, signature: true, lignes: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
@@ -5487,21 +5547,52 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     if (devis.statut === 'EN_ATTENTE_ACOMPTE') throw new DevisSaisieError('Ce devis attend son acompte : le chantier ne peut pas encore être ouvert.');
     if (devis.statut !== 'ACCEPTE') throw new DevisSaisieError('Seul un devis accepté peut être converti.');
     if (!devis.signature) throw new DevisSaisieError('Seul un devis signé en interne peut être converti.');
-    if (devis.conversion) throw new DevisSaisieError('Ce devis a déjà été converti.');
+    if (devis.conversion) throw new DevisConflitError(REFUS_DOUBLE_CONVERSION);
     // Verrou de fond, indépendant du statut : un devis qui exige un acompte n'ouvre pas de
     // chantier tant que sa réception n'a pas été constatée. Le statut peut être manipulé,
     // pas ce fait.
     if (devis.acompteExige && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte exigé par ce devis n’a pas été constaté : le chantier ne peut pas être ouvert.');
+    // Un chantier saisi à la main sous cette référence (fiche corrigée, par exemple) est déjà
+    // celui de l'affaire : la fiche refuse de même un numéro déjà pris.
+    if (await tx.chantier.findFirst({ where: { numeroDevis: devis.numero }, select: { id: true } })) {
+      throw new DevisConflitError(`L’affaire ${devis.numero} a déjà un chantier : corrigez la référence de ce chantier avant de convertir le devis.`);
+    }
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
     const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
-    const chantier = await tx.chantier.create({ data: { nom: devis.objet, client: devis.client.raisonSociale, clientId: devis.clientId, numeroDevis: devis.numero, dateDebut: new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues } });
+    const chantier = await tx.chantier.create({ data: {
+      nom: devis.objet, client: devis.client.raisonSociale, clientId: devis.clientId, numeroDevis: devis.numero,
+      dateDebut: ouverture.dateDebut ?? new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues,
+      responsableId: ouverture.responsableId, commercialId: ouverture.commercialId, types: ouverture.types,
+    } });
     await tx.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
     return chantier;
   });
   res.status(201).json(decimalToNumber(resultat));
-} catch (error) { devisErreur(res, error); } };
+} catch (error) {
+  // Deux conversions simultanées passent toutes deux la vérification ci-dessus : la contrainte
+  // unique de DevisConversion refuse la seconde, dont le chantier est annulé avec la transaction.
+  if ((error as { code?: string })?.code === 'P2002') return void res.status(409).json({ error: REFUS_DOUBLE_CONVERSION });
+  devisErreur(res, error);
+} };
 routeMixte('post', '/devis/:id/convertir', 'devis:write', convertirDevis, [requirePermission('devis:write')]);
+
+// Devis qui peuvent ouvrir leur chantier : mêmes conditions que la conversion ci-dessus (accepté,
+// signé, acompte constaté s'il est exigé, pas encore converti, dernière version non annulée de
+// son dossier). Ils alimentent le formulaire « Ouvrir le chantier d'une affaire » de
+// l'Administration. Réservé à l'interface, comme le formulaire.
+app.get('/api/devis/a-convertir', requireAuth, requirePermission('devis:read'), requirePermission('devis:write'), async (_req, res) => { try {
+  const candidats = await prisma.devis.findMany({
+    where: { statut: 'ACCEPTE', signature: { isNot: null }, conversion: { is: null }, OR: [{ acompteExige: false }, { acompteRecuLe: { not: null } }] },
+    select: { id: true, dossierId: true, numero: true, version: true, objet: true, totalHt: true, client: { select: { id: true, raisonSociale: true } } },
+    orderBy: { createdAt: 'desc' },
+  });
+  const versions = await prisma.devis.groupBy({
+    by: ['dossierId'], where: { dossierId: { in: candidats.map(d => d.dossierId) }, statut: { not: 'ANNULE' } }, _max: { version: true },
+  });
+  const derniere = new Map(versions.map(v => [v.dossierId, v._max.version]));
+  res.json(decimalToNumber(candidats.filter(d => derniere.get(d.dossierId) === d.version)));
+} catch (error) { devisErreur(res, error); } });
 
 // --- Constatation de l'acompte ---
 // Tant que le module paiements (phase 9) n'existe pas, la réception d'un acompte se
