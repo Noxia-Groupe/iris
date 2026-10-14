@@ -116,6 +116,8 @@ test('l’ouverture d’un devis converti entre-temps est refusée avec un messa
   await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
   await expect(admin.getByRole('alert').filter({ hasText: 'Ce devis a déjà été converti' })).toBeVisible();
   await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
+  // Le chantier ouvert ailleurs apparaît dans la liste de l'Administration, sans rechargement.
+  await expect(admin.getByRole('link', { name: devis.objet })).toBeVisible();
   const chantiers = await (await request.get(`${api}/chantiers`, { headers })).json() as { numeroDevis: string }[];
   expect(chantiers.filter((c) => c.numeroDevis === devis.numero)).toHaveLength(1);
 });
@@ -280,15 +282,22 @@ test('une ouverture dont la réponse est perdue retire le devis et montre le cha
 test('une relecture dépassée ne remet pas un devis converti dans la liste', async ({ allerSurPageAdmin, creerClient, request, session }) => {
   const { headers, envoyer, conducteur, remplacant, commercial, devis } = await preparer(request, session.token, creerClient, 'relecture-depassee');
   const admin = await allerSurPageAdmin('/admin');
+  // La relecture retenue est lue au serveur tout de suite (devis encore proposé), mais rendue à
+  // la page seulement quand le test la libère, après la relecture récente : l'ordre est garanti
+  // sans dépendre d'un délai.
   let retarder = false;
-  let relectureRetardeeEnvoyee = false;
+  let libererRelecture = () => {};
+  const relectureLiberee = new Promise<void>((fin) => { libererRelecture = fin; });
+  let relectureRetenueLue = false;
+  let relectureRetenueAvecLeDevis = false;
   let relectureRetardeeServie = false;
   await admin.route('**/api/devis/a-convertir', async (route) => {
     if (!retarder) return route.continue();
     retarder = false;
     const reponse = await route.fetch();
-    await new Promise((fin) => setTimeout(fin, 3000));
-    relectureRetardeeEnvoyee = true;
+    relectureRetenueAvecLeDevis = ((await reponse.json()) as { id: string }[]).some((d) => d.id === devis.id);
+    relectureRetenueLue = true;
+    await relectureLiberee;
     await route.fulfill({ response: reponse });
     relectureRetardeeServie = true;
   });
@@ -303,19 +312,19 @@ test('une relecture dépassée ne remet pas un devis converti dans la liste', as
   await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
   await envoyer('patch', `/users/${conducteur.id}/actif`, { actif: false });
   retarder = true;
-  // Premier refus : sa relecture (devis encore proposé) est retenue 3 s.
+  // Premier refus : sa relecture, lue avant la conversion (devis encore proposé), est retenue.
   await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
   await expect(admin.getByRole('alert').filter({ hasText: 'Conducteur responsable introuvable' })).toBeVisible();
+  await expect.poll(() => relectureRetenueLue).toBe(true);
+  expect(relectureRetenueAvecLeDevis).toBe(true);
   await admin.getByLabel('Responsable du chantier').selectOption(remplacant.id);
   await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
   await expect(admin.getByRole('alert').filter({ hasText: 'n’a pas pu être confirmée' })).toBeVisible();
   await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
-  // Le test ne discrimine que si la relecture récente précède la relecture retenue : sinon, il
-  // échoue ici plutôt que de passer sans rien vérifier.
-  expect(relectureRetardeeEnvoyee, 'la relecture récente doit précéder la relecture dépassée').toBe(false);
-  // La relecture dépassée arrive ensuite : le devis doit rester absent (attente bornée, pour un
-  // constat d'absence).
-  await expect.poll(() => relectureRetardeeServie, { timeout: 10_000 }).toBe(true);
+  // La relecture récente est appliquée : la relecture dépassée est libérée, et le devis doit
+  // rester absent (attente bornée, pour un constat d'absence).
+  libererRelecture();
+  await expect.poll(() => relectureRetardeeServie).toBe(true);
   await admin.waitForTimeout(500);
   await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
   const chantiers = await (await request.get(`${api}/chantiers`, { headers })).json() as { numeroDevis: string }[];
@@ -327,14 +336,16 @@ test('une relecture dépassée ne remet pas un devis converti dans la liste', as
 test('l’échec d’un chargement dépassé n’affiche pas d’erreur', async ({ allerSurPageAdmin, creerClient, request, session }) => {
   const { envoyer, conducteur, remplacant, commercial, devis } = await preparer(request, session.token, creerClient, 'echec-depasse');
   const admin = await allerSurPageAdmin('/admin');
+  // L'échec n'est rendu à la page que lorsque le test le libère, après le chargement récent :
+  // l'ordre est garanti sans dépendre d'un délai.
   let echouerEnRetard = false;
-  let echecEnvoye = false;
+  let libererEchec = () => {};
+  const echecLibere = new Promise<void>((fin) => { libererEchec = fin; });
   let echecServi = false;
   await admin.route('**/api/devis/a-convertir', async (route) => {
     if (!echouerEnRetard) return route.continue();
     echouerEnRetard = false;
-    await new Promise((fin) => setTimeout(fin, 3000));
-    echecEnvoye = true;
+    await echecLibere;
     await route.fulfill({ status: 500, json: { error: 'Indisponible' } });
     echecServi = true;
   });
@@ -343,18 +354,17 @@ test('l’échec d’un chargement dépassé n’affiche pas d’erreur', async 
   await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
   await envoyer('patch', `/users/${conducteur.id}/actif`, { actif: false });
   echouerEnRetard = true;
-  // Refus : sa relecture échouera dans 3 s. L'ouverture suivante réussit et relit les listes.
+  // Refus : sa relecture est retenue, puis échouera. L'ouverture suivante réussit et relit les listes.
   await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
   await expect(admin.getByRole('alert').filter({ hasText: 'Conducteur responsable introuvable' })).toBeVisible();
   await admin.getByLabel('Responsable du chantier').selectOption(remplacant.id);
   await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
   await expect(admin.getByRole('status').filter({ hasText: `pour l’affaire ${devis.numero}` })).toBeVisible();
-  // La relecture récente est appliquée (devis converti retiré) avant l'échec dépassé : sinon, le
-  // test échoue ici plutôt que de passer sans rien vérifier.
+  // Le chargement récent est appliqué (devis converti retiré) : l'échec dépassé est libéré, et
+  // aucun bandeau ne doit s'afficher (attente bornée, pour un constat d'absence).
   await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
-  expect(echecEnvoye, 'la relecture récente doit précéder l’échec dépassé').toBe(false);
-  // L'échec dépassé arrive ensuite : aucun bandeau (attente bornée, pour un constat d'absence).
-  await expect.poll(() => echecServi, { timeout: 10_000 }).toBe(true);
+  libererEchec();
+  await expect.poll(() => echecServi).toBe(true);
   await admin.waitForTimeout(500);
   await expect(admin.getByText('n’ont pas pu être chargés')).toHaveCount(0);
 });

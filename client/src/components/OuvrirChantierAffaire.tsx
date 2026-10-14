@@ -92,6 +92,9 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
         // listes sont relues pour ne plus proposer ce qui ne peut plus servir ; un choix retiré
         // revient à vide, sans être remplacé.
         void charger();
+        // Un 409 signale un chantier déjà ouvert pour l'affaire (depuis l'écran Devis, par
+        // exemple) : la liste des chantiers est relue pour le montrer.
+        if (res.status === 409) onOuvert();
         return;
       }
       setResultat({ ok: true, texte: `Chantier « ${data.nom} » ouvert pour l’affaire ${data.numeroDevis}.`, chantierId: data.id });
