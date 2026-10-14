@@ -601,4 +601,12 @@ test('l’écran Devis ne donne le lien vers la fiche du chantier ouvert qu’à
   } finally {
     await contexte.close();
   }
+
+  // Le devis annulé emporte son chantier : la ligne ne le dit plus ouvert, et la fiche reste
+  // accessible à l'administration.
+  await envoyer('post', `/devis/${devis.id}/annulation`, { motif: 'Annulation E2E après ouverture' });
+  await admin.goto('/devis', { waitUntil: 'networkidle' });
+  await expect(ligneAdmin).toContainText('Chantier annulé avec le devis : voir la fiche');
+  await expect(ligneAdmin).not.toContainText('Chantier ouvert');
+  await expect(ligneAdmin.getByRole('link', { name: 'voir la fiche' })).toHaveAttribute('href', `/chantiers/${ouvert.id}`);
 });

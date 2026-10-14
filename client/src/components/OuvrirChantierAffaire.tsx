@@ -95,7 +95,7 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
         // Un 409 signale un conflit avec l'état de l'affaire : le plus souvent un chantier déjà
         // ouvert pour elle (devis converti ailleurs, autre version convertie, référence prise),
         // sinon une version plus récente du dossier. La liste des chantiers est relue pour montrer
-        // un chantier ouvert ailleurs.
+        // un chantier ouvert ailleurs (un chantier annulé n'y figure pas).
         if (res.status === 409) onOuvert();
         return;
       }
