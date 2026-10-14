@@ -3256,6 +3256,7 @@ if (!TEST_DATABASE_URL) {
           [{ responsableId: comptes.conducteur.id, commercialId: '' }, /toujours avoir un commercial rattaché/],
           [{ responsableId: comptes.conducteur.id, dateDebut: '31-02-2026' }, /date de début doit être valide/],
           [{ responsableId: comptes.conducteur.id, dateDebut: '' }, /date de début doit être valide/],
+          [{ responsableId: comptes.conducteur.id, dateDebut: null }, /date de début doit être valide/],
         ];
         for (const [corps, motif] of cas) {
           const refus = await ouvrir(devis.id, corps);

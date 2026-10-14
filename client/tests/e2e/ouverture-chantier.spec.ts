@@ -202,10 +202,12 @@ test('après une ouverture, le formulaire repart à vide pour l’affaire suivan
   const date = admin.getByLabel('Date de début');
   await expect(date).toHaveValue(/^\d{2}-\d{2}-\d{4}$/);
   const jourDeLaSociete = await date.inputValue();
+  // Une date saisie différente du jour, pour que sa remise au jour soit observable.
+  const autreJour = jourDeLaSociete === '05-10-2026' ? '06-10-2026' : '05-10-2026';
   await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
   await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
   await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
-  await date.fill('05-10-2026');
+  await date.fill(autreJour);
   await admin.getByRole('checkbox', { name: 'Vidéo' }).check();
   await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
   await expect(admin.getByRole('status').filter({ hasText: `pour l’affaire ${devis.numero}` })).toBeVisible();
@@ -231,6 +233,111 @@ test('sans réponse du serveur à l’ouverture, le message ne conclut pas', asy
   await expect(admin.getByRole('alert').filter({ hasText: 'L’ouverture du chantier n’a pas pu être confirmée : impossible de joindre le serveur.' })).toBeVisible();
   await expect(admin.getByLabel('Devis signé de l’affaire')).toHaveValue(devis.id);
   await expect(admin.getByLabel('Responsable du chantier')).toHaveValue(conducteur.id);
+});
+
+// La conversion aboutit côté serveur, mais sa réponse est perdue : le message ne conclut pas, le
+// devis converti disparaît du formulaire, son chantier apparaît dans la liste, et les choix
+// encore valides restent pour la suite.
+test('une ouverture dont la réponse est perdue retire le devis et montre le chantier', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { headers, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'reponse-perdue');
+  const admin = await allerSurPageAdmin('/admin');
+  let statutServeur = 0;
+  await admin.route(`**/api/devis/${devis.id}/convertir`, async (route) => {
+    const reponse = await route.fetch();
+    statutServeur = reponse.status();
+    await route.abort('failed');
+  });
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
+  await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
+  await admin.getByLabel('Date de début').fill('07-10-2026');
+  await admin.getByRole('checkbox', { name: 'Vidéo' }).check();
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('alert').filter({ hasText: 'L’ouverture du chantier n’a pas pu être confirmée' })).toBeVisible();
+  expect(statutServeur).toBe(201);
+  await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
+  await expect(admin.getByLabel('Devis signé de l’affaire')).toHaveValue('');
+  await expect(admin.getByLabel('Responsable du chantier')).toHaveValue(conducteur.id);
+  await expect(admin.getByLabel('Commercial rattaché')).toHaveValue(commercial.id);
+  await expect(admin.getByLabel('Date de début')).toHaveValue('07-10-2026');
+  await expect(admin.getByRole('checkbox', { name: 'Vidéo' })).toBeChecked();
+  await expect(admin.getByRole('link', { name: devis.objet })).toBeVisible();
+  const chantiers = await (await request.get(`${api}/chantiers`, { headers })).json() as { numeroDevis: string }[];
+  expect(chantiers.filter((c) => c.numeroDevis === devis.numero)).toHaveLength(1);
+});
+
+// Une relecture plus ancienne qui répond après une plus récente est ignorée : elle remettrait
+// dans la liste un devis converti entre-temps.
+test('une relecture dépassée ne remet pas un devis converti dans la liste', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { headers, envoyer, conducteur, remplacant, commercial, devis } = await preparer(request, session.token, creerClient, 'relecture-depassee');
+  const admin = await allerSurPageAdmin('/admin');
+  let retarder = false;
+  let relectureRetardeeServie = false;
+  await admin.route('**/api/devis/a-convertir', async (route) => {
+    if (!retarder) return route.continue();
+    retarder = false;
+    const reponse = await route.fetch();
+    await new Promise((fin) => setTimeout(fin, 3000));
+    await route.fulfill({ response: reponse });
+    relectureRetardeeServie = true;
+  });
+  // Seconde tentative : le serveur convertit, mais la réponse est perdue.
+  await admin.route(`**/api/devis/${devis.id}/convertir`, async (route) => {
+    if ((route.request().postDataJSON() as { responsableId: string }).responsableId === conducteur.id) return route.continue();
+    await route.fetch();
+    await route.abort('failed');
+  });
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
+  await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
+  await envoyer('patch', `/users/${conducteur.id}/actif`, { actif: false });
+  retarder = true;
+  // Premier refus : sa relecture (devis encore proposé) est retenue 3 s.
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('alert').filter({ hasText: 'Conducteur responsable introuvable' })).toBeVisible();
+  await admin.getByLabel('Responsable du chantier').selectOption(remplacant.id);
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('alert').filter({ hasText: 'n’a pas pu être confirmée' })).toBeVisible();
+  await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
+  // La relecture dépassée arrive ensuite : le devis doit rester absent (attente bornée, pour un
+  // constat d'absence).
+  await expect.poll(() => relectureRetardeeServie, { timeout: 10_000 }).toBe(true);
+  await admin.waitForTimeout(500);
+  await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
+  const chantiers = await (await request.get(`${api}/chantiers`, { headers })).json() as { numeroDevis: string }[];
+  expect(chantiers.filter((c) => c.numeroDevis === devis.numero)).toHaveLength(1);
+});
+
+// Échec de lecture d'une des trois listes : message exact et aucun formulaire, puis « Réessayer »
+// le fait apparaître. États vides : aucun devis prêt, aucun conducteur actif.
+test('le formulaire d’ouverture signale un chargement en échec et ses listes vides', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { devis } = await preparer(request, session.token, creerClient, 'chargement');
+  const admin = await allerSurPageAdmin('/admin');
+  await expect(admin.getByLabel('Devis signé de l’affaire')).toBeVisible();
+
+  // La liste des devis à convertir n'est lue que par ce formulaire : elle échoue jusqu'à
+  // « Réessayer » (le chargement peut être lancé deux fois au montage, en développement).
+  let enEchec = true;
+  await admin.route('**/api/devis/a-convertir', (route) => (enEchec ? route.fulfill({ status: 500, json: { error: 'Indisponible' } }) : route.continue()));
+  await admin.reload();
+  const bandeau = admin.getByRole('alert').filter({ hasText: 'Les devis, conducteurs ou commerciaux n’ont pas pu être chargés.' });
+  await expect(bandeau).toBeVisible();
+  await expect(admin.getByLabel('Devis signé de l’affaire')).toHaveCount(0);
+  enEchec = false;
+  await bandeau.getByRole('button', { name: 'Réessayer' }).click();
+  await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(1);
+  await expect(bandeau).toHaveCount(0);
+  await admin.unroute('**/api/devis/a-convertir');
+
+  await admin.route('**/api/conducteurs', (route) => route.fulfill({ json: [] }));
+  await admin.reload();
+  await expect(admin.getByText('Aucun conducteur actif : créez ou réactivez un compte conducteur')).toBeVisible();
+  await admin.unroute('**/api/conducteurs');
+
+  await admin.route('**/api/devis/a-convertir', (route) => route.fulfill({ json: [] }));
+  await admin.reload();
+  await expect(admin.getByText('Aucun devis signé n’attend l’ouverture de son chantier.')).toBeVisible();
+  await expect(admin.getByLabel('Devis signé de l’affaire')).toHaveCount(0);
 });
 
 // Formulaires voisins de l'Administration : un ajout refusé (nom déjà pris) est signalé, et la

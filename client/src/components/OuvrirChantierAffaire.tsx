@@ -104,10 +104,11 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
       void charger();
       onOuvert();
     } catch {
-      // Sans réponse, le chantier a pu être ouvert : on ne l'affirme ni ne le nie, et la liste est
-      // relue pour retirer le devis s'il a bien été converti.
-      setResultat({ ok: false, texte: 'L’ouverture du chantier n’a pas pu être confirmée : impossible de joindre le serveur.' });
+      // Sans réponse, le chantier a pu être ouvert : on ne l'affirme ni ne le nie. Les devis et la
+      // liste des chantiers sont relus : le devis converti disparaît et son chantier apparaît.
+      setResultat({ ok: false, texte: 'L’ouverture du chantier n’a pas pu être confirmée : impossible de joindre le serveur. Vérifiez la liste des chantiers avant de réessayer.' });
       void charger();
+      onOuvert();
     } finally {
       setEnvoi(false);
     }
