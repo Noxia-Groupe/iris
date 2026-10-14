@@ -24,7 +24,9 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
   const [erreurChargement, setErreurChargement] = useState(false);
   const [devisId, setDevisId] = useState('');
   // Listes contrôlées, comme le devis : relues après un refus, elles ne doivent jamais remplacer
-  // en silence un compte choisi puis désactivé par le premier de la liste (règle de sélection HTML).
+  // en silence un compte choisi puis désactivé par le premier de la liste. Le contrôle seul n'y
+  // suffit pas (une valeur absente de la liste fait afficher la première option active) : c'est
+  // la remise à vide dans `charger` qui protège.
   const [responsableId, setResponsableId] = useState('');
   const [commercialId, setCommercialId] = useState('');
   const [dateDebut, setDateDebut] = useState(() => companyDateInputValue(fuseau));
@@ -102,7 +104,10 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
       void charger();
       onOuvert();
     } catch {
-      setResultat({ ok: false, texte: 'Impossible de joindre le serveur.' });
+      // Sans réponse, le chantier a pu être ouvert : on ne l'affirme ni ne le nie, et la liste est
+      // relue pour retirer le devis s'il a bien été converti.
+      setResultat({ ok: false, texte: 'L’ouverture du chantier n’a pas pu être confirmée : impossible de joindre le serveur.' });
+      void charger();
     } finally {
       setEnvoi(false);
     }
@@ -124,7 +129,7 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
       )}
       {erreurChargement && (
         <div role="alert" className="mb-4 p-3 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm">
-          Les devis à convertir n’ont pas pu être chargés.{' '}
+          Les devis, conducteurs ou commerciaux n’ont pas pu être chargés.{' '}
           <button type="button" className="font-semibold underline" onClick={() => void charger()}>Réessayer</button>
         </div>
       )}

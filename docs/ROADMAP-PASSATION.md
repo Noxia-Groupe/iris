@@ -135,6 +135,7 @@ La phase est **livrée techniquement** lorsque ses sous-lots définis sont fusio
   - au départ d'un conducteur, faut-il une réattribution groupée de ses chantiers en cours (par exemple au moment de désactiver son compte) ?
   - le titulaire, le commercial, les types et la date de début ne se fixent à l'ouverture que par l'administration : faut-il l'ouvrir à d'autres porteurs du droit devis ?
   - sans conducteur actif, le formulaire d'Administration le signale et ne permet pas d'ouvrir le chantier ; le serveur accepterait pourtant une ouverture sans titulaire (comme depuis l'écran Devis). Faut-il la permettre depuis le formulaire ?
+  - le commercial est exigé, quand il est envoyé, dès qu'il existe un compte commercial, même désactivé (règle déjà présente sur la fiche). Sans commercial actif, le formulaire ouvre donc le chantier sans commercial, mais l'API refuse un commercial vide. L'obligation doit-elle ne compter que les commerciaux actifs ?
 - Conversion des devis vers les autres cibles : flux autorisés, statuts et données transférées.
 - Règles des profils de commission (fait générateur, paliers, hiérarchie et validation des montants).
 - Politique de maintenance automatique : événement déclencheur, anticipation des échéances et responsabilités en cas d'échec, sans polling IA permanent.

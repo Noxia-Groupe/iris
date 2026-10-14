@@ -33,7 +33,7 @@ async function preparer(request: APIRequestContext, token: string, creerClient: 
   const client = await creerClient(`ouverture-${cle}`, false);
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Ouverture ${cle} E2E ${suffixe}`, lignes: [
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 50, tauxTva: 20 },
-  ] }) as { id: string; numero: string; objet: string };
+  ] }) as { id: string; numero: string; objet: string; clientId: string };
   await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
   await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
   return { headers, envoyer, conducteur, remplacant, commercial, devis };
@@ -160,6 +160,77 @@ test('un conducteur désactivé pendant le formulaire n’est remplacé par aucu
   expect(conversions).toEqual([400]);
   const chantiers = await (await request.get(`${api}/chantiers`, { headers })).json() as { numeroDevis: string }[];
   expect(chantiers.filter((c) => c.numeroDevis === devis.numero)).toHaveLength(0);
+});
+
+// Même règle pour le commercial : désactivé pendant le formulaire, il n'est remplacé par aucun
+// autre commercial resté actif ; le responsable, toujours valide, est conservé.
+test('un commercial désactivé pendant le formulaire n’est remplacé par aucun autre', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { headers, envoyer, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'commercial-desactive');
+  const autreCommercial = await envoyer('post', '/users', { email: `ouverture.commercial-desactive.autre.${Date.now()}@iris.test`, name: `Autre commercial actif ${Date.now()}`, role: 'COMMERCIAL' }) as Compte;
+  const admin = await allerSurPageAdmin('/admin');
+  const conversions: number[] = [];
+  admin.on('response', (r) => { if (r.url().endsWith(`/api/devis/${devis.id}/convertir`)) conversions.push(r.status()); });
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
+  const listeCommercial = admin.getByLabel('Commercial rattaché');
+  await listeCommercial.selectOption(commercial.id);
+  await envoyer('patch', `/users/${commercial.id}/actif`, { actif: false });
+
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('alert').filter({ hasText: 'Commercial introuvable' })).toBeVisible();
+  await expect(listeCommercial.locator(`option[value="${commercial.id}"]`)).toHaveCount(0);
+  await expect(listeCommercial.locator(`option[value="${autreCommercial.id}"]`)).toHaveCount(1);
+  await expect(listeCommercial).toHaveValue('');
+  await expect(admin.getByLabel('Responsable du chantier')).toHaveValue(conducteur.id);
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  expect(await listeCommercial.evaluate((el: HTMLSelectElement) => el.validity.valueMissing)).toBe(true);
+  await admin.waitForLoadState('networkidle');
+  expect(conversions).toEqual([400]);
+  const chantiers = await (await request.get(`${api}/chantiers`, { headers })).json() as { numeroDevis: string }[];
+  expect(chantiers.filter((c) => c.numeroDevis === devis.numero)).toHaveLength(0);
+});
+
+// Après une ouverture réussie, le formulaire repart à vide pour l'affaire suivante : devis,
+// responsable, commercial et types vidés, date revenue au jour de la société.
+test('après une ouverture, le formulaire repart à vide pour l’affaire suivante', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { envoyer, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'remise-a-zero');
+  // Un second devis prêt garde le formulaire affiché après la première ouverture.
+  const second = await envoyer('post', '/devis', { clientId: devis.clientId, objet: `Seconde affaire E2E ${Date.now()}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }) as { id: string };
+  await envoyer('put', `/devis/${second.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${second.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const admin = await allerSurPageAdmin('/admin');
+  const date = admin.getByLabel('Date de début');
+  await expect(date).toHaveValue(/^\d{2}-\d{2}-\d{4}$/);
+  const jourDeLaSociete = await date.inputValue();
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
+  await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
+  await date.fill('05-10-2026');
+  await admin.getByRole('checkbox', { name: 'Vidéo' }).check();
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('status').filter({ hasText: `pour l’affaire ${devis.numero}` })).toBeVisible();
+
+  await expect(admin.getByLabel('Devis signé de l’affaire')).toHaveValue('');
+  await expect(admin.locator(`#ouverture-devis option[value="${second.id}"]`)).toHaveCount(1);
+  await expect(admin.getByLabel('Responsable du chantier')).toHaveValue('');
+  await expect(admin.getByLabel('Commercial rattaché')).toHaveValue('');
+  await expect(date).toHaveValue(jourDeLaSociete);
+  await expect(admin.getByRole('checkbox', { name: 'Vidéo' })).not.toBeChecked();
+});
+
+// Sans réponse à l'ouverture, le chantier a pu être ouvert : le message ne l'affirme ni ne le nie,
+// et la saisie reste pour réessayer.
+test('sans réponse du serveur à l’ouverture, le message ne conclut pas', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'ouverture-reseau');
+  const admin = await allerSurPageAdmin('/admin');
+  await admin.route(`**/api/devis/${devis.id}/convertir`, (route) => route.abort('failed'));
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
+  await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('alert').filter({ hasText: 'L’ouverture du chantier n’a pas pu être confirmée : impossible de joindre le serveur.' })).toBeVisible();
+  await expect(admin.getByLabel('Devis signé de l’affaire')).toHaveValue(devis.id);
+  await expect(admin.getByLabel('Responsable du chantier')).toHaveValue(conducteur.id);
 });
 
 // Formulaires voisins de l'Administration : un ajout refusé (nom déjà pris) est signalé, et la

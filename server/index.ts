@@ -5528,7 +5528,9 @@ async function ouvertureChantier(body: Record<string, unknown>): Promise<{ respo
     ouverture.commercialId = commercialId || null;
   }
   if ('types' in body) ouverture.types = sanitizeTypes(body.types);
-  if ('dateDebut' in body && body.dateDebut) {
+  // Une date présente mais vide est refusée, comme un titulaire vide : seule son absence laisse le
+  // chantier commencer le jour de la conversion.
+  if ('dateDebut' in body) {
     const dateDebut = dateIsoStricte(body.dateDebut);
     if (!dateDebut) throw new DevisSaisieError('La date de début doit être valide au format JJ-MM-AAAA.');
     ouverture.dateDebut = dateDebut;
