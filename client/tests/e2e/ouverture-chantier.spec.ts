@@ -133,6 +133,35 @@ test('l’ouverture d’un devis annulé entre-temps est refusée avec un messag
   await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
 });
 
+// Le conducteur choisi est désactivé pendant le formulaire (départ, par exemple) : le refus
+// s'affiche, et la liste relue revient au choix vide au lieu de passer en silence au premier
+// conducteur restant. L'envoi suivant est bloqué tant qu'un conducteur n'est pas rechoisi.
+test('un conducteur désactivé pendant le formulaire n’est remplacé par aucun autre', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { headers, envoyer, conducteur, remplacant, commercial, devis } = await preparer(request, session.token, creerClient, 'desactive');
+  const admin = await allerSurPageAdmin('/admin');
+  const conversions: number[] = [];
+  admin.on('response', (r) => { if (r.url().endsWith(`/api/devis/${devis.id}/convertir`)) conversions.push(r.status()); });
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  const responsable = admin.getByLabel('Responsable du chantier');
+  await responsable.selectOption(conducteur.id);
+  await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
+  await envoyer('patch', `/users/${conducteur.id}/actif`, { actif: false });
+
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('alert').filter({ hasText: 'Conducteur responsable introuvable' })).toBeVisible();
+  await expect(responsable.locator(`option[value="${conducteur.id}"]`)).toHaveCount(0);
+  await expect(responsable.locator(`option[value="${remplacant.id}"]`)).toHaveCount(1);
+  await expect(responsable).toHaveValue('');
+  await expect(admin.getByLabel('Commercial rattaché')).toHaveValue(commercial.id);
+  // Sans conducteur rechoisi, le navigateur bloque l'envoi : aucune autre conversion.
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  expect(await responsable.evaluate((el: HTMLSelectElement) => el.validity.valueMissing)).toBe(true);
+  await admin.waitForLoadState('networkidle');
+  expect(conversions).toEqual([400]);
+  const chantiers = await (await request.get(`${api}/chantiers`, { headers })).json() as { numeroDevis: string }[];
+  expect(chantiers.filter((c) => c.numeroDevis === devis.numero)).toHaveLength(0);
+});
+
 // Formulaires voisins de l'Administration : un ajout refusé (nom déjà pris) est signalé, et la
 // saisie conservée pour être corrigée.
 test('un fournisseur déjà enregistré est refusé avec un message, sans vider la saisie', async ({ allerSurPageAdmin, request, session }) => {

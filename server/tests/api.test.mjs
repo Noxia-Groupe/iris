@@ -3152,8 +3152,9 @@ if (!TEST_DATABASE_URL) {
         const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST agent statut devis', scopes: ['devis:write'] });
         assert.equal(cle.status, 201, JSON.stringify(cle.body));
         const reponses = [
-          await request(app).put('/api/devis/devis-inexistant/statut').set(admin()).send({ statut: 'ENVOYE' }),
-          await request(app).put('/api/v1/devis/devis-inexistant/statut').set('Authorization', `Bearer ${cle.body.apiKey}`).send({ statut: 'ENVOYE' }),
+          // Statut invalide : le 404 passe avant la vérification de la transition.
+          await request(app).put('/api/devis/devis-inexistant/statut').set(admin()).send({ statut: 'INCONNU' }),
+          await request(app).put('/api/v1/devis/devis-inexistant/statut').set('Authorization', `Bearer ${cle.body.apiKey}`).send({ statut: 'INCONNU' }),
           await request(app).post('/api/devis/devis-inexistant/acompte').set(admin()).send({}),
         ];
         for (const reponse of reponses) {

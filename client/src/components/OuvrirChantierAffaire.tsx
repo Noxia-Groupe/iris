@@ -23,6 +23,10 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
   const [commerciaux, setCommerciaux] = useState<Compte[]>([]);
   const [erreurChargement, setErreurChargement] = useState(false);
   const [devisId, setDevisId] = useState('');
+  // Listes contrôlées, comme le devis : relues après un refus, elles ne doivent jamais remplacer
+  // en silence un compte choisi puis désactivé par le premier de la liste (règle de sélection HTML).
+  const [responsableId, setResponsableId] = useState('');
+  const [commercialId, setCommercialId] = useState('');
   const [dateDebut, setDateDebut] = useState(() => companyDateInputValue(fuseau));
   const dateSaisie = useRef(false);
   const [envoi, setEnvoi] = useState(false);
@@ -44,6 +48,9 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
       setErreurChargement(false);
       // Un devis converti entre-temps (depuis l'écran Devis, par exemple) n'est plus proposé.
       setDevisId((choisi) => (listeDevis.some((d: DevisAConvertir) => d.id === choisi) ? choisi : ''));
+      // Un compte désactivé entre-temps n'est plus proposé : le choix revient à vide, à refaire.
+      setResponsableId((choisi) => (listeConducteurs.some((c: Compte) => c.id === choisi) ? choisi : ''));
+      setCommercialId((choisi) => (listeCommerciaux.some((c: Compte) => c.id === choisi) ? choisi : ''));
     } catch {
       if (chargement === dernierChargement.current) setErreurChargement(true);
     }
@@ -79,14 +86,17 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setResultat({ ok: false, texte: data.error || 'Ouverture du chantier impossible.' });
-        // Devis converti, annulé ou remis en attente d'acompte entre-temps, compte désactivé : la
-        // liste est relue pour ne plus proposer ce qui ne peut plus ouvrir de chantier.
+        // Devis converti, annulé ou remis en attente d'acompte entre-temps, compte désactivé : les
+        // listes sont relues pour ne plus proposer ce qui ne peut plus servir ; un choix retiré
+        // revient à vide, sans être remplacé.
         void charger();
         return;
       }
       setResultat({ ok: true, texte: `Chantier « ${data.nom} » ouvert pour l’affaire ${data.numeroDevis}.`, chantierId: data.id });
       formulaire.current?.reset();
       setDevisId('');
+      setResponsableId('');
+      setCommercialId('');
       dateSaisie.current = false;
       setDateDebut(companyDateInputValue(fuseau));
       void charger();
@@ -143,7 +153,7 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
           </div>
           <div className="form-group mb-0">
             <label className="form-label" htmlFor="ouverture-responsable">Responsable du chantier</label>
-            <select id="ouverture-responsable" required name="responsableId" className="form-input" defaultValue="" aria-describedby={conducteurs.length === 0 ? 'ouverture-sans-conducteur' : undefined}>
+            <select id="ouverture-responsable" required name="responsableId" className="form-input" value={responsableId} onChange={(e) => setResponsableId(e.target.value)} aria-describedby={conducteurs.length === 0 ? 'ouverture-sans-conducteur' : undefined}>
               <option value="" disabled>Sélectionner un conducteur…</option>
               {conducteurs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -155,7 +165,7 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
           </div>
           <div className="form-group mb-0">
             <label className="form-label" htmlFor="ouverture-commercial">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
-            <select id="ouverture-commercial" required={commerciaux.length > 0} disabled={commerciaux.length === 0} name="commercialId" className="form-input" defaultValue="">
+            <select id="ouverture-commercial" required={commerciaux.length > 0} disabled={commerciaux.length === 0} name="commercialId" className="form-input" value={commercialId} onChange={(e) => setCommercialId(e.target.value)}>
               <option value="" disabled>Sélectionner un commercial…</option>
               {commerciaux.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
