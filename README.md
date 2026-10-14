@@ -75,8 +75,10 @@ main-d'œuvre, totaux), ni taux horaires, ni alertes de dépassement, dans la li
 les journaux d'achats, d'heures et de saisies, le tableau de bord et la liste des
 intervenants. Il ne modifie pas l'affaire, n'en réattribue pas le commercial et ne la clôture
 pas : le serveur refuse avec un message explicite, et la fiche l'indique. La clôture d'une
-affaire revient à l'administration, à son responsable s'il n'est pas technicien et, pour
-l'affaire d'un technicien, aux responsables de sa branche (N+1 et au-dessus). Les droits
+affaire revient à l'administration, à son titulaire s'il n'est pas technicien et, pour
+l'affaire d'un technicien, aux comptes Responsable dont la branche le contient, à tout niveau.
+La décision la donne au N+1 et au-dessus : un conducteur N+1, qui ne voit pas l'affaire, ne la
+clôture pas aujourd'hui (question ouverte dans la passation). Les droits
 devis, saisie ou archivage Travaux et l'accès financier ne s'accordent pas à un technicien ;
 ceux d'un compte qui devient technicien restent enregistrés, mais sans effet :
 l'écran Utilisateurs les signale « Sans effet » et un super administrateur peut les retirer.
@@ -188,7 +190,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [ ] Phase 5 — **partielle** : devis versionnés, signature, acompte constaté, cycle de vie et conversion en chantier livrés ; cibles intervention/contrat/facture à cadrer et à réaliser. Sélection d'un client hors des 200 premiers livrée pour Devis (#114).
 - [ ] Suivi Travaux et commissionnement — **partiels** : sécurité, journaux, achats/heures et fiche chantier déjà présents ; suivi de rentabilité (alertes, marge estimée en fin de chantier) implémenté par #117, et adressé selon la chaîne hiérarchique et au profil Directeur depuis #121 ; ne pas recréer un écran fictif. Profils commerciaux versionnés et individualisés de l'issue #15 non livrés ; réévaluer les reliquats des issues #16 et #19 contre le code.
 - [ ] Phase 6 — **partielle** : SAV, rapports, planning et suivi chantier présents ; navigation utilisable sur téléphone depuis #118 ; parcours mobile technicien dédié et autres parcours terrain à qualifier.
-- [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire, clôture par les comptes Responsable de sa branche et l'administration — **implémenté** par #123 (extension de la clôture au conducteur N+1 posée en question) ; **prévus** : journal des paramètres et des droits réservé aux administrateurs, suivant dans l'ordre choisi, puis annuaire des clients pour le technicien et taux horaire réservé aux administrateurs, dont la place reste à confirmer (voir la passation).
+- [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire, clôture par son N+1 et au-dessus — **implémenté** par #123, la clôture pour les seuls comptes Responsable de sa branche et l'administration (écart pour un conducteur N+1, posé en question) ; **prévus** : journal des paramètres et des droits réservé aux administrateurs, suivant dans l'ordre choisi ; annuaire des clients pour le technicien et taux horaire réservé aux administrateurs, dont la place reste à confirmer (voir la passation).
 - [ ] Phase 7 — **partielle** : contrats cycliques et génération idempotente d'interventions à planifier depuis une action métier ; automatisation de l'échéance et ses règles de déclenchement à arbitrer.
 - [ ] Phase 8 — **partielle** : factures, avoirs, PDF, plan comptable paramétrable et export CSV déjà présents. La conformité de facturation électronique et l'adaptateur de plateforme restent à concevoir/valider. Requalifier les anciennes issues #31, #33 et #35 avant de coder leur reliquat.
 - [ ] Phase 9 — **future comme chaîne automatisée** : paiements, abonnements télécom, financeurs, banque et rapprochement ; un statut de règlement manuel n'est pas un module bancaire.
