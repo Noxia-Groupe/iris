@@ -900,3 +900,34 @@ test.describe('Facturation — parcours utilisateur', () => {
     });
   });
 });
+
+// Si les paramètres de la société ne se chargent pas, les dates restent vides et désactivées :
+// la création est refusée avec un message, sans envoi, plutôt que par une « date invalide ».
+test('sans le fuseau de la société, une facture n’est pas créée sans ses dates', async ({ creerClient, page, session }) => {
+  const client = await creerClient('Client fuseau indisponible');
+  await page.route('**/api/company', (route) => (route.request().method() === 'GET'
+    ? route.fulfill({ status: 500, json: { error: 'Paramètres indisponibles.' } })
+    : route.continue()));
+  let envois = 0;
+  page.on('request', (requete) => {
+    if (requete.method() === 'POST' && new URL(requete.url()).pathname === '/api/factures') envois += 1;
+  });
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [session.token, JSON.stringify(session.user)]);
+  await page.goto('/factures', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByText('Paramètres indisponibles.')).toBeVisible();
+  await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+  const emission = page.locator('input[name="dateEmission"]');
+  await expect(emission).toBeDisabled();
+  await expect(emission).toHaveAttribute('placeholder', 'Actualisez la liste');
+  await page.getByLabel('Rechercher un client').fill(client.raisonSociale);
+  await page.getByLabel('Client de la facture').selectOption({ label: client.raisonSociale });
+  await page.getByPlaceholder('Motif obligatoire').fill('Test du fuseau indisponible');
+  await page.getByLabel('Désignation ligne 1').fill('Prestation');
+  await page.getByLabel('Prix unitaire HT ligne 1').fill('100');
+  await page.getByRole('button', { name: /Créer le brouillon/ }).click();
+  await expect(page.getByText(/Les paramètres de la société ne sont pas chargés/)).toBeVisible();
+  expect(envois).toBe(0);
+});

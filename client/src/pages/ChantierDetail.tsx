@@ -206,30 +206,51 @@ const ChantierDetail = () => {
     if (!id) return;
     const formData = new FormData(e.target as HTMLFormElement);
     // Le commercial rattaché a sa propre route (/commercial) — pas dans la liste blanche
-    // de PATCH /chantiers/:id — on l'envoie donc à part, après les autres champs.
+    // de PATCH /chantiers/:id. Il part AVANT les autres champs, et seulement s'il change :
+    // un titulaire qui confie son chantier à un autre conducteur n'en est plus chargé une
+    // fois la fiche enregistrée, et le serveur lui refuserait alors le commercial
+    // (« Chantier introuvable ») alors que la réattribution est faite.
     const commercialId = String(formData.get('commercialId') || '');
     formData.delete('commercialId');
+    const responsableId = String(formData.get('responsableId') || '');
     // Case à cocher unique : absente de FormData quand décochée, on la force donc à
     // explicitement true/false pour que décocher l'enregistre bien (cf. 'types' ci-dessous).
     const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), baremeReduit: formData.get('baremeReduit') === 'true' };
     setSavingChantier(true);
+    // Le commercial, enregistré d'abord, le reste si la suite échoue : le message le dit.
+    let commercialEnregistre = false;
     try {
+      if (commercialId !== (chantier?.commercial?.id || '')) {
+        const commRes = await apiFetch(`/chantiers/${id}/commercial`, { method: 'PATCH', body: JSON.stringify({ commercialId: commercialId || null }) });
+        const d = await commRes.json().catch(() => ({}));
+        if (!commRes.ok) {
+          alert(d.error || "Erreur lors de l'affectation du commercial.");
+          return;
+        }
+        // Commercial enregistré : la fiche le reflète aussitôt, même si la suite est refusée.
+        // Pas de relecture complète ici : elle démonterait la fenêtre et effacerait la saisie.
+        setChantier((c: any) => (c ? { ...c, commercial: d.commercial ?? null } : c));
+        commercialEnregistre = true;
+      }
       const res = await apiFetch(`/chantiers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
       if (!res.ok) {
-        const d = await res.json();
-        alert(d.error || 'Erreur lors de la modification du chantier.');
-        return;
-      }
-      const commRes = await apiFetch(`/chantiers/${id}/commercial`, { method: 'PATCH', body: JSON.stringify({ commercialId: commercialId || null }) });
-      if (!commRes.ok) {
-        const d = await commRes.json();
-        alert(d.error || "Erreur lors de l'affectation du commercial.");
+        const d = await res.json().catch(() => ({}));
+        // La fenêtre reste ouverte avec la saisie, pour corriger le champ refusé.
+        const motif = d.error || 'Erreur lors de la modification du chantier.';
+        alert(commercialEnregistre ? `Le commercial a été enregistré, mais pas les autres modifications : ${motif}` : motif);
         return;
       }
       setEditingChantier(false);
+      // Un conducteur qui vient de confier son chantier à un autre n'y a plus accès : il
+      // retrouve sa liste au lieu d'une fiche « introuvable ».
+      if (!isAdminRole(userRole) && responsableId !== currentUser?.id) {
+        navigate('/chantiers');
+        return;
+      }
       fetchChantier();
     } catch (e) {
-      alert('Impossible de joindre le serveur.');
+      // Sans réponse, on ne sait pas si le reste de la fiche a été enregistré : on ne l'affirme pas.
+      alert(commercialEnregistre ? 'Le commercial a été enregistré ; l’enregistrement des autres modifications n’a pas pu être confirmé : impossible de joindre le serveur.' : 'Impossible de joindre le serveur.');
     } finally {
       setSavingChantier(false);
     }
@@ -1330,11 +1351,13 @@ const ChantierDetail = () => {
                 <label className="form-label">Responsable Chantier</label>
                 <select required name="responsableId" className="form-input" value={editResponsableId} onChange={(e) => setEditResponsableId(e.target.value)}>
                   <option value="" disabled>Sélectionner un conducteur...</option>
-                  {/* Si le responsable actuel a été désactivé, il ne figure plus dans la liste
-                      d'attribution : on l'y rajoute pour ne pas forcer une réaffectation à
-                      l'occasion d'une correction sans rapport (son historique lui reste). */}
+                  {/* Un titulaire absent de la liste d'attribution (compte désactivé au départ d'un
+                      conducteur, ou titulaire qui n'est pas conducteur) y est rajouté, pour ne pas
+                      forcer une réaffectation à l'occasion d'une correction sans rapport. Choisir
+                      un autre conducteur le remplace. La raison n'est pas connue ici : le libellé
+                      ne la présume pas. */}
                   {chantier.responsable && !conducteurs.some(c => c.id === chantier.responsable.id) && (
-                    <option value={chantier.responsable.id}>{chantier.responsable.name} (compte désactivé)</option>
+                    <option value={chantier.responsable.id}>{chantier.responsable.name} (hors des conducteurs actifs)</option>
                   )}
                   {conducteurs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
@@ -1344,7 +1367,7 @@ const ChantierDetail = () => {
                 <select required={commerciaux.length > 0} name="commercialId" className="form-input" value={editCommercialId} onChange={(e) => setEditCommercialId(e.target.value)}>
                   <option value="" disabled>Sélectionner un commercial...</option>
                   {chantier.commercial && !commerciaux.some(c => c.id === chantier.commercial.id) && (
-                    <option value={chantier.commercial.id}>{chantier.commercial.name} (compte désactivé)</option>
+                    <option value={chantier.commercial.id}>{chantier.commercial.name} (hors des commerciaux actifs)</option>
                   )}
                   {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>

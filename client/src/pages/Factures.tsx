@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Ban, CheckCircle2, Download, FilePlus2, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
+import { companyDateInputValue } from '../lib/dateFormatting';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
@@ -37,11 +38,6 @@ type Facture = {
 
 const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: '1', prixUnitaireHt: '', tauxTva: '20' });
 const nombreFr = (valeur: string): number | null => { const normalise = valeur.trim().replace(',', '.'); return /^\d+(\.\d+)?$/.test(normalise) ? Number(normalise) : null; };
-const dateFrancaiseDuJour = (fuseauHoraire: string) => {
-  const parties = new Intl.DateTimeFormat('en-CA', { timeZone: fuseauHoraire, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
-  const valeur = (type: Intl.DateTimeFormatPartTypes) => parties.find((partie) => partie.type === type)?.value || '';
-  return `${valeur('day')}-${valeur('month')}-${valeur('year')}`;
-};
 const formatDate = (date: string) => new Date(date).toLocaleDateString('fr-FR', { timeZone: 'UTC' }).replace(/\//g, '-');
 const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 // Même arithmétique que le serveur : chaque ligne est arrondie au centime avant
@@ -83,7 +79,9 @@ export default function Factures() {
   const [origine, setOrigine] = useState<Origine>('HORS_AFFAIRE');
   const [clientSelection, setClientSelection] = useState('');
   const [lignes, setLignes] = useState<Ligne[]>([nouvelleLigne()]);
-  const [fuseauHoraire, setFuseauHoraire] = useState('Europe/Paris');
+  // Fuseau de la société, lu avec la liste : tant qu'il n'est pas connu, les dates d'émission et
+  // d'échéance ne sont pas préremplies (un jour d'Europe/Paris par défaut serait faux ailleurs).
+  const [fuseauHoraire, setFuseauHoraire] = useState<string | null>(null);
   const [factureAvoir, setFactureAvoir] = useState<Facture | null>(null);
   const [lignesAvoir, setLignesAvoir] = useState<Ligne[]>([nouvelleLigne()]);
   const [factureTraceId, setFactureTraceId] = useState<string | null>(null);
@@ -273,6 +271,9 @@ export default function Factures() {
     event.preventDefault();
     setErreur('');
     setSucces('');
+    // Champs de date désactivés tant que le fuseau n'est pas lu (chargement en échec, par exemple) :
+    // le formulaire les omettrait, et le serveur ne refuserait qu'une « date invalide ».
+    if (!fuseauHoraire) return setErreur('Les paramètres de la société ne sont pas chargés : actualisez la liste avant de créer la facture, ses dates suivent le jour de la société.');
     const form = new FormData(event.currentTarget);
     const lignesConverties = lignes.map((ligne) => ({ ...ligne, quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
     const fautive = lignesConverties.findIndex((ligne) => ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.tauxTva === null || ligne.tauxTva > 100);
@@ -446,8 +447,10 @@ export default function Factures() {
               {resultatsClients?.length === 200 && !rechercheEnCours && !erreurRechercheClient && <p role="status" aria-label="Limite des résultats clients" className="text-sm">200 clients maximum affichés ; veuillez affiner votre recherche.</p>}
               {resultatsClients?.length === 0 && !rechercheEnCours && !erreurRechercheClient && <p role="status" className="text-sm">Aucun client actif trouvé.</p>}
             </div>
-            <input required name="dateEmission" defaultValue={dateFrancaiseDuJour(fuseauHoraire)} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Émission (JJ-MM-AAAA)" />
-            <input required name="dateEcheance" defaultValue={dateFrancaiseDuJour(fuseauHoraire)} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Échéance (JJ-MM-AAAA)" />
+            {/* Préremplies au jour de la société une fois son fuseau connu : la clé remonte les champs
+                à son arrivée, quand le formulaire a été ouvert avant (ils restent désactivés d'ici là). */}
+            <input key={`emission-${fuseauHoraire ?? ''}`} required name="dateEmission" disabled={!fuseauHoraire} defaultValue={fuseauHoraire ? companyDateInputValue(fuseauHoraire) : ''} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder={fuseauHoraire ? 'Émission (JJ-MM-AAAA)' : erreurListe ? 'Actualisez la liste' : 'Chargement…'} aria-label="Date d’émission" />
+            <input key={`echeance-${fuseauHoraire ?? ''}`} required name="dateEcheance" disabled={!fuseauHoraire} defaultValue={fuseauHoraire ? companyDateInputValue(fuseauHoraire) : ''} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder={fuseauHoraire ? 'Échéance (JJ-MM-AAAA)' : erreurListe ? 'Actualisez la liste' : 'Chargement…'} aria-label="Date d’échéance" />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <select name="origine" className="form-input" value={origine} onChange={(e) => setOrigine(e.target.value as Origine)}>
