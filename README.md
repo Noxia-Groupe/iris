@@ -88,7 +88,7 @@ montants) et l'historique des chantiers sans montant. Aujourd'hui, seul un droit
 enregistré sur son compte (déjà présent, ou accordé par un super administrateur par l'API, que
 l'écran Utilisateurs ne propose pas) lui donne l'annuaire (contacts et sites), par l'API seulement,
 le menu Clients étant réservé aux administrateurs ; le retrait de son
-droit devis le conserve ; un lot prévu le lui donnera par défaut, avec un menu, une fiche client en consultation
+droit devis conserve ce `clients:read` ; un lot prévu lui donnera `clients:read` par défaut, avec un menu, une fiche client en consultation
 seule et l'historique des chantiers sans montant.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
@@ -200,7 +200,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [ ] Phase 11 — **partielle** : paramètres Entra et secours d'instance existants ; installation guidée et secours plateforme distinct non démontrés.
 - [ ] Phase 12 — **préparée, non validée** : Compose, migrations et CI existent ; recette, isolation SQL, sauvegarde/restauration, validations client et décision de mise en service restent requises.
 
-**Prochains découpages candidats, à ordonner avec Nelson :** les lots décidés restants (journal des paramètres et des droits, annuaire des clients pour le technicien, taux horaire réservé aux administrateurs), achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, adapter au téléphone les en-têtes des écrans encore serrés, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
+**Prochains découpages candidats, à ordonner avec Nelson :** livrer les lots décidés restants (journal des paramètres et des droits, annuaire des clients pour le technicien, taux horaire réservé aux administrateurs), achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, adapter au téléphone les en-têtes des écrans encore serrés, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
 
 ## Tests
 
