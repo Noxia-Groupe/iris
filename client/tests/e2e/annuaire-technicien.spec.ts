@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
-import type { Browser } from '@playwright/test';
-import { test, expect, dateDuJour } from './fixtures';
+import type { Browser, Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
@@ -13,6 +13,16 @@ function jetonPour(userId: string) {
 }
 
 type Compte = { id: string; name: string; email: string; role: string };
+
+// Jour civil JJ-MM-AAAA d'un instant dans un fuseau donné.
+function jourDans(fuseau: string, instant: Date = new Date()) {
+  const parties = new Intl.DateTimeFormat('en-GB', { timeZone: fuseau, day: '2-digit', month: '2-digit', year: 'numeric' }).formatToParts(instant);
+  const valeur = (type: string) => parties.find((partie) => partie.type === type)!.value;
+  return `${valeur('day')}-${valeur('month')}-${valeur('year')}`;
+}
+
+// Laisse au navigateur le temps de traiter une réponse déjà reçue (rendu React planifié).
+const laisserRendre = (page: Page) => page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)));
 
 async function pageDe(browser: Browser, compte: Compte) {
   const contexte = await browser.newContext();
@@ -27,8 +37,10 @@ async function pageDe(browser: Browser, compte: Compte) {
 // Décision de Nelson (13-10-2026) : le technicien consulte l'annuaire des clients, leurs contacts
 // et leurs sites, par exemple pour retrouver une adresse, et l'historique des chantiers, sans
 // montant ; il ne modifie rien et ne voit ni devis ni prix.
-test('un technicien consulte l’annuaire des clients et l’historique de ses chantiers, sans montant ni modification', async ({ creerClient, request, session, browser, allerSurPageAdmin }) => {
+test('un technicien consulte l’annuaire des clients et l’historique de ses chantiers, sans montant ni modification', async ({ creerClient, request, session, browser, allerSurPageAdmin, apiAdmin }) => {
   test.slow();
+  const { fuseauHoraire } = await (await apiAdmin.get('/company')).json() as { fuseauHoraire?: string };
+  const fuseau = fuseauHoraire || 'Europe/Paris';
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'post' | 'patch' | 'put', path: string, data: object) => {
     const response = await request[methode](`${api}${path}`, { headers, data });
@@ -45,7 +57,10 @@ test('un technicien consulte l’annuaire des clients et l’historique de ses c
   ] });
   await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
   await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  // Jour de la conversion, encadré : minuit peut tomber pendant l'appel.
+  const jourAvant = jourDans(fuseau);
   const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  const jourApres = jourDans(fuseau);
   const contextes: { close: () => Promise<void> }[] = [];
   try {
     await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: technicien.id });
@@ -85,8 +100,8 @@ test('un technicien consulte l’annuaire des clients et l’historique de ses c
     const historique = fiche.getByRole('region', { name: 'Historique des chantiers' });
     await expect(historique.getByRole('link', { name: chantier.nom })).toBeVisible();
     await expect(historique).toContainText('En cours');
-    // Début : jour civil de la conversion dans le fuseau de l'entreprise (Europe/Paris en E2E).
-    await expect(historique).toContainText(`Début : ${dateDuJour()}`);
+    // Début : jour civil de la conversion dans le fuseau de l'entreprise.
+    await expect(historique).toContainText(new RegExp(`Début : (${jourAvant}|${jourApres})`));
     await expect(fiche).not.toContainText('€');
     await expect(fiche).not.toContainText(/4[\s\u202f\u00a0]?321[,.]87/);
     expect(refus, 'requêtes refusées dans l’annuaire').toEqual([]);
@@ -123,3 +138,53 @@ test('fiche client : un historique en échec est signalé dans sa section, sans 
   await expect(historique.getByRole('alert')).toHaveText('L’historique des chantiers n’a pas pu être chargé. Rechargez la page pour réessayer.');
   await expect(fiche.getByRole('button', { name: 'Ajouter le contact' })).toBeVisible();
 });
+
+// Les dates de l'historique sont des jours civils de l'entreprise : un instant (début d'un chantier
+// converti) est lu dans son fuseau, une date-seule (minuit UTC) telle quelle. L'historique est
+// intercepté pour placer l'instant là où le jour de l'entreprise et le jour UTC diffèrent.
+test('fiche client : les dates de l’historique sont lues au jour civil de l’entreprise', async ({ creerClient, page, allerSurPageAdmin, apiAdmin }) => {
+  const { fuseauHoraire } = await (await apiAdmin.get('/company')).json() as { fuseauHoraire?: string };
+  const fuseau = fuseauHoraire || 'Europe/Paris';
+  const instant = ['2026-10-14T22:30:00.000Z', '2026-10-14T01:30:00.000Z']
+    .find((iso) => jourDans(fuseau, new Date(iso)) !== jourDans('UTC', new Date(iso)));
+  expect(instant, `le fuseau ${fuseau} doit différer d'UTC pour ce test`).toBeTruthy();
+  const client = await creerClient('annuaire-jour-civil');
+  await page.route('**/api/clients/*/chantiers', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+    { id: 'converti', nom: 'Chantier converti de nuit', adresse: null, statut: 'EN_COURS', dateDebut: instant, dateFin: null },
+    { id: 'corrige', nom: 'Chantier aux dates saisies', adresse: null, statut: 'TERMINE', dateDebut: '2026-03-02T00:00:00.000Z', dateFin: '2026-04-30T00:00:00.000Z' },
+  ]) }));
+  const historique = (await allerSurPageAdmin(`/clients/${client.id}`)).locator('main').getByRole('region', { name: 'Historique des chantiers' });
+  await expect(historique.getByRole('listitem').filter({ hasText: 'Chantier converti de nuit' })).toContainText(`Début : ${jourDans(fuseau, new Date(instant!))}`);
+  await expect(historique.getByRole('listitem').filter({ hasText: 'Chantier aux dates saisies' })).toContainText('Début : 02-03-2026 · Fin : 30-04-2026');
+});
+
+// Un rôle mémorisé périmé (administrateur, alors que le serveur répond technicien) ne laisse ni
+// erreur ni parc sur la fiche : le chargement fait sous l'ancien rôle est ignoré, et l'erreur
+// qu'il a pu produire est effacée par le chargement suivant.
+for (const retarde of ['/api/me', '/api/clients/*/equipements']) {
+  test(`fiche client : un rôle mémorisé périmé ne laisse ni erreur ni parc (${retarde} retardé)`, async ({ creerClient, request, session, browser }) => {
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const creation = await request.post(`${api}/users`, { headers, data: { email: `annuaire.perime.${Date.now()}@iris.test`, name: `Technicien périmé ${Date.now()}`, role: 'TECHNICIEN' } });
+    expect(creation.ok(), await creation.text()).toBeTruthy();
+    const technicien = await creation.json() as Compte;
+    const client = await creerClient('annuaire-role-perime');
+    const vue = await pageDe(browser, { ...technicien, role: 'ADMIN' });
+    try {
+      await vue.route(`**${retarde}`, async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await route.continue();
+      });
+      const reponseRetardee = vue.waitForResponse((r) => new RegExp(retarde.replace('*', '[^/]+') + '$').test(new URL(r.url()).pathname));
+      await vue.goto(`/clients/${client.id}`);
+      await reponseRetardee;
+      const fiche = vue.locator('main');
+      await expect(fiche.getByRole('note')).toContainText('Consultation seule');
+      await laisserRendre(vue);
+      await expect(fiche.locator('p.text-red-600')).toHaveCount(0);
+      await expect(fiche.getByRole('heading', { name: 'Parc d’équipements installés' })).toHaveCount(0);
+      await expect(fiche.getByRole('heading', { name: client.raisonSociale })).toBeVisible();
+    } finally {
+      await vue.context().close();
+    }
+  });
+}
