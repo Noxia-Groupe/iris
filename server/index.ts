@@ -469,14 +469,16 @@ function chantierSansMontants(c: any) {
 
 const REFUS_TECHNICIEN_MODIFICATION = 'Un compte technicien n’est pas autorisé à modifier une affaire. Adressez-vous à votre responsable.';
 const REFUS_TECHNICIEN_COMMERCIAL = 'Un compte technicien n’est pas autorisé à réattribuer le commercial d’une affaire. Adressez-vous à votre responsable.';
-const REFUS_TECHNICIEN_CLOTURE = 'Un compte technicien n’est pas autorisé à clôturer une affaire : la clôture revient à son responsable hiérarchique (N+1) ou au-dessus.';
+const REFUS_TECHNICIEN_CLOTURE = 'Un compte technicien n’est pas autorisé à clôturer une affaire : la clôture revient à un compte Responsable de sa branche, à la direction ou à l’administration.';
 
-// Clôture d'une affaire en cours : l'administration ; son responsable s'il n'est pas technicien ;
-// et, pour l'affaire d'un technicien, les responsables de sa branche (N+1 et au-dessus).
+// Clôture d'une affaire en cours : l'administration et les directeurs, sur tout chantier
+// (décision de Nelson du 14-10-2026) ; son responsable s'il n'est pas technicien (un conducteur
+// clôture l'affaire dont il est chargé) ; et, pour l'affaire d'un technicien, les comptes
+// Responsable dont la branche le contient.
 function peutCloturerChantier(user: AuthRequest['user'], chantier: { responsableId: string | null; responsableRole?: string | null }): boolean {
   if (!user) return false;
-  if (isAdminRole(user.role)) return true;
-  if (user.role === 'COMMERCIAL' || user.role === ROLE_DIRECTEUR || user.role === ROLE_TECHNICIEN) return false;
+  if (isAdminRole(user.role) || user.role === ROLE_DIRECTEUR) return true;
+  if (user.role === 'COMMERCIAL' || user.role === ROLE_TECHNICIEN) return false;
   if (chantier.responsableId === user.id) return true;
   return user.role === ROLE_RESPONSABLE && !!chantier.responsableId
     && chantier.responsableRole === ROLE_TECHNICIEN && user.equipeIds.includes(chantier.responsableId);
@@ -529,7 +531,7 @@ const blockCommercial: express.RequestHandler = (req, res, next) => {
     return;
   }
   if (role === ROLE_DIRECTEUR) {
-    res.status(403).json({ error: 'Accès non autorisé pour un compte directeur : il consulte les chantiers sans les modifier.' });
+    res.status(403).json({ error: 'Accès non autorisé pour un compte directeur.' });
     return;
   }
   next();
@@ -3166,7 +3168,8 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
 
 // Clôture / réouverture d'un chantier. Un conducteur peut clôturer (uniquement
 // clôturer, uniquement ses propres chantiers en cours) : une fois TERMINE, il ne
-// peut plus y ajouter d'heures ou de dépenses (cf. POST /achats et /heures).
+// peut plus y ajouter d'heures ou de dépenses (cf. POST /achats et /heures). Un
+// directeur clôture tout chantier en cours (décision de Nelson du 14-10-2026).
 // Seul un admin peut réouvrir un chantier clôturé (repasser en EN_COURS).
 // Un chantier ne se supprime plus, et ne s'archive pas non plus par lui-même.
 //
@@ -3183,7 +3186,18 @@ app.delete('/api/chantiers/:id', requireAuth, requireAdmin, (_req, res) => {
   res.status(410).json({ error: 'Un chantier ne se supprime pas : annulez le devis dont il est issu (une note explicative est exigée).' });
 });
 
-app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req, res) => {
+// Sur un chantier, la clôture est le seul geste d'écriture du directeur (décision de Nelson
+// du 14-10-2026) : cette route n'exclut que le commercial. Rouvrir reste réservé à
+// l'administration.
+const blockCommercialSeulement: express.RequestHandler = (req, res, next) => {
+  if ((req as AuthRequest).user?.role === 'COMMERCIAL') {
+    res.status(403).json({ error: 'Accès non autorisé pour un compte commercial.' });
+    return;
+  }
+  next();
+};
+
+app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercialSeulement, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
     const isAdmin = isAdminRole(authUser.role);
@@ -3193,9 +3207,10 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercial, async (req,
     }
 
     const chantier = await prisma.chantier.findUnique({ where: { id: paramId(req) }, include: { responsable: { select: { role: true } } } });
-    const estN1OuAuDessus = !!chantier && peutCloturerChantier(authUser, { responsableId: chantier.responsableId, responsableRole: chantier.responsable?.role })
+    // Clôture par un tiers au chantier : directeur, ou compte Responsable de la branche d'un technicien.
+    const clotureParUnTiers = !!chantier && peutCloturerChantier(authUser, { responsableId: chantier.responsableId, responsableRole: chantier.responsable?.role })
       && chantier.responsableId !== authUser.id;
-    if (!chantier || (!isAdmin && chantier.responsableId !== authUser.id && !estN1OuAuDessus)) {
+    if (!chantier || (!isAdmin && chantier.responsableId !== authUser.id && !clotureParUnTiers)) {
       return res.status(404).json({ error: 'Chantier introuvable' });
     }
     if (authUser.role === ROLE_TECHNICIEN) {
@@ -3241,8 +3256,10 @@ app.patch('/api/chantiers/:id/commercial', requireAuth, blockCommercial, async (
     if (!chantier) {
       return res.status(404).json({ error: 'Chantier introuvable' });
     }
+    // Hors de son périmètre, le chantier n'existe pas pour lui : 404, comme pour la
+    // modification de la fiche, et non 403, qui en révélerait l'existence.
     if (!isAdmin && chantier.responsableId !== authUser.id) {
-      return res.status(403).json({ error: 'Action non autorisée' });
+      return res.status(404).json({ error: 'Chantier introuvable' });
     }
     if (authUser.role === ROLE_TECHNICIEN) {
       return res.status(403).json({ error: REFUS_TECHNICIEN_COMMERCIAL });
@@ -4818,9 +4835,15 @@ function clientRecherche(q: string) {
   };
 }
 
+// Un technicien ne consulte que les clients actifs : les fiches désactivées lui sont fermées,
+// en liste comme à l'unité (décision de Nelson du 14-10-2026).
+function clientsActifsSeulement(req: express.Request): boolean {
+  return !(req as ApiRequest).apiKey && (req as AuthRequest).user?.role === ROLE_TECHNICIEN;
+}
+
 const listerClients: express.RequestHandler = async (req, res) => {
   const q = String(req.query.q ?? '').trim();
-  const actif = req.query.actif === 'false' ? false : true;
+  const actif = req.query.actif === 'false' && !clientsActifsSeulement(req) ? false : true;
   try {
     const clients = await prisma.client.findMany({
       where: { actif, ...clientRecherche(q) },
@@ -4837,7 +4860,7 @@ const listerClients: express.RequestHandler = async (req, res) => {
 const lireClient: express.RequestHandler = async (req, res) => {
   try {
     const client = await prisma.client.findUnique({ where: { id: paramId(req) }, include: clientDetailInclude });
-    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    if (!client || (!client.actif && clientsActifsSeulement(req))) return res.status(404).json({ error: 'Client introuvable.' });
     res.json(client);
   } catch (error) {
     clientApiError(res, error);
@@ -5046,8 +5069,8 @@ routeMixte('post', '/clients/:clientId/equipements/:id/archiver', 'equipements:w
 const CHANTIER_HISTORIQUE_CLIENT_SELECT = { id: true, nom: true, adresse: true, statut: true, dateDebut: true, dateFin: true } as const;
 app.get('/api/clients/:id/chantiers', requireAuth, requirePermission('clients:read'), requirePermission('chantiers:read'), async (req, res) => {
   try {
-    const client = await prisma.client.findUnique({ where: { id: paramId(req) }, select: { id: true } });
-    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+    const client = await prisma.client.findUnique({ where: { id: paramId(req) }, select: { id: true, actif: true } });
+    if (!client || (!client.actif && clientsActifsSeulement(req))) return res.status(404).json({ error: 'Client introuvable.' });
     res.json(await prisma.chantier.findMany({
       where: { clientId: client.id, ...perimetreChantiers(req) },
       select: CHANTIER_HISTORIQUE_CLIENT_SELECT,

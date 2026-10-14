@@ -74,7 +74,8 @@ export function peutVoirStatistiques(user?: CurrentUser | null): boolean {
 
 /**
  * Comptes exclus des écrans opérationnels (planning, administration, saisies) : le
- * commercial, qui a son propre résultat, et le directeur, qui consulte sans modifier.
+ * commercial, qui a son propre résultat, et le directeur, qui consulte sans modifier (hors la
+ * clôture d'un chantier en cours, depuis la liste des chantiers).
  * Même règle que blockCommercial côté serveur.
  */
 export function estExcluDesOperations(role?: string | null): boolean {

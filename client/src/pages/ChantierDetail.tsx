@@ -621,7 +621,8 @@ const ChantierDetail = () => {
         {estTechnicien && (
           <div role="note" data-consultation-seule className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <strong>Consultation seule.</strong> Un compte technicien n’est pas autorisé à modifier une affaire, à en
-            réattribuer le commercial ni à la clôturer. Pour toute modification, adressez-vous à votre responsable (N+1).
+            réattribuer le commercial ni à la clôturer. Pour toute modification, adressez-vous à votre responsable (N+1) ;
+            la clôture revient à un compte Responsable de votre branche, à la direction ou à l’administration.
           </div>
         )}
 
