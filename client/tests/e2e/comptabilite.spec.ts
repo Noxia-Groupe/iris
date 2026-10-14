@@ -367,7 +367,9 @@ test('deux sessions : le formulaire périmé reçoit 409 sans écraser la premi�
 
 test('nature liée à une règle refusée et dialogue conservé pour corriger la saisie', async ({ allerSurPageAdmin, apiAdmin }) => {
   const page = await allerSurPageAdmin('/comptabilite');
-  const ligne = page.locator('tbody tr', { hasText: '706000' });
+  // Ligne du seul compte 706000 : un code créé par un autre test peut commencer par 706000
+  // (code horodaté), et une recherche par sous-chaîne trouverait alors deux lignes.
+  const ligne = page.locator('tbody tr').filter({ has: page.getByRole('cell', { name: '706000', exact: true }) });
   await ligne.getByRole('button', { name: 'Modifier' }).click();
   const dialogue = page.getByRole('dialog', { name: 'Modifier le compte' });
   const libelle = await dialogue.getByLabel('Libellé').inputValue();
@@ -419,7 +421,9 @@ test('confirme la désactivation d’un compte, le retire des choix et permet sa
 
 test('refuse la désactivation d’un compte encore lié à une règle et explique le remappage', async ({ allerSurPageAdmin }) => {
   const page = await allerSurPageAdmin('/comptabilite');
-  const ligne = page.locator('tbody tr', { hasText: '706000' });
+  // Ligne du seul compte 706000 : un code créé par un autre test peut commencer par 706000
+  // (code horodaté), et une recherche par sous-chaîne trouverait alors deux lignes.
+  const ligne = page.locator('tbody tr').filter({ has: page.getByRole('cell', { name: '706000', exact: true }) });
   await expect(ligne).toContainText('Actif');
   await ligne.getByRole('button', { name: 'Désactiver' }).click();
   const dialogue = page.getByRole('dialog', { name: 'Motif du changement de statut' });
