@@ -196,6 +196,14 @@ test('un refus de la fiche garde la saisie, et le commercial déjà enregistré 
   const appelsCommercial: string[] = [];
   admin.on('request', (r) => { if (r.url().endsWith(`/api/chantiers/${ouvert.id}/commercial`)) appelsCommercial.push(r.method()); });
   await admin.getByRole('button', { name: 'Modifier' }).first().click();
+  // Premier refus, commercial inchangé : le motif seul, et seule la fiche est envoyée.
+  await admin.locator('input[name="numeroDevis"]').fill(autreDevis.numero);
+  let premiereAlerte = '';
+  admin.once('dialog', (dialogue) => { premiereAlerte = dialogue.message(); void dialogue.accept(); });
+  await admin.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+  await expect.poll(() => premiereAlerte).toContain('déjà rattaché à un autre chantier');
+  expect(premiereAlerte).not.toMatch(/commercial/i);
+  expect(appelsCommercial).toEqual([]);
   const nouveauNom = `Nom corrigé E2E ${suffixe}`;
   await admin.locator('input[name="nom"]').fill(nouveauNom);
   await admin.locator('select[name="commercialId"]').selectOption(autreCommercial.id);
@@ -229,4 +237,51 @@ test('un refus de la fiche garde la saisie, et le commercial déjà enregistré 
   expect(final.nom).toBe(nouveauNom);
   expect(final.commercial.id).toBe(autreCommercial.id);
   expect(final.numeroDevis).toBe(relu.numeroDevis);
+});
+
+// Le commercial enregistré, la fiche n'obtient pas de réponse : le message dit que le commercial
+// l'est, sans affirmer ni nier l'enregistrement du reste, et la fenêtre garde la saisie.
+test('sans réponse du serveur après l’enregistrement du commercial, le message le dit', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { headers, envoyer, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'reseau');
+  const autreCommercial = await envoyer('post', '/users', { email: `ouverture.reseau.autre.${Date.now()}@iris.test`, name: `Autre commercial réseau ${Date.now()}`, role: 'COMMERCIAL' }) as Compte;
+  const ouvert = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER', responsableId: conducteur.id, commercialId: commercial.id }) as { id: string; nom: string };
+  const admin = await allerSurPageAdmin(`/chantiers/${ouvert.id}`);
+  await admin.route(`**/api/chantiers/${ouvert.id}`, (route) => (route.request().method() === 'PATCH' ? route.abort('failed') : route.continue()));
+  await admin.getByRole('button', { name: 'Modifier' }).first().click();
+  await admin.locator('input[name="nom"]').fill(`Nom sans réponse ${Date.now()}`);
+  await admin.locator('select[name="commercialId"]').selectOption(autreCommercial.id);
+  let alerte = '';
+  admin.once('dialog', (dialogue) => { alerte = dialogue.message(); void dialogue.accept(); });
+  await admin.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+  await expect.poll(() => alerte).toBe('Le commercial a été enregistré ; l’enregistrement des autres modifications n’a pas pu être confirmé : impossible de joindre le serveur.');
+  await expect(admin.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
+  const relu = await (await request.get(`${api}/chantiers/${ouvert.id}`, { headers })).json() as { nom: string; commercial: Compte };
+  expect(relu.commercial.id).toBe(autreCommercial.id);
+  expect(relu.nom).toBe(ouvert.nom);
+});
+
+// Écran Devis : un devis converti mène à la fiche de son chantier pour l'administration ; un autre
+// porteur du droit devis (ici un commercial) lit « Chantier ouvert. », sans lien vers une fiche
+// qu'il ne peut pas forcément consulter.
+test('l’écran Devis ne donne le lien vers la fiche du chantier ouvert qu’à l’administration', async ({ allerSurPageAdmin, browser, creerClient, request, session }) => {
+  const { envoyer, devis, commercial } = await preparer(request, session.token, creerClient, 'lien-devis');
+  const ouvert = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  const admin = await allerSurPageAdmin('/devis');
+  const ligneAdmin = admin.locator('li', { hasText: devis.numero });
+  await expect(ligneAdmin.getByRole('link', { name: 'voir la fiche' })).toHaveAttribute('href', `/chantiers/${ouvert.id}`);
+
+  const contexte = await browser.newContext();
+  try {
+    const page = await contexte.newPage();
+    await page.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token as string);
+      localStorage.setItem('user', user as string);
+    }, [jetonPour(commercial.id), JSON.stringify({ ...commercial, role: 'COMMERCIAL', permissions: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'] })]);
+    await page.goto('/devis', { waitUntil: 'networkidle' });
+    const ligne = page.locator('li', { hasText: devis.numero });
+    await expect(ligne).toContainText('Chantier ouvert.');
+    await expect(ligne.getByRole('link', { name: 'voir la fiche' })).toHaveCount(0);
+  } finally {
+    await contexte.close();
+  }
 });

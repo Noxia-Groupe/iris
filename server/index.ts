@@ -5539,6 +5539,11 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   }
   const ouverture = await ouvertureChantier(body);
   const resultat = await prisma.$transaction(async tx => {
+    // Verrou du devis, comme pour ses autres écritures : deux conversions simultanées du même
+    // devis passent l'une après l'autre, et la seconde lit la conversion de la première (« déjà
+    // converti ») au lieu de tomber, selon le moment, sur le contrôle du dossier ou de la référence
+    // avec un message inexact. La contrainte unique du dossier reste le filet (P2002 → 409).
+    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, signature: true, lignes: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
     if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé : il ne peut plus ouvrir de chantier.');

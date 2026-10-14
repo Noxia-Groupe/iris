@@ -249,7 +249,8 @@ const ChantierDetail = () => {
       }
       fetchChantier();
     } catch (e) {
-      alert(commercialEnregistre ? 'Le commercial a été enregistré, mais pas les autres modifications : impossible de joindre le serveur.' : 'Impossible de joindre le serveur.');
+      // Sans réponse, on ne sait pas si le reste de la fiche a été enregistré : on ne l'affirme pas.
+      alert(commercialEnregistre ? 'Le commercial a été enregistré ; l’enregistrement des autres modifications n’a pas pu être confirmé : impossible de joindre le serveur.' : 'Impossible de joindre le serveur.');
     } finally {
       setSavingChantier(false);
     }

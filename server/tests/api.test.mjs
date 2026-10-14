@@ -3226,6 +3226,13 @@ if (!TEST_DATABASE_URL) {
         const acompte = await request(app).post(`/api/devis/${avecAcompte.id}/acompte`).set(admin()).send({ recuLe: '01-10-2026', montant: 60, reference: 'TEST-VIR-OUVERTURE' });
         assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
         assert.ok((await aConvertir()).some((d) => d.id === avecAcompte.id));
+        // Une révision brouillon abandonnée (annulée sans conversion) rend la version précédente à
+        // nouveau la dernière non annulée : elle est proposée, comme la conversion l'accepte.
+        const abandon = await request(app).post(`/api/devis/${revision.body.id}/annulation`).set(admin()).send({ motif: 'TEST révision abandonnée' });
+        assert.equal(abandon.status, 200, JSON.stringify(abandon.body));
+        assert.ok((await aConvertir()).some((d) => d.id === revise.id), 'la version précédente redevient proposée');
+        const conversionRevise = await convertir(revise.id);
+        assert.equal(conversionRevise.status, 201, JSON.stringify(conversionRevise.body));
         // Liste réservée à qui peut convertir.
         assert.equal((await request(app).get('/api/devis/a-convertir').set(entete('conducteur'))).status, 403);
         assert.equal((await request(app).get('/api/v1/devis/a-convertir').set('Authorization', `Bearer ${cleApi}`)).status, 404);

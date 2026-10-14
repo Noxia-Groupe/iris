@@ -271,6 +271,9 @@ export default function Factures() {
     event.preventDefault();
     setErreur('');
     setSucces('');
+    // Champs de date désactivés tant que le fuseau n'est pas lu (chargement en échec, par exemple) :
+    // le formulaire les omettrait, et le serveur ne refuserait qu'une « date invalide ».
+    if (!fuseauHoraire) return setErreur('Les paramètres de la société ne sont pas chargés : actualisez la liste avant de créer la facture, ses dates suivent le jour de la société.');
     const form = new FormData(event.currentTarget);
     const lignesConverties = lignes.map((ligne) => ({ ...ligne, quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
     const fautive = lignesConverties.findIndex((ligne) => ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.tauxTva === null || ligne.tauxTva > 100);
@@ -446,8 +449,8 @@ export default function Factures() {
             </div>
             {/* Préremplies au jour de la société une fois son fuseau connu : la clé remonte les champs
                 à son arrivée, quand le formulaire a été ouvert avant (ils restent désactivés d'ici là). */}
-            <input key={`emission-${fuseauHoraire ?? ''}`} required name="dateEmission" disabled={!fuseauHoraire} defaultValue={fuseauHoraire ? companyDateInputValue(fuseauHoraire) : ''} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder={fuseauHoraire ? 'Émission (JJ-MM-AAAA)' : 'Chargement…'} aria-label="Date d’émission" />
-            <input key={`echeance-${fuseauHoraire ?? ''}`} required name="dateEcheance" disabled={!fuseauHoraire} defaultValue={fuseauHoraire ? companyDateInputValue(fuseauHoraire) : ''} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder={fuseauHoraire ? 'Échéance (JJ-MM-AAAA)' : 'Chargement…'} aria-label="Date d’échéance" />
+            <input key={`emission-${fuseauHoraire ?? ''}`} required name="dateEmission" disabled={!fuseauHoraire} defaultValue={fuseauHoraire ? companyDateInputValue(fuseauHoraire) : ''} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder={fuseauHoraire ? 'Émission (JJ-MM-AAAA)' : erreurListe ? 'Actualisez la liste' : 'Chargement…'} aria-label="Date d’émission" />
+            <input key={`echeance-${fuseauHoraire ?? ''}`} required name="dateEcheance" disabled={!fuseauHoraire} defaultValue={fuseauHoraire ? companyDateInputValue(fuseauHoraire) : ''} pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder={fuseauHoraire ? 'Échéance (JJ-MM-AAAA)' : erreurListe ? 'Actualisez la liste' : 'Chargement…'} aria-label="Date d’échéance" />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <select name="origine" className="form-input" value={origine} onChange={(e) => setOrigine(e.target.value as Origine)}>
