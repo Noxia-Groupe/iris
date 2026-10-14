@@ -79,6 +79,7 @@ Les constats relevés pendant les audits et la CI de #123 à #128 sont devenus l
 - Formulaire « Créer un nouveau chantier » (lot (f), corrigé par #129) : il postait vers `POST /api/chantiers`, qui répond 410, et sa réponse était ignorée.
 - Titulaire non conducteur (lot (f)) : la fiche chantier ne propose que les conducteurs actifs (`GET /api/conducteurs`) ; un tel titulaire s'affichait « (compte désactivé) », et s'affiche depuis #129 « (hors des conducteurs actifs) ». Son attribution depuis l'interface reste une question.
 - Réattribution par le titulaire (lot (f), relevé par l'audit de #128, corrigé par #129) : la fiche enregistrait le commercial après la réattribution, quand le chantier n'était plus le sien ; l'alerte qui suivait était trompeuse.
+- Références d'affaire regroupées (lot (f), relevé par le second audit de #129) : la référence se compare à l'identique, si bien qu'un chantier dont la référence en regroupe plusieurs (« A26-0001 / A26-0002 ») ne bloquerait pas la conversion de ces devis. Sans objet selon Nelson (14-10-2026) : l'application n'est pas en service et ne contient aucune donnée à reprendre.
 - « Socket hang up » (lot (g)) : une occurrence en CI E2E de #123.
 
 ## Ordre de travail proposé — à confirmer par Nelson
