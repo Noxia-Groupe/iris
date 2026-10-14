@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 import { isAdminRole } from '../roles';
-import { useCompanyTimezone } from '../companyTimezoneContext';
+import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 
 const Achats = () => {
   const companyTimezone = useCompanyTimezone();
+  // Date du jour préremplie une fois le fuseau de la société lu ; sinon, elle reste à saisir.
+  const fuseauConnu = useFuseauSocieteConnu();
   const [achats, setAchats] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -61,7 +63,7 @@ const Achats = () => {
         <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4 items-start sm:items-end flex-wrap">
           <div className="form-group mb-0 w-full sm:w-auto" style={{flex: '1 1 150px'}}>
             <label className="form-label">Date de facture</label>
-            <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" name="date" key={companyTimezone} defaultValue={companyDateInputValue(companyTimezone)} placeholder="JJ-MM-AAAA" className="form-input" />
+            <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" name="date" key={`${companyTimezone}-${fuseauConnu}`} defaultValue={fuseauConnu ? companyDateInputValue(companyTimezone) : ''} placeholder="JJ-MM-AAAA" className="form-input" />
           </div>
           <div className="form-group mb-0" style={{flex: '1 1 200px'}}>
             <label className="form-label">Fournisseur</label>

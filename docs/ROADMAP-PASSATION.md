@@ -64,6 +64,7 @@ Le catalogue et le plan comptable commencent vides et sont paramétrés par la s
   - planning d'administration et planning public : semaine, jour surligné et heure de mise à jour au fuseau de la société (la réponse publique fournit ce jour et ce fuseau, sans session) ;
   - nouvelle facture : dates préremplies une fois le fuseau de la société connu, jamais au jour d'Europe/Paris par défaut, et création refusée avec un message si les paramètres de la société ne se chargent pas — livré par avance dans #129, dont la CI a de nouveau rencontré cette course (relevée aussi par celle de #127 et #128) ;
   - horodatages de la signature d'un devis et de l'historique des règles comptables, date d'archivage du tableau de bord, début de chantier de « Résultat commercial » ;
+  - achats, heures, contrats de maintenance et ouverture d'un chantier : la date du jour n'est préremplie qu'une fois le fuseau de la société lu ; s'il ne peut pas l'être, elle reste à saisir, au lieu du jour d'Europe/Paris (relevé par le septième audit de #129) ;
   - serveur : statistiques par type de chantier au jour civil de son début ; dates d'équipement lues en `JJ-MM-AAAA`.
 
   Points restants tranchés par Nelson le 14-10-2026 :

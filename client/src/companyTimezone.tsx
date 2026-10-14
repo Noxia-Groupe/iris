@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { apiFetch } from './api';
-import { CompanyTimezoneContext, DEFAULT_COMPANY_TIME_ZONE, SocieteContext } from './companyTimezoneContext';
+import { CompanyTimezoneConnuContext, CompanyTimezoneContext, DEFAULT_COMPANY_TIME_ZONE, SocieteContext } from './companyTimezoneContext';
 import { lireNomSocieteEnCache, memoriserNomSociete } from './lib/cacheSociete';
 
 type CompanySettingsLus = { fuseauHoraire?: string | null; nomCommercial?: string | null; raisonSociale?: string | null };
@@ -12,6 +12,8 @@ type CompanySettingsLus = { fuseauHoraire?: string | null; nomCommercial?: strin
  */
 export function CompanyTimezoneProvider({ children }: { children: ReactNode }) {
   const [timezone, setTimezone] = useState(DEFAULT_COMPANY_TIME_ZONE);
+  // Fuseau effectivement lu (et non le défaut) : condition pour préremplir une date du jour.
+  const [connu, setConnu] = useState(false);
   const [nom, setNom] = useState(lireNomSocieteEnCache);
   const [version, setVersion] = useState(0);
   const rafraichir = useCallback(() => setVersion((v) => v + 1), []);
@@ -24,6 +26,7 @@ export function CompanyTimezoneProvider({ children }: { children: ReactNode }) {
         const settings = await response.json() as CompanySettingsLus;
         if (cancelled) return;
         if (settings.fuseauHoraire) setTimezone(settings.fuseauHoraire);
+        setConnu(true);
         const nomSociete = (settings.nomCommercial || settings.raisonSociale || '').trim();
         setNom(nomSociete);
         memoriserNomSociete(nomSociete);
@@ -38,7 +41,9 @@ export function CompanyTimezoneProvider({ children }: { children: ReactNode }) {
 
   return (
     <CompanyTimezoneContext value={timezone}>
-      <SocieteContext value={societe}>{children}</SocieteContext>
+      <CompanyTimezoneConnuContext value={connu}>
+        <SocieteContext value={societe}>{children}</SocieteContext>
+      </CompanyTimezoneConnuContext>
     </CompanyTimezoneContext>
   );
 }

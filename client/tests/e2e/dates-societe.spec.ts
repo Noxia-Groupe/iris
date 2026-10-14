@@ -163,3 +163,20 @@ test.describe('navigateur à Gambier, société à Wallis', () => {
     });
   });
 });
+
+// Fuseau de la société illisible : aucune date du jour n'est préremplie (ce serait le jour
+// d'Europe/Paris, fuseau par défaut), elle reste à saisir.
+test('sans le fuseau de la société, les dates du jour ne sont pas préremplies', async ({ page, session }) => {
+  await page.route('**/api/company', (route) => (route.request().method() === 'GET'
+    ? route.fulfill({ status: 500, json: { error: 'Paramètres indisponibles.' } })
+    : route.continue()));
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [session.token, JSON.stringify(session.user)]);
+  await page.goto('/admin', { waitUntil: 'networkidle' });
+  await expect(page.getByRole('heading', { name: 'Ouvrir le chantier d’une affaire' })).toBeVisible();
+  await expect(page.getByLabel('Date de début')).toHaveValue('');
+  await page.goto('/heures', { waitUntil: 'networkidle' });
+  await expect(page.locator('input[name="date"]')).toHaveValue('');
+});
