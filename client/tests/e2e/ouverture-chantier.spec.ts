@@ -239,7 +239,12 @@ test('sans réponse du serveur à l’ouverture, le message ne conclut pas', asy
 // devis converti disparaît du formulaire, son chantier apparaît dans la liste, et les choix
 // encore valides restent pour la suite.
 test('une ouverture dont la réponse est perdue retire le devis et montre le chantier', async ({ allerSurPageAdmin, creerClient, request, session }) => {
-  const { headers, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'reponse-perdue');
+  const { headers, envoyer, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'reponse-perdue');
+  // Un second devis prêt garde le formulaire affiché une fois le premier converti, quel que soit
+  // l'état de la base laissé par les autres tests.
+  const second = await envoyer('post', '/devis', { clientId: devis.clientId, objet: `Seconde affaire réponse perdue ${Date.now()}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }) as { id: string };
+  await envoyer('put', `/devis/${second.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${second.id}/signature`, { signataire: 'Client E2E', confirme: true });
   const admin = await allerSurPageAdmin('/admin');
   let statutServeur = 0;
   await admin.route(`**/api/devis/${devis.id}/convertir`, async (route) => {
@@ -253,8 +258,9 @@ test('une ouverture dont la réponse est perdue retire le devis et montre le cha
   await admin.getByLabel('Date de début').fill('07-10-2026');
   await admin.getByRole('checkbox', { name: 'Vidéo' }).check();
   await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
-  await expect(admin.getByRole('alert').filter({ hasText: 'L’ouverture du chantier n’a pas pu être confirmée' })).toBeVisible();
+  await expect(admin.getByRole('alert').filter({ hasText: 'L’ouverture du chantier n’a pas pu être confirmée' })).toHaveText('L’ouverture du chantier n’a pas pu être confirmée : impossible de joindre le serveur. Vérifiez la liste des chantiers avant de réessayer.');
   expect(statutServeur).toBe(201);
+  await expect(admin.locator(`#ouverture-devis option[value="${second.id}"]`)).toHaveCount(1);
   await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
   await expect(admin.getByLabel('Devis signé de l’affaire')).toHaveValue('');
   await expect(admin.getByLabel('Responsable du chantier')).toHaveValue(conducteur.id);
@@ -306,6 +312,56 @@ test('une relecture dépassée ne remet pas un devis converti dans la liste', as
   await expect(admin.locator(`#ouverture-devis option[value="${devis.id}"]`)).toHaveCount(0);
   const chantiers = await (await request.get(`${api}/chantiers`, { headers })).json() as { numeroDevis: string }[];
   expect(chantiers.filter((c) => c.numeroDevis === devis.numero)).toHaveLength(1);
+});
+
+// Un chargement plus ancien qui échoue après qu'un plus récent a réussi n'affiche pas de bandeau
+// d'erreur au-dessus de listes à jour.
+test('l’échec d’un chargement dépassé n’affiche pas d’erreur', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { envoyer, conducteur, remplacant, commercial, devis } = await preparer(request, session.token, creerClient, 'echec-depasse');
+  const admin = await allerSurPageAdmin('/admin');
+  let echouerEnRetard = false;
+  let echecServi = false;
+  await admin.route('**/api/devis/a-convertir', async (route) => {
+    if (!echouerEnRetard) return route.continue();
+    echouerEnRetard = false;
+    await new Promise((fin) => setTimeout(fin, 3000));
+    await route.fulfill({ status: 500, json: { error: 'Indisponible' } });
+    echecServi = true;
+  });
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
+  await admin.getByLabel('Commercial rattaché').selectOption(commercial.id);
+  await envoyer('patch', `/users/${conducteur.id}/actif`, { actif: false });
+  echouerEnRetard = true;
+  // Refus : sa relecture échouera dans 3 s. L'ouverture suivante réussit et relit les listes.
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('alert').filter({ hasText: 'Conducteur responsable introuvable' })).toBeVisible();
+  await admin.getByLabel('Responsable du chantier').selectOption(remplacant.id);
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  await expect(admin.getByRole('status').filter({ hasText: `pour l’affaire ${devis.numero}` })).toBeVisible();
+  // L'échec dépassé arrive ensuite : aucun bandeau (attente bornée, pour un constat d'absence).
+  await expect.poll(() => echecServi, { timeout: 10_000 }).toBe(true);
+  await admin.waitForTimeout(500);
+  await expect(admin.getByText('n’ont pas pu être chargés')).toHaveCount(0);
+});
+
+// Sans aucun commercial actif, la liste est désactivée et le chantier s'ouvre sans commercial,
+// sans envoyer de commercial vide, que le serveur refuserait (comportement de la question 8).
+test('sans commercial actif, le formulaire ouvre le chantier sans commercial', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const { headers, conducteur, devis } = await preparer(request, session.token, creerClient, 'sans-commercial');
+  const admin = await allerSurPageAdmin('/admin');
+  await admin.route('**/api/commerciaux', (route) => route.fulfill({ json: [] }));
+  await admin.reload();
+  await expect(admin.getByLabel('Commercial rattaché (aucun disponible)')).toBeDisabled();
+  await admin.getByLabel('Devis signé de l’affaire').selectOption(devis.id);
+  await admin.getByLabel('Responsable du chantier').selectOption(conducteur.id);
+  const ouverture = admin.waitForResponse((r) => r.url().endsWith(`/api/devis/${devis.id}/convertir`));
+  await admin.getByRole('button', { name: 'Ouvrir le chantier' }).click();
+  const reponse = await ouverture;
+  expect(reponse.status(), await reponse.text()).toBe(201);
+  expect(Object.keys(reponse.request().postDataJSON() as object)).not.toContain('commercialId');
+  const fiche = await (await request.get(`${api}/chantiers/${(await reponse.json() as { id: string }).id}`, { headers })).json() as { commercial: unknown };
+  expect(fiche.commercial).toBeNull();
 });
 
 // Échec de lecture d'une des trois listes : message exact et aucun formulaire, puis « Réessayer »
