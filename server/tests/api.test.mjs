@@ -2407,6 +2407,27 @@ if (!TEST_DATABASE_URL) {
       assert.equal(parc.body[0].garantieJusquAu.slice(0, 10), '2028-09-01');
     });
 
+    // Date métier au format français : « 01-10-2026 » est le 1er octobre, en date-seule. `new Date`
+    // la lisait comme le 10 janvier, à minuit du fuseau du serveur.
+    test('lit une date d’installation JJ-MM-AAAA comme un jour civil', async () => {
+      const creation = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
+        .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE', installeLe: '01-10-2026', garantieJusquAu: '31-12-2028' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.equal(creation.body.installeLe, '2026-10-01T00:00:00.000Z');
+      assert.equal(creation.body.garantieJusquAu, '2028-12-31T00:00:00.000Z');
+      const invalide = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
+        .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-2', installeLe: '31-02-2026' });
+      assert.equal(invalide.status, 400, JSON.stringify(invalide.body));
+      // Une date-heure reçue par l'API retient la date telle qu'elle est écrite, sans tenir
+      // compte de l'heure ni du décalage (décision de Nelson du 14-10-2026).
+      const horodatee = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
+        .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-3', installeLe: '2026-10-01T23:30:00-10:00', garantieJusquAu: '2028-12-31T22:30:00Z' });
+      assert.equal(horodatee.status, 201, JSON.stringify(horodatee.body));
+      assert.equal(horodatee.body.installeLe, '2026-10-01T00:00:00.000Z');
+      assert.equal(horodatee.body.garantieJusquAu, '2028-12-31T00:00:00.000Z');
+      await prisma.equipementInstalle.deleteMany({ where: { id: { in: [creation.body.id, horodatee.body.id] } } });
+    });
+
     test('refuse un équipement rattaché au site d’un autre client', async () => {
       const autre = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
         .send({ raisonSociale: 'TEST Autre client parc' });
@@ -3078,6 +3099,25 @@ if (!TEST_DATABASE_URL) {
         assert.equal(doublon.status, 409, JSON.stringify(doublon.body));
         assert.match(doublon.body.error, /déjà été converti/);
         assert.equal(await prisma.chantier.count({ where: { numeroDevis: devis.numero } }), 1);
+      });
+
+      // Décision de Nelson (14-10-2026) : le début d'un chantier ouvert sans date choisie est le
+      // jour civil de la société, en date-seule. Le fuseau est choisi pour que ce jour diffère de
+      // celui d'UTC (Wallis l'après-midi UTC, Tahiti le matin ; entre 10 h et 12 h UTC, aucun
+      // fuseau français ne change de jour, et le test vérifie Wallis sans écart).
+      test('une conversion sans date de début pose le jour civil de la société', async () => {
+        const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        const fuseau = ['Pacific/Wallis', 'Pacific/Tahiti'].find((f) => jourDans(f) !== jourDans('UTC')) ?? 'Pacific/Wallis';
+        const fuseauInitial = (await request(app).get('/api/company').set(admin())).body.fuseauHoraire;
+        try {
+          assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: fuseau })).status, 200);
+          const devis = await devisAccepte('TEST Ouverture jour de la société');
+          const ouvert = await convertir(devis.id);
+          assert.equal(ouvert.status, 201, JSON.stringify(ouvert.body));
+          assert.equal(ouvert.body.dateDebut, `${jourDans(fuseau)}T00:00:00.000Z`);
+        } finally {
+          await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        }
       });
 
       test('deux ouvertures simultanées du même devis n’ouvrent qu’un chantier', async () => {
@@ -7647,6 +7687,73 @@ if (!TEST_DATABASE_URL) {
         await prisma.chantier.delete({ where: { id: chantier.id } });
         await prisma.intervenant.delete({ where: { id: intervenant.id } });
         await prisma.user.delete({ where: { id: conducteur.id } });
+      }
+    });
+
+    // Décision de Nelson (14-10-2026) : toutes les dates suivent la société, où que se trouve le
+    // lecteur. La page publique n'a pas de session : le serveur lui donne le jour, la semaine et
+    // le fuseau de la société. Le fuseau est choisi, parmi ceux qu'accepte la société, pour que
+    // son jour diffère de celui d'UTC (Wallis l'après-midi UTC, Tahiti le matin ; entre 10 h et
+    // 12 h UTC, aucun fuseau français ne change de jour, et le test vérifie Wallis sans écart).
+    test('le planning public donne le jour, la semaine et le fuseau de la société', async () => {
+      const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      const fuseau = ['Pacific/Wallis', 'Pacific/Tahiti'].find((f) => jourDans(f) !== jourDans('UTC')) ?? 'Pacific/Wallis';
+      const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+      const partageInitial = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
+      const token = `test-planning-public-${Date.now()}`;
+      try {
+        assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
+        await prisma.planningPublicShare.upsert({ where: { id: 'singleton' }, update: { token, active: true }, create: { id: 'singleton', token, active: true } });
+        const aujourdhui = jourDans(fuseau);
+        const jourSemaine = new Date(`${aujourdhui}T00:00:00Z`).getUTCDay();
+        const lundi = new Date(Date.parse(`${aujourdhui}T00:00:00Z`) + (jourSemaine === 0 ? -6 : 1 - jourSemaine) * 86400000).toISOString().slice(0, 10);
+        const dimanche = new Date(Date.parse(`${lundi}T00:00:00Z`) + 6 * 86400000).toISOString().slice(0, 10);
+
+        const semaine = await request(app).get(`/api/planning/public/${token}`);
+        assert.equal(semaine.status, 200, JSON.stringify(semaine.body));
+        assert.equal(semaine.body.fuseauHoraire, fuseau);
+        assert.equal(semaine.body.aujourdhui, aujourdhui, 'le jour de la société, et non celui d’UTC');
+        assert.deepEqual([semaine.body.debut, semaine.body.fin], [lundi, dimanche], 'sans plage, la semaine du jour de la société');
+
+        const plage = await request(app).get(`/api/planning/public/${token}`).query({ start: '2026-03-02', end: '2026-03-08' });
+        assert.equal(plage.status, 200, JSON.stringify(plage.body));
+        assert.deepEqual([plage.body.debut, plage.body.fin, plage.body.aujourdhui], ['2026-03-02', '2026-03-08', aujourdhui]);
+        assert.equal((await request(app).get(`/api/planning/public/${token}`).query({ start: '2026-03-02' })).status, 400, 'une plage incomplète reste refusée');
+      } finally {
+        await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        if (partageInitial) await prisma.planningPublicShare.update({ where: { id: 'singleton' }, data: { token: partageInitial.token, active: partageInitial.active } });
+        else await prisma.planningPublicShare.deleteMany({ where: { id: 'singleton' } });
+      }
+    });
+
+    // Un chantier converti commence à un instant, une fiche corrigée à une date-seule : chacun
+    // compte au jour civil de la société, et non au jour UTC.
+    test('les statistiques par type comptent un chantier au jour civil de son début dans la société', async () => {
+      const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+      const compter = async (ref) => {
+        const res = await request(app).get('/api/stats/types-chantiers').query({ period: 'month', ref }).set('Authorization', `Bearer ${session}`);
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        return Object.fromEntries(res.body.types.map((t) => [t.type, t.count]));
+      };
+      const chantiers = [];
+      try {
+        assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Europe/Paris' })).status, 200);
+        const avant = { octobre: await compter('2026-10-15'), novembre: await compter('2026-11-15') };
+        const vente = { client: 'TEST Client types', budgetGlobalVendu: 0 };
+        // 31-10 à 23:30 UTC : le 1er novembre à Paris.
+        chantiers.push(await prisma.chantier.create({ data: { ...vente, nom: 'TEST Types début instant', dateDebut: new Date('2026-10-31T23:30:00.000Z'), types: ['Vidéo'] } }));
+        // Date-seule du 30-11 : novembre, lue telle quelle.
+        chantiers.push(await prisma.chantier.create({ data: { ...vente, nom: 'TEST Types début date-seule', dateDebut: new Date('2026-11-30T00:00:00.000Z'), types: ['Alarme'] } }));
+        // 30-11 à 23:30 UTC : le 1er décembre à Paris.
+        chantiers.push(await prisma.chantier.create({ data: { ...vente, nom: 'TEST Types début décembre', dateDebut: new Date('2026-11-30T23:30:00.000Z'), types: ['Interphonie'] } }));
+        const apres = { octobre: await compter('2026-10-15'), novembre: await compter('2026-11-15') };
+        assert.equal(apres.novembre['Vidéo'] - avant.novembre['Vidéo'], 1, 'le 1er novembre à Paris compte en novembre');
+        assert.equal(apres.octobre['Vidéo'] - avant.octobre['Vidéo'], 0, 'et non en octobre (jour UTC)');
+        assert.equal(apres.novembre['Alarme'] - avant.novembre['Alarme'], 1, 'une date-seule compte à son jour');
+        assert.equal(apres.novembre['Interphonie'] - avant.novembre['Interphonie'], 0, 'le 1er décembre à Paris ne compte pas en novembre');
+      } finally {
+        await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        await prisma.chantier.deleteMany({ where: { id: { in: chantiers.map((c) => c.id) } } });
       }
     });
 

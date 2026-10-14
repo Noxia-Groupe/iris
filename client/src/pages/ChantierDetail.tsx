@@ -12,7 +12,7 @@ import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole, ROLE_TECHNICIEN } from '../roles';
 import { useModules } from '../modules';
 import { useCompanyTimezone } from '../companyTimezoneContext';
-import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
+import { formatCompanyDate, formatCompanyDateTime, formatDateOnly, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre } from '../lib/dateFormatting';
 import { archivagesRestaurables } from '../lib/archivesRestaurables';
 import { AlertesChantier } from '../components/AlertesChantier';
 import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
@@ -25,10 +25,17 @@ const toDateFrancaise = (d: string | null | undefined) => {
 };
 
 const fmtDate = (d: string) => formatDateOnly(d, { day: '2-digit', month: 'long', year: 'numeric' });
+// Instantané d'une saisie journalisée, rendu lisible : une date-seule en JJ-MM-AAAA, un
+// horodatage (création, archivage…) à la date et à l'heure de la société, et non en UTC.
+const INSTANT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+const instantaneLisible = (valeur: unknown, fuseau: string) => JSON.stringify(valeur, (_cle, v) => {
+  if (typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
+  const jour = jourCivilChantier(v, fuseau);
+  return v.endsWith('T00:00:00.000Z') ? jour : `${jour} ${formatCompanyDateTime(v, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
+});
 const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
 // Heures pointées : demi-heures possibles, mais pas de décimale inutile (8 h, 7,5 h).
 const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
-const daysBetween = (a: Date, b: Date) => Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000));
 
 type FactureLiee = {
   id: string;
@@ -607,10 +614,13 @@ const ChantierDetail = () => {
   const showBudgetVendu = chantier.budgetGlobalVendu != null;
   const estimation: EstimationMarge | null = metrics.estimation ?? null;
 
-  const dateDebut = new Date(chantier.dateDebut);
-  const dateFin = chantier.dateFin ? new Date(chantier.dateFin) : null;
+  // Jours civils de la société (décision de Nelson du 14-10-2026) : le début horodaté d'un
+  // chantier converti se lit dans son fuseau, une date-seule telle quelle ; la durée compte
+  // des jours civils, jusqu'à la fin ou jusqu'à aujourd'hui pour la société.
+  const debutCivil = jourCivilChantierIso(chantier.dateDebut, companyTimezone);
+  const finCivile = chantier.dateFin ? jourCivilChantierIso(chantier.dateFin, companyTimezone) : null;
   const isTermine = chantier.statut !== 'EN_COURS';
-  const joursEcoules = daysBetween(dateDebut, dateFin && isTermine ? dateFin : new Date());
+  const joursEcoules = Math.max(0, joursCivilsEntre(debutCivil, finCivile && isTermine ? finCivile : jourCivilEntrepriseIso(companyTimezone)));
 
   // La fiche (nom, client, dates, budgets, devis, responsable) et le commercial rattaché
   // sont modifiables par l'admin ou par le conducteur responsable du chantier, qui corrige
@@ -704,8 +714,8 @@ const ChantierDetail = () => {
               )}
               <span className="flex items-center gap-1.5">
                 <Calendar size={14} className="text-gray-400" />
-                Démarré le {fmtDate(chantier.dateDebut)}
-                {isTermine && dateFin ? ` — terminé le ${fmtDate(chantier.dateFin)} (${joursEcoules} j)` : ` (il y a ${joursEcoules} j)`}
+                Démarré le {jourCivilChantier(chantier.dateDebut, companyTimezone)}
+                {isTermine && chantier.dateFin ? ` — terminé le ${jourCivilChantier(chantier.dateFin, companyTimezone)} (${joursEcoules} j)` : ` (il y a ${joursEcoules} j)`}
               </span>
               {metrics.joursSansSaisie != null && (
                 <span className="flex items-center gap-1.5" data-derniere-saisie>
@@ -1274,8 +1284,8 @@ const ChantierDetail = () => {
                   {entree.motif && <p className="mt-1 text-gray-600">Motif : {entree.motif}</p>}
                   {entree.action === 'CORRECTION' && (
                     <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
-                      <pre className="overflow-auto rounded bg-red-50 p-2 text-red-900">Avant : {JSON.stringify(entree.avant)}</pre>
-                      <pre className="overflow-auto rounded bg-emerald-50 p-2 text-emerald-900">Après : {JSON.stringify(entree.apres)}</pre>
+                      <pre className="overflow-auto rounded bg-red-50 p-2 text-red-900">Avant : {instantaneLisible(entree.avant, companyTimezone)}</pre>
+                      <pre className="overflow-auto rounded bg-emerald-50 p-2 text-emerald-900">Après : {instantaneLisible(entree.apres, companyTimezone)}</pre>
                     </div>
                   )}
                   {entree.action === 'CREATION' && entree.apres && (
@@ -1374,11 +1384,11 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Date Début</label>
-                <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" defaultValue={toDateFrancaise(chantier.dateDebut)} className="form-input" />
+                <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" key={`debut-${companyTimezone}`} defaultValue={jourCivilChantier(chantier.dateDebut, companyTimezone)} className="form-input" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Date Fin</label>
-                <input type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" defaultValue={toDateFrancaise(chantier.dateFin)} className="form-input" />
+                <input type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" key={`fin-${companyTimezone}`} defaultValue={chantier.dateFin ? jourCivilChantier(chantier.dateFin, companyTimezone) : ''} className="form-input" />
               </div>
               {/* Montant vendu : seulement pour qui le voit (le serveur refuse qu'un autre le
                   modifie) ; sinon le champ arriverait vide et l'enregistrer l'écraserait. */}

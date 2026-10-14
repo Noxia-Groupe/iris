@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Award, CheckCircle2, Circle } from 'lucide-react';
 import { apiFetch } from '../api';
+import { decalerReference } from '../lib/dateFormatting';
+import { useReferencePeriode } from '../lib/referencePeriode';
 import { ObjectifBar } from '../components/ObjectifBar';
 import { useModules } from '../modules';
 
@@ -14,14 +16,6 @@ const periodLabelComm = (period: CommPeriod, periodStart: string) => {
   if (period === 'year') return `Année ${y}`;
   if (period === 'quarter') return `T${Math.ceil(m / 3)} ${y}`;
   return `${MOIS[m - 1]} ${y}`;
-};
-
-const shiftCommRef = (ref: string, period: CommPeriod, dir: 1 | -1): string => {
-  const d = new Date(ref + 'T00:00:00Z');
-  if (period === 'month') d.setUTCMonth(d.getUTCMonth() + dir);
-  else if (period === 'quarter') d.setUTCMonth(d.getUTCMonth() + dir * 3);
-  else d.setUTCFullYear(d.getUTCFullYear() + dir);
-  return d.toISOString().slice(0, 10);
 };
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
@@ -43,7 +37,7 @@ const MesCommerciaux = () => {
   const [commerciaux, setCommerciaux] = useState<any[]>([]);
   const [commerciauxMeta, setCommerciauxMeta] = useState<any>(null);
   const [commerciauxPeriod, setCommerciauxPeriod] = useState<CommPeriod>('month');
-  const [commerciauxRef, setCommerciauxRef] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [commerciauxRef, setCommerciauxRef] = useReferencePeriode();
   const [expandedCommercialId, setExpandedCommercialId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -115,12 +109,12 @@ const MesCommerciaux = () => {
             ))}
           </div>
           <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
-            <button type="button" onClick={() => setCommerciauxRef(shiftCommRef(commerciauxRef, commerciauxPeriod, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Période précédente">‹</button>
+            <button type="button" onClick={() => setCommerciauxRef(decalerReference(commerciauxRef, commerciauxPeriod, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Période précédente">‹</button>
             <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap">
               {commerciauxMeta ? periodLabelComm(commerciauxPeriod, commerciauxMeta.periodStart) : '…'}
             </span>
-            <button type="button" onClick={() => setCommerciauxRef(shiftCommRef(commerciauxRef, commerciauxPeriod, 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Période suivante">›</button>
-            <button type="button" onClick={() => setCommerciauxRef(new Date().toISOString().slice(0, 10))} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">Aujourd'hui</button>
+            <button type="button" onClick={() => setCommerciauxRef(decalerReference(commerciauxRef, commerciauxPeriod, 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Période suivante">›</button>
+            <button type="button" onClick={() => setCommerciauxRef(null)} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">Aujourd'hui</button>
           </div>
         </div>
       </div>

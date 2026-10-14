@@ -4,18 +4,23 @@ import { ChevronLeft, ChevronRight, ChevronDown, RefreshCw, AlertTriangle, MapPi
 import { API_URL } from '../api';
 import {
   type Intervenant, type PlanningEvent,
-  toDateStr, mondayOfWeek, addDays, isoWeekNumber,
+  lundiDe, joursDeLaSemaine, numeroSemaineIso, shiftDateStr,
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, adresseEvent,
 } from '../planningUtils';
+import { formatCompanyDateTime, formatDateOnly } from '../lib/dateFormatting';
 
 // Plage "13 – 19 juillet 2026" (ou "28 juin – 4 juillet 2026" si la semaine chevauche deux
 // mois) : le mois n'est répété qu'une fois quand il est identique aux deux bornes.
-function formatPlageSemaine(debut: Date, fin: Date): string {
-  const memeMois = debut.getMonth() === fin.getMonth() && debut.getFullYear() === fin.getFullYear();
-  const debutStr = debut.toLocaleDateString('fr-FR', { day: 'numeric', month: memeMois ? undefined : 'long' });
-  const finStr = fin.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+function formatPlageSemaine(debut: string, fin: string): string {
+  const memeMois = debut.slice(0, 7) === fin.slice(0, 7);
+  const debutStr = formatDateOnly(`${debut}T00:00:00Z`, { day: 'numeric', month: memeMois ? undefined : 'long' });
+  const finStr = formatDateOnly(`${fin}T00:00:00Z`, { day: 'numeric', month: 'long', year: 'numeric' });
   return `${debutStr} – ${finStr}`;
 }
+
+// Jour et fuseau de la société, renvoyés par le serveur : la page publique n'a pas de session,
+// et le téléphone du technicien peut être dans un autre fuseau (décision de Nelson du 14-10-2026).
+type Societe = { fuseauHoraire: string; aujourdhui: string; debut: string };
 
 // ---------------------------------------------------------------------------
 // Vue publique, en LECTURE SEULE et SANS authentification, du planning d'intervention —
@@ -30,7 +35,9 @@ const RANG_CRENEAU: Record<string, number> = { MATIN: 0, JOURNEE: 1, HEURES: 2, 
 
 const PlanningPublic = () => {
   const { token } = useParams<{ token: string }>();
-  const [weekStart, setWeekStart] = useState<Date>(() => mondayOfWeek(new Date()));
+  // Semaine choisie (son lundi) ; tant qu'on n'a pas navigué, le serveur renvoie celle du jour de la société.
+  const [semaineChoisie, setSemaineChoisie] = useState<string | null>(null);
+  const [societe, setSociete] = useState<Societe | null>(null);
   const [events, setEvents] = useState<PlanningEvent[]>([]);
   const [intervenants, setIntervenants] = useState<Intervenant[]>([]);
   const [selectedTech, setSelectedTech] = useState<string>('');
@@ -39,11 +46,11 @@ const PlanningPublic = () => {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const jours = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const weekStartStr = toDateStr(weekStart);
-  const weekEndStr = toDateStr(jours[6]);
-  const todayStr = toDateStr(new Date());
-  const isoWeek = isoWeekNumber(weekStart);
+  const weekStartStr = semaineChoisie ?? (societe ? lundiDe(societe.debut) : null);
+  const jours = weekStartStr ? joursDeLaSemaine(weekStartStr) : [];
+  const todayStr = societe?.aujourdhui ?? null;
+  const isoWeek = weekStartStr ? numeroSemaineIso(weekStartStr) : null;
+  const plage = semaineChoisie ? `?start=${semaineChoisie}&end=${shiftDateStr(semaineChoisie, 6)}` : '';
 
   // Retrouve le technicien choisi précédemment sur ce même lien (typiquement gardé en
   // favori sur le téléphone) : évite d'avoir à se re-sélectionner à chaque ouverture.
@@ -57,7 +64,7 @@ const PlanningPublic = () => {
     if (!token) return;
     if (!silent) setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/planning/public/${encodeURIComponent(token)}?start=${weekStartStr}&end=${weekEndStr}`);
+      const res = await fetch(`${API_URL}/planning/public/${encodeURIComponent(token)}${plage}`);
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Ce lien de planning n'est plus disponible.");
@@ -65,6 +72,7 @@ const PlanningPublic = () => {
         setError(null);
         setEvents(Array.isArray(data.events) ? data.events : []);
         setIntervenants(Array.isArray(data.intervenants) ? data.intervenants : []);
+        if (data.fuseauHoraire && data.aujourdhui && data.debut) setSociete({ fuseauHoraire: data.fuseauHoraire, aujourdhui: data.aujourdhui, debut: data.debut });
         setLastUpdated(new Date());
       }
     } catch {
@@ -72,7 +80,7 @@ const PlanningPublic = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, weekStartStr, weekEndStr]);
+  }, [token, plage]);
 
   useEffect(() => {
     fetchData();
@@ -139,33 +147,32 @@ const PlanningPublic = () => {
         )}
 
         <div className="flex items-center justify-between gap-2 bg-white px-2 py-2 rounded-xl shadow-sm border border-gray-100">
-          <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2.5 bg-gray-100 active:bg-gray-200 rounded-lg" title="Semaine précédente">
+          <button disabled={!weekStartStr} onClick={() => weekStartStr && setSemaineChoisie(shiftDateStr(weekStartStr, -7))} className="p-2.5 bg-gray-100 active:bg-gray-200 rounded-lg" title="Semaine précédente">
             <ChevronLeft size={18} />
           </button>
-          <button onClick={() => setWeekStart(mondayOfWeek(new Date()))} className="flex-1 text-sm font-bold px-2 py-2 bg-gray-50 rounded-lg text-center" title="Revenir à aujourd'hui">
-            Semaine {isoWeek}
+          <button onClick={() => setSemaineChoisie(null)} className="flex-1 text-sm font-bold px-2 py-2 bg-gray-50 rounded-lg text-center" title="Revenir à aujourd'hui">
+            Semaine {isoWeek ?? '…'}
           </button>
-          <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2.5 bg-gray-100 active:bg-gray-200 rounded-lg" title="Semaine suivante">
+          <button disabled={!weekStartStr} onClick={() => weekStartStr && setSemaineChoisie(shiftDateStr(weekStartStr, 7))} className="p-2.5 bg-gray-100 active:bg-gray-200 rounded-lg" title="Semaine suivante">
             <ChevronRight size={18} />
           </button>
         </div>
         <div className="text-center text-xs font-semibold text-gray-500 mt-1.5 mb-4">
-          {formatPlageSemaine(weekStart, jours[6])}
+          {jours.length > 0 ? formatPlageSemaine(jours[0], jours[6]) : '…'}
         </div>
 
         {loading && events.length === 0 ? (
           <div className="text-center text-gray-400 py-10 animate-pulse">Chargement du planning...</div>
         ) : (
           <div className="flex flex-col gap-4">
-            {jours.map((j) => {
-              const jStr = toDateStr(j);
+            {jours.map((jStr) => {
               const isToday = jStr === todayStr;
               const dayEvents = eventsJour(jStr);
               return (
                 <div key={jStr}>
                   <div className={`flex items-center gap-2 mb-1.5 px-1 ${isToday ? 'text-accent' : 'text-gray-500'}`}>
                     <span className="text-sm font-extrabold uppercase">
-                      {j.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                      {formatDateOnly(`${jStr}T00:00:00Z`, { weekday: 'long', day: 'numeric', month: 'long' })}
                     </span>
                     {isToday && <span className="text-[10px] font-bold bg-accent text-white px-1.5 py-0.5 rounded">Aujourd'hui</span>}
                   </div>
@@ -184,10 +191,10 @@ const PlanningPublic = () => {
           </div>
         )}
 
-        {lastUpdated && (
+        {lastUpdated && societe && (
           <div className="flex items-center justify-center gap-1.5 text-xs text-gray-400 mt-6 pb-4">
             <RefreshCw size={11} />
-            Mis à jour à {lastUpdated.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+            Mis à jour à {formatCompanyDateTime(lastUpdated, societe.fuseauHoraire, { hour: '2-digit', minute: '2-digit' })}
           </div>
         )}
       </div>

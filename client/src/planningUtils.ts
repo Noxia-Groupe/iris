@@ -28,32 +28,32 @@ export interface PlanningEvent {
 }
 
 // --- Aides dates (le planning raisonne en jours "YYYY-MM-DD", jamais en heures) ---
+// Les jours sont des dates-seules calculées en UTC, sans l'horloge ni le fuseau du navigateur :
+// « aujourd'hui » est le jour de la société (décision de Nelson du 14-10-2026), où que se
+// trouve celui qui consulte le planning.
 
-export function toDateStr(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// Lundi de la semaine d'un jour "YYYY-MM-DD".
+export function lundiDe(jour: string): string {
+  const jourSemaine = new Date(`${jour}T00:00:00Z`).getUTCDay(); // 0 = dimanche
+  return shiftDateStr(jour, jourSemaine === 0 ? -6 : 1 - jourSemaine);
 }
 
-export function mondayOfWeek(d: Date): Date {
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const day = x.getDay(); // 0 = dimanche
-  x.setDate(x.getDate() + (day === 0 ? -6 : 1 - day));
-  return x;
+export function joursDeLaSemaine(lundi: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => shiftDateStr(lundi, i));
 }
 
-export function addDays(d: Date, n: number): Date {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
+export function estWeekEnd(jour: string): boolean {
+  const jourSemaine = new Date(`${jour}T00:00:00Z`).getUTCDay();
+  return jourSemaine === 0 || jourSemaine === 6;
 }
 
 // Numéro de semaine ISO 8601 (celui du calendrier civil français : la semaine 1 est celle
-// qui contient le premier jeudi de l'année, semaines toujours lundi-dimanche). Fonctionne
-// quel que soit le jour de la semaine passé en argument (on se recale sur le jeudi de sa
-// semaine avant de compter), donc utilisable directement avec le lundi de semaine du planning.
-export function isoWeekNumber(d: Date): number {
-  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const jour = x.getUTCDay() || 7; // lundi=1 ... dimanche=7
-  x.setUTCDate(x.getUTCDate() + 4 - jour); // jeudi de cette semaine
+// qui contient le premier jeudi de l'année, semaines toujours lundi-dimanche), quel que soit
+// le jour de la semaine passé.
+export function numeroSemaineIso(jour: string): number {
+  const x = new Date(`${jour}T00:00:00Z`);
+  const jourIso = x.getUTCDay() || 7; // lundi=1 ... dimanche=7
+  x.setUTCDate(x.getUTCDate() + 4 - jourIso); // jeudi de cette semaine
   const debutAnnee = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
   return Math.ceil(((x.getTime() - debutAnnee.getTime()) / 86400000 + 1) / 7);
 }

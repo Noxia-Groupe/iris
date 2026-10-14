@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatCompanyDate, formatCompanyDateTime, formatDateOnly, jourCivilChantier } from '../src/lib/dateFormatting.ts';
+import { companyDateInputValue, decalerReference, formatCompanyDate, formatCompanyDateTime, formatDateOnly, jourCivilChantier, jourCivilEntrepriseIso } from '../src/lib/dateFormatting.ts';
 
 test('formatDateOnly always preserves a date-only value in UTC', () => {
   assert.equal(formatDateOnly('2026-01-01T00:00:00.000Z'), '01/01/2026');
@@ -23,4 +23,29 @@ test('jourCivilChantier lit une date-seule telle quelle et un instant dans le fu
   // Chantier converti le 15-10 à 00:30 à Paris : instant 2026-10-14T22:30Z.
   assert.equal(jourCivilChantier('2026-10-14T22:30:00.000Z', 'Europe/Paris'), '15-10-2026');
   assert.equal(jourCivilChantier('2026-10-14T22:30:00.000Z', 'UTC'), '14-10-2026');
+});
+
+// Décision de Nelson (14-10-2026) : « aujourd'hui » est le jour de la société, pas celui d'UTC
+// ni du navigateur (les tests tournent sous TZ=Pacific/Gambier, UTC-9).
+test('jourCivilEntrepriseIso et companyDateInputValue donnent le jour de la société', () => {
+  // 31-10-2026 à 23:30 UTC : déjà le 1er novembre à Paris, encore le 31 en UTC et à Gambier.
+  const instant = new Date('2026-10-31T23:30:00.000Z');
+  assert.equal(jourCivilEntrepriseIso('Europe/Paris', instant), '2026-11-01');
+  assert.equal(jourCivilEntrepriseIso('UTC', instant), '2026-10-31');
+  assert.equal(companyDateInputValue('Europe/Paris', instant), '01-11-2026');
+  // Nouméa (UTC+11) : la matinée y est la veille en UTC.
+  assert.equal(jourCivilEntrepriseIso('Pacific/Noumea', new Date('2026-10-14T21:00:00.000Z')), '2026-10-15');
+  // Cayenne (UTC-3) : la soirée y est le lendemain en UTC.
+  assert.equal(jourCivilEntrepriseIso('America/Cayenne', new Date('2026-10-15T01:00:00.000Z')), '2026-10-14');
+});
+
+test('decalerReference ne déborde pas d’un mois depuis le 31, ni d’une année depuis un 29 février', () => {
+  assert.equal(decalerReference('2026-10-31', 'month', 1), '2026-11-01');
+  assert.equal(decalerReference('2026-01-31', 'month', 1), '2026-02-01');
+  assert.equal(decalerReference('2026-03-31', 'month', -1), '2026-02-01');
+  assert.equal(decalerReference('2026-12-15', 'month', 1), '2027-01-01');
+  assert.equal(decalerReference('2026-11-30', 'quarter', 1), '2027-02-01');
+  assert.equal(decalerReference('2028-02-29', 'year', 1), '2029-02-01');
+  assert.equal(decalerReference('2026-10-31', 'week', 1), '2026-11-07');
+  assert.equal(decalerReference('2026-03-02', 'week', -1), '2026-02-23');
 });

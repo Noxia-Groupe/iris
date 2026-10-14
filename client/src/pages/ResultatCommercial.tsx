@@ -1,25 +1,15 @@
 import { useState, useEffect } from 'react';
 import { TrendingUp, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '../api';
+import { decalerReference, jourCivilChantier } from '../lib/dateFormatting';
+import { useReferencePeriode } from '../lib/referencePeriode';
+import { useCompanyTimezone } from '../companyTimezoneContext';
 import { ObjectifBar } from '../components/ObjectifBar';
 import { useModules } from '../modules';
 
 type Period = 'month' | 'quarter' | 'year';
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
-
-const fmtJourMois = (isoDate: string) => {
-  const [, m, d] = isoDate.split('-');
-  return `${d}/${m}`;
-};
-
-const shiftRef = (ref: string, period: Period, dir: 1 | -1): string => {
-  const d = new Date(ref + 'T00:00:00Z');
-  if (period === 'month') d.setUTCMonth(d.getUTCMonth() + dir);
-  else if (period === 'quarter') d.setUTCMonth(d.getUTCMonth() + dir * 3);
-  else d.setUTCFullYear(d.getUTCFullYear() + dir);
-  return d.toISOString().slice(0, 10);
-};
 
 const periodLabel = (period: Period, periodStart: string) => {
   const [y, m] = periodStart.split('-').map(Number);
@@ -36,8 +26,9 @@ const ResultatCommercial = () => {
   // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
   // de société n'est écrit dans l'interface.
   const { libelleBaremeReduit } = useModules();
+  const fuseau = useCompanyTimezone();
   const [period, setPeriod] = useState<Period>('month');
-  const [ref, setRef] = useState(() => new Date().toISOString().slice(0, 10));
+  const [ref, setRef] = useReferencePeriode();
   const [data, setData] = useState<any>(null);
 
   useEffect(() => {
@@ -74,16 +65,16 @@ const ResultatCommercial = () => {
             ))}
           </div>
           <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
-            <button type="button" onClick={() => setRef(shiftRef(ref, period, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période précédente">
+            <button type="button" onClick={() => setRef(decalerReference(ref, period, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période précédente">
               <ChevronLeft size={16} />
             </button>
             <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap min-w-[10rem] text-center">
               {data ? periodLabel(period, data.periodStart) : '…'}
             </span>
-            <button type="button" onClick={() => setRef(shiftRef(ref, period, 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période suivante">
+            <button type="button" onClick={() => setRef(decalerReference(ref, period, 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période suivante">
               <ChevronRight size={16} />
             </button>
-            <button type="button" onClick={() => setRef(new Date().toISOString().slice(0, 10))} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">
+            <button type="button" onClick={() => setRef(null)} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">
               Aujourd'hui
             </button>
           </div>
@@ -165,7 +156,7 @@ const ResultatCommercial = () => {
                       <tr key={c.id} style={{ borderBottom: '1px solid #eee' }}>
                         <td style={{ padding: '8px' }}>
                           <strong className="text-gray-800">{c.nom}</strong>
-                          <div className="text-xs text-gray-400">{fmtJourMois(String(c.dateDebut).slice(0, 10))}</div>
+                          <div className="text-xs text-gray-400">{jourCivilChantier(c.dateDebut, fuseau)}</div>
                         </td>
                         <td style={{ padding: '8px' }} className="text-gray-600">{c.client}</td>
                         <td style={{ padding: '8px' }}>
