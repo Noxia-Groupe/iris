@@ -1,6 +1,6 @@
 # Iris — état de la roadmap et passation du développement
 
-> État du dépôt `main` après les PR [#122](https://github.com/Noxia-Groupe/iris/pull/122) (roadmap), [#123](https://github.com/Noxia-Groupe/iris/pull/123), [#124](https://github.com/Noxia-Groupe/iris/pull/124) et [#125](https://github.com/Noxia-Groupe/iris/pull/125), commit `f62cfd2` (14 octobre 2026). **État du code, pas attestation de conformité ni feu vert de production.** Toute phase est à recontrôler contre le code, les tests, les issues *et leurs commentaires* avant une nouvelle PR. Les issues anciennes décrivent parfois un manque depuis comblé ; une case non cochée n'est pas une preuve d'absence.
+> État du dépôt `main` après les PR [#122](https://github.com/Noxia-Groupe/iris/pull/122) (roadmap), [#123](https://github.com/Noxia-Groupe/iris/pull/123), [#124](https://github.com/Noxia-Groupe/iris/pull/124) et [#125](https://github.com/Noxia-Groupe/iris/pull/125), commit `f62cfd2` (14 octobre 2026), puis la PR [#127](https://github.com/Noxia-Groupe/iris/pull/127) (annuaire des clients pour le technicien). **État du code, pas attestation de conformité ni feu vert de production.** Toute phase est à recontrôler contre le code, les tests, les issues *et leurs commentaires* avant une nouvelle PR. Les issues anciennes décrivent parfois un manque depuis comblé ; une case non cochée n'est pas une preuve d'absence.
 
 ## But et limites
 
@@ -66,7 +66,7 @@ Relevés pendant les audits et la CI de #123, #125, #126 et #127, à traiter dan
 - Le formulaire « Créer un nouveau chantier » d'Administration poste vers `POST /api/chantiers`, qui répond 410, et sa réponse est ignorée.
 - Un chantier ne peut être confié à un compte autre qu'un conducteur (technicien, responsable…) que par l'API : la fiche chantier ne propose que les conducteurs actifs (`GET /api/conducteurs`), comme le formulaire de création d'Administration (410, ci-dessus) ; un tel titulaire s'affiche « (compte désactivé) » dans le formulaire de modification de la fiche.
 - Les dates d'émission et d'échéance d'une nouvelle facture sont préremplies au jour d'Europe/Paris si le formulaire s'ouvre avant la lecture du fuseau de la société (champs non contrôlés, `Factures.tsx`) : révélé par un échec de la CI E2E de #127 ; correctif proposé en commentaire de #127 (remonter les deux champs quand le fuseau change, ou désactiver « Nouvelle facture » pendant le chargement), à soumettre à Nelson dans un lot séparé.
-- La fiche chantier affiche « Démarré le » au jour UTC (`ChantierDetail.tsx`), alors que l'historique de la fiche client lit le jour civil de l'entreprise depuis #127 : un chantier converti peu après minuit, heure de l'entreprise, y paraît commencé la veille.
+- La fiche chantier affiche « Démarré le » au jour UTC (`ChantierDetail.tsx`), alors que l'historique de la fiche client lit le jour civil de l'entreprise depuis #127 : un chantier converti peu après minuit, heure de l'entreprise, y paraît commencé la veille (le lendemain s'il est converti en soirée, pour une société à l'ouest d'UTC). Le formulaire de modification de la fiche préremplit ce même jour UTC et le renvoie à chaque enregistrement : enregistrer n'importe quel changement fige alors le début du chantier au jour UTC, en date-seule.
 
 ## Ordre de travail proposé — à confirmer par Nelson
 

@@ -188,7 +188,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 
 ## Roadmap et état de livraison
 
-**Source de passation à jour : [`docs/ROADMAP-PASSATION.md`](docs/ROADMAP-PASSATION.md).** État constaté sur `main` au commit `f62cfd2`, après les PR #122 à #125. « Code présent » ne signifie ni conformité validée ni mise en production. Chaque phase incomplète est détaillée dans la passation avec ses dépendances et les décisions à demander à Nelson.
+**Source de passation à jour : [`docs/ROADMAP-PASSATION.md`](docs/ROADMAP-PASSATION.md).** État constaté sur `main` au commit `f62cfd2`, après les PR #122 à #125, puis la PR #127 (annuaire des clients pour le technicien). « Code présent » ne signifie ni conformité validée ni mise en production. Chaque phase incomplète est détaillée dans la passation avec ses dépendances et les décisions à demander à Nelson.
 
 - [x] Phases 0–4 : identité du projet, accès Entra/secours, configuration d'instance, référentiel clients/sites/contacts, catalogue et parc d'équipements. Le catalogue et le plan comptable démarrent vides. L'écran Utilisateurs est allégé (#124) ; sur une installation neuve, la création des réglages uniques (paramètres, société) ne provoque plus d'erreur lors des premières requêtes simultanées, et une liste d'Administration qui ne se charge pas est signalée sans plantage (#125).
 - [ ] Phase 5 — **partielle** : devis versionnés, signature, acompte constaté, cycle de vie et conversion en chantier livrés ; cibles intervention/contrat/facture à cadrer et à réaliser. Sélection d'un client hors des 200 premiers livrée pour Devis (#114).
