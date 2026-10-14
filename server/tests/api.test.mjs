@@ -1953,7 +1953,7 @@ if (!TEST_DATABASE_URL) {
       const essais = [
         ['modification', () => request(app).patch(`/api/chantiers/${chantierTechnicien.id}`).set(authTechnicien).send({ nom: 'TEST renommé par le technicien' }), /technicien n’est pas autorisé à modifier/],
         ['commercial', () => request(app).patch(`/api/chantiers/${chantierTechnicien.id}/commercial`).set(authTechnicien).send({ commercialId: commercial.id }), /technicien n’est pas autorisé à réattribuer/],
-        ['clôture', () => request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authTechnicien).send({ statut: 'TERMINE' }), /responsable hiérarchique, à la direction ou à l’administration/],
+        ['clôture', () => request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authTechnicien).send({ statut: 'TERMINE' }), /compte Responsable de sa branche, à la direction ou à l’administration/],
       ];
       for (const champ of ['budgetMaterielVendu', 'budgetMainOeuvreVendu', 'heuresVendues']) {
         for (const valeur of [1, 0, null, '']) {
@@ -1975,7 +1975,8 @@ if (!TEST_DATABASE_URL) {
     test('son N+1 clôture son affaire ; un responsable hors de sa branche ne le peut pas, ni le N+1 l’affaire d’un conducteur', async () => {
       const ligne = async (entetes, chantier) => (await request(app).get('/api/chantiers').set(entetes)).body.find((c) => c.id === chantier.id);
       assert.equal((await ligne(authDe.responsable, chantierTechnicien)).peutCloturer, true);
-      // La règle du conducteur reste celle d'avant : lui seul (et l'administration) clôture son affaire.
+      // La règle du conducteur reste celle d'avant : lui seul clôture son affaire, avec l'administration
+      // et les directeurs (#128) ; pas le compte Responsable de sa branche.
       assert.equal((await ligne(authDe.responsable, chantierConducteur)).peutCloturer, false);
       assert.equal((await ligne(authDe.conducteur, chantierConducteur)).peutCloturer, true);
       assert.equal((await request(app).patch(`/api/chantiers/${chantierConducteur.id}/statut`).set(authDe.responsable).send({ statut: 'TERMINE' })).status, 404);
@@ -2003,6 +2004,20 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.chantier.findUnique({ where: { id: chantier.id } })).statut, 'TERMINE');
       // Un conducteur ne clôture que l'affaire dont il est chargé.
       assert.equal((await request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authDe.conducteur).send({ statut: 'TERMINE' })).status, 404);
+    });
+
+    // La route de statut s'ouvre au directeur, qui atteint tous les chantiers : une affaire
+    // annulée lui reste fermée comme à l'administration.
+    test('une affaire annulée ne se clôture ni ne se rouvre, même par un directeur ou l’administration (409)', async () => {
+      const chantier = await prisma.chantier.create({ data: { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, nom: 'TEST Budgets affaire annulée', statut: 'ANNULE', annuleLe: new Date(), responsableId: chantierConducteur.responsableId } });
+      for (const [qui, entetes, statut] of [['directeur', authDe.directeur, 'TERMINE'], ['administration', auth, 'TERMINE'], ['administration', auth, 'EN_COURS']]) {
+        const reponse = await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(entetes).send({ statut });
+        assert.equal(reponse.status, 409, `${qui} vers ${statut} : ${JSON.stringify(reponse.body)}`);
+        assert.match(reponse.body.error, /affaire est annulée/);
+      }
+      const enBase = await prisma.chantier.findUnique({ where: { id: chantier.id } });
+      assert.equal(enBase.statut, 'ANNULE');
+      assert.equal(enBase.dateFin, null);
     });
 
     test('la réattribution du commercial hors de son périmètre répond 404, sans révéler le chantier', async () => {

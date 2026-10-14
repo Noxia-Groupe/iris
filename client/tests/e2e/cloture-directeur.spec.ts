@@ -26,7 +26,7 @@ async function pageDe(browser: Browser, compte: Compte) {
 
 // Décision de Nelson (14-10-2026) : un directeur peut clôturer n'importe quel chantier ; il ne le
 // rouvre pas. Un conducteur clôture l'affaire dont il est chargé, pas celle d'un autre.
-test('un directeur clôture le chantier d’un conducteur depuis la liste ; un autre conducteur ne le peut pas', async ({ creerClient, request, session, browser }) => {
+test('un directeur clôture le chantier d’un conducteur depuis la liste ; un autre conducteur ne le peut pas', async ({ allerSurPageAdmin, creerClient, request, session, browser }) => {
   test.slow();
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'post' | 'patch' | 'put', path: string, data: object) => {
@@ -68,11 +68,21 @@ test('un directeur clôture le chantier d’un conducteur depuis la liste ; un a
     const relu = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { statut: string; dateFin: string | null };
     expect(relu.statut).toBe('TERMINE');
     expect(relu.dateFin).not.toBeNull();
-    // Le directeur ne rouvre pas : aucun bouton, et l'API le refuse.
+    // Le directeur ne rouvre pas : le chantier clôturé figure dans la section repliée des
+    // chantiers terminés, sans bouton « Réouvrir », et l'API le refuse.
+    const archives = (page: typeof vueDirecteur) => page.getByRole('button', { name: /Chantiers Terminés \/ Archivés/ });
     await vueDirecteur.reload({ waitUntil: 'networkidle' });
-    await expect(vueDirecteur.getByRole('button', { name: 'Réouvrir' })).toHaveCount(0);
+    await archives(vueDirecteur).click();
+    const ligneTerminee = vueDirecteur.locator(`tr[data-chantier="${chantier.id}"]`);
+    await expect(ligneTerminee).toBeVisible();
+    await expect(ligneTerminee.getByRole('button', { name: 'Clôturer' })).toHaveCount(0);
+    await expect(ligneTerminee.getByRole('button', { name: 'Réouvrir' })).toHaveCount(0);
     const reouverture = await request.patch(`${api}/chantiers/${chantier.id}/statut`, { headers: { Authorization: `Bearer ${jetonPour(directeur.id)}` }, data: { statut: 'EN_COURS' } });
     expect(reouverture.status()).toBe(403);
+    // Témoin : l'administration, elle, voit le bouton sur la même ligne.
+    const vueAdmin = await allerSurPageAdmin('/chantiers');
+    await archives(vueAdmin).click();
+    await expect(vueAdmin.locator(`tr[data-chantier="${chantier.id}"]`).getByRole('button', { name: 'Réouvrir' })).toBeVisible();
   } finally {
     for (const contexte of contextes) await contexte.close().catch(() => undefined);
   }

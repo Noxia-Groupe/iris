@@ -469,7 +469,7 @@ function chantierSansMontants(c: any) {
 
 const REFUS_TECHNICIEN_MODIFICATION = 'Un compte technicien n’est pas autorisé à modifier une affaire. Adressez-vous à votre responsable.';
 const REFUS_TECHNICIEN_COMMERCIAL = 'Un compte technicien n’est pas autorisé à réattribuer le commercial d’une affaire. Adressez-vous à votre responsable.';
-const REFUS_TECHNICIEN_CLOTURE = 'Un compte technicien n’est pas autorisé à clôturer une affaire : la clôture revient à son responsable hiérarchique, à la direction ou à l’administration.';
+const REFUS_TECHNICIEN_CLOTURE = 'Un compte technicien n’est pas autorisé à clôturer une affaire : la clôture revient à un compte Responsable de sa branche, à la direction ou à l’administration.';
 
 // Clôture d'une affaire en cours : l'administration et les directeurs, sur tout chantier
 // (décision de Nelson du 14-10-2026) ; son responsable s'il n'est pas technicien (un conducteur
@@ -3168,7 +3168,8 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
 
 // Clôture / réouverture d'un chantier. Un conducteur peut clôturer (uniquement
 // clôturer, uniquement ses propres chantiers en cours) : une fois TERMINE, il ne
-// peut plus y ajouter d'heures ou de dépenses (cf. POST /achats et /heures).
+// peut plus y ajouter d'heures ou de dépenses (cf. POST /achats et /heures). Un
+// directeur clôture tout chantier en cours (décision de Nelson du 14-10-2026).
 // Seul un admin peut réouvrir un chantier clôturé (repasser en EN_COURS).
 // Un chantier ne se supprime plus, et ne s'archive pas non plus par lui-même.
 //
@@ -3185,8 +3186,9 @@ app.delete('/api/chantiers/:id', requireAuth, requireAdmin, (_req, res) => {
   res.status(410).json({ error: 'Un chantier ne se supprime pas : annulez le devis dont il est issu (une note explicative est exigée).' });
 });
 
-// La clôture est le seul geste d'écriture du directeur (décision de Nelson du 14-10-2026) :
-// cette route n'exclut que le commercial. Rouvrir reste réservé à l'administration.
+// Sur un chantier, la clôture est le seul geste d'écriture du directeur (décision de Nelson
+// du 14-10-2026) : cette route n'exclut que le commercial. Rouvrir reste réservé à
+// l'administration.
 const blockCommercialSeulement: express.RequestHandler = (req, res, next) => {
   if ((req as AuthRequest).user?.role === 'COMMERCIAL') {
     res.status(403).json({ error: 'Accès non autorisé pour un compte commercial.' });

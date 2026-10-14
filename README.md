@@ -89,8 +89,10 @@ fiche de chaque client (coordonnées, contacts avec leur téléphone, sites avec
 consultation seule, sans parc d'équipements ni catalogue, donc sans prix. La fiche montre
 l'historique des chantiers du client, sans montant (nom, adresse, statut, dates), limité aux
 chantiers dont il est chargé (confirmé par Nelson le 14-10-2026) ; l'administration y voit
-tous les chantiers non annulés reliés à la fiche. Les clients désactivés lui sont fermés, en
-liste comme à l'unité. Il ne voit aucun devis.
+tous les chantiers non annulés reliés à la fiche. Dans l'annuaire, les clients désactivés lui
+sont fermés, en liste comme à l'unité ; une intervention SAV qui lui est affectée montre
+encore le client, le site et le contact, même désactivés (question posée dans la passation).
+Il ne voit aucun devis.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté. L'historique des chantiers d'un client
@@ -194,7 +196,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [ ] Phase 5 — **partielle** : devis versionnés, signature, acompte constaté, cycle de vie et conversion en chantier livrés ; cibles intervention/contrat/facture à cadrer et à réaliser. Sélection d'un client hors des 200 premiers livrée pour Devis (#114).
 - [ ] Suivi Travaux et commissionnement — **partiels** : sécurité, journaux, achats/heures et fiche chantier déjà présents ; suivi de rentabilité (alertes, marge estimée en fin de chantier) implémenté par #117, et adressé selon la chaîne hiérarchique et au profil Directeur depuis #121 ; ne pas recréer un écran fictif. Profils commerciaux versionnés et individualisés de l'issue #15 non livrés ; réévaluer les reliquats des issues #16 et #19 contre le code.
 - [ ] Phase 6 — **partielle** : SAV, rapports, planning et suivi chantier présents ; navigation utilisable sur téléphone depuis #118 ; parcours mobile technicien dédié et autres parcours terrain à qualifier.
-- [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire — **implémenté** par #123 ; annuaire des clients pour le technicien, sans montant ni devis — **implémenté** par #127 ; clôture de tout chantier par les directeurs et clients désactivés fermés au technicien — **implémentés** par #128 ; **prévus**, décidés le 14-10-2026 : toutes les dates au fuseau de la société, création du chantier d'une affaire depuis l'Administration et réattribution sans l'API, correctif « socket hang up » ; puis journal des paramètres et des droits et taux horaire réservé aux administrateurs (voir la passation).
+- [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire — **implémenté** par #123 ; annuaire des clients pour le technicien, sans montant ni devis — **implémenté** par #127 ; clôture de tout chantier par les directeurs et clients désactivés fermés au technicien — **implémentés** par #128 ; **prévus** : toutes les dates au fuseau de la société, création du chantier d'une affaire depuis l'Administration et réattribution sans l'API, correctif « socket hang up » (décidés le 14-10-2026), journal des paramètres et des droits, taux horaire réservé aux administrateurs (décidés le 13-10-2026). Ordre proposé, à confirmer par Nelson : voir la passation.
 - [ ] Phase 7 — **partielle** : contrats cycliques et génération idempotente d'interventions à planifier depuis une action métier ; automatisation de l'échéance et ses règles de déclenchement à arbitrer.
 - [ ] Phase 8 — **partielle** : factures, avoirs, PDF, plan comptable paramétrable et export CSV déjà présents. La conformité de facturation électronique et l'adaptateur de plateforme restent à concevoir/valider. Requalifier les anciennes issues #31, #33 et #35 avant de coder leur reliquat.
 - [ ] Phase 9 — **future comme chaîne automatisée** : paiements, abonnements télécom, financeurs, banque et rapprochement ; un statut de règlement manuel n'est pas un module bancaire.
