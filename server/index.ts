@@ -5552,10 +5552,20 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     // chantier tant que sa réception n'a pas été constatée. Le statut peut être manipulé,
     // pas ce fait.
     if (devis.acompteExige && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte exigé par ce devis n’a pas été constaté : le chantier ne peut pas être ouvert.');
+    // Une autre version du dossier a déjà ouvert le chantier de l'affaire, puis a pu être annulée
+    // avec lui : l'affaire a eu son chantier. Sa reprise passe par la duplication du devis, qui
+    // crée une nouvelle affaire (cf. POST /api/devis/:id/duplication).
+    if (await tx.devisConversion.findFirst({ where: { dossierId: devis.dossierId }, select: { id: true } })) {
+      throw new DevisConflitError('Une autre version de ce devis a déjà ouvert le chantier de l’affaire : chaque affaire n’en ouvre qu’un. Pour la reprendre, dupliquez le devis.');
+    }
     // Un chantier saisi à la main sous cette référence (fiche corrigée, par exemple) est déjà
-    // celui de l'affaire : la fiche refuse de même un numéro déjà pris.
-    if (await tx.chantier.findFirst({ where: { numeroDevis: devis.numero }, select: { id: true } })) {
-      throw new DevisConflitError(`L’affaire ${devis.numero} a déjà un chantier : corrigez la référence de ce chantier avant de convertir le devis.`);
+    // celui de l'affaire : la fiche refuse de même un numéro déjà pris. Une affaire annulée ne
+    // se modifie plus : on oriente alors vers la duplication, et non vers une correction.
+    const chantierDeLaReference = await tx.chantier.findFirst({ where: { numeroDevis: devis.numero }, select: { statut: true } });
+    if (chantierDeLaReference) {
+      throw new DevisConflitError(chantierDeLaReference.statut === 'ANNULE'
+        ? `L’affaire ${devis.numero} a déjà eu un chantier, annulé depuis : pour la reprendre, dupliquez le devis.`
+        : `L’affaire ${devis.numero} a déjà un chantier : corrigez la référence de ce chantier avant de convertir le devis.`);
     }
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
@@ -5578,9 +5588,10 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
 routeMixte('post', '/devis/:id/convertir', 'devis:write', convertirDevis, [requirePermission('devis:write')]);
 
 // Devis qui peuvent ouvrir leur chantier : mêmes conditions que la conversion ci-dessus (accepté,
-// signé, acompte constaté s'il est exigé, pas encore converti, dernière version non annulée de
-// son dossier). Ils alimentent le formulaire « Ouvrir le chantier d'une affaire » de
-// l'Administration. Réservé à l'interface, comme le formulaire.
+// signé, acompte constaté s'il est exigé, dernière version non annulée de son dossier, aucune
+// version du dossier déjà convertie, référence d'affaire portée par aucun chantier). Ils
+// alimentent le formulaire « Ouvrir le chantier d'une affaire » de l'Administration. Réservé à
+// l'interface, comme le formulaire.
 app.get('/api/devis/a-convertir', requireAuth, requirePermission('devis:read'), requirePermission('devis:write'), async (_req, res) => { try {
   const candidats = await prisma.devis.findMany({
     where: { statut: 'ACCEPTE', signature: { isNot: null }, conversion: { is: null }, OR: [{ acompteExige: false }, { acompteRecuLe: { not: null } }] },
@@ -5591,7 +5602,14 @@ app.get('/api/devis/a-convertir', requireAuth, requirePermission('devis:read'), 
     by: ['dossierId'], where: { dossierId: { in: candidats.map(d => d.dossierId) }, statut: { not: 'ANNULE' } }, _max: { version: true },
   });
   const derniere = new Map(versions.map(v => [v.dossierId, v._max.version]));
-  res.json(decimalToNumber(candidats.filter(d => derniere.get(d.dossierId) === d.version)));
+  const dossiersConvertis = new Set((await prisma.devisConversion.findMany({
+    where: { dossierId: { in: candidats.map(d => d.dossierId) } }, select: { dossierId: true },
+  })).map(c => c.dossierId));
+  const referencesPrises = new Set((await prisma.chantier.findMany({
+    where: { numeroDevis: { in: candidats.map(d => d.numero) } }, select: { numeroDevis: true },
+  })).map(c => c.numeroDevis));
+  res.json(decimalToNumber(candidats.filter(d => derniere.get(d.dossierId) === d.version
+    && !dossiersConvertis.has(d.dossierId) && !referencesPrises.has(d.numero))));
 } catch (error) { devisErreur(res, error); } });
 
 // --- Constatation de l'acompte ---

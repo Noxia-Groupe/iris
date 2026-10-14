@@ -3093,6 +3093,7 @@ if (!TEST_DATABASE_URL) {
         const devis = await devisAccepte('TEST Ouverture référence prise');
         const existant = await prisma.chantier.create({ data: { nom: 'TEST Ouverture chantier saisi à la main', client: 'TEST Client cycle', numeroDevis: devis.numero, dateDebut: new Date('2026-10-01T00:00:00.000Z'), budgetGlobalVendu: 0 } });
         try {
+          assert.ok(!(await aConvertir()).some((d) => d.id === devis.id), 'un devis dont la référence est prise n’est pas proposé');
           const refus = await ouvrir(devis.id, { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id });
           assert.equal(refus.status, 409, JSON.stringify(refus.body));
           assert.match(refus.body.error, new RegExp(`L’affaire ${devis.numero} a déjà un chantier`));
@@ -3103,6 +3104,27 @@ if (!TEST_DATABASE_URL) {
         } finally {
           await prisma.chantier.delete({ where: { id: existant.id } });
         }
+      });
+
+      // Une révision convertie puis annulée avec son chantier : l'affaire a eu son chantier. La
+      // version précédente, redevenue la dernière non annulée, n'est plus proposée, et sa
+      // conversion oriente vers la duplication (seule voie de reprise), et non vers une
+      // correction de la fiche d'une affaire annulée.
+      test('une affaire qui a déjà eu son chantier n’est plus proposée, et sa reprise passe par la duplication', async () => {
+        const premiere = await devisAccepte('TEST Ouverture affaire reprise');
+        const revision = await request(app).post(`/api/devis/${premiere.id}/revisions`).set(admin());
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        await request(app).put(`/api/devis/${revision.body.id}/statut`).set(admin()).send({ statut: 'ENVOYE' });
+        const signature = await request(app).post(`/api/devis/${revision.body.id}/signature`).set(admin()).send({ signataire: 'TEST Signataire révision', confirme: true });
+        assert.equal(signature.status, 201, JSON.stringify(signature.body));
+        assert.equal((await convertir(revision.body.id)).status, 201);
+        const annulation = await request(app).post(`/api/devis/${revision.body.id}/annulation`).set(admin()).send({ motif: 'TEST affaire annulée avant reprise' });
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        assert.ok(!(await aConvertir()).some((d) => d.id === premiere.id), 'la version précédente n’est plus proposée');
+        const refus = await ouvrir(premiere.id, { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /dupliquez le devis/);
+        assert.equal(await prisma.chantier.count({ where: { numeroDevis: premiere.numero } }), 1, 'pas de second chantier pour l’affaire');
       });
 
       test('refuse un titulaire, un commercial ou une date invalides, sans rien ouvrir', async () => {

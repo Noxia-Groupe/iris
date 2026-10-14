@@ -220,18 +220,20 @@ const ChantierDetail = () => {
     try {
       if (commercialId !== (chantier?.commercial?.id || '')) {
         const commRes = await apiFetch(`/chantiers/${id}/commercial`, { method: 'PATCH', body: JSON.stringify({ commercialId: commercialId || null }) });
+        const d = await commRes.json().catch(() => ({}));
         if (!commRes.ok) {
-          const d = await commRes.json().catch(() => ({}));
           alert(d.error || "Erreur lors de l'affectation du commercial.");
           return;
         }
+        // Commercial enregistré : la fiche le reflète aussitôt, même si la suite est refusée.
+        // Pas de relecture complète ici : elle démonterait la fenêtre et effacerait la saisie.
+        setChantier((c: any) => (c ? { ...c, commercial: d.commercial ?? null } : c));
       }
       const res = await apiFetch(`/chantiers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
+        // La fenêtre reste ouverte avec la saisie, pour corriger le champ refusé.
         alert(d.error || 'Erreur lors de la modification du chantier.');
-        // Le commercial a pu être enregistré : la fiche est relue pour l'afficher tel qu'il est.
-        fetchChantier();
         return;
       }
       setEditingChantier(false);

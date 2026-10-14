@@ -174,3 +174,40 @@ test('un conducteur confie son chantier à un autre conducteur depuis la fiche, 
   expect(relu.responsable.id).toBe(remplacant.id);
   expect(relu.commercial.id).toBe(commercial.id);
 });
+
+// Un refus de la fiche (ici une référence d'affaire déjà prise) laisse la fenêtre ouverte avec
+// la saisie, pour corriger le champ refusé ; le commercial, enregistré juste avant, s'affiche
+// tel qu'il est désormais. Relire toute la fiche aurait démonté la fenêtre et vidé la saisie.
+test('un refus de la fiche garde la saisie, et le commercial déjà enregistré s’affiche', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  test.slow();
+  const { headers, envoyer, conducteur, commercial, devis } = await preparer(request, session.token, creerClient, 'refus');
+  const suffixe = Date.now();
+  const autreCommercial = await envoyer('post', '/users', { email: `ouverture.refus.autre.${suffixe}@iris.test`, name: `Autre commercial ${suffixe}`, role: 'COMMERCIAL' }) as Compte;
+  const ouvert = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER', responsableId: conducteur.id, commercialId: commercial.id }) as { id: string; nom: string };
+  // Une autre affaire, dont la référence est déjà portée par son chantier.
+  const autreClient = await creerClient('ouverture-refus-autre', false);
+  const autreDevis = await envoyer('post', '/devis', { clientId: autreClient.id, objet: `Autre affaire E2E ${suffixe}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }) as { id: string; numero: string };
+  await envoyer('put', `/devis/${autreDevis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${autreDevis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  await envoyer('post', `/devis/${autreDevis.id}/convertir`, { cible: 'CHANTIER' });
+
+  const admin = await allerSurPageAdmin(`/chantiers/${ouvert.id}`);
+  await admin.getByRole('button', { name: 'Modifier' }).first().click();
+  const nouveauNom = `Nom corrigé E2E ${suffixe}`;
+  await admin.locator('input[name="nom"]').fill(nouveauNom);
+  await admin.locator('select[name="commercialId"]').selectOption(autreCommercial.id);
+  await admin.locator('input[name="numeroDevis"]').fill(autreDevis.numero);
+  let alerte = '';
+  admin.once('dialog', (dialogue) => { alerte = dialogue.message(); void dialogue.accept(); });
+  await admin.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+  await expect.poll(() => alerte).toContain('déjà rattaché à un autre chantier');
+  // La fenêtre et la saisie sont intactes.
+  await expect(admin.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
+  await expect(admin.locator('input[name="nom"]')).toHaveValue(nouveauNom);
+  await expect(admin.locator('input[name="numeroDevis"]')).toHaveValue(autreDevis.numero);
+  await expect(admin.locator('select[name="commercialId"]')).toHaveValue(autreCommercial.id);
+  // Le commercial est enregistré, la fiche ne l'est pas.
+  const relu = await (await request.get(`${api}/chantiers/${ouvert.id}`, { headers })).json() as { nom: string; commercial: Compte };
+  expect(relu.commercial.id).toBe(autreCommercial.id);
+  expect(relu.nom).toBe(ouvert.nom);
+});

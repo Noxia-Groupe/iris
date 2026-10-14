@@ -142,10 +142,15 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
           </div>
           <div className="form-group mb-0">
             <label className="form-label" htmlFor="ouverture-responsable">Responsable du chantier</label>
-            <select id="ouverture-responsable" required name="responsableId" className="form-input" defaultValue="">
+            <select id="ouverture-responsable" required name="responsableId" className="form-input" defaultValue="" aria-describedby={conducteurs.length === 0 ? 'ouverture-sans-conducteur' : undefined}>
               <option value="" disabled>Sélectionner un conducteur…</option>
               {conducteurs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {conducteurs.length === 0 && (
+              <p id="ouverture-sans-conducteur" className="text-sm text-amber-700 mt-1">
+                Aucun conducteur actif : créez ou réactivez un compte conducteur dans Administration &gt; Utilisateurs.
+              </p>
+            )}
           </div>
           <div className="form-group mb-0">
             <label className="form-label" htmlFor="ouverture-commercial">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
