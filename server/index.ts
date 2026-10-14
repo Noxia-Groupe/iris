@@ -5041,6 +5041,8 @@ routeMixte('post', '/clients/:clientId/equipements/:id/archiver', 'equipements:w
 // adresse, période, statut), dans le périmètre de lecture du demandeur (cf. perimetreChantiers) ;
 // un technicien n'y voit que les chantiers dont il est chargé. Seuls les chantiers reliés à la
 // fiche (clientId) y figurent : un chantier qui ne porte que le libellé du client n'y est pas.
+// Réservée à l'interface (pas de porte /api/v1). chantiers:read est exigé par principe, la
+// route listant des chantiers : tous les types de compte le portent aujourd'hui.
 const CHANTIER_HISTORIQUE_CLIENT_SELECT = { id: true, nom: true, adresse: true, statut: true, dateDebut: true, dateFin: true } as const;
 app.get('/api/clients/:id/chantiers', requireAuth, requirePermission('clients:read'), requirePermission('chantiers:read'), async (req, res) => {
   try {

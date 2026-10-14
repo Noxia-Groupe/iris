@@ -30,6 +30,16 @@ export function formatCompanyDate(value: string | Date, companyTimeZone: string,
   return formatCompanyDateTime(value, companyTimeZone, options);
 }
 
+/**
+ * Jour civil d'une date de chantier, au format JJ-MM-AAAA. Une date-seule (saisie ou corrigée à la
+ * main, stockée à minuit UTC) est lue telle quelle ; un instant (début d'un chantier converti
+ * depuis un devis) l'est dans le fuseau de l'entreprise. Même règle que jourCivilDeDebut côté serveur.
+ */
+export function jourCivilChantier(value: string | Date, companyTimeZone: string): string {
+  const dateSeule = new Date(value).toISOString().endsWith('T00:00:00.000Z');
+  return (dateSeule ? formatDateOnly(value) : formatCompanyDate(value, companyTimeZone)).replace(/\//g, '-');
+}
+
 /** Rend la date métier du jour pour un champ texte, dérivée dans le fuseau entreprise. */
 export function companyDateInputValue(companyTimeZone: string, now: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {

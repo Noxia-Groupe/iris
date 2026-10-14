@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { Browser } from '@playwright/test';
-import { test, expect } from './fixtures';
+import { test, expect, dateDuJour } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
@@ -41,7 +41,7 @@ test('un technicien consulte l’annuaire des clients et l’historique de ses c
   const client = await creerClient('annuaire-technicien');
   await envoyer('post', `/clients/${client.id}/contacts`, { nom: 'Gardien', prenom: 'Paul', telephone: '06 11 22 33 44' });
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Annuaire technicien E2E ${suffixe}`, lignes: [
-    { designation: 'Caméra', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 4321, tauxTva: 20 },
+    { designation: 'Caméra', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 4321.87, tauxTva: 20 },
   ] });
   await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
   await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
@@ -85,9 +85,10 @@ test('un technicien consulte l’annuaire des clients et l’historique de ses c
     const historique = fiche.getByRole('region', { name: 'Historique des chantiers' });
     await expect(historique.getByRole('link', { name: chantier.nom })).toBeVisible();
     await expect(historique).toContainText('En cours');
-    await expect(historique).toContainText(/Début : \d{2}-\d{2}-\d{4}/);
+    // Début : jour civil de la conversion dans le fuseau de l'entreprise (Europe/Paris en E2E).
+    await expect(historique).toContainText(`Début : ${dateDuJour()}`);
     await expect(fiche).not.toContainText('€');
-    await expect(fiche).not.toContainText(/4\s?321/);
+    await expect(fiche).not.toContainText(/4[\s\u202f\u00a0]?321[,.]87/);
     expect(refus, 'requêtes refusées dans l’annuaire').toEqual([]);
     surveiller = false;
 
@@ -108,4 +109,17 @@ test('un technicien consulte l’annuaire des clients et l’historique de ses c
     await request.patch(`${api}/chantiers/${chantier.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
     for (const contexte of contextes) await contexte.close().catch(() => undefined);
   }
+});
+
+// L'historique ne bloque pas la fiche : s'il ne se charge pas, sa section le dit et le reste de
+// la fiche (coordonnées, contacts, sites) reste consultable.
+test('fiche client : un historique en échec est signalé dans sa section, sans bloquer la fiche', async ({ creerClient, page, allerSurPageAdmin }) => {
+  const client = await creerClient('annuaire-historique-en-echec');
+  await page.route('**/api/clients/*/chantiers', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Lecture de l’historique des chantiers impossible.' }) }));
+  const fiche = (await allerSurPageAdmin(`/clients/${client.id}`)).locator('main');
+  await expect(fiche.getByRole('heading', { name: client.raisonSociale })).toBeVisible();
+  await expect(fiche.getByText('2 rue du Parcours, 14000 Caen')).toBeVisible();
+  const historique = fiche.getByRole('region', { name: 'Historique des chantiers' });
+  await expect(historique.getByRole('alert')).toHaveText('L’historique des chantiers n’a pas pu être chargé. Rechargez la page pour réessayer.');
+  await expect(fiche.getByRole('button', { name: 'Ajouter le contact' })).toBeVisible();
 });

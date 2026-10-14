@@ -221,7 +221,7 @@ if (!TEST_DATABASE_URL) {
       'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
-      'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test',
+      'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -2098,15 +2098,18 @@ if (!TEST_DATABASE_URL) {
       const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
       assert.equal(login.status, 200);
       auth = { Authorization: `Bearer ${login.body.token}` };
-      const compte = async (cle, email, role) => {
-        const user = await prisma.user.create({ data: { email, name: `TEST Annuaire ${cle}`, role } });
+      const compte = async (cle, email, role, extra = {}) => {
+        const user = await prisma.user.create({ data: { email, name: `TEST Annuaire ${cle}`, role, ...extra } });
         jetons[cle] = { Authorization: `Bearer ${jwt.sign({ id: user.id }, process.env.JWT_SECRET)}` };
         return user;
       };
       const technicien = await compte('technicien', 'annuaire.technicien@iris.test', 'TECHNICIEN');
-      const autreTechnicien = await compte('autreTechnicien', 'annuaire.autre.technicien@iris.test', 'TECHNICIEN');
-      await compte('conducteur', 'annuaire.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX');
+      // Un responsable porteur d'un clients:read individuel, dont la branche contient le collègue.
+      const responsable = await compte('responsable', 'annuaire.responsable@iris.test', 'RESPONSABLE', { permissions: ['clients:read'] });
+      const autreTechnicien = await compte('autreTechnicien', 'annuaire.autre.technicien@iris.test', 'TECHNICIEN', { responsableHierarchiqueId: responsable.id });
+      const conducteur = await compte('conducteur', 'annuaire.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX');
       await compte('directeur', 'annuaire.directeur@iris.test', 'DIRECTEUR');
+      const commercial = await compte('commercial', 'annuaire.commercial@iris.test', 'COMMERCIAL');
       client = await prisma.client.create({ data: { raisonSociale: 'TEST Annuaire Résidence des Tilleuls', telephone: '01 23 45 67 89' } });
       contact = await prisma.clientContact.create({ data: { clientId: client.id, nom: 'Gardien', prenom: 'Paul', telephone: '06 11 22 33 44', principal: true } });
       site = await prisma.clientSite.create({ data: { clientId: client.id, nom: 'Bâtiment B', adresse: '12 rue des Tilleuls', complementAdresse: 'Accès par la cour', codePostal: '75011', ville: 'Paris' } });
@@ -2117,6 +2120,7 @@ if (!TEST_DATABASE_URL) {
       chantiers.termine = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Annuaire chantier terminé', dateDebut: jour('2026-03-02'), dateFin: jour('2026-04-30'), statut: 'TERMINE', responsableId: technicien.id } });
       chantiers.annule = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Annuaire chantier annulé', dateDebut: jour('2026-08-01'), statut: 'ANNULE', responsableId: technicien.id } });
       chantiers.collegue = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Annuaire chantier du collègue', dateDebut: jour('2026-07-01'), responsableId: autreTechnicien.id } });
+      chantiers.vendu = await prisma.chantier.create({ data: { ...vente, nom: 'TEST Annuaire chantier vendu', dateDebut: jour('2026-05-01'), responsableId: conducteur.id, commercialId: commercial.id } });
       // Chantier qui ne porte que le libellé du client, sans lien vers sa fiche.
       chantiers.sansFiche = await prisma.chantier.create({ data: { ...vente, clientId: null, nom: 'TEST Annuaire chantier sans fiche', dateDebut: jour('2026-06-01'), responsableId: technicien.id } });
     });
@@ -2168,7 +2172,13 @@ if (!TEST_DATABASE_URL) {
     });
 
     // Valeurs monétaires du jeu de données, où qu'elles se trouvent dans la réponse.
-    const MONTANTS_ANNUAIRE = /":\s*(987654|123456|234567|345)(\.0+)?[,}\]]/;
+    // Prisma sérialise un Decimal en chaîne : les guillemets sont admis autour de la valeur.
+    const MONTANTS_ANNUAIRE = /":\s*"?(987654|123456|234567|345)(\.0+)?"?[,}\]]/;
+    const CLES_HISTORIQUE = ['adresse', 'dateDebut', 'dateFin', 'id', 'nom', 'statut'];
+    const sansMontant = (corps, qui) => {
+      for (const chantier of corps) assert.deepEqual(Object.keys(chantier).sort(), CLES_HISTORIQUE, qui);
+      assert.doesNotMatch(JSON.stringify(corps), MONTANTS_ANNUAIRE, `${qui} : un montant est exposé`);
+    };
 
     test('l’historique des chantiers du client, sans montant, suit le périmètre de lecture', async () => {
       const historique = async (qui) => request(app).get(`/api/clients/${client.id}/chantiers`).set(qui);
@@ -2177,22 +2187,36 @@ if (!TEST_DATABASE_URL) {
       const technicien = await historique(jetons.technicien);
       assert.equal(technicien.status, 200, JSON.stringify(technicien.body));
       assert.deepEqual(technicien.body.map((c) => c.id), [chantiers.enCours.id, chantiers.termine.id]);
-      for (const chantier of technicien.body) {
-        assert.deepEqual(Object.keys(chantier).sort(), ['adresse', 'dateDebut', 'dateFin', 'id', 'nom', 'statut']);
-      }
+      sansMontant(technicien.body, 'technicien');
       assert.equal(technicien.body[1].statut, 'TERMINE');
       assert.equal(technicien.body[1].dateFin, '2026-04-30T00:00:00.000Z');
-      assert.doesNotMatch(JSON.stringify(technicien.body), MONTANTS_ANNUAIRE);
       assert.deepEqual((await historique(jetons.autreTechnicien)).body.map((c) => c.id), [chantiers.collegue.id]);
-      // L'administration voit tous les chantiers reliés à la fiche, sauf l'annulé.
+      // Les autres porteurs de l'annuaire suivent leur propre périmètre : le commercial, ses
+      // ventes ; un responsable (clients:read individuel), sa branche.
+      const commercial = await historique(jetons.commercial);
+      assert.equal(commercial.status, 200, JSON.stringify(commercial.body));
+      assert.deepEqual(commercial.body.map((c) => c.id), [chantiers.vendu.id]);
+      sansMontant(commercial.body, 'commercial');
+      assert.deepEqual((await historique(jetons.responsable)).body.map((c) => c.id), [chantiers.collegue.id]);
+      // L'administration voit tous les chantiers reliés à la fiche, sauf l'annulé, sans montant non plus.
       const admin = await historique(auth);
       assert.equal(admin.status, 200);
-      assert.deepEqual(admin.body.map((c) => c.id), [chantiers.enCours.id, chantiers.collegue.id, chantiers.termine.id]);
-      assert.doesNotMatch(JSON.stringify(admin.body), MONTANTS_ANNUAIRE);
+      assert.deepEqual(admin.body.map((c) => c.id), [chantiers.enCours.id, chantiers.collegue.id, chantiers.vendu.id, chantiers.termine.id]);
+      sansMontant(admin.body, 'administration');
       // Sans l'annuaire (clients:read), pas d'historique ; un client inconnu répond 404.
       assert.equal((await historique(jetons.conducteur)).status, 403);
       assert.equal((await historique(jetons.directeur)).status, 403);
       assert.equal((await request(app).get('/api/clients/00000000-0000-0000-0000-000000000000/chantiers').set(auth)).status, 404);
+    });
+
+    test('l’historique des chantiers d’un client n’est pas ouvert aux clés d’intégration', async () => {
+      const creation = await request(app).post('/api/admin/api-keys').set(auth).send({ nom: 'TEST agent annuaire', scopes: ['clients:read', 'chantiers:read'] });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const cle = { Authorization: `Bearer ${creation.body.apiKey}` };
+      // Témoin : la clé lit bien la fiche client par sa porte.
+      assert.equal((await request(app).get(`/api/v1/clients/${client.id}`).set(cle)).status, 200);
+      assert.equal((await request(app).get(`/api/clients/${client.id}/chantiers`).set(cle)).status, 401);
+      assert.equal((await request(app).get(`/api/v1/clients/${client.id}/chantiers`).set(cle)).status, 404);
     });
   });
 

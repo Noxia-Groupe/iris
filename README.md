@@ -85,11 +85,13 @@ adresse : son type de compte porte `clients:read`, et le menu Clients lui ouvre 
 fiche de chaque client (coordonnées, contacts avec leur téléphone, sites avec leur adresse), en
 consultation seule, sans parc d'équipements ni catalogue, donc sans prix. La fiche montre
 l'historique des chantiers du client, sans montant (nom, adresse, statut, dates), limité aux
-chantiers dont il est chargé ; l'administration y voit tous les chantiers reliés à la fiche.
-Il ne voit aucun devis.
+chantiers dont il est chargé (périmètre retenu en attendant l'arbitrage de Nelson, qui peut
+l'étendre à tous les chantiers du client) ; l'administration y voit tous les chantiers reliés
+à la fiche. Il ne voit aucun devis.
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
-ne puisse être appliquée d'un seul côté.
+ne puisse être appliquée d'un seul côté. L'historique des chantiers d'un client
+(`GET /api/clients/:id/chantiers`) n'existe que côté interface.
 
 Chaque chantier porte des alertes de suivi calculées par le serveur (`metrics.alertes`) :
 
