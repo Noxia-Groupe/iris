@@ -2006,6 +2006,18 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authDe.conducteur).send({ statut: 'TERMINE' })).status, 404);
     });
 
+    // La route de statut ne ferme plus que le commercial (blockCommercialSeulement). Un compte
+    // commercial peut être titulaire d'un chantier (tout compte actif peut l'être, et un compte
+    // change de type) : il ne le clôture pas pour autant.
+    test('un commercial titulaire d’un chantier ne le clôture pas (403)', async () => {
+      const chantier = await prisma.chantier.create({ data: { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, nom: 'TEST Budgets chantier au nom du commercial', responsableId: commercial.id } });
+      const refus = await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(authDe.commercial).send({ statut: 'TERMINE' });
+      assert.equal(refus.status, 403, JSON.stringify(refus.body));
+      const enBase = await prisma.chantier.findUnique({ where: { id: chantier.id } });
+      assert.equal(enBase.statut, 'EN_COURS');
+      assert.equal(enBase.dateFin, null);
+    });
+
     // La route de statut s'ouvre au directeur, qui atteint tous les chantiers : une affaire
     // annulée lui reste fermée comme à l'administration.
     test('une affaire annulée ne se clôture ni ne se rouvre, même par un directeur ou l’administration (409)', async () => {
