@@ -69,7 +69,9 @@ test('#95 : création de règle standard motivée, sans mutation à la sélectio
   await page.getByRole('combobox', { name: 'Compte TVA à associer' }).selectOption(autreCompte.id);
   await page.getByRole('textbox', { name: /Motif du remappage TVA/ }).fill('Révision du compte TVA');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
-  await expect(ligne).toContainText('445710');
+  // Code suivi de son libellé : le code horodaté affiché avant le remappage peut lui-même
+  // commencer par 445710.
+  await expect(ligne).toContainText('445710 — TVA collectée E2E');
   await ligne.getByRole('button', { name: 'Retirer' }).click();
   const dialogue = page.getByRole('dialog', { name: 'Retirer la règle TVA' });
   await expect(dialogue).toContainText('émissions futures');

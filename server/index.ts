@@ -5680,9 +5680,10 @@ app.post('/api/devis/:id/annulation', requireAuth, requireAdmin, async (req, res
   if (!motif) throw new DevisSaisieError('Un motif d’annulation est obligatoire.');
 
   const resultat = await prisma.$transaction(async tx => {
-    // Verrou du devis d'abord, puis du chantier, dans le même ordre que la conversion : une
-    // annulation concurrente d'une conversion attend sa fin et archive alors le chantier ouvert,
-    // au lieu d'annuler le devis en laissant son chantier en cours.
+    // Verrou du devis d'abord, comme la conversion : une annulation concurrente d'une conversion
+    // attend sa fin et archive alors le chantier ouvert, au lieu d'annuler le devis en laissant
+    // son chantier en cours. Le chantier, lui, n'est verrouillé que par sa mise à jour, après le
+    // comptage des saisies (course avec une saisie simultanée : question 7 de la passation).
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { conversion: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
