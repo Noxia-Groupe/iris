@@ -127,11 +127,12 @@ test('un fournisseur déjà enregistré est refusé avec un message, sans vider 
   await admin.getByRole('button', { name: 'Fournisseurs', exact: true }).click();
   const formulaire = admin.locator('form').filter({ has: admin.locator('input[name="nom"]') }).first();
   await formulaire.locator('input[name="nom"]').fill(nom);
-  const message = admin.waitForEvent('dialog');
+  // L'alerte est acceptée dans l'écouteur même : sans écouteur actif, Playwright la fermerait
+  // de lui-même, et une acceptation tardive resterait bloquée.
+  let alerte = '';
+  admin.once('dialog', (dialogue) => { alerte = dialogue.message(); void dialogue.accept(); });
   await formulaire.getByRole('button', { name: 'Enregistrer' }).click();
-  const dialogue = await message;
-  expect(dialogue.message()).toBe('Un fournisseur porte déjà ce nom.');
-  await dialogue.accept();
+  await expect.poll(() => alerte).toBe('Un fournisseur porte déjà ce nom.');
   await expect(formulaire.locator('input[name="nom"]')).toHaveValue(nom);
 });
 
