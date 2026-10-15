@@ -631,6 +631,7 @@ function decimalToNumber(value: any): any {
 interface Parametres {
   margeCommercialeActive: boolean; planningActif: boolean; tauxAcompteDefaut: number; seuilMargeFaible: number | null; joursSansSaisie: number | null;
   rentabiliteConducteur: boolean; rentabiliteHierarchie: boolean; rentabiliteDirecteurs: boolean;
+  journalConservationJours: number;
 }
 
 // Réglage unique (singleton) créé à sa première lecture. Avec un `update` vide, Prisma
@@ -3343,6 +3344,29 @@ function refuseSuperAdminTarget(req: express.Request, targetRole: string | null 
 
 // Garde-fou : l'application doit toujours conserver au moins un compte superadmin, sinon
 // plus personne ne peut piloter les modules ni rendre la main à un autre superadmin.
+// Libellé figé d'un compte dans le journal des paramètres et des droits : il reste lisible après
+// la suppression ou le renommage du compte.
+function libelleCompteJournal(compte: { name: string; email: string }): string {
+  return `${compte.name} (${compte.email})`;
+}
+
+// Relit un compte en verrouillant sa ligne le temps de la transaction : l'« avant » journalisé est
+// celui que la modification remplace, même face à une modification simultanée.
+async function lireCompteVerrouille(tx: any, id: string) {
+  await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
+  return tx.user.findUnique({ where: { id }, select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true } });
+}
+
+// Journalise un changement de droits d'un compte, s'il change quelque chose.
+async function journaliserDroitsCompte(tx: any, req: express.Request, action: string, avant: any, apres: any, champs: readonly string[]) {
+  const changements = changementsJournal(avant, apres, champs);
+  if (!changements) return;
+  await journaliserAdministration(tx, req as AuthRequest, {
+    domaine: 'DROITS', type: 'COMPTE', action, cibleId: apres.id, cibleLibelle: libelleCompteJournal(apres),
+    concerneSuperAdmin: isSuperAdminRole(avant?.role) || isSuperAdminRole(apres.role), ...changements,
+  });
+}
+
 async function isLastSuperAdmin(userId: string): Promise<boolean> {
   const count = await prisma.user.count({ where: { role: ROLE_SUPERADMIN } });
   if (count > 1) return false;
@@ -3380,9 +3404,17 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     if (existing) {
       return res.status(409).json({ error: 'Un compte existe déjà pour cet email.' });
     }
-    const user = await prisma.user.create({
-      data: { email, name, role, estCommercial, accesFinance }, // pas de mot de passe : accès via SSO Microsoft
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+    const user = await prisma.$transaction(async (tx) => {
+      const cree = await tx.user.create({
+        data: { email, name, role, estCommercial, accesFinance }, // pas de mot de passe : accès via SSO Microsoft
+        select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+      });
+      await journaliserAdministration(tx, req as AuthRequest, {
+        domaine: 'DROITS', type: 'COMPTE', action: 'CREATION', cibleId: cree.id, cibleLibelle: libelleCompteJournal(cree),
+        concerneSuperAdmin: isSuperAdminRole(cree.role),
+        apres: { role: cree.role, estCommercial: cree.estCommercial, accesFinance: cree.accesFinance, permissions: cree.permissions, actif: cree.actif },
+      });
+      return cree;
     });
     res.status(201).json({ ...user, hasPassword: false });
   } catch (error) {
@@ -3429,11 +3461,23 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + journauxComptables + journauxRegles + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives > 0) {
       return res.status(409).json({ error: 'Ce compte est l’auteur de données tracées : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
-    await prisma.$transaction([
-      prisma.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } }),
-      prisma.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } }),
-      prisma.user.delete({ where: { id } }),
-    ]);
+    await prisma.$transaction(async (tx) => {
+      const chantiersResponsable = await tx.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } });
+      const chantiersCommercial = await tx.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } });
+      const collaborateurs = await tx.user.count({ where: { responsableHierarchiqueId: id } });
+      await tx.user.delete({ where: { id } });
+      const effets = [
+        chantiersResponsable.count ? `retiré de ${chantiersResponsable.count} chantier(s) comme responsable` : '',
+        chantiersCommercial.count ? `retiré de ${chantiersCommercial.count} chantier(s) comme commercial` : '',
+        collaborateurs ? `${collaborateurs} collaborateur(s) détaché(s) de ce responsable` : '',
+      ].filter(Boolean);
+      await journaliserAdministration(tx, req as AuthRequest, {
+        domaine: 'DROITS', type: 'COMPTE', action: 'SUPPRESSION', cibleId: target.id, cibleLibelle: libelleCompteJournal(target),
+        concerneSuperAdmin: isSuperAdminRole(target.role),
+        avant: { role: target.role, estCommercial: target.estCommercial, accesFinance: target.accesFinance, permissions: target.permissions, actif: target.actif, responsableHierarchiqueId: target.responsableHierarchiqueId },
+        detail: effets.length ? effets.join(' ; ') : null,
+      });
+    });
     res.json({ success: true });
   } catch (error) {
     if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : ce compte vient d’être rattaché à des données métier.' });
@@ -3460,7 +3504,9 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
     if (!isSuperAdminRole(role) && (await isLastSuperAdmin(target.id))) {
       return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
     }
-    const user = await prisma.user.update({
+    const user = await prisma.$transaction(async (tx) => {
+      const avant = await lireCompteVerrouille(tx, target.id);
+      const apres = await tx.user.update({
       where: { id: target.id },
       // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
       // compte quitte ces rôles, pour ne pas laisser un état orphelin qui réapparaîtrait
@@ -3471,6 +3517,9 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       // droits individuels : il retrouve son effet si le compte reprend un autre type.
       data: isAdminRole(role) ? { role } : { role, estCommercial: false },
       select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
+      });
+      await journaliserDroitsCompte(tx, req, 'TYPE_COMPTE', avant, apres, ['role', 'estCommercial']);
+      return apres;
     });
     res.json(user);
   } catch (error) {
@@ -3494,13 +3543,17 @@ app.patch('/api/users/:id/responsable-hierarchique', requireAuth, requireAdmin, 
     const responsableId = brut ? String(brut) : null;
     const resultat = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(814090)::text AS verrou`;
-      const target = await tx.user.findUnique({ where: { id: paramId(req) }, select: { id: true, role: true } });
+      const target = await tx.user.findUnique({
+        where: { id: paramId(req) },
+        select: { id: true, name: true, email: true, role: true, responsableHierarchique: { select: { id: true, name: true, role: true } } },
+      });
       if (!target) return { statut: 404, erreur: 'Utilisateur introuvable.' };
       const refus = refuseSuperAdminTarget(req, target.role);
       if (refus) return { statut: 403, erreur: refus };
+      let responsable: { name: string; role: string; actif: boolean } | null = null;
       if (responsableId) {
         if (responsableId === target.id) return { statut: 400, erreur: 'Un compte ne peut pas être son propre responsable hiérarchique.' };
-        const responsable = await tx.user.findUnique({ where: { id: responsableId }, select: { role: true, actif: true } });
+        responsable = await tx.user.findUnique({ where: { id: responsableId }, select: { name: true, role: true, actif: true } });
         // Un super administrateur n'existe pas pour un simple administrateur : même réponse
         // qu'un compte absent.
         if (!responsable || !responsable.actif || (!demandeurSuper && isSuperAdminRole(responsable.role))) {
@@ -3515,6 +3568,14 @@ app.patch('/api/users/:id/responsable-hierarchique', requireAuth, requireAdmin, 
         data: { responsableHierarchiqueId: responsableId },
         select: { id: true, name: true, responsableHierarchique: { select: { id: true, name: true } } },
       });
+      const ancien = target.responsableHierarchique;
+      if ((ancien?.id ?? null) !== responsableId) {
+        await journaliserAdministration(tx, req as AuthRequest, {
+          domaine: 'DROITS', type: 'COMPTE', action: 'RATTACHEMENT', cibleId: target.id, cibleLibelle: libelleCompteJournal(target),
+          concerneSuperAdmin: isSuperAdminRole(target.role) || isSuperAdminRole(ancien?.role) || (responsableId ? isSuperAdminRole(responsable?.role) : false),
+          avant: { responsableHierarchique: ancien?.name ?? null }, apres: { responsableHierarchique: user.responsableHierarchique?.name ?? null },
+        });
+      }
       return { statut: 200, user };
     });
     if (resultat.statut !== 200) return res.status(resultat.statut).json({ error: resultat.erreur });
@@ -3541,10 +3602,15 @@ app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req
     if (refus) {
       return res.status(403).json({ error: refus });
     }
-    const user = await prisma.user.update({
-      where: { id: target.id },
-      data: { estCommercial: !!req.body.estCommercial },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+    const user = await prisma.$transaction(async (tx) => {
+      const avant = await lireCompteVerrouille(tx, target.id);
+      const apres = await tx.user.update({
+        where: { id: target.id },
+        data: { estCommercial: !!req.body.estCommercial },
+        select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+      });
+      await journaliserDroitsCompte(tx, req, 'AUSSI_COMMERCIAL', avant, apres, ['estCommercial']);
+      return apres;
     });
     res.json(user);
   } catch (error) {
@@ -3572,7 +3638,12 @@ app.put('/api/users/:id/permissions', requireAuth, requireSuperAdmin, async (req
     if (interdites.length) {
       return void res.status(400).json({ error: `Ces droits ne s’accordent pas à un compte technicien : ${interdites.join(', ')}.` });
     }
-    const user = await prisma.user.update({ where: { id: target.id }, data: { permissions }, select: { id: true, name: true, email: true, role: true, permissions: true } });
+    const user = await prisma.$transaction(async (tx) => {
+      const avant = await lireCompteVerrouille(tx, target.id);
+      const apres = await tx.user.update({ where: { id: target.id }, data: { permissions }, select: { id: true, name: true, email: true, role: true, permissions: true } });
+      await journaliserDroitsCompte(tx, req, 'PERMISSIONS', avant, apres, ['permissions']);
+      return apres;
+    });
     res.json(user);
   } catch { res.status(500).json({ error: 'Impossible de modifier les permissions individuelles.' }); }
 });
@@ -3590,10 +3661,15 @@ app.patch('/api/users/:id/acces-finance', requireAuth, requireSuperAdmin, async 
     if (req.body.accesFinance && target.role === ROLE_TECHNICIEN) {
       return res.status(400).json({ error: 'L’accès financier ne s’accorde pas à un compte technicien.' });
     }
-    const user = await prisma.user.update({
-      where: { id: target.id },
-      data: { accesFinance: !!req.body.accesFinance },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+    const user = await prisma.$transaction(async (tx) => {
+      const avant = await lireCompteVerrouille(tx, target.id);
+      const apres = await tx.user.update({
+        where: { id: target.id },
+        data: { accesFinance: !!req.body.accesFinance },
+        select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+      });
+      await journaliserDroitsCompte(tx, req, 'ACCES_FINANCE', avant, apres, ['accesFinance']);
+      return apres;
     });
     res.json(user);
   } catch (error) {
@@ -3627,10 +3703,15 @@ app.patch('/api/users/:id/actif', requireAuth, requireAdmin, async (req, res) =>
     if (!actif && (await isLastSuperAdmin(target.id))) {
       return res.status(400).json({ error: "Ce compte est le dernier super administrateur : il ne peut pas être désactivé." });
     }
-    const user = await prisma.user.update({
-      where: { id: target.id },
-      data: { actif },
-      select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+    const user = await prisma.$transaction(async (tx) => {
+      const avant = await lireCompteVerrouille(tx, target.id);
+      const apres = await tx.user.update({
+        where: { id: target.id },
+        data: { actif },
+        select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
+      });
+      await journaliserDroitsCompte(tx, req, actif ? 'ACTIVATION' : 'DESACTIVATION', avant, apres, ['actif']);
+      return apres;
     });
     res.json(user);
   } catch (error) {
@@ -4065,10 +4146,21 @@ app.get('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, 
 app.post('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, async (req, res) => {
   try {
     const token = generateShareToken();
-    const share = await prisma.planningPublicShare.upsert({
-      where: { id: 'singleton' },
-      update: { token, active: true },
-      create: { id: 'singleton', token, active: true },
+    const share = await prisma.$transaction(async (tx) => {
+      await verrouillerReglage(tx, 'PlanningPublicShare');
+      const avant = await tx.planningPublicShare.findUnique({ where: { id: 'singleton' } });
+      const apres = await tx.planningPublicShare.upsert({
+        where: { id: 'singleton' },
+        update: { token, active: true },
+        create: { id: 'singleton', token, active: true },
+      });
+      // Le jeton est le secret du lien : le journal note seulement qu'il a changé.
+      await journaliserAdministration(tx, req as AuthRequest, {
+        domaine: 'REGLAGES', type: 'PARTAGE_PLANNING', action: avant ? 'NOUVEAU_LIEN' : 'PUBLICATION',
+        avant: avant ? { actif: avant.active } : null, apres: { actif: true },
+        detail: avant ? 'Nouveau lien : l’ancien ne fonctionne plus.' : 'Premier lien publié.',
+      });
+      return apres;
     });
     res.json(serializeShare(share));
   } catch (error) {
@@ -4081,12 +4173,21 @@ app.post('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif,
 // lien déjà communiqué aux techniciens.
 app.patch('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, async (req, res) => {
   try {
-    const existing = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
-    if (!existing) return res.status(404).json({ error: "Le planning n'a encore jamais été publié." });
-    const share = await prisma.planningPublicShare.update({
-      where: { id: 'singleton' },
-      data: { active: !!req.body.active },
+    const active = !!req.body.active;
+    const share = await prisma.$transaction(async (tx) => {
+      await verrouillerReglage(tx, 'PlanningPublicShare');
+      const existing = await tx.planningPublicShare.findUnique({ where: { id: 'singleton' } });
+      if (!existing) return null;
+      const apres = await tx.planningPublicShare.update({ where: { id: 'singleton' }, data: { active } });
+      if (existing.active !== active) {
+        await journaliserAdministration(tx, req as AuthRequest, {
+          domaine: 'REGLAGES', type: 'PARTAGE_PLANNING', action: active ? 'ACTIVATION' : 'DESACTIVATION',
+          avant: { actif: existing.active }, apres: { actif: active },
+        });
+      }
+      return apres;
     });
+    if (!share) return res.status(404).json({ error: "Le planning n'a encore jamais été publié." });
     res.json(serializeShare(share));
   } catch (error) {
     res.status(500).json({ error: 'Error updating planning share' });
@@ -4325,6 +4426,81 @@ function echeanceSuivante(dateDebut: Date, echeanceCourante: Date, periodiciteMo
 
 function valeurJournal(value: unknown): Record<string, unknown> {
   return JSON.parse(JSON.stringify(decimalToNumber(value))) as Record<string, unknown>;
+}
+
+// --- Journal des paramètres et des droits (lot (a), décision de Nelson du 13-10-2026) ---
+// Chaque changement de réglage ou de droits d'un compte s'écrit dans la même transaction que le
+// changement lui-même : si l'entrée ne peut pas être écrite, le changement est annulé. Seuls les
+// champs qui changent sont gardés (avant / après) ; un enregistrement sans changement n'écrit
+// rien. Aucun secret n'y entre (clé d'intégration, jeton du partage public).
+type EntreeJournalAdministration = {
+  domaine: 'DROITS' | 'REGLAGES';
+  type: 'COMPTE' | 'PARAMETRES' | 'MODULES' | 'REMUNERATION' | 'PRIME_COMMERCIAL' | 'SOCIETE' | 'CLE_INTEGRATION' | 'PARTAGE_PLANNING' | 'CONSERVATION_JOURNAL';
+  action: string;
+  cibleId?: string | null;
+  cibleLibelle?: string | null;
+  avant?: Record<string, unknown> | null;
+  apres?: Record<string, unknown> | null;
+  detail?: string | null;
+  // Entrée fermée au simple administrateur : elle concerne un compte super administrateur
+  // (décision du 14-10-2026), ou relève d'un réglage réservé au super administrateur dont
+  // l'historique lui est réservé aussi (clés d'intégration).
+  concerneSuperAdmin?: boolean;
+  reserveSuperAdmin?: boolean;
+};
+
+const AUTEUR_JOURNAL_DEMARRAGE = 'Iris (démarrage, SUPERADMIN_EMAILS)';
+
+async function journaliserAdministration(tx: any, req: AuthRequest | null, entree: EntreeJournalAdministration) {
+  const auteur = req?.user;
+  await tx.journalAdministration.create({
+    data: {
+      domaine: entree.domaine,
+      type: entree.type,
+      action: entree.action,
+      cibleId: entree.cibleId ?? null,
+      cibleLibelle: entree.cibleLibelle ?? null,
+      avant: entree.avant ? valeurJournal(entree.avant) : undefined,
+      apres: entree.apres ? valeurJournal(entree.apres) : undefined,
+      detail: entree.detail ?? null,
+      concerneSuperAdmin: !!entree.concerneSuperAdmin,
+      reserveSuperAdmin: !!entree.reserveSuperAdmin,
+      auteurId: auteur?.id ?? null,
+      auteurNom: auteur?.name?.trim() || AUTEUR_JOURNAL_DEMARRAGE,
+      auteurSuperAdmin: isSuperAdminRole(auteur?.role),
+    },
+  });
+}
+
+// Champs qui changent entre deux états, valeurs normalisées comme dans le journal (décimaux en
+// nombres, dates en ISO). Null si rien ne change.
+function changementsJournal(avant: Record<string, unknown> | null | undefined, apres: Record<string, unknown> | null | undefined, champs: readonly string[]) {
+  const ancien: Record<string, unknown> = {};
+  const nouveau: Record<string, unknown> = {};
+  for (const champ of champs) {
+    const a = valeurJournal({ v: avant?.[champ] ?? null }).v ?? null;
+    const b = valeurJournal({ v: apres?.[champ] ?? null }).v ?? null;
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      ancien[champ] = a;
+      nouveau[champ] = b;
+    }
+  }
+  return Object.keys(nouveau).length ? { avant: ancien, apres: nouveau } : null;
+}
+
+// Supprime les entrées plus anciennes que la durée de conservation (Parametres.
+// journalConservationJours). Le trigger de la table refuse toute autre suppression. Appelée au
+// démarrage et à chaque consultation du journal : sans tâche planifiée, une entrée échue
+// disparaît au plus tard à la consultation suivante.
+async function purgerJournalAdministration() {
+  await prisma.$executeRaw`DELETE FROM "JournalAdministration" WHERE "createdAt" < CURRENT_TIMESTAMP - make_interval(days => COALESCE((SELECT "journalConservationJours" FROM "Parametres" WHERE "id" = 'singleton'), 90))`;
+}
+
+// Verrouille la ligne d'un réglage unique le temps de la transaction : deux enregistrements
+// simultanés ne peuvent pas journaliser le même « avant ». Sans ligne (première écriture), rien
+// n'est verrouillé, et l'avant est vide.
+async function verrouillerReglage(tx: any, table: 'Parametres' | 'ParametresRemuneration' | 'CompanySettings' | 'PlanningPublicShare') {
+  await tx.$queryRawUnsafe(`SELECT 1 FROM "${table}" WHERE "id" = 'singleton' FOR UPDATE`);
 }
 
 async function journaliserSaisieTravaux(
@@ -4719,10 +4895,22 @@ app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async
       return res.status(404).json({ error: 'Commercial introuvable.' });
     }
     const suiviAdministratif = !!req.body.suiviAdministratif;
-    const prime = await prisma.primeMensuelleCommercial.upsert({
-      where: { commercialId_periode: { commercialId: commercial.id, periode } },
-      update: { suiviAdministratif },
-      create: { commercialId: commercial.id, periode, suiviAdministratif },
+    const prime = await prisma.$transaction(async (tx) => {
+      const avant = await tx.primeMensuelleCommercial.findUnique({ where: { commercialId_periode: { commercialId: commercial.id, periode } } });
+      const apres = await tx.primeMensuelleCommercial.upsert({
+        where: { commercialId_periode: { commercialId: commercial.id, periode } },
+        update: { suiviAdministratif },
+        create: { commercialId: commercial.id, periode, suiviAdministratif },
+      });
+      // Faute de ligne, la prime n'était pas accordée : l'avant vaut « non ».
+      const changements = changementsJournal({ suiviAdministratif: avant?.suiviAdministratif ?? false }, apres, ['suiviAdministratif']);
+      if (changements) {
+        await journaliserAdministration(tx, req as AuthRequest, {
+          domaine: 'REGLAGES', type: 'PRIME_COMMERCIAL', action: 'MODIFICATION', cibleId: commercial.id, cibleLibelle: commercial.name,
+          detail: `Période ${periode.slice(5, 7)}-${periode.slice(0, 4)}`, concerneSuperAdmin: isSuperAdminRole(commercial.role), ...changements,
+        });
+      }
+      return apres;
     });
     res.json(prime);
   } catch (error) {
@@ -4810,8 +4998,16 @@ app.post('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (req, res)
   }
   try {
     const secret = `iris_${crypto.randomBytes(32).toString('base64url')}`;
-    const key = await prisma.apiAccessKey.create({
-      data: { nom, prefixe: secret.slice(0, 14), secretHash: apiKeyHash(secret), scopes, expireLe, creeParId: (req as AuthRequest).user!.id },
+    const key = await prisma.$transaction(async (tx) => {
+      const cle = await tx.apiAccessKey.create({
+        data: { nom, prefixe: secret.slice(0, 14), secretHash: apiKeyHash(secret), scopes, expireLe, creeParId: (req as AuthRequest).user!.id },
+      });
+      // Ni le secret ni son empreinte : seulement le préfixe affiché dans l'administration.
+      await journaliserAdministration(tx, req as AuthRequest, {
+        domaine: 'REGLAGES', type: 'CLE_INTEGRATION', action: 'CREATION', cibleId: cle.id, cibleLibelle: cle.nom, reserveSuperAdmin: true,
+        apres: { nom: cle.nom, prefixe: cle.prefixe, scopes: cle.scopes, expireLe: cle.expireLe },
+      });
+      return cle;
     });
     console.warn(`[API] Clé d'intégration créée : « ${nom} » (${scopes.join(', ')}) par ${(req as AuthRequest).user!.id}`);
     res.status(201).json({ apiKey: secret, key: publicApiKey(key), warning: 'Copiez cette clé maintenant : elle ne sera plus jamais affichée.' });
@@ -4821,9 +5017,16 @@ app.post('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (req, res)
 });
 
 app.post('/api/admin/api-keys/:id/revoke', requireAuth, requireSuperAdmin, async (req, res) => {
-  const key = await prisma.apiAccessKey
-    .update({ where: { id: paramId(req) }, data: { actif: false, revoqueLe: new Date() } })
-    .catch(() => null);
+  const key = await prisma.$transaction(async (tx) => {
+    const avant = await tx.apiAccessKey.findUnique({ where: { id: paramId(req) } });
+    if (!avant) return null;
+    const cle = await tx.apiAccessKey.update({ where: { id: avant.id }, data: { actif: false, revoqueLe: new Date() } });
+    await journaliserAdministration(tx, req as AuthRequest, {
+      domaine: 'REGLAGES', type: 'CLE_INTEGRATION', action: 'REVOCATION', cibleId: cle.id, cibleLibelle: cle.nom, reserveSuperAdmin: true,
+      avant: { actif: avant.actif, revoqueLe: avant.revoqueLe }, apres: { actif: cle.actif, revoqueLe: cle.revoqueLe },
+    });
+    return cle;
+  }).catch(() => null);
   if (!key) return res.status(404).json({ error: 'Clé API introuvable.' });
   console.warn(`[API] Clé d'intégration révoquée : « ${key.nom} »`);
   res.json(publicApiKey(key));
@@ -5783,10 +5986,17 @@ app.get('/api/company', requireAuth, async (_req, res) => {
 app.put('/api/company', requireAuth, requireSuperAdmin, async (req, res) => {
   try {
     const data = companySettingsPayload(req.body ?? {});
-    const company = await prisma.companySettings.upsert({
-      where: { id: 'singleton' },
-      update: data,
-      create: { id: 'singleton', ...data },
+    const company = await prisma.$transaction(async (tx) => {
+      await verrouillerReglage(tx, 'CompanySettings');
+      const avant = await tx.companySettings.findUnique({ where: { id: 'singleton' } });
+      const apres = await tx.companySettings.upsert({
+        where: { id: 'singleton' },
+        update: data,
+        create: { id: 'singleton', ...data },
+      });
+      const changements = changementsJournal(avant, apres, Object.keys(data));
+      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'SOCIETE', action: 'MODIFICATION', ...changements });
+      return apres;
     });
     res.json(company);
   } catch (error) {
@@ -5864,10 +6074,16 @@ app.put('/api/parametres/remuneration', requireAuth, requireSuperAdmin, async (r
       primeObjectifMarge: montantPositif(body.primeObjectifMarge, "Prime d'objectif de marge"),
       primeSuiviAdministratif: montantPositif(body.primeSuiviAdministratif, 'Prime de suivi administratif'),
     };
-    await prisma.parametresRemuneration.upsert({
-      where: { id: 'singleton' },
-      update: data,
-      create: { id: 'singleton', ...data },
+    await prisma.$transaction(async (tx) => {
+      await verrouillerReglage(tx, 'ParametresRemuneration');
+      const avant = await tx.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
+      const apres = await tx.parametresRemuneration.upsert({
+        where: { id: 'singleton' },
+        update: data,
+        create: { id: 'singleton', ...data },
+      });
+      const changements = changementsJournal(avant, apres, Object.keys(data));
+      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'REMUNERATION', action: 'MODIFICATION', ...changements });
     });
     console.warn(`[REMUNERATION] Règles modifiées par ${(req as AuthRequest).user!.id}`);
     const regles = await getReglesRemuneration();
@@ -5936,10 +6152,17 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
       }
       data[champ] = req.body[champ];
     }
-    const p = await prisma.parametres.upsert({
-      where: { id: 'singleton' },
-      update: data,
-      create: { id: 'singleton', ...data },
+    const p = await prisma.$transaction(async (tx) => {
+      await verrouillerReglage(tx, 'Parametres');
+      const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
+      const apres = await tx.parametres.upsert({
+        where: { id: 'singleton' },
+        update: data,
+        create: { id: 'singleton', ...data },
+      });
+      const changements = changementsJournal(avant, apres, Object.keys(data));
+      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'PARAMETRES', action: 'MODIFICATION', ...changements });
+      return apres;
     });
     res.json(decimalToNumber(p));
   } catch (error) {
@@ -5971,14 +6194,154 @@ app.get('/api/modules', requireAuth, async (req, res) => {
 app.put('/api/modules', requireAuth, requireSuperAdmin, async (req, res) => {
   try {
     const planningActif = !!req.body.planningActif;
-    const p = await prisma.parametres.upsert({
-      where: { id: 'singleton' },
-      update: { planningActif },
-      create: { id: 'singleton', planningActif },
+    const p = await prisma.$transaction(async (tx) => {
+      await verrouillerReglage(tx, 'Parametres');
+      const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
+      const apres = await tx.parametres.upsert({
+        where: { id: 'singleton' },
+        update: { planningActif },
+        create: { id: 'singleton', planningActif },
+      });
+      const changements = changementsJournal(avant, apres, ['planningActif']);
+      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'MODULES', action: planningActif ? 'ACTIVATION' : 'DESACTIVATION', cibleLibelle: 'Planning', ...changements });
+      return apres;
     });
     res.json({ planningActif: true, planningActifGlobal: p.planningActif });
   } catch (error) {
     res.status(500).json({ error: 'Error updating modules' });
+  }
+});
+
+// --- Journal des paramètres et des droits : consultation et export (administrateurs) ---
+// Option retenue par Nelson (13-10-2026) : un onglet « Journal » dans Administration, filtrable par
+// date, type et auteur, avec export CSV. Un simple administrateur ne reçoit ni les entrées qui
+// concernent un compte super administrateur, ni l'historique des clés d'intégration.
+const TYPES_JOURNAL_ADMINISTRATION = ['COMPTE', 'PARAMETRES', 'MODULES', 'REMUNERATION', 'PRIME_COMMERCIAL', 'SOCIETE', 'CLE_INTEGRATION', 'PARTAGE_PLANNING', 'CONSERVATION_JOURNAL'];
+const AUTEUR_FILTRE_DEMARRAGE = 'DEMARRAGE';
+const ENTREES_JOURNAL_PAR_PAGE = 50;
+const ENTREES_JOURNAL_EXPORT_MAX = 10000;
+
+function entreesVisiblesJournal(req: express.Request) {
+  return isSuperAdminRole((req as AuthRequest).user?.role) ? {} : { concerneSuperAdmin: false, reserveSuperAdmin: false };
+}
+
+// Filtres : du / au (jours civils de la société, JJ-MM-AAAA ou AAAA-MM-JJ, bornes incluses),
+// type, auteur (identifiant, ou DEMARRAGE pour les entrées sans auteur).
+async function filtreJournalAdministration(req: express.Request): Promise<{ where: Record<string, unknown>; fuseau: string } | { erreur: string }> {
+  const fuseau = (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+  const where: Record<string, unknown> = { ...entreesVisiblesJournal(req) };
+  const { du, au, type, auteur } = req.query;
+  const periode: { gte?: Date; lt?: Date } = {};
+  if (du !== undefined && du !== '') {
+    const jour = dateIsoStricte(du);
+    if (!jour) return { erreur: 'Date de début invalide (JJ-MM-AAAA).' };
+    periode.gte = debutJourCivilEntreprise(jour.slice(0, 10), fuseau);
+  }
+  if (au !== undefined && au !== '') {
+    const jour = dateIsoStricte(au);
+    if (!jour) return { erreur: 'Date de fin invalide (JJ-MM-AAAA).' };
+    periode.lt = debutJourCivilEntreprise(ajouterJoursCivils(jour.slice(0, 10), 1), fuseau);
+  }
+  if (periode.gte && periode.lt && periode.gte >= periode.lt) return { erreur: 'La date de fin doit être postérieure ou égale à la date de début.' };
+  if (periode.gte || periode.lt) where.createdAt = periode;
+  if (type !== undefined && type !== '') {
+    if (typeof type !== 'string' || !TYPES_JOURNAL_ADMINISTRATION.includes(type)) return { erreur: 'Type d’entrée inconnu.' };
+    where.type = type;
+  }
+  if (auteur !== undefined && auteur !== '') {
+    if (typeof auteur !== 'string') return { erreur: 'Auteur invalide.' };
+    where.auteurId = auteur === AUTEUR_FILTRE_DEMARRAGE ? null : auteur;
+  }
+  return { where, fuseau };
+}
+
+function entreeJournalPublique(entree: { id: string; createdAt: Date; domaine: string; type: string; action: string; cibleId: string | null; cibleLibelle: string | null; avant: unknown; apres: unknown; detail: string | null; auteurId: string | null; auteurNom: string }) {
+  const { id, createdAt, domaine, type, action, cibleId, cibleLibelle, avant, apres, detail, auteurId, auteurNom } = entree;
+  return { id, createdAt, domaine, type, action, cibleId, cibleLibelle, avant, apres, detail, auteurId, auteurNom };
+}
+
+app.get('/api/journal-administration', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await purgerJournalAdministration();
+    const filtre = await filtreJournalAdministration(req);
+    if ('erreur' in filtre) return res.status(400).json({ error: filtre.erreur });
+    const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const [total, entrees, auteurs, parametres] = await Promise.all([
+      prisma.journalAdministration.count({ where: filtre.where }),
+      prisma.journalAdministration.findMany({
+        where: filtre.where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * ENTREES_JOURNAL_PAR_PAGE, take: ENTREES_JOURNAL_PAR_PAGE,
+      }),
+      // Auteurs proposés au filtre : ceux des seules entrées visibles par le demandeur.
+      prisma.journalAdministration.findMany({
+        where: entreesVisiblesJournal(req), distinct: ['auteurId', 'auteurNom'],
+        select: { auteurId: true, auteurNom: true }, orderBy: { auteurNom: 'asc' },
+      }),
+      getParametres(),
+    ]);
+    res.json({
+      entrees: entrees.map(entreeJournalPublique), total, page, parPage: ENTREES_JOURNAL_PAR_PAGE,
+      auteurs: auteurs.map((a) => ({ id: a.auteurId ?? AUTEUR_FILTRE_DEMARRAGE, nom: a.auteurNom })),
+      conservationJours: parametres.journalConservationJours,
+    });
+  } catch {
+    res.status(500).json({ error: 'Lecture du journal impossible.' });
+  }
+});
+
+// Valeurs avant / après d'une entrée, lisibles dans un tableur : « champ : valeur ; … ».
+function valeursJournalCsv(valeurs: unknown): string {
+  if (!valeurs || typeof valeurs !== 'object') return '';
+  return Object.entries(valeurs as Record<string, unknown>)
+    .map(([champ, valeur]) => `${champ} : ${typeof valeur === 'string' ? valeur : JSON.stringify(valeur)}`)
+    .join(' ; ');
+}
+
+app.get('/api/journal-administration/export.csv', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await purgerJournalAdministration();
+    const filtre = await filtreJournalAdministration(req);
+    if ('erreur' in filtre) return res.status(400).json({ error: filtre.erreur });
+    const entrees = await prisma.journalAdministration.findMany({
+      where: filtre.where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: ENTREES_JOURNAL_EXPORT_MAX,
+    });
+    const heure = new Intl.DateTimeFormat('fr-FR', { timeZone: filtre.fuseau, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+    const lignes = ['Date;Heure;Auteur;Domaine;Type;Action;Cible;Avant;Après;Détail'];
+    for (const e of entrees) {
+      lignes.push([
+        jourCivilEntreprise(e.createdAt, filtre.fuseau).split('-').reverse().join('-'), heure.format(e.createdAt), e.auteurNom, e.domaine, e.type, e.action,
+        e.cibleLibelle ?? '', valeursJournalCsv(e.avant), valeursJournalCsv(e.apres), e.detail ?? '',
+      ].map(csvComptable).join(';'));
+    }
+    const jour = aujourdHuiEntreprise(filtre.fuseau).split('-').reverse().join('-');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="journal-parametres-droits-${jour}.csv"`);
+    res.send(`\uFEFF${lignes.join('\n')}\n`);
+  } catch {
+    res.status(500).json({ error: 'Export du journal impossible.' });
+  }
+});
+
+// Durée de conservation (1 à 90 jours) : réglée par un super administrateur, et journalisée.
+// La réduire efface aussitôt les entrées devenues plus anciennes que la nouvelle durée.
+app.put('/api/journal-administration/conservation', requireAuth, requireSuperAdmin, async (req, res) => {
+  const brut = req.body?.jours;
+  const jours = typeof brut === 'number' ? brut : typeof brut === 'string' && /^\d+$/.test(brut.trim()) ? Number(brut.trim()) : NaN;
+  if (!Number.isInteger(jours) || jours < 1 || jours > 90) {
+    return res.status(400).json({ error: 'La durée de conservation est un nombre entier de jours, de 1 à 90.' });
+  }
+  try {
+    await prisma.$transaction(async (tx) => {
+      await verrouillerReglage(tx, 'Parametres');
+      const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
+      const apres = await tx.parametres.upsert({ where: { id: 'singleton' }, update: { journalConservationJours: jours }, create: { id: 'singleton', journalConservationJours: jours } });
+      const changements = changementsJournal(avant, apres, ['journalConservationJours']);
+      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'CONSERVATION_JOURNAL', action: 'MODIFICATION', ...changements });
+    });
+    await purgerJournalAdministration();
+    res.json({ conservationJours: jours });
+  } catch {
+    res.status(500).json({ error: 'Enregistrement de la durée de conservation impossible.' });
   }
 });
 
@@ -6842,19 +7205,30 @@ const ensureSuperAdmins = async () => {
 
   for (const email of emails) {
     const existing = await prisma.user.findUnique({ where: { email } });
+    // Promotions et créations du démarrage : journalisées comme les autres changements de droits,
+    // sans auteur (AUTEUR_JOURNAL_DEMARRAGE), et réservées au super administrateur.
     if (existing) {
       if (existing.role !== ROLE_SUPERADMIN) {
-        await prisma.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
+        await prisma.$transaction(async (tx) => {
+          const apres = await tx.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
+          await journaliserDroitsCompte(tx, { } as express.Request, 'TYPE_COMPTE', existing, apres, ['role']);
+        });
         console.log(`Compte promu super administrateur : ${email}`);
       }
       continue;
     }
-    await prisma.user.create({
-      data: {
-        email,
-        name: nameFromEmail(email),
-        role: ROLE_SUPERADMIN,
-      },
+    await prisma.$transaction(async (tx) => {
+      const cree = await tx.user.create({
+        data: {
+          email,
+          name: nameFromEmail(email),
+          role: ROLE_SUPERADMIN,
+        },
+      });
+      await journaliserAdministration(tx, null, {
+        domaine: 'DROITS', type: 'COMPTE', action: 'CREATION', cibleId: cree.id, cibleLibelle: libelleCompteJournal(cree), concerneSuperAdmin: true,
+        apres: { role: cree.role, estCommercial: cree.estCommercial, accesFinance: cree.accesFinance, permissions: cree.permissions, actif: cree.actif },
+      });
     });
     console.log(`Compte super administrateur créé : ${email} (connexion Microsoft Entra ID)`);
   }
@@ -6871,7 +7245,7 @@ const initDb = async () => {
   // écoute déjà : une première requête peut la créer au même instant, et une erreur levée ici
   // (rappel de listen) arrêterait le processus avant ensureSuperAdmins.
   await upsertSingleton(() => prisma.parametres.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } }));
-
+  await purgerJournalAdministration();
 };
 
 // Délais de connexion du serveur HTTP. Node ferme par défaut une connexion keep-alive inactive

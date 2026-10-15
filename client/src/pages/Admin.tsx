@@ -5,6 +5,7 @@ import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRol
 import { refreshModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
 import OuvrirChantierAffaire from '../components/OuvrirChantierAffaire';
+import JournalAdministration from '../components/JournalAdministration';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
@@ -676,6 +677,7 @@ const Admin = () => {
           <>
             <button className={`btn ${activeTab === 'marges' ? 'btn-primary' : 'bg-white'}`} onClick={() => (activeTab === 'marges' ? fetchData() : setActiveTab('marges'))}>Marges & Commissions</button>
             <button className={`btn ${activeTab === 'utilisateurs' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('utilisateurs')}>Utilisateurs</button>
+            <button className={`btn ${activeTab === 'journal' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('journal')}>Journal</button>
           </>
         )}
         {isSuper && (
@@ -685,6 +687,8 @@ const Admin = () => {
           </>
         )}
       </div>
+
+      {activeTab === 'journal' && isAdmin && <JournalAdministration isSuper={isSuper} />}
 
       {erreurListe === activeTab && (
         <div role="alert" className="mb-4 p-4 bg-red-50 text-red-800 rounded text-sm">Cette liste n’a pas pu être chargée. Rechargez la page pour réessayer.</div>
