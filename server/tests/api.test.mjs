@@ -2448,9 +2448,11 @@ if (!TEST_DATABASE_URL) {
       assert.equal(sansDecalage.status, 201, JSON.stringify(sansDecalage.body));
       assert.equal(sansDecalage.body.installeLe, '2026-10-01T00:00:00.000Z');
       assert.equal(sansDecalage.body.garantieJusquAu, '2028-12-31T00:00:00.000Z');
-      const heureInvalide = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
-        .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-5', installeLe: '2026-10-01T99:99Z' });
-      assert.equal(heureInvalide.status, 400, JSON.stringify(heureInvalide.body));
+      for (const installeLe of ['2026-10-01T99:99Z', '2026-10-01T10:60Z', '2026-10-01T24:00Z', '2026-10-01T23:59:60Z']) {
+        const heureInvalide = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
+          .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-5', installeLe });
+        assert.equal(heureInvalide.status, 400, `${installeLe} : ${JSON.stringify(heureInvalide.body)}`);
+      }
       await prisma.equipementInstalle.deleteMany({ where: { id: { in: [creation.body.id, horodatee.body.id, sansDecalage.body.id] } } });
     });
 

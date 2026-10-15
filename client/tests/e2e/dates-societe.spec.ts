@@ -136,6 +136,11 @@ test.describe('navigateur à Gambier, société à Wallis : périodes', () => {
         attendu: page.getByText('Novembre 2026', { exact: true }),
         depasse: page.getByText('Octobre 2026', { exact: true }),
       });
+      // « Aujourd'hui » revient au mois de la société, et non au mois du jour UTC (octobre).
+      await page.getByTitle('Période précédente').click();
+      await expect(page.getByText('Octobre 2026', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: "Aujourd'hui" }).click();
+      await expect(page.getByText('Novembre 2026', { exact: true })).toBeVisible();
     });
   });
 
@@ -154,6 +159,10 @@ test.describe('navigateur à Gambier, société à Wallis : périodes', () => {
         attendu: page.getByText('Novembre 2026', { exact: true }),
         depasse: page.getByText('Octobre 2026', { exact: true }),
       });
+      await page.getByTitle('Période précédente').click();
+      await expect(page.getByText('Octobre 2026', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: "Aujourd'hui" }).click();
+      await expect(page.getByText('Novembre 2026', { exact: true })).toBeVisible();
     });
   });
 
@@ -168,6 +177,11 @@ test.describe('navigateur à Gambier, société à Wallis : périodes', () => {
         attendu: page.getByText(/Semaine du 19\/10 au 23\/10/),
         depasse: page.getByText(/Semaine du 12\/10/),
       });
+      // « Aujourd'hui » revient à la semaine de la société, et non à celle du jour UTC (le 12).
+      await page.getByTitle('Semaine précédente').click();
+      await expect(page.getByText(/Semaine du 12\/10/)).toBeVisible();
+      await page.getByRole('button', { name: "Aujourd'hui" }).click();
+      await expect(page.getByText(/Semaine du 19\/10 au 23\/10/)).toBeVisible();
     });
   });
 
@@ -359,11 +373,13 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     const demandes: string[] = [];
     await page.route('**/api/planning/public/**', async (route) => {
       demandes.push(route.request().url());
+      // Sans plage, le serveur sert la semaine de la société ; sinon, la plage demandée.
+      const parametres = new URL(route.request().url()).searchParams;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         headers: { 'Access-Control-Allow-Origin': '*' },
-        body: JSON.stringify({ events: [], intervenants: [], fuseauHoraire: 'Pacific/Wallis', aujourdhui: '2026-10-15', debut: '2026-10-12', fin: '2026-10-18' }),
+        body: JSON.stringify({ events: [], intervenants: [], fuseauHoraire: 'Pacific/Wallis', aujourdhui: '2026-10-15', debut: parametres.get('start') ?? '2026-10-12', fin: parametres.get('end') ?? '2026-10-18' }),
       });
     });
     await page.goto('/planning/public/jeton-e2e-dates', { waitUntil: 'networkidle' });
@@ -375,6 +391,17 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     await expect(page.getByText("Aujourd'hui", { exact: true }).locator('..')).toContainText('jeudi 15 octobre');
     // 13:00 UTC = 01:00 à Wallis.
     await expect(page.getByText(/Mis à jour à 01:00/)).toBeVisible();
+    // Semaine précédente, puis retour à la semaine de la société, choisie par le serveur.
+    await page.getByTitle('Semaine précédente').click();
+    await expect(page.getByText('5 – 11 octobre 2026')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Semaine 41' })).toBeVisible();
+    expect(new URL(demandes[demandes.length - 1]).search).toBe('?start=2026-10-05&end=2026-10-11');
+    const nombreAvantRetour = demandes.length;
+    await page.getByRole('button', { name: 'Semaine 41' }).click();
+    await expect(page.getByText('12 – 18 octobre 2026')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
+    expect(demandes.length).toBeGreaterThan(nombreAvantRetour);
+    expect(new URL(demandes[demandes.length - 1]).search).toBe('');
   });
 
   // Un rafraîchissement lancé avant un changement de semaine ne doit pas, arrivé le dernier,
