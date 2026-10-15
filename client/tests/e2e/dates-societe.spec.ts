@@ -567,12 +567,17 @@ test.describe('navigateur à Gambier : instants affichés au fuseau de la socié
       apresCode: '706100', apresLibelle: 'Après E2E', motif: 'Motif E2E', auteurNom: 'Auteur E2E', createdAt: instant,
     }] }));
     // Archivé sans date de fin : le tableau de bord lit sa dernière modification, un instant, au
-    // jour de la société, même à minuit UTC pile (à Tahiti, encore le 14 à 14:00).
+    // jour de la société. À minuit UTC pile, Tahiti est encore le 14 à 14:00 (une lecture comme
+    // date-seule donnerait le 15). Une copie du chantier, modifiée à 09:30 UTC, distingue aussi la
+    // société du navigateur : Tahiti est encore le 14 à 23:30, Gambier et UTC déjà le 15.
+    const nomMatin = `Archivé au matin E2E ${Date.now()}`;
     await page.route('**/api/chantiers', async (route) => {
       if (route.request().method() !== 'GET') return route.continue();
       const reponse = await route.fetch();
-      const liste = await reponse.json() as { id: string }[];
-      await route.fulfill({ response: reponse, json: liste.map((c) => (c.id === chantierId ? { ...c, statut: 'TERMINE', dateFin: null, updatedAt: '2026-10-15T00:00:00.000Z' } : c)) });
+      const liste = await reponse.json() as { id: string; nom: string }[];
+      const archive = { ...liste.find((c) => c.id === chantierId) as { id: string; nom: string }, statut: 'TERMINE', dateFin: null, updatedAt: '2026-10-15T00:00:00.000Z' };
+      const matin = { ...archive, id: `${chantierId}-matin`, nom: nomMatin, updatedAt: '2026-10-15T09:30:00.000Z' };
+      await route.fulfill({ response: reponse, json: [...liste.map((c) => (c.id === chantierId ? archive : c)), matin] });
     });
     await page.addInitScript(([token, user]) => {
       localStorage.setItem('token', token as string);
@@ -589,6 +594,7 @@ test.describe('navigateur à Gambier : instants affichés au fuseau de la socié
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await page.getByRole('button', { name: /Chantiers terminés \/ archivés/ }).click();
       await expect(page.getByRole('button', { name: new RegExp(objet) })).toContainText('Archivé le 14-10-2026');
+      await expect(page.getByRole('button', { name: new RegExp(nomMatin) })).toContainText('Archivé le 14-10-2026');
     });
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   });

@@ -182,8 +182,9 @@ où que se trouve celui qui consulte ou saisit (décision de Nelson du 14-10-202
 - un chantier ouvert sans date choisie commence le jour civil de la société. Un début
   horodaté plus ancien (conversion antérieure) se lit dans ce fuseau, et enregistrer la fiche
   le fixe à ce même jour ;
-- une date-heure reçue par l'API pour une date-seule retient la date telle qu'elle est écrite,
-  sans tenir compte de l'heure ni du décalage ;
+- une date-heure ISO reçue par l'API pour une date-seule, avec `Z` ou un décalage `±HH:MM`,
+  retient la date telle qu'elle est écrite, sans tenir compte de l'heure ni du décalage ; sans
+  décalage, elle est refusée ;
 - la semaine de la société commence le lundi.
 
 L'affichage de toutes les dates au même format `JJ-MM-AAAA` est décidé et prévu (lot (h) de la

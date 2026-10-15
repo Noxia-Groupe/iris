@@ -70,7 +70,7 @@ Le catalogue et le plan comptable commencent vides et sont paramétrés par la s
   - serveur : statistiques par type de chantier au jour civil de son début ; dates d'équipement lues en `JJ-MM-AAAA`.
 
   Points restants tranchés par Nelson le 14-10-2026 :
-  - une date-heure reçue par l'API pour une date-seule retient la date telle qu'elle est écrite, sans tenir compte de l'heure ni du décalage (comportement conservé, désormais testé) ;
+  - une date-heure ISO reçue par l'API pour une date-seule, avec `Z` ou un décalage `±HH:MM`, retient la date telle qu'elle est écrite, sans tenir compte de l'heure ni du décalage ; sans décalage, elle est refusée (comportement conservé pour les champs déjà lus par `dateIsoStricte`, désormais testé). Les dates d'équipement, auparavant lues par `new Date`, suivent désormais cette règle : « 01-10-2026 » y est le 1er octobre, et une date-heure sans décalage, que `new Date` acceptait, y est refusée ;
   - aucune migration des débuts horodatés existants : l'application n'est pas en service et ne contient aucune donnée ;
   - la semaine de la société commence le lundi, comme le planning le fait déjà ;
   - toutes les dates s'affichent au même format `JJ-MM-AAAA` : lot (h) ;

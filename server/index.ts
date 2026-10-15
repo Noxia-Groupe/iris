@@ -4275,9 +4275,10 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
 function dateIsoStricte(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   // Le format métier français est JJ-MM-AAAA. YYYY-MM-DD reste accepté pour les champs
-  // HTML natifs. Une date-heure ISO est également acceptée car l'API la renvoie elle-même : une
-  // date-seule ne peut pas porter l'heure, on retient donc la date telle qu'elle est écrite, sans
-  // tenir compte de l'heure ni du décalage (décision de Nelson du 14-10-2026).
+  // HTML natifs. Une date-heure ISO avec « Z » ou un décalage ±HH:MM est également acceptée car
+  // l'API la renvoie elle-même : une date-seule ne peut pas porter l'heure, on retient donc la
+  // date telle qu'elle est écrite, sans tenir compte de l'heure ni du décalage (décision de Nelson
+  // du 14-10-2026). Sans décalage, l'heure ne désigne aucun instant : elle est refusée.
   const isoComplet = /^(\d{4})-(\d{2})-(\d{2})T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
   if (isoComplet) return dateIsoStricte(`${isoComplet[1]}-${isoComplet[2]}-${isoComplet[3]}`);
   const match = /^(?:(\d{2})-(\d{2})-(\d{4})|(\d{4})-(\d{2})-(\d{2}))$/.exec(value);
