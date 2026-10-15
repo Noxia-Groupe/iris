@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
-import { useCompanyTimezone } from '../companyTimezoneContext';
+import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue } from '../lib/dateFormatting';
 
 type DevisAConvertir = { id: string; numero: string; version: number; objet: string; totalHt: number; client: { id: string; raisonSociale: string } };
@@ -18,6 +18,9 @@ const euros = (montant: number) => montant.toLocaleString('fr-FR', { style: 'cur
 // commercial, les types et la date de début. Les refus du serveur sont affichés tels quels.
 export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => void }) {
   const fuseau = useCompanyTimezone();
+  // Le jour de la société n'est prérempli qu'une fois son fuseau lu ; sinon, la date reste à saisir.
+  const fuseauConnu = useFuseauSocieteConnu();
+  const jourParDefaut = useCallback(() => (fuseauConnu ? companyDateInputValue(fuseau) : ''), [fuseau, fuseauConnu]);
   const [devis, setDevis] = useState<DevisAConvertir[] | null>(null);
   const [conducteurs, setConducteurs] = useState<Compte[]>([]);
   const [commerciaux, setCommerciaux] = useState<Compte[]>([]);
@@ -29,7 +32,7 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
   // la remise à vide dans `charger` qui protège.
   const [responsableId, setResponsableId] = useState('');
   const [commercialId, setCommercialId] = useState('');
-  const [dateDebut, setDateDebut] = useState(() => companyDateInputValue(fuseau));
+  const [dateDebut, setDateDebut] = useState(jourParDefaut);
   const dateSaisie = useRef(false);
   const [envoi, setEnvoi] = useState(false);
   const [resultat, setResultat] = useState<Resultat | null>(null);
@@ -61,8 +64,8 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
   // Date de début préremplie au jour de la société tant qu'elle n'a pas été saisie : le fuseau
   // de la société peut n'être connu qu'après l'ouverture de l'écran.
   useEffect(() => {
-    if (!dateSaisie.current) setDateDebut(companyDateInputValue(fuseau));
-  }, [fuseau]);
+    if (!dateSaisie.current) setDateDebut(jourParDefaut());
+  }, [jourParDefaut]);
 
   const choisi = devis?.find((d) => d.id === devisId);
 
@@ -105,7 +108,7 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
       setResponsableId('');
       setCommercialId('');
       dateSaisie.current = false;
-      setDateDebut(companyDateInputValue(fuseau));
+      setDateDebut(jourParDefaut());
       void charger();
       onOuvert();
     } catch {

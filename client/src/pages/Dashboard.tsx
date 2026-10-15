@@ -8,7 +8,7 @@ import { AlertesChantier } from '../components/AlertesChantier';
 import { isAdminRole, peutAccederAuxDevis, roleLabel, useCurrentUser } from '../roles';
 import { estASurveiller, trierChantiers } from '../lib/suiviChantiers';
 import { useCompanyTimezone } from '../companyTimezoneContext';
-import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
+import { companyDateInputValue, jourCivilChantier } from '../lib/dateFormatting';
 
 type Period = 'month' | 'quarter' | 'year';
 
@@ -88,10 +88,6 @@ const Dashboard = () => {
   const archives = chantiers
     .filter(c => c.statut !== 'EN_COURS')
     .sort((a, b) => archiveDate(b) - archiveDate(a));
-
-  const fmtDate = (d: string, isDateOnly: boolean) => isDateOnly
-    ? formatDateOnly(d, { day: '2-digit', month: 'short', year: 'numeric' })
-    : formatCompanyDate(d, companyTimezone, { day: '2-digit', month: 'short', year: 'numeric' });
 
   const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
   const periodLabel = (() => {
@@ -411,7 +407,11 @@ const Dashboard = () => {
                       </div>
                     </div>
                     <span className="hidden sm:inline-block text-xs font-semibold text-gray-400 shrink-0">
-                      Archivé le {fmtDate(c.dateFin || c.updatedAt, Boolean(c.dateFin))}
+                      {/* Jour civil de la société, au format JJ-MM-AAAA : une date de fin horodatée
+                          (clôtures antérieures au 16-09-2026) se lit dans son fuseau, une date-seule
+                          telle quelle ; la dernière modification, toujours un instant, se lit dans son
+                          fuseau, même à minuit UTC pile. */}
+                      Archivé le {c.dateFin ? jourCivilChantier(c.dateFin, companyTimezone) : companyDateInputValue(companyTimezone, new Date(c.updatedAt))}
                     </span>
                     <span className="text-[11px] font-bold uppercase tracking-wide bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full shrink-0">Terminé</span>
                     <ChevronRight size={20} className="text-gray-300 group-hover:text-accent transition-colors shrink-0" />

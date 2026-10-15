@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarPlus, FilePlus2, RefreshCw, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
-import { useCompanyTimezone } from '../companyTimezoneContext';
+import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 
 type Client = { id: string; raisonSociale: string };
@@ -16,6 +16,8 @@ const libelleStatut: Record<string, string> = { ACTIF: 'Actif', BROUILLON: 'Brou
 
 export default function ContratsMaintenance() {
   const companyTimezone = useCompanyTimezone();
+  // Date du jour préremplie une fois le fuseau de la société lu ; sinon, elle reste à saisir.
+  const fuseauConnu = useFuseauSocieteConnu();
   const formatDate = (value: string) => formatDateOnly(value);
   const [contrats, setContrats] = useState<Contrat[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -132,7 +134,7 @@ export default function ContratsMaintenance() {
       <select required name="clientId" className="form-input" defaultValue="" onChange={(event) => void choisirClient(event.target.value)}><option value="" disabled>Client concerné</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}</select>
       {clientSelectionne && <select name="siteId" className="form-input" defaultValue=""><option value="">Tous sites / site non précisé</option>{clientSelectionne.sites.map((site) => <option key={site.id} value={site.id}>{site.nom} — {site.ville}{site.estSiteIntervention ? ' · intervention' : ''}</option>)}</select>}
       <input required name="titre" minLength={3} maxLength={200} className="form-input" placeholder="Ex. Maintenance préventive SSI" />
-      <div className="grid gap-3 sm:grid-cols-3"><input required name="dateDebut" key={companyTimezone} defaultValue={companyDateInputValue(companyTimezone)} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Début (JJ-MM-AAAA)" /><input required name="periodiciteMois" type="number" min="1" max="60" defaultValue="12" className="form-input" placeholder="Périodicité (mois)" /><input required name="dureePrevisionnelleMinutes" type="number" min="15" max="1440" defaultValue="60" className="form-input" placeholder="Durée (minutes)" /></div>
+      <div className="grid gap-3 sm:grid-cols-3"><input required name="dateDebut" defaultValue={fuseauConnu ? companyDateInputValue(companyTimezone) : ''} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" className="form-input" placeholder="Début (JJ-MM-AAAA)" /><input required name="periodiciteMois" type="number" min="1" max="60" defaultValue="12" className="form-input" placeholder="Périodicité (mois)" /><input required name="dureePrevisionnelleMinutes" type="number" min="15" max="1440" defaultValue="60" className="form-input" placeholder="Durée (minutes)" /></div>
       <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm text-gray-700">Main-d’œuvre<select required name="politiqueMainOeuvre" defaultValue="HORS_FORFAIT" className="form-input mt-1"><option value="INCLUSE">Incluse</option><option value="HORS_FORFAIT">Hors forfait</option></select></label><label className="text-sm text-gray-700">Matériel<select required name="politiqueMateriel" defaultValue="HORS_FORFAIT" className="form-input mt-1"><option value="INCLUS">Inclus</option><option value="HORS_FORFAIT">Hors forfait</option></select></label></div>
       <textarea name="noteCouverture" maxLength={1000} className="form-input" placeholder="Note de couverture (facultative)" />
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer le contrat</button><button className="btn btn-secondary" type="button" onClick={() => { setFormulaireOuvert(false); setClientSelectionne(null); }}>Annuler</button></div>

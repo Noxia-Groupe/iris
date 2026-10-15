@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Activity } from 'lucide-react';
 import { apiFetch } from '../api';
+import { decalerReference } from '../lib/dateFormatting';
+import { useReferencePeriode } from '../lib/referencePeriode';
 
 // Une date "YYYY-MM-DD" (sans fuseau, tel que renvoyé par le serveur) -> "DD/MM".
 const fmtJourMois = (isoDate: string) => {
@@ -20,7 +22,10 @@ const Performances = () => {
   const [perf, setPerf] = useState<any[]>([]);
   const [assiduite, setAssiduite] = useState<any>(null);
   // N'importe quelle date de la semaine affichée (le serveur calcule lundi-vendredi).
-  const [weekRef, setWeekRef] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [weekRef, setWeekRef] = useReferencePeriode();
+  // Seule la dernière demande d'assiduité s'affiche : une réponse dépassée (semaine changée, ou
+  // fuseau de la société lu entre-temps) est ignorée.
+  const requeteAssiduite = useRef(0);
 
   useEffect(() => {
     fetchPerf();
@@ -41,18 +46,14 @@ const Performances = () => {
   };
 
   const fetchAssiduite = async () => {
+    const requete = ++requeteAssiduite.current;
     try {
       const res = await apiFetch(`/stats/conducteurs/assiduite?week=${weekRef}`);
-      if (res.ok) setAssiduite(await res.json());
+      const donnees = res.ok ? await res.json() : null;
+      if (donnees && requete === requeteAssiduite.current) setAssiduite(donnees);
     } catch (e) {
       console.error(e);
     }
-  };
-
-  const shiftWeek = (deltaDays: number) => {
-    const d = new Date(weekRef + 'T00:00:00Z');
-    d.setUTCDate(d.getUTCDate() + deltaDays);
-    setWeekRef(d.toISOString().slice(0, 10));
   };
 
   return (
@@ -65,12 +66,12 @@ const Performances = () => {
           </p>
         </div>
         <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 shrink-0">
-          <button type="button" onClick={() => shiftWeek(-7)} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine précédente">‹</button>
+          <button type="button" onClick={() => setWeekRef(decalerReference(weekRef, 'week', -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine précédente">‹</button>
           <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap">
             Semaine du {assiduite ? fmtJourMois(assiduite.weekStart) : '…'} au {assiduite ? fmtJourMois(assiduite.weekEnd) : '…'}
           </span>
-          <button type="button" onClick={() => shiftWeek(7)} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine suivante">›</button>
-          <button type="button" onClick={() => setWeekRef(new Date().toISOString().slice(0, 10))} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">Aujourd'hui</button>
+          <button type="button" onClick={() => setWeekRef(decalerReference(weekRef, 'week', 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine suivante">›</button>
+          <button type="button" onClick={() => setWeekRef(null)} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">Aujourd'hui</button>
         </div>
       </div>
 

@@ -837,8 +837,9 @@ async function contexteSuivi(avecEstimation: boolean): Promise<ContexteSuivi> {
   return contexte;
 }
 
-// Le début d'un chantier converti est un instant (lu dans le fuseau de l'entreprise) ; une
-// date corrigée à la main est une date-seule, stockée à minuit UTC et lue telle quelle.
+// Le début d'un chantier converti avant #130 est un instant (lu dans le fuseau de l'entreprise) ;
+// depuis, la conversion pose une date-seule, comme une date corrigée à la main : stockée à minuit
+// UTC et lue telle quelle.
 function jourCivilDeDebut(dateDebut: Date | string, fuseauHoraire: string): string {
   const iso = new Date(dateDebut).toISOString();
   return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : jourCivilEntreprise(new Date(dateDebut), fuseauHoraire);
@@ -4106,9 +4107,17 @@ app.get('/api/planning/public/:token', async (req, res) => {
       return res.status(404).json({ error: "Ce lien de planning n'est plus disponible. Contactez votre administrateur." });
     }
 
-    const start = parsePlanningJour(req.query.start);
-    const end = parsePlanningJour(req.query.end);
-    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, format YYYY-MM-DD).' });
+    // Le téléphone du technicien ne connaît ni le fuseau de la société ni son jour : sans plage
+    // demandée (première ouverture), la page reçoit la semaine du jour de la société, et chaque
+    // réponse lui donne ce jour et ce fuseau (« aujourd'hui », heure de mise à jour).
+    const fuseauHoraire = (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+    const aujourdhui = aujourdHuiEntreprise(fuseauHoraire);
+    const jourSemaine = new Date(`${aujourdhui}T00:00:00.000Z`).getUTCDay();
+    const lundi = ajouterJoursCivils(aujourdhui, jourSemaine === 0 ? -6 : 1 - jourSemaine);
+    const sansPlage = req.query.start === undefined && req.query.end === undefined;
+    const start = parsePlanningJour(sansPlage ? lundi : req.query.start);
+    const end = parsePlanningJour(sansPlage ? ajouterJoursCivils(lundi, 6) : req.query.end);
+    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide : start et end vont ensemble, au format YYYY-MM-DD.' });
 
     // `select` explicite (plutôt qu'`include`, qui renverrait aussi tous les champs
     // scalaires bruts de PlanningEvent) : n'expose que ce qui est utile à un technicien,
@@ -4128,7 +4137,7 @@ app.get('/api/planning/public/:token', async (req, res) => {
       prisma.intervenant.findMany({ select: { id: true, nom: true }, orderBy: { nom: 'asc' } }),
     ]);
 
-    res.json({ events, intervenants });
+    res.json({ events, intervenants, fuseauHoraire, aujourdhui, debut: start.toISOString().slice(0, 10), fin: end.toISOString().slice(0, 10) });
   } catch (error) {
     res.status(500).json({ error: 'Error fetching public planning' });
   }
@@ -4266,8 +4275,17 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
 function dateIsoStricte(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   // Le format métier français est JJ-MM-AAAA. YYYY-MM-DD reste accepté pour les champs
-  // HTML natifs. Une date-heure ISO est également acceptée car l'API la renvoie elle-même.
-  const isoComplet = /^(\d{4})-(\d{2})-(\d{2})T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
+  // HTML natifs. Une date-heure ISO est également acceptée, car l'API la renvoie elle-même. Une
+  // date-seule ne peut pas porter l'heure : on retient la date telle qu'elle est écrite, selon la
+  // réponse de Nelson du 14-10-2026 (« Avec l'api qui renvoi une date avec heure tu retiens la
+  // date simplement si ce n'est pas possible de prendre egalement en compte l'heure qui va
+  // avec »). Sans décalage, l'heure ne désigne aucun instant. Avec un décalage, la date écrite est
+  // gardée aussi, et non le jour de la société de l'instant (décision de Nelson du 15-10-2026 :
+  // « garde le comportement actuel ») : cette lecture le faisait déjà pour « Z » et ±HH:MM
+  // (±HHMM est accepté depuis #130), et l'API d'Iris renvoie une date-seule sous la forme
+  // …T00:00:00.000Z, qu'une conversion au jour de la société décalerait. L'heure et le décalage
+  // doivent être valides (HH:MM de 00:00 à 23:59, secondes et fraction facultatives).
+  const isoComplet = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?$/.exec(value);
   if (isoComplet) return dateIsoStricte(`${isoComplet[1]}-${isoComplet[2]}-${isoComplet[3]}`);
   const match = /^(?:(\d{2})-(\d{2})-(\d{4})|(\d{4})-(\d{2})-(\d{2}))$/.exec(value);
   if (!match) return null;
@@ -4991,11 +5009,13 @@ function equipementTexte(value: unknown, champ: string, requis = false) {
   return texte || null;
 }
 
+// Date-seule, comme toute date métier : JJ-MM-AAAA (ou AAAA-MM-JJ des champs natifs), à minuit
+// UTC. `new Date` lisait « 01-10-2026 » comme le 10 janvier, à minuit du fuseau du serveur.
 function equipementDate(value: unknown, champ: string) {
   if (value == null || value === '') return null;
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) throw new Error(`${champ} invalide.`);
-  return date;
+  const date = dateIsoStricte(String(value));
+  if (!date) throw new Error(`${champ} invalide.`);
+  return new Date(date);
 }
 
 async function equipementPayload(clientId: string, body: Record<string, unknown>) {
@@ -5545,6 +5565,10 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     return void res.status(403).json({ error: 'Seule l’administration choisit le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche.' });
   }
   const ouverture = await ouvertureChantier(body);
+  // Sans date choisie, le chantier commence le jour civil de la société (décision de Nelson du
+  // 14-10-2026), enregistré en date-seule comme une date saisie, et non à l'instant UTC.
+  const societe = await getCompanySettings();
+  const debutParDefaut = `${aujourdHuiEntreprise(societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)}T00:00:00.000Z`;
   const resultat = await prisma.$transaction(async tx => {
     // Verrou du devis, comme pour sa modification, sa révision, sa signature, son statut, son
     // acompte et son annulation : ces écritures et deux conversions simultanées du même devis
@@ -5585,7 +5609,7 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
     const chantier = await tx.chantier.create({ data: {
       nom: devis.objet, client: devis.client.raisonSociale, clientId: devis.clientId, numeroDevis: devis.numero,
-      dateDebut: ouverture.dateDebut ?? new Date(), budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues,
+      dateDebut: ouverture.dateDebut ?? debutParDefaut, budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues,
       responsableId: ouverture.responsableId, commercialId: ouverture.commercialId, types: ouverture.types,
     } });
     await tx.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
@@ -6467,14 +6491,23 @@ app.get('/api/stats/types-chantiers', requireAuth, requireTravauxRead, async (re
   try {
     const period = req.query.period === 'year' ? 'year' : 'month';
     const societe = await getCompanySettings();
-    const { start, endExclusive } = periodBounds(period, req.query.ref, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
+    const fuseauHoraire = societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+    const { start, endExclusive } = periodBounds(period, req.query.ref, fuseauHoraire);
 
-    const chantiers = await prisma.chantier.findMany({
+    // Le début d'un chantier converti avant #130 est un instant, les autres une date-seule :
+    // chacun compte au jour civil de la société (jourCivilDeDebut), d'où une marge d'un jour
+    // de part et d'autre de la période, puis un tri sur ce jour civil.
+    const debutCivil = start.toISOString().slice(0, 10);
+    const finCivileExclue = endExclusive.toISOString().slice(0, 10);
+    const chantiers = (await prisma.chantier.findMany({
       where: {
-        dateDebut: { gte: start, lt: endExclusive },
+        dateDebut: { gte: new Date(start.getTime() - 86400000), lt: new Date(endExclusive.getTime() + 86400000) },
         ...perimetreChantiers(req),
       },
-      select: { types: true },
+      select: { types: true, dateDebut: true },
+    })).filter((c) => {
+      const jour = jourCivilDeDebut(c.dateDebut, fuseauHoraire);
+      return jour >= debutCivil && jour < finCivileExclue;
     });
 
     const counts: Record<string, number> = {};

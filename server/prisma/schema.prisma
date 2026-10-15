@@ -435,10 +435,9 @@ model Devis {
   // --- Acompte conditionnant l'ouverture du chantier ---
   // Coché sur le devis initial : tant que l'acompte n'est pas constaté, la conversion en
   // chantier est refusée. Le TAUX est figé ici à l'émission, à partir du paramètre global :
-  // le modifier plus tard ne réécrit aucun devis déjà émis (même non-rétroactivité que les
-  // commissions). Les trois champs de constatation sont saisis à la main tant que le module
-  // paiements (phase 9) n'existe pas ; le rapprochement bancaire les alimentera ensuite
-  // sans changer la règle.
+  // le modifier plus tard ne réécrit aucun devis déjà émis. Les trois champs de constatation
+  // sont saisis à la main tant que le module paiements (phase 9) n'existe pas ; le
+  // rapprochement bancaire les alimentera ensuite sans changer la règle.
   acompteExige         Boolean   @default(false)
   tauxAcompte          Decimal?  @db.Decimal(5, 2)
   acompteRecuLe        DateTime?

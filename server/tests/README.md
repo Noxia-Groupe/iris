@@ -33,6 +33,10 @@ la main dans `package.json` marcherait aussi, mais rouvrirait le piège que ces 
 existent pour fermer : un test ajouté et jamais exécuté faute d'avoir été inscrit quelque
 part. La découverte est donc automatique.
 
+Node 20.11 au moins : deux tests du jour de la société figent l'horloge du processus avec
+`mock.timers` (`Date`), que Node ne simule qu'à partir de cette version. La CI installe la
+dernière version 20.
+
 Les tests HTTP ont besoin d'une base PostgreSQL **jetable** (ils écrivent et suppriment des
 données). Ne pointez jamais `TEST_DATABASE_URL` vers une base de production.
 

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { PieChart, Users, Truck, Tags, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiFetch } from '../api';
+import { decalerReference } from '../lib/dateFormatting';
+import { useReferencePeriode } from '../lib/referencePeriode';
 import { isAdminRole, roleLabel } from '../roles';
 
 type Period = 'week' | 'month' | 'year';
@@ -10,14 +12,6 @@ const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 
 const fmtJourMois = (isoDate: string) => {
   const [, m, d] = isoDate.split('-');
   return `${d}/${m}`;
-};
-
-const shiftRef = (ref: string, period: Period, dir: 1 | -1): string => {
-  const d = new Date(ref + 'T00:00:00Z');
-  if (period === 'week') d.setUTCDate(d.getUTCDate() + dir * 7);
-  else if (period === 'month') d.setUTCMonth(d.getUTCMonth() + dir);
-  else d.setUTCFullYear(d.getUTCFullYear() + dir);
-  return d.toISOString().slice(0, 10);
 };
 
 const periodLabel = (period: Period, periodStart: string, periodEnd: string) => {
@@ -36,7 +30,7 @@ function PeriodNav({
   granularities: Period[];
   onPeriodChange: (p: Period) => void;
   refDate: string;
-  onRefChange: (r: string) => void;
+  onRefChange: (r: string | null) => void;
   label: string;
 }) {
   const GRANULARITY_LABELS: Record<Period, string> = { week: 'Semaine', month: 'Mois', year: 'Année' };
@@ -56,14 +50,14 @@ function PeriodNav({
         </div>
       )}
       <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
-        <button type="button" onClick={() => onRefChange(shiftRef(refDate, period, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période précédente">
+        <button type="button" onClick={() => onRefChange(decalerReference(refDate, period, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période précédente">
           <ChevronLeft size={16} />
         </button>
         <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap min-w-[10rem] text-center">{label}</span>
-        <button type="button" onClick={() => onRefChange(shiftRef(refDate, period, 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période suivante">
+        <button type="button" onClick={() => onRefChange(decalerReference(refDate, period, 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période suivante">
           <ChevronRight size={16} />
         </button>
-        <button type="button" onClick={() => onRefChange(new Date().toISOString().slice(0, 10))} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">
+        <button type="button" onClick={() => onRefChange(null)} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">
           Aujourd'hui
         </button>
       </div>
@@ -143,17 +137,25 @@ function ChantiersTab() {
   );
 }
 
+// Lit une statistique pour la période affichée. Une réponse dépassée (période changée, ou fuseau
+// de la société lu entre-temps) est ignorée, même arrivée la dernière.
+function useStatistique(chemin: string, period: Period, ref: string) {
+  const [data, setData] = useState<any>(null);
+  useEffect(() => {
+    let actuelle = true;
+    apiFetch(`${chemin}?period=${period}&ref=${ref}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((donnees) => { if (actuelle) setData(donnees); })
+      .catch(() => { if (actuelle) setData(null); });
+    return () => { actuelle = false; };
+  }, [chemin, period, ref]);
+  return data;
+}
+
 function IntervenantsTab() {
   const [period, setPeriod] = useState<Period>('week');
-  const [ref, setRef] = useState(() => new Date().toISOString().slice(0, 10));
-  const [data, setData] = useState<any>(null);
-
-  useEffect(() => {
-    apiFetch(`/stats/intervenants?period=${period}&ref=${ref}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
-  }, [period, ref]);
+  const [ref, setRef] = useReferencePeriode();
+  const data = useStatistique('/stats/intervenants', period, ref);
 
   const list = data?.intervenants || [];
   const maxHeures = Math.max(1, ...list.map((i: any) => i.heures));
@@ -204,15 +206,8 @@ function IntervenantsTab() {
 
 function FournisseursTab() {
   const [period, setPeriod] = useState<Period>('month');
-  const [ref, setRef] = useState(() => new Date().toISOString().slice(0, 10));
-  const [data, setData] = useState<any>(null);
-
-  useEffect(() => {
-    apiFetch(`/stats/fournisseurs?period=${period}&ref=${ref}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
-  }, [period, ref]);
+  const [ref, setRef] = useReferencePeriode();
+  const data = useStatistique('/stats/fournisseurs', period, ref);
 
   const list = data?.fournisseurs || [];
   const maxTotal = Math.max(1, ...list.map((f: any) => f.total));
@@ -262,15 +257,8 @@ function FournisseursTab() {
 
 function TypesChantiersTab() {
   const [period, setPeriod] = useState<Period>('month');
-  const [ref, setRef] = useState(() => new Date().toISOString().slice(0, 10));
-  const [data, setData] = useState<any>(null);
-
-  useEffect(() => {
-    apiFetch(`/stats/types-chantiers?period=${period}&ref=${ref}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
-  }, [period, ref]);
+  const [ref, setRef] = useReferencePeriode();
+  const data = useStatistique('/stats/types-chantiers', period, ref);
 
   const list = data?.types || [];
   const totalChantiers = data?.totalChantiers || 0;

@@ -4,13 +4,14 @@ import { ChevronLeft, ChevronRight, Plus, Tags, Trash2, X, Users, Info, Share2, 
 import { apiFetch } from '../api';
 import {
   type Intervenant, type ChantierLite, type PlanningType, type PlanningEvent,
-  toDateStr, mondayOfWeek, addDays, shiftDateStr, diffJours, isoWeekNumber,
+  lundiDe, joursDeLaSemaine, estWeekEnd, numeroSemaineIso, shiftDateStr, diffJours,
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, tooltipEvent,
 } from '../planningUtils';
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
 import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
-import { formatDateOnly } from '../lib/dateFormatting';
+import { formatDateOnly, jourCivilEntrepriseIso } from '../lib/dateFormatting';
+import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { planningDayToIso } from '../lib/contractPlanningDate';
 
 // ---------------------------------------------------------------------------
@@ -65,7 +66,8 @@ const Planning = () => {
   const [contractQueue, setContractQueue] = useState<ContractQueueItem[]>([]);
   const [toPlace, setToPlace] = useState<ContractQueueItem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [weekStart, setWeekStart] = useState<Date>(() => mondayOfWeek(new Date()));
+  // Semaine choisie (son lundi) ; tant qu'on n'a pas navigué, celle du jour de la société.
+  const [semaineChoisie, setSemaineChoisie] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [showTypes, setShowTypes] = useState(false);
   const [showShare, setShowShare] = useState(false);
@@ -75,10 +77,15 @@ const Planning = () => {
   // Glisser-déposer : l'affectation en cours de déplacement + la cellule d'origine.
   const dragRef = useRef<{ eventId: string; fromIntervenantId: string; fromDate: string } | null>(null);
 
-  const jours = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const weekStartStr = toDateStr(weekStart);
-  const weekEndStr = toDateStr(jours[6]);
-  const todayStr = toDateStr(new Date());
+  const fuseau = useCompanyTimezone();
+  const fuseauConnu = useFuseauSocieteConnu();
+  const todayStr = jourCivilEntrepriseIso(fuseau);
+  // Seule la dernière demande d'affectations s'affiche : une réponse dépassée (semaine changée,
+  // ou fuseau de la société lu entre-temps) est ignorée.
+  const requeteEvents = useRef(0);
+  const weekStartStr = semaineChoisie ?? lundiDe(todayStr);
+  const jours = joursDeLaSemaine(weekStartStr);
+  const weekEndStr = jours[6];
 
   useEffect(() => {
     (async () => {
@@ -119,10 +126,11 @@ const Planning = () => {
   useEffect(() => { fetchQueue(); }, []);
 
   const fetchEvents = async () => {
+    const requete = ++requeteEvents.current;
     try {
       const res = await apiFetch(`/planning/events?start=${weekStartStr}&end=${weekEndStr}`);
       const data = await res.json();
-      if (Array.isArray(data)) setEvents(data);
+      if (Array.isArray(data) && requete === requeteEvents.current) setEvents(data);
     } catch (e) {
       console.error(e);
     }
@@ -210,7 +218,7 @@ const Planning = () => {
     </div>
   );
 
-  const labelSemaine = `Semaine du ${weekStart.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} au ${jours[6].toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  const labelSemaine = `Semaine du ${formatDateOnly(`${weekStartStr}T00:00:00Z`, { day: 'numeric', month: 'long' })} au ${formatDateOnly(`${weekEndStr}T00:00:00Z`, { day: 'numeric', month: 'long', year: 'numeric' })}`;
 
   return (
     <div className="flex flex-col h-full">
@@ -233,7 +241,8 @@ const Planning = () => {
           <button onClick={() => setShowTypes(true)} className="btn btn-secondary flex items-center gap-2">
             <Tags size={16} /> Types d'événements
           </button>
-          <button onClick={() => setModal({ mode: 'create', date: todayStr })} className="btn btn-primary flex items-center gap-2">
+          {/* Date du jour préremplie seulement une fois le fuseau de la société lu (sinon, celui d'Europe/Paris) : à saisir sinon. */}
+          <button onClick={() => setModal({ mode: 'create', date: fuseauConnu ? todayStr : '' })} className="btn btn-primary flex items-center gap-2">
             <Plus size={16} /> Affectation
           </button>
         </div>
@@ -269,13 +278,13 @@ const Planning = () => {
       {/* Navigation de semaine */}
       <div className="flex items-center justify-between gap-3 mb-4 bg-white px-4 py-3 rounded-xl shadow-sm border border-gray-100">
         <div className="flex items-center gap-2">
-          <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Semaine précédente">
+          <button onClick={() => setSemaineChoisie(shiftDateStr(weekStartStr, -7))} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Semaine précédente">
             <ChevronLeft size={18} />
           </button>
-          <button onClick={() => setWeekStart(mondayOfWeek(new Date()))} className="text-sm font-semibold px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Revenir à aujourd'hui">
-            Semaine {isoWeekNumber(weekStart)}
+          <button onClick={() => setSemaineChoisie(null)} className="text-sm font-semibold px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Revenir à aujourd'hui">
+            Semaine {numeroSemaineIso(weekStartStr)}
           </button>
-          <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Semaine suivante">
+          <button onClick={() => setSemaineChoisie(shiftDateStr(weekStartStr, 7))} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Semaine suivante">
             <ChevronRight size={18} />
           </button>
         </div>
@@ -297,12 +306,11 @@ const Planning = () => {
                 <th className="sticky left-0 z-10 bg-gray-50 border border-gray-100 px-3 py-3 text-left text-xs uppercase text-gray-500 font-semibold" style={{ width: '170px', minWidth: '170px' }}>
                   Technicien
                 </th>
-                {jours.map((j) => {
-                  const jStr = toDateStr(j);
+                {jours.map((jStr) => {
                   const isToday = jStr === todayStr;
                   return (
                     <th key={jStr} className={`border border-gray-100 px-2 py-3 text-center text-xs uppercase ${isToday ? 'bg-blue-50 text-accent font-extrabold' : 'text-gray-500 font-semibold'}`}>
-                      {j.toLocaleDateString('fr-FR', { weekday: 'short' })} {String(j.getDate()).padStart(2, '0')}/{String(j.getMonth() + 1).padStart(2, '0')}
+                      {formatDateOnly(`${jStr}T00:00:00Z`, { weekday: 'short' })} {jStr.slice(8, 10)}-{jStr.slice(5, 7)}
                     </th>
                   );
                 })}
@@ -322,10 +330,9 @@ const Planning = () => {
                       </div>
                     </div>
                   </th>
-                  {jours.map((j) => {
-                    const jStr = toDateStr(j);
+                  {jours.map((jStr) => {
                     const isToday = jStr === todayStr;
-                    const isWeekend = j.getDay() === 0 || j.getDay() === 6;
+                    const isWeekend = estWeekEnd(jStr);
                     const cellEvents = eventsCellule(interv.id, jStr);
                     return (
                       <td
