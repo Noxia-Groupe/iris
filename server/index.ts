@@ -2193,7 +2193,7 @@ app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireA
       if (!intervention || intervention.statut !== 'TERMINEE') return { erreur: 'NOT_READY' as const };
       const prochaineEcheance = echeanceSuivante(contrat.dateDebut, contrat.prochaineEcheance, contrat.periodiciteMois);
       const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { prochaineEcheance } });
-      const motif = `Intervention ${intervention.reference} terminée : échéance du ${contrat.prochaineEcheance.toISOString().slice(0, 10)} au ${prochaineEcheance.toISOString().slice(0, 10)}.`;
+      const motif = `Intervention ${intervention.reference} terminée : échéance du ${dateFrancaise(contrat.prochaineEcheance)} au ${dateFrancaise(prochaineEcheance)}.`;
       await journaliserContrat(tx, req, 'AVANCEMENT_ECHEANCE', maj, contrat, motif);
       return { contrat: maj };
     });
@@ -3761,12 +3761,11 @@ const PLANNING_CATEGORIES = ['CHANTIER', 'HORS_CHANTIER', 'EVENEMENT'];
 const PLANNING_CRENEAUX = ['JOURNEE', 'MATIN', 'APRES_MIDI', 'HEURES'];
 
 // Jour du planning : on ne stocke que la date (minuit UTC), jamais d'heure — le créneau
-// horaire éventuel est porté par creneau/heureDebut/heureFin.
+// horaire éventuel est porté par creneau/heureDebut/heureFin. Même lecture que les autres
+// dates métier (dateIsoStricte) : JJ-MM-AAAA ou AAAA-MM-JJ, sans débordement (30 février).
 function parsePlanningJour(value: unknown): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''));
-  if (!m) return null;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  return Number.isNaN(d.getTime()) ? null : d;
+  const date = dateIsoStricte(value);
+  return date ? new Date(date) : null;
 }
 
 function parsePlanningHeure(value: unknown): string | null {

@@ -10,7 +10,7 @@ import {
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
 import { isAdminRole } from '../roles';
 import { useModules } from '../modules';
-import { formatDateOnly, jourCivilEntrepriseIso } from '../lib/dateFormatting';
+import { formatDateOnly, jourCivilEntrepriseIso, jourFrancais, jourSemaineFrancais } from '../lib/dateFormatting';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { planningDayToIso } from '../lib/contractPlanningDate';
 
@@ -218,7 +218,7 @@ const Planning = () => {
     </div>
   );
 
-  const labelSemaine = `Semaine du ${formatDateOnly(`${weekStartStr}T00:00:00Z`, { day: 'numeric', month: 'long' })} au ${formatDateOnly(`${weekEndStr}T00:00:00Z`, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  const labelSemaine = `Semaine du ${jourFrancais(weekStartStr)} au ${jourFrancais(weekEndStr)}`;
 
   return (
     <div className="flex flex-col h-full">
@@ -266,7 +266,7 @@ const Planning = () => {
         {contractQueue.length === 0 ? <p className="text-sm text-muted">Aucune visite en attente.</p> : (
           <table className="w-full text-sm"><thead><tr><th>Échéance</th><th>Référence</th><th>Client / site</th><th>Contrat</th><th>Durée</th><th></th></tr></thead>
             <tbody>{contractQueue.map(item => <tr key={item.id} className="border-t">
-              <td>{formatDateOnly(item.echeanceContrat).replaceAll('/', '-')}</td><td>{item.reference}</td>
+              <td>{formatDateOnly(item.echeanceContrat)}</td><td>{item.reference}</td>
               <td>{item.client.raisonSociale} — {item.site?.nom || 'Sans site'} {item.site?.ville || ''}</td>
               <td>{item.contratMaintenance.titre}</td><td>{item.dureePrevisionnelleMinutes} min</td>
               <td><button className="btn btn-primary" onClick={() => setToPlace(item)}>Placer</button></td>
@@ -310,7 +310,7 @@ const Planning = () => {
                   const isToday = jStr === todayStr;
                   return (
                     <th key={jStr} className={`border border-gray-100 px-2 py-3 text-center text-xs uppercase ${isToday ? 'bg-blue-50 text-accent font-extrabold' : 'text-gray-500 font-semibold'}`}>
-                      {formatDateOnly(`${jStr}T00:00:00Z`, { weekday: 'short' })} {jStr.slice(8, 10)}-{jStr.slice(5, 7)}
+                      {jourSemaineFrancais(jStr)}
                     </th>
                   );
                 })}
@@ -448,7 +448,7 @@ const ContractPlacement = ({ item, intervenants, onClose, onSaved }: {
       <p className="text-sm mb-4">{item.titre} — {item.client.raisonSociale}</p>
       <form onSubmit={submit} className="flex flex-col gap-3">
         <label>Technicien<select required name="technicienId" className="form-input" defaultValue=""><option value="" disabled>Choisir</option>{intervenants.map(i => <option key={i.id} value={i.id}>{i.nom}</option>)}</select></label>
-        <label>Jour<input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="jour" className="form-input" defaultValue={formatDateOnly(item.echeanceContrat).replaceAll('/', '-')} /></label>
+        <label>Jour<input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="jour" className="form-input" defaultValue={formatDateOnly(item.echeanceContrat)} /></label>
         <label>Heure de début<input required type="time" name="heureDebut" className="form-input" defaultValue="09:00" /></label>
         <label>Durée (minutes)<input required type="number" name="duree" min="1" max="1439" className="form-input" defaultValue={item.dureePrevisionnelleMinutes} /></label>
         {error && <p role="alert" className="text-red-700">{error}</p>}
@@ -498,8 +498,10 @@ const EventModal = ({
     .filter((c) => c.statut === 'EN_COURS' || (event?.chantierId === c.id))
     .sort((a, b) => a.nom.localeCompare(b.nom));
 
-  const defaultDebut = isEdit ? event!.dateDebut.slice(0, 10) : modal.date;
-  const defaultFin = isEdit ? event!.dateFin.slice(0, 10) : modal.date;
+  // Saisie au format JJ-MM-AAAA (décision de Nelson du 14-10-2026) ; le serveur lit aussi AAAA-MM-JJ.
+  const enSaisie = (jourIso: string) => (jourIso ? jourFrancais(jourIso) : '');
+  const defaultDebut = enSaisie(isEdit ? event!.dateDebut.slice(0, 10) : modal.date);
+  const defaultFin = enSaisie(isEdit ? event!.dateFin.slice(0, 10) : modal.date);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -672,11 +674,11 @@ const EventModal = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="form-group mb-0">
               <label className="form-label">Du</label>
-              <input required type="date" name="dateDebut" className="form-input" defaultValue={defaultDebut} />
+              <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" className="form-input" defaultValue={defaultDebut} />
             </div>
             <div className="form-group mb-0">
               <label className="form-label">Au (inclus)</label>
-              <input type="date" name="dateFin" className="form-input" defaultValue={defaultFin} />
+              <input type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" className="form-input" defaultValue={defaultFin} />
             </div>
           </div>
 

@@ -15,14 +15,30 @@ const DATE_TIME_OPTIONS: DateFormatOptions = {
   second: '2-digit',
 };
 
-/** Formate une date métier stockée à minuit UTC : elle ne dépend d’aucun fuseau utilisateur. */
+// Toutes les dates s'affichent au format JJ-MM-AAAA (décision de Nelson du 14-10-2026). Intl
+// (fr-FR) sépare jour, mois et année par des barres obliques : on les remplace par des tirets.
+const enTirets = (texte: string) => texte.replace(/(\d{2})\/(\d{2})\/(\d{4})/g, '$1-$2-$3');
+
+/** Formate une date métier stockée à minuit UTC (JJ-MM-AAAA) : elle ne dépend d’aucun fuseau utilisateur. */
 export function formatDateOnly(value: string | Date, options: DateFormatOptions = DATE_ONLY_OPTIONS): string {
-  return new Intl.DateTimeFormat('fr-FR', { ...options, timeZone: 'UTC' }).format(new Date(value));
+  return enTirets(new Intl.DateTimeFormat('fr-FR', { ...options, timeZone: 'UTC' }).format(new Date(value)));
 }
 
-/** Formate un instant réel dans le fuseau configuré dans CompanySettings. */
+/** Formate un instant réel dans le fuseau configuré dans CompanySettings (JJ-MM-AAAA HH:MM:SS). */
 export function formatCompanyDateTime(value: string | Date, companyTimeZone: string, options: DateFormatOptions = DATE_TIME_OPTIONS): string {
-  return new Intl.DateTimeFormat('fr-FR', { ...options, timeZone: companyTimeZone }).format(new Date(value));
+  return enTirets(new Intl.DateTimeFormat('fr-FR', { ...options, timeZone: companyTimeZone }).format(new Date(value)));
+}
+
+/** Jour AAAA-MM-JJ au format affiché JJ-MM-AAAA. */
+export function jourFrancais(jourIso: string): string {
+  const [annee, mois, jour] = jourIso.slice(0, 10).split('-');
+  return `${jour}-${mois}-${annee}`;
+}
+
+/** Jour AAAA-MM-JJ précédé de son jour de la semaine : « lun. 12-10-2026 » ou « lundi 12-10-2026 ». */
+export function jourSemaineFrancais(jourIso: string, nom: 'short' | 'long' = 'short'): string {
+  const jourSemaine = new Intl.DateTimeFormat('fr-FR', { weekday: nom, timeZone: 'UTC' }).format(new Date(`${jourIso.slice(0, 10)}T00:00:00Z`));
+  return `${jourSemaine} ${jourFrancais(jourIso)}`;
 }
 
 /** Formate le jour civil dérivé d’un instant dans le fuseau de l’entreprise. */
@@ -37,8 +53,7 @@ export function formatCompanyDate(value: string | Date, companyTimeZone: string,
  * jourCivilDeDebut côté serveur.
  */
 export function jourCivilChantier(value: string | Date, companyTimeZone: string): string {
-  const [annee, mois, jour] = jourCivilChantierIso(value, companyTimeZone).split('-');
-  return `${jour}-${mois}-${annee}`;
+  return jourFrancais(jourCivilChantierIso(value, companyTimeZone));
 }
 
 /** Même jour civil que jourCivilChantier, au format AAAA-MM-JJ (calculs de durée). */
@@ -66,8 +81,7 @@ export function jourCivilEntrepriseIso(companyTimeZone: string, now: Date = new 
 
 /** Rend la date métier du jour pour un champ texte, dérivée dans le fuseau entreprise. */
 export function companyDateInputValue(companyTimeZone: string, now: Date = new Date()): string {
-  const [annee, mois, jour] = jourCivilEntrepriseIso(companyTimeZone, now).split('-');
-  return `${jour}-${mois}-${annee}`;
+  return jourFrancais(jourCivilEntrepriseIso(companyTimeZone, now));
 }
 
 export type PeriodeNavigable = 'week' | 'month' | 'quarter' | 'year';
@@ -94,17 +108,13 @@ export function decalerReference(ref: string, periode: PeriodeNavigable, sens: 1
 const CHAMPS_DATE_SEULE = new Set(['date']);
 const CHAMPS_INSTANT = new Set(['createdAt', 'updatedAt', 'archivedAt']);
 const INSTANT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-const enJourFrancais = (jourIso: string) => {
-  const [annee, mois, jour] = jourIso.split('-');
-  return `${jour}-${mois}-${annee}`;
-};
 export function instantaneLisible(valeur: unknown, fuseau: string): string {
   return JSON.stringify(valeur, (cle, v) => {
     const dateSeule = CHAMPS_DATE_SEULE.has(cle);
     if ((!dateSeule && !CHAMPS_INSTANT.has(cle)) || typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
     const instant = new Date(v);
     if (Number.isNaN(instant.getTime()) || instant.toISOString().slice(0, 19) !== v.slice(0, 19)) return v;
-    if (dateSeule) return enJourFrancais(v.slice(0, 10));
-    return `${enJourFrancais(jourCivilEntrepriseIso(fuseau, instant))} ${formatCompanyDateTime(instant, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
+    if (dateSeule) return jourFrancais(v.slice(0, 10));
+    return `${jourFrancais(jourCivilEntrepriseIso(fuseau, instant))} ${formatCompanyDateTime(instant, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
   });
 }

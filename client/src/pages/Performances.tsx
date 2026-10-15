@@ -1,14 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Activity } from 'lucide-react';
 import { apiFetch } from '../api';
-import { decalerReference } from '../lib/dateFormatting';
+import { decalerReference, jourFrancais } from '../lib/dateFormatting';
 import { useReferencePeriode } from '../lib/referencePeriode';
 
-// Une date "YYYY-MM-DD" (sans fuseau, tel que renvoyé par le serveur) -> "DD/MM".
-const fmtJourMois = (isoDate: string) => {
-  const [, m, d] = isoDate.split('-');
-  return `${d}/${m}`;
-};
 
 // Plage d'heures affichée pour le créneau de saisie habituel (6h -> 19h).
 const HOUR_RANGE = Array.from({ length: 14 }, (_, i) => i + 6);
@@ -68,7 +63,7 @@ const Performances = () => {
         <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 shrink-0">
           <button type="button" onClick={() => setWeekRef(decalerReference(weekRef, 'week', -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine précédente">‹</button>
           <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap">
-            Semaine du {assiduite ? fmtJourMois(assiduite.weekStart) : '…'} au {assiduite ? fmtJourMois(assiduite.weekEnd) : '…'}
+            Semaine du {assiduite ? jourFrancais(assiduite.weekStart) : '…'} au {assiduite ? jourFrancais(assiduite.weekEnd) : '…'}
           </span>
           <button type="button" onClick={() => setWeekRef(decalerReference(weekRef, 'week', 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine suivante">›</button>
           <button type="button" onClick={() => setWeekRef(null)} className="ml-1 text-xs font-semibold px-2 py-1.5 rounded-md hover:bg-gray-100 text-accent">Aujourd'hui</button>

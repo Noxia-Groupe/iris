@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Ban, CheckCircle2, Download, FilePlus2, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
-import { companyDateInputValue } from '../lib/dateFormatting';
+import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
@@ -38,7 +38,7 @@ type Facture = {
 
 const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: '1', prixUnitaireHt: '', tauxTva: '20' });
 const nombreFr = (valeur: string): number | null => { const normalise = valeur.trim().replace(',', '.'); return /^\d+(\.\d+)?$/.test(normalise) ? Number(normalise) : null; };
-const formatDate = (date: string) => new Date(date).toLocaleDateString('fr-FR', { timeZone: 'UTC' }).replace(/\//g, '-');
+const formatDate = (date: string) => formatDateOnly(date);
 const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 // Même arithmétique que le serveur : chaque ligne est arrondie au centime avant
 // agrégation, puis la TVA est calculée par taux. L’aperçu doit annoncer le document émis.

@@ -24,7 +24,7 @@ const toDateFrancaise = (d: string | null | undefined) => {
   return `${jour}-${mois}-${annee}`;
 };
 
-const fmtDate = (d: string) => formatDateOnly(d, { day: '2-digit', month: 'long', year: 'numeric' });
+const fmtDate = (d: string) => formatDateOnly(d);
 const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
 // Heures pointées : demi-heures possibles, mais pas de décimale inutile (8 h, 7,5 h).
 const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
@@ -1272,7 +1272,7 @@ const ChantierDetail = () => {
                 <div key={entree.id} className="px-6 py-4 text-sm">
                   <div className="flex flex-wrap justify-between gap-2">
                     <strong>{entree.cible === 'ACHAT' ? 'Achat' : 'Heures'} — {entree.action.toLowerCase()}</strong>
-                    <span className="text-gray-500">{formatCompanyDate(entree.createdAt, companyTimezone, { day: '2-digit', month: 'long', year: 'numeric' })} · {entree.auteurNom}</span>
+                    <span className="text-gray-500">{formatCompanyDate(entree.createdAt, companyTimezone)} · {entree.auteurNom}</span>
                   </div>
                   {entree.motif && <p className="mt-1 text-gray-600">Motif : {entree.motif}</p>}
                   {entree.action === 'CORRECTION' && (
