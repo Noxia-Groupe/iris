@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient, Prisma } from '@prisma/client';
 import path from 'path';
+import type http from 'http';
 import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -6874,17 +6875,30 @@ const initDb = async () => {
 
 };
 
+// Délais de connexion du serveur HTTP. Node ferme par défaut une connexion keep-alive inactive
+// au bout de 5 s : un client qui la réutilise à cet instant précis (navigateur, Playwright,
+// répartiteur de charge) reçoit « socket hang up » ou `read ECONNRESET`, comme une fois dans la
+// CI E2E de #123 puis de #129. Le serveur garde donc ses connexions inactives plus longtemps que les clients et
+// répartiteurs courants (60 s), et laisse aux en-têtes un délai un peu supérieur, comme le
+// demande Node (headersTimeout au-delà de keepAliveTimeout).
+const DELAI_CONNEXION_INACTIVE_MS = 65_000;
+function reglerDelaisConnexion(serveur: http.Server): http.Server {
+  serveur.keepAliveTimeout = DELAI_CONNEXION_INACTIVE_MS;
+  serveur.headersTimeout = DELAI_CONNEXION_INACTIVE_MS + 1_000;
+  return serveur;
+}
+
 // Le serveur n'écoute que lorsque ce fichier est LANCÉ (node dist/index.js). Quand il est
 // simplement importé — c'est le cas des tests d'intégration, qui montent l'application
 // dans le processus de test — on expose `app` sans ouvrir de port : deux suites de tests
 // peuvent alors tourner en parallèle sans se disputer le 3001, et aucun test n'oublie de
 // fermer un serveur derrière lui.
 if (require.main === module) {
-  app.listen(port, async () => {
+  reglerDelaisConnexion(app.listen(port, async () => {
     await initDb();
     await ensureSuperAdmins();
     console.log(`Server running on port ${port}`);
-  });
+  }));
 }
 
 // Surface exportée pour les tests. `app` sert aux tests d'intégration HTTP ; les fonctions
@@ -6892,6 +6906,7 @@ if (require.main === module) {
 // directement, sans base de données ni requête.
 export {
   app,
+  reglerDelaisConnexion,
   initDb,
   ensureSuperAdmins,
   clientPayload,
