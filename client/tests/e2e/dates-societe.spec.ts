@@ -379,6 +379,8 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     const demandes: string[] = [];
     let retenirRetour = false;
     let libererRetour = () => {};
+    // Jour de la société renvoyé par le serveur ; il change plus bas, comme au passage d'une nuit.
+    const societe = { aujourdhui: '2026-10-19', debut: '2026-10-19', fin: '2026-10-25' };
     await page.route('**/api/planning/public/**', async (route) => {
       demandes.push(route.request().url());
       // Sans plage, le serveur sert la semaine de la société ; sinon, la plage demandée.
@@ -388,7 +390,7 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
         status: 200,
         contentType: 'application/json',
         headers: { 'Access-Control-Allow-Origin': '*' },
-        body: JSON.stringify({ events: [], intervenants: [], fuseauHoraire: 'Pacific/Wallis', aujourdhui: '2026-10-19', debut: parametres.get('start') ?? '2026-10-19', fin: parametres.get('end') ?? '2026-10-25' }),
+        body: JSON.stringify({ events: [], intervenants: [], fuseauHoraire: 'Pacific/Wallis', aujourdhui: societe.aujourdhui, debut: parametres.get('start') ?? societe.debut, fin: parametres.get('end') ?? societe.fin }),
       });
     });
     await page.goto('/planning/public/jeton-e2e-dates', { waitUntil: 'networkidle' });
@@ -420,6 +422,12 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     libererRetour();
     await (await retour).finished();
     await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
+    // Page restée ouverte jusqu'au lundi suivant : la relecture suivante donne le nouveau jour de
+    // la société, et la semaine par défaut le suit.
+    Object.assign(societe, { aujourdhui: '2026-10-26', debut: '2026-10-26', fin: '2026-11-01' });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.getByRole('button', { name: 'Semaine 44' })).toBeVisible();
+    await expect(page.getByText("Aujourd'hui", { exact: true }).locator('..')).toContainText('lundi 26 octobre');
   });
 
   // Un rafraîchissement lancé avant un changement de semaine ne doit pas, arrivé le dernier,
@@ -633,13 +641,17 @@ test.describe('navigateur à Gambier : instants affichés au fuseau de la socié
     // date-seule donnerait le 15). Une copie du chantier, modifiée à 09:30 UTC, distingue aussi la
     // société du navigateur : Tahiti est encore le 14 à 23:30, Gambier et UTC déjà le 15.
     const nomMatin = `Archivé au matin E2E ${Date.now()}`;
+    // Clôturé avec une date de fin date-seule (cas normal) : lue telle quelle, le 15, et non comme
+    // un instant (encore le 14 à Tahiti).
+    const nomFin = `Clôturé le 15 E2E ${Date.now()}`;
     await page.route('**/api/chantiers', async (route) => {
       if (route.request().method() !== 'GET') return route.continue();
       const reponse = await route.fetch();
       const liste = await reponse.json() as { id: string; nom: string }[];
       const archive = { ...liste.find((c) => c.id === chantierId) as { id: string; nom: string }, statut: 'TERMINE', dateFin: null, updatedAt: '2026-10-15T00:00:00.000Z' };
       const matin = { ...archive, id: `${chantierId}-matin`, nom: nomMatin, updatedAt: '2026-10-15T09:30:00.000Z' };
-      await route.fulfill({ response: reponse, json: [...liste.map((c) => (c.id === chantierId ? archive : c)), matin] });
+      const fin = { ...archive, id: `${chantierId}-fin`, nom: nomFin, dateFin: '2026-10-15T00:00:00.000Z', updatedAt: '2026-10-20T10:00:00.000Z' };
+      await route.fulfill({ response: reponse, json: [...liste.map((c) => (c.id === chantierId ? archive : c)), matin, fin] });
     });
     await page.addInitScript(([token, user]) => {
       localStorage.setItem('token', token as string);
@@ -657,6 +669,30 @@ test.describe('navigateur à Gambier : instants affichés au fuseau de la socié
       await page.getByRole('button', { name: /Chantiers terminés \/ archivés/ }).click();
       await expect(page.getByRole('button', { name: new RegExp(objet) })).toContainText('Archivé le 14-10-2026');
       await expect(page.getByRole('button', { name: new RegExp(nomMatin) })).toContainText('Archivé le 14-10-2026');
+      await expect(page.getByRole('button', { name: new RegExp(nomFin) })).toContainText('Archivé le 15-10-2026');
+    });
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
+  // Chantier terminé, dates-seules (cas normal), société à Tahiti (à l'ouest d'UTC, où une
+  // date-seule lue comme un instant reculerait d'un jour) : « terminé le » au 05-10 et durée
+  // jusqu'à la date de fin (4 j), et non jusqu'au jour courant.
+  test('fiche d’un chantier terminé : date de fin et durée lues telles quelles', async ({ page, request, session, creerClient }) => {
+    await page.clock.install({ time: new Date('2026-10-16T12:00:00Z') });
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const devis = await signerDevisPret(request, session.token, creerClient, 'Fiche terminée');
+    const conversion = await request.post(`${api}/devis/${devis.id}/convertir`, { headers, data: { cible: 'CHANTIER' } });
+    expect(conversion.ok(), await conversion.text()).toBeTruthy();
+    const { id: chantierId } = await conversion.json() as { id: string };
+    await page.route(`**/api/chantiers/${chantierId}`, async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const reponse = await route.fetch();
+      const corps = await reponse.json();
+      await route.fulfill({ response: reponse, json: { ...corps, statut: 'TERMINE', dateDebut: '2026-10-01T00:00:00.000Z', dateFin: '2026-10-05T00:00:00.000Z' } });
+    });
+    await avecFuseauSociete(request, session.token, 'Pacific/Tahiti', async () => {
+      await ouvrirSansAttendre(page, `/chantiers/${chantierId}`, session.token, session.user);
+      await expect(page.getByText(/Démarré le 01-10-2026/)).toContainText('terminé le 05-10-2026 (4 j)');
     });
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
