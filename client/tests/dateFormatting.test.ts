@@ -71,4 +71,6 @@ test('instantaneLisible rend une date-seule en JJ-MM-AAAA et un instant au jour 
     '{"date":"15-10-2026","createdAt":"15-10-2026 00:30","heures":7.5,"commentaire":"2026-10-14 noté à la main"}',
   );
   assert.equal(instantaneLisible({ createdAt: '2026-10-14T13:30:00Z' }, 'Europe/Paris'), '{"createdAt":"14-10-2026 15:30"}');
+  // Minuit UTC écrit sans millisecondes reste une date-seule, sans heure ajoutée.
+  assert.equal(instantaneLisible({ date: '2026-10-15T00:00:00Z' }, 'Pacific/Tahiti'), '{"date":"15-10-2026"}');
 });

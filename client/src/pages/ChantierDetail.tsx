@@ -1281,7 +1281,7 @@ const ChantierDetail = () => {
                     </div>
                   )}
                   {entree.action === 'CREATION' && entree.apres && (
-                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs enregistrées : {JSON.stringify(entree.apres)}</pre>
+                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs enregistrées : {instantaneLisible(entree.apres, companyTimezone)}</pre>
                   )}
                   {entree.action === 'ARCHIVAGE' && entree.avant && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">

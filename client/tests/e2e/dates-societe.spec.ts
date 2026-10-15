@@ -38,6 +38,24 @@ function jetonPour(userId: string) {
   return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
 }
 
+// Devis signé, prêt à ouvrir son chantier : le formulaire d'ouverture n'affiche ses champs
+// qu'avec un tel devis.
+async function signerDevisPret(request: APIRequestContext, token: string, creerClient: (libelle: string, avecSite?: boolean) => Promise<{ id: string }>, libelle: string) {
+  const headers = { Authorization: `Bearer ${token}` };
+  const envoyer = async (path: string, methode: 'post' | 'put', data: object) => {
+    const response = await request[methode](`${api}${path}`, { headers, data });
+    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+    return response.json();
+  };
+  const client = await creerClient(libelle, false);
+  const devis = await envoyer('/devis', 'post', { clientId: client.id, objet: `${libelle} E2E ${Date.now()}`, lignes: [
+    { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
+  ] }) as { id: string };
+  await envoyer(`/devis/${devis.id}/statut`, 'put', { statut: 'ENVOYE' });
+  await envoyer(`/devis/${devis.id}/signature`, 'post', { signataire: 'Client E2E', confirme: true });
+  return devis;
+}
+
 // Avant la lecture du fuseau, un écran calcule sa période au fuseau par défaut (Europe/Paris) et
 // la demande ; une fois le fuseau lu, il demande celle de la société. La lecture du fuseau est
 // retenue jusqu'à la première demande, et la réponse à celle-ci jusqu'à l'affichage de la période
@@ -187,9 +205,11 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
   // 15-10 à 00:30 à Nouméa (encore le 14 à Paris, fuseau par défaut, en UTC et à Gambier). La
   // fiche l'affiche et le préremplit au 15, et enregistrer la fiche sans y toucher garde le 15
   // (avant, le jour UTC était réenregistré : le 14). Lue le 16 à 23:00 à Nouméa, elle compte un
-  // jour civil écoulé, et non 46 h 30 arrondies à 2 jours. Le formulaire est ouvert pendant que la
-  // lecture du fuseau est retenue : il montre d'abord le jour du fuseau par défaut, puis celui de
-  // la société une fois le fuseau lu.
+  // jour civil écoulé, et non 46 h 30 arrondies à 2 jours ; le 17 à 00:30 à Nouméa (encore le 16
+  // en UTC), deux. Le formulaire est ouvert pendant que la lecture du fuseau est retenue : il
+  // montre d'abord le jour du fuseau par défaut, puis celui de la société une fois le fuseau lu.
+  // Le journal des saisies rend la date d'un achat en JJ-MM-AAAA, à sa création comme à sa
+  // correction.
   test('la fiche lit un début horodaté au jour de la société, et l’enregistre sans le décaler', async ({ creerClient, page, request, session }) => {
     await page.clock.install({ time: new Date('2026-10-16T12:00:00Z') });
     const headers = { Authorization: `Bearer ${session.token}` };
@@ -206,6 +226,11 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
     await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
     await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
     const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER', responsableId: conducteur.id, commercialId: commercial.id }) as { id: string };
+    const fournisseur = await envoyer('post', '/fournisseurs', { nom: `Fournisseur dates ${suffixe}` }) as { id: string };
+    const categorie = await envoyer('post', '/categories', { nom: `Catégorie dates ${suffixe}` }) as { id: string };
+    const achat = await envoyer('post', '/achats', { date: '14-10-2026', fournisseurId: fournisseur.id, categorieId: categorie.id, description: 'Achat journal E2E', montantHT: 10, chantierId: chantier.id }) as { id: string };
+    const correction = await request.patch(`${api}/achats/${achat.id}`, { headers, data: { montantHT: 12, motifCorrection: 'Montant corrigé E2E' } });
+    expect(correction.ok(), await correction.text()).toBeTruthy();
 
     await page.route(`**/api/chantiers/${chantier.id}`, async (route) => {
       if (route.request().method() !== 'GET') return route.continue();
@@ -230,12 +255,29 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
       }
       await expect(page.locator('input[name="dateDebut"]')).toHaveValue('15-10-2026');
       await expect(page.getByText('Démarré le 15-10-2026 (il y a 1 j)')).toBeVisible();
+      await expect(page.getByText(/^Valeurs enregistrées : /)).toContainText('"date":"14-10-2026"');
+      await expect(page.getByText(/^Avant : /)).toContainText('"date":"14-10-2026"');
+      await expect(page.getByText(/^Après : /)).toContainText('"date":"14-10-2026"');
+      const ficheRelue = (r: { url(): string; request(): { method(): string } }) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'GET';
       const enregistrement = page.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'PATCH');
+      // La fiche se relit après l'enregistrement : le test attend la fin de cette relecture, que sa
+      // route réécrit, pour ne pas se terminer pendant qu'elle est en cours.
+      const relecture = page.waitForResponse(ficheRelue);
       await page.getByRole('button', { name: 'Enregistrer les modifications' }).click();
       expect((await enregistrement).status()).toBe(200);
+      await relecture;
       const relu = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { dateDebut: string };
       expect(relu.dateDebut).toBe('2026-10-15T00:00:00.000Z');
+
+      // Le 16 à 13:30 UTC, déjà le 17 à 00:30 à Nouméa : deux jours civils écoulés (le jour UTC
+      // n'en compterait qu'un).
+      await page.clock.setSystemTime(new Date('2026-10-16T13:30:00Z'));
+      const rechargement = page.waitForResponse(ficheRelue);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await rechargement;
+      await expect(page.getByText('Démarré le 15-10-2026 (il y a 2 j)')).toBeVisible();
     });
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 });
 
@@ -367,18 +409,7 @@ test.describe('navigateur à Gambier, société à Wallis', () => {
 // achats, contrats de maintenance et affectation du planning. Le formulaire d'ouverture n'affiche
 // ses champs qu'avec un devis prêt : le test signe le sien, sans dépendre des autres parcours.
 test('sans le fuseau de la société, les dates du jour ne sont pas préremplies', async ({ page, request, session, creerClient }) => {
-  const headers = { Authorization: `Bearer ${session.token}` };
-  const envoyer = async (path: string, methode: 'post' | 'put', data: object) => {
-    const response = await request[methode](`${api}${path}`, { headers, data });
-    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
-    return response.json();
-  };
-  const client = await creerClient('fuseau illisible', false);
-  const devis = await envoyer('/devis', 'post', { clientId: client.id, objet: `Fuseau illisible E2E ${Date.now()}`, lignes: [
-    { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
-  ] }) as { id: string };
-  await envoyer(`/devis/${devis.id}/statut`, 'put', { statut: 'ENVOYE' });
-  await envoyer(`/devis/${devis.id}/signature`, 'post', { signataire: 'Client E2E', confirme: true });
+  const devis = await signerDevisPret(request, session.token, creerClient, 'Fuseau illisible');
   await page.route('**/api/company', (route) => (route.request().method() === 'GET'
     ? route.fulfill({ status: 500, json: { error: 'Paramètres indisponibles.' } })
     : route.continue()));
@@ -400,4 +431,41 @@ test('sans le fuseau de la société, les dates du jour ne sont pas préremplies
   await page.goto('/planning', { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Affectation', exact: true }).click();
   await expect(page.locator('input[name="dateDebut"]')).toHaveValue('');
+});
+
+// Société au fuseau par défaut (Europe/Paris) : une fois ce fuseau lu, la date du jour se
+// préremplit, même si le fuseau, inchangé, ne remonte pas le champ. Chaque page est ouverte
+// pendant que la lecture du fuseau est retenue.
+test('au fuseau par défaut, la date du jour se préremplit une fois le fuseau lu', async ({ page, request, session, creerClient }) => {
+  await page.clock.install({ time: new Date('2026-10-14T10:00:00Z') });
+  await signerDevisPret(request, session.token, creerClient, 'Fuseau par défaut');
+  let ouvrirPorte = () => {};
+  let porte = Promise.resolve();
+  await page.route('**/api/company', async (route) => {
+    if (route.request().method() === 'GET') await porte;
+    await route.continue();
+  });
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [session.token, JSON.stringify(session.user)]);
+  await avecFuseauSociete(request, session.token, 'Europe/Paris', async () => {
+    for (const { chemin, champ, bouton } of [
+      { chemin: '/achats', champ: 'input[name="date"]' },
+      { chemin: '/heures', champ: 'input[name="date"]' },
+      { chemin: '/contrats-maintenance', champ: 'input[name="dateDebut"]', bouton: 'Nouveau contrat' },
+      { chemin: '/admin', champ: '#ouverture-date' },
+    ]) {
+      porte = new Promise<void>((resolve) => { ouvrirPorte = resolve; });
+      try {
+        await page.goto(chemin, { waitUntil: 'domcontentloaded' });
+        if (bouton) await page.getByRole('button', { name: bouton }).click();
+        await expect(page.locator(champ), chemin).toHaveValue('');
+      } finally {
+        ouvrirPorte();
+      }
+      await expect(page.locator(champ), chemin).toHaveValue('14-10-2026');
+    }
+  });
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
 });

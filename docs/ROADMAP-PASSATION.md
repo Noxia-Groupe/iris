@@ -96,7 +96,7 @@ Le catalogue et le plan comptable commencent vides et sont paramétrés par la s
 
   Le lot reprend les profils de commission attribués par personne, versionnés et non rétroactifs de l'[issue #15](https://github.com/Noxia-Groupe/iris/issues/15) (transversal « commissionnement » ci-dessus). Existant à prendre en compte :
   - le barème progressif, les objectifs, les primes et le barème réduit (`ParametresRemuneration`, Administration > Marges & Commissions) valent pour toute la société ; une commission ne naît que d'un chantier encaissé et se rattache au mois de sa clôture ;
-  - ces règles sont relues à chaque calcul : modifier un barème recalcule aussi les mois passés. Le plan commercial devra figer les règles applicables à chaque période ;
+  - ces règles sont relues à chaque calcul : modifier un barème recalcule aussi les mois passés. L'issue #15 prévoit le gel de la règle et du montant au fait générateur ; son application au plan commercial reste à cadrer (question du changement de plan, plus bas) ;
   - le devis ne porte pas de commercial, qui se fixe sur le chantier : la commande signée comme fait générateur suppose de le connaître dès le devis ;
   - les commissions sur abonnements et locations supposent des contrats qui n'existent pas encore : `ContratMaintenance` ne porte ni montant, ni durée d'engagement, ni date de signature, ni commercial, et Iris n'a pas de contrat de location (ventes récurrentes, phase 9) ;
   - les commissions sur contrats récurrents et les primes affichées en texte dans l'onglet de rémunération ne sont pas calculées.

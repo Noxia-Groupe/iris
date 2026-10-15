@@ -93,6 +93,7 @@ export function instantaneLisible(valeur: unknown, fuseau: string): string {
   return JSON.stringify(valeur, (_cle, v) => {
     if (typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
     const jour = jourCivilChantier(v, fuseau);
-    return v.endsWith('T00:00:00.000Z') ? jour : `${jour} ${formatCompanyDateTime(v, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
+    // Même règle que jourCivilChantier : minuit UTC, quelle que soit l'écriture, est une date-seule.
+    return new Date(v).toISOString().endsWith('T00:00:00.000Z') ? jour : `${jour} ${formatCompanyDateTime(v, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
   });
 }

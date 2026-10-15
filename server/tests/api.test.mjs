@@ -3114,8 +3114,8 @@ if (!TEST_DATABASE_URL) {
       });
 
       // Décision de Nelson (14-10-2026) : le début d'un chantier ouvert sans date choisie est le
-      // jour civil de la société, en date-seule. L'horloge est figée à 21 h UTC, où le jour de
-      // Wallis diffère de celui d'UTC.
+      // jour civil de la société, en date-seule. L'horloge est figée au dernier 21 h UTC passé, où
+      // le jour de Wallis diffère de celui d'UTC.
       test('une conversion sans date de début pose le jour civil de la société', async () => {
         const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
         const fuseau = 'Pacific/Wallis';
@@ -7706,8 +7706,8 @@ if (!TEST_DATABASE_URL) {
 
     // Décision de Nelson (14-10-2026) : toutes les dates suivent la société, où que se trouve le
     // lecteur. La page publique n'a pas de session : le serveur lui donne le jour, la semaine et
-    // le fuseau de la société. L'horloge est figée à 21 h UTC, où le jour de Wallis diffère de
-    // celui d'UTC.
+    // le fuseau de la société. L'horloge est figée au dernier 21 h UTC passé, où le jour de Wallis
+    // diffère de celui d'UTC.
     test('le planning public donne le jour, la semaine et le fuseau de la société', async () => {
       const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
       const fuseau = 'Pacific/Wallis';
