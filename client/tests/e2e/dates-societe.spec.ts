@@ -123,6 +123,10 @@ test.describe('navigateur à Gambier, société à Wallis : périodes', () => {
       await expect(page.getByText('Octobre 2026', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: "Aujourd'hui" }).click();
       await expect(page.getByText('Novembre 2026', { exact: true })).toBeVisible();
+      // Onglet Intervenants, à la semaine : libellé au format JJ-MM-AAAA. Le dimanche 1er novembre
+      // de Wallis est dans la semaine du 26-10 au 01-11.
+      await page.getByRole('button', { name: 'Intervenants' }).click();
+      await expect(page.getByText('Semaine du 26-10-2026 au 01-11-2026', { exact: true })).toBeVisible();
     });
   });
 

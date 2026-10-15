@@ -26,6 +26,10 @@ test('la fiche chantier affiche les dates de ses achats au format JJ-MM-AAAA', a
   const achat = page.locator('div.min-w-0', { has: page.getByText(`Achat format ${suffixe}`, { exact: true }) });
   await expect(achat).toContainText('05-10-2026 ·');
   await expect(achat).not.toContainText('octobre');
+  // Date de l'entrée du journal des saisies (instant, au jour de la société), suivie de l'auteur.
+  const entree = page.locator('strong', { hasText: /^Achat — creation$/ }).locator('..');
+  await expect(entree).toContainText(/\d{2}-\d{2}-\d{4} · /);
+  await expect(entree).not.toContainText(/janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre/);
 });
 
 // La modale d'affectation du planning utilisait le sélecteur de date du navigateur (AAAA-MM-JJ

@@ -3865,7 +3865,7 @@ app.get('/api/planning/events', requireAuth, blockCommercial, requirePlanningAct
   try {
     const start = parsePlanningJour(req.query.start);
     const end = parsePlanningJour(req.query.end);
-    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, format YYYY-MM-DD).' });
+    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, au format JJ-MM-AAAA ou AAAA-MM-JJ).' });
     const events = await prisma.planningEvent.findMany({
       where: { dateDebut: { lte: end }, dateFin: { gte: start }, OR: [
         { interventionId: null }, { intervention: { is: getInterventionFilterForUser(req.user!) } },
@@ -4117,7 +4117,7 @@ app.get('/api/planning/public/:token', async (req, res) => {
     const sansPlage = req.query.start === undefined && req.query.end === undefined;
     const start = parsePlanningJour(sansPlage ? lundi : req.query.start);
     const end = parsePlanningJour(sansPlage ? ajouterJoursCivils(lundi, 6) : req.query.end);
-    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide : start et end vont ensemble, au format YYYY-MM-DD.' });
+    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide : start et end vont ensemble, au format JJ-MM-AAAA ou AAAA-MM-JJ.' });
 
     // `select` explicite (plutôt qu'`include`, qui renverrait aussi tous les champs
     // scalaires bruts de PlanningEvent) : n'expose que ce qui est utile à un technicien,

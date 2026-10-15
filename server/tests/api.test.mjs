@@ -7733,10 +7733,6 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    // Décision de Nelson (14-10-2026) : toutes les dates suivent la société, où que se trouve le
-    // lecteur. La page publique n'a pas de session : le serveur lui donne le jour, la semaine et
-    // le fuseau de la société. L'horloge est figée au dernier dimanche 21 h UTC passé : Wallis est
-    // déjà au lundi, si bien que son jour et sa semaine diffèrent de ceux d'UTC.
     // Lot (h) : la modale d'affectation saisit ses dates en JJ-MM-AAAA. Le serveur les lit comme les
     // autres dates métier (dateIsoStricte) : JJ-MM-AAAA ou AAAA-MM-JJ, sans débordement ni suffixe.
     test('les dates d’une affectation se saisissent en JJ-MM-AAAA, et sont lues strictement', async () => {
@@ -7759,18 +7755,22 @@ if (!TEST_DATABASE_URL) {
         // Auparavant : le 30 février enregistré au 2 mars, un suffixe quelconque ignoré, JJ-MM-AAAA refusé.
         for (const dateDebut of ['2026-02-30', '30-02-2026', '2026-10-20xyz', '20/10/2026', '2026-10-20 10:00']) {
           const refuse = await creer({ dateDebut });
-          assert.equal(refuse.status, 400, `${dateDebut} : ${JSON.stringify(refuse.body)}`);
           if (refuse.status === 201) creees.push(refuse.body.id);
+          assert.equal(refuse.status, 400, `${dateDebut} : ${JSON.stringify(refuse.body)}`);
         }
         const finInvalide = await creer({ dateDebut: '20-10-2026', dateFin: '31-11-2026' });
-        assert.equal(finInvalide.status, 400, JSON.stringify(finInvalide.body));
         if (finInvalide.status === 201) creees.push(finInvalide.body.id);
+        assert.equal(finInvalide.status, 400, JSON.stringify(finInvalide.body));
       } finally {
         for (const id of creees) await request(app).delete(`/api/planning/events/${id}`).set(auth);
         await request(app).delete(`/api/intervenants/${intervenant.body.id}`).set(auth);
       }
     });
 
+    // Décision de Nelson (14-10-2026) : toutes les dates suivent la société, où que se trouve le
+    // lecteur. La page publique n'a pas de session : le serveur lui donne le jour, la semaine et
+    // le fuseau de la société. L'horloge est figée au dernier dimanche 21 h UTC passé : Wallis est
+    // déjà au lundi, si bien que son jour et sa semaine diffèrent de ceux d'UTC.
     test('le planning public donne le jour, la semaine et le fuseau de la société', async () => {
       const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
       const fuseau = 'Pacific/Wallis';
