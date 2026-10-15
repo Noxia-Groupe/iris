@@ -2458,7 +2458,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(forme.body.installeLe, '2026-10-01T00:00:00.000Z', installeLe);
         formes.push(forme.body.id);
       }
-      for (const installeLe of ['2026-10-01T99:99Z', '2026-10-01T10:60Z', '2026-10-01T24:00Z', '2026-10-01T23:59:60Z']) {
+      for (const installeLe of ['2026-10-01T99:99Z', '2026-10-01T10:60Z', '2026-10-01T24:00Z', '2026-10-01T23:59:60Z', '2026-10-01T10:00+24:00', '2026-10-01T10:00+14:60']) {
         const heureInvalide = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
           .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-5', installeLe });
         assert.equal(heureInvalide.status, 400, `${installeLe} : ${JSON.stringify(heureInvalide.body)}`);
@@ -7765,6 +7765,21 @@ if (!TEST_DATABASE_URL) {
         assert.equal(plage.status, 200, JSON.stringify(plage.body));
         assert.deepEqual([plage.body.debut, plage.body.fin, plage.body.aujourdhui], ['2026-03-02', '2026-03-08', aujourdhui]);
         assert.equal((await request(app).get(`/api/planning/public/${token}`).query({ start: '2026-03-02' })).status, 400, 'une plage incomplète reste refusée');
+
+        // Dimanche de la société : horloge figée au dernier samedi 13 h UTC passé, déjà dimanche
+        // 01:00 à Wallis. La semaine servie est celle du lundi précédent, et non la suivante.
+        mock.timers.reset();
+        const maintenant = new Date();
+        let samedi = Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth(), maintenant.getUTCDate(), 13);
+        if (samedi > maintenant.getTime()) samedi -= 86_400_000;
+        while (new Date(samedi).getUTCDay() !== 6) samedi -= 86_400_000;
+        mock.timers.enable({ apis: ['Date'], now: samedi });
+        const dimancheSociete = jourDans(fuseau);
+        assert.equal(new Date(`${dimancheSociete}T00:00:00Z`).getUTCDay(), 0, 'la société est au dimanche');
+        const lundiPrecedent = new Date(Date.parse(`${dimancheSociete}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10);
+        const semaineDimanche = await request(app).get(`/api/planning/public/${token}`);
+        assert.equal(semaineDimanche.status, 200, JSON.stringify(semaineDimanche.body));
+        assert.deepEqual([semaineDimanche.body.aujourdhui, semaineDimanche.body.debut, semaineDimanche.body.fin], [dimancheSociete, lundiPrecedent, dimancheSociete], 'un dimanche appartient à la semaine de son lundi');
       } finally {
         mock.timers.reset();
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
@@ -7798,6 +7813,18 @@ if (!TEST_DATABASE_URL) {
         assert.equal(apres.octobre['Vidéo'] - avant.octobre['Vidéo'], 0, 'et non en octobre (jour UTC)');
         assert.equal(apres.novembre['Alarme'] - avant.novembre['Alarme'], 1, 'une date-seule compte à son jour');
         assert.equal(apres.novembre['Interphonie'] - avant.novembre['Interphonie'], 0, 'le 1er décembre à Paris ne compte pas en novembre');
+
+        // Société à l'ouest d'UTC (Tahiti, UTC−10) : un début au 01-12 à 05:00 UTC est encore le
+        // 30-11 dans la société, une date-seule du 01-12 reste le 01-12.
+        assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: 'Pacific/Tahiti' })).status, 200);
+        const avantTahiti = { novembre: await compter('2026-11-15'), decembre: await compter('2026-12-15') };
+        chantiers.push(await prisma.chantier.create({ data: { ...vente, nom: 'TEST Types début Tahiti', dateDebut: new Date('2026-12-01T05:00:00.000Z'), types: ["Contrôle d'accès"] } }));
+        chantiers.push(await prisma.chantier.create({ data: { ...vente, nom: 'TEST Types date-seule Tahiti', dateDebut: new Date('2026-12-01T00:00:00.000Z'), types: ['Câblage réseau'] } }));
+        const apresTahiti = { novembre: await compter('2026-11-15'), decembre: await compter('2026-12-15') };
+        assert.equal(apresTahiti.novembre["Contrôle d'accès"] - avantTahiti.novembre["Contrôle d'accès"], 1, 'le 30-11 à Tahiti compte en novembre');
+        assert.equal(apresTahiti.decembre["Contrôle d'accès"] - avantTahiti.decembre["Contrôle d'accès"], 0, 'et non en décembre (jour UTC)');
+        assert.equal(apresTahiti.decembre['Câblage réseau'] - avantTahiti.decembre['Câblage réseau'], 1, 'une date-seule du 01-12 compte en décembre');
+        assert.equal(apresTahiti.novembre['Câblage réseau'] - avantTahiti.novembre['Câblage réseau'], 0, 'et non en novembre');
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
         await prisma.chantier.deleteMany({ where: { id: { in: chantiers.map((c) => c.id) } } });

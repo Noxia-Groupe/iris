@@ -360,6 +360,10 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
         await expect(page.locator('thead th', { hasText: '12-10' })).toBeVisible();
         await expect(page.locator('thead th', { hasText: '19-10' })).toHaveCount(0);
         await expect(surlignes).toHaveCount(0);
+        // « + Affectation » préremplit le jour de la société (lundi 19), et non celui du
+        // navigateur ou d'UTC (dimanche 18), quelle que soit la semaine affichée.
+        await page.getByRole('button', { name: 'Affectation', exact: true }).click();
+        await expect(page.locator('input[name="dateDebut"]')).toHaveValue('2026-10-19');
       });
     } finally {
       await request.delete(`${api}/intervenants/${id}`, { headers });
@@ -371,10 +375,13 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
   test('le planning public suit le jour et le fuseau de la société renvoyés par le serveur', async ({ page }) => {
     await page.clock.install({ time: new Date('2026-10-14T13:00:00Z') });
     const demandes: string[] = [];
+    let retenirRetour = false;
+    let libererRetour = () => {};
     await page.route('**/api/planning/public/**', async (route) => {
       demandes.push(route.request().url());
       // Sans plage, le serveur sert la semaine de la société ; sinon, la plage demandée.
       const parametres = new URL(route.request().url()).searchParams;
+      if (retenirRetour && !parametres.get('start')) await new Promise<void>((resolve) => { libererRetour = resolve; });
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -396,12 +403,20 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     await expect(page.getByText('5 – 11 octobre 2026')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Semaine 41' })).toBeVisible();
     expect(new URL(demandes[demandes.length - 1]).search).toBe('?start=2026-10-05&end=2026-10-11');
+    // Le retour est immédiat : la semaine de la société s'affiche avant la réponse du serveur,
+    // retenue ici.
     const nombreAvantRetour = demandes.length;
+    retenirRetour = true;
     await page.getByRole('button', { name: 'Semaine 41' }).click();
     await expect(page.getByText('12 – 18 octobre 2026')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
     expect(demandes.length).toBeGreaterThan(nombreAvantRetour);
     expect(new URL(demandes[demandes.length - 1]).search).toBe('');
+    retenirRetour = false;
+    const retour = page.waitForResponse((r) => r.url().includes('/api/planning/public/') && !new URL(r.url()).searchParams.get('start'));
+    libererRetour();
+    await (await retour).finished();
+    await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
   });
 
   // Un rafraîchissement lancé avant un changement de semaine ne doit pas, arrivé le dernier,

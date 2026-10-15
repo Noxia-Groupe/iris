@@ -20,7 +20,7 @@ function formatPlageSemaine(debut: string, fin: string): string {
 
 // Jour et fuseau de la société, renvoyés par le serveur : la page publique n'a pas de session,
 // et le téléphone du technicien peut être dans un autre fuseau (décision de Nelson du 14-10-2026).
-type Societe = { fuseauHoraire: string; aujourdhui: string; debut: string };
+type Societe = { fuseauHoraire: string; aujourdhui: string };
 
 // ---------------------------------------------------------------------------
 // Vue publique, en LECTURE SEULE et SANS authentification, du planning d'intervention —
@@ -49,7 +49,9 @@ const PlanningPublic = () => {
   // rafraîchissement, par exemple) est ignorée.
   const requeteRef = useRef(0);
 
-  const weekStartStr = semaineChoisie ?? (societe ? lundiDe(societe.debut) : null);
+  // Sans semaine choisie, celle du jour de la société, connu dès la première réponse : le retour
+  // à cette semaine est immédiat, sans attendre la réponse suivante.
+  const weekStartStr = semaineChoisie ?? (societe ? lundiDe(societe.aujourdhui) : null);
   const jours = weekStartStr ? joursDeLaSemaine(weekStartStr) : [];
   const todayStr = societe?.aujourdhui ?? null;
   const isoWeek = weekStartStr ? numeroSemaineIso(weekStartStr) : null;
@@ -77,7 +79,7 @@ const PlanningPublic = () => {
         setError(null);
         setEvents(Array.isArray(data.events) ? data.events : []);
         setIntervenants(Array.isArray(data.intervenants) ? data.intervenants : []);
-        if (data.fuseauHoraire && data.aujourdhui && data.debut) setSociete({ fuseauHoraire: data.fuseauHoraire, aujourdhui: data.aujourdhui, debut: data.debut });
+        if (data.fuseauHoraire && data.aujourdhui) setSociete({ fuseauHoraire: data.fuseauHoraire, aujourdhui: data.aujourdhui });
         setLastUpdated(new Date());
       }
     } catch {

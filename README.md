@@ -169,8 +169,8 @@ Toutes les dates suivent le fuseau de la société qui utilise Iris (Administrat
 où que se trouve celui qui consulte ou saisit (décision de Nelson du 14-10-2026, #130) :
 
 - une **date métier** (début et fin d'un chantier, date d'achat, d'heures, de facture…) est
-  une date-seule, saisie et affichée en `JJ-MM-AAAA` et stockée à minuit UTC ; elle se lit
-  telle quelle, sans conversion ;
+  une date-seule, saisie en `JJ-MM-AAAA` (affichage harmonisé au lot (h)) et stockée à minuit
+  UTC ; elle se lit telle quelle, sans conversion ;
 - un **instant** (horodatage d'une signature, d'une écriture de journal, d'une mise à jour)
   s'affiche à la date et à l'heure de la société ;
 - « aujourd'hui » est le jour de la société : préremplissages, semaine et mois affichés par

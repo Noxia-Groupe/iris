@@ -4276,14 +4276,15 @@ function dateIsoStricte(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   // Le format métier français est JJ-MM-AAAA. YYYY-MM-DD reste accepté pour les champs
   // HTML natifs. Une date-heure ISO est également acceptée, car l'API la renvoie elle-même. Une
-  // date-seule ne peut pas porter l'heure : on retient la date telle qu'elle est écrite (décision
-  // de Nelson du 14-10-2026 : « tu retiens la date simplement si ce n'est pas possible de prendre
-  // egalement en compte l'heure qui va avec »). Sans décalage, l'heure ne désigne aucun instant.
-  // Avec un décalage, la date écrite est gardée aussi, et non le jour de la société de l'instant
-  // (décision de Nelson du 15-10-2026 : « garde le comportement actuel ») : cette lecture le
-  // faisait déjà pour « Z » et ±HH:MM (±HHMM est accepté depuis), et l'API d'Iris renvoie une
-  // date-seule sous la forme …T00:00:00.000Z, qu'une conversion au jour de la société décalerait.
-  // L'heure doit être valide (HH:MM de 00:00 à 23:59, secondes et fraction facultatives).
+  // date-seule ne peut pas porter l'heure : on retient la date telle qu'elle est écrite, selon la
+  // réponse de Nelson du 14-10-2026 (« Avec l'api qui renvoi une date avec heure tu retiens la
+  // date simplement si ce n'est pas possible de prendre egalement en compte l'heure qui va
+  // avec »). Sans décalage, l'heure ne désigne aucun instant. Avec un décalage, la date écrite est
+  // gardée aussi, et non le jour de la société de l'instant (décision de Nelson du 15-10-2026 :
+  // « garde le comportement actuel ») : cette lecture le faisait déjà pour « Z » et ±HH:MM
+  // (±HHMM est accepté depuis #130), et l'API d'Iris renvoie une date-seule sous la forme
+  // …T00:00:00.000Z, qu'une conversion au jour de la société décalerait. L'heure et le décalage
+  // doivent être valides (HH:MM de 00:00 à 23:59, secondes et fraction facultatives).
   const isoComplet = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?$/.exec(value);
   if (isoComplet) return dateIsoStricte(`${isoComplet[1]}-${isoComplet[2]}-${isoComplet[3]}`);
   const match = /^(?:(\d{2})-(\d{2})-(\d{4})|(\d{4})-(\d{2})-(\d{2}))$/.exec(value);
