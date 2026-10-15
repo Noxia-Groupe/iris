@@ -2434,8 +2434,8 @@ if (!TEST_DATABASE_URL) {
       const invalide = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
         .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-2', installeLe: '31-02-2026' });
       assert.equal(invalide.status, 400, JSON.stringify(invalide.body));
-      // Une date-heure reçue par l'API retient la date telle qu'elle est écrite (lecture de la
-      // réponse de Nelson du 14-10-2026 ; avec un décalage, choix provisoire, question posée).
+      // Une date-heure reçue par l'API retient la date telle qu'elle est écrite, avec ou sans
+      // décalage (décisions de Nelson du 14-10-2026 et, pour le décalage, du 15-10-2026).
       // La forme renvoyée par l'API elle-même (…T00:00:00.000Z) et une heure sans secondes
       // sont acceptées.
       const horodatee = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)

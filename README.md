@@ -185,9 +185,9 @@ où que se trouve celui qui consulte ou saisit (décision de Nelson du 14-10-202
 - une date-heure ISO reçue par l'API pour une date métier lue par `dateIsoStricte` (chantier,
   heures, achats, interventions, factures, contrats, acompte, équipements) retient la date telle
   qu'elle est écrite, sans tenir compte de l'heure ni du décalage, présent ou non ; l'heure doit
-  être valide. Avec un décalage, c'est un choix provisoire : tenir compte de l'heure (jour de la
-  société) reste une question posée à Nelson. Le planning et la demande curative lisent encore leurs
-  dates autrement (constats de la passation) ;
+  être valide. Avec un décalage aussi, la date écrite est retenue, et non le jour de la société
+  de l'instant (décision de Nelson du 15-10-2026). Le planning et la demande curative lisent encore
+  leurs dates autrement (constats de la passation) ;
 - la semaine de la société commence le lundi.
 
 L'affichage de toutes les dates au même format `JJ-MM-AAAA` est décidé et prévu (lot (h) de la
