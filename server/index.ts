@@ -4279,9 +4279,10 @@ function dateIsoStricte(value: unknown): string | null {
   // date-seule ne peut pas porter l'heure : on retient la date telle qu'elle est écrite (décision
   // de Nelson du 14-10-2026 : « tu retiens la date simplement si ce n'est pas possible de prendre
   // egalement en compte l'heure qui va avec »). Sans décalage, l'heure ne désigne aucun instant.
-  // Avec un décalage (« Z », ±HH:MM ou ±HHMM), la date écrite est gardée, comme cette lecture le
-  // faisait déjà : l'API d'Iris renvoie une date-seule sous la forme …T00:00:00.000Z, qu'une
-  // conversion au jour de la société décalerait (question posée à Nelson pour les autres heures).
+  // Avec un décalage, la date écrite est gardée, choix provisoire : cette lecture le faisait déjà
+  // pour « Z » et ±HH:MM (±HHMM est accepté depuis), et l'API d'Iris renvoie une date-seule sous
+  // la forme …T00:00:00.000Z, qu'une conversion au jour de la société décalerait (question posée
+  // à Nelson pour les autres heures).
   // L'heure doit être valide (HH:MM de 00:00 à 23:59, secondes et fraction facultatives).
   const isoComplet = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?$/.exec(value);
   if (isoComplet) return dateIsoStricte(`${isoComplet[1]}-${isoComplet[2]}-${isoComplet[3]}`);

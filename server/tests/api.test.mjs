@@ -2434,8 +2434,10 @@ if (!TEST_DATABASE_URL) {
       const invalide = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
         .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-2', installeLe: '31-02-2026' });
       assert.equal(invalide.status, 400, JSON.stringify(invalide.body));
-      // Une date-heure reçue par l'API retient la date telle qu'elle est écrite, sans tenir
-      // compte de l'heure ni du décalage (décision de Nelson du 14-10-2026).
+      // Une date-heure reçue par l'API retient la date telle qu'elle est écrite (lecture de la
+      // réponse de Nelson du 14-10-2026 ; avec un décalage, choix provisoire, question posée).
+      // La forme renvoyée par l'API elle-même (…T00:00:00.000Z) et une heure sans secondes
+      // sont acceptées.
       const horodatee = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
         .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-3', installeLe: '2026-10-01T23:30:00-10:00', garantieJusquAu: '2028-12-31T22:30:00Z' });
       assert.equal(horodatee.status, 201, JSON.stringify(horodatee.body));
@@ -2448,12 +2450,20 @@ if (!TEST_DATABASE_URL) {
       assert.equal(sansDecalage.status, 201, JSON.stringify(sansDecalage.body));
       assert.equal(sansDecalage.body.installeLe, '2026-10-01T00:00:00.000Z');
       assert.equal(sansDecalage.body.garantieJusquAu, '2028-12-31T00:00:00.000Z');
+      const formes = [];
+      for (const [installeLe, numeroSerie] of [['2026-10-01T00:00:00.000Z', 'TEST-SN-DATE-6'], ['2026-10-01T10:00Z', 'TEST-SN-DATE-7'], ['2026-10-01T10:00+02:00', 'TEST-SN-DATE-8']]) {
+        const forme = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
+          .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie, installeLe });
+        assert.equal(forme.status, 201, `${installeLe} : ${JSON.stringify(forme.body)}`);
+        assert.equal(forme.body.installeLe, '2026-10-01T00:00:00.000Z', installeLe);
+        formes.push(forme.body.id);
+      }
       for (const installeLe of ['2026-10-01T99:99Z', '2026-10-01T10:60Z', '2026-10-01T24:00Z', '2026-10-01T23:59:60Z']) {
         const heureInvalide = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
           .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-5', installeLe });
         assert.equal(heureInvalide.status, 400, `${installeLe} : ${JSON.stringify(heureInvalide.body)}`);
       }
-      await prisma.equipementInstalle.deleteMany({ where: { id: { in: [creation.body.id, horodatee.body.id, sansDecalage.body.id] } } });
+      await prisma.equipementInstalle.deleteMany({ where: { id: { in: [creation.body.id, horodatee.body.id, sansDecalage.body.id, ...formes] } } });
     });
 
     test('refuse un équipement rattaché au site d’un autre client', async () => {
