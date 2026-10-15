@@ -226,7 +226,9 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
     const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Dates fiche E2E ${suffixe}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
     await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
     await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
-    const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER', responsableId: conducteur.id, commercialId: commercial.id }) as { id: string };
+    // Début réel distinct de la date attendue après enregistrement (15-10-2026), quel que soit le
+    // jour où le test tourne.
+    const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER', responsableId: conducteur.id, commercialId: commercial.id, dateDebut: '01-10-2026' }) as { id: string };
     const fournisseur = await envoyer('post', '/fournisseurs', { nom: `Fournisseur dates ${suffixe}` }) as { id: string };
     const categorie = await envoyer('post', '/categories', { nom: `Catégorie dates ${suffixe}` }) as { id: string };
     const achat = await envoyer('post', '/achats', { date: '14-10-2026', fournisseurId: fournisseur.id, categorieId: categorie.id, description: '2026-13-01T10:00:00Z', montantHT: 10, chantierId: chantier.id }) as { id: string };
@@ -291,7 +293,9 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
       // route réécrit, pour ne pas se terminer pendant qu'elle est en cours.
       const relecture = page.waitForResponse(ficheRelue);
       await page.getByRole('button', { name: 'Enregistrer les modifications' }).click();
-      expect((await enregistrement).status()).toBe(200);
+      const reponse = await enregistrement;
+      expect(reponse.status()).toBe(200);
+      expect((reponse.request().postDataJSON() as Record<string, unknown>).dateDebut).toBe('15-10-2026');
       await relecture;
       const relu = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { dateDebut: string };
       expect(relu.dateDebut).toBe('2026-10-15T00:00:00.000Z');
@@ -534,4 +538,78 @@ test('une date saisie avant la lecture du fuseau est gardée', async ({ page, re
     }
   });
   await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
+// Instants affichés par la PR (signature d'un devis, historique des règles comptables, archivage du
+// tableau de bord, début d'un chantier dans « Résultat commercial ») : au jour et à l'heure de la
+// société, et non du navigateur ni d'UTC. Les réponses sont réécrites avec des instants fixes.
+test.describe('navigateur à Gambier : instants affichés au fuseau de la société', () => {
+  test.use({ timezoneId: 'Pacific/Gambier' });
+  // 14-10-2026 à 13:30 UTC : le 15 à 01:30 à Wallis, le 14 à 04:30 à Gambier, à 15:30 à Paris.
+  const instant = '2026-10-14T13:30:00.000Z';
+
+  test('signature d’un devis, historique des règles et archivage du tableau de bord', async ({ page, request, session, creerClient }) => {
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const devis = await signerDevisPret(request, session.token, creerClient, 'Instants affichés');
+    const signe = await (await request.get(`${api}/devis`, { headers })).json() as { id: string; objet: string }[];
+    const objet = signe.find((d) => d.id === devis.id)?.objet as string;
+    const conversion = await request.post(`${api}/devis/${devis.id}/convertir`, { headers, data: { cible: 'CHANTIER' } });
+    expect(conversion.ok(), await conversion.text()).toBeTruthy();
+    const { id: chantierId } = await conversion.json() as { id: string };
+    await page.route('**/api/devis', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const reponse = await route.fetch();
+      const liste = await reponse.json() as { id: string; signature?: { signeLe: string } | null }[];
+      await route.fulfill({ response: reponse, json: liste.map((d) => (d.id === devis.id && d.signature ? { ...d, signature: { ...d.signature, signeLe: instant } } : d)) });
+    });
+    await page.route('**/api/comptabilite/regles/journal', (route) => route.fulfill({ json: [{
+      id: 'e2e-instant', action: 'REMAPPAGE', type: 'REGLE', cible: 'E2E_INSTANT', avantCode: '706000', avantLibelle: 'Avant E2E',
+      apresCode: '706100', apresLibelle: 'Après E2E', motif: 'Motif E2E', auteurNom: 'Auteur E2E', createdAt: instant,
+    }] }));
+    // Archivé sans date de fin : le tableau de bord lit sa dernière modification, un instant, au
+    // jour de la société, même à minuit UTC pile (à Tahiti, encore le 14 à 14:00).
+    await page.route('**/api/chantiers', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const reponse = await route.fetch();
+      const liste = await reponse.json() as { id: string }[];
+      await route.fulfill({ response: reponse, json: liste.map((c) => (c.id === chantierId ? { ...c, statut: 'TERMINE', dateFin: null, updatedAt: '2026-10-15T00:00:00.000Z' } : c)) });
+    });
+    await page.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token as string);
+      localStorage.setItem('user', user as string);
+    }, [session.token, JSON.stringify(session.user)]);
+    await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
+      await page.goto('/devis', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('li', { hasText: objet })).toContainText('15/10/2026 01:30:00');
+      await page.goto('/comptabilite', { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: 'Historique des règles' }).click();
+      await expect(page.getByRole('region', { name: 'Historique des règles' })).toContainText('15/10/2026 01:30:00');
+    });
+    await avecFuseauSociete(request, session.token, 'Pacific/Tahiti', async () => {
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: /Chantiers terminés \/ archivés/ }).click();
+      await expect(page.getByRole('button', { name: new RegExp(objet) })).toContainText('Archivé le 14-10-2026');
+    });
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
+  test('début d’un chantier horodaté dans « Résultat commercial »', async ({ page, request, session }) => {
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    const creation = await request.post(`${api}/users`, { headers, data: { email: `dates.instant.commercial.${suffixe}@iris.test`, name: `Commercial instant ${suffixe}`, role: 'COMMERCIAL' } });
+    expect(creation.ok(), await creation.text()).toBeTruthy();
+    const commercial = await creation.json() as { id: string; name: string; email: string };
+    const chantierHorodate = { id: 'e2e-horodate', nom: 'Chantier horodaté E2E', client: 'Client E2E', dateDebut: instant, statut: 'EN_COURS', budgetGlobalVendu: 1000, margeCommerciale: 100, commissionEstimee: 0, comptabiliseDansPeriode: false, encaisse: false };
+    await page.route('**/api/stats/commerciaux?*', async (route) => {
+      const reponse = await route.fetch();
+      const donnees = await reponse.json() as { commerciaux?: Record<string, unknown>[] };
+      const moi = { caTotal: 0, margeTotal: 0, margeStandard: 0, margeReduite: 0, commissionStandard: 0, commissionReduite: 0, commissionTotal: 0, suiviAdministratif: false, ...(donnees.commerciaux?.[0] ?? {}), chantiers: [chantierHorodate] };
+      await route.fulfill({ response: reponse, json: { ...donnees, commerciaux: [moi] } });
+    });
+    await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
+      await ouvrirSansAttendre(page, '/resultat-commercial', jetonPour(commercial.id), { ...commercial, role: 'COMMERCIAL', permissions: [] });
+      await expect(page.locator('tr', { hasText: 'Chantier horodaté E2E' })).toContainText('15-10-2026');
+    });
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
 });

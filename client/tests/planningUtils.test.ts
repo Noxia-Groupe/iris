@@ -17,6 +17,9 @@ test('estWeekEnd et numeroSemaineIso suivent le calendrier civil', () => {
   assert.equal(estWeekEnd('2026-10-18'), true);
   assert.equal(estWeekEnd('2026-10-19'), false);
   assert.equal(numeroSemaineIso('2026-10-14'), 42);
+  // Un dimanche appartient à la semaine ISO de son lundi.
+  assert.equal(numeroSemaineIso('2026-10-18'), 42);
+  assert.equal(numeroSemaineIso('2027-01-03'), 53);
   assert.equal(numeroSemaineIso('2027-01-01'), 53, 'le 1er janvier 2027 appartient à la semaine 53 de 2026');
   assert.equal(numeroSemaineIso('2026-12-28'), 53);
   assert.equal(numeroSemaineIso('2027-01-04'), 1);

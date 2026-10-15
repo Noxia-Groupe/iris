@@ -16,10 +16,14 @@ import { PDFParse } from 'pdf-parse';
 // diffère et un test du jour de la société ne distinguerait plus le bon calcul du jour UTC.
 // L'horloge ne part jamais dans le futur : les sessions de test, valables une heure à compter de
 // leur ouverture, y seraient expirées.
-function figerHorlogeA21hUtc() {
+// Avec `dimanche`, l'horloge recule jusqu'au dernier dimanche 21 h UTC : Wallis est alors déjà au
+// lundi, si bien que la semaine de la société diffère aussi de la semaine UTC.
+function figerHorlogeA21hUtc({ dimanche = false } = {}) {
   const maintenant = new Date();
   const aujourdhui21h = Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth(), maintenant.getUTCDate(), 21);
-  mock.timers.enable({ apis: ['Date'], now: aujourdhui21h <= maintenant.getTime() ? aujourdhui21h : aujourdhui21h - 86_400_000 });
+  let instant = aujourdhui21h <= maintenant.getTime() ? aujourdhui21h : aujourdhui21h - 86_400_000;
+  while (dimanche && new Date(instant).getUTCDay() !== 0) instant -= 86_400_000;
+  mock.timers.enable({ apis: ['Date'], now: instant });
 }
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -7706,8 +7710,8 @@ if (!TEST_DATABASE_URL) {
 
     // Décision de Nelson (14-10-2026) : toutes les dates suivent la société, où que se trouve le
     // lecteur. La page publique n'a pas de session : le serveur lui donne le jour, la semaine et
-    // le fuseau de la société. L'horloge est figée au dernier 21 h UTC passé, où le jour de Wallis
-    // diffère de celui d'UTC.
+    // le fuseau de la société. L'horloge est figée au dernier dimanche 21 h UTC passé : Wallis est
+    // déjà au lundi, si bien que son jour et sa semaine diffèrent de ceux d'UTC.
     test('le planning public donne le jour, la semaine et le fuseau de la société', async () => {
       const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
       const fuseau = 'Pacific/Wallis';
@@ -7715,7 +7719,7 @@ if (!TEST_DATABASE_URL) {
       const partageInitial = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
       const token = `test-planning-public-${Date.now()}`;
       try {
-        figerHorlogeA21hUtc();
+        figerHorlogeA21hUtc({ dimanche: true });
         assert.notEqual(jourDans(fuseau), jourDans('UTC'), 'le jour de la société diffère de celui d’UTC');
         assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
         await prisma.planningPublicShare.upsert({ where: { id: 'singleton' }, update: { token, active: true }, create: { id: 'singleton', token, active: true } });
@@ -7723,6 +7727,11 @@ if (!TEST_DATABASE_URL) {
         const jourSemaine = new Date(`${aujourdhui}T00:00:00Z`).getUTCDay();
         const lundi = new Date(Date.parse(`${aujourdhui}T00:00:00Z`) + (jourSemaine === 0 ? -6 : 1 - jourSemaine) * 86400000).toISOString().slice(0, 10);
         const dimanche = new Date(Date.parse(`${lundi}T00:00:00Z`) + 6 * 86400000).toISOString().slice(0, 10);
+        // Semaine UTC (lundi du jour UTC) : différente de celle de la société, sans quoi un lundi
+        // calculé depuis le jour UTC passerait inaperçu.
+        const jourUtc = jourDans('UTC');
+        const lundiUtc = new Date(Date.parse(`${jourUtc}T00:00:00Z`) - ((new Date(`${jourUtc}T00:00:00Z`).getUTCDay() + 6) % 7) * 86400000).toISOString().slice(0, 10);
+        assert.notEqual(lundi, lundiUtc, 'la semaine de la société diffère de la semaine UTC');
 
         const semaine = await request(app).get(`/api/planning/public/${token}`);
         assert.equal(semaine.status, 200, JSON.stringify(semaine.body));
