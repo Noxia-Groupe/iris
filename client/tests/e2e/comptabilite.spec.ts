@@ -1,6 +1,8 @@
 import { Buffer } from 'node:buffer';
 import { test, expect } from './fixtures';
 
+const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+
 test('#95 : remappage de règle par dialogue motivé et historique visible', async ({ allerSurPageAdmin, apiAdmin }) => {
   const plan = await (await apiAdmin.get('/comptabilite')).json() as { comptes: Array<{ id: string; nature: string }> ; regles: Array<{ cle: string; compteId: string }> };
   const comptes = plan.comptes.filter(c => c.nature === 'PRODUIT');
@@ -51,7 +53,7 @@ test('#95 : création de règle standard motivée, sans mutation à la sélectio
 });
 
  test('TVA #92 : liste les taux, confirme le retrait ciblé puis remappe sans supprimer le compte', async ({ allerSurPageAdmin, apiAdmin, session, request }) => {
-  const base = 'http://127.0.0.1:3001/api';
+  const base = api;
   const headers = { Authorization: `Bearer ${session.token}` };
   const code = `445${String(Date.now()).slice(-9)}`;
   const compte = await request.post(`${base}/comptabilite/comptes`, { headers, data: { code, libelle: 'TVA à conserver', nature: 'TVA' } });
@@ -91,7 +93,7 @@ test('#95 : création de règle standard motivée, sans mutation à la sélectio
 });
 
 test('TVA #92 : confirmation française 5,5 dans le navigateur retire le mapping et préserve le compte', async ({ allerSurPageAdmin, request, session, apiAdmin }) => {
-  const base = 'http://127.0.0.1:3001/api';
+  const base = api;
   const headers = { Authorization: `Bearer ${session.token}` };
   const code = `445${String(Date.now()).slice(-9)}`;
   const compte = await request.post(`${base}/comptabilite/comptes`, { headers, data: { code, libelle: 'TVA virgule E2E', nature: 'TVA' } });
@@ -114,7 +116,7 @@ test('TVA #92 : confirmation française 5,5 dans le navigateur retire le mapping
 });
 
 test('TVA #92 : deux sessions, la confirmation ancienne ne retire pas le nouveau mapping', async ({ browser, request, session, apiAdmin }) => {
-  const base = 'http://127.0.0.1:3001/api';
+  const base = api;
   const headers = { Authorization: `Bearer ${session.token}` };
   const code = String(Date.now()).slice(-8);
   const creerCompte = async (suffixe: string) => {
@@ -222,7 +224,7 @@ test('annule l’aperçu sans écriture puis refuse une confirmation devenue pé
   expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ code: string; libelle: string }> }).comptes.find(c => c.code === code)?.libelle).toBe('Départ');
   await fichier.setInputFiles(csv);
   await expect(dialogue).toBeVisible();
-  const patch = await request.patch(`http://127.0.0.1:3001/api/comptabilite/comptes/${compte.id}`, { headers: { Authorization: `Bearer ${session.token}` }, data: { libelle: 'Modification concurrente', motif: 'Autre opérateur', expectedUpdatedAt: compte.updatedAt } });
+  const patch = await request.patch(`${api}/comptabilite/comptes/${compte.id}`, { headers: { Authorization: `Bearer ${session.token}` }, data: { libelle: 'Modification concurrente', motif: 'Autre opérateur', expectedUpdatedAt: compte.updatedAt } });
   expect(patch.status()).toBe(200);
   await dialogue.getByLabel(/Motif unique/).fill('Correction motivée');
   await dialogue.getByRole('button', { name: 'Confirmer la mise à jour' }).click();

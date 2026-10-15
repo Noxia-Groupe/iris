@@ -138,10 +138,12 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       await admin.getByRole('button', { name: 'Marges & Commissions' }).click();
       const destinataires = admin.getByRole('group', { name: 'Qui suit la rentabilité des chantiers ?' });
       await destinataires.getByRole('checkbox', { name: 'Ses responsables hiérarchiques, à tous les niveaux' }).uncheck();
-      admin.once('dialog', (dialog) => void dialog.accept());
+      // Comme dans suivi-chantiers.spec.ts : l'alerte, ouverte après la réponse, est attendue.
+      const alerte = admin.waitForEvent('dialog').then(async (dialog) => { const message = dialog.message(); await dialog.accept(); return message; });
       const enregistrement = admin.waitForResponse((r) => r.url().endsWith('/api/parametres') && r.request().method() === 'PUT');
       await admin.locator('form').filter({ has: destinataires }).getByRole('button', { name: 'Enregistrer' }).click();
       expect((await enregistrement).status()).toBe(200);
+      expect(await alerte).toBe('Paramètres mis à jour');
       const apres = await (await request.get(`${api}/parametres`, { headers })).json() as Record<string, unknown>;
       expect([apres.rentabiliteConducteur, apres.rentabiliteHierarchie, apres.rentabiliteDirecteurs]).toEqual([true, false, true]);
 
