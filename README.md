@@ -176,18 +176,20 @@ où que se trouve celui qui consulte ou saisit (décision de Nelson du 14-10-202
 - « aujourd'hui » est le jour de la société : préremplissages, semaine et mois affichés par
   défaut (statistiques, performances, commissions, planning, planning public), jour surligné.
   Tant que son fuseau n'est pas lu, aucune date du jour n'est préremplie ; la période affichée
-  suit provisoirement Europe/Paris, puis se recale, et une réponse dépassée est ignorée ; les
-  dates de la fiche chantier ne se modifient pas (enregistrer la fiche garde alors ses dates),
-  et la création d'une facture est refusée ;
+  par les écrans connectés suit provisoirement Europe/Paris, puis se recale, et une réponse
+  dépassée est ignorée ; les dates de la fiche chantier ne se modifient pas (enregistrer la
+  fiche garde alors ses dates), et la création d'une facture est refusée. Le planning public
+  n'affiche aucune semaine avant la première réponse du serveur, qui lui donne le jour et le
+  fuseau de la société ;
 - un chantier ouvert sans date choisie commence le jour civil de la société. Un début
   horodaté plus ancien (conversion antérieure) se lit dans ce fuseau, et enregistrer la fiche
   le fixe à ce même jour ;
 - une date-heure ISO reçue par l'API pour une date métier lue par `dateIsoStricte` (chantier,
   heures, achats, interventions, factures, contrats, acompte, équipements) retient la date telle
   qu'elle est écrite, sans tenir compte de l'heure ni du décalage, présent ou non ; l'heure et
-  le décalage doivent être valides. Avec un décalage aussi, la date écrite est retenue, et non le jour de la société
-  de l'instant (décision de Nelson du 15-10-2026). Le planning et la demande curative lisent encore
-  leurs dates autrement (constats de la passation) ;
+  le décalage doivent être valides. Avec un décalage aussi, la date écrite est retenue, et non
+  le jour de la société de l'instant (décision de Nelson du 15-10-2026). Le planning et la
+  demande curative lisent encore leurs dates autrement (constats de la passation) ;
 - la semaine de la société commence le lundi.
 
 L'affichage de toutes les dates au même format `JJ-MM-AAAA` est décidé et prévu (lot (h) de la
