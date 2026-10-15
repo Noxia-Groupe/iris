@@ -11,7 +11,7 @@ import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole, ROLE_TECHNICIEN } from '../roles';
 import { useModules } from '../modules';
-import { useCompanyTimezone } from '../companyTimezoneContext';
+import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre, instantaneLisible } from '../lib/dateFormatting';
 import { archivagesRestaurables } from '../lib/archivesRestaurables';
 import { AlertesChantier } from '../components/AlertesChantier';
@@ -46,6 +46,7 @@ const STATUT_LABELS: Record<string, string> = {
 
 const ChantierDetail = () => {
   const companyTimezone = useCompanyTimezone();
+  const fuseauConnu = useFuseauSocieteConnu();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -1285,7 +1286,7 @@ const ChantierDetail = () => {
                   )}
                   {entree.action === 'ARCHIVAGE' && entree.avant && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <pre className="overflow-auto rounded bg-amber-50 p-2 text-xs text-amber-900">Valeurs archivées : {JSON.stringify(entree.avant)}</pre>
+                      <pre className="overflow-auto rounded bg-amber-50 p-2 text-xs text-amber-900">Valeurs archivées : {instantaneLisible(entree.avant, companyTimezone)}</pre>
                       {peutArchiverTravaux && archivesRestaurables.has(entree.id) && (
                         <button
                           type="button"
@@ -1299,7 +1300,7 @@ const ChantierDetail = () => {
                     </div>
                   )}
                   {entree.action === 'RESTAURATION' && entree.apres && (
-                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs restaurées : {JSON.stringify(entree.apres)}</pre>
+                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs restaurées : {instantaneLisible(entree.apres, companyTimezone)}</pre>
                   )}
                 </div>
               ))}
@@ -1376,11 +1377,14 @@ const ChantierDetail = () => {
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Date Début</label>
-                <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" key={`debut-${companyTimezone}`} defaultValue={jourCivilChantier(chantier.dateDebut, companyTimezone)} className="form-input" />
+                {/* Dates lues au jour de la société : non modifiables tant que son fuseau n'est pas lu,
+                    pour ne pas effacer une saisie au moment où le champ se recale. Désactivées, elles
+                    ne partent pas avec la fiche, qui garde alors ses dates. */}
+                <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" key={`debut-${companyTimezone}`} defaultValue={jourCivilChantier(chantier.dateDebut, companyTimezone)} disabled={!fuseauConnu} className="form-input" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Date Fin</label>
-                <input type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" key={`fin-${companyTimezone}`} defaultValue={chantier.dateFin ? jourCivilChantier(chantier.dateFin, companyTimezone) : ''} className="form-input" />
+                <input type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" key={`fin-${companyTimezone}`} defaultValue={chantier.dateFin ? jourCivilChantier(chantier.dateFin, companyTimezone) : ''} disabled={!fuseauConnu} className="form-input" />
               </div>
               {/* Montant vendu : seulement pour qui le voit (le serveur refuse qu'un autre le
                   modifie) ; sinon le champ arriverait vide et l'enregistrer l'écraserait. */}

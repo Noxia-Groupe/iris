@@ -85,15 +85,26 @@ export function decalerReference(ref: string, periode: PeriodeNavigable, sens: 1
   return date.toISOString().slice(0, 10);
 }
 
-// Instantané d'une saisie journalisée, rendu lisible : une date-seule en JJ-MM-AAAA, un
-// horodatage (création, archivage…) à la date et à l'heure de la société, et non en UTC ; le
-// reste est rendu tel quel, en JSON.
+// Instantané d'une saisie journalisée (achat, heures), rendu lisible : une date-seule en
+// JJ-MM-AAAA, un horodatage (création, archivage…) à la date et à l'heure de la société, et non
+// en UTC ; le reste est rendu tel quel, en JSON. Seuls les champs de date de ces saisies sont
+// convertis : un texte libre (description, commentaire) qui ressemble à une date reste tel qu'il a
+// été saisi, et une valeur invalide n'est jamais interprétée.
+const CHAMPS_DATE_JOURNAL = new Set(['date', 'createdAt', 'updatedAt', 'archivedAt']);
 const INSTANT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+const enJourFrancais = (jourIso: string) => {
+  const [annee, mois, jour] = jourIso.split('-');
+  return `${jour}-${mois}-${annee}`;
+};
 export function instantaneLisible(valeur: unknown, fuseau: string): string {
-  return JSON.stringify(valeur, (_cle, v) => {
-    if (typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
-    const jour = jourCivilChantier(v, fuseau);
-    // Même règle que jourCivilChantier : minuit UTC, quelle que soit l'écriture, est une date-seule.
-    return new Date(v).toISOString().endsWith('T00:00:00.000Z') ? jour : `${jour} ${formatCompanyDateTime(v, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
+  return JSON.stringify(valeur, (cle, v) => {
+    if (!CHAMPS_DATE_JOURNAL.has(cle) || typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
+    const instant = new Date(v);
+    if (Number.isNaN(instant.getTime())) return v;
+    // Une seule décision, sur la valeur normalisée : minuit UTC, quelle que soit son écriture, est
+    // une date-seule, lue telle quelle ; tout autre instant se lit au jour et à l'heure de la société.
+    const iso = instant.toISOString();
+    if (iso.endsWith('T00:00:00.000Z')) return enJourFrancais(iso.slice(0, 10));
+    return `${enJourFrancais(jourCivilEntrepriseIso(fuseau, instant))} ${formatCompanyDateTime(instant, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
   });
 }

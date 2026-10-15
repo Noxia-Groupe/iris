@@ -90,7 +90,7 @@ const Heures = () => {
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           <div className="flex flex-col">
             <label className="text-sm font-semibold text-gray-600 mb-1">Date</label>
-            <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" name="date" key={companyTimezone} defaultValue={fuseauConnu ? companyDateInputValue(companyTimezone) : ''} placeholder="JJ-MM-AAAA" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" />
+            <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" name="date" defaultValue={fuseauConnu ? companyDateInputValue(companyTimezone) : ''} placeholder="JJ-MM-AAAA" className="p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all w-full" />
           </div>
           
           <div className="flex flex-col">

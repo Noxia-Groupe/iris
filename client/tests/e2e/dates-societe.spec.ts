@@ -208,8 +208,9 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
   // jour civil écoulé, et non 46 h 30 arrondies à 2 jours ; le 17 à 00:30 à Nouméa (encore le 16
   // en UTC), deux. Le formulaire est ouvert pendant que la lecture du fuseau est retenue : il
   // montre d'abord le jour du fuseau par défaut, puis celui de la société une fois le fuseau lu.
-  // Le journal des saisies rend la date d'un achat en JJ-MM-AAAA, à sa création comme à sa
-  // correction.
+  // Le journal des saisies rend la date d'un achat en JJ-MM-AAAA, à sa création, sa correction,
+  // son archivage et sa restauration, et laisse tel quel un texte libre qui ressemble à une date
+  // sans en être une (la fiche ne doit pas planter).
   test('la fiche lit un début horodaté au jour de la société, et l’enregistre sans le décaler', async ({ creerClient, page, request, session }) => {
     await page.clock.install({ time: new Date('2026-10-16T12:00:00Z') });
     const headers = { Authorization: `Bearer ${session.token}` };
@@ -228,9 +229,13 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
     const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER', responsableId: conducteur.id, commercialId: commercial.id }) as { id: string };
     const fournisseur = await envoyer('post', '/fournisseurs', { nom: `Fournisseur dates ${suffixe}` }) as { id: string };
     const categorie = await envoyer('post', '/categories', { nom: `Catégorie dates ${suffixe}` }) as { id: string };
-    const achat = await envoyer('post', '/achats', { date: '14-10-2026', fournisseurId: fournisseur.id, categorieId: categorie.id, description: 'Achat journal E2E', montantHT: 10, chantierId: chantier.id }) as { id: string };
+    const achat = await envoyer('post', '/achats', { date: '14-10-2026', fournisseurId: fournisseur.id, categorieId: categorie.id, description: '2026-13-01T10:00:00Z', montantHT: 10, chantierId: chantier.id }) as { id: string };
     const correction = await request.patch(`${api}/achats/${achat.id}`, { headers, data: { montantHT: 12, motifCorrection: 'Montant corrigé E2E' } });
     expect(correction.ok(), await correction.text()).toBeTruthy();
+    const archivage = await request.delete(`${api}/achats/${achat.id}`, { headers, data: { motifArchivage: 'Archivage E2E' } });
+    expect(archivage.ok(), await archivage.text()).toBeTruthy();
+    const restauration = await request.post(`${api}/achats/${achat.id}/restaurer`, { headers, data: { motifRestauration: 'Restauration E2E' } });
+    expect(restauration.ok(), await restauration.text()).toBeTruthy();
 
     await page.route(`**/api/chantiers/${chantier.id}`, async (route) => {
       if (route.request().method() !== 'GET') return route.continue();
@@ -249,15 +254,21 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
         await ouvrirSansAttendre(page, `/chantiers/${chantier.id}`, session.token, session.user);
         await expect(page.getByText('Démarré le 14-10-2026')).toBeVisible();
         await page.getByRole('button', { name: 'Modifier' }).first().click();
+        // Tant que le fuseau n'est pas lu, les dates ne se modifient pas : une saisie serait effacée
+        // au moment où le champ se recale sur le jour de la société.
         await expect(page.locator('input[name="dateDebut"]')).toHaveValue('14-10-2026');
+        await expect(page.locator('input[name="dateDebut"]')).toBeDisabled();
+        await expect(page.locator('input[name="dateFin"]')).toBeDisabled();
       } finally {
         libererSociete();
       }
+      await expect(page.locator('input[name="dateDebut"]')).toBeEnabled();
       await expect(page.locator('input[name="dateDebut"]')).toHaveValue('15-10-2026');
       await expect(page.getByText('Démarré le 15-10-2026 (il y a 1 j)')).toBeVisible();
-      await expect(page.getByText(/^Valeurs enregistrées : /)).toContainText('"date":"14-10-2026"');
-      await expect(page.getByText(/^Avant : /)).toContainText('"date":"14-10-2026"');
-      await expect(page.getByText(/^Après : /)).toContainText('"date":"14-10-2026"');
+      for (const libelle of [/^Valeurs enregistrées : /, /^Avant : /, /^Après : /, /^Valeurs archivées : /, /^Valeurs restaurées : /]) {
+        await expect(page.getByText(libelle)).toContainText('"date":"14-10-2026"');
+        await expect(page.getByText(libelle)).toContainText('"description":"2026-13-01T10:00:00Z"');
+      }
       const ficheRelue = (r: { url(): string; request(): { method(): string } }) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'GET';
       const enregistrement = page.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'PATCH');
       // La fiche se relit après l'enregistrement : le test attend la fin de cette relecture, que sa
@@ -306,7 +317,7 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
 
   // La page publique n'a pas de session : elle prend le jour, la semaine et le fuseau de la
   // société dans la réponse du serveur, simulée ici pour un instant donné.
-  test('le planning public suit le jour et l’heure de la société renvoyés par le serveur', async ({ page }) => {
+  test('le planning public suit le jour et le fuseau de la société renvoyés par le serveur', async ({ page }) => {
     await page.clock.install({ time: new Date('2026-10-14T13:00:00Z') });
     const demandes: string[] = [];
     await page.route('**/api/planning/public/**', async (route) => {
@@ -465,6 +476,45 @@ test('au fuseau par défaut, la date du jour se préremplit une fois le fuseau l
         ouvrirPorte();
       }
       await expect(page.locator(champ), chemin).toHaveValue('14-10-2026');
+    }
+  });
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
+// Société à Wallis : une date saisie avant la lecture du fuseau est gardée quand le fuseau arrive
+// (le champ, déjà modifié, ne se recale pas sur le jour de la société).
+test('une date saisie avant la lecture du fuseau est gardée', async ({ page, request, session }) => {
+  await page.clock.install({ time: new Date('2026-10-14T13:00:00Z') });
+  let ouvrirPorte = () => {};
+  let porte = Promise.resolve();
+  await page.route('**/api/company', async (route) => {
+    if (route.request().method() === 'GET') await porte;
+    await route.continue();
+  });
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [session.token, JSON.stringify(session.user)]);
+  await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
+    for (const { chemin, champ, bouton } of [
+      { chemin: '/achats', champ: 'input[name="date"]' },
+      { chemin: '/heures', champ: 'input[name="date"]' },
+      { chemin: '/contrats-maintenance', champ: 'input[name="dateDebut"]', bouton: 'Nouveau contrat' },
+    ]) {
+      porte = new Promise<void>((resolve) => { ouvrirPorte = resolve; });
+      const lecture = page.waitForResponse((r) => r.url().endsWith('/api/company') && r.request().method() === 'GET');
+      try {
+        await page.goto(chemin, { waitUntil: 'domcontentloaded' });
+        if (bouton) await page.getByRole('button', { name: bouton }).click();
+        await page.locator(champ).fill('01-10-2026');
+      } finally {
+        ouvrirPorte();
+      }
+      await lecture;
+      // Le fuseau lu (déjà le 15 à Wallis) ne remplace pas la date saisie. Délai laissé à la page
+      // pour appliquer ce fuseau, si elle recalait le champ.
+      await page.waitForTimeout(300);
+      await expect(page.locator(champ), chemin).toHaveValue('01-10-2026');
     }
   });
   await page.unrouteAll({ behavior: 'ignoreErrors' });

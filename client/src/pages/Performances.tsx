@@ -56,7 +56,6 @@ const Performances = () => {
     }
   };
 
-
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
