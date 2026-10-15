@@ -85,12 +85,14 @@ export function decalerReference(ref: string, periode: PeriodeNavigable, sens: 1
   return date.toISOString().slice(0, 10);
 }
 
-// Instantané d'une saisie journalisée (achat, heures), rendu lisible : une date-seule en
-// JJ-MM-AAAA, un horodatage (création, archivage…) à la date et à l'heure de la société, et non
-// en UTC ; le reste est rendu tel quel, en JSON. Seuls les champs de date de ces saisies sont
-// convertis : un texte libre (description, commentaire) qui ressemble à une date reste tel qu'il a
-// été saisi, et une valeur invalide n'est jamais interprétée.
-const CHAMPS_DATE_JOURNAL = new Set(['date', 'createdAt', 'updatedAt', 'archivedAt']);
+// Instantané d'une saisie journalisée (achat, heures), rendu lisible : sa date métier en
+// JJ-MM-AAAA, ses horodatages (création, mise à jour, archivage) à la date et à l'heure de la
+// société, et non en UTC ; le reste est rendu tel quel, en JSON. La nature de chaque valeur suit
+// son champ, et seuls ces champs sont convertis : un texte libre (description, commentaire) qui
+// ressemble à une date reste tel qu'il a été saisi. Une valeur que Date ne relit pas à l'identique
+// (invalide, ou qui déborde comme un 30 février) n'est jamais interprétée.
+const CHAMPS_DATE_SEULE = new Set(['date']);
+const CHAMPS_INSTANT = new Set(['createdAt', 'updatedAt', 'archivedAt']);
 const INSTANT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 const enJourFrancais = (jourIso: string) => {
   const [annee, mois, jour] = jourIso.split('-');
@@ -98,13 +100,11 @@ const enJourFrancais = (jourIso: string) => {
 };
 export function instantaneLisible(valeur: unknown, fuseau: string): string {
   return JSON.stringify(valeur, (cle, v) => {
-    if (!CHAMPS_DATE_JOURNAL.has(cle) || typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
+    const dateSeule = CHAMPS_DATE_SEULE.has(cle);
+    if ((!dateSeule && !CHAMPS_INSTANT.has(cle)) || typeof v !== 'string' || !INSTANT_ISO.test(v)) return v;
     const instant = new Date(v);
-    if (Number.isNaN(instant.getTime())) return v;
-    // Une seule décision, sur la valeur normalisée : minuit UTC, quelle que soit son écriture, est
-    // une date-seule, lue telle quelle ; tout autre instant se lit au jour et à l'heure de la société.
-    const iso = instant.toISOString();
-    if (iso.endsWith('T00:00:00.000Z')) return enJourFrancais(iso.slice(0, 10));
+    if (Number.isNaN(instant.getTime()) || instant.toISOString().slice(0, 19) !== v.slice(0, 19)) return v;
+    if (dateSeule) return enJourFrancais(v.slice(0, 10));
     return `${enJourFrancais(jourCivilEntrepriseIso(fuseau, instant))} ${formatCompanyDateTime(instant, fuseau, { hour: '2-digit', minute: '2-digit' })}`;
   });
 }

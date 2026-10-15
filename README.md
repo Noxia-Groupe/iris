@@ -176,7 +176,9 @@ où que se trouve celui qui consulte ou saisit (décision de Nelson du 14-10-202
 - « aujourd'hui » est le jour de la société : préremplissages, semaine et mois affichés par
   défaut (statistiques, performances, commissions, planning, planning public), jour surligné.
   Tant que son fuseau n'est pas lu, aucune date du jour n'est préremplie ; la période affichée
-  suit provisoirement Europe/Paris, puis se recale, et une réponse dépassée est ignorée ;
+  suit provisoirement Europe/Paris, puis se recale, et une réponse dépassée est ignorée ; les
+  dates de la fiche chantier ne se modifient pas (enregistrer la fiche garde alors ses dates),
+  et la création d'une facture est refusée ;
 - un chantier ouvert sans date choisie commence le jour civil de la société. Un début
   horodaté plus ancien (conversion antérieure) se lit dans ce fuseau, et enregistrer la fiche
   le fixe à ce même jour ;

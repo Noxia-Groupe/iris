@@ -243,6 +243,8 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
       const corps = await reponse.json();
       await route.fulfill({ response: reponse, json: { ...corps, dateDebut: '2026-10-14T13:30:00.000Z' } });
     });
+    const ficheRelue = (r: { url(): string; request(): { method(): string } }) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'GET';
+    const avant = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { dateDebut: string; dateFin: string | null };
     await avecFuseauSociete(request, session.token, 'Pacific/Noumea', async () => {
       let libererSociete = () => {};
       const societeRetenue = new Promise<void>((resolve) => { libererSociete = resolve; });
@@ -259,6 +261,21 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
         await expect(page.locator('input[name="dateDebut"]')).toHaveValue('14-10-2026');
         await expect(page.locator('input[name="dateDebut"]')).toBeDisabled();
         await expect(page.locator('input[name="dateFin"]')).toBeDisabled();
+        // Enregistrée avant la lecture du fuseau, la fiche garde ses dates : désactivées, elles ne
+        // partent pas avec elle.
+        const nouveauNom = `Dates fiche renommée E2E ${suffixe}`;
+        await page.locator('input[name="nom"]').fill(nouveauNom);
+        const envoi = page.waitForRequest((r) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.method() === 'PATCH');
+        const relectureSansFuseau = page.waitForResponse(ficheRelue);
+        await page.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+        const corps = (await envoi).postDataJSON() as Record<string, unknown>;
+        expect(Object.keys(corps)).not.toContain('dateDebut');
+        expect(Object.keys(corps)).not.toContain('dateFin');
+        await relectureSansFuseau;
+        const renommee = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { nom: string; dateDebut: string; dateFin: string | null };
+        expect(renommee).toMatchObject({ nom: nouveauNom, dateDebut: avant.dateDebut, dateFin: avant.dateFin });
+        await page.getByRole('button', { name: 'Modifier' }).first().click();
+        await expect(page.locator('input[name="dateDebut"]')).toBeDisabled();
       } finally {
         libererSociete();
       }
@@ -269,7 +286,6 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
         await expect(page.getByText(libelle)).toContainText('"date":"14-10-2026"');
         await expect(page.getByText(libelle)).toContainText('"description":"2026-13-01T10:00:00Z"');
       }
-      const ficheRelue = (r: { url(): string; request(): { method(): string } }) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'GET';
       const enregistrement = page.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${chantier.id}`) && r.request().method() === 'PATCH');
       // La fiche se relit après l'enregistrement : le test attend la fin de cette relecture, que sa
       // route réécrit, pour ne pas se terminer pendant qu'elle est en cours.

@@ -71,8 +71,10 @@ test('instantaneLisible rend une date-seule en JJ-MM-AAAA et un instant au jour 
     '{"date":"15-10-2026","createdAt":"15-10-2026 00:30","heures":7.5,"commentaire":"2026-10-14 noté à la main"}',
   );
   assert.equal(instantaneLisible({ createdAt: '2026-10-14T13:30:00Z' }, 'Europe/Paris'), '{"createdAt":"14-10-2026 15:30"}');
-  // Minuit UTC écrit sans millisecondes reste une date-seule, sans heure ajoutée.
+  // Le champ décide : une date métier écrite sans millisecondes reste une date-seule, sans heure
+  // ajoutée, et un horodatage à minuit UTC pile garde son heure.
   assert.equal(instantaneLisible({ date: '2026-10-15T00:00:00Z' }, 'Pacific/Tahiti'), '{"date":"15-10-2026"}');
+  assert.equal(instantaneLisible({ createdAt: '2026-10-14T00:00:00.000Z' }, 'Pacific/Noumea'), '{"createdAt":"14-10-2026 11:00"}');
 });
 
 test('instantaneLisible ne convertit que les champs de date, et jamais une valeur invalide', () => {
@@ -81,7 +83,12 @@ test('instantaneLisible ne convertit que les champs de date, et jamais une valeu
     instantaneLisible({ description: '2026-10-14T13:30:00Z', commentaire: '2026-13-01T10:00:00Z' }, 'Europe/Paris'),
     '{"description":"2026-10-14T13:30:00Z","commentaire":"2026-13-01T10:00:00Z"}',
   );
-  // Une date invalide, même dans un champ de date, n'est pas interprétée (et ne lève rien).
+  // Une date invalide, même dans un champ de date, n'est pas interprétée (et ne lève rien), ni une
+  // date qui déborde (30 février, 24:00, 31 avril), que Date accepterait en la décalant.
   assert.equal(instantaneLisible({ date: '2026-13-01T10:00:00Z', createdAt: '2026-10-14T25:00:00Z' }, 'Europe/Paris'), '{"date":"2026-13-01T10:00:00Z","createdAt":"2026-10-14T25:00:00Z"}');
+  assert.equal(
+    instantaneLisible({ date: '2026-02-30T00:00:00.000Z', createdAt: '2026-10-14T24:00:00Z', archivedAt: '2026-04-31T10:00:00Z' }, 'Europe/Paris'),
+    '{"date":"2026-02-30T00:00:00.000Z","createdAt":"2026-10-14T24:00:00Z","archivedAt":"2026-04-31T10:00:00Z"}',
+  );
   assert.equal(instantaneLisible({ archivedAt: '2026-10-14T13:30:00.000Z', updatedAt: null }, 'Europe/Paris'), '{"archivedAt":"14-10-2026 15:30","updatedAt":null}');
 });
