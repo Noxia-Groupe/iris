@@ -11,18 +11,30 @@ const { app, reglerDelaisConnexion } = await import('../dist/index.js');
 
 const attendre = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Envoie une requête keep-alive sur la connexion et attend la réponse complète.
+// Envoie une requête keep-alive sur la connexion et attend la réponse complète. Une connexion
+// fermée ou en erreur avant la réponse fait échouer le test au lieu de le laisser bloqué.
 async function demanderSante(socket) {
-  const reponse = new Promise((resolve) => {
+  const reponse = new Promise((resolve, reject) => {
     let recu = '';
+    const arreter = () => {
+      socket.off('data', lire);
+      socket.off('close', fermee);
+      socket.off('error', fermee);
+    };
     const lire = (morceau) => {
       recu += morceau.toString();
       if (recu.includes('{"status":"ok"}')) {
-        socket.off('data', lire);
+        arreter();
         resolve(recu);
       }
     };
+    const fermee = (erreur) => {
+      arreter();
+      reject(erreur instanceof Error ? erreur : new Error('connexion fermée avant la réponse'));
+    };
     socket.on('data', lire);
+    socket.on('close', fermee);
+    socket.on('error', fermee);
   });
   socket.write('GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n');
   return reponse;
@@ -36,6 +48,7 @@ async function fermeeApresInactivite(serveur, inactiviteMs) {
   let fermee = false;
   socket.on('end', () => { fermee = true; });
   socket.on('close', () => { fermee = true; });
+  socket.on('error', () => { fermee = true; });
   try {
     await once(socket, 'connect');
     assert.match(await demanderSante(socket), /^HTTP\/1\.1 200/);
@@ -49,13 +62,14 @@ async function fermeeApresInactivite(serveur, inactiviteMs) {
   }
 }
 
-describe('Délais de connexion du serveur HTTP', () => {
+// Délai borné : un test bloqué échoue au lieu de suspendre la suite (la CI n'a pas de délai par job).
+describe('Délais de connexion du serveur HTTP', { timeout: 20_000 }, () => {
   test('les connexions inactives sont gardées 65 s, et les en-têtes acceptés au-delà', () => {
     const serveur = reglerDelaisConnexion(app.listen(0));
     try {
       assert.equal(serveur.keepAliveTimeout, 65_000);
       assert.equal(serveur.headersTimeout, 66_000);
-      assert.ok(serveur.headersTimeout > serveur.keepAliveTimeout, 'Node exige headersTimeout au-delà de keepAliveTimeout');
+      assert.ok(serveur.headersTimeout > serveur.keepAliveTimeout, 'headersTimeout reste au-delà de keepAliveTimeout, comme le recommandaient les anciennes versions de Node');
     } finally {
       serveur.close();
     }

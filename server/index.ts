@@ -6878,9 +6878,13 @@ const initDb = async () => {
 // Délais de connexion du serveur HTTP. Node ferme par défaut une connexion keep-alive inactive
 // au bout de 5 s : un client qui la réutilise à cet instant précis (navigateur, Playwright,
 // répartiteur de charge) reçoit « socket hang up » ou `read ECONNRESET`, comme une fois dans la
-// CI E2E de #123 puis de #129. Le serveur garde donc ses connexions inactives plus longtemps que les clients et
-// répartiteurs courants (60 s), et laisse aux en-têtes un délai un peu supérieur, comme le
-// demande Node (headersTimeout au-delà de keepAliveTimeout).
+// CI E2E de #123 puis de #129. Le serveur garde donc ses connexions inactives 65 s, plus
+// longtemps que les clients et répartiteurs courants (60 s) : un client qui ne ferme pas de
+// lui-même ses connexions inactives (l'agent de Playwright) ne risque plus cette course
+// qu'après plus d'une minute d'inactivité sur une même connexion. headersTimeout, qui ne
+// s'applique qu'à une requête commencée, reste au-delà de keepAliveTimeout, comme le
+// recommandaient les anciennes versions de Node (Node 20 exige seulement qu'il ne dépasse pas
+// requestTimeout, 300 s par défaut).
 const DELAI_CONNEXION_INACTIVE_MS = 65_000;
 function reglerDelaisConnexion(serveur: http.Server): http.Server {
   serveur.keepAliveTimeout = DELAI_CONNEXION_INACTIVE_MS;
