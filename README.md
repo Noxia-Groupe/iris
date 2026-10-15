@@ -169,10 +169,10 @@ Toutes les dates suivent le fuseau de la société qui utilise Iris (Administrat
 où que se trouve celui qui consulte ou saisit (décision de Nelson du 14-10-2026, #130) :
 
 - une **date métier** (début et fin d'un chantier, date d'achat, d'heures, de facture…) est
-  une date-seule, saisie en `JJ-MM-AAAA` (affichage harmonisé au lot (h)) et stockée à minuit
-  UTC ; elle se lit telle quelle, sans conversion ;
+  une date-seule, saisie et affichée en `JJ-MM-AAAA` (#132) et stockée à minuit UTC ; elle se
+  lit telle quelle, sans conversion ;
 - un **instant** (horodatage d'une signature, d'une écriture de journal, d'une mise à jour)
-  s'affiche à la date et à l'heure de la société ;
+  s'affiche à la date et à l'heure de la société, la date en `JJ-MM-AAAA` ;
 - « aujourd'hui » est le jour de la société : préremplissages, semaine et mois affichés par
   défaut (statistiques, performances, commissions, planning, planning public), jour surligné.
   Tant que son fuseau n'est pas lu, aucune date du jour n'est préremplie ; la période affichée
@@ -185,15 +185,16 @@ où que se trouve celui qui consulte ou saisit (décision de Nelson du 14-10-202
   horodaté plus ancien (conversion antérieure) se lit dans ce fuseau, et enregistrer la fiche
   le fixe à ce même jour ;
 - une date-heure ISO reçue par l'API pour une date métier lue par `dateIsoStricte` (chantier,
-  heures, achats, interventions, factures, contrats, acompte, équipements) retient la date telle
-  qu'elle est écrite, sans tenir compte de l'heure ni du décalage, présent ou non ; l'heure et
-  le décalage doivent être valides. Avec un décalage aussi, la date écrite est retenue, et non
-  le jour de la société de l'instant (décision de Nelson du 15-10-2026). Le planning et la
-  demande curative lisent encore leurs dates autrement (constats de la passation) ;
+  heures, achats, interventions, factures, contrats, acompte, équipements, planning) retient la
+  date telle qu'elle est écrite, sans tenir compte de l'heure ni du décalage, présent ou non ;
+  l'heure et le décalage doivent être valides. Avec un décalage aussi, la date écrite est
+  retenue, et non le jour de la société de l'instant (décision de Nelson du 15-10-2026). La date
+  de demande curative n'accepte que `JJ-MM-AAAA` (question posée dans la passation) ;
 - la semaine de la société commence le lundi.
 
-L'affichage de toutes les dates au même format `JJ-MM-AAAA` est décidé et prévu (lot (h) de la
-passation).
+Toutes les dates s'affichent et se saisissent au même format `JJ-MM-AAAA` (décision de Nelson
+du 14-10-2026, #132), jusque dans les libellés de semaine, les en-têtes du planning et les
+messages du journal ; aucun sélecteur de date du navigateur ne subsiste.
 
 ## Hors périmètre
 
@@ -238,7 +239,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [ ] Phase 5 — **partielle** : devis versionnés, signature, acompte constaté, cycle de vie et conversion en chantier livrés ; cibles intervention/contrat/facture à cadrer et à réaliser. Sélection d'un client hors des 200 premiers livrée pour Devis (#114).
 - [ ] Suivi Travaux et commissionnement — **partiels** : sécurité, journaux, achats/heures et fiche chantier déjà présents ; suivi de rentabilité (alertes, marge estimée en fin de chantier) implémenté par #117, et adressé selon la chaîne hiérarchique et au profil Directeur depuis #121 ; ne pas recréer un écran fictif. Profils commerciaux versionnés et individualisés de l'issue #15 non livrés ; réévaluer les reliquats des issues #16 et #19 contre le code.
 - [ ] Phase 6 — **partielle** : SAV, rapports, planning et suivi chantier présents ; navigation utilisable sur téléphone depuis #118 ; parcours mobile technicien dédié et autres parcours terrain à qualifier.
-- [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire — **implémenté** par #123 ; annuaire des clients pour le technicien, sans montant ni devis — **implémenté** par #127 ; clôture de tout chantier par les directeurs et clients désactivés fermés au technicien dans l'annuaire — **implémentés** par #128 ; ouverture du chantier d'une affaire depuis l'Administration, sans doublon, et réattribution par le titulaire depuis la fiche corrigée — **implémentées** par #129 ; toutes les dates au jour et à l'heure de la société — **implémenté** par #130 ; correctif « socket hang up » (connexions inactives gardées plus longtemps par le serveur, parcours E2E qui attendent leurs alertes) — **implémenté** par #131 ; **prévus** : toutes les dates au format `JJ-MM-AAAA`, plan commercial (plans de commission paramétrables attribués à chaque commercial), horaires de la société et astreintes (décidés le 14-10-2026), journal des paramètres et des droits, taux horaire réservé aux administrateurs (décidés le 13-10-2026). Ordre proposé, à confirmer par Nelson : voir la passation.
+- [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire — **implémenté** par #123 ; annuaire des clients pour le technicien, sans montant ni devis — **implémenté** par #127 ; clôture de tout chantier par les directeurs et clients désactivés fermés au technicien dans l'annuaire — **implémentés** par #128 ; ouverture du chantier d'une affaire depuis l'Administration, sans doublon, et réattribution par le titulaire depuis la fiche corrigée — **implémentées** par #129 ; toutes les dates au jour et à l'heure de la société — **implémenté** par #130 ; correctif « socket hang up » (connexions inactives gardées plus longtemps par le serveur, parcours E2E qui attendent leurs alertes) — **implémenté** par #131 ; toutes les dates au format `JJ-MM-AAAA` — **implémenté** par #132 ; **prévus** : plan commercial (plans de commission paramétrables attribués à chaque commercial), horaires de la société et astreintes (décidés le 14-10-2026), journal des paramètres et des droits, taux horaire réservé aux administrateurs (décidés le 13-10-2026). Ordre proposé, à confirmer par Nelson : voir la passation.
 - [ ] Phase 7 — **partielle** : contrats cycliques et génération idempotente d'interventions à planifier depuis une action métier ; automatisation de l'échéance et ses règles de déclenchement à arbitrer.
 - [ ] Phase 8 — **partielle** : factures, avoirs, PDF, plan comptable paramétrable et export CSV déjà présents. La conformité de facturation électronique et l'adaptateur de plateforme restent à concevoir/valider. Requalifier les anciennes issues #31, #33 et #35 avant de coder leur reliquat.
 - [ ] Phase 9 — **future comme chaîne automatisée** : paiements, abonnements télécom, financeurs, banque et rapprochement ; un statut de règlement manuel n'est pas un module bancaire.
@@ -246,7 +247,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 - [ ] Phase 11 — **partielle** : paramètres Entra et secours d'instance existants ; installation guidée et secours plateforme distinct non démontrés.
 - [ ] Phase 12 — **préparée, non validée** : Compose, migrations et CI existent ; recette, isolation SQL, sauvegarde/restauration, validations client et décision de mise en service restent requises.
 
-**Prochains découpages candidats, à ordonner avec Nelson :** livrer les lots décidés restants (dates au format `JJ-MM-AAAA`, journal des paramètres et des droits, taux horaire réservé aux administrateurs, plan commercial, horaires et astreintes), achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, adapter au téléphone les en-têtes des écrans encore serrés, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
+**Prochains découpages candidats, à ordonner avec Nelson :** livrer les lots décidés restants (journal des paramètres et des droits, taux horaire réservé aux administrateurs, plan commercial, horaires et astreintes), achever les autres écrans de l'issue [#111](https://github.com/Noxia-Groupe/iris/issues/111) par lots, adapter au téléphone les en-têtes des écrans encore serrés, puis revoir les véritables reliquats par domaine. L'ordre de développement et la définition du premier périmètre pilote doivent être confirmés avec Nelson ; une CI verte n'autorise ni fusion ni production.
 
 ## Tests
 
