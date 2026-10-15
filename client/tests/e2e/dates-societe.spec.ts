@@ -372,8 +372,10 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
 
   // La page publique n'a pas de session : elle prend le jour, la semaine et le fuseau de la
   // société dans la réponse du serveur, simulée ici pour un instant donné.
+  // Dimanche 18-10-2026 à 13:00 UTC : dimanche 18 à Cayenne et en UTC (semaine 42), déjà lundi 19
+  // à Wallis (semaine 43). La page calcule la semaine par défaut à partir du jour de la société.
   test('le planning public suit le jour et le fuseau de la société renvoyés par le serveur', async ({ page }) => {
-    await page.clock.install({ time: new Date('2026-10-14T13:00:00Z') });
+    await page.clock.install({ time: new Date('2026-10-18T13:00:00Z') });
     const demandes: string[] = [];
     let retenirRetour = false;
     let libererRetour = () => {};
@@ -386,37 +388,38 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
         status: 200,
         contentType: 'application/json',
         headers: { 'Access-Control-Allow-Origin': '*' },
-        body: JSON.stringify({ events: [], intervenants: [], fuseauHoraire: 'Pacific/Wallis', aujourdhui: '2026-10-15', debut: parametres.get('start') ?? '2026-10-12', fin: parametres.get('end') ?? '2026-10-18' }),
+        body: JSON.stringify({ events: [], intervenants: [], fuseauHoraire: 'Pacific/Wallis', aujourdhui: '2026-10-19', debut: parametres.get('start') ?? '2026-10-19', fin: parametres.get('end') ?? '2026-10-25' }),
       });
     });
     await page.goto('/planning/public/jeton-e2e-dates', { waitUntil: 'networkidle' });
-    // Première demande sans plage : le serveur choisit la semaine de la société.
+    // Première demande sans plage ; la page affiche la semaine du jour de la société (43), et non
+    // celle du navigateur ou d'UTC (42).
     expect(new URL(demandes[0]).search).toBe('');
-    await expect(page.getByText('12 – 18 octobre 2026')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
-    // Le jeudi 15 (Wallis) est « Aujourd'hui », et non le mercredi 14 de Cayenne.
-    await expect(page.getByText("Aujourd'hui", { exact: true }).locator('..')).toContainText('jeudi 15 octobre');
+    await expect(page.getByText('19 – 25 octobre 2026')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
+    // Le lundi 19 (Wallis) est « Aujourd'hui », et non le dimanche 18 de Cayenne.
+    await expect(page.getByText("Aujourd'hui", { exact: true }).locator('..')).toContainText('lundi 19 octobre');
     // 13:00 UTC = 01:00 à Wallis.
     await expect(page.getByText(/Mis à jour à 01:00/)).toBeVisible();
-    // Semaine précédente, puis retour à la semaine de la société, choisie par le serveur.
+    // Semaine précédente, puis retour à la semaine de la société.
     await page.getByTitle('Semaine précédente').click();
-    await expect(page.getByText('5 – 11 octobre 2026')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Semaine 41' })).toBeVisible();
-    expect(new URL(demandes[demandes.length - 1]).search).toBe('?start=2026-10-05&end=2026-10-11');
+    await expect(page.getByText('12 – 18 octobre 2026')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
+    await expect.poll(() => new URL(demandes[demandes.length - 1]).search).toBe('?start=2026-10-12&end=2026-10-18');
     // Le retour est immédiat : la semaine de la société s'affiche avant la réponse du serveur,
     // retenue ici.
     const nombreAvantRetour = demandes.length;
     retenirRetour = true;
-    await page.getByRole('button', { name: 'Semaine 41' }).click();
-    await expect(page.getByText('12 – 18 octobre 2026')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
-    expect(demandes.length).toBeGreaterThan(nombreAvantRetour);
+    await page.getByRole('button', { name: 'Semaine 42' }).click();
+    await expect(page.getByText('19 – 25 octobre 2026')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
+    await expect.poll(() => demandes.length).toBeGreaterThan(nombreAvantRetour);
     expect(new URL(demandes[demandes.length - 1]).search).toBe('');
     retenirRetour = false;
     const retour = page.waitForResponse((r) => r.url().includes('/api/planning/public/') && !new URL(r.url()).searchParams.get('start'));
     libererRetour();
     await (await retour).finished();
-    await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
   });
 
   // Un rafraîchissement lancé avant un changement de semaine ne doit pas, arrivé le dernier,
