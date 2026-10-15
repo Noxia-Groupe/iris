@@ -1,20 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { companyDateInputValue, decalerReference, formatCompanyDate, formatCompanyDateTime, formatDateOnly, instantaneLisible, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre } from '../src/lib/dateFormatting.ts';
+import { companyDateInputValue, decalerReference, formatCompanyDate, formatCompanyDateTime, formatDateOnly, instantaneLisible, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre, jourFrancais, jourSemaineFrancais } from '../src/lib/dateFormatting.ts';
 
-test('formatDateOnly always preserves a date-only value in UTC', () => {
-  assert.equal(formatDateOnly('2026-01-01T00:00:00.000Z'), '01/01/2026');
+// Décision de Nelson (14-10-2026) : toutes les dates s'affichent au format JJ-MM-AAAA.
+test('formatDateOnly always preserves a date-only value in UTC, au format JJ-MM-AAAA', () => {
+  assert.equal(formatDateOnly('2026-01-01T00:00:00.000Z'), '01-01-2026');
 });
 
 test('formatCompanyDateTime renders an instant in the supplied company timezone', () => {
   assert.equal(
     formatCompanyDateTime('2026-01-01T00:30:00.000Z', 'America/Toronto'),
-    '31/12/2025 19:30:00',
+    '31-12-2025 19:30:00',
   );
 });
 
 test('formatCompanyDate derives the date of an instant from the company timezone', () => {
-  assert.equal(formatCompanyDate('2026-01-01T00:30:00.000Z', 'America/Toronto'), '31/12/2025');
+  assert.equal(formatCompanyDate('2026-01-01T00:30:00.000Z', 'America/Toronto'), '31-12-2025');
+});
+
+test('jourFrancais et jourSemaineFrancais affichent un jour AAAA-MM-JJ au format JJ-MM-AAAA', () => {
+  assert.equal(jourFrancais('2026-10-05'), '05-10-2026');
+  assert.equal(jourFrancais('2026-10-05T00:00:00.000Z'), '05-10-2026');
+  // Le jour de la semaine ne dépend pas du fuseau du navigateur (tests sous TZ=Pacific/Gambier).
+  assert.equal(jourSemaineFrancais('2026-10-05'), 'lun. 05-10-2026');
+  assert.equal(jourSemaineFrancais('2026-10-11', 'long'), 'dimanche 11-10-2026');
 });
 
 test('jourCivilChantier lit une date-seule telle quelle et un instant dans le fuseau de l’entreprise', () => {
