@@ -3462,25 +3462,49 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       return res.status(409).json({ error: 'Ce compte est l’auteur de données tracées : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
     await prisma.$transaction(async (tx) => {
+      // État supprimé relu sous verrou, avec son responsable et ses collaborateurs : le journal
+      // donne des noms (comme le rattachement), jamais l'identifiant d'un compte qu'un simple
+      // administrateur ne doit pas voir, et chaque entrée qui touche un super administrateur
+      // lui est fermée.
+      await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
+      const supprime = await tx.user.findUnique({
+        where: { id },
+        select: {
+          id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true,
+          responsableHierarchique: { select: { name: true, role: true } },
+          collaborateurs: { select: { id: true, name: true, email: true, role: true } },
+        },
+      });
+      if (!supprime) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
       const chantiersResponsable = await tx.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } });
       const chantiersCommercial = await tx.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } });
-      const collaborateurs = await tx.user.count({ where: { responsableHierarchiqueId: id } });
       await tx.user.delete({ where: { id } });
       const effets = [
         chantiersResponsable.count ? `retiré de ${chantiersResponsable.count} chantier(s) comme responsable` : '',
         chantiersCommercial.count ? `retiré de ${chantiersCommercial.count} chantier(s) comme commercial` : '',
-        collaborateurs ? `${collaborateurs} collaborateur(s) détaché(s) de ce responsable` : '',
       ].filter(Boolean);
+      const responsable = supprime.responsableHierarchique;
       await journaliserAdministration(tx, req as AuthRequest, {
-        domaine: 'DROITS', type: 'COMPTE', action: 'SUPPRESSION', cibleId: target.id, cibleLibelle: libelleCompteJournal(target),
-        concerneSuperAdmin: isSuperAdminRole(target.role),
-        avant: { role: target.role, estCommercial: target.estCommercial, accesFinance: target.accesFinance, permissions: target.permissions, actif: target.actif, responsableHierarchiqueId: target.responsableHierarchiqueId },
+        domaine: 'DROITS', type: 'COMPTE', action: 'SUPPRESSION', cibleId: supprime.id, cibleLibelle: libelleCompteJournal(supprime),
+        concerneSuperAdmin: isSuperAdminRole(supprime.role) || isSuperAdminRole(responsable?.role),
+        avant: { role: supprime.role, estCommercial: supprime.estCommercial, accesFinance: supprime.accesFinance, permissions: supprime.permissions, actif: supprime.actif, responsableHierarchique: responsable?.name ?? null },
         detail: effets.length ? effets.join(' ; ') : null,
       });
+      // Les collaborateurs du compte supprimé perdent leur responsable (ON DELETE SET NULL) :
+      // chacun le voit dans son propre historique.
+      for (const collaborateur of supprime.collaborateurs) {
+        await journaliserAdministration(tx, req as AuthRequest, {
+          domaine: 'DROITS', type: 'COMPTE', action: 'RATTACHEMENT', cibleId: collaborateur.id, cibleLibelle: libelleCompteJournal(collaborateur),
+          concerneSuperAdmin: isSuperAdminRole(collaborateur.role) || isSuperAdminRole(supprime.role),
+          avant: { responsableHierarchique: supprime.name }, apres: { responsableHierarchique: null },
+          detail: 'Responsable hiérarchique supprimé.',
+        });
+      }
     });
     res.json({ success: true });
   } catch (error) {
     if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : ce compte vient d’être rattaché à des données métier.' });
+    if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
     res.status(500).json({ error: 'Error deleting user' });
   }
 });
@@ -4493,7 +4517,7 @@ function changementsJournal(avant: Record<string, unknown> | null | undefined, a
 // démarrage et à chaque consultation du journal : sans tâche planifiée, une entrée échue
 // disparaît au plus tard à la consultation suivante.
 async function purgerJournalAdministration() {
-  await prisma.$executeRaw`DELETE FROM "JournalAdministration" WHERE "createdAt" < CURRENT_TIMESTAMP - make_interval(days => COALESCE((SELECT "journalConservationJours" FROM "Parametres" WHERE "id" = 'singleton'), 90))`;
+  await prisma.$executeRaw`DELETE FROM "JournalAdministration" WHERE "createdAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(days => COALESCE((SELECT "journalConservationJours" FROM "Parametres" WHERE "id" = 'singleton'), 90))`;
 }
 
 // Verrouille la ligne d'un réglage unique le temps de la transaction : deux enregistrements
@@ -4896,6 +4920,9 @@ app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async
     }
     const suiviAdministratif = !!req.body.suiviAdministratif;
     const prime = await prisma.$transaction(async (tx) => {
+      // Verrou sur le couple commercial + période, que la ligne existe déjà ou non : deux
+      // enregistrements simultanés ne journalisent pas deux fois le même changement.
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`prime-mensuelle:${commercial.id}:${periode}`}))::text AS verrou`;
       const avant = await tx.primeMensuelleCommercial.findUnique({ where: { commercialId_periode: { commercialId: commercial.id, periode } } });
       const apres = await tx.primeMensuelleCommercial.upsert({
         where: { commercialId_periode: { commercialId: commercial.id, periode } },
@@ -5017,16 +5044,24 @@ app.post('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (req, res)
 });
 
 app.post('/api/admin/api-keys/:id/revoke', requireAuth, requireSuperAdmin, async (req, res) => {
-  const key = await prisma.$transaction(async (tx) => {
-    const avant = await tx.apiAccessKey.findUnique({ where: { id: paramId(req) } });
-    if (!avant) return null;
-    const cle = await tx.apiAccessKey.update({ where: { id: avant.id }, data: { actif: false, revoqueLe: new Date() } });
-    await journaliserAdministration(tx, req as AuthRequest, {
-      domaine: 'REGLAGES', type: 'CLE_INTEGRATION', action: 'REVOCATION', cibleId: cle.id, cibleLibelle: cle.nom, reserveSuperAdmin: true,
-      avant: { actif: avant.actif, revoqueLe: avant.revoqueLe }, apres: { actif: cle.actif, revoqueLe: cle.revoqueLe },
+  let key;
+  try {
+    key = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "ApiAccessKey" WHERE "id" = ${paramId(req)} FOR UPDATE`;
+      const avant = await tx.apiAccessKey.findUnique({ where: { id: paramId(req) } });
+      if (!avant) return null;
+      // Une clé déjà révoquée le reste : ni nouvelle date de révocation, ni nouvelle entrée.
+      if (!avant.actif && avant.revoqueLe) return avant;
+      const cle = await tx.apiAccessKey.update({ where: { id: avant.id }, data: { actif: false, revoqueLe: new Date() } });
+      await journaliserAdministration(tx, req as AuthRequest, {
+        domaine: 'REGLAGES', type: 'CLE_INTEGRATION', action: 'REVOCATION', cibleId: cle.id, cibleLibelle: cle.nom, reserveSuperAdmin: true,
+        avant: { actif: avant.actif, revoqueLe: avant.revoqueLe }, apres: { actif: cle.actif, revoqueLe: cle.revoqueLe },
+      });
+      return cle;
     });
-    return cle;
-  }).catch(() => null);
+  } catch {
+    return res.status(500).json({ error: 'Révocation de la clé impossible.' });
+  }
   if (!key) return res.status(404).json({ error: 'Clé API introuvable.' });
   console.warn(`[API] Clé d'intégration révoquée : « ${key.nom} »`);
   res.json(publicApiKey(key));
@@ -6226,11 +6261,12 @@ function entreesVisiblesJournal(req: express.Request) {
 }
 
 // Filtres : du / au (jours civils de la société, JJ-MM-AAAA ou AAAA-MM-JJ, bornes incluses),
-// type, auteur (identifiant, ou DEMARRAGE pour les entrées sans auteur).
+// type, auteur (identifiant, ou DEMARRAGE pour les entrées sans auteur), cible (identifiant du compte,
+// de la clé ou du commercial concerné).
 async function filtreJournalAdministration(req: express.Request): Promise<{ where: Record<string, unknown>; fuseau: string } | { erreur: string }> {
   const fuseau = (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
   const where: Record<string, unknown> = { ...entreesVisiblesJournal(req) };
-  const { du, au, type, auteur } = req.query;
+  const { du, au, type, auteur, cible } = req.query;
   const periode: { gte?: Date; lt?: Date } = {};
   if (du !== undefined && du !== '') {
     const jour = dateIsoStricte(du);
@@ -6251,6 +6287,10 @@ async function filtreJournalAdministration(req: express.Request): Promise<{ wher
   if (auteur !== undefined && auteur !== '') {
     if (typeof auteur !== 'string') return { erreur: 'Auteur invalide.' };
     where.auteurId = auteur === AUTEUR_FILTRE_DEMARRAGE ? null : auteur;
+  }
+  if (cible !== undefined && cible !== '') {
+    if (typeof cible !== 'string') return { erreur: 'Cible invalide.' };
+    where.cibleId = cible;
   }
   return { where, fuseau };
 }
@@ -7245,7 +7285,13 @@ const initDb = async () => {
   // écoute déjà : une première requête peut la créer au même instant, et une erreur levée ici
   // (rappel de listen) arrêterait le processus avant ensureSuperAdmins.
   await upsertSingleton(() => prisma.parametres.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } }));
-  await purgerJournalAdministration();
+  // Une purge qui échoue ne doit pas arrêter le démarrage avant ensureSuperAdmins : elle sera
+  // rejouée à la prochaine consultation du journal.
+  try {
+    await purgerJournalAdministration();
+  } catch (error) {
+    console.error('[JOURNAL] Purge des entrées échues impossible au démarrage :', error);
+  }
 };
 
 // Délais de connexion du serveur HTTP. Node ferme par défaut une connexion keep-alive inactive

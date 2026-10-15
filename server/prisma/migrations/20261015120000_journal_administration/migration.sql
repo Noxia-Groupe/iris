@@ -29,10 +29,12 @@ CREATE INDEX "JournalAdministration_createdAt_idx" ON "JournalAdministration"("c
 CREATE INDEX "JournalAdministration_type_createdAt_idx" ON "JournalAdministration"("type", "createdAt");
 
 -- L'horodatage est celui de l'écriture, jamais une valeur fournie : une entrée antidatée pourrait
--- sinon être supprimée aussitôt comme trop ancienne.
+-- sinon être supprimée aussitôt comme trop ancienne. Heure de l'insertion elle-même
+-- (clock_timestamp, et non le début de la transaction, antérieur au verrou du réglage), en UTC
+-- comme les autres dates écrites par Prisma, quel que soit le fuseau de la session PostgreSQL.
 CREATE FUNCTION "horodater_journal_administration"() RETURNS trigger AS $$
 BEGIN
-  NEW."createdAt" := CURRENT_TIMESTAMP;
+  NEW."createdAt" := clock_timestamp() AT TIME ZONE 'UTC';
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -48,7 +50,7 @@ BEGIN
     RAISE EXCEPTION 'Journal des paramètres et des droits immuable : modification interdite';
   END IF;
   SELECT "journalConservationJours" INTO conservation FROM "Parametres" WHERE "id" = 'singleton';
-  IF OLD."createdAt" >= CURRENT_TIMESTAMP - make_interval(days => COALESCE(conservation, 90)) THEN
+  IF OLD."createdAt" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(days => COALESCE(conservation, 90)) THEN
     RAISE EXCEPTION 'Journal des paramètres et des droits : une entrée ne se supprime qu''au-delà de la durée de conservation';
   END IF;
   RETURN OLD;

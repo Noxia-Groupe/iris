@@ -40,13 +40,13 @@ test('un administrateur consulte, filtre et exporte le journal, sans les entrée
     await page.goto('/admin', { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Journal', exact: true }).click();
     const tableau = page.getByRole('table', { name: 'Entrées du journal' });
-    const ligne = tableau.locator('tr', { hasText: `Admin journal ${suffixe}` }).filter({ hasText: 'joursSansSaisie' }).first();
+    const ligne = tableau.locator('tr', { hasText: `Admin journal ${suffixe}` }).filter({ hasText: 'Jours sans saisie' }).first();
     await expect(ligne).toContainText('Paramètres (marge, acompte, alertes, destinataires)');
-    await expect(ligne).toContainText(`joursSansSaisie : ${avant.joursSansSaisie ?? '—'}`);
-    await expect(ligne).toContainText(`joursSansSaisie : ${jours}`);
+    await expect(ligne).toContainText(`Jours sans saisie : ${avant.joursSansSaisie ?? '—'}`);
+    await expect(ligne).toContainText(`Jours sans saisie : ${jours}`);
     await expect(ligne.locator('td').first()).toHaveText(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/);
-    // La création de son propre compte par le super administrateur reste visible : elle ne
-    // concerne pas un compte super administrateur.
+    // La création du compte de l'administrateur par le super administrateur lui reste visible :
+    // elle ne concerne pas un compte super administrateur.
     await expect(tableau).toContainText(`Admin journal ${suffixe} (journal.e2e.${suffixe}@iris.test)`);
     // Historique des clés d'intégration : ni dans le tableau, ni proposé au filtre.
     await expect(page.getByText(`Clé journal ${suffixe}`)).toHaveCount(0);
@@ -60,7 +60,7 @@ test('un administrateur consulte, filtre et exporte le journal, sans les entrée
     await filtres.getByLabel('Type').selectOption({ label: 'Paramètres (marge, acompte, alertes, destinataires)' });
     await filtres.getByRole('button', { name: 'Filtrer' }).click();
     await expect(tableau.locator('tbody tr')).toHaveCount(1);
-    await expect(tableau.locator('tbody tr')).toContainText(`joursSansSaisie : ${jours}`);
+    await expect(tableau.locator('tbody tr')).toContainText(`Jours sans saisie : ${jours}`);
     await expect(page.getByText('1 entrée', { exact: true })).toBeVisible();
 
     // Export CSV des entrées filtrées.
@@ -72,7 +72,18 @@ test('un administrateur consulte, filtre et exporte le journal, sans les entrée
     expect(contenu.startsWith('﻿Date;Heure;Auteur;Domaine;Type;Action;Cible;Avant;Après;Détail\n')).toBeTruthy();
     expect(contenu).toContain(`"Admin journal ${suffixe}";"REGLAGES";"PARAMETRES";"MODIFICATION"`);
     expect(contenu).toContain(`"joursSansSaisie : ${jours}"`);
-    expect(contenu).not.toContain(`Clé journal ${suffixe}`);
+
+    // Export sans filtre : toujours aucune entrée de clé d'intégration.
+    await filtres.getByLabel('Auteur').selectOption({ label: 'Tous' });
+    await filtres.getByLabel('Type').selectOption({ label: 'Tous' });
+    await filtres.getByRole('button', { name: 'Filtrer' }).click();
+    await expect(tableau.locator('tbody tr').nth(1)).toBeVisible();
+    const telechargementComplet = page.waitForEvent('download');
+    await filtres.getByRole('button', { name: 'Exporter en CSV' }).click();
+    const complet = await readFile(await (await telechargementComplet).path() as string, 'utf8');
+    expect(complet).toContain(`Admin journal ${suffixe} (journal.e2e.${suffixe}@iris.test)`);
+    expect(complet).not.toContain(`Clé journal ${suffixe}`);
+    expect(complet).not.toContain('"CLE_INTEGRATION"');
   } finally {
     await contexte.close();
     await request.put(`${api}/parametres`, { headers, data: { joursSansSaisie: avant.joursSansSaisie } });

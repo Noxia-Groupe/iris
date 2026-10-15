@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api';
 import { useCompanyTimezone } from '../companyTimezoneContext';
-import { formatCompanyDateTime, jourCivilChantier } from '../lib/dateFormatting';
+import { companyDateInputValue, formatCompanyDateTime } from '../lib/dateFormatting';
+import { roleLabel } from '../roles';
 
 // Journal des paramètres et des droits (lot (a), décision de Nelson du 13-10-2026) : qui a changé
 // quoi, avant et après, filtrable par date, type et auteur, avec export CSV. Le serveur ne renvoie
@@ -62,10 +63,31 @@ const ACTIONS_JOURNAL: Record<string, string> = {
 
 const FILTRES_VIDES: Filtres = { du: '', au: '', type: '', auteur: '' };
 
-function lisible(valeur: unknown): string {
+// Libellés des champs journalisés ; un champ absent de la liste garde son nom technique.
+const CHAMPS_JOURNAL: Record<string, string> = {
+  role: 'Type de compte',
+  estCommercial: 'Aussi commercial',
+  accesFinance: 'Accès financier',
+  permissions: 'Permissions',
+  actif: 'Actif',
+  responsableHierarchique: 'Responsable hiérarchique',
+  margeCommercialeActive: 'Marge commerciale',
+  tauxAcompteDefaut: 'Acompte par défaut (%)',
+  seuilMargeFaible: 'Seuil de marge faible (%)',
+  joursSansSaisie: 'Jours sans saisie',
+  rentabiliteConducteur: 'Rentabilité : conducteur',
+  rentabiliteHierarchie: 'Rentabilité : hiérarchie',
+  rentabiliteDirecteurs: 'Rentabilité : directeurs',
+  planningActif: 'Planning',
+  suiviAdministratif: 'Prime de suivi administratif',
+  journalConservationJours: 'Conservation (jours)',
+};
+
+function lisible(valeur: unknown, champ?: string): string {
+  if (champ === 'role' && typeof valeur === 'string') return roleLabel(valeur);
   if (valeur === null || valeur === undefined || valeur === '') return '—';
   if (typeof valeur === 'boolean') return valeur ? 'oui' : 'non';
-  if (Array.isArray(valeur)) return valeur.length ? valeur.map(lisible).join(', ') : 'aucune';
+  if (Array.isArray(valeur)) return valeur.length ? valeur.map((v) => lisible(v)).join(', ') : 'aucune';
   if (typeof valeur === 'object') return JSON.stringify(valeur);
   return String(valeur);
 }
@@ -75,7 +97,7 @@ function Valeurs({ valeurs }: { valeurs: Record<string, unknown> | null }) {
   return (
     <ul className="space-y-0.5">
       {Object.entries(valeurs).map(([champ, valeur]) => (
-        <li key={champ}><span className="text-gray-500">{champ} :</span> <span className="break-all">{lisible(valeur)}</span></li>
+        <li key={champ}><span className="text-gray-500" title={champ}>{CHAMPS_JOURNAL[champ] ?? champ} :</span> <span className="break-all">{lisible(valeur, champ)}</span></li>
       ))}
     </ul>
   );
@@ -128,19 +150,23 @@ export default function JournalAdministration({ isSuper }: { isSuper: boolean })
 
   const exporter = async () => {
     setErreur(null);
-    const res = await apiFetch(`/journal-administration/export.csv${parametresRequete(filtres)}`);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setErreur(data.error || 'Export impossible.');
-      return;
+    try {
+      const res = await apiFetch(`/journal-administration/export.csv${parametresRequete(filtres)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setErreur(data.error || 'Export impossible.');
+        return;
+      }
+      const nom = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'journal-parametres-droits.csv';
+      const url = URL.createObjectURL(await res.blob());
+      const lien = document.createElement('a');
+      lien.href = url;
+      lien.download = nom;
+      lien.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setErreur('Impossible de joindre le serveur.');
     }
-    const nom = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'journal-parametres-droits.csv';
-    const url = URL.createObjectURL(await res.blob());
-    const lien = document.createElement('a');
-    lien.href = url;
-    lien.download = nom;
-    lien.click();
-    URL.revokeObjectURL(url);
   };
 
   const enregistrerConservation = async (e: React.FormEvent) => {
@@ -217,7 +243,7 @@ export default function JournalAdministration({ isSuper }: { isSuper: boolean })
               {donnees.entrees.map((entree) => (
                 <tr key={entree.id} className="border-b align-top">
                   <td className="py-2 pr-3 whitespace-nowrap">
-                    {jourCivilChantier(entree.createdAt, fuseau)} {formatCompanyDateTime(entree.createdAt, fuseau, { hour: '2-digit', minute: '2-digit' })}
+                    {companyDateInputValue(fuseau, new Date(entree.createdAt))} {formatCompanyDateTime(entree.createdAt, fuseau, { hour: '2-digit', minute: '2-digit' })}
                   </td>
                   <td className="py-2 pr-3">{entree.auteurNom}</td>
                   <td className="py-2 pr-3">{TYPES_JOURNAL[entree.type] ?? entree.type}</td>
