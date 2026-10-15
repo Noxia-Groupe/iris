@@ -2441,12 +2441,17 @@ if (!TEST_DATABASE_URL) {
       assert.equal(horodatee.status, 201, JSON.stringify(horodatee.body));
       assert.equal(horodatee.body.installeLe, '2026-10-01T00:00:00.000Z');
       assert.equal(horodatee.body.garantieJusquAu, '2028-12-31T00:00:00.000Z');
-      // Sans « Z » ni décalage ±HH:MM, l'heure ne désigne aucun instant : la date-heure est
-      // refusée, comme pour les autres dates métier lues par `dateIsoStricte`.
+      // Sans décalage, ou avec un décalage écrit ±HHMM, la date est retenue de même. Une heure
+      // invalide est refusée.
       const sansDecalage = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
-        .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-4', installeLe: '2026-10-01T10:00:00' });
-      assert.equal(sansDecalage.status, 400, JSON.stringify(sansDecalage.body));
-      await prisma.equipementInstalle.deleteMany({ where: { id: { in: [creation.body.id, horodatee.body.id] } } });
+        .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-4', installeLe: '2026-10-01T23:30:00', garantieJusquAu: '2028-12-31T23:30:00+1400' });
+      assert.equal(sansDecalage.status, 201, JSON.stringify(sansDecalage.body));
+      assert.equal(sansDecalage.body.installeLe, '2026-10-01T00:00:00.000Z');
+      assert.equal(sansDecalage.body.garantieJusquAu, '2028-12-31T00:00:00.000Z');
+      const heureInvalide = await request(app).post(`/api/clients/${clientId}/equipements`).set('Authorization', `Bearer ${session}`)
+        .send({ catalogueEquipementId: modeleId, clientSiteId: siteId, numeroSerie: 'TEST-SN-DATE-5', installeLe: '2026-10-01T99:99Z' });
+      assert.equal(heureInvalide.status, 400, JSON.stringify(heureInvalide.body));
+      await prisma.equipementInstalle.deleteMany({ where: { id: { in: [creation.body.id, horodatee.body.id, sansDecalage.body.id] } } });
     });
 
     test('refuse un équipement rattaché au site d’un autre client', async () => {

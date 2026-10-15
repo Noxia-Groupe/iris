@@ -329,6 +329,23 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
         await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
         await expect(page.locator('thead th', { hasText: '19-10' })).toHaveClass(/bg-blue-50/);
         await expect(page.locator('thead th', { hasText: '18-10' })).toHaveCount(0);
+        // Navigation d'une semaine à l'autre, depuis la semaine de la société : le libellé suit la
+        // semaine affichée, et seul le jour de la société est surligné.
+        const surlignes = page.locator('thead th[class*="bg-blue-50"]');
+        await page.getByTitle('Semaine suivante').click();
+        await expect(page.getByRole('button', { name: 'Semaine 44' })).toBeVisible();
+        await expect(page.locator('thead th', { hasText: '26-10' })).toBeVisible();
+        await expect(page.locator('thead th', { hasText: '25-10' })).toHaveCount(0);
+        await expect(surlignes).toHaveCount(0);
+        await page.getByRole('button', { name: 'Semaine 44' }).click();
+        await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
+        await expect(surlignes).toHaveCount(1);
+        await expect(surlignes).toContainText('19-10');
+        await page.getByTitle('Semaine précédente').click();
+        await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
+        await expect(page.locator('thead th', { hasText: '12-10' })).toBeVisible();
+        await expect(page.locator('thead th', { hasText: '19-10' })).toHaveCount(0);
+        await expect(surlignes).toHaveCount(0);
       });
     } finally {
       await request.delete(`${api}/intervenants/${id}`, { headers });
