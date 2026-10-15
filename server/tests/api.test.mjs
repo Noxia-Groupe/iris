@@ -7893,4 +7893,255 @@ if (!TEST_DATABASE_URL) {
       assert.equal(lecture.body.fuseauHoraire, 'Pacific/Noumea');
     });
   });
+
+  // Lot (a), décision de Nelson du 13-10-2026 : tout changement de réglage et de droits d'un compte
+  // est journalisé (qui, quoi, avant, après), consultable et exportable par les seuls
+  // administrateurs ; un simple administrateur ne voit ni les entrées qui concernent un compte
+  // super administrateur, ni l'historique des clés d'intégration (précisions du 14-10-2026).
+  describe('Journal des paramètres et des droits', () => {
+    let superAuth;
+    let adminAuth;
+    let admin;
+    let conducteurAuth;
+    const suffixe = Date.now();
+    const email = (qui) => `journal.${qui}.${suffixe}@iris.test`;
+    const journal = (auth, query = {}) => request(app).get('/api/journal-administration').query(query).set(auth);
+    // Entrées d'une cible, de la plus ancienne à la plus récente (la route les renvoie de la plus récente).
+    const entreesDe = async (cibleId, auth = superAuth) => {
+      const lignes = [];
+      for (let page = 1; page < 50; page += 1) {
+        const res = await journal(auth, { page });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        lignes.push(...res.body.entrees);
+        if (page * res.body.parPage >= res.body.total) break;
+      }
+      return lignes.filter((e) => e.cibleId === cibleId).reverse();
+    };
+    const derniere = async (type, auth = superAuth) => (await journal(auth, { type })).body.entrees[0];
+
+    before(async () => {
+      const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(login.status, 200);
+      superAuth = { Authorization: `Bearer ${login.body.token}` };
+      admin = await prisma.user.create({ data: { email: email('admin'), name: `TEST Journal admin ${suffixe}`, role: 'ADMIN' } });
+      adminAuth = { Authorization: `Bearer ${jwt.sign({ id: admin.id }, process.env.JWT_SECRET)}` };
+      const conducteur = await prisma.user.create({ data: { email: email('conducteur'), name: 'TEST Journal conducteur', role: 'CONDUCTEUR_TRAVAUX' } });
+      conducteurAuth = { Authorization: `Bearer ${jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET)}` };
+    });
+
+    after(async () => {
+      await prisma.user.updateMany({ where: { email: { startsWith: 'journal.' } }, data: { responsableHierarchiqueId: null } });
+      await prisma.user.deleteMany({ where: { email: { startsWith: 'journal.' }, NOT: { email: { contains: 'resp' } } } });
+      await prisma.user.deleteMany({ where: { email: { startsWith: 'journal.' } } });
+    });
+
+    test('chaque changement de droits d’un compte est journalisé, avec son auteur, avant et après', async () => {
+      const responsable = await prisma.user.create({ data: { email: email('resp'), name: `TEST Journal responsable ${suffixe}`, role: 'RESPONSABLE' } });
+      const creation = await request(app).post('/api/users').set(superAuth).send({ email: email('cible'), name: 'TEST Journal cible', role: 'CONDUCTEUR_TRAVAUX' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const etapes = [
+        () => request(app).patch(`/api/users/${id}/role`).set(superAuth).send({ role: 'ADMIN' }),
+        () => request(app).patch(`/api/users/${id}/est-commercial`).set(superAuth).send({ estCommercial: true }),
+        () => request(app).put(`/api/users/${id}/permissions`).set(superAuth).send({ permissions: ['clients:read'] }),
+        () => request(app).patch(`/api/users/${id}/acces-finance`).set(superAuth).send({ accesFinance: true }),
+        () => request(app).patch(`/api/users/${id}/responsable-hierarchique`).set(superAuth).send({ responsableHierarchiqueId: responsable.id }),
+        () => request(app).patch(`/api/users/${id}/actif`).set(superAuth).send({ actif: false }),
+        // Même valeur : rien ne change, rien n'est journalisé.
+        () => request(app).patch(`/api/users/${id}/actif`).set(superAuth).send({ actif: false }),
+        () => request(app).delete(`/api/users/${id}`).set(superAuth),
+      ];
+      for (const etape of etapes) {
+        const res = await etape();
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      }
+      const entrees = await entreesDe(id);
+      assert.deepEqual(entrees.map((e) => e.action), ['CREATION', 'TYPE_COMPTE', 'AUSSI_COMMERCIAL', 'PERMISSIONS', 'ACCES_FINANCE', 'RATTACHEMENT', 'DESACTIVATION', 'SUPPRESSION']);
+      assert.ok(entrees.every((e) => e.domaine === 'DROITS' && e.type === 'COMPTE' && e.cibleLibelle === `TEST Journal cible (${email('cible')})`));
+      const secours = await prisma.user.findUnique({ where: { email: 'secours@iris.test' } });
+      assert.ok(entrees.every((e) => e.auteurId === secours.id && e.auteurNom === secours.name));
+      const [cree, typeCompte, commercial, permissions, finance, rattachement, desactivation, suppression] = entrees;
+      assert.equal(cree.avant, null);
+      assert.deepEqual(cree.apres, { role: 'CONDUCTEUR_TRAVAUX', estCommercial: false, accesFinance: false, permissions: [], actif: true });
+      assert.deepEqual([typeCompte.avant, typeCompte.apres], [{ role: 'CONDUCTEUR_TRAVAUX' }, { role: 'ADMIN' }]);
+      assert.deepEqual([commercial.avant, commercial.apres], [{ estCommercial: false }, { estCommercial: true }]);
+      assert.deepEqual([permissions.avant, permissions.apres], [{ permissions: [] }, { permissions: ['clients:read'] }]);
+      assert.deepEqual([finance.avant, finance.apres], [{ accesFinance: false }, { accesFinance: true }]);
+      assert.deepEqual([rattachement.avant, rattachement.apres], [{ responsableHierarchique: null }, { responsableHierarchique: responsable.name }]);
+      assert.deepEqual([desactivation.avant, desactivation.apres], [{ actif: true }, { actif: false }]);
+      assert.equal(suppression.apres, null);
+      assert.equal(suppression.avant.role, 'ADMIN');
+      assert.equal(suppression.avant.responsableHierarchiqueId, responsable.id);
+    });
+
+    test('chaque réglage est journalisé sans secret, et un enregistrement sans changement n’écrit rien', async () => {
+      const parametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      const company = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+      const remuneration = (await request(app).get('/api/parametres/remuneration').set(superAuth)).body;
+      const partage = await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } });
+      const nouveauxJours = parametres.joursSansSaisie === 21 ? 22 : 21;
+      try {
+        assert.equal((await request(app).put('/api/parametres').set(adminAuth).send({ joursSansSaisie: nouveauxJours })).status, 200);
+        const reglage = await derniere('PARAMETRES');
+        assert.deepEqual([reglage.avant, reglage.apres, reglage.auteurId], [{ joursSansSaisie: parametres.joursSansSaisie }, { joursSansSaisie: nouveauxJours }, admin.id]);
+        assert.equal((await request(app).put('/api/parametres').set(adminAuth).send({ joursSansSaisie: nouveauxJours })).status, 200);
+        assert.equal((await derniere('PARAMETRES')).id, reglage.id, 'aucune entrée sans changement');
+
+        assert.equal((await request(app).put('/api/modules').set(superAuth).send({ planningActif: !parametres.planningActif })).status, 200);
+        const module = await derniere('MODULES');
+        assert.deepEqual([module.avant, module.apres], [{ planningActif: parametres.planningActif }, { planningActif: !parametres.planningActif }]);
+
+        const prime = Number(remuneration.primeSuiviAdministratif) + 7;
+        const majRemuneration = await request(app).put('/api/parametres/remuneration').set(superAuth).send({ ...remuneration, primeSuiviAdministratif: prime });
+        assert.equal(majRemuneration.status, 200, JSON.stringify(majRemuneration.body));
+        assert.deepEqual((await derniere('REMUNERATION')).apres, { primeSuiviAdministratif: prime });
+
+        const telephone = `01 02 03 ${String(suffixe).slice(-4, -2)} ${String(suffixe).slice(-2)}`;
+        assert.equal((await request(app).put('/api/company').set(superAuth).send({ telephone })).status, 200);
+        const societe = await derniere('SOCIETE');
+        assert.deepEqual([societe.avant, societe.apres], [{ telephone: company?.telephone ?? null }, { telephone }]);
+
+        const commercial = await prisma.user.create({ data: { email: email('commercial'), name: 'TEST Journal commercial', role: 'COMMERCIAL' } });
+        assert.equal((await request(app).put(`/api/commerciaux/${commercial.id}/prime-mensuelle`).set(adminAuth).send({ periode: '2026-09', suiviAdministratif: true })).status, 200);
+        const primeMensuelle = await derniere('PRIME_COMMERCIAL');
+        assert.deepEqual([primeMensuelle.cibleId, primeMensuelle.detail, primeMensuelle.avant, primeMensuelle.apres], [commercial.id, 'Période 09-2026', { suiviAdministratif: false }, { suiviAdministratif: true }]);
+
+        const cle = await request(app).post('/api/admin/api-keys').set(superAuth).send({ nom: `TEST journal ${suffixe}`, scopes: ['clients:read'] });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        assert.equal((await request(app).post(`/api/admin/api-keys/${cle.body.key.id}/revoke`).set(superAuth)).status, 200);
+        const [creationCle, revocation] = await entreesDe(cle.body.key.id);
+        assert.deepEqual([creationCle.action, revocation.action], ['CREATION', 'REVOCATION']);
+        const empreinte = (await prisma.apiAccessKey.findUnique({ where: { id: cle.body.key.id } })).secretHash;
+        for (const texte of [JSON.stringify(creationCle), JSON.stringify(revocation)]) {
+          assert.ok(!texte.includes(cle.body.apiKey) && !texte.includes(empreinte), 'ni la clé ni son empreinte au journal');
+        }
+        assert.deepEqual(revocation.apres.actif, false);
+
+        const publication = await request(app).post('/api/planning/share').set(superAuth);
+        assert.equal(publication.status, 200, JSON.stringify(publication.body));
+        const lien = await derniere('PARTAGE_PLANNING');
+        assert.ok(['PUBLICATION', 'NOUVEAU_LIEN'].includes(lien.action));
+        assert.ok(!JSON.stringify(lien).includes(publication.body.token), 'le jeton du lien n’est pas journalisé');
+        assert.equal((await request(app).patch('/api/planning/share').set(superAuth).send({ active: false })).status, 200);
+        const coupure = await derniere('PARTAGE_PLANNING');
+        assert.deepEqual([coupure.action, coupure.avant, coupure.apres], ['DESACTIVATION', { actif: true }, { actif: false }]);
+      } finally {
+        await request(app).put('/api/parametres').set(superAuth).send({ joursSansSaisie: parametres.joursSansSaisie });
+        await request(app).put('/api/modules').set(superAuth).send({ planningActif: parametres.planningActif });
+        await request(app).put('/api/parametres/remuneration').set(superAuth).send(remuneration);
+        await request(app).put('/api/company').set(superAuth).send({ telephone: company?.telephone ?? '' });
+        if (partage) await prisma.planningPublicShare.update({ where: { id: 'singleton' }, data: { token: partage.token, active: partage.active } });
+        else await prisma.planningPublicShare.deleteMany({});
+        await prisma.primeMensuelleCommercial.deleteMany({ where: { commercial: { email: email('commercial') } } });
+      }
+    });
+
+    test('un simple administrateur ne voit ni les entrées d’un compte super administrateur, ni les clés d’intégration', async () => {
+      const promu = await prisma.user.create({ data: { email: email('promu'), name: 'TEST Journal promu', role: 'CONDUCTEUR_TRAVAUX' } });
+      assert.equal((await request(app).patch(`/api/users/${promu.id}/role`).set(superAuth).send({ role: 'SUPERADMIN' })).status, 200);
+      const cle = await request(app).post('/api/admin/api-keys').set(superAuth).send({ nom: `TEST journal visibilité ${suffixe}`, scopes: ['clients:read'] });
+      assert.equal(cle.status, 201);
+      assert.deepEqual((await entreesDe(promu.id)).map((e) => e.action), ['TYPE_COMPTE'], 'le super administrateur voit l’entrée');
+      assert.equal((await entreesDe(cle.body.key.id)).length, 1);
+      assert.deepEqual(await entreesDe(promu.id, adminAuth), [], 'l’administrateur ne voit pas l’entrée du compte promu');
+      assert.deepEqual(await entreesDe(cle.body.key.id, adminAuth), []);
+      const parType = await journal(adminAuth, { type: 'CLE_INTEGRATION' });
+      assert.deepEqual([parType.status, parType.body.total], [200, 0]);
+      // Le compte promu ne peut plus être rétrogradé par l'administrateur, et l'entrée de sa
+      // rétrogradation par le super administrateur lui reste fermée.
+      assert.equal((await request(app).patch(`/api/users/${promu.id}/role`).set(superAuth).send({ role: 'CONDUCTEUR_TRAVAUX' })).status, 200);
+      assert.deepEqual(await entreesDe(promu.id, adminAuth), []);
+      const auteurs = (await journal(adminAuth)).body.auteurs.map((a) => a.nom);
+      assert.ok(!auteurs.includes('Iris (démarrage, SUPERADMIN_EMAILS)'), 'les auteurs des seules entrées fermées ne sont pas proposés');
+      assert.equal((await journal(conducteurAuth)).status, 403);
+      assert.equal((await request(app).get('/api/journal-administration/export.csv').set(conducteurAuth)).status, 403);
+      assert.equal((await request(app).put('/api/journal-administration/conservation').set(adminAuth).send({ jours: 30 })).status, 403);
+      await request(app).post(`/api/admin/api-keys/${cle.body.key.id}/revoke`).set(superAuth);
+    });
+
+    test('filtres par date, type et auteur, et export CSV', async () => {
+      const nom = `=HYPERLINK("http://exemple.test") ${suffixe}`;
+      const creation = await request(app).post('/api/users').set(adminAuth).send({ email: email('csv'), name: nom, role: 'CONDUCTEUR_TRAVAUX' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const aujourdhui = jourCivilEntreprise(new Date(), fuseau).split('-').reverse().join('-');
+      const demain = jourCivilEntreprise(new Date(Date.now() + 86400000), fuseau).split('-').reverse().join('-');
+      const parAuteur = await journal(adminAuth, { auteur: admin.id, type: 'COMPTE', du: aujourdhui, au: aujourdhui });
+      assert.equal(parAuteur.status, 200, JSON.stringify(parAuteur.body));
+      assert.ok(parAuteur.body.entrees.some((e) => e.cibleId === creation.body.id));
+      assert.ok(parAuteur.body.entrees.every((e) => e.auteurId === admin.id && e.type === 'COMPTE'));
+      assert.equal((await journal(adminAuth, { du: demain })).body.total, 0, 'aucune entrée demain');
+      for (const query of [{ du: '31-02-2026' }, { au: '2026-13-01' }, { du: demain, au: aujourdhui }, { type: 'INCONNU' }]) {
+        assert.equal((await journal(adminAuth, query)).status, 400, JSON.stringify(query));
+      }
+      const csv = await request(app).get('/api/journal-administration/export.csv').query({ auteur: admin.id, type: 'COMPTE' }).set(adminAuth).buffer(true).parse((res, fin) => {
+        let texte = ''; res.setEncoding('utf8'); res.on('data', (morceau) => { texte += morceau; }); res.on('end', () => fin(null, texte));
+      });
+      assert.equal(csv.status, 200);
+      assert.match(csv.headers['content-type'], /^text\/csv; charset=utf-8/);
+      assert.match(csv.headers['content-disposition'], /^attachment; filename="journal-parametres-droits-\d{2}-\d{2}-\d{4}\.csv"$/);
+      assert.ok(csv.body.startsWith('﻿Date;Heure;Auteur;Domaine;Type;Action;Cible;Avant;Après;Détail\n'));
+      const ligne = csv.body.split('\n').find((l) => l.includes(email('csv')));
+      assert.ok(ligne, csv.body.slice(0, 500));
+      assert.ok(ligne.startsWith(`"${aujourdhui}";"`), ligne);
+      // Protection contre l'injection de formule dans un tableur : la cellule commence par une apostrophe.
+      assert.ok(ligne.includes(`"'=HYPERLINK(""http://exemple.test"") ${suffixe} (${email('csv')})"`), ligne);
+      // Valeurs « champ : valeur », séparées par « ; » (l'ordre des champs suit le stockage JSONB).
+      for (const valeur of ['role : CONDUCTEUR_TRAVAUX', 'estCommercial : false', 'permissions : []', 'actif : true']) assert.ok(ligne.includes(valeur), `${valeur} : ${ligne}`);
+    });
+
+    test('le journal est en ajout seul, et purgé au-delà de la durée de conservation', async () => {
+      const entree = await prisma.journalAdministration.findFirst({ orderBy: { createdAt: 'desc' } });
+      await assert.rejects(prisma.$executeRaw`UPDATE "JournalAdministration" SET "auteurNom" = 'falsifié' WHERE "id" = ${entree.id}`, /immuable/);
+      await assert.rejects(prisma.$executeRaw`DELETE FROM "JournalAdministration" WHERE "id" = ${entree.id}`, /durée de conservation/);
+      await assert.rejects(prisma.$executeRawUnsafe('TRUNCATE "JournalAdministration"'), /vidage interdit/);
+      // Une entrée ne peut pas être antidatée pour être supprimée aussitôt.
+      const antidatee = await prisma.journalAdministration.create({ data: { domaine: 'REGLAGES', type: 'PARAMETRES', action: 'MODIFICATION', auteurNom: 'TEST antidatée', createdAt: new Date('2020-01-01T00:00:00Z') } });
+      assert.ok(Date.now() - antidatee.createdAt.getTime() < 60000, 'horodatage de l’écriture');
+
+      for (const jours of [0, 91, 'abc', 1.5]) {
+        assert.equal((await request(app).put('/api/journal-administration/conservation').set(superAuth).send({ jours })).status, 400, String(jours));
+      }
+      // Entrées anciennes insérées pour le test, horodatage forcé désactivé le temps de l'insertion.
+      const vieille = (jours) => ({ domaine: 'REGLAGES', type: 'PARAMETRES', action: 'MODIFICATION', auteurNom: `TEST âgée de ${jours} jours`, createdAt: new Date(Date.now() - jours * 86400000) });
+      await prisma.$executeRawUnsafe('ALTER TABLE "JournalAdministration" DISABLE TRIGGER "journal_administration_horodatage"');
+      let a100; let a40;
+      try {
+        a100 = await prisma.journalAdministration.create({ data: vieille(100) });
+        a40 = await prisma.journalAdministration.create({ data: vieille(40) });
+      } finally {
+        await prisma.$executeRawUnsafe('ALTER TABLE "JournalAdministration" ENABLE TRIGGER "journal_administration_horodatage"');
+      }
+      try {
+        assert.equal((await journal(superAuth)).status, 200);
+        assert.equal(await prisma.journalAdministration.count({ where: { id: a100.id } }), 0, 'au-delà de 90 jours, purgée à la consultation');
+        assert.equal(await prisma.journalAdministration.count({ where: { id: a40.id } }), 1, 'en deçà, conservée');
+        const reglage = await request(app).put('/api/journal-administration/conservation').set(superAuth).send({ jours: 30 });
+        assert.deepEqual([reglage.status, reglage.body], [200, { conservationJours: 30 }]);
+        assert.equal(await prisma.journalAdministration.count({ where: { id: a40.id } }), 0, 'la réduction purge aussitôt');
+        const conservation = await derniere('CONSERVATION_JOURNAL', adminAuth);
+        assert.deepEqual([conservation.avant, conservation.apres], [{ journalConservationJours: 90 }, { journalConservationJours: 30 }]);
+        assert.equal((await journal(adminAuth)).body.conservationJours, 30);
+      } finally {
+        await request(app).put('/api/journal-administration/conservation').set(superAuth).send({ jours: 90 });
+      }
+    });
+
+    test('un changement dont l’entrée de journal échoue est annulé', async () => {
+      const avant = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION test_refuser_journal() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'journal indisponible'; END; $$ LANGUAGE plpgsql`);
+      await prisma.$executeRawUnsafe('CREATE TRIGGER test_refuser_journal BEFORE INSERT ON "JournalAdministration" FOR EACH ROW EXECUTE FUNCTION test_refuser_journal()');
+      try {
+        const res = await request(app).put('/api/parametres').set(adminAuth).send({ joursSansSaisie: avant.joursSansSaisie === 30 ? 31 : 30 });
+        assert.equal(res.status, 500);
+        assert.equal((await prisma.parametres.findUnique({ where: { id: 'singleton' } })).joursSansSaisie, avant.joursSansSaisie, 'réglage inchangé');
+        const compte = await request(app).post('/api/users').set(adminAuth).send({ email: email('annule'), name: 'TEST Journal annulé', role: 'CONDUCTEUR_TRAVAUX' });
+        assert.equal(compte.status, 500);
+        assert.equal(await prisma.user.count({ where: { email: email('annule') } }), 0, 'compte non créé');
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_refuser_journal ON "JournalAdministration"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_refuser_journal()');
+      }
+    });
+  });
 }
