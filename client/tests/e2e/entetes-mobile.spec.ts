@@ -19,10 +19,12 @@ async function defautsAffichage(page: Page) {
       return false;
     };
     const libelle = (el: Element) => (el.textContent || (el as HTMLInputElement).placeholder || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    // Tolérance d'un demi-pixel (arrondi du rendu) : un dépassement d'un pixel, invisible ici, en
+    // devient plusieurs avec d'autres polices (constaté en CI sur « Prêt à facturer »).
     const coupes: string[] = [];
     for (const el of Array.from(document.querySelectorAll('main button, main a, main h1, main h2, main input, main select, main span, main p'))) {
       const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0 && (r.right > largeur + 1 || r.left < -1) && !defilable(el)) coupes.push(`${el.tagName.toLowerCase()} « ${libelle(el)} »`);
+      if (r.width > 0 && r.height > 0 && (r.right > largeur + 0.5 || r.left < -0.5) && !defilable(el)) coupes.push(`${el.tagName.toLowerCase()} « ${libelle(el)} »`);
     }
     const recouverts: string[] = [];
     for (const titre of Array.from(document.querySelectorAll('main h1, main h2'))) {
@@ -51,6 +53,9 @@ test.describe('écrans sur téléphone (375 px)', () => {
       return reponse.json();
     };
     const client = await creerClient('écrans téléphone');
+    // Un client sans site : « Prêt à facturer » affiche alors un contrôle non bloquant et son lien
+    // « Configurer », qui sortait de l'écran (sans effet sur « Configuration prête »).
+    await creerClient('écrans téléphone sans site', false);
     // Un nom d'affaire long : c'est lui que la barre d'actions de la fiche recouvrait.
     const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Rénovation complète de la chaufferie collective ${Date.now()}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
     await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
