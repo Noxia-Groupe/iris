@@ -922,8 +922,7 @@ test('sans le fuseau de la société, une facture n’est pas créée sans ses d
   const emission = page.locator('input[name="dateEmission"]');
   await expect(emission).toBeDisabled();
   await expect(emission).toHaveAttribute('placeholder', 'Actualisez la liste');
-  await page.getByLabel('Rechercher un client').fill(client.raisonSociale);
-  await page.getByLabel('Client de la facture').selectOption({ label: client.raisonSociale });
+  await choisirClient(page, client);
   await page.getByPlaceholder('Motif obligatoire').fill('Test du fuseau indisponible');
   await page.getByLabel('Désignation ligne 1').fill('Prestation');
   await page.getByLabel('Prix unitaire HT ligne 1').fill('100');
