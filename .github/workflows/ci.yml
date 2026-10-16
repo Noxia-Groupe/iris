@@ -147,6 +147,11 @@ jobs:
       # TEST_DATABASE_URL étant défini, les tests HTTP s'exécutent réellement au lieu
       # d'être ignorés.
       - run: npm test
+      # Un conteneur de service affichait le journal du serveur à son arrêt ; celui du runner
+      # est montré en cas d'échec, pour le diagnostic.
+      - name: Journal de PostgreSQL
+        if: failure()
+        run: sudo tail -n 300 /var/log/postgresql/postgresql-16-main.log
 
   frontend:
     name: Frontend — build et lint
@@ -212,3 +217,6 @@ jobs:
           name: parcours-rapport
           path: client/playwright-report/
           retention-days: 7
+      - name: Journal de PostgreSQL
+        if: failure()
+        run: sudo tail -n 300 /var/log/postgresql/postgresql-16-main.log
