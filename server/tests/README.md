@@ -6,6 +6,7 @@ Deux niveaux, lancés ensemble par `npm test` :
 |---|---|---|
 | `validation.test.mjs` | Règles de saisie et calculs purs, appelés directement | non |
 | `securite.test.mjs` | Empreinte des clés API, comparaison à temps constant | non |
+| `serveur.test.mjs` | Délais de connexion du serveur HTTP, sur une vraie connexion TCP | non |
 | `api.test.mjs` | Requêtes HTTP réelles sur l'application montée en mémoire | **oui** |
 
 ## Pourquoi pas de test qui relit le code source

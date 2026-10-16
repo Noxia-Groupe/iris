@@ -1,6 +1,8 @@
 import { createHmac } from 'node:crypto';
 import { test, expect } from './fixtures';
 
+const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+
 const base64url = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
 const tokenFor = (userId: string) => {
   const payload = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
@@ -25,7 +27,7 @@ test.describe('Interventions SAV', () => {
     const carte = page.locator('article').filter({ has: page.getByRole('heading', { name: titre }) });
     await expect(carte).toContainText('Demandée le 02/01/2026');
     await expect(carte).toContainText('Souhaitée le 10/01/2026');
-    const liste = await request.get('http://127.0.0.1:3001/api/interventions', { headers: { Authorization: `Bearer ${session.token}` } });
+    const liste = await request.get(`${api}/interventions`, { headers: { Authorization: `Bearer ${session.token}` } });
     expect(liste.ok()).toBeTruthy();
     const enregistree = (await liste.json() as { titre: string; dateDemande: string }[]).find((i) => i.titre === titre);
     expect(enregistree?.dateDemande).toBe('2026-01-02T00:00:00.000Z');
@@ -34,7 +36,7 @@ test.describe('Interventions SAV', () => {
   test('historique sans date de demande : pas de libellé vide dans la carte', async ({ page, request, session, creerClient }) => {
     const client = await creerClient('historique sans demande', false);
     const titre = `TEST Historique sans demande ${Date.now()}`;
-    const creation = await request.post('http://127.0.0.1:3001/api/interventions', {
+    const creation = await request.post(`${api}/interventions`, {
       headers: { Authorization: 'Bearer ' + session.token },
       data: { clientId: client.id, titre, dateSouhaitee: '10-01-2027' },
     });
@@ -58,7 +60,7 @@ test.describe('Interventions SAV', () => {
 
   test('permet au conducteur de travaux d’ouvrir la création d’intervention', async ({ page, request, session }) => {
     const headers = { Authorization: `Bearer ${session.token}` };
-    const creation = await request.post('http://127.0.0.1:3001/api/users', {
+    const creation = await request.post(`${api}/users`, {
       headers,
       data: { email: `conducteur.intervention.${Date.now()}@iris.test`, name: 'Conducteur interventions', role: 'CONDUCTEUR_TRAVAUX' },
     });
@@ -82,16 +84,16 @@ test.describe('Interventions SAV', () => {
   test('enregistre un achat SAV et réinitialise le formulaire sans erreur de page', async ({ page, request, session, creerClient }) => {
     const headers = { Authorization: `Bearer ${session.token}` };
     const client = await creerClient('achat intervention', false);
-    const contrat = await request.post('http://127.0.0.1:3001/api/contrats-maintenance', {
+    const contrat = await request.post(`${api}/contrats-maintenance`, {
       headers,
       data: { clientId: client.id, titre: `Contrat E2E achat ${Date.now()}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2026' },
     });
     expect(contrat.status(), await contrat.text()).toBe(201);
     const { id: contratId } = await contrat.json() as { id: string };
-    const intervention = await request.post(`http://127.0.0.1:3001/api/contrats-maintenance/${contratId}/generer-intervention`, { headers });
+    const intervention = await request.post(`${api}/contrats-maintenance/${contratId}/generer-intervention`, { headers });
     expect(intervention.status(), await intervention.text()).toBe(201);
     const { titre: titreIntervention } = await intervention.json() as { titre: string };
-    const fournisseur = await request.post('http://127.0.0.1:3001/api/fournisseurs', { headers, data: { nom: `Fournisseur E2E ${Date.now()}` } });
+    const fournisseur = await request.post(`${api}/fournisseurs`, { headers, data: { nom: `Fournisseur E2E ${Date.now()}` } });
     expect(fournisseur.ok(), await fournisseur.text()).toBeTruthy();
     const { id: fournisseurId, nom: fournisseurNom } = await fournisseur.json() as { id: string; nom: string };
     const erreursPage: Error[] = [];

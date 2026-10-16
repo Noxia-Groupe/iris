@@ -101,10 +101,14 @@ test.describe('Suivi des chantiers — rentabilité et dérives', () => {
       const jours = page.getByRole('spinbutton', { name: 'Nombre de jours sans saisie' });
       await seuil.fill('12.5');
       await jours.fill('');
-      page.once('dialog', (dialog) => void dialog.accept());
+      // L'alerte « Paramètres mis à jour » s'ouvre après la réponse : le test l'attend et
+      // l'accepte avant de continuer, sans quoi il pouvait se terminer pendant qu'elle s'ouvrait
+      // (« dialog.accept: Test ended »).
+      const alerte = page.waitForEvent('dialog').then(async (dialog) => { const message = dialog.message(); await dialog.accept(); return message; });
       const enregistrement = page.waitForResponse((r) => r.url().endsWith('/api/parametres') && r.request().method() === 'PUT');
       await page.locator('form').filter({ has: page.getByRole('group', { name: 'Alertes de suivi des chantiers' }) }).getByRole('button', { name: 'Enregistrer' }).click();
       expect((await enregistrement).status()).toBe(200);
+      expect(await alerte).toBe('Paramètres mis à jour');
       const apres = await (await apiAdmin.get('/parametres')).json() as { seuilMargeFaible: number | null; joursSansSaisie: number | null };
       expect(apres.seuilMargeFaible).toBe(12.5);
       expect(apres.joursSansSaisie).toBeNull();
