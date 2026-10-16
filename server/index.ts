@@ -451,6 +451,50 @@ function sansMontantsSaisie<T>(valeur: T): T {
   return copie as T;
 }
 
+// Taux horaires et coût de main-d'œuvre : réservés à l'administration (décision de Nelson du
+// 13-10-2026, précisée le 16-10-2026). Les autres comptes gardent les heures, jamais un montant
+// horaire, ni le coût de main-d'œuvre ni un total qui l'inclut, d'où l'on retrouverait le taux.
+// Les destinataires de la rentabilité gardent la marge du jour, la marge estimée et les alertes.
+// Une clé d'intégration garde son accès inchangé (scope chantiers:read).
+function voitCoutMainOeuvre(req: express.Request): boolean {
+  if ((req as ApiRequest).apiKey) return true;
+  return isAdminRole((req as AuthRequest).user?.role);
+}
+
+const CLES_TAUX_HORAIRE = ['tauxHoraireApplique', 'tauxHoraireCharge'] as const;
+
+function sansTauxHoraire<T>(valeur: T): T {
+  if (!valeur || typeof valeur !== 'object' || Array.isArray(valeur)) return valeur;
+  const copie: Record<string, unknown> = { ...(valeur as Record<string, unknown>) };
+  for (const cle of CLES_TAUX_HORAIRE) if (cle in copie) delete copie[cle];
+  if (copie.intervenant) copie.intervenant = sansTauxHoraire(copie.intervenant);
+  return copie as T;
+}
+
+// Masquage d'une saisie (achat, pointage, intervenant, instantané du journal) selon le
+// demandeur : rien au technicien, ni taux ni coût horaire aux autres comptes non administrateurs.
+function saisieSelonDroits(req: express.Request): <T>(valeur: T) => T {
+  if (!voitMontantsChantier(req)) return sansMontantsSaisie;
+  if (!voitCoutMainOeuvre(req)) return sansTauxHoraire;
+  return (valeur) => valeur;
+}
+
+// Chantier sérialisé, vu par un compte non administrateur : ni taux, ni coût de main-d'œuvre, ni
+// total qui l'inclut. Le pourcentage du budget main-d'œuvre consommé redonnerait ce coût, et les
+// hypothèses de la marge estimée un coût horaire. Les marges et les alertes restent.
+function chantierSansCoutMainOeuvre(c: any) {
+  const estimation = c.metrics?.estimation;
+  return {
+    ...c,
+    ...(Array.isArray(c.pointages) ? { pointages: c.pointages.map(sansTauxHoraire) } : {}),
+    ...(c.metrics ? { metrics: {
+      ...c.metrics,
+      moReel: null, totalDepenses: null, pctMainOeuvre: null,
+      ...(estimation ? { estimation: { ...estimation, coutEstime: null, coutMainOeuvreAttendu: null, coutHoraireReference: null } } : {}),
+    } } : {}),
+  };
+}
+
 // Chantier sérialisé, vu par un technicien : budgets par poste, coûts, taux et alertes de
 // dépassement retirés ; le pourcentage de consommation redonnerait un budget à partir du réel.
 function chantierSansMontants(c: any) {
@@ -963,15 +1007,17 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
 // global est masqué : les budgets par poste restent envoyés pour le suivi des dépassements ;
 // ils en donnent la somme, donc avec les dépenses la marge du jour.
 // Exception : au technicien, ni budgets par poste, ni coûts, ni taux, ni alertes de
-// dépassement (cf. voitMontantsChantier et chantierSansMontants).
-function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, montantsVisibles = true) {
+// dépassement (cf. voitMontantsChantier et chantierSansMontants) ; aux autres comptes non
+// administrateurs, ni taux ni coût de main-d'œuvre (cf. voitCoutMainOeuvre).
+function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, montantsVisibles = true, coutMainOeuvreVisible = true) {
   const c = decimalToNumber(chantier);
   const serialise = {
     ...c,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
     metrics: computeChantierMetrics(c, params, canSeeMarge, contexte),
   };
-  return montantsVisibles ? serialise : chantierSansMontants(serialise);
+  if (!montantsVisibles) return chantierSansMontants(serialise);
+  return coutMainOeuvreVisible ? serialise : chantierSansCoutMainOeuvre(serialise);
 }
 
 // --- Interventions SAV natives ---
@@ -2414,6 +2460,9 @@ app.get('/api/interventions/:id/couts', requireAuth, blockCommercial, async (req
     ]);
     const totalMainOeuvreHT = totalHeuresInterventionAuCentime(heures.filter((heure) => !heure.archivedAt));
     const totalMaterielHT = achats.filter((achat) => !achat.archivedAt).reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    // Un conducteur garde les heures et le matériel, mais ni taux ni coût de main-d'œuvre, ni le
+    // total qui l'inclut (cf. voitCoutMainOeuvre).
+    if (!voitCoutMainOeuvre(req)) return res.json(decimalToNumber({ heures: heures.map(sansTauxHoraire), achats, totalMainOeuvreHT: null, totalMaterielHT, totalCoutsHT: null }));
     res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT: totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP) }));
   } catch (error) { console.error('Erreur lecture coûts intervention', error); res.status(500).json({ error: 'Lecture des coûts impossible.' }); }
 });
@@ -2530,7 +2579,7 @@ app.post('/api/interventions/:id/couts/:type/:coutId/:action', requireAuth, bloc
     const motif = motifRestaurationValide(req.body?.motif); if (!motif) return res.status(400).json({ error: 'Le motif doit contenir entre 3 et 500 caractères.' });
     const archivage = action === 'archiver'; if ((archivage && cout.archivedAt) || (!archivage && !cout.archivedAt)) return res.status(409).json({ error: archivage ? 'Ce coût est déjà archivé.' : 'Ce coût est déjà actif.' });
     const resultat = await prisma.$transaction(async (tx) => { const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat; const updated = await delegate.updateMany({ where: { id: cout.id, archivedAt: archivage ? null : { not: null } }, data: archivage ? { archivedAt: new Date(), archivedById: req.user!.id, motifArchivage: motif } : { archivedAt: null, archivedById: null, motifArchivage: null } }); if (!updated.count) return null; const apres = await delegate.findUniqueOrThrow({ where: { id: cout.id } }); await journaliserCoutIntervention(tx, req, heures ? 'COUT_INTERVENTION_HEURE' : 'COUT_INTERVENTION_ACHAT', archivage ? 'ARCHIVAGE' : 'RESTAURATION', cout.id, intervention.id, cout, apres, motif); return apres; });
-    if (!resultat) return res.status(409).json({ error: 'État du coût modifié concurremment.' }); res.json(decimalToNumber(resultat));
+    if (!resultat) return res.status(409).json({ error: 'État du coût modifié concurremment.' }); res.json(saisieSelonDroits(req)(decimalToNumber(resultat)));
   } catch (error) { console.error('Erreur archivage coût intervention', error); res.status(500).json({ error: 'Opération impossible.' }); }
 });
 
@@ -2542,7 +2591,8 @@ app.get('/api/interventions/:id/journal-saisies', requireAuth, blockCommercial, 
     if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
     if (req.user!.role === ROLE_TECHNICIEN) return res.status(403).json({ error: 'Le journal financier est réservé à l’encadrement.' });
     const entrees = await prisma.journalSaisieChantier.findMany({ where: { interventionId: intervention.id }, orderBy: { createdAt: 'desc' } });
-    res.json(decimalToNumber(entrees.map((entree) => ({ ...entree, avant: chantierDuJournalReduit(entree.avant), apres: chantierDuJournalReduit(entree.apres) }))));
+    const masquer = saisieSelonDroits(req);
+    res.json(decimalToNumber(entrees.map((entree) => ({ ...entree, avant: masquer(chantierDuJournalReduit(entree.avant)), apres: masquer(chantierDuJournalReduit(entree.apres)) }))));
   } catch (error) {
     console.error('Erreur journal intervention SAV', error);
     res.status(500).json({ error: 'Erreur lors de la lecture du journal de l’intervention.' });
@@ -2970,7 +3020,8 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
     const contexte = await contexteSuivi(params.margeCommercialeActive && visibles.some(Boolean));
     const montantsVisibles = voitMontantsChantier(req);
     const user = (req as AuthRequest).user;
-    res.json(chantiers.map((c: any, i) => serializeChantier(avecDroitDeCloture(user, c), params, visibles[i], contexte, montantsVisibles)));
+    const coutMainOeuvreVisible = voitCoutMainOeuvre(req);
+    res.json(chantiers.map((c: any, i) => serializeChantier(avecDroitDeCloture(user, c), params, visibles[i], contexte, montantsVisibles, coutMainOeuvreVisible)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
   }
@@ -3018,7 +3069,7 @@ app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     // évite toute fuite de montants vers les rôles qui ne voient pas la marge.
     const { factures, ...chantierSansFactures } = chantier;
     const contexte = await contexteSuivi(canSeeMarge && params.margeCommercialeActive);
-    const detail = serializeChantier(avecDroitDeCloture(authUser, chantierSansFactures), params, canSeeMarge, contexte, voitMontantsChantier(req)) as Record<string, unknown>;
+    const detail = serializeChantier(avecDroitDeCloture(authUser, chantierSansFactures), params, canSeeMarge, contexte, voitMontantsChantier(req), voitCoutMainOeuvre(req)) as Record<string, unknown>;
     if (canSeeMarge) {
       // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
       // facture annulée est visible mais ne contribue plus, son avoir la neutralise.
@@ -3050,7 +3101,8 @@ app.get('/api/chantiers/:id/journal-saisies', requireAuth, async (req, res) => {
       orderBy: { createdAt: 'desc' },
     }));
     // Instantanés relus sans leurs montants pour un technicien : le journal reste intact en base.
-    res.json(voitMontantsChantier(req) ? entrees : entrees.map((entree: any) => ({ ...entree, avant: sansMontantsSaisie(entree.avant), apres: sansMontantsSaisie(entree.apres) })));
+    const masquer = saisieSelonDroits(req);
+    res.json(entrees.map((entree: any) => ({ ...entree, avant: masquer(entree.avant), apres: masquer(entree.apres) })));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching journal des saisies' });
   }
@@ -3785,8 +3837,8 @@ app.get('/api/conducteurs', requireAuth, async (req, res) => {
 app.get('/api/intervenants', requireAuth, async (req, res) => {
   try {
     const intervenants = decimalToNumber(await prisma.intervenant.findMany());
-    // Le taux horaire chargé de chacun n'est jamais envoyé à un technicien.
-    res.json(voitMontantsChantier(req) ? intervenants : intervenants.map(sansMontantsSaisie));
+    // Le taux horaire chargé de chacun n’est envoyé qu’à l’administration (et à une clé d’intégration).
+    res.json(intervenants.map(saisieSelonDroits(req)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching intervenants' });
   }
@@ -4740,8 +4792,8 @@ const listerHeures: express.RequestHandler = async (req, res) => {
       },
       orderBy: { date: 'desc' },
     }));
-    // Ni taux appliqué ni taux de l'intervenant pour un technicien (cf. voitMontantsChantier).
-    res.json(voitMontantsChantier(req) ? heures : heures.map(sansMontantsSaisie));
+    // Taux appliqué et taux de l'intervenant réservés à l'administration (cf. saisieSelonDroits).
+    res.json(heures.map(saisieSelonDroits(req)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching heures' });
   }
@@ -4775,7 +4827,8 @@ app.post('/api/heures', requireAuth, requireTravauxWrite, async (req, res) => {
       await journaliserSaisieTravaux(tx, req as AuthRequest, 'HEURE', 'CREATION', pointage.id, pointage.chantierId, null, pointage);
       return pointage;
     });
-    res.json(cree);
+    // Réponse masquée comme en lecture : ni taux appliqué hors administration.
+    res.json(saisieSelonDroits(req)(cree));
   } catch (error) {
     res.status(500).json({ error: 'Error creating pointage' });
   }
@@ -4828,7 +4881,7 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
       return misAJour;
     });
     if (!resultat) return res.status(409).json({ error: 'Un pointage archivé ne peut plus être corrigé.' });
-    res.json(resultat);
+    res.json(saisieSelonDroits(req)(resultat));
   } catch (error) {
     res.status(500).json({ error: 'Error updating pointage' });
   }
@@ -4882,7 +4935,7 @@ app.post('/api/heures/:id/restaurer', requireAuth, requireTravauxArchive, async 
       return actif;
     });
     if (!restaure) return res.status(409).json({ error: 'Ce pointage est déjà actif.' });
-    res.json(restaure);
+    res.json(saisieSelonDroits(req)(restaure));
   } catch (error) {
     res.status(500).json({ error: 'Error restoring pointage' });
   }
@@ -6582,6 +6635,10 @@ app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, r
       .filter((a: any) => a.nbChantiers > 0)
       .map(({ caVisible, margeVisible, ...a }: any) => ({
         ...a,
+        // Dépenses (main-d'œuvre comprise) et manque à gagner (heures en trop au taux moyen) :
+        // coût de main-d'œuvre, réservé à l'administration (cf. voitCoutMainOeuvre).
+        depensesTotal: isAdmin ? a.depensesTotal : null,
+        manqueAGagnerMainOeuvre: isAdmin ? a.manqueAGagnerMainOeuvre : null,
         caTotal: caVisible ? a.caTotal : null,
         margeTotal: margeVisible ? a.margeTotal : null,
         margePct: !margeVisible ? null : a.caTotal > 0 ? (a.margeTotal / a.caTotal) * 100 : 0,
@@ -6831,8 +6888,11 @@ app.get('/api/stats/intervenants', requireAuth, requireTravauxRead, async (req, 
       byIntervenant[p.intervenantId] = cur;
     }
 
+    // Le coût d'un intervenant, rapporté à ses heures, redonnerait son taux : réservé à
+    // l'administration (cf. voitCoutMainOeuvre).
+    const coutVisible = voitCoutMainOeuvre(req);
     const list = intervenants
-      .map((i) => ({ id: i.id, nom: i.nom, role: i.role, heures: byIntervenant[i.id]?.heures || 0, cout: byIntervenant[i.id]?.cout || 0 }))
+      .map((i) => ({ id: i.id, nom: i.nom, role: i.role, heures: byIntervenant[i.id]?.heures || 0, cout: coutVisible ? byIntervenant[i.id]?.cout || 0 : null }))
       .filter((i) => i.heures > 0)
       .sort((a, b) => b.heures - a.heures);
 

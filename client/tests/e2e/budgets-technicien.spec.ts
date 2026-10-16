@@ -93,11 +93,13 @@ test('un technicien consulte son chantier sans montant ni alerte de dépassement
     // Le N+1 voit le bouton Clôturer sur l'affaire de son technicien et la clôture.
     const vueResponsable = await pageDe(browser, responsable);
     contextes.push(vueResponsable.context());
-    // Témoin : les mêmes sections existent bien pour le N+1, qui voit les montants.
+    // Témoin : les mêmes sections existent bien pour le N+1, qui voit les montants, sauf le coût
+    // de main-d'œuvre, réservé à l'administration (lot (d), vérifié par taux-horaire.spec.ts).
     await vueResponsable.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
-    for (const section of SECTIONS_DE_MONTANTS) {
+    for (const section of SECTIONS_DE_MONTANTS.filter((section) => section !== 'Coût Main d\'Œuvre')) {
       await expect(vueResponsable.getByText(section, { exact: true }).first()).toBeVisible();
     }
+    await expect(vueResponsable.getByText('Coût Main d\'Œuvre', { exact: true })).toHaveCount(0);
     await expect(vueResponsable.locator('[data-consultation-seule]')).toHaveCount(0);
     await vueResponsable.goto('/chantiers', { waitUntil: 'networkidle' });
     // Témoin : le N+1 dispose bien des filtres de dépassement.

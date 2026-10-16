@@ -176,7 +176,7 @@ function IntervenantsTab() {
       ) : (
         <div className="divide-y divide-gray-100">
           {list.map((iv: any, i: number) => (
-            <div key={iv.id} className="flex items-center gap-4 py-3.5">
+            <div key={iv.id} data-intervenant={iv.id} className="flex items-center gap-4 py-3.5">
               <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-500 font-bold text-xs flex items-center justify-center shrink-0">#{i + 1}</div>
               <div className="min-w-0 flex-1">
                 <div className="font-bold text-gray-800 truncate">{iv.nom}</div>
@@ -189,7 +189,8 @@ function IntervenantsTab() {
               </div>
               <div className="text-right w-28 shrink-0">
                 <div className="font-black text-purple-600">{iv.heures.toFixed(1)} h</div>
-                <div className="text-xs text-gray-400">{Math.round(iv.cout).toLocaleString()} €</div>
+                {/* Coût d'un intervenant : réservé à l'administration (le serveur envoie null aux autres). */}
+                {iv.cout != null && <div className="text-xs text-gray-400">{Math.round(iv.cout).toLocaleString()} €</div>}
               </div>
             </div>
           ))}

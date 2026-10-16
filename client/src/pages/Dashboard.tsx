@@ -77,6 +77,9 @@ const Dashboard = () => {
   // marge (serveur), l'encart n'existe donc que pour ces profils.
   const portefeuille = enCours.filter(c => c.metrics?.margeEstimee != null);
   const venduEnCours = portefeuille.reduce((s, c) => s + (c.budgetGlobalVendu ?? 0), 0);
+  // Dépenses (main-d'œuvre comprise) : réservées à l'administration ; le serveur envoie null aux
+  // autres destinataires de la rentabilité, qui gardent le vendu et la marge estimée.
+  const depensesVisibles = portefeuille.every(c => c.metrics?.totalDepenses != null);
   const depenseEnCours = portefeuille.reduce((s, c) => s + (c.metrics?.totalDepenses ?? 0), 0);
   const margeEstimeeEnCours = portefeuille.reduce((s, c) => s + c.metrics.margeEstimee, 0);
   const margeEstimeeEnCoursPct = venduEnCours > 0 ? (margeEstimeeEnCours / venduEnCours) * 100 : 0;
@@ -257,16 +260,18 @@ const Dashboard = () => {
                 <h2 className="text-lg font-bold text-primary-dark m-0 flex items-center gap-2"><TrendingUp size={18} className="text-accent" /> Rentabilité des chantiers en cours</h2>
                 <span className="text-xs text-gray-400">{portefeuille.length} chantier{portefeuille.length > 1 ? 's' : ''} · estimation : réel engagé + reste à faire au coût attendu</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className={`grid grid-cols-1 gap-4 ${depensesVisibles ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                 <div>
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Vendu</div>
                   <div className="text-2xl font-black text-primary-dark mt-0.5">{euros(venduEnCours)}</div>
                 </div>
+                {depensesVisibles && (
                 <div>
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Dépensé à ce jour</div>
                   <div className="text-2xl font-black text-orange-600 mt-0.5">{euros(depenseEnCours)}</div>
                   <div className="mt-1.5"><ProgressMeter value={depenseEnCours} max={venduEnCours || 1} color="orange" size="sm" /></div>
                 </div>
+                )}
                 <div>
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge estimée en fin de chantier</div>
                   <div className={`text-2xl font-black mt-0.5 ${margeEstimeeEnCours >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-marge-portefeuille>

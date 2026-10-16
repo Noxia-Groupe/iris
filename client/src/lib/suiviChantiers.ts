@@ -28,10 +28,11 @@ export interface MetriquesChantier {
   alertes?: string[];
 }
 
-/** Hypothèses de la marge estimée en fin de chantier, telles que le serveur les a prises. */
+/** Hypothèses de la marge estimée en fin de chantier, telles que le serveur les a prises. Le coût
+ * total, celui de la main-d'œuvre et le coût horaire ne sont transmis qu'à l'administration. */
 export interface EstimationMarge {
-  coutEstime: number;
-  coutMainOeuvreAttendu: number;
+  coutEstime: number | null;
+  coutMainOeuvreAttendu: number | null;
   coutMaterielAttendu: number;
   coutHoraireReference: number | null;
   sourceCoutHoraire: 'CHANTIER' | 'SOCIETE' | 'VENDU' | 'REEL';
@@ -152,8 +153,10 @@ export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): st
       return `Heures +${nombre((m.heuresRealisees ?? 0) - chantier.heuresVendues, 1)} h`;
     // Garde défensive : un budget non communiqué ne doit jamais donner un montant de dépassement
     // (le serveur ne transmet d'ailleurs pas ces alertes au technicien, seul à ne pas voir les budgets).
+    // Le coût de main-d'œuvre, lui, n'est transmis qu'à l'administration : sans lui, l'alerte
+    // reste, sans montant.
     case 'MAIN_OEUVRE_DEPASSEE':
-      return chantier.budgetMainOeuvreVendu == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${nombre((m.moReel ?? 0) - chantier.budgetMainOeuvreVendu)} €`;
+      return chantier.budgetMainOeuvreVendu == null || m.moReel == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${nombre(m.moReel - chantier.budgetMainOeuvreVendu)} €`;
     case 'MATERIEL_DEPASSE':
       return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : `Matériel +${nombre((m.materielReel ?? 0) - chantier.budgetMaterielVendu)} €`;
   }
@@ -178,12 +181,13 @@ export function ancienneteSaisie(jours: number): string {
   return `il y a ${nombre(jours)} j`;
 }
 
-/** Libellé de l'hypothèse de coût horaire retenue pour l'estimation. */
+/** Libellé de l'hypothèse de coût horaire retenue pour l'estimation. Le coût horaire n'est
+ * transmis qu'à l'administration : sans lui, l'hypothèse est décrite sans montant. */
 export function hypotheseCoutHoraire(e: EstimationMarge): string {
-  const taux = e.coutHoraireReference != null ? `${nombre(e.coutHoraireReference, 2)} €/h` : '';
+  const taux = e.coutHoraireReference != null ? `à ${nombre(e.coutHoraireReference, 2)} €/h, ` : 'au ';
   switch (e.sourceCoutHoraire) {
-    case 'CHANTIER': return `heures vendues à ${taux}, coût moyen réellement appliqué sur ce chantier`;
-    case 'SOCIETE': return `heures vendues à ${taux}, coût moyen de la société (aucune heure encore saisie ici)`;
+    case 'CHANTIER': return `heures vendues ${taux}coût moyen réellement appliqué sur ce chantier`;
+    case 'SOCIETE': return `heures vendues ${taux}coût moyen de la société (aucune heure encore saisie ici)`;
     case 'VENDU': return 'budget main-d’œuvre vendu (aucun coût horaire connu)';
     case 'REEL': return 'coût réel (chantier terminé)';
   }

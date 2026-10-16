@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { alertesDuChantier, ancienneteSaisie, filtrerChantiers, libelleAlerte, trierChantiers, type ChantierSuivi } from '../src/lib/suiviChantiers.ts';
+import { alertesDuChantier, ancienneteSaisie, filtrerChantiers, hypotheseCoutHoraire, libelleAlerte, trierChantiers, type ChantierSuivi, type EstimationMarge } from '../src/lib/suiviChantiers.ts';
 
 const chantier = (id: string, nom: string, metrics: ChantierSuivi['metrics'] = {}, extra: Partial<ChantierSuivi> = {}): ChantierSuivi => ({
   id, nom, client: 'Client', statut: 'EN_COURS', heuresVendues: 10, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, metrics, ...extra,
@@ -84,4 +84,17 @@ test('budget non communiqué : un libellé de dépassement ne donne jamais de mo
   assert.equal(libelleAlerte('MATERIEL_DEPASSE', technicien), 'Matériel dépassé');
   assert.equal(libelleAlerte('MAIN_OEUVRE_DEPASSEE', technicien), 'Main-d’œuvre dépassée');
   assert.deepEqual(alertesDuChantier(technicien), ['MAIN_OEUVRE_DEPASSEE', 'MATERIEL_DEPASSE']);
+});
+
+test('coût de main-d’œuvre réservé à l’administration : alerte et hypothèse sans montant horaire', () => {
+  // Un conducteur reçoit le budget main-d'œuvre vendu et l'alerte, mais ni le coût réel ni le taux.
+  const conducteur = chantier('m', 'Vu par un conducteur', { moReel: null, totalDepenses: null, alertes: ['MAIN_OEUVRE_DEPASSEE'] });
+  assert.equal(libelleAlerte('MAIN_OEUVRE_DEPASSEE', conducteur), 'Main-d’œuvre dépassée');
+  assert.equal(libelleAlerte('MAIN_OEUVRE_DEPASSEE', chantier('n', 'Vu par l’administration', { moReel: 820 })), 'Main-d’œuvre +120 €');
+  const estimation = (source: EstimationMarge['sourceCoutHoraire'], coutHoraireReference: number | null): EstimationMarge => ({
+    coutEstime: null, coutMainOeuvreAttendu: null, coutMaterielAttendu: 300, coutHoraireReference, sourceCoutHoraire: source, ratioMateriel: 1, sourceMateriel: 'VENDU',
+  });
+  assert.equal(hypotheseCoutHoraire(estimation('CHANTIER', null)), 'heures vendues au coût moyen réellement appliqué sur ce chantier');
+  assert.equal(hypotheseCoutHoraire(estimation('SOCIETE', null)), 'heures vendues au coût moyen de la société (aucune heure encore saisie ici)');
+  assert.equal(hypotheseCoutHoraire(estimation('CHANTIER', 42.5)), 'heures vendues à 42,5 €/h, coût moyen réellement appliqué sur ce chantier');
 });
