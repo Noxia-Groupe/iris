@@ -88,8 +88,10 @@ export function estExcluDesOperations(role?: string | null): boolean {
  * retrouver une adresse, et le conducteur de travaux (décision du 16-10-2026). Le serveur applique
  * la permission clients:read.
  */
+export const ROLES_ANNUAIRE = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TECHNICIEN, ROLE_CONDUCTEUR];
+// Même liste pour le menu et pour la route /clients (App.tsx) : l'un ne s'ouvre pas sans l'autre.
 export function peutConsulterAnnuaire(user?: CurrentUser | null): boolean {
-  return !!user && (isAdminRole(user.role) || user.role === ROLE_TECHNICIEN || user.role === ROLE_CONDUCTEUR);
+  return !!user && ROLES_ANNUAIRE.includes(user.role || '');
 }
 
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */

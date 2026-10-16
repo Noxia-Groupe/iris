@@ -16,7 +16,7 @@ interface ClientResume {
 
 export default function Clients() {
   const navigate = useNavigate();
-  // Seule l'administration crée une fiche ; le technicien consulte l'annuaire.
+  // Seule l'administration crée une fiche ; le technicien et le conducteur consultent l'annuaire.
   const modifiable = isAdminRole(useCurrentUser()?.role);
   const [clients, setClients] = useState<ClientResume[]>([]);
   const [query, setQuery] = useState('');

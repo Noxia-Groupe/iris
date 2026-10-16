@@ -140,15 +140,26 @@ test('un conducteur consulte l’annuaire des clients depuis le menu, en consult
   const conducteur: Compte = await envoyer('post', '/users', { email: `annuaire.conducteur.${suffixe}@iris.test`, name: `Conducteur annuaire ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' });
   const client = await creerClient('annuaire-conducteur');
   await envoyer('post', `/clients/${client.id}/contacts`, { nom: 'Gardienne', prenom: 'Lucie', telephone: '06 55 44 33 22' });
-  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Annuaire conducteur E2E ${suffixe}`, lignes: [
-    { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 1234.56, tauxTva: 20 },
-  ] });
-  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
-  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
-  const sien = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  // Deux affaires du même client : la sienne, et celle d'un autre conducteur, absente de son historique.
+  const autreConducteur: Compte = await envoyer('post', '/users', { email: `annuaire.conducteur.autre.${suffixe}@iris.test`, name: `Autre conducteur annuaire ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' });
+  const ouvrirAffaire = async (objet: string) => {
+    const devis = await envoyer('post', '/devis', { clientId: client.id, objet, lignes: [
+      { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 1234.56, tauxTva: 20 },
+    ] });
+    await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+    await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+    return await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  };
+  const sien = await ouvrirAffaire(`Annuaire conducteur E2E ${suffixe}`);
+  const autre = await ouvrirAffaire(`Annuaire autre conducteur E2E ${suffixe}`);
+  // Un client désactivé, que la liste ne propose plus mais dont la fiche s'ouvre par son adresse.
+  const desactive = await creerClient('annuaire-conducteur-desactive');
+  const desactivation = await request.delete(`${api}/clients/${desactive.id}`, { headers });
+  expect(desactivation.ok(), await desactivation.text()).toBeTruthy();
   const contextes: { close: () => Promise<void> }[] = [];
   try {
     await envoyer('patch', `/chantiers/${sien.id}`, { responsableId: conducteur.id });
+    await envoyer('patch', `/chantiers/${autre.id}`, { responsableId: autreConducteur.id });
     const vue = await pageDe(browser, conducteur);
     contextes.push(vue.context());
     await vue.goto('/', { waitUntil: 'networkidle' });
@@ -171,16 +182,25 @@ test('un conducteur consulte l’annuaire des clients depuis le menu, en consult
     await expect(fiche.getByRole('heading', { name: client.raisonSociale })).toBeVisible();
     await expect(fiche.getByRole('note')).toContainText('Consultation seule');
     await expect(fiche.getByText('06 55 44 33 22', { exact: false })).toBeVisible();
-    for (const bouton of ['Ajouter le contact', 'Ajouter le site', 'Ajouter au parc']) {
+    await expect(fiche.getByText('2 rue du Parcours, 14000 Caen')).toBeVisible();
+    await expect(fiche.getByText('Client désactivé')).toHaveCount(0);
+    for (const bouton of ['Ajouter le contact', 'Ajouter le site', 'Ajouter au parc', 'Archiver']) {
       await expect(fiche.getByRole('button', { name: bouton })).toHaveCount(0);
     }
     await expect(fiche.getByRole('heading', { name: 'Parc d’équipements installés' })).toHaveCount(0);
     const historique = fiche.getByRole('region', { name: 'Historique des chantiers' });
     await expect(historique.getByRole('link', { name: sien.nom })).toBeVisible();
+    await expect(historique.getByRole('link')).toHaveCount(1);
+    await expect(fiche).not.toContainText(autre.nom);
     await expect(fiche).not.toContainText('€');
+
+    // Fiche d'un client désactivé ouverte par son adresse : elle le signale.
+    await vue.goto(`/clients/${desactive.id}`, { waitUntil: 'networkidle' });
+    await expect(fiche.getByRole('heading', { name: desactive.raisonSociale })).toBeVisible();
+    await expect(fiche.getByText('Client désactivé', { exact: true })).toBeVisible();
     expect(refus, 'requêtes refusées dans l’annuaire').toEqual([]);
   } finally {
-    await request.patch(`${api}/chantiers/${sien.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
+    for (const affaire of [sien, autre]) await request.patch(`${api}/chantiers/${affaire.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
     for (const contexte of contextes) await contexte.close().catch(() => undefined);
   }
 });
