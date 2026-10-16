@@ -81,6 +81,8 @@ En local, lancer les parcours Playwright avec `cd client && npm run test:e2e:loc
 
 `npm run test:e2e` seul suppose que ces étapes ont déjà été faites, comme dans la CI.
 
+En CI, les travaux « Backend — tests » et « parcours utilisateur » démarrent le PostgreSQL 16 préinstallé du runner Ubuntu 24.04, et non un conteneur tiré d'un registre public, dont les refus (`toomanyrequests`) faisaient échouer des jobs avant tout test. Le script `.github/scripts/postgresql-runner.sh` crée le rôle `iris` et la base jetable en UTF-8 et `C.UTF-8`, et il refuse toute autre version majeure que 16.
+
 ## Vérifier avant démarrage
 
 1. vérifier que les deux `.env` sont ignorés par Git : `git status --short` ne doit pas les afficher ;
