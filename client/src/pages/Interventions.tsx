@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
+import { SelecteurClient } from '../components/SelecteurClient';
 import { resumeCoutsIntervention } from '../lib/coutsIntervention';
 import { isAdminRole, useCurrentUser } from '../roles';
 import { useCompanyTimezone } from '../companyTimezoneContext';
@@ -35,7 +36,9 @@ export default function Interventions() {
   const formatDateOnlyOrEmpty = (value?: string | null) => value ? formatDateOnly(value) : 'Non renseignée';
   const formatCompanyDateOrEmpty = (value?: string | null) => value ? formatCompanyDate(value, companyTimezone) : 'Non renseignée';
   const [interventions, setInterventions] = useState<Intervention[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
+  const [clientIdFormulaire, setClientIdFormulaire] = useState('');
+  // Dernier client demandé : la fiche d'un client choisi puis abandonné ne doit pas s'afficher.
+  const clientDemande = useRef('');
   const [chantiers, setChantiers] = useState<Chantier[]>([]);
   const [clientFormulaire, setClientFormulaire] = useState<ClientDetail | null>(null);
   const [couts, setCouts] = useState<Record<string, CoutsIntervention>>({});
@@ -71,9 +74,9 @@ export default function Interventions() {
       setInterventions(items);
       void chargerCouts(items);
       if (estEncadrement) {
-        const [clientsRes, chantiersRes] = await Promise.all([apiFetch('/clients'), apiFetch('/chantiers')]);
-        const [clientData, chantierData] = await Promise.all([clientsRes.json(), chantiersRes.json()]);
-        if (clientsRes.ok) setClients(Array.isArray(clientData) ? clientData : (clientData.clients || []));
+        // Les clients se cherchent dans le sélecteur du formulaire (au-delà des 200 premiers, #111).
+        const chantiersRes = await apiFetch('/chantiers');
+        const chantierData = await chantiersRes.json();
         if (chantiersRes.ok) setChantiers(Array.isArray(chantierData) ? chantierData : []);
         try {
           const fournisseursRes = await apiFetch('/fournisseurs');
@@ -93,12 +96,20 @@ export default function Interventions() {
   useEffect(() => { void load(); }, [load]);
 
   const choisirClient = async (clientId: string) => {
+    clientDemande.current = clientId;
     setClientFormulaire(null);
     if (!clientId) return;
     const res = await apiFetch(`/clients/${clientId}`);
     const data = await res.json();
+    if (clientDemande.current !== clientId) return;
     if (!res.ok) return setError(data.error || 'Client introuvable.');
     setClientFormulaire(data as ClientDetail);
+  };
+
+  const fermerFormulaire = () => {
+    setFormOpen(false);
+    setClientIdFormulaire('');
+    setClientFormulaire(null);
   };
 
   const create = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -109,7 +120,7 @@ export default function Interventions() {
     const res = await apiFetch('/interventions', { method: 'POST', body: JSON.stringify(Object.fromEntries(form.entries())) });
     const data = await res.json();
     if (!res.ok) return setError(data.error || 'Création impossible.');
-    setFormOpen(false);
+    fermerFormulaire();
     await load();
   };
 
@@ -186,12 +197,12 @@ export default function Interventions() {
     {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{error}</div>}
     {formOpen && <form onSubmit={create} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
       <h2 className="font-semibold">Nouvelle intervention SAV</h2>
-      <select required name="clientId" className="form-input" defaultValue="" onChange={(event) => void choisirClient(event.target.value)}><option value="" disabled>Client concerné</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}</select>
+      <SelecteurClient id="client-intervention" name="clientId" label="Client de l’intervention" required valeur={clientIdFormulaire} onChange={(client) => { setClientIdFormulaire(client?.id ?? ''); void choisirClient(client?.id ?? ''); }} />
       {clientFormulaire && <div className="grid gap-3 sm:grid-cols-3"><select name="siteId" className="form-input" defaultValue=""><option value="">Site (facultatif)</option>{clientFormulaire.sites.map((site) => <option key={site.id} value={site.id}>{site.nom} — {site.ville}</option>)}</select><select name="contactId" className="form-input" defaultValue=""><option value="">Contact (facultatif)</option>{clientFormulaire.contacts.map((contact) => <option key={contact.id} value={contact.id}>{[contact.prenom, contact.nom].filter(Boolean).join(' ')}</option>)}</select><select name="chantierId" className="form-input" defaultValue=""><option value="">Affaire / chantier (facultatif)</option>{chantiers.filter((chantier) => chantier.client === clientFormulaire.raisonSociale).map((chantier) => <option key={chantier.id} value={chantier.id}>{chantier.numeroDevis ? `${chantier.numeroDevis} — ` : ''}{chantier.nom}</option>)}</select></div>}
       <input required name="titre" maxLength={200} className="form-input" placeholder="Objet de la demande" />
       <textarea name="description" className="form-input" placeholder="Description de la demande" />
       <div className="grid gap-3 sm:grid-cols-2"><select name="priorite" className="form-input" defaultValue="NORMALE">{Object.entries(libellePriorite).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input name="dateDemande" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date de demande (JJ-MM-AAAA)" aria-label="Date de demande (JJ-MM-AAAA)" className="form-input" /><input name="dateSouhaitee" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date souhaitée (JJ-MM-AAAA)" className="form-input" /></div>
-      <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer</button><button className="btn btn-secondary" type="button" onClick={() => setFormOpen(false)}>Annuler</button></div>
+      <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer</button><button className="btn btn-secondary" type="button" onClick={fermerFormulaire}>Annuler</button></div>
     </form>}
     {loading ? <p className="text-gray-500">Chargement…</p> : interventions.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucune intervention active.</div> : <div className="grid gap-3">{interventions.map((item) => <article key={item.id} className="rounded-xl border bg-white p-5 shadow-sm">
       <div className="flex justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">{item.reference}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale}{item.dateDemande && ` · Demandée le ${formatDateOnlyOrEmpty(item.dateDemande)}`} · Souhaitée le {formatDateOnlyOrEmpty(item.dateSouhaitee)}</p>{(item.site || item.contact || item.chantier) && <p className="text-sm text-gray-500">{item.site && `Site : ${item.site.nom}${item.site.ville ? ` (${item.site.ville})` : ''}`}{item.contact && `${item.site ? ' · ' : ''}Contact : ${[item.contact.prenom, item.contact.nom].filter(Boolean).join(' ')}`}{item.chantier && `${item.site || item.contact ? ' · ' : ''}Affaire : ${item.chantier.numeroDevis ? `${item.chantier.numeroDevis} — ` : ''}${item.chantier.nom}`}</p>}</div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>
