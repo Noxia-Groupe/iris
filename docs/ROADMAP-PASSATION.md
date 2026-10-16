@@ -42,7 +42,7 @@ Le catalogue et le plan comptable commencent vides et sont paramétrés par la s
 
   Les droits devis, saisie et archivage Travaux ne s'accordent plus à un technicien ; ceux d'un compte devenu technicien restent enregistrés sans effet et retirables ([modèle de droits](MODELE-DROITS-COMPTES.md)). L'accès financier lui est refusé de même : c'est une déduction de #123 (aucun montant), à confirmer.
 
-**Transversal — 200 clients :** Factures (#112) et Devis (#114) sont livrés ; l'[issue #111](https://github.com/Noxia-Groupe/iris/issues/111) reste ouverte pour Interventions, Contrats de maintenance, réaffectation sur la fiche chantier et lisibilité de la liste Clients. Conserver le filtre actif, les permissions et le client déjà lié ; confronter chaque écran au code courant, sans réimplémenter les deux parcours livrés.
+**Transversal — 200 clients :** Factures (#112), Devis (#114), puis Interventions et Contrats de maintenance (#137, sélecteur commun `SelecteurClient`) sont livrés ; l'[issue #111](https://github.com/Noxia-Groupe/iris/issues/111) reste ouverte pour la réaffectation sur la fiche chantier et la lisibilité de la liste Clients. Conserver le filtre actif, les permissions et le client déjà lié ; confronter chaque écran au code courant, sans réimplémenter les parcours livrés.
 
 ## Lots décidés par Nelson
 
@@ -143,7 +143,7 @@ Les constats relevés pendant les audits et la CI de #123 à #129 sont devenus l
 
 Ce classement organise l'audit du reliquat, **pas un mandat de modifier tous les domaines sans décision**. Chaque ligne devient une issue bornée puis une PR indépendante, après vérification des PR ouvertes :
 
-1. **Assainir le suivi :** confronter les cases et commentaires des issues #111, #15, #16, #19, #31, #33 et #35 au `main` actuel. Fermer seulement les critères prouvés par code et tests ; extraire les vrais manques en issues courtes avec critères de validation. Priorité immédiate candidate : les écrans restants de #111, un écran par lot cohérent.
+1. **Assainir le suivi — fait le 16-10-2026 :** #16, #19, #31 et #33 sont fermées après confrontation au `main` ; leurs reliquats sont suivis dans #135, #136 et #35. #15 (lot (i)), #35 et #111 restent ouvertes, avec un point d'étape. Priorité immédiate candidate : les écrans restants de #111 (fiche chantier, liste Clients), un écran par lot cohérent.
 2. **Finir les parcours opérationnels de base :** arbitrer les cibles supplémentaires du devis, compléter les parcours Travaux/SAV/planning et l'interface technicien, et adapter au téléphone les en-têtes des écrans encore serrés. Pour chaque lot : acteurs et droits, états avant/après, traçabilité et tests réels.
 3. **Maintenance et commissionnement :** décider du déclenchement de la récurrence (événement ou autre mécanisme nécessaire), puis livrer les profils de commission et attributions versionnées (lot (i) ; leur non-rétroactivité sur les affaires déjà calculées, prévue par l'issue #15, reste à cadrer pour le plan commercial).
 4. **Facturation exploitable et conformité :** auditer l'existant en priorité contre les conditions de mise en service ; traiter les écarts avérés dans des PR distinctes. Soumettre mentions/CGV, montants, exports et choix de facturation électronique à validation comptable/juridique et produit. La plateforme agréée et les formats ne sont pas choisis ici.
