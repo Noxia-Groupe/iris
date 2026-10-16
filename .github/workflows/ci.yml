@@ -104,30 +104,23 @@ jobs:
 
   tests:
     name: Backend — tests
-    runs-on: ubuntu-latest
+    # Version épinglée : c'est l'image Ubuntu 24.04 qui fournit PostgreSQL 16 (voir l'étape
+    # PostgreSQL ci-dessous).
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: server
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:16-alpine
-        env:
-          POSTGRES_USER: iris
-          POSTGRES_PASSWORD: iris_test
-          POSTGRES_DB: iris_test
-        ports: ['5432:5432']
-        # Sans ce contrôle de santé, les tests démarrent avant que PostgreSQL n'accepte
-        # les connexions et échouent pour une raison qui n'a rien à voir avec le code.
-        options: >-
-          --health-cmd "pg_isready -U iris -d iris_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
       DATABASE_URL: postgresql://iris:iris_test@localhost:5432/iris_test?schema=public
       TEST_DATABASE_URL: postgresql://iris:iris_test@localhost:5432/iris_test?schema=public
     steps:
       - uses: actions/checkout@v4
+      # PostgreSQL préinstallé sur le runner, et non un conteneur de service : le tirage de
+      # l'image depuis un registre public échouait par intermittence (« toomanyrequests »)
+      # avant tout test. Le script refuse toute autre version majeure que 16 et crée la base
+      # en C.UTF-8, l'ordre de tri par point de code de l'image Alpine utilisée auparavant.
+      - name: PostgreSQL 16 du runner
+        run: ../.github/scripts/postgresql-runner.sh iris_test
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -177,26 +170,16 @@ jobs:
 
   parcours:
     name: Frontend — parcours utilisateur
-    runs-on: ubuntu-latest
+    # Même PostgreSQL 16 du runner que le travail `tests`.
+    runs-on: ubuntu-24.04
     # Les tests API et jsdom ne reproduisent pas la saisie du navigateur : ce travail
     # pilote Chromium contre la SPA, le proxy Vite, le backend et PostgreSQL.
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:16-alpine
-        env:
-          POSTGRES_USER: iris
-          POSTGRES_PASSWORD: iris_test
-          POSTGRES_DB: iris_e2e
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U iris -d iris_e2e"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
       E2E_DATABASE_URL: postgresql://iris:iris_test@localhost:5432/iris_e2e?schema=public
     steps:
       - uses: actions/checkout@v4
+      - name: PostgreSQL 16 du runner
+        run: .github/scripts/postgresql-runner.sh iris_e2e
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
