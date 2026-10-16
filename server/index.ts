@@ -3159,11 +3159,14 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     for (const key of allowed) {
       if (key !== 'responsableId' && key !== 'numeroDevis' && key !== 'clientId' && key in req.body) data[key] = req.body[key];
     }
-    if (isAdminRole(authUser.role) && 'clientId' in req.body) {
+    // Un client renvoyé à l'identique n'est pas un changement : la fiche d'un chantier dont le
+    // client a été désactivé depuis reste modifiable (#111). Seul un nouveau client doit être
+    // actif, et une affaire déjà facturée n'en change pas.
+    if (isAdminRole(authUser.role) && 'clientId' in req.body && String(req.body.clientId || '') !== existant.clientId) {
       const cibleId = String(req.body.clientId || '');
       const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true } });
       if (!cible) return res.status(404).json({ error: 'Client introuvable.' });
-      if (existant.clientId !== cibleId && await prisma.facture.count({ where: { OR: [
+      if (await prisma.facture.count({ where: { OR: [
         { chantierId: existant.id },
         { intervention: { is: { chantierId: existant.id } } },
       ] } })) {

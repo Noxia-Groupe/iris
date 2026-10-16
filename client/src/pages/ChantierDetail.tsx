@@ -6,6 +6,7 @@ import {
   Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, RotateCcw, X, MapPin, Search,
 } from 'lucide-react';
 import { apiFetch } from '../api';
+import { SelecteurClient, type ClientActuel } from '../components/SelecteurClient';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
 import { TYPES_CHANTIER } from '../chantierTypes';
@@ -78,7 +79,9 @@ const ChantierDetail = () => {
   // au conducteur responsable ; le serveur (PATCH /api/chantiers/:id) refuse déjà la requête
   // à quiconque d'autre.
   const [conducteurs, setConducteurs] = useState<any[]>([]);
-  const [clients, setClients] = useState<any[]>([]);
+  // Client lié, choisi par l'administration dans la fenêtre d'édition (#111).
+  const [editClientId, setEditClientId] = useState('');
+  const [clientActuel, setClientActuel] = useState<ClientActuel | null>(null);
   const [editingChantier, setEditingChantier] = useState(false);
   const [savingChantier, setSavingChantier] = useState(false);
   // Responsable et commercial de la modale : champs CONTRÔLÉS, contrairement aux autres.
@@ -194,8 +197,17 @@ const ChantierDetail = () => {
   const startEditChantier = () => {
     if (conducteurs.length === 0) fetchConducteurs();
     if (commerciaux.length === 0) fetchCommerciaux();
-    // GET /api/clients renvoie { clients: [...] } : lire les deux formes évite un select vide.
-    if (isAdminRole(userRole) && clients.length === 0) apiFetch('/clients').then(res => res.ok ? res.json() : null).then(data => { const liste = Array.isArray(data) ? data : data?.clients; if (Array.isArray(liste)) setClients(liste); }).catch(() => {});
+    // Le client lié reste proposé même au-delà des 200 premiers ou désactivé : sa fiche donne
+    // sa raison sociale et son état. En attendant (ou si elle ne se charge pas), une étiquette
+    // neutre : le libellé historique du chantier peut désigner un ancien client.
+    if (isAdminRole(userRole)) {
+      const lie = chantier?.clientId || '';
+      setEditClientId(lie);
+      setClientActuel(lie ? { id: lie, raisonSociale: 'Client actuellement lié' } : null);
+      if (lie) apiFetch(`/clients/${lie}`).then(res => res.ok ? res.json() : null).then(data => {
+        if (data?.id === lie) setClientActuel({ id: data.id, raisonSociale: data.raisonSociale, actif: data.actif });
+      }).catch(() => {});
+    }
     setEditResponsableId(chantier?.responsable?.id || '');
     setEditCommercialId(chantier?.commercial?.id || '');
     setEditingChantier(true);
@@ -212,10 +224,19 @@ const ChantierDetail = () => {
     // (« Chantier introuvable ») alors que la réattribution est faite.
     const commercialId = String(formData.get('commercialId') || '');
     formData.delete('commercialId');
+    // Client : lu dans l'état du sélecteur, pas dans le formulaire, dont il sort quand le
+    // sélecteur est désactivé (chargement de la liste, recherche en cours). Une recherche
+    // désélectionne le client : on refuse alors l'envoi. Il n'est envoyé que s'il change.
+    formData.delete('clientId');
+    let clientChange: string | null = null;
+    if (isAdminRole(userRole)) {
+      if (!editClientId) { alert('Choisissez un client.'); return; }
+      if (editClientId !== (chantier?.clientId || '')) clientChange = editClientId;
+    }
     const responsableId = String(formData.get('responsableId') || '');
     // Case à cocher unique : absente de FormData quand décochée, on la force donc à
     // explicitement true/false pour que décocher l'enregistre bien (cf. 'types' ci-dessous).
-    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), baremeReduit: formData.get('baremeReduit') === 'true' };
+    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), baremeReduit: formData.get('baremeReduit') === 'true', ...(clientChange ? { clientId: clientChange } : {}) };
     setSavingChantier(true);
     // Le commercial, enregistré d'abord, le reste si la suite échoue : le message le dit.
     let commercialEnregistre = false;
@@ -1333,12 +1354,9 @@ const ChantierDetail = () => {
                 <input required name="nom" defaultValue={chantier.nom} className="form-input" />
               </div>
               <div className="form-group mb-0">
-                <label className="form-label">Client</label>
+                <label className="form-label" htmlFor={isAdminRole(userRole) ? 'client-chantier' : undefined}>Client</label>
                 {isAdminRole(userRole) ? (
-                  <select required name="clientId" defaultValue={chantier.clientId || ''} className="form-input">
-                    <option value="" disabled>Sélectionner la fiche client…</option>
-                    {clients.map(client => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
-                  </select>
+                  <SelecteurClient id="client-chantier" name="clientId" label="Client du chantier" required valeur={editClientId} onChange={(client) => setEditClientId(client?.id ?? '')} clientActuel={clientActuel} />
                 ) : <input readOnly value={chantier.client} className="form-input bg-gray-50" />}
               </div>
               <div className="form-group mb-0">

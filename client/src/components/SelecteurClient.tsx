@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api';
 
 export type ClientResume = { id: string; raisonSociale: string };
+export type ClientActuel = ClientResume & { actif?: boolean };
 
 // Plafond de GET /api/clients : au-delà, il faut affiner la recherche.
 const LIMITE_CLIENTS = 200;
@@ -13,6 +14,9 @@ type Props = {
   valeur: string;
   onChange: (client: ClientResume | null) => void;
   required?: boolean;
+  /** Client déjà lié (fiche chantier) : proposé hors recherche même s'il est au-delà des 200
+   * premiers ou désactivé, pour que l'enregistrer tel quel ne le remplace jamais. */
+  clientActuel?: ClientActuel | null;
 };
 
 /**
@@ -21,7 +25,7 @@ type Props = {
  * les autres. Les réponses périmées sont ignorées. Modifier la recherche désélectionne le client :
  * le formulaire ne garde jamais un client qui n'est plus proposé.
  */
-export function SelecteurClient({ id, name, label, valeur, onChange, required }: Props) {
+export function SelecteurClient({ id, name, label, valeur, onChange, required, clientActuel }: Props) {
   const [initiaux, setInitiaux] = useState<ClientResume[]>([]);
   const [chargementInitial, setChargementInitial] = useState(true);
   const [erreurInitiale, setErreurInitiale] = useState('');
@@ -78,9 +82,11 @@ export function SelecteurClient({ id, name, label, valeur, onChange, required }:
 
   const enRecherche = resultats !== null;
   const options = resultats ?? initiaux;
+  // Hors recherche, le client déjà lié reste proposé s'il manque à la liste initiale.
+  const actuelAjoute = !enRecherche && clientActuel && !options.some((c) => c.id === clientActuel.id) ? clientActuel : null;
   const enCours = enRecherche ? rechercheEnCours : chargementInitial;
   const erreur = enRecherche ? erreurRecherche : erreurInitiale;
-  const choisir = (clientId: string) => onChange(options.find((c) => c.id === clientId) ?? null);
+  const choisir = (clientId: string) => onChange(options.find((c) => c.id === clientId) ?? (actuelAjoute?.id === clientId ? actuelAjoute : null));
 
   return (
     <div>
@@ -89,6 +95,7 @@ export function SelecteurClient({ id, name, label, valeur, onChange, required }:
       <select id={id} name={name} aria-label={label} required={required} className="form-input mt-1" value={valeur} disabled={enCours || Boolean(erreur)} onChange={(e) => choisir(e.target.value)}>
         <option value="">Client concerné</option>
         {options.map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
+        {actuelAjoute && <option value={actuelAjoute.id}>{actuelAjoute.raisonSociale}{actuelAjoute.actif === false ? ' (client désactivé)' : ''}</option>}
       </select>
       {enCours && <p role="status" className="text-sm text-gray-500">{enRecherche ? 'Recherche en cours…' : 'Chargement des clients…'}</p>}
       {erreur && <p role="alert" className="text-sm text-red-600">{erreur}</p>}
