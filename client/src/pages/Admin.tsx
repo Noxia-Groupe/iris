@@ -6,6 +6,7 @@ import { refreshModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
 import OuvrirChantierAffaire from '../components/OuvrirChantierAffaire';
 import JournalAdministration from '../components/JournalAdministration';
+import { DROITS_DEVIS, droitsApresBasculeDevis, etatDroitDevis } from '../lib/droitDevis';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 
@@ -183,8 +184,6 @@ function ChoixResponsable({ compte, responsableActuel, responsableDesactive, des
   );
 }
 
-// Le droit d'établir un devis comprend le référentiel minimal nécessaire pour choisir le client.
-const DROITS_DEVIS = ['devis:read', 'devis:write', 'clients:read'];
 const DROIT_TRAVAUX_CORRECTION = 'chantiers:write';
 const DROIT_TRAVAUX_ARCHIVAGE = 'chantiers:archive';
 // Droits individuels qu'un technicien ne reçoit pas (miroir du serveur ; l'accès financier, lui,
@@ -537,6 +536,10 @@ const Admin = () => {
     const suivantes = toutesActives
       ? permissions.filter((item) => !cible.includes(item))
       : [...new Set([...permissions, ...cible])];
+    await enregistrerPermissions(userId, suivantes);
+  };
+
+  const enregistrerPermissions = async (userId: string, suivantes: string[]) => {
     try {
       const res = await apiFetch(`/users/${userId}/permissions`, { method: 'PUT', body: JSON.stringify({ permissions: suivantes }) });
       if (!res.ok) {
@@ -1328,8 +1331,7 @@ const Admin = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {users.map(u => {
-                  const aLeDroitDevis = DROITS_DEVIS.every((permission) => (u.permissions || []).includes(permission));
-                  const droitDevisVientDuRole = aLeDroitDevis && !DROITS_DEVIS.every((permission) => (u.permissionsIndividuelles || []).includes(permission));
+                  const { coche: aLeDroitDevis, vientDuRole: droitDevisVientDuRole } = etatDroitDevis(u.permissions || [], u.permissionsIndividuelles || []);
                   const peutCorrigerTravaux = (u.permissions || []).includes(DROIT_TRAVAUX_CORRECTION);
                   const peutArchiverTravaux = (u.permissions || []).includes(DROIT_TRAVAUX_ARCHIVAGE);
                   const correctionVientDuRole = peutCorrigerTravaux && !(u.permissionsIndividuelles || []).includes(DROIT_TRAVAUX_CORRECTION);
@@ -1437,7 +1439,7 @@ const Admin = () => {
                     </td>
                     <td className="px-4 py-4">
                       <label className={`flex items-center gap-2 w-fit ${isSuper ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <input type="checkbox" aria-label={`Droit devis — ${u.name}`} checked={estTechnicien ? devisSansEffet : aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole || (estTechnicien && !devisSansEffet)} onChange={() => (estTechnicien ? retirer(DROITS_DEVIS) : handleTogglePermission(u.id, individuels, DROITS_DEVIS))} className="w-4 h-4" title={estTechnicien ? titreTechnicien(devisSansEffet) : droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
+                        <input type="checkbox" aria-label={`Droit devis — ${u.name}`} checked={estTechnicien ? devisSansEffet : aLeDroitDevis} disabled={!isSuper || droitDevisVientDuRole || (estTechnicien && !devisSansEffet)} onChange={() => (estTechnicien ? retirer(DROITS_DEVIS) : enregistrerPermissions(u.id, droitsApresBasculeDevis(individuels, aLeDroitDevis)))} className="w-4 h-4" title={estTechnicien ? titreTechnicien(devisSansEffet) : droitDevisVientDuRole ? 'Droit accordé par le type de compte' : 'Autoriser la consultation et la création de devis'} />
                         <span className="text-xs text-gray-500">{devisSansEffet ? 'Sans effet' : 'Droit devis'}</span>
                       </label>
                     </td>

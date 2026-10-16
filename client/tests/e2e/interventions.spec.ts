@@ -80,8 +80,12 @@ test.describe('Interventions SAV', () => {
     await page.getByRole('button', { name: 'Nouvelle intervention' }).click();
     await expect(page.getByRole('heading', { name: 'Nouvelle intervention SAV' })).toBeVisible();
     await expect(page.locator('select[name="clientId"]')).toHaveValue('');
-    await expect(page.getByText(/Permission requise/)).toHaveCount(0);
+    // La fiche du client (sites, contacts, chantiers) se lit elle aussi avec clients:read.
+    const fiche = page.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname.endsWith(`/api/clients/${client.id}`));
     await choisirClient(page, client);
+    expect((await fiche).status()).toBe(200);
+    await expect(page.locator('select[name="siteId"]')).toBeVisible();
+    await expect(page.getByText(/Permission requise/)).toHaveCount(0);
     const titre = `TEST Intervention du conducteur ${Date.now()}`;
     await page.getByPlaceholder('Objet de la demande').fill(titre);
     await page.getByPlaceholder('Date de demande (JJ-MM-AAAA)').fill(dateDuJour());
