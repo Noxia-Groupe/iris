@@ -39,8 +39,9 @@ import { CompanyTimezoneProvider } from './companyTimezone';
 const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
 const ROLES_INTERVENTIONS = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
 const ROLES_TRAVAUX = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE];
-// Annuaire des clients : tenu par l'administration, consulté par le technicien (cf. peutConsulterAnnuaire).
-const ROLES_ANNUAIRE = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TECHNICIEN];
+// Annuaire des clients : tenu par l'administration, consulté par le technicien et le conducteur
+// (cf. peutConsulterAnnuaire).
+const ROLES_ANNUAIRE = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TECHNICIEN, ROLE_CONDUCTEUR];
 
 const PrivateRoute = ({ children, requiredRoles, horsOperations }: { children: JSX.Element, requiredRoles?: string[], horsOperations?: boolean }) => {
   const token = localStorage.getItem('token');

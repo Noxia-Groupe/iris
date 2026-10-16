@@ -126,6 +126,65 @@ test('un technicien consulte l’annuaire des clients et l’historique de ses c
   }
 });
 
+// Décision de Nelson (16-10-2026) : le conducteur de travaux consulte lui aussi l'annuaire des
+// clients, depuis le menu, en consultation seule ; l'historique ne lui montre que ses chantiers.
+test('un conducteur consulte l’annuaire des clients depuis le menu, en consultation seule', async ({ creerClient, request, session, browser }) => {
+  test.slow();
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const envoyer = async (methode: 'post' | 'patch' | 'put', path: string, data: object) => {
+    const response = await request[methode](`${api}${path}`, { headers, data });
+    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+    return response.json();
+  };
+  const suffixe = Date.now();
+  const conducteur: Compte = await envoyer('post', '/users', { email: `annuaire.conducteur.${suffixe}@iris.test`, name: `Conducteur annuaire ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' });
+  const client = await creerClient('annuaire-conducteur');
+  await envoyer('post', `/clients/${client.id}/contacts`, { nom: 'Gardienne', prenom: 'Lucie', telephone: '06 55 44 33 22' });
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Annuaire conducteur E2E ${suffixe}`, lignes: [
+    { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 1234.56, tauxTva: 20 },
+  ] });
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const sien = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  const contextes: { close: () => Promise<void> }[] = [];
+  try {
+    await envoyer('patch', `/chantiers/${sien.id}`, { responsableId: conducteur.id });
+    const vue = await pageDe(browser, conducteur);
+    contextes.push(vue.context());
+    await vue.goto('/', { waitUntil: 'networkidle' });
+    const refus: string[] = [];
+    vue.on('response', (reponse) => {
+      if (reponse.url().includes('/api/') && reponse.status() >= 400) refus.push(`${reponse.status()} ${reponse.request().method()} ${reponse.url()}`);
+    });
+
+    // Le menu propose l'annuaire dans les référentiels.
+    await vue.locator('#menu-principal').getByRole('group', { name: 'Référentiels' }).getByRole('link', { name: 'Clients' }).click();
+    await expect(vue).toHaveURL(/\/clients$/);
+    await expect(vue.getByRole('heading', { name: 'Clients', level: 1 })).toBeVisible();
+    await expect(vue.getByRole('button', { name: 'Nouveau client' })).toHaveCount(0);
+    await vue.getByRole('searchbox', { name: 'Rechercher un client' }).fill(client.raisonSociale);
+    await vue.getByRole('link', { name: new RegExp(client.raisonSociale) }).click();
+
+    // Fiche en consultation seule, sans formulaire ni parc ; historique limité à ses chantiers.
+    await expect(vue).toHaveURL(new RegExp(`/clients/${client.id}$`));
+    const fiche = vue.locator('main');
+    await expect(fiche.getByRole('heading', { name: client.raisonSociale })).toBeVisible();
+    await expect(fiche.getByRole('note')).toContainText('Consultation seule');
+    await expect(fiche.getByText('06 55 44 33 22', { exact: false })).toBeVisible();
+    for (const bouton of ['Ajouter le contact', 'Ajouter le site', 'Ajouter au parc']) {
+      await expect(fiche.getByRole('button', { name: bouton })).toHaveCount(0);
+    }
+    await expect(fiche.getByRole('heading', { name: 'Parc d’équipements installés' })).toHaveCount(0);
+    const historique = fiche.getByRole('region', { name: 'Historique des chantiers' });
+    await expect(historique.getByRole('link', { name: sien.nom })).toBeVisible();
+    await expect(fiche).not.toContainText('€');
+    expect(refus, 'requêtes refusées dans l’annuaire').toEqual([]);
+  } finally {
+    await request.patch(`${api}/chantiers/${sien.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
+    for (const contexte of contextes) await contexte.close().catch(() => undefined);
+  }
+});
+
 // L'historique ne bloque pas la fiche : s'il ne se charge pas, sa section le dit et le reste de
 // la fiche (coordonnées, contacts, sites) reste consultable.
 test('fiche client : un historique en échec est signalé dans sa section, sans bloquer la fiche', async ({ creerClient, page, allerSurPageAdmin }) => {

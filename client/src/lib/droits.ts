@@ -84,11 +84,12 @@ export function estExcluDesOperations(role?: string | null): boolean {
 
 /**
  * Annuaire des clients (clients, contacts, sites) : les administrateurs, qui le tiennent à jour,
- * et le technicien, en consultation seule (décision de Nelson du 13-10-2026), par exemple pour
- * retrouver une adresse. Le serveur applique la permission clients:read.
+ * puis, en consultation seule, le technicien (décision de Nelson du 13-10-2026), par exemple pour
+ * retrouver une adresse, et le conducteur de travaux (décision du 16-10-2026). Le serveur applique
+ * la permission clients:read.
  */
 export function peutConsulterAnnuaire(user?: CurrentUser | null): boolean {
-  return !!user && (isAdminRole(user.role) || user.role === ROLE_TECHNICIEN);
+  return !!user && (isAdminRole(user.role) || user.role === ROLE_TECHNICIEN || user.role === ROLE_CONDUCTEUR);
 }
 
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */
