@@ -240,7 +240,7 @@ if (!TEST_DATABASE_URL) {
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
       'ouverture.conducteur@iris.test', 'ouverture.autre.conducteur@iris.test', 'ouverture.commercial@iris.test', 'ouverture.commercial.inactif@iris.test', 'ouverture.ancien.conducteur@iris.test',
       'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
-      'fiche111.titulaire@iris.test',
+      'fiche111.titulaire@iris.test', 'permissions.autre@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -2520,8 +2520,12 @@ if (!TEST_DATABASE_URL) {
       assert.equal(admin.status, 200);
       assert.deepEqual(admin.body.map((c) => c.id), [chantiers.enCours.id, chantiers.collegue.id, chantiers.vendu.id, chantiers.termine.id]);
       sansMontant(admin.body, 'administration');
+      // Le conducteur lit les clients depuis le 16-10-2026 : il ne voit que le chantier dont il est chargé.
+      const conducteur = await historique(jetons.conducteur);
+      assert.equal(conducteur.status, 200, JSON.stringify(conducteur.body));
+      assert.deepEqual(conducteur.body.map((c) => c.id), [chantiers.vendu.id]);
+      sansMontant(conducteur.body, 'conducteur');
       // Sans l'annuaire (clients:read), pas d'historique ; un client inconnu répond 404.
-      assert.equal((await historique(jetons.conducteur)).status, 403);
       assert.equal((await historique(jetons.directeur)).status, 403);
       assert.equal((await request(app).get('/api/clients/00000000-0000-0000-0000-000000000000/chantiers').set(auth)).status, 404);
     });
@@ -3072,7 +3076,7 @@ if (!TEST_DATABASE_URL) {
     test('refuse un devis sans permission, puis l’autorise après attribution individuelle', async () => {
       const corps = { clientId, objet: 'TEST Devis permission', lignes: [{ designation: 'Test', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] };
       assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 403);
-      assert.equal((await request(app).get(`/api/clients/${clientId}`).set('Authorization', `Bearer ${conducteurSession}`)).status, 403);
+      assert.equal((await request(app).get('/api/devis').set('Authorization', `Bearer ${conducteurSession}`)).status, 403);
       const avant = await request(app).get('/api/me').set('Authorization', `Bearer ${conducteurSession}`);
       assert.equal(avant.status, 200);
       assert.equal(avant.body.permissions.includes('devis:read'), false);
@@ -3082,6 +3086,53 @@ if (!TEST_DATABASE_URL) {
       assert.equal(apres.body.permissions.includes('devis:read'), true);
       assert.equal((await request(app).get(`/api/clients/${clientId}`).set('Authorization', `Bearer ${conducteurSession}`)).status, 200);
       assert.equal((await request(app).post('/api/devis').set('Authorization', `Bearer ${conducteurSession}`).send(corps)).status, 201);
+    });
+
+    test('le conducteur lit les clients par son type de compte, sans les modifier (décision du 16-10-2026)', async () => {
+      const auth = { Authorization: `Bearer ${conducteurSession}` };
+      const conducteur = await prisma.user.findUniqueOrThrow({ where: { id: conducteurId } });
+      // Sans permission individuelle, le droit vient du type de compte.
+      if (conducteur.permissions.length) await prisma.user.update({ where: { id: conducteurId }, data: { permissions: [] } });
+      const me = await request(app).get('/api/me').set(auth);
+      assert.equal(me.status, 200);
+      assert.deepEqual(me.body.permissions, ['chantiers:read', 'chantiers:write', 'clients:read']);
+      // Recherche et fiche, comme dans le sélecteur de « Nouvelle intervention ».
+      const recherche = await request(app).get(`/api/clients?q=${encodeURIComponent('TEST Client permissions')}`).set(auth);
+      assert.equal(recherche.status, 200, JSON.stringify(recherche.body));
+      assert.ok(recherche.body.clients.some((c) => c.id === clientId));
+      assert.equal((await request(app).get(`/api/clients/${clientId}`).set(auth)).status, 200);
+      // Aucune écriture dans l'annuaire, ni parc d'équipements, ni devis.
+      const contact = await prisma.clientContact.create({ data: { clientId, nom: 'TEST Contact existant' } });
+      const site = await prisma.clientSite.create({ data: { clientId, nom: 'TEST Site existant', adresse: '1 rue du Test', codePostal: '75001', ville: 'Paris' } });
+      const refus = [
+        ['création de client', () => request(app).post('/api/clients').set(auth).send({ raisonSociale: 'TEST Client par un conducteur' })],
+        ['modification de client', () => request(app).put(`/api/clients/${clientId}`).set(auth).send({ raisonSociale: 'TEST Renommé par un conducteur' })],
+        ['suppression de client', () => request(app).delete(`/api/clients/${clientId}`).set(auth)],
+        ['création de contact', () => request(app).post(`/api/clients/${clientId}/contacts`).set(auth).send({ nom: 'TEST Contact conducteur' })],
+        ['modification de contact', () => request(app).put(`/api/clients/${clientId}/contacts/${contact.id}`).set(auth).send({ nom: 'TEST Contact modifié par un conducteur' })],
+        ['création de site', () => request(app).post(`/api/clients/${clientId}/sites`).set(auth).send({ nom: 'TEST Site conducteur', adresse: '2 rue du Test', codePostal: '75002', ville: 'Paris' })],
+        ['modification de site', () => request(app).put(`/api/clients/${clientId}/sites/${site.id}`).set(auth).send({ nom: 'TEST Site modifié par un conducteur' })],
+        ['parc d’équipements', () => request(app).get(`/api/clients/${clientId}/equipements`).set(auth)],
+        ['devis', () => request(app).get('/api/devis').set(auth)],
+      ];
+      for (const [quoi, appel] of refus) assert.equal((await appel()).status, 403, quoi);
+      assert.equal(await prisma.client.count({ where: { raisonSociale: { in: ['TEST Client par un conducteur', 'TEST Renommé par un conducteur'] } } }), 0);
+      assert.equal(await prisma.client.count({ where: { id: clientId } }), 1);
+      assert.equal(await prisma.clientContact.count({ where: { clientId, nom: { in: ['TEST Contact conducteur', 'TEST Contact modifié par un conducteur'] } } }), 0);
+      assert.equal(await prisma.clientSite.count({ where: { clientId, nom: { in: ['TEST Site conducteur', 'TEST Site modifié par un conducteur'] } } }), 0);
+      // L'historique du client ne montre que ses chantiers à lui, sans montant.
+      const autre = await prisma.user.create({ data: { email: 'permissions.autre@iris.test', name: 'TEST Permissions autre conducteur', role: 'CONDUCTEUR_TRAVAUX' } });
+      const sien = await prisma.chantier.create({ data: { nom: 'TEST Chantier client du conducteur', client: 'TEST Client permissions', clientId, responsableId: conducteurId, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const pasLeSien = await prisma.chantier.create({ data: { nom: 'TEST Chantier client d’un autre', client: 'TEST Client permissions', clientId, responsableId: autre.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const historique = await request(app).get(`/api/clients/${clientId}/chantiers`).set(auth);
+      assert.equal(historique.status, 200, JSON.stringify(historique.body));
+      assert.deepEqual(historique.body.map((c) => c.id), [sien.id]);
+      assert.equal(historique.body.some((c) => c.id === pasLeSien.id), false);
+      // Exactement les champs de l'historique, sans aucun montant ni référence d'affaire.
+      assert.deepEqual(Object.keys(historique.body[0]).sort(), ['adresse', 'dateDebut', 'dateFin', 'id', 'nom', 'statut']);
+      // Il crée l'intervention SAV de ce client.
+      const intervention = await request(app).post('/api/interventions').set(auth).send({ clientId, titre: 'TEST Intervention créée par le conducteur' });
+      assert.equal(intervention.status, 201, JSON.stringify(intervention.body));
     });
 
     test('/api/me expose les droits hérités du type de compte, pas seulement les individuels', async () => {
