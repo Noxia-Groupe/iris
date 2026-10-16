@@ -374,7 +374,7 @@ export default function Factures() {
           <h1 className="text-2xl font-bold">Factures</h1>
           <p className="text-gray-500">Facturation française native et numérotation attribuée à l’émission.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">
           <button className="btn btn-secondary" onClick={() => void charger()}><RefreshCw size={16} /> Actualiser</button>
           <button className="btn btn-secondary" onClick={() => void exporter()}><Download size={16} /> Export comptable</button>
           <button className="btn btn-primary" onClick={ouvrirFormulaire}><FilePlus2 size={16} /> Nouvelle facture</button>
@@ -534,7 +534,7 @@ export default function Factures() {
           </tbody>
         </table>
       </div>
-      <nav data-testid="pagination-factures" aria-label="Pagination des factures" className="flex items-center justify-between gap-3 text-sm">
+      <nav data-testid="pagination-factures" aria-label="Pagination des factures" className="flex flex-wrap items-center justify-between gap-3 text-sm">
         <button type="button" className="btn btn-secondary" disabled={page <= 1} onClick={() => changerPage(page - 1)}>Page précédente</button>
         <span>Page {page} sur {nombrePages} — {total} document(s)</span>
         <button type="button" className="btn btn-secondary" disabled={page >= nombrePages} onClick={() => changerPage(page + 1)}>Page suivante</button>

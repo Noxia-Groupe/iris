@@ -93,14 +93,14 @@ const MesCommerciaux = () => {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-primary-dark m-0 flex items-center gap-2"><Award size={22} /> Mes Commerciaux</h1>
           <p className="text-sm text-muted mt-1">
             Classés par chiffre d'affaires vendu (mois ou année civile en cours, navigable). Visible uniquement par les administrateurs.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+        <div className="flex flex-wrap items-center gap-2 xl:shrink-0">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
             {(['month', 'quarter', 'year'] as const).map((g) => (
               <button
@@ -113,9 +113,10 @@ const MesCommerciaux = () => {
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
+          {/* Sur un téléphone étroit, le libellé se replie pour garder ‹ › sur la même ligne. */}
+          <div className="flex max-w-full items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
             <button type="button" onClick={() => setCommerciauxRef(decalerReference(commerciauxRef, commerciauxPeriod, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Période précédente">‹</button>
-            <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap">
+            <span className="min-w-0 flex-1 text-center text-sm font-semibold text-gray-700 px-2 sm:flex-none sm:whitespace-nowrap">
               {commerciauxMeta ? periodLabelComm(commerciauxPeriod, commerciauxMeta.periodStart) : '…'}
             </span>
             <button type="button" onClick={() => setCommerciauxRef(decalerReference(commerciauxRef, commerciauxPeriod, 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Période suivante">›</button>
@@ -138,14 +139,14 @@ const MesCommerciaux = () => {
                   className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer"
                   onClick={() => setExpandedCommercialId(isExpanded ? null : c.id)}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 font-bold text-sm flex items-center justify-center shrink-0">#{i + 1}</div>
-                    <div>
-                      <div className="font-bold text-gray-800">{c.name}</div>
-                      <div className="text-xs text-muted">{c.email} · {c.nbChantiers} chantier{c.nbChantiers > 1 ? 's' : ''}</div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-gray-800 break-words">{c.name}</div>
+                      <div className="text-xs text-muted break-all">{c.email} · {c.nbChantiers} chantier{c.nbChantiers > 1 ? 's' : ''}</div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex flex-wrap items-center gap-4">
                     <div className="text-right">
                       <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">CA validé</div>
                       <div className="font-bold text-gray-800">{fmtEuro(c.caTotal)}</div>

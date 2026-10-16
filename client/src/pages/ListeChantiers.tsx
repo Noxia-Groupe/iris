@@ -40,7 +40,7 @@ function Compteur({ valeur, libelle, icone, actif, alerte = false, onClick }: { 
       type="button"
       onClick={onClick}
       aria-pressed={actif}
-      className={`bg-white p-4 rounded-xl shadow-sm border text-left flex items-start gap-3 transition-colors hover:bg-gray-50 ${actif ? 'border-accent' : alerte ? 'border-red-200' : 'border-gray-100'}`}
+      className={`bg-white p-4 rounded-xl shadow-sm border text-left flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 transition-colors hover:bg-gray-50 ${actif ? 'border-accent' : alerte ? 'border-red-200' : 'border-gray-100'}`}
     >
       <div className={`p-2 rounded-lg ${alerte ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-accent'}`}>{icone}</div>
       <div>
@@ -348,7 +348,7 @@ const ListeChantiers = () => {
           <Compteur valeur={nbEnPerte} libelle="En perte" icone={<TrendingDown size={18} />} alerte={nbEnPerte > 0}
             actif={filtre === 'EN_PERTE'} onClick={() => majParametre('filtre', 'EN_PERTE', 'TOUS')} />
         )}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
           <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600"><CheckCircle2 size={18} /></div>
           <div>
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Dans le budget</div>
@@ -370,12 +370,12 @@ const ListeChantiers = () => {
               className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm"
             />
           </label>
-          <label className="flex items-center gap-2 text-sm font-semibold text-gray-500">
+          <label className="flex min-w-0 max-w-full items-center gap-2 text-sm font-semibold text-gray-500">
             Trier
             <select
               value={tri}
               onChange={(e) => majParametre('tri', e.target.value, 'PRIORITE')}
-              className="border border-gray-200 rounded-lg px-2 py-2 text-sm font-normal"
+              className="min-w-0 max-w-full border border-gray-200 rounded-lg px-2 py-2 text-sm font-normal"
             >
               {trisProposes.map((t) => <option key={t.valeur} value={t.valeur}>{t.libelle}</option>)}
             </select>

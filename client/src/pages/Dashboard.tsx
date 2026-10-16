@@ -141,7 +141,7 @@ const Dashboard = () => {
           mois/l'année sélectionné ci-dessus (periodLabel). */}
       {globalStats && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
             <div className="p-2 rounded-lg bg-blue-50 text-accent"><Building2 size={18} /></div>
             <div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Chantiers en cours</div>
@@ -153,7 +153,7 @@ const Dashboard = () => {
 
           {/* Instantané indépendant de la période, comme "Chantiers en cours" — visible
               par tous les rôles (périmètre déjà filtré côté serveur selon le rôle). */}
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
             <div className="p-2 rounded-lg bg-gray-100 text-gray-500"><CheckCircle2 size={18} /></div>
             <div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Chantiers terminés</div>
@@ -165,7 +165,7 @@ const Dashboard = () => {
               la fiche chantier), clause de sécurisation qui conditionne le calcul de la
               commission commerciale du mois de clôture. */}
           {globalStats.nbTerminesNonEncaisses != null && (
-            <div className={`bg-white p-4 rounded-xl shadow-sm border flex items-start gap-3 ${globalStats.nbTerminesNonEncaisses > 0 ? 'border-amber-200' : 'border-gray-100'}`}>
+            <div className={`bg-white p-4 rounded-xl shadow-sm border flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${globalStats.nbTerminesNonEncaisses > 0 ? 'border-amber-200' : 'border-gray-100'}`}>
               <div className={`p-2 rounded-lg ${globalStats.nbTerminesNonEncaisses > 0 ? 'bg-amber-50 text-amber-600' : 'bg-gray-100 text-gray-400'}`}><AlertTriangle size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">En attente d'encaissement</div>
@@ -177,7 +177,7 @@ const Dashboard = () => {
           )}
 
           {globalStats.achatsTotal != null && (
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
               <div className="p-2 rounded-lg bg-orange-50 text-orange-600"><ShoppingCart size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total des achats</div>
@@ -188,7 +188,7 @@ const Dashboard = () => {
           )}
 
           {globalStats.heuresTotal != null && (
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
               <div className="p-2 rounded-lg bg-purple-50 text-purple-600"><Clock3 size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Heures enregistrées</div>
@@ -199,7 +199,7 @@ const Dashboard = () => {
           )}
 
           {globalStats.caTotal != null && (
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
               <div className="p-2 rounded-lg bg-blue-50 text-accent"><Wallet size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">CA Vendu</div>
@@ -210,7 +210,7 @@ const Dashboard = () => {
           )}
 
           {globalStats.margeTotal != null && (
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
               <div className={`p-2 rounded-lg ${globalStats.margeTotal >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}><TrendingUp size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge totale</div>
@@ -225,7 +225,7 @@ const Dashboard = () => {
           )}
 
           {commissionCommerciale != null && (
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start gap-3">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
               <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600"><Award size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">

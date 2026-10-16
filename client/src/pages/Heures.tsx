@@ -66,7 +66,7 @@ const Heures = () => {
           const realisees = getHeuresRealisees(c.id);
           const percent = c.heuresVendues > 0 ? (realisees / c.heuresVendues) * 100 : 0;
           return (
-            <div key={c.id} className="card flex-1">
+            <div key={c.id} className="card flex-1 min-w-0">
               <h3 className="mb-2 truncate text-primary-dark" title={c.nom}>{c.nom}</h3>
               <div className="flex justify-between text-sm mb-1">
                 <span>{realisees}h réalisées</span>
