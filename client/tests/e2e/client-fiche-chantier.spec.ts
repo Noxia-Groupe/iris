@@ -103,4 +103,23 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
   const corpsDesactive = await enregistrer(page, chantier.id);
   expect('clientId' in corpsDesactive).toBe(false);
   expect(await lireChantier()).toMatchObject({ nom: `${chantier.nom} client désactivé`, clientId: autre.id });
+
+  // 4. Envoi pendant une recherche (sélecteur désactivé, hors du formulaire) : refus local, sans requête.
+  const rechercheLente = `${prefixe} recherche lente`;
+  await page.route((url) => url.pathname.endsWith('/api/clients') && url.searchParams.get('q') === rechercheLente, async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await ouvrirEdition();
+  let modifications = 0;
+  page.on('request', (r) => { if (r.method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/api/chantiers/${chantier.id}`)) modifications += 1; });
+  await page.getByRole('searchbox', { name: 'Rechercher un client' }).fill(rechercheLente);
+  await expect(select).toBeDisabled();
+  // L'alerte bloque le clic tant qu'elle est ouverte : elle est acceptée dès son ouverture.
+  let message = '';
+  page.once('dialog', (alerte) => { message = alerte.message(); void alerte.accept(); });
+  await page.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+  await expect.poll(() => message).toBe('Choisissez un client.');
+  expect(modifications).toBe(0);
+  expect((await lireChantier()).clientId).toBe(autre.id);
 });
