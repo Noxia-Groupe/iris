@@ -2322,7 +2322,7 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     const priorite = String(req.body?.priorite || 'NORMALE');
     if (!titre) return res.status(400).json({ error: 'Le titre de l’intervention est obligatoire.' });
     if (!['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'].includes(priorite)) return res.status(400).json({ error: 'Priorité d’intervention invalide.' });
-    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true, raisonSociale: true } });
+    const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
     if (!client) return res.status(404).json({ error: 'Client introuvable.' });
     const siteId = req.body?.siteId ? String(req.body.siteId) : null;
     const contactId = req.body?.contactId ? String(req.body.contactId) : null;
@@ -2333,10 +2333,10 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     if (contactId && !await prisma.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
       return res.status(404).json({ error: 'Contact introuvable pour ce client.' });
     }
-    // Chantier.client est un champ historique libre : le rattachement SAV ne l'infère pas.
-    // Il n'est autorisé que lorsque sa raison sociale correspond exactement au client natif.
-    const clientNom = client.raisonSociale;
-    if (chantierId && !await prisma.chantier.findFirst({ where: { id: chantierId, client: clientNom, annuleLe: null }, select: { id: true } })) {
+    // Le chantier rattaché doit être lié à la fiche de ce client (clientId), et non à un libellé
+    // identique : renommer un client ne rompt pas le rattachement, et une affaire héritée sans
+    // fiche se répare d'abord (décision de Nelson du 16-10-2026).
+    if (chantierId && !await prisma.chantier.findFirst({ where: { id: chantierId, clientId, annuleLe: null }, select: { id: true } })) {
       return res.status(404).json({ error: 'Chantier introuvable pour ce client.' });
     }
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
@@ -3176,9 +3176,10 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
       }
       data.clientId = cibleId;
       // Une réaffectation d'un client à un autre reprend la raison sociale du nouveau client
-      // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et le rattachement d'une
-      // intervention SAV, qui compare ce libellé, suivent le client. Une affaire héritée sans
-      // client lié garde, elle, son libellé historique quand on la répare.
+      // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et les affichages qui lisent
+      // ce libellé suivent le client ; le rattachement d'une intervention SAV, lui, passe par
+      // clientId depuis #144. Une affaire héritée sans client lié garde son libellé historique
+      // quand on la répare.
       if (existant.clientId) data.client = cible.raisonSociale;
     }
     // Format et unicité du numéro de devis : mêmes règles qu'à la création, mais appliquées
