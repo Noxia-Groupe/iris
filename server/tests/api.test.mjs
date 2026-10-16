@@ -2086,6 +2086,8 @@ if (!TEST_DATABASE_URL) {
       const comptable = await request(app).get(`/api/chantiers/${chantierComptable.id}`).set(authComptable);
       assert.equal(comptable.status, 200, JSON.stringify(comptable.body));
       avecMontants(comptable.body, 'comptable responsable du chantier');
+      // Taux et coût de main-d'œuvre : réservés à l'administration, comptable compris (lot (d)).
+      assert.equal(comptable.body.metrics.moReel, null);
       const vues = [
         ['responsable du technicien', authDe.responsable, chantierTechnicien, 500],
         ['conducteur du chantier', authDe.conducteur, chantierConducteur, 700],
@@ -2314,18 +2316,23 @@ if (!TEST_DATABASE_URL) {
       assert.equal(saisie.status, 200, JSON.stringify(saisie.body));
       assert.equal(Number(saisie.body.nbrHeures), 2);
       sansTaux(saisie.body, 'saisie');
-      assert.equal(Number((await prisma.pointageHeure.findUniqueOrThrow({ where: { id: saisie.body.id } })).tauxHoraireApplique), 42);
-      const correction = await request(app).patch(`/api/heures/${saisie.body.id}`).set(authDe.conducteur).send({ nbrHeures: 3, motifCorrection: 'TEST correction taux' });
-      assert.equal(correction.status, 200, JSON.stringify(correction.body));
-      assert.equal(Number(correction.body.nbrHeures), 3);
-      sansTaux(correction.body, 'correction');
-      const archivage = await request(app).delete(`/api/heures/${saisie.body.id}`).set(authDe.conducteur).send({ motifArchivage: 'TEST archivage taux' });
-      assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
-      const restauration = await request(app).post(`/api/heures/${saisie.body.id}/restaurer`).set(authDe.conducteur).send({ motifRestauration: 'TEST restauration taux' });
-      assert.equal(restauration.status, 200, JSON.stringify(restauration.body));
-      sansTaux(restauration.body, 'restauration');
-      // Remet le chantier dans son état initial pour les autres tests du bloc.
-      assert.equal((await request(app).delete(`/api/heures/${saisie.body.id}`).set(auth).send({ motifArchivage: 'TEST fin du test' })).status, 200);
+      try {
+        assert.equal(Number((await prisma.pointageHeure.findUniqueOrThrow({ where: { id: saisie.body.id } })).tauxHoraireApplique), 42);
+        const correction = await request(app).patch(`/api/heures/${saisie.body.id}`).set(authDe.conducteur).send({ nbrHeures: 3, motifCorrection: 'TEST correction taux' });
+        assert.equal(correction.status, 200, JSON.stringify(correction.body));
+        assert.equal(Number(correction.body.nbrHeures), 3);
+        sansTaux(correction.body, 'correction');
+        const archivage = await request(app).delete(`/api/heures/${saisie.body.id}`).set(authDe.conducteur).send({ motifArchivage: 'TEST archivage taux' });
+        assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
+        const restauration = await request(app).post(`/api/heures/${saisie.body.id}/restaurer`).set(authDe.conducteur).send({ motifRestauration: 'TEST restauration taux' });
+        assert.equal(restauration.status, 200, JSON.stringify(restauration.body));
+        sansTaux(restauration.body, 'restauration');
+      } finally {
+        // Remet le chantier dans son état initial pour les autres tests du bloc, même en cas
+        // d'échec ci-dessus (409 si la saisie est déjà archivée).
+        await request(app).delete(`/api/heures/${saisie.body.id}`).set(auth).send({ motifArchivage: 'TEST fin du test' });
+      }
+      assert.equal((await prisma.pointageHeure.findUniqueOrThrow({ where: { id: saisie.body.id } })).archivedAt instanceof Date, true);
       // Témoin : l'administration reçoit le taux en réponse.
       const saisieAdmin = await request(app).patch(`/api/heures/${pointage.id}`).set(auth).send({ commentaire: 'TEST témoin', motifCorrection: 'TEST témoin taux' });
       assert.equal(saisieAdmin.status, 200, JSON.stringify(saisieAdmin.body));

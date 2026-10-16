@@ -73,6 +73,19 @@ test('un conducteur suit son chantier sans taux ni coût de main-d’œuvre ; l�
     await expect(ligneHeures).not.toContainText('€');
     await expect(vueConducteur.getByRole('columnheader', { name: 'Coût Interne' })).toHaveCount(0);
 
+    // Tableau de bord : la rentabilité du portefeuille, sans « Dépensé à ce jour ».
+    await vueConducteur.goto('/', { waitUntil: 'networkidle' });
+    const portefeuille = vueConducteur.getByRole('region', { name: 'Rentabilité des chantiers en cours' });
+    await expect(portefeuille).toContainText('Marge estimée en fin de chantier');
+    await expect(portefeuille).not.toContainText('Dépensé à ce jour');
+
+    // Statistiques > Intervenants : les heures de l'intervenant, sans son coût.
+    await vueConducteur.goto('/statistiques', { waitUntil: 'networkidle' });
+    await vueConducteur.getByRole('button', { name: 'Intervenants' }).click();
+    const ligneStats = vueConducteur.locator(`[data-intervenant="${intervenant.id}"]`);
+    await expect(ligneStats).toContainText('3.0 h');
+    await expect(ligneStats).not.toContainText('€');
+
     // Témoin : l'administration voit le coût de main-d'œuvre, son dépassement chiffré et le coût interne.
     const vueAdmin = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
     await expect(vueAdmin.getByText('Coût Main d\'Œuvre')).toBeVisible();
@@ -83,6 +96,11 @@ test('un conducteur suit son chantier sans taux ni coût de main-d’œuvre ; l�
     await vueAdmin.getByRole('button', { name: /Historique récent/ }).click();
     await expect(vueAdmin.getByRole('columnheader', { name: 'Coût Interne' })).toBeVisible();
     await expect(vueAdmin.locator('tr', { hasText: chantier.nom }).first()).toContainText('141.00 €');
+    await vueAdmin.goto('/', { waitUntil: 'networkidle' });
+    await expect(vueAdmin.getByRole('region', { name: 'Rentabilité des chantiers en cours' })).toContainText('Dépensé à ce jour');
+    await vueAdmin.goto('/statistiques', { waitUntil: 'networkidle' });
+    await vueAdmin.getByRole('button', { name: 'Intervenants' }).click();
+    await expect(vueAdmin.locator(`[data-intervenant="${intervenant.id}"]`)).toContainText('141 €');
   } finally {
     await vueConducteur.context().close();
   }

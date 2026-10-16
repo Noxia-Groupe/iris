@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
+import { resumeCoutsIntervention } from '../lib/coutsIntervention';
 import { isAdminRole, useCurrentUser } from '../roles';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
@@ -9,7 +10,7 @@ type Client = { id: string; raisonSociale: string };
 type ClientDetail = Client & { sites: { id: string; nom: string; ville: string }[]; contacts: { id: string; prenom?: string | null; nom: string }[] };
 type Chantier = { id: string; nom: string; client: string; numeroDevis?: string | null };
 type Fournisseur = { id: string; nom: string };
-type CoutsIntervention = { totalMainOeuvreHT?: number | null; totalCoutsHT?: number | null; heures?: { id: string; date: string; nbrHeures: number; commentaire?: string | null; createdAt: string }[] };
+type CoutsIntervention = { totalMainOeuvreHT?: number | null; totalMaterielHT?: number | null; totalCoutsHT?: number | null; heures?: { id: string; date: string; nbrHeures: number; commentaire?: string | null; createdAt: string }[] };
 type Intervention = {
   id: string; reference: string; titre: string; description?: string | null; priorite: string; statut: string;
   dateSouhaitee?: string | null; dateDemande?: string | null; client: Client;
@@ -197,8 +198,8 @@ export default function Interventions() {
       {item.description && <p className="mt-3 text-sm text-gray-600">{item.description}</p>}
       {item.couvertureContrat && <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">Couverture contractuelle figée : main-d’œuvre {item.couvertureContrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {item.couvertureContrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{item.couvertureContrat.noteCouverture ? ` · ${item.couvertureContrat.noteCouverture}` : ''}</p>}
       {couts[item.id] && <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-        {/* Coût réel, main-d'œuvre comprise : réservé à l'administration, le serveur ne l'envoie pas au conducteur. */}
-        {estEncadrement && couts[item.id].totalCoutsHT != null && <p className="font-medium text-slate-800">Coût réel cumulé : {montantEuros(couts[item.id].totalCoutsHT!)} HT</p>}
+        {/* Coût réel, main-d'œuvre comprise, pour l'administration ; matériel seul pour un conducteur (lot (d)). */}
+        {estEncadrement && (() => { const resume = resumeCoutsIntervention(couts[item.id]); return resume && <p className="font-medium text-slate-800">{resume.libelle} : {montantEuros(resume.montant)} HT</p>; })()}
         {estTechnicien && <>
           {(couts[item.id].heures || []).length > 0 && <ul className="mb-3 space-y-1 text-slate-700">{couts[item.id].heures!.map((heure) => <li key={heure.id}>{formatDateOnlyOrEmpty(heure.date)} — {heure.nbrHeures} h{heure.commentaire ? ` — ${heure.commentaire}` : ''}</li>)}</ul>}
           <form onSubmit={(event) => void enregistrerHeures(event, item.id)} className="grid gap-2 sm:grid-cols-2"><input required name="date" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date (JJ-MM-AAAA)" className="form-input" /><input required name="nbrHeures" inputMode="decimal" placeholder="Heures" className="form-input" /><input name="commentaire" maxLength={500} placeholder="Commentaire" className="form-input sm:col-span-2" /><input name="motif" maxLength={500} placeholder="Motif (obligatoire si 0)" className="form-input" /><button type="submit" className="btn btn-secondary">Enregistrer mes heures</button></form>

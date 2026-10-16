@@ -114,6 +114,8 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       const ligne = vueRegional.getByRole('region', { name: 'Chantiers à surveiller' }).getByRole('button').filter({ hasText: chantier.nom });
       await expect(ligne.locator('[data-alerte="EN_PERTE"]')).toHaveText(/En perte 50\s?€/);
       await expect(vueRegional.getByRole('region', { name: 'Rentabilité des chantiers en cours' })).toBeVisible();
+      // Les dépenses, main-d'œuvre comprise, restent réservées à l'administration (lot (d)).
+      await expect(vueRegional.getByRole('region', { name: 'Rentabilité des chantiers en cours' })).not.toContainText('Dépensé à ce jour');
       await vueRegional.goto('/chantiers', { waitUntil: 'networkidle' });
       const ligneListe = vueRegional.locator(`tr[data-chantier="${chantier.id}"]`);
       await expect(ligneListe).toContainText(/[-−]50\s€/);

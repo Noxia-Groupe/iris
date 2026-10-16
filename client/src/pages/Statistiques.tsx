@@ -176,7 +176,7 @@ function IntervenantsTab() {
       ) : (
         <div className="divide-y divide-gray-100">
           {list.map((iv: any, i: number) => (
-            <div key={iv.id} className="flex items-center gap-4 py-3.5">
+            <div key={iv.id} data-intervenant={iv.id} className="flex items-center gap-4 py-3.5">
               <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-500 font-bold text-xs flex items-center justify-center shrink-0">#{i + 1}</div>
               <div className="min-w-0 flex-1">
                 <div className="font-bold text-gray-800 truncate">{iv.nom}</div>
