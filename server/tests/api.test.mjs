@@ -7904,7 +7904,11 @@ if (!TEST_DATABASE_URL) {
     let admin;
     let conducteurAuth;
     const suffixe = Date.now();
-    const email = (qui) => `journal.${qui}.${suffixe}@iris.test`;
+    // Préfixe propre à ce bloc et à cette exécution : le nettoyage ne touche aucun compte créé
+    // ailleurs (d'autres tests créent par exemple journal.regle.auteur@iris.test, auteur protégé
+    // d'une entrée comptable).
+    const prefixe = `jadm.${suffixe}.`;
+    const email = (qui) => `${prefixe}${qui}@iris.test`;
     const journal = (auth, query = {}) => request(app).get('/api/journal-administration').query(query).set(auth);
     // Entrées d'une cible, telles que la route les montre à ce compte, de la plus ancienne à la plus
     // récente (la route les renvoie de la plus récente). Le filtre par cible garde le test juste
@@ -7928,9 +7932,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     after(async () => {
-      await prisma.user.updateMany({ where: { email: { startsWith: 'journal.' } }, data: { responsableHierarchiqueId: null } });
-      await prisma.user.deleteMany({ where: { email: { startsWith: 'journal.' }, NOT: { email: { contains: 'resp' } } } });
-      await prisma.user.deleteMany({ where: { email: { startsWith: 'journal.' } } });
+      await prisma.user.deleteMany({ where: { email: { startsWith: prefixe } } });
     });
 
     test('chaque changement de droits d’un compte est journalisé, avec son auteur, avant et après', async () => {
