@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { test, expect, choisirClient } from './fixtures';
+import { test, expect, choisirClient, dateDuJour } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
@@ -58,8 +58,11 @@ test.describe('Interventions SAV', () => {
     await expect(carte).not.toContainText('Demandée le');
   });
 
-  test('permet au conducteur de travaux d’ouvrir la création d’intervention', async ({ page, request, session }) => {
+  // Décision de Nelson du 16-10-2026 : le conducteur lit les clients (clients:read) pour choisir
+  // celui de l'intervention qu'il crée, par la recherche, au-delà des 200 premiers.
+  test('le conducteur de travaux crée une intervention pour un client retrouvé par la recherche', async ({ page, request, session, creerClient }) => {
     const headers = { Authorization: `Bearer ${session.token}` };
+    const client = await creerClient('intervention par un conducteur', false);
     const creation = await request.post(`${api}/users`, {
       headers,
       data: { email: `conducteur.intervention.${Date.now()}@iris.test`, name: 'Conducteur interventions', role: 'CONDUCTEUR_TRAVAUX' },
@@ -77,8 +80,17 @@ test.describe('Interventions SAV', () => {
     await page.getByRole('button', { name: 'Nouvelle intervention' }).click();
     await expect(page.getByRole('heading', { name: 'Nouvelle intervention SAV' })).toBeVisible();
     await expect(page.locator('select[name="clientId"]')).toHaveValue('');
-    // La création du client prouve que le conducteur peut atteindre le flux ; la liste
-    // des clients relève du chargement asynchrone, hors objectif de cette ouverture.
+    await expect(page.getByText(/Permission requise/)).toHaveCount(0);
+    await choisirClient(page, client);
+    const titre = `TEST Intervention du conducteur ${Date.now()}`;
+    await page.getByPlaceholder('Objet de la demande').fill(titre);
+    await page.getByPlaceholder('Date de demande (JJ-MM-AAAA)').fill(dateDuJour());
+    const reponse = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/api/interventions'));
+    await page.getByRole('button', { name: 'Créer', exact: true }).click();
+    const creee = await reponse;
+    expect(creee.status(), await creee.text()).toBe(201);
+    expect((await creee.json()).clientId).toBe(client.id);
+    await expect(page.locator('article').filter({ has: page.getByRole('heading', { name: titre }) })).toBeVisible();
   });
 
   test('enregistre un achat SAV et réinitialise le formulaire sans erreur de page', async ({ page, request, session, creerClient }) => {

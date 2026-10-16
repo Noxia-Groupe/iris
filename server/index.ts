@@ -207,7 +207,9 @@ const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
   // Le conducteur saisit et corrige les écritures de son affaire. L'archivage, qui retire
   // un coût ou des heures des marges actives, est distinct et réservé par défaut aux rôles
   // d'encadrement ; il peut être accordé individuellement si l'organisation le décide.
-  CONDUCTEUR_TRAVAUX: ['chantiers:read', 'chantiers:write'],
+  // Il lit les clients (clients, contacts, sites) pour choisir celui d'une intervention SAV
+  // qu'il crée (décision de Nelson du 16-10-2026), sans les modifier ni voir de devis.
+  CONDUCTEUR_TRAVAUX: ['chantiers:read', 'chantiers:write', 'clients:read'],
   COMMERCIAL: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_ASSISTANTE_COMMERCIALE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
   [ROLE_COMPTABLE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
