@@ -5502,6 +5502,8 @@ if (!TEST_DATABASE_URL) {
       const refus = await request(app).patch(`/api/chantiers/${chantier.id}`).set('Authorization', auth).send({ clientId: autreClient.id, nom: 'Modification refusée' });
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
       assert.match(refus.body.error, /déjà facturée/);
+      // Le refus ne réécrit pas non plus le libellé client.
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).client, 'TEST Client');
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).clientId, clientId);
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).nom, chantier.nom);
       const apres = await request(app).get(traceUrl).set('Authorization', auth);
@@ -7500,6 +7502,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(facture.status, 201); assert.equal((await request(app).post(`/api/factures/${facture.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
       const autre = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client déplacement' });
       assert.equal((await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId: autre.body.id })).status, 409);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: orpheline.id } })).client, 'TEST Libellé libre');
       // Le client renvoyé à l'identique n'est pas un changement : la fiche facturée reste modifiable.
       const identique = await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId, nom: 'TEST Affaire héritée renommée' });
       assert.equal(identique.status, 200, JSON.stringify(identique.body));
@@ -7558,6 +7561,7 @@ if (!TEST_DATABASE_URL) {
       const parTitulaireEnBase = await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } });
       assert.equal(parTitulaireEnBase.nom, 'TEST 111 renommée par le titulaire');
       assert.equal(parTitulaireEnBase.clientId, actif.id);
+      assert.equal(parTitulaireEnBase.client, actif.raisonSociale);
     });
 
     test('refuse le document PDF d’une facture brouillon', async () => {
