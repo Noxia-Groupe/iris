@@ -1173,6 +1173,10 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
 }
 const PLAFOND_MONTANT = 9_999_999_999.99;
 class FactureInvalideError extends Error {}
+class FactureRattachementRefuse extends Error {
+  statut: number;
+  constructor(statut: number, message: string) { super(message); this.statut = statut; }
+}
 
 type LigneTaxable = { tauxTva: unknown; totalHt: unknown };
 const tauxUtilises = (lignes: LigneTaxable[]) => [...new Set(lignes.map(ligne => Number(ligne.tauxTva)))];
@@ -1314,11 +1318,7 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     if ((origine === 'CHANTIER' && !chantierId) || (origine === 'INTERVENTION' && !interventionId) || (origine === 'CONTRAT' && !contratMaintenanceId)) return res.status(400).json({ error: 'Le rattachement ne correspond pas à l’origine déclarée.' });
     // Ne jamais déduire l'appartenance par un libellé : les trois origines portent un clientId explicite.
     // Une origine étrangère ou inexistante répond 404 afin de ne pas divulguer son existence.
-    if (origine === 'CHANTIER') {
-      const chantier = await prisma.chantier.findFirst({ where: { id: chantierId!, clientId }, select: { id: true, statut: true } });
-      if (!chantier) return res.status(404).json({ error: 'Affaire facturable introuvable.' });
-      if (chantier.statut === 'ANNULE') return res.status(409).json({ error: 'Une affaire annulée ne peut pas être facturée.' });
-    }
+    // L'affaire (origine CHANTIER) se contrôle dans la transaction de création, plus bas.
     if (origine === 'INTERVENTION' && !await prisma.intervention.findFirst({ where: { id: interventionId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Intervention facturable introuvable.' });
     if (origine === 'CONTRAT' && !await prisma.contratMaintenance.findFirst({ where: { id: contratMaintenanceId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Contrat facturable introuvable.' });
     const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
@@ -1342,6 +1342,15 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
     const facture = await prisma.$transaction(async (tx) => {
+      // Sous verrou partagé : un changement de client de l'affaire en cours (cf. PATCH
+      // /api/chantiers/:id) attend la fin de cette création et voit alors la facture, ou s'enregistre
+      // d'abord, et l'affaire n'est plus celle de ce client. Une annulation en cours est attendue de
+      // même, puis refusée ci-dessous.
+      if (origine === 'CHANTIER') {
+        const [chantier] = await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} FOR SHARE`);
+        if (!chantier) throw new FactureRattachementRefuse(404, 'Affaire facturable introuvable.');
+        if (chantier.statut === 'ANNULE') throw new FactureRattachementRefuse(409, 'Une affaire annulée ne peut pas être facturée.');
+      }
       const creee = await tx.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes }, ventilationTva: { create: ventilationTva } }, include: factureInclude });
       await tx.journalFacture.create({ data: { factureId: creee.id, acteurId: req.user!.id, action: 'CREATION_BROUILLON', detail: `Origine ${origine}` } });
       return creee;
@@ -1349,6 +1358,7 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     res.status(201).json(decimalToNumber(facture));
   } catch (error) {
     if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
+    if (error instanceof FactureRattachementRefuse) return res.status(error.statut).json({ error: error.message });
     res.status(500).json({ error: 'Création de facture impossible.' });
   }
 });
@@ -2311,6 +2321,7 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
   }
 });
 
+class ChantierInterventionIntrouvable extends Error {}
 app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, res, next) => {
   if (!isAdminRole(req.user?.role) && req.user?.role !== 'CONDUCTEUR_TRAVAUX') return res.status(403).json({ error: 'Création réservée à l’encadrement SAV.' });
   next();
@@ -2333,12 +2344,6 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     if (contactId && !await prisma.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
       return res.status(404).json({ error: 'Contact introuvable pour ce client.' });
     }
-    // Le chantier rattaché doit être lié à la fiche de ce client (clientId), et non à un libellé
-    // identique : renommer un client ne rompt pas le rattachement, et une affaire héritée sans
-    // fiche se répare d'abord (décision de Nelson du 16-10-2026).
-    if (chantierId && !await prisma.chantier.findFirst({ where: { id: chantierId, clientId, annuleLe: null }, select: { id: true } })) {
-      return res.status(404).json({ error: 'Chantier introuvable pour ce client.' });
-    }
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
     if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
     const societe = await getCompanySettings();
@@ -2347,6 +2352,15 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     if (dateSouhaitee && dateSouhaitee < dateDemande) return res.status(400).json({ error: 'La date souhaitée ne peut pas précéder la date de demande.' });
     const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
     const intervention = await prisma.$transaction(async (tx) => {
+      // Le chantier rattaché doit être lié à la fiche de ce client (clientId), et non à un libellé
+      // identique : renommer un client ne rompt pas le rattachement, et une affaire héritée sans
+      // fiche se répare d'abord (décision de Nelson du 16-10-2026). Le contrôle se fait sous verrou
+      // partagé : un changement de client de l'affaire en cours attend la fin de cette création, ou
+      // la fait refuser s'il s'enregistre d'abord (cf. PATCH /api/chantiers/:id). FOR SHARE, et non
+      // FOR KEY SHARE, pour attendre aussi une annulation en cours, qui ferme alors le chantier.
+      if (chantierId && !(await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} AND "annuleLe" IS NULL FOR SHARE`)).length) {
+        throw new ChantierInterventionIntrouvable();
+      }
       const sequence = await tx.sequenceIntervention.upsert({
         where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
       });
@@ -2360,6 +2374,7 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     });
     res.status(201).json(decimalToNumber(exposerIntervention(intervention)));
   } catch (error) {
+    if (error instanceof ChantierInterventionIntrouvable) return res.status(404).json({ error: 'Chantier introuvable pour ce client.' });
     console.error('Erreur création intervention SAV', error);
     res.status(500).json({ error: 'Erreur lors de la création de l’intervention.' });
   }
@@ -3125,6 +3140,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, (_req, res) => {
 // date, un budget ou un devis mal saisi, comme le ferait un administrateur, sans avoir à en
 // solliciter un. Sur un chantier dont il n'est pas responsable, un conducteur reçoit 404 (et
 // non 403) : même règle qu'à la lecture, on ne révèle pas l'existence du chantier.
+class ChangementClientRefuse extends Error {}
 app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
@@ -3164,23 +3180,13 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // Un client renvoyé à l'identique n'est pas un changement : la fiche d'un chantier dont le
     // client a été désactivé depuis reste modifiable (#111). Seul un nouveau client doit être
     // actif, et une affaire déjà facturée n'en change pas.
+    // Les refus (affaire annulée ou facturée, interventions rattachées — d'un autre client pour la
+    // réparation d'une affaire héritée), le libellé et la trace sont décidés plus bas, dans la
+    // transaction de l'enregistrement, sur la ligne verrouillée.
+    let cibleClient: { id: string; raisonSociale: string } | null = null;
     if (isAdminRole(authUser.role) && 'clientId' in req.body && String(req.body.clientId || '') !== existant.clientId) {
-      const cibleId = String(req.body.clientId || '');
-      const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true, raisonSociale: true } });
-      if (!cible) return res.status(404).json({ error: 'Client introuvable.' });
-      if (await prisma.facture.count({ where: { OR: [
-        { chantierId: existant.id },
-        { intervention: { is: { chantierId: existant.id } } },
-      ] } })) {
-        return res.status(409).json({ error: 'Une affaire déjà facturée ne change pas de client.' });
-      }
-      data.clientId = cibleId;
-      // Une réaffectation d'un client à un autre reprend la raison sociale du nouveau client
-      // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et les affichages qui lisent
-      // ce libellé suivent le client ; le rattachement d'une intervention SAV, lui, passe par
-      // clientId depuis #144. Une affaire héritée sans client lié garde son libellé historique
-      // quand on la répare.
-      if (existant.clientId) data.client = cible.raisonSociale;
+      cibleClient = await prisma.client.findFirst({ where: { id: String(req.body.clientId || ''), actif: true }, select: { id: true, raisonSociale: true } });
+      if (!cibleClient) return res.status(404).json({ error: 'Client introuvable.' });
     }
     // Format et unicité du numéro de devis : mêmes règles qu'à la création, mais appliquées
     // SEULEMENT si le numéro change réellement. Des chantiers antérieurs portent une valeur
@@ -3232,12 +3238,58 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     if ('types' in req.body) data.types = sanitizeTypes(req.body.types);
     if ('baremeReduit' in req.body) data.baremeReduit = !!req.body.baremeReduit;
 
-    const chantier = await prisma.chantier.update({
-      where: { id: paramId(req) },
-      data
+    const chantier = await prisma.$transaction(async (tx) => {
+      if (cibleClient) {
+        // Verrou de la ligne : une intervention créée en même temps sur cette affaire attend la
+        // fin du changement, ou le fait refuser si elle s'enregistre d'abord (cf. POST
+        // /api/interventions) ; deux changements simultanés se suivent au lieu de se croiser.
+        const [verrouille] = await tx.$queryRaw<Array<{ clientId: string | null; client: string; statut: string }>>(Prisma.sql`SELECT "clientId", "client", "statut" FROM "Chantier" WHERE "id" = ${existant.id} FOR UPDATE`);
+        // Relu sous verrou : une annulation du devis enregistrée entre-temps clôt l'affaire.
+        if (verrouille.statut === 'ANNULE') throw new ChangementClientRefuse('Cette affaire est annulée : elle n’est plus modifiable.');
+        if (verrouille.clientId !== cibleClient.id) {
+          if (await tx.facture.count({ where: { OR: [
+            { chantierId: existant.id },
+            { intervention: { is: { chantierId: existant.id } } },
+          ] } })) {
+            throw new ChangementClientRefuse('Une affaire déjà facturée ne change pas de client.');
+          }
+          // Tant qu'une intervention SAV est rattachée à une affaire liée, même annulée (elle y
+          // resterait rattachée), l'affaire ne change pas de client (décision de Nelson du
+          // 16-10-2026), quel que soit le client de l'intervention : des données d'avant #142 et
+          // #144 en rattachent d'un ancien client. Seule exception, lecture à confirmer : une
+          // affaire héritée sans fiche se répare vers le client de ses interventions, jamais vers
+          // un autre.
+          if (await tx.intervention.count({ where: { chantierId: existant.id, ...(verrouille.clientId ? {} : { clientId: { not: cibleClient.id } }) } })) {
+            throw new ChangementClientRefuse(verrouille.clientId
+              ? 'Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client.'
+              : 'Des interventions SAV d’un autre client sont rattachées à cette affaire : elle ne peut pas être rattachée à ce client.');
+          }
+          data.clientId = cibleClient.id;
+          // Une réaffectation d'un client à un autre reprend la raison sociale du nouveau client
+          // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et les affichages qui lisent
+          // ce libellé suivent le client ; le rattachement d'une intervention SAV, lui, passe par
+          // clientId depuis #144. Une affaire héritée sans client lié garde son libellé historique
+          // quand on la répare.
+          if (verrouille.clientId) data.client = cibleClient.raisonSociale;
+          // Trace du changement (décision de Nelson du 16-10-2026), dans la même transaction :
+          // sans elle, le changement n'a pas lieu. La raison sociale de chaque fiche est figée à
+          // l'acte, à côté du libellé de l'affaire, qui peut en différer.
+          const ancienne = verrouille.clientId
+            ? await tx.client.findUnique({ where: { id: verrouille.clientId }, select: { raisonSociale: true } })
+            : null;
+          await tx.journalSaisieChantier.create({ data: {
+            chantierId: existant.id, cible: 'CHANTIER', cibleId: existant.id, action: 'CHANGEMENT_CLIENT',
+            auteurId: authUser.id, auteurNom: authUser.name,
+            avant: { clientId: verrouille.clientId, raisonSociale: ancienne?.raisonSociale ?? null, libelle: verrouille.client },
+            apres: { clientId: cibleClient.id, raisonSociale: cibleClient.raisonSociale, libelle: String(data.client ?? verrouille.client) },
+          } });
+        }
+      }
+      return tx.chantier.update({ where: { id: existant.id }, data });
     });
     res.json(await chantierSelonRentabilite(req, chantier));
   } catch (error) {
+    if (error instanceof ChangementClientRefuse) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: 'Error updating chantier' });
   }
 });

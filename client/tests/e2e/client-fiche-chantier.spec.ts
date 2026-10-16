@@ -16,6 +16,28 @@ async function remplirAuDela(request: APIRequestContext, headers: Record<string,
   }
 }
 
+// Affaire ouverte par un devis accepté puis converti, avec le responsable et le commercial que la
+// fiche exige pour s'enregistrer.
+async function ouvrirAffaire(request: APIRequestContext, headers: Record<string, string>, clientId: string, objet: string) {
+  const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
+    const reponse = await request[methode](`${api}${path}`, { headers, data });
+    expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
+    return reponse.json();
+  };
+  const devis = await envoyer('post', '/devis', { clientId, objet, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  const suffixe = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const conducteur = await envoyer('post', '/users', { email: `fiche.conducteur.${suffixe}@iris.test`, name: `Conducteur fiche ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' }) as { id: string };
+  const commercial = await envoyer('post', '/users', { email: `fiche.commercial.${suffixe}@iris.test`, name: `Commercial fiche ${suffixe}`, role: 'COMMERCIAL' }) as { id: string };
+  for (const [chemin, data] of [[`/chantiers/${chantier.id}`, { responsableId: conducteur.id }], [`/chantiers/${chantier.id}/commercial`, { commercialId: commercial.id }]] as const) {
+    const reponse = await request.patch(`${api}${chemin}`, { headers, data });
+    expect(reponse.ok(), `${chemin} : ${await reponse.text()}`).toBeTruthy();
+  }
+  return chantier;
+}
+
 // Enregistre la fiche et rend le corps du PATCH envoyé.
 async function enregistrer(page: Page, chantierId: string) {
   const requete = page.waitForRequest((r) => r.method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/api/chantiers/${chantierId}`));
@@ -42,23 +64,7 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
   };
   const initial = await creerClient('initial');
   const autre = await creerClient('autre');
-  const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
-    const reponse = await request[methode](`${api}${path}`, { headers, data });
-    expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
-    return reponse.json();
-  };
-  const devis = await envoyer('post', '/devis', { clientId: initial.id, objet: `Fiche 111 ${prefixe}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
-  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
-  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
-  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
-  // La fiche exige un responsable et, dès qu'il existe un commercial, un commercial : on les fixe.
-  const suffixe = Date.now();
-  const conducteur = await envoyer('post', '/users', { email: `fiche111.conducteur.${suffixe}@iris.test`, name: `Conducteur fiche 111 ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' }) as { id: string };
-  const commercial = await envoyer('post', '/users', { email: `fiche111.commercial.${suffixe}@iris.test`, name: `Commercial fiche 111 ${suffixe}`, role: 'COMMERCIAL' }) as { id: string };
-  for (const [chemin, data] of [[`/chantiers/${chantier.id}`, { responsableId: conducteur.id }], [`/chantiers/${chantier.id}/commercial`, { commercialId: commercial.id }]] as const) {
-    const reponse = await request.patch(`${api}${chemin}`, { headers, data });
-    expect(reponse.ok(), `${chemin} : ${await reponse.text()}`).toBeTruthy();
-  }
+  const chantier = await ouvrirAffaire(request, headers, initial.id, `Fiche 111 ${prefixe}`);
   const lireChantier = async () => (await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json()) as { nom: string; clientId: string };
   // Témoin : le client lié est hors de la liste initiale des clients. Sur une base où d'autres
   // clients sont classés après « ZZZ », on complète par lots jusqu'à l'en sortir (au plus 5 lots).
@@ -183,4 +189,56 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
   await expect.poll(() => message).toBe('Choisissez un client.');
   expect(modifications).toBe(0);
   expect((await lireChantier()).clientId).toBe(autre.id);
+});
+
+// Décisions de Nelson du 16-10-2026 : le changement de client d'une affaire est tracé au journal
+// de la fiche, et refusé tant qu'une intervention SAV y est rattachée.
+test('changement de client tracé au journal de la fiche, puis refusé une fois une intervention rattachée', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const headers = auth(session.token);
+  const premier = await creerClient('trace premier', false);
+  const second = await creerClient('trace second', false);
+  const troisieme = await creerClient('trace troisième', false);
+  const chantier = await ouvrirAffaire(request, headers, premier.id, `Trace client ${premier.raisonSociale}`);
+
+  const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  const journal = page.getByRole('region', { name: 'Journal d’audit des saisies' });
+  const traces = journal.getByText('Client de l’affaire — changement', { exact: true });
+  const enTeteClient = page.locator('span', { has: page.locator('strong', { hasText: /^Client:$/ }) });
+  const select = page.getByRole('combobox', { name: 'Client du chantier' });
+  const choisir = async (client: { id: string; raisonSociale: string }) => {
+    await page.getByRole('button', { name: 'Modifier', exact: true }).first().click();
+    await expect(page.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
+    await page.getByRole('searchbox', { name: 'Rechercher un client' }).fill(client.raisonSociale);
+    await expect(select.locator(`option[value="${client.id}"]`)).toHaveCount(1);
+    await select.selectOption(client.id);
+    await expect(select).toHaveValue(client.id);
+  };
+  await expect(enTeteClient).toHaveText(`Client: ${premier.raisonSociale}`);
+  await expect(traces).toHaveCount(0);
+
+  // 1. Changement de client : la fiche suit, et le journal dit qui l'a fait, avant et après.
+  await choisir(second);
+  expect((await enregistrer(page, chantier.id)).clientId).toBe(second.id);
+  await expect(enTeteClient).toHaveText(`Client: ${second.raisonSociale}`);
+  await expect(traces).toHaveCount(1);
+  await expect(journal.getByText(`Avant : ${premier.raisonSociale}`, { exact: true })).toBeVisible();
+  await expect(journal.getByText(`Après : ${second.raisonSociale}`, { exact: true })).toBeVisible();
+  await expect(journal).toContainText(` · ${(session.user as { name: string }).name}`);
+
+  // 2. Une intervention SAV rattachée : un nouveau changement est refusé, avec le motif, et rien
+  //    ne change ni ne s'ajoute au journal.
+  const sav = await request.post(`${api}/interventions`, { headers, data: { clientId: second.id, chantierId: chantier.id, titre: `SAV trace ${second.raisonSociale}` } });
+  expect(sav.status(), await sav.text()).toBe(201);
+  await choisir(troisieme);
+  let message = '';
+  page.once('dialog', (alerte) => { message = alerte.message(); void alerte.accept(); });
+  const reponse = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/api/chantiers/${chantier.id}`));
+  await page.getByRole('button', { name: 'Enregistrer les modifications' }).click();
+  expect((await reponse).status()).toBe(409);
+  await expect.poll(() => message).toBe('Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client.');
+  // La fenêtre reste ouverte avec la saisie ; relue, la fiche n'a pas changé.
+  await expect(page.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(enTeteClient).toHaveText(`Client: ${second.raisonSociale}`);
+  await expect(traces).toHaveCount(1);
 });

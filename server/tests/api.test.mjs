@@ -7606,6 +7606,243 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).client, 'TEST Libellé saisi à la main');
     });
 
+    test('changement de client : refusé tant que des interventions SAV y sont rattachées, et tracé au journal (décisions du 16-10-2026)', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const admin = await prisma.user.findUniqueOrThrow({ where: { id: jwt.verify(session, process.env.JWT_SECRET).id }, select: { id: true, name: true } });
+      const ancien = await prisma.client.create({ data: { raisonSociale: 'TEST Trace client ancien' } });
+      const nouveau = await prisma.client.create({ data: { raisonSociale: 'TEST Trace client nouveau' } });
+      const troisieme = await prisma.client.create({ data: { raisonSociale: 'TEST Trace client troisième' } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Trace changement de client', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const journal = async (id = chantier.id) => {
+        const reponse = await request(app).get(`/api/chantiers/${id}/journal-saisies`).set(auth);
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+        return reponse.body.filter(entree => entree.action === 'CHANGEMENT_CLIENT');
+      };
+      const enBase = async (id = chantier.id) => prisma.chantier.findUniqueOrThrow({ where: { id }, select: { nom: true, client: true, clientId: true } });
+
+      // Sans intervention, le changement passe et s'écrit au journal : auteur, client avant et après.
+      const changement = await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: nouveau.id });
+      assert.equal(changement.status, 200, JSON.stringify(changement.body));
+      const [trace, ...autres] = await journal();
+      assert.equal(autres.length, 0);
+      assert.equal(trace.cible, 'CHANTIER');
+      assert.equal(trace.cibleId, chantier.id);
+      assert.equal(trace.auteurId, admin.id);
+      assert.equal(trace.auteurNom, admin.name);
+      assert.equal(trace.motif, null);
+      assert.deepEqual(trace.avant, { clientId: ancien.id, raisonSociale: ancien.raisonSociale, libelle: ancien.raisonSociale });
+      assert.deepEqual(trace.apres, { clientId: nouveau.id, raisonSociale: nouveau.raisonSociale, libelle: nouveau.raisonSociale });
+
+      // Le même client renvoyé, ou un champ client envoyé par le conducteur titulaire (ignoré), ne trace rien.
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: nouveau.id, nom: 'TEST Trace renommé' })).status, 200);
+      const titulaire = await prisma.user.create({ data: { email: `trace.client.titulaire.${Date.now()}@iris.test`, name: 'TEST Trace conducteur titulaire', role: 'CONDUCTEUR_TRAVAUX' } });
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { responsableId: titulaire.id } });
+      const parTitulaire = await request(app).patch(`/api/chantiers/${chantier.id}`).set('Authorization', `Bearer ${jwt.sign({ id: titulaire.id }, process.env.JWT_SECRET)}`).send({ clientId: troisieme.id });
+      assert.equal(parTitulaire.status, 200, JSON.stringify(parTitulaire.body));
+      assert.equal((await journal()).length, 1);
+      assert.deepEqual(await enBase(), { nom: 'TEST Trace renommé', client: nouveau.raisonSociale, clientId: nouveau.id });
+
+      // Une intervention SAV rattachée, même annulée, fige le client : refus, rien d'enregistré ni de tracé.
+      const sav = await request(app).post('/api/interventions').set(auth).send({ clientId: nouveau.id, chantierId: chantier.id, titre: 'TEST Trace SAV rattaché' });
+      assert.equal(sav.status, 201, JSON.stringify(sav.body));
+      await prisma.intervention.update({ where: { id: sav.body.id }, data: { statut: 'ANNULEE' } });
+      const refus = await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: troisieme.id, nom: 'TEST Trace modification refusée' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client.');
+      assert.deepEqual(await enBase(), { nom: 'TEST Trace renommé', client: nouveau.raisonSociale, clientId: nouveau.id });
+      assert.equal((await journal()).length, 1);
+      // Le reste de la fiche, lui, s'enregistre toujours.
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: nouveau.id, nom: 'TEST Trace renommé encore' })).status, 200);
+      assert.equal((await enBase()).nom, 'TEST Trace renommé encore');
+
+      // Affaire liée portant une intervention d'un ancien client, rattachée avant #142 et #144 :
+      // elle ne passe pas non plus à ce client, et rien n'est tracé.
+      const liee = await prisma.chantier.create({ data: { nom: 'TEST Trace affaire liée', client: nouveau.raisonSociale, clientId: nouveau.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      await prisma.intervention.create({ data: { reference: `TEST-TRACE-LIEE-${Date.now()}`, titre: 'TEST Trace SAV de l’ancien client', clientId: ancien.id, chantierId: liee.id } });
+      const versClientDuSav = await request(app).patch(`/api/chantiers/${liee.id}`).set(auth).send({ clientId: ancien.id });
+      assert.equal(versClientDuSav.status, 409, JSON.stringify(versClientDuSav.body));
+      assert.equal(versClientDuSav.body.error, 'Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client.');
+      assert.deepEqual(await enBase(liee.id), { nom: 'TEST Trace affaire liée', client: nouveau.raisonSociale, clientId: nouveau.id });
+      assert.equal((await journal(liee.id)).length, 0);
+
+      // Atomicité : si l'enregistrement échoue après l'écriture de la trace (ici, une contrainte
+      // posée pour le test refuse le nouveau nom), ni le changement ni la trace ne restent.
+      const atomique = await prisma.chantier.create({ data: { nom: 'TEST Trace atomicité', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const contrainte = 'test_atomicite_changement_client';
+      await prisma.$executeRawUnsafe(`ALTER TABLE "Chantier" DROP CONSTRAINT IF EXISTS "${contrainte}"`);
+      await prisma.$executeRawUnsafe(`ALTER TABLE "Chantier" ADD CONSTRAINT "${contrainte}" CHECK ("nom" <> 'TEST Trace nom refusé par la base') NOT VALID`);
+      try {
+        const echec = await request(app).patch(`/api/chantiers/${atomique.id}`).set(auth).send({ clientId: nouveau.id, nom: 'TEST Trace nom refusé par la base' });
+        assert.equal(echec.status, 500, JSON.stringify(echec.body));
+      } finally {
+        await prisma.$executeRawUnsafe(`ALTER TABLE "Chantier" DROP CONSTRAINT IF EXISTS "${contrainte}"`);
+      }
+      assert.deepEqual(await enBase(atomique.id), { nom: 'TEST Trace atomicité', client: ancien.raisonSociale, clientId: ancien.id });
+      assert.equal((await journal(atomique.id)).length, 0);
+
+      // Affaire héritée sans fiche, portant une intervention d'avant #144 : elle se répare vers le
+      // client de cette intervention, jamais vers un autre ; la trace garde le libellé historique.
+      const heritee = await prisma.chantier.create({ data: { nom: 'TEST Trace affaire héritée', client: 'TEST Trace libellé historique', dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      await prisma.intervention.create({ data: { reference: `TEST-TRACE-${Date.now()}`, titre: 'TEST Trace SAV hérité', clientId: ancien.id, chantierId: heritee.id } });
+      const versAutre = await request(app).patch(`/api/chantiers/${heritee.id}`).set(auth).send({ clientId: troisieme.id });
+      assert.equal(versAutre.status, 409, JSON.stringify(versAutre.body));
+      assert.equal(versAutre.body.error, 'Des interventions SAV d’un autre client sont rattachées à cette affaire : elle ne peut pas être rattachée à ce client.');
+      assert.deepEqual(await enBase(heritee.id), { nom: 'TEST Trace affaire héritée', client: 'TEST Trace libellé historique', clientId: null });
+      assert.equal((await journal(heritee.id)).length, 0);
+      const reparation = await request(app).patch(`/api/chantiers/${heritee.id}`).set(auth).send({ clientId: ancien.id });
+      assert.equal(reparation.status, 200, JSON.stringify(reparation.body));
+      assert.deepEqual(await enBase(heritee.id), { nom: 'TEST Trace affaire héritée', client: 'TEST Trace libellé historique', clientId: ancien.id });
+      const [traceReparation] = await journal(heritee.id);
+      assert.deepEqual(traceReparation.avant, { clientId: null, raisonSociale: null, libelle: 'TEST Trace libellé historique' });
+      assert.deepEqual(traceReparation.apres, { clientId: ancien.id, raisonSociale: ancien.raisonSociale, libelle: 'TEST Trace libellé historique' });
+
+      // Le journal suit le périmètre de la fiche : lisible par le titulaire, pas par un autre conducteur.
+      const autreConducteur = await prisma.user.create({ data: { email: `trace.client.autre.${Date.now()}@iris.test`, name: 'TEST Trace autre conducteur', role: 'CONDUCTEUR_TRAVAUX' } });
+      const vueTitulaire = await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set('Authorization', `Bearer ${jwt.sign({ id: titulaire.id }, process.env.JWT_SECRET)}`);
+      assert.equal(vueTitulaire.status, 200);
+      assert.deepEqual(vueTitulaire.body.filter(entree => entree.action === 'CHANGEMENT_CLIENT').map(entree => entree.id), [trace.id]);
+      assert.equal((await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set('Authorization', `Bearer ${jwt.sign({ id: autreConducteur.id }, process.env.JWT_SECRET)}`)).status, 404);
+    });
+
+    test('changement de client, création d’intervention ou de facture et annulation simultanés : l’un attend l’autre, sans rattachement incohérent ni trace', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const ancien = await prisma.client.create({ data: { raisonSociale: 'TEST Course client ancien' } });
+      const nouveau = await prisma.client.create({ data: { raisonSociale: 'TEST Course client nouveau' } });
+      const attendreVerrou = async (motif) => {
+        for (let tour = 0; tour < 150; tour++) {
+          const sessions = await prisma.$queryRawUnsafe(`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '${motif}'`);
+          if (sessions.length) return true;
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        return false;
+      };
+      const tenirVerrou = (chantierId, verrou, puis) => {
+        let liberer, pret;
+        const attente = new Promise(resolve => { liberer = resolve; });
+        const verrouPris = new Promise(resolve => { pret = resolve; });
+        const transaction = prisma.$transaction(async tx => {
+          await tx.$queryRawUnsafe(`SELECT "id" FROM "Chantier" WHERE "id" = $1 ${verrou}`, chantierId);
+          pret();
+          await attente;
+          await puis(tx);
+        }, { timeout: 15000 });
+        return { verrouPris, liberer, transaction };
+      };
+
+      // 1. Un changement de client en cours (ligne verrouillée) : la création d'intervention pour
+      //    l'ancien client attend sa fin, puis est refusée, faute de chantier lié à ce client.
+      const premier = await prisma.chantier.create({ data: { nom: 'TEST Course création attend', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const changement = tenirVerrou(premier.id, 'FOR UPDATE', tx => tx.chantier.update({ where: { id: premier.id }, data: { clientId: nouveau.id, client: nouveau.raisonSociale } }));
+      await changement.verrouPris;
+      let creation;
+      try {
+        creation = request(app).post('/api/interventions').set(auth).send({ clientId: ancien.id, chantierId: premier.id, titre: 'TEST Course SAV pendant changement' }).then(r => r);
+        assert.equal(await attendreVerrou('%"Chantier"%FOR SHARE%'), true, 'la création doit attendre le changement de client');
+      } finally {
+        changement.liberer();
+        await changement.transaction;
+      }
+      const refusCreation = await creation;
+      assert.equal(refusCreation.status, 404, JSON.stringify(refusCreation.body));
+      assert.equal(await prisma.intervention.count({ where: { chantierId: premier.id } }), 0);
+
+      // 2. Une création d'intervention en cours (verrou partagé) : le changement de client attend sa
+      //    fin, voit l'intervention et refuse, sans rien tracer.
+      //    (Le verrou tenu est celui que prend la création : FOR SHARE.)
+      const second = await prisma.chantier.create({ data: { nom: 'TEST Course changement attend', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const creationEnCours = tenirVerrou(second.id, 'FOR SHARE', tx => tx.intervention.create({ data: { reference: `TEST-COURSE-${Date.now()}`, titre: 'TEST Course SAV créé', clientId: ancien.id, chantierId: second.id } }));
+      await creationEnCours.verrouPris;
+      let modification;
+      try {
+        modification = request(app).patch(`/api/chantiers/${second.id}`).set(auth).send({ clientId: nouveau.id }).then(r => r);
+        assert.equal(await attendreVerrou('%"Chantier"%FOR UPDATE%'), true, 'le changement de client doit attendre la création');
+      } finally {
+        creationEnCours.liberer();
+        await creationEnCours.transaction;
+      }
+      const refusModification = await modification;
+      assert.equal(refusModification.status, 409, JSON.stringify(refusModification.body));
+      assert.deepEqual(await prisma.chantier.findUniqueOrThrow({ where: { id: second.id }, select: { client: true, clientId: true } }), { client: ancien.raisonSociale, clientId: ancien.id });
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { chantierId: second.id } }), 0);
+
+      // 3. Le même changement fait deux fois en même temps : le second attend le premier, ne trouve
+      //    plus rien à changer, et ne réécrit ni le libellé ni le journal.
+      const troisiemeChantier = await prisma.chantier.create({ data: { nom: 'TEST Course changement en double', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const premierChangement = tenirVerrou(troisiemeChantier.id, 'FOR UPDATE', tx => tx.chantier.update({ where: { id: troisiemeChantier.id }, data: { clientId: nouveau.id, client: 'TEST Course libellé du premier changement' } }));
+      await premierChangement.verrouPris;
+      let doublon;
+      try {
+        doublon = request(app).patch(`/api/chantiers/${troisiemeChantier.id}`).set(auth).send({ clientId: nouveau.id }).then(r => r);
+        assert.equal(await attendreVerrou('%"Chantier"%FOR UPDATE%'), true, 'le second changement doit attendre le premier');
+      } finally {
+        premierChangement.liberer();
+        await premierChangement.transaction;
+      }
+      const reponseDoublon = await doublon;
+      assert.equal(reponseDoublon.status, 200, JSON.stringify(reponseDoublon.body));
+      assert.deepEqual(await prisma.chantier.findUniqueOrThrow({ where: { id: troisiemeChantier.id }, select: { client: true, clientId: true } }), { client: 'TEST Course libellé du premier changement', clientId: nouveau.id });
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { chantierId: troisiemeChantier.id } }), 0);
+
+      // 4. Une facture d'affaire créée pendant un changement de client attend sa fin, puis est
+      //    refusée pour l'ancien client : l'affaire n'est plus la sienne.
+      const quatrieme = await prisma.chantier.create({ data: { nom: 'TEST Course facture attend', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const changementAvantFacture = tenirVerrou(quatrieme.id, 'FOR UPDATE', tx => tx.chantier.update({ where: { id: quatrieme.id }, data: { clientId: nouveau.id, client: nouveau.raisonSociale } }));
+      await changementAvantFacture.verrouPris;
+      let facturation;
+      try {
+        facturation = request(app).post('/api/factures').set(auth).send({ clientId: ancien.id, origine: 'CHANTIER', chantierId: quatrieme.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST Course facture', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }).then(r => r);
+        assert.equal(await attendreVerrou('%"Chantier"%FOR SHARE%'), true, 'la facture doit attendre le changement de client');
+      } finally {
+        changementAvantFacture.liberer();
+        await changementAvantFacture.transaction;
+      }
+      const refusFacture = await facturation;
+      assert.equal(refusFacture.status, 404, JSON.stringify(refusFacture.body));
+      assert.equal(await prisma.facture.count({ where: { chantierId: quatrieme.id } }), 0);
+
+      // 5. Une annulation de l'affaire enregistrée pendant le changement : relue sous verrou, elle
+      //    fait refuser le changement, sans trace.
+      const cinquieme = await prisma.chantier.create({ data: { nom: 'TEST Course annulation', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const annulation = tenirVerrou(cinquieme.id, 'FOR UPDATE', tx => tx.chantier.update({ where: { id: cinquieme.id }, data: { statut: 'ANNULE', annuleLe: new Date() } }));
+      await annulation.verrouPris;
+      let pendantAnnulation;
+      try {
+        pendantAnnulation = request(app).patch(`/api/chantiers/${cinquieme.id}`).set(auth).send({ clientId: nouveau.id }).then(r => r);
+        assert.equal(await attendreVerrou('%"Chantier"%FOR UPDATE%'), true, 'le changement doit attendre l’annulation');
+      } finally {
+        annulation.liberer();
+        await annulation.transaction;
+      }
+      const refusAnnulee = await pendantAnnulation;
+      assert.equal(refusAnnulee.status, 409, JSON.stringify(refusAnnulee.body));
+      assert.equal(refusAnnulee.body.error, 'Cette affaire est annulée : elle n’est plus modifiable.');
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: cinquieme.id } })).clientId, ancien.id);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { chantierId: cinquieme.id } }), 0);
+
+      // 6. Une annulation en cours (verrou d'une mise à jour ordinaire, FOR NO KEY UPDATE) : la
+      //    création d'une intervention ou d'une facture d'affaire l'attend, puis est refusée.
+      for (const creation of ['intervention', 'facture']) {
+        const sixieme = await prisma.chantier.create({ data: { nom: `TEST Course ${creation} pendant annulation`, client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+        const annulationEnCours = tenirVerrou(sixieme.id, 'FOR NO KEY UPDATE', tx => tx.chantier.update({ where: { id: sixieme.id }, data: { statut: 'ANNULE', annuleLe: new Date() } }));
+        await annulationEnCours.verrouPris;
+        let pendant;
+        try {
+          pendant = (creation === 'intervention'
+            ? request(app).post('/api/interventions').set(auth).send({ clientId: ancien.id, chantierId: sixieme.id, titre: 'TEST Course SAV pendant annulation' })
+            : request(app).post('/api/factures').set(auth).send({ clientId: ancien.id, origine: 'CHANTIER', chantierId: sixieme.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST Course facture pendant annulation', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] })
+          ).then(r => r);
+          assert.equal(await attendreVerrou('%"Chantier"%FOR SHARE%'), true, `la création (${creation}) doit attendre l’annulation`);
+        } finally {
+          annulationEnCours.liberer();
+          await annulationEnCours.transaction;
+        }
+        const refusPendant = await pendant;
+        assert.equal(refusPendant.status, creation === 'intervention' ? 404 : 409, JSON.stringify(refusPendant.body));
+        assert.equal(await prisma.intervention.count({ where: { chantierId: sixieme.id } }), 0);
+        assert.equal(await prisma.facture.count({ where: { chantierId: sixieme.id } }), 0);
+      }
+    });
+
     test('#111 : un client désactivé depuis ne bloque pas la fiche, mais ne se choisit plus', async () => {
       const auth = { Authorization: `Bearer ${session}` };
       const desactive = await prisma.client.create({ data: { raisonSociale: 'TEST 111 client désactivé depuis' } });
