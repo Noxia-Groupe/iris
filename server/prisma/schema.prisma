@@ -358,9 +358,44 @@ model Parametres {
   rentabiliteConducteur  Boolean  @default(true)
   rentabiliteHierarchie  Boolean  @default(true)
   rentabiliteDirecteurs  Boolean  @default(true)
+  // Durée de conservation du journal des paramètres et des droits (JournalAdministration), en
+  // jours. Décision de Nelson du 14-10-2026 : une durée conforme au RGPD, à faire valider par le
+  // cabinet juridique ; à défaut, réglable, de 90 jours au plus (CHECK 1 à 90 en base). Réglée
+  // par un super administrateur, et journalisée.
+  journalConservationJours Int    @default(90)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Journal des paramètres et des droits (lot (a), décision de Nelson du 13-10-2026) : tout
+// changement de réglage de l'instance et tout changement de droits d'un compte, avec son auteur,
+// la valeur avant et après. Consultable et exportable par les seuls administrateurs ; un simple
+// administrateur ne voit ni les entrées qui concernent un compte super administrateur
+// (concerneSuperAdmin), ni celles réservées au super administrateur (reserveSuperAdmin : clés
+// d'intégration). En ajout seul : un trigger refuse toute modification, et toute suppression
+// d'une entrée plus récente que la durée de conservation (Parametres.journalConservationJours).
+// L'auteur n'a pas de clé étrangère : la suppression d'un compte ne bloque ni n'efface son
+// historique, dont le nom est figé (auteurNom).
+model JournalAdministration {
+  id                 String   @id @default(uuid())
+  domaine            String // DROITS | REGLAGES
+  type               String // COMPTE | PARAMETRES | MODULES | REMUNERATION | PRIME_COMMERCIAL | SOCIETE | CLE_INTEGRATION | PARTAGE_PLANNING | CONSERVATION_JOURNAL
+  action             String
+  cibleId            String?
+  cibleLibelle       String?
+  avant              Json?
+  apres              Json?
+  detail             String?
+  concerneSuperAdmin Boolean  @default(false)
+  reserveSuperAdmin  Boolean  @default(false)
+  auteurId           String?
+  auteurNom          String
+  auteurSuperAdmin   Boolean  @default(false)
+  createdAt          DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([type, createdAt])
 }
 
 // Identité unique de la société exploitant cette instance Iris. Chaque installation et
