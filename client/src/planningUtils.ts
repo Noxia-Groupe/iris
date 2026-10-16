@@ -71,7 +71,7 @@ export function diffJours(a: string, b: string): number {
 
 export function formatFr(s: string): string {
   const [y, m, d] = s.split('-');
-  return `${d}/${m}/${y}`;
+  return `${d}-${m}-${y}`;
 }
 
 // --- Couleurs des pastilles ---

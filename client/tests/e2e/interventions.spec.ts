@@ -25,8 +25,8 @@ test.describe('Interventions SAV', () => {
     await page.getByPlaceholder('Date souhaitée (JJ-MM-AAAA)').fill('10-01-2026');
     await page.getByRole('button', { name: 'Créer', exact: true }).click();
     const carte = page.locator('article').filter({ has: page.getByRole('heading', { name: titre }) });
-    await expect(carte).toContainText('Demandée le 02/01/2026');
-    await expect(carte).toContainText('Souhaitée le 10/01/2026');
+    await expect(carte).toContainText('Demandée le 02-01-2026');
+    await expect(carte).toContainText('Souhaitée le 10-01-2026');
     const liste = await request.get(`${api}/interventions`, { headers: { Authorization: `Bearer ${session.token}` } });
     expect(liste.ok()).toBeTruthy();
     const enregistree = (await liste.json() as { titre: string; dateDemande: string }[]).find((i) => i.titre === titre);
@@ -54,7 +54,7 @@ test.describe('Interventions SAV', () => {
     }, [session.token, JSON.stringify(session.user)]);
     await page.goto('/interventions', { waitUntil: 'networkidle' });
     const carte = page.locator('article').filter({ has: page.getByRole('heading', { name: titre }) });
-    await expect(carte).toContainText('Souhaitée le 10/01/2027');
+    await expect(carte).toContainText('Souhaitée le 10-01-2027');
     await expect(carte).not.toContainText('Demandée le');
   });
 

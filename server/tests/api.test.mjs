@@ -7590,6 +7590,9 @@ if (!TEST_DATABASE_URL) {
       assert.ok(trace.auteurId);
       assert.ok(trace.auteurNom);
       assert.match(trace.motif, new RegExp(intervention.body.reference));
+      // Dates du motif au format JJ-MM-AAAA (lot (h)), et non en AAAA-MM-JJ.
+      const echeanceFr = intervention.body.echeanceContrat.slice(0, 10).split('-').reverse().join('-');
+      assert.ok(trace.motif.endsWith(`échéance du ${echeanceFr} au 08-03-2027.`), trace.motif);
       assert.equal(trace.avant.prochaineEcheance, intervention.body.echeanceContrat);
       assert.equal(trace.apres.prochaineEcheance, avance.body.prochaineEcheance);
       const secondeTentative = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
@@ -7727,6 +7730,40 @@ if (!TEST_DATABASE_URL) {
         await prisma.chantier.delete({ where: { id: chantier.id } });
         await prisma.intervenant.delete({ where: { id: intervenant.id } });
         await prisma.user.delete({ where: { id: conducteur.id } });
+      }
+    });
+
+    // Lot (h) : la modale d'affectation saisit ses dates en JJ-MM-AAAA. Le serveur les lit comme les
+    // autres dates métier (dateIsoStricte) : JJ-MM-AAAA ou AAAA-MM-JJ, sans débordement ni suffixe.
+    test('les dates d’une affectation se saisissent en JJ-MM-AAAA, et sont lues strictement', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const intervenant = await request(app).post('/api/intervenants').set(auth).send({ nom: `TEST Format planning ${Date.now()}`, role: 'Technicien', tauxHoraireCharge: 40 });
+      assert.equal(intervenant.status, 200, JSON.stringify(intervenant.body));
+      const creees = [];
+      const creer = (dates) => request(app).post('/api/planning/events').set(auth).send({ categorie: 'HORS_CHANTIER', titre: 'TEST Format planning', intervenantIds: [intervenant.body.id], ...dates });
+      try {
+        for (const [dates, attendu] of [
+          [{ dateDebut: '20-10-2026', dateFin: '21-10-2026' }, ['2026-10-20', '2026-10-21']],
+          [{ dateDebut: '2026-10-20', dateFin: '2026-10-21' }, ['2026-10-20', '2026-10-21']],
+          [{ dateDebut: '20-10-2026' }, ['2026-10-20', '2026-10-20']],
+        ]) {
+          const reponse = await creer(dates);
+          assert.equal(reponse.status, 201, `${JSON.stringify(dates)} : ${JSON.stringify(reponse.body)}`);
+          creees.push(reponse.body.id);
+          assert.deepEqual([reponse.body.dateDebut, reponse.body.dateFin], attendu.map((jour) => `${jour}T00:00:00.000Z`));
+        }
+        // Auparavant : le 30 février enregistré au 2 mars, un suffixe quelconque ignoré, JJ-MM-AAAA refusé.
+        for (const dateDebut of ['2026-02-30', '30-02-2026', '2026-10-20xyz', '20/10/2026', '2026-10-20 10:00']) {
+          const refuse = await creer({ dateDebut });
+          if (refuse.status === 201) creees.push(refuse.body.id);
+          assert.equal(refuse.status, 400, `${dateDebut} : ${JSON.stringify(refuse.body)}`);
+        }
+        const finInvalide = await creer({ dateDebut: '20-10-2026', dateFin: '31-11-2026' });
+        if (finInvalide.status === 201) creees.push(finInvalide.body.id);
+        assert.equal(finInvalide.status, 400, JSON.stringify(finInvalide.body));
+      } finally {
+        for (const id of creees) await request(app).delete(`/api/planning/events/${id}`).set(auth);
+        await request(app).delete(`/api/intervenants/${intervenant.body.id}`).set(auth);
       }
     });
 

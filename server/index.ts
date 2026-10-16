@@ -2193,7 +2193,7 @@ app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireA
       if (!intervention || intervention.statut !== 'TERMINEE') return { erreur: 'NOT_READY' as const };
       const prochaineEcheance = echeanceSuivante(contrat.dateDebut, contrat.prochaineEcheance, contrat.periodiciteMois);
       const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { prochaineEcheance } });
-      const motif = `Intervention ${intervention.reference} terminée : échéance du ${contrat.prochaineEcheance.toISOString().slice(0, 10)} au ${prochaineEcheance.toISOString().slice(0, 10)}.`;
+      const motif = `Intervention ${intervention.reference} terminée : échéance du ${dateFrancaise(contrat.prochaineEcheance)} au ${dateFrancaise(prochaineEcheance)}.`;
       await journaliserContrat(tx, req, 'AVANCEMENT_ECHEANCE', maj, contrat, motif);
       return { contrat: maj };
     });
@@ -3761,12 +3761,11 @@ const PLANNING_CATEGORIES = ['CHANTIER', 'HORS_CHANTIER', 'EVENEMENT'];
 const PLANNING_CRENEAUX = ['JOURNEE', 'MATIN', 'APRES_MIDI', 'HEURES'];
 
 // Jour du planning : on ne stocke que la date (minuit UTC), jamais d'heure — le créneau
-// horaire éventuel est porté par creneau/heureDebut/heureFin.
+// horaire éventuel est porté par creneau/heureDebut/heureFin. Même lecture que les autres
+// dates métier (dateIsoStricte) : JJ-MM-AAAA ou AAAA-MM-JJ, sans débordement (30 février).
 function parsePlanningJour(value: unknown): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''));
-  if (!m) return null;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  return Number.isNaN(d.getTime()) ? null : d;
+  const date = dateIsoStricte(value);
+  return date ? new Date(date) : null;
 }
 
 function parsePlanningHeure(value: unknown): string | null {
@@ -3866,7 +3865,7 @@ app.get('/api/planning/events', requireAuth, blockCommercial, requirePlanningAct
   try {
     const start = parsePlanningJour(req.query.start);
     const end = parsePlanningJour(req.query.end);
-    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, format YYYY-MM-DD).' });
+    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, au format JJ-MM-AAAA ou AAAA-MM-JJ).' });
     const events = await prisma.planningEvent.findMany({
       where: { dateDebut: { lte: end }, dateFin: { gte: start }, OR: [
         { interventionId: null }, { intervention: { is: getInterventionFilterForUser(req.user!) } },
@@ -4118,7 +4117,7 @@ app.get('/api/planning/public/:token', async (req, res) => {
     const sansPlage = req.query.start === undefined && req.query.end === undefined;
     const start = parsePlanningJour(sansPlage ? lundi : req.query.start);
     const end = parsePlanningJour(sansPlage ? ajouterJoursCivils(lundi, 6) : req.query.end);
-    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide : start et end vont ensemble, au format YYYY-MM-DD.' });
+    if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide : start et end vont ensemble, au format JJ-MM-AAAA ou AAAA-MM-JJ.' });
 
     // `select` explicite (plutôt qu'`include`, qui renverrait aussi tous les champs
     // scalaires bruts de PlanningEvent) : n'expose que ce qui est utile à un technicien,

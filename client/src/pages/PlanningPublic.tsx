@@ -7,15 +7,11 @@ import {
   lundiDe, joursDeLaSemaine, numeroSemaineIso, shiftDateStr,
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, adresseEvent,
 } from '../planningUtils';
-import { formatCompanyDateTime, formatDateOnly } from '../lib/dateFormatting';
+import { formatCompanyDateTime, jourFrancais, jourSemaineFrancais } from '../lib/dateFormatting';
 
-// Plage "13 – 19 juillet 2026" (ou "28 juin – 4 juillet 2026" si la semaine chevauche deux
-// mois) : le mois n'est répété qu'une fois quand il est identique aux deux bornes.
+// Plage de la semaine au format JJ-MM-AAAA : « 13-07-2026 – 19-07-2026 ».
 function formatPlageSemaine(debut: string, fin: string): string {
-  const memeMois = debut.slice(0, 7) === fin.slice(0, 7);
-  const debutStr = formatDateOnly(`${debut}T00:00:00Z`, { day: 'numeric', month: memeMois ? undefined : 'long' });
-  const finStr = formatDateOnly(`${fin}T00:00:00Z`, { day: 'numeric', month: 'long', year: 'numeric' });
-  return `${debutStr} – ${finStr}`;
+  return `${jourFrancais(debut)} – ${jourFrancais(fin)}`;
 }
 
 // Jour et fuseau de la société, renvoyés par le serveur : la page publique n'a pas de session,
@@ -179,7 +175,7 @@ const PlanningPublic = () => {
                 <div key={jStr}>
                   <div className={`flex items-center gap-2 mb-1.5 px-1 ${isToday ? 'text-accent' : 'text-gray-500'}`}>
                     <span className="text-sm font-extrabold uppercase">
-                      {formatDateOnly(`${jStr}T00:00:00Z`, { weekday: 'long', day: 'numeric', month: 'long' })}
+                      {jourSemaineFrancais(jStr, 'long')}
                     </span>
                     {isToday && <span className="text-[10px] font-bold bg-accent text-white px-1.5 py-0.5 rounded">Aujourd'hui</span>}
                   </div>

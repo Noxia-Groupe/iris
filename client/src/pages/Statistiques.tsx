@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PieChart, Users, Truck, Tags, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiFetch } from '../api';
-import { decalerReference } from '../lib/dateFormatting';
+import { decalerReference, jourFrancais } from '../lib/dateFormatting';
 import { useReferencePeriode } from '../lib/referencePeriode';
 import { isAdminRole, roleLabel } from '../roles';
 
@@ -9,16 +9,11 @@ type Period = 'week' | 'month' | 'year';
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
-const fmtJourMois = (isoDate: string) => {
-  const [, m, d] = isoDate.split('-');
-  return `${d}/${m}`;
-};
-
 const periodLabel = (period: Period, periodStart: string, periodEnd: string) => {
   const [y, m] = periodStart.split('-').map(Number);
   if (period === 'year') return `Année ${y}`;
   if (period === 'month') return `${MOIS[m - 1]} ${y}`;
-  return `Semaine du ${fmtJourMois(periodStart)} au ${fmtJourMois(periodEnd)}`;
+  return `Semaine du ${jourFrancais(periodStart)} au ${jourFrancais(periodEnd)}`;
 };
 
 // Sélecteur de période générique (granularité + navigation précédent/suivant/aujourd'hui),

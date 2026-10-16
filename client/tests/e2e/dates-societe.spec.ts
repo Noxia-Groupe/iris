@@ -123,6 +123,10 @@ test.describe('navigateur à Gambier, société à Wallis : périodes', () => {
       await expect(page.getByText('Octobre 2026', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: "Aujourd'hui" }).click();
       await expect(page.getByText('Novembre 2026', { exact: true })).toBeVisible();
+      // Onglet Intervenants, à la semaine : libellé au format JJ-MM-AAAA. Le dimanche 1er novembre
+      // de Wallis est dans la semaine du 26-10 au 01-11.
+      await page.getByRole('button', { name: 'Intervenants' }).click();
+      await expect(page.getByText('Semaine du 26-10-2026 au 01-11-2026', { exact: true })).toBeVisible();
     });
   });
 
@@ -174,14 +178,14 @@ test.describe('navigateur à Gambier, société à Wallis : périodes', () => {
         demande: '**/api/stats/conducteurs/assiduite?*',
         estDepassee: (url) => url.searchParams.get('week') === '2026-10-18',
         ouvrir: () => ouvrirSansAttendre(page, '/performances', session.token, session.user),
-        attendu: page.getByText(/Semaine du 19\/10 au 23\/10/),
-        depasse: page.getByText(/Semaine du 12\/10/),
+        attendu: page.getByText(/Semaine du 19-10-2026 au 23-10-2026/),
+        depasse: page.getByText(/Semaine du 12-10-2026/),
       });
       // « Aujourd'hui » revient à la semaine de la société, et non à celle du jour UTC (le 12).
       await page.getByTitle('Semaine précédente').click();
-      await expect(page.getByText(/Semaine du 12\/10/)).toBeVisible();
+      await expect(page.getByText(/Semaine du 12-10-2026/)).toBeVisible();
       await page.getByRole('button', { name: "Aujourd'hui" }).click();
-      await expect(page.getByText(/Semaine du 19\/10 au 23\/10/)).toBeVisible();
+      await expect(page.getByText(/Semaine du 19-10-2026 au 23-10-2026/)).toBeVisible();
     });
   });
 
@@ -343,6 +347,9 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
         await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
         await expect(page.locator('thead th', { hasText: '19-10' })).toHaveClass(/bg-blue-50/);
         await expect(page.locator('thead th', { hasText: '18-10' })).toHaveCount(0);
+        // Format JJ-MM-AAAA (décision de Nelson du 14-10-2026), jusque dans les en-têtes de colonne.
+        await expect(page.getByText('Semaine du 19-10-2026 au 25-10-2026')).toBeVisible();
+        await expect(page.locator('thead th', { hasText: '19-10' })).toHaveText(/^lun\. 19-10-2026$/i);
         // Navigation d'une semaine à l'autre, depuis la semaine de la société : le libellé suit la
         // semaine affichée, et seul le jour de la société est surligné.
         const surlignes = page.locator('thead th[class*="bg-blue-50"]');
@@ -363,7 +370,7 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
         // « + Affectation » préremplit le jour de la société (lundi 19), et non celui du
         // navigateur ou d'UTC (dimanche 18), quelle que soit la semaine affichée.
         await page.getByRole('button', { name: 'Affectation', exact: true }).click();
-        await expect(page.locator('input[name="dateDebut"]')).toHaveValue('2026-10-19');
+        await expect(page.locator('input[name="dateDebut"]')).toHaveValue('19-10-2026');
       });
     } finally {
       await request.delete(`${api}/intervenants/${id}`, { headers });
@@ -397,15 +404,15 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     // Première demande sans plage ; la page affiche la semaine du jour de la société (43), et non
     // celle du navigateur ou d'UTC (42).
     expect(new URL(demandes[0]).search).toBe('');
-    await expect(page.getByText('19 – 25 octobre 2026')).toBeVisible();
+    await expect(page.getByText('19-10-2026 – 25-10-2026')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
     // Le lundi 19 (Wallis) est « Aujourd'hui », et non le dimanche 18 de Cayenne.
-    await expect(page.getByText("Aujourd'hui", { exact: true }).locator('..')).toContainText('lundi 19 octobre');
+    await expect(page.getByText("Aujourd'hui", { exact: true }).locator('..')).toContainText('lundi 19-10-2026');
     // 13:00 UTC = 01:00 à Wallis.
     await expect(page.getByText(/Mis à jour à 01:00/)).toBeVisible();
     // Semaine précédente, puis retour à la semaine de la société.
     await page.getByTitle('Semaine précédente').click();
-    await expect(page.getByText('12 – 18 octobre 2026')).toBeVisible();
+    await expect(page.getByText('12-10-2026 – 18-10-2026')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Semaine 42' })).toBeVisible();
     await expect.poll(() => new URL(demandes[demandes.length - 1]).search).toBe('?start=2026-10-12&end=2026-10-18');
     // Le retour est immédiat : la semaine de la société s'affiche avant la réponse du serveur,
@@ -413,7 +420,7 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     const nombreAvantRetour = demandes.length;
     retenirRetour = true;
     await page.getByRole('button', { name: 'Semaine 42' }).click();
-    await expect(page.getByText('19 – 25 octobre 2026')).toBeVisible();
+    await expect(page.getByText('19-10-2026 – 25-10-2026')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Semaine 43' })).toBeVisible();
     await expect.poll(() => demandes.length).toBeGreaterThan(nombreAvantRetour);
     expect(new URL(demandes[demandes.length - 1]).search).toBe('');
@@ -427,7 +434,7 @@ test.describe('navigateur à Cayenne, société à Wallis', () => {
     Object.assign(societe, { aujourdhui: '2026-10-26', debut: '2026-10-26', fin: '2026-11-01' });
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(page.getByRole('button', { name: 'Semaine 44' })).toBeVisible();
-    await expect(page.getByText("Aujourd'hui", { exact: true }).locator('..')).toContainText('lundi 26 octobre');
+    await expect(page.getByText("Aujourd'hui", { exact: true }).locator('..')).toContainText('lundi 26-10-2026');
   });
 
   // Un rafraîchissement lancé avant un changement de semaine ne doit pas, arrivé le dernier,
@@ -659,10 +666,10 @@ test.describe('navigateur à Gambier : instants affichés au fuseau de la socié
     }, [session.token, JSON.stringify(session.user)]);
     await avecFuseauSociete(request, session.token, 'Pacific/Wallis', async () => {
       await page.goto('/devis', { waitUntil: 'domcontentloaded' });
-      await expect(page.locator('li', { hasText: objet })).toContainText('15/10/2026 01:30:00');
+      await expect(page.locator('li', { hasText: objet })).toContainText('15-10-2026 01:30:00');
       await page.goto('/comptabilite', { waitUntil: 'domcontentloaded' });
       await page.getByRole('button', { name: 'Historique des règles' }).click();
-      await expect(page.getByRole('region', { name: 'Historique des règles' })).toContainText('15/10/2026 01:30:00');
+      await expect(page.getByRole('region', { name: 'Historique des règles' })).toContainText('15-10-2026 01:30:00');
     });
     await avecFuseauSociete(request, session.token, 'Pacific/Tahiti', async () => {
       await page.goto('/', { waitUntil: 'domcontentloaded' });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { estWeekEnd, joursDeLaSemaine, lundiDe, numeroSemaineIso } from '../src/planningUtils.ts';
+import { estWeekEnd, formatFr, joursDeLaSemaine, lundiDe, numeroSemaineIso } from '../src/planningUtils.ts';
 
 // Le planning raisonne en jours AAAA-MM-JJ, sans l'horloge ni le fuseau du navigateur (les tests
 // tournent sous TZ=Pacific/Gambier, UTC-9, où une date locale glisserait d'un jour).
@@ -23,4 +23,9 @@ test('estWeekEnd et numeroSemaineIso suivent le calendrier civil', () => {
   assert.equal(numeroSemaineIso('2027-01-01'), 53, 'le 1er janvier 2027 appartient à la semaine 53 de 2026');
   assert.equal(numeroSemaineIso('2026-12-28'), 53);
   assert.equal(numeroSemaineIso('2027-01-04'), 1);
+});
+
+// Décision de Nelson (14-10-2026) : toutes les dates s'affichent au format JJ-MM-AAAA.
+test('formatFr affiche un jour AAAA-MM-JJ au format JJ-MM-AAAA', () => {
+  assert.equal(formatFr('2026-10-05'), '05-10-2026');
 });
