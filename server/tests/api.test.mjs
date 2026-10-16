@@ -7678,7 +7678,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set('Authorization', `Bearer ${jwt.sign({ id: autreConducteur.id }, process.env.JWT_SECRET)}`)).status, 404);
     });
 
-    test('changement de client et création d’intervention simultanés : l’un attend l’autre, sans rattachement incohérent', async () => {
+    test('changements de client et création d’intervention simultanés : l’un attend l’autre, sans rattachement incohérent ni trace en double', async () => {
       const auth = { Authorization: `Bearer ${session}` };
       const ancien = await prisma.client.create({ data: { raisonSociale: 'TEST Course client ancien' } });
       const nouveau = await prisma.client.create({ data: { raisonSociale: 'TEST Course client nouveau' } });
@@ -7737,6 +7737,24 @@ if (!TEST_DATABASE_URL) {
       assert.equal(refusModification.status, 409, JSON.stringify(refusModification.body));
       assert.deepEqual(await prisma.chantier.findUniqueOrThrow({ where: { id: second.id }, select: { client: true, clientId: true } }), { client: ancien.raisonSociale, clientId: ancien.id });
       assert.equal(await prisma.journalSaisieChantier.count({ where: { chantierId: second.id } }), 0);
+
+      // 3. Le même changement fait deux fois en même temps : le second attend le premier, ne trouve
+      //    plus rien à changer, et ne réécrit ni le libellé ni le journal.
+      const troisiemeChantier = await prisma.chantier.create({ data: { nom: 'TEST Course changement en double', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const premierChangement = tenirVerrou(troisiemeChantier.id, 'FOR UPDATE', tx => tx.chantier.update({ where: { id: troisiemeChantier.id }, data: { clientId: nouveau.id, client: 'TEST Course libellé du premier changement' } }));
+      await premierChangement.verrouPris;
+      let doublon;
+      try {
+        doublon = request(app).patch(`/api/chantiers/${troisiemeChantier.id}`).set(auth).send({ clientId: nouveau.id }).then(r => r);
+        assert.equal(await attendreVerrou('%"Chantier"%FOR UPDATE%'), true, 'le second changement doit attendre le premier');
+      } finally {
+        premierChangement.liberer();
+        await premierChangement.transaction;
+      }
+      const reponseDoublon = await doublon;
+      assert.equal(reponseDoublon.status, 200, JSON.stringify(reponseDoublon.body));
+      assert.deepEqual(await prisma.chantier.findUniqueOrThrow({ where: { id: troisiemeChantier.id }, select: { client: true, clientId: true } }), { client: 'TEST Course libellé du premier changement', clientId: nouveau.id });
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { chantierId: troisiemeChantier.id } }), 0);
     });
 
     test('#111 : un client désactivé depuis ne bloque pas la fiche, mais ne se choisit plus', async () => {
