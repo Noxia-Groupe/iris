@@ -2311,6 +2311,7 @@ app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requ
   }
 });
 
+class ChantierInterventionIntrouvable extends Error {}
 app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, res, next) => {
   if (!isAdminRole(req.user?.role) && req.user?.role !== 'CONDUCTEUR_TRAVAUX') return res.status(403).json({ error: 'Création réservée à l’encadrement SAV.' });
   next();
@@ -2333,12 +2334,6 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     if (contactId && !await prisma.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
       return res.status(404).json({ error: 'Contact introuvable pour ce client.' });
     }
-    // Le chantier rattaché doit être lié à la fiche de ce client (clientId), et non à un libellé
-    // identique : renommer un client ne rompt pas le rattachement, et une affaire héritée sans
-    // fiche se répare d'abord (décision de Nelson du 16-10-2026).
-    if (chantierId && !await prisma.chantier.findFirst({ where: { id: chantierId, clientId, annuleLe: null }, select: { id: true } })) {
-      return res.status(404).json({ error: 'Chantier introuvable pour ce client.' });
-    }
     const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
     if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
     const societe = await getCompanySettings();
@@ -2347,6 +2342,14 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     if (dateSouhaitee && dateSouhaitee < dateDemande) return res.status(400).json({ error: 'La date souhaitée ne peut pas précéder la date de demande.' });
     const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
     const intervention = await prisma.$transaction(async (tx) => {
+      // Le chantier rattaché doit être lié à la fiche de ce client (clientId), et non à un libellé
+      // identique : renommer un client ne rompt pas le rattachement, et une affaire héritée sans
+      // fiche se répare d'abord (décision de Nelson du 16-10-2026). Le contrôle se fait sous verrou
+      // partagé : un changement de client de l'affaire en cours attend la fin de cette création, ou
+      // la fait refuser s'il s'enregistre d'abord (cf. PATCH /api/chantiers/:id).
+      if (chantierId && !(await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} AND "annuleLe" IS NULL FOR SHARE`)).length) {
+        throw new ChantierInterventionIntrouvable();
+      }
       const sequence = await tx.sequenceIntervention.upsert({
         where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
       });
@@ -2360,6 +2363,7 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     });
     res.status(201).json(decimalToNumber(exposerIntervention(intervention)));
   } catch (error) {
+    if (error instanceof ChantierInterventionIntrouvable) return res.status(404).json({ error: 'Chantier introuvable pour ce client.' });
     console.error('Erreur création intervention SAV', error);
     res.status(500).json({ error: 'Erreur lors de la création de l’intervention.' });
   }
@@ -3125,6 +3129,7 @@ app.post('/api/chantiers', requireAuth, blockCommercial, (_req, res) => {
 // date, un budget ou un devis mal saisi, comme le ferait un administrateur, sans avoir à en
 // solliciter un. Sur un chantier dont il n'est pas responsable, un conducteur reçoit 404 (et
 // non 403) : même règle qu'à la lecture, on ne révèle pas l'existence du chantier.
+class ChangementClientRefuse extends Error {}
 app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) => {
   try {
     const authUser = (req as AuthRequest).user!;
@@ -3164,23 +3169,12 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // Un client renvoyé à l'identique n'est pas un changement : la fiche d'un chantier dont le
     // client a été désactivé depuis reste modifiable (#111). Seul un nouveau client doit être
     // actif, et une affaire déjà facturée n'en change pas.
+    // Les refus (affaire facturée, interventions d'un autre client), le libellé et la trace sont
+    // décidés plus bas, dans la transaction de l'enregistrement, sur la ligne verrouillée.
+    let cibleClient: { id: string; raisonSociale: string } | null = null;
     if (isAdminRole(authUser.role) && 'clientId' in req.body && String(req.body.clientId || '') !== existant.clientId) {
-      const cibleId = String(req.body.clientId || '');
-      const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true, raisonSociale: true } });
-      if (!cible) return res.status(404).json({ error: 'Client introuvable.' });
-      if (await prisma.facture.count({ where: { OR: [
-        { chantierId: existant.id },
-        { intervention: { is: { chantierId: existant.id } } },
-      ] } })) {
-        return res.status(409).json({ error: 'Une affaire déjà facturée ne change pas de client.' });
-      }
-      data.clientId = cibleId;
-      // Une réaffectation d'un client à un autre reprend la raison sociale du nouveau client
-      // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et les affichages qui lisent
-      // ce libellé suivent le client ; le rattachement d'une intervention SAV, lui, passe par
-      // clientId depuis #144. Une affaire héritée sans client lié garde son libellé historique
-      // quand on la répare.
-      if (existant.clientId) data.client = cible.raisonSociale;
+      cibleClient = await prisma.client.findFirst({ where: { id: String(req.body.clientId || ''), actif: true }, select: { id: true, raisonSociale: true } });
+      if (!cibleClient) return res.status(404).json({ error: 'Client introuvable.' });
     }
     // Format et unicité du numéro de devis : mêmes règles qu'à la création, mais appliquées
     // SEULEMENT si le numéro change réellement. Des chantiers antérieurs portent une valeur
@@ -3232,12 +3226,52 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     if ('types' in req.body) data.types = sanitizeTypes(req.body.types);
     if ('baremeReduit' in req.body) data.baremeReduit = !!req.body.baremeReduit;
 
-    const chantier = await prisma.chantier.update({
-      where: { id: paramId(req) },
-      data
+    const chantier = await prisma.$transaction(async (tx) => {
+      if (cibleClient) {
+        // Verrou de la ligne : une intervention créée en même temps sur cette affaire attend la
+        // fin du changement, ou le fait refuser si elle s'enregistre d'abord (cf. POST
+        // /api/interventions) ; deux changements simultanés se suivent au lieu de se croiser.
+        const [verrouille] = await tx.$queryRaw<Array<{ clientId: string | null; client: string }>>(Prisma.sql`SELECT "clientId", "client" FROM "Chantier" WHERE "id" = ${existant.id} FOR UPDATE`);
+        if (verrouille.clientId !== cibleClient.id) {
+          if (await tx.facture.count({ where: { OR: [
+            { chantierId: existant.id },
+            { intervention: { is: { chantierId: existant.id } } },
+          ] } })) {
+            throw new ChangementClientRefuse('Une affaire déjà facturée ne change pas de client.');
+          }
+          // Une intervention SAV rattachée appartient au client de l'affaire (#144) : tant qu'elle
+          // y est, l'affaire ne passe pas à un autre client (décision de Nelson du 16-10-2026),
+          // même annulée, car elle resterait rattachée. Une affaire héritée se répare vers le
+          // client de ses interventions, jamais vers un autre.
+          if (await tx.intervention.count({ where: { chantierId: existant.id, clientId: { not: cibleClient.id } } })) {
+            throw new ChangementClientRefuse('Des interventions SAV d’un autre client sont rattachées à cette affaire : elle ne peut pas passer à ce client.');
+          }
+          data.clientId = cibleClient.id;
+          // Une réaffectation d'un client à un autre reprend la raison sociale du nouveau client
+          // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et les affichages qui lisent
+          // ce libellé suivent le client ; le rattachement d'une intervention SAV, lui, passe par
+          // clientId depuis #144. Une affaire héritée sans client lié garde son libellé historique
+          // quand on la répare.
+          if (verrouille.clientId) data.client = cibleClient.raisonSociale;
+          // Trace du changement (décision de Nelson du 16-10-2026), dans la même transaction :
+          // sans elle, le changement n'a pas lieu. La raison sociale de chaque fiche est figée à
+          // l'acte, à côté du libellé de l'affaire, qui peut en différer.
+          const ancienne = verrouille.clientId
+            ? await tx.client.findUnique({ where: { id: verrouille.clientId }, select: { raisonSociale: true } })
+            : null;
+          await tx.journalSaisieChantier.create({ data: {
+            chantierId: existant.id, cible: 'CHANTIER', cibleId: existant.id, action: 'CHANGEMENT_CLIENT',
+            auteurId: authUser.id, auteurNom: authUser.name,
+            avant: { clientId: verrouille.clientId, raisonSociale: ancienne?.raisonSociale ?? null, libelle: verrouille.client },
+            apres: { clientId: cibleClient.id, raisonSociale: cibleClient.raisonSociale, libelle: String(data.client ?? verrouille.client) },
+          } });
+        }
+      }
+      return tx.chantier.update({ where: { id: existant.id }, data });
     });
     res.json(await chantierSelonRentabilite(req, chantier));
   } catch (error) {
+    if (error instanceof ChangementClientRefuse) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: 'Error updating chantier' });
   }
 });
