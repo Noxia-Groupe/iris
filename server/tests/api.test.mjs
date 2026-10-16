@@ -5502,6 +5502,8 @@ if (!TEST_DATABASE_URL) {
       const refus = await request(app).patch(`/api/chantiers/${chantier.id}`).set('Authorization', auth).send({ clientId: autreClient.id, nom: 'Modification refusée' });
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
       assert.match(refus.body.error, /déjà facturée/);
+      // Le refus ne réécrit pas non plus le libellé client.
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).client, 'TEST Client');
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).clientId, clientId);
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).nom, chantier.nom);
       const apres = await request(app).get(traceUrl).set('Authorization', auth);
@@ -7494,14 +7496,42 @@ if (!TEST_DATABASE_URL) {
       const avantReparation = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CHANTIER', chantierId: orpheline.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST affaire non rattachée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(avantReparation.status, 404);
       assert.equal((await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId })).status, 200);
+      // La réparation lie la fiche client sans réécrire le libellé historique.
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: orpheline.id } })).client, 'TEST Libellé libre');
       const facture = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'CHANTIER', chantierId: orpheline.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST affaire réparée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(facture.status, 201); assert.equal((await request(app).post(`/api/factures/${facture.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
       const autre = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client déplacement' });
       assert.equal((await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId: autre.body.id })).status, 409);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: orpheline.id } })).client, 'TEST Libellé libre');
       // Le client renvoyé à l'identique n'est pas un changement : la fiche facturée reste modifiable.
       const identique = await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId, nom: 'TEST Affaire héritée renommée' });
       assert.equal(identique.status, 200, JSON.stringify(identique.body));
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: orpheline.id } })).nom, 'TEST Affaire héritée renommée');
+    });
+
+    test('une réaffectation reprend la raison sociale du nouveau client, et le SAV suit (décision du 16-10-2026)', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const ancien = await prisma.client.create({ data: { raisonSociale: 'TEST Libellé client ancien' } });
+      const nouveau = await prisma.client.create({ data: { raisonSociale: 'TEST Libellé client nouveau' } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Libellé réaffectation', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      // Avant : le SAV du nouveau client ne peut pas viser ce chantier, qui porte l'ancien libellé.
+      const avant = await request(app).post('/api/interventions').set(auth).send({ clientId: nouveau.id, chantierId: chantier.id, titre: 'TEST Libellé SAV avant réaffectation' });
+      assert.equal(avant.status, 404, JSON.stringify(avant.body));
+      const reaffectation = await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: nouveau.id });
+      assert.equal(reaffectation.status, 200, JSON.stringify(reaffectation.body));
+      assert.equal(reaffectation.body.client, nouveau.raisonSociale);
+      assert.deepEqual(await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id }, select: { client: true, clientId: true } }), { client: nouveau.raisonSociale, clientId: nouveau.id });
+      // Après : le SAV du nouveau client s'y rattache, celui de l'ancien plus.
+      const apres = await request(app).post('/api/interventions').set(auth).send({ clientId: nouveau.id, chantierId: chantier.id, titre: 'TEST Libellé SAV après réaffectation' });
+      assert.equal(apres.status, 201, JSON.stringify(apres.body));
+      assert.equal(apres.body.chantierId, chantier.id);
+      const ancienSav = await request(app).post('/api/interventions').set(auth).send({ clientId: ancien.id, chantierId: chantier.id, titre: 'TEST Libellé SAV ancien client' });
+      assert.equal(ancienSav.status, 404, JSON.stringify(ancienSav.body));
+      // Un client renvoyé à l'identique ne réécrit pas le libellé, même s'il diffère de la fiche.
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { client: 'TEST Libellé saisi à la main' } });
+      const identique = await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: nouveau.id, nom: 'TEST Libellé réaffectation renommée' });
+      assert.equal(identique.status, 200, JSON.stringify(identique.body));
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).client, 'TEST Libellé saisi à la main');
     });
 
     test('#111 : un client désactivé depuis ne bloque pas la fiche, mais ne se choisit plus', async () => {
@@ -7531,6 +7561,7 @@ if (!TEST_DATABASE_URL) {
       const parTitulaireEnBase = await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } });
       assert.equal(parTitulaireEnBase.nom, 'TEST 111 renommée par le titulaire');
       assert.equal(parTitulaireEnBase.clientId, actif.id);
+      assert.equal(parTitulaireEnBase.client, actif.raisonSociale);
     });
 
     test('refuse le document PDF d’une facture brouillon', async () => {
