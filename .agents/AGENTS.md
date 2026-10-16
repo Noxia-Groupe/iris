@@ -26,12 +26,16 @@ appartiennent à l'agent qui les a ouvertes.
 5. L'auteur résout les fils qu'il a traités ; le relecteur résout les siens une fois la
    correction livrée par l'auteur.
 
-## Méthode et remarques d'audit (décision du 16-10-2026)
+## Méthode de travail (décision du 16-10-2026)
 
-Les règles complètes sont dans [`CLAUDE.md`](../CLAUDE.md#méthode-de-travail-décision-de-nelson-du-16-10-2026). Pour les revues :
+Mêmes règles que dans [`CLAUDE.md`](../CLAUDE.md#méthode-de-travail-décision-de-nelson-du-16-10-2026), à appliquer aussi aux revues entre agents :
 
-1. Le périmètre du pilote guide les priorités : une PR dit à quel besoin du premier client elle répond.
-2. Droits et périmètres, montants, factures et documents figés, journaux d'audit et sécurité gardent l'exigence maximale : une remarque qui les touche est bloquante pour la fusion et se corrige avant.
-3. Toute autre remarque non bloquante ne retarde pas la fusion : l'auteur ouvre une issue étiquetée `suivi-audit` (constat, preuve, correctif proposé) et la cite dans la PR. Elle remplace l'obligation de corriger toute remarque non bloquante avant fusion.
-4. Pas de traitement de données historiques, de migration de données existantes ni de déduction théorique tant qu'aucune donnée réelle n'existe : une ligne dans la PR suffit.
-5. Un micro-arbitrage de droits ou d'affichage prend l'option la plus simple et, en cas de doute, la plus restrictive, documentée « choix par défaut, à confirmer » dans la PR et la passation, sans solliciter le responsable.
+1. **Le périmètre du pilote est la boussole.** On avance en largeur sur ce dont le premier client a besoin le premier jour ; le reste attend.
+2. **Exigence maximale inchangée là où une erreur coûte cher** : droits et périmètres, montants, factures et documents figés, journaux d'audit, sécurité. Ces parcours gardent des tests réels sur PostgreSQL et dans le navigateur.
+3. **Remarques d'audit.** Ailleurs, une remarque d'audit non bloquante ne retarde plus la fusion : elle devient une issue étiquetée `suivi-audit`, traitée plus tard. Une remarque bloquante, ou qui touche un parcours de la règle 2, reste corrigée et retestée avant fusion.
+4. **Rien d'historique ni de théorique sans données réelles.** Tant qu'aucune donnée réelle n'existe, ne traiter ni données historiques, ni migration de données existantes, ni déductions théoriques. Les signaler en une ligne dans la PR.
+5. **Micro-arbitrages.** Sur un micro-arbitrage de droits ou d'affichage, ne pas solliciter Nelson : choisir l'option la plus simple et, en cas de doute, la plus restrictive ; la documenter dans la PR et dans `docs/ROADMAP-PASSATION.md` avec la mention « choix par défaut, à confirmer ». Ne lui remonter que ce qui touche les montants, les règles métier, le modèle de données ou un lot entier.
+
+Ce qui ne change pas : une PR par lot, jamais de push direct sur `main`, l'audit interne et l'audit indépendant ; seul Nelson autorise les fusions (une CI verte n'y suffit pas), valide les montants et décide de la mise en production ; Iris reste sa propre source de vérité, et aucune règle de prix, de commission ou de conformité n'est inventée.
+
+Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'étiquette s'appelle `suivi-audit` ; l'issue reprend le constat, sa preuve et le correctif proposé, et la PR la cite.
