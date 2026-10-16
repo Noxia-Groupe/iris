@@ -3164,7 +3164,7 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // actif, et une affaire déjà facturée n'en change pas.
     if (isAdminRole(authUser.role) && 'clientId' in req.body && String(req.body.clientId || '') !== existant.clientId) {
       const cibleId = String(req.body.clientId || '');
-      const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true } });
+      const cible = await prisma.client.findFirst({ where: { id: cibleId, actif: true }, select: { id: true, raisonSociale: true } });
       if (!cible) return res.status(404).json({ error: 'Client introuvable.' });
       if (await prisma.facture.count({ where: { OR: [
         { chantierId: existant.id },
@@ -3173,6 +3173,11 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
         return res.status(409).json({ error: 'Une affaire déjà facturée ne change pas de client.' });
       }
       data.clientId = cibleId;
+      // Une réaffectation d'un client à un autre reprend la raison sociale du nouveau client
+      // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et le rattachement d'une
+      // intervention SAV, qui compare ce libellé, suivent le client. Une affaire héritée sans
+      // client lié garde, elle, son libellé historique quand on la répare.
+      if (existant.clientId) data.client = cible.raisonSociale;
     }
     // Format et unicité du numéro de devis : mêmes règles qu'à la création, mais appliquées
     // SEULEMENT si le numéro change réellement. Des chantiers antérieurs portent une valeur
