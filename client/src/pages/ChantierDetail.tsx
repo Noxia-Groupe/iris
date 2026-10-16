@@ -1294,7 +1294,7 @@ const ChantierDetail = () => {
             <p className="text-sm text-gray-500 mt-1">Historique immuable des créations, corrections et archivages du chantier, et des changements de son client.</p>
           </div>
           {journalSaisies.length === 0 ? (
-            <p className="px-6 py-5 text-sm italic text-gray-400">Aucune saisie à tracer pour ce chantier.</p>
+            <p className="px-6 py-5 text-sm italic text-gray-400">Aucune entrée au journal de ce chantier.</p>
           ) : (
             <div className="divide-y divide-gray-100">
               {journalSaisies.map((entree) => (

@@ -235,7 +235,7 @@ test('changement de client tracé au journal de la fiche, puis refusé une fois 
   const reponse = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname.endsWith(`/api/chantiers/${chantier.id}`));
   await page.getByRole('button', { name: 'Enregistrer les modifications' }).click();
   expect((await reponse).status()).toBe(409);
-  await expect.poll(() => message).toBe('Des interventions SAV d’un autre client sont rattachées à cette affaire : elle ne peut pas passer à ce client.');
+  await expect.poll(() => message).toBe('Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client.');
   // La fenêtre reste ouverte avec la saisie ; relue, la fiche n'a pas changé.
   await expect(page.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
   await page.reload({ waitUntil: 'networkidle' });
