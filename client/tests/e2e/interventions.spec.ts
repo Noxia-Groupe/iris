@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { test, expect } from './fixtures';
+import { test, expect, choisirClient } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
@@ -18,7 +18,7 @@ test.describe('Interventions SAV', () => {
     }, [session.token, JSON.stringify(session.user)]);
     await page.goto('/interventions', { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Nouvelle intervention' }).click();
-    await page.locator('select[name="clientId"]').selectOption(client.id);
+    await choisirClient(page, client);
     const titre = `TEST Demande datée E2E ${Date.now()}`;
     await page.getByPlaceholder('Objet de la demande').fill(titre);
     await page.getByPlaceholder('Date de demande (JJ-MM-AAAA)').fill('02-01-2026');

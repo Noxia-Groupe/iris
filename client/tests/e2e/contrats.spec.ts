@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, choisirClient } from './fixtures';
 
 test.describe('Contrats de maintenance', () => {
   test('réinitialise l’éditeur de couverture avant d’enregistrer le second contrat', async ({ page, allerSurPageAdmin, creerClient, apiAdmin }) => {
@@ -7,7 +7,7 @@ test.describe('Contrats de maintenance', () => {
 
     const creerContrat = async (titre: string, politiqueMainOeuvre: 'INCLUSE' | 'HORS_FORFAIT', politiqueMateriel: 'INCLUS' | 'HORS_FORFAIT', noteCouverture: string) => {
       await page.getByRole('button', { name: 'Nouveau contrat' }).click();
-      await page.locator('select[name="clientId"]').selectOption(client.id);
+      await choisirClient(page, client);
       await page.locator('input[name="titre"]').fill(titre);
       await page.locator('input[name="dateDebut"]').fill('01-10-2030');
       await page.locator('select[name="politiqueMainOeuvre"]').selectOption(politiqueMainOeuvre);
@@ -47,7 +47,7 @@ test.describe('Contrats de maintenance', () => {
     const titre = `Contrat motif ${Date.now()}`;
     await allerSurPageAdmin('/contrats-maintenance');
     await page.getByRole('button', { name: 'Nouveau contrat' }).click();
-    await page.locator('select[name="clientId"]').selectOption(client.id);
+    await choisirClient(page, client);
     await page.locator('input[name="titre"]').fill(titre);
     await page.locator('input[name="dateDebut"]').fill('01-10-2030');
     await page.getByRole('button', { name: 'Créer le contrat' }).click();
@@ -89,7 +89,7 @@ test.describe('Contrats de maintenance', () => {
     const titre = `Contrat emoji ${Date.now()}`;
     await allerSurPageAdmin('/contrats-maintenance');
     await page.getByRole('button', { name: 'Nouveau contrat' }).click();
-    await page.locator('select[name="clientId"]').selectOption(client.id);
+    await choisirClient(page, client);
     await page.locator('input[name="titre"]').fill(titre);
     await page.locator('input[name="dateDebut"]').fill('01-10-2030');
     await page.getByRole('button', { name: 'Créer le contrat' }).click();

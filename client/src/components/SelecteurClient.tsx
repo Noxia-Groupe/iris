@@ -5,7 +5,7 @@ export type ClientResume = { id: string; raisonSociale: string };
 export type ClientActuel = ClientResume & { actif?: boolean };
 
 // Plafond de GET /api/clients : au-delà, il faut affiner la recherche.
-const LIMITE_CLIENTS = 200;
+export const LIMITE_CLIENTS = 200;
 
 type Props = {
   id: string;

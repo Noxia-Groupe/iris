@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { test, expect } from './fixtures';
+import { test, expect, choisirClient } from './fixtures';
 
 test('#109 : pages, action sur page suivante, création et réponse périmée', async ({ allerSurPageAdmin, creerClient, apiAdmin, request, session, page }) => {
   const client = await creerClient('pagination-109');
@@ -145,7 +145,7 @@ test('#109 : pages, action sur page suivante, création et réponse périmée', 
   await page.getByRole('button', { name: 'Page suivante' }).click();
   await expect(page.getByTestId('pagination-factures')).toContainText(`Page 2 sur ${nombrePages}`);
   await page.getByRole('button', { name: 'Nouvelle facture' }).click();
-  await page.locator('select[name="clientId"]').selectOption(client.id);
+  await choisirClient(page, client);
   await page.locator('input[name="motifHorsAffaire"]').fill(`${prefixe} nouveau`);
   await page.locator('input[aria-label="Désignation ligne 1"]').fill('Nouvelle prestation');
   await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').fill('10');
@@ -175,7 +175,7 @@ test('#109 : pages, action sur page suivante, création et réponse périmée', 
 
   // Un brouillon antidaté reste trié parmi les anciennes factures, pas forcément en page 1.
   await page.getByRole('button', { name: 'Nouvelle facture' }).click();
-  await page.locator('select[name="clientId"]').selectOption(client.id);
+  await choisirClient(page, client);
   await page.locator('input[name="dateEmission"]').fill('01-01-2020');
   await page.locator('input[name="dateEcheance"]').fill('01-01-2020');
   await page.locator('input[name="motifHorsAffaire"]').fill(`${prefixe} antidaté`);

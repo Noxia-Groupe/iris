@@ -1,4 +1,4 @@
-import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 const jetonSecours = 'jeton-de-secours-e2e-au-moins-32-caracteres';
@@ -55,10 +55,9 @@ async function preparerFacturation(request: APIRequestContext, token: string) {
 }
 
 async function creerClient(request: APIRequestContext, token: string, libelle: string, avecSite: boolean) {
-  // /clients renvoie au plus 200 entrées triées par raison sociale : placer les
-  // nouvelles fixtures en tête pour que les sélecteurs et contacts les voient même
-  // lorsque cette base jetable a déjà servi à plusieurs exécutions E2E.
-  const raisonSociale = `E2E 0${String(9_999_999_999_999 - Date.now())} ${libelle}`;
+  // Nom unique, sans rang imposé : sur une base qui a déjà servi, le client peut être au-delà
+  // des 200 premiers ; un parcours le choisit donc par la recherche (choisirClient).
+  const raisonSociale = `E2E ${libelle} ${Date.now()}`;
   const response = await request.post(`${api}/clients`, { headers: headers(token), data: { raisonSociale } });
   expect(response.status(), await response.text()).toBe(201);
   const { id } = await response.json() as { id: string };
@@ -67,6 +66,17 @@ async function creerClient(request: APIRequestContext, token: string, libelle: s
     expect(site.status(), await site.text()).toBe(201);
   }
   return { id, raisonSociale };
+}
+
+// Choisit un client comme un utilisateur : par la recherche du formulaire, puisqu'il peut être
+// au-delà des 200 premiers de la liste initiale (#111).
+export async function choisirClient(portee: Page | Locator, client: { id: string; raisonSociale: string }) {
+  await portee.getByRole('searchbox', { name: 'Rechercher un client' }).fill(client.raisonSociale);
+  const select = portee.locator('select[name="clientId"]');
+  await expect(select.locator(`option[value="${client.id}"]`)).toHaveCount(1);
+  await expect(select).toBeEnabled();
+  await select.selectOption(client.id);
+  await expect(select).toHaveValue(client.id);
 }
 
 export function dateDuJour() {
