@@ -1342,11 +1342,12 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
     const facture = await prisma.$transaction(async (tx) => {
-      // Sous verrou partagé de clé : un changement de client de l'affaire en cours (FOR UPDATE,
-      // cf. PATCH /api/chantiers/:id) attend la fin de cette création et voit alors la facture, ou
-      // s'enregistre d'abord, et l'affaire n'est plus celle de ce client.
+      // Sous verrou partagé : un changement de client de l'affaire en cours (cf. PATCH
+      // /api/chantiers/:id) attend la fin de cette création et voit alors la facture, ou s'enregistre
+      // d'abord, et l'affaire n'est plus celle de ce client. Une annulation en cours est attendue de
+      // même, puis refusée ci-dessous.
       if (origine === 'CHANTIER') {
-        const [chantier] = await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} FOR KEY SHARE`);
+        const [chantier] = await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} FOR SHARE`);
         if (!chantier) throw new FactureRattachementRefuse(404, 'Affaire facturable introuvable.');
         if (chantier.statut === 'ANNULE') throw new FactureRattachementRefuse(409, 'Une affaire annulée ne peut pas être facturée.');
       }
@@ -2354,10 +2355,10 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
       // Le chantier rattaché doit être lié à la fiche de ce client (clientId), et non à un libellé
       // identique : renommer un client ne rompt pas le rattachement, et une affaire héritée sans
       // fiche se répare d'abord (décision de Nelson du 16-10-2026). Le contrôle se fait sous verrou
-      // partagé de clé : un changement de client de l'affaire en cours (FOR UPDATE) attend la fin
-      // de cette création, ou la fait refuser s'il s'enregistre d'abord (cf. PATCH
-      // /api/chantiers/:id) ; les autres mises à jour du chantier ne sont pas bloquées.
-      if (chantierId && !(await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} AND "annuleLe" IS NULL FOR KEY SHARE`)).length) {
+      // partagé : un changement de client de l'affaire en cours attend la fin de cette création, ou
+      // la fait refuser s'il s'enregistre d'abord (cf. PATCH /api/chantiers/:id). FOR SHARE, et non
+      // FOR KEY SHARE, pour attendre aussi une annulation en cours, qui ferme alors le chantier.
+      if (chantierId && !(await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} AND "annuleLe" IS NULL FOR SHARE`)).length) {
         throw new ChantierInterventionIntrouvable();
       }
       const sequence = await tx.sequenceIntervention.upsert({
@@ -3179,8 +3180,9 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     // Un client renvoyé à l'identique n'est pas un changement : la fiche d'un chantier dont le
     // client a été désactivé depuis reste modifiable (#111). Seul un nouveau client doit être
     // actif, et une affaire déjà facturée n'en change pas.
-    // Les refus (affaire facturée, interventions d'un autre client), le libellé et la trace sont
-    // décidés plus bas, dans la transaction de l'enregistrement, sur la ligne verrouillée.
+    // Les refus (affaire annulée ou facturée, interventions rattachées — d'un autre client pour la
+    // réparation d'une affaire héritée), le libellé et la trace sont décidés plus bas, dans la
+    // transaction de l'enregistrement, sur la ligne verrouillée.
     let cibleClient: { id: string; raisonSociale: string } | null = null;
     if (isAdminRole(authUser.role) && 'clientId' in req.body && String(req.body.clientId || '') !== existant.clientId) {
       cibleClient = await prisma.client.findFirst({ where: { id: String(req.body.clientId || ''), actif: true }, select: { id: true, raisonSociale: true } });

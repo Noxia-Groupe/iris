@@ -7704,7 +7704,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set('Authorization', `Bearer ${jwt.sign({ id: autreConducteur.id }, process.env.JWT_SECRET)}`)).status, 404);
     });
 
-    test('changements de client simultanés à une création d’intervention ou de facture, ou à une annulation : l’un attend l’autre, sans rattachement incohérent ni trace', async () => {
+    test('changement de client, création d’intervention ou de facture et annulation simultanés : l’un attend l’autre, sans rattachement incohérent ni trace', async () => {
       const auth = { Authorization: `Bearer ${session}` };
       const ancien = await prisma.client.create({ data: { raisonSociale: 'TEST Course client ancien' } });
       const nouveau = await prisma.client.create({ data: { raisonSociale: 'TEST Course client nouveau' } });
@@ -7737,7 +7737,7 @@ if (!TEST_DATABASE_URL) {
       let creation;
       try {
         creation = request(app).post('/api/interventions').set(auth).send({ clientId: ancien.id, chantierId: premier.id, titre: 'TEST Course SAV pendant changement' }).then(r => r);
-        assert.equal(await attendreVerrou('%"Chantier"%FOR KEY SHARE%'), true, 'la création doit attendre le changement de client');
+        assert.equal(await attendreVerrou('%"Chantier"%FOR SHARE%'), true, 'la création doit attendre le changement de client');
       } finally {
         changement.liberer();
         await changement.transaction;
@@ -7748,9 +7748,9 @@ if (!TEST_DATABASE_URL) {
 
       // 2. Une création d'intervention en cours (verrou partagé) : le changement de client attend sa
       //    fin, voit l'intervention et refuse, sans rien tracer.
-      //    (Le verrou tenu est celui que prend la création : FOR KEY SHARE.)
+      //    (Le verrou tenu est celui que prend la création : FOR SHARE.)
       const second = await prisma.chantier.create({ data: { nom: 'TEST Course changement attend', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
-      const creationEnCours = tenirVerrou(second.id, 'FOR KEY SHARE', tx => tx.intervention.create({ data: { reference: `TEST-COURSE-${Date.now()}`, titre: 'TEST Course SAV créé', clientId: ancien.id, chantierId: second.id } }));
+      const creationEnCours = tenirVerrou(second.id, 'FOR SHARE', tx => tx.intervention.create({ data: { reference: `TEST-COURSE-${Date.now()}`, titre: 'TEST Course SAV créé', clientId: ancien.id, chantierId: second.id } }));
       await creationEnCours.verrouPris;
       let modification;
       try {
@@ -7791,7 +7791,7 @@ if (!TEST_DATABASE_URL) {
       let facturation;
       try {
         facturation = request(app).post('/api/factures').set(auth).send({ clientId: ancien.id, origine: 'CHANTIER', chantierId: quatrieme.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST Course facture', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }).then(r => r);
-        assert.equal(await attendreVerrou('%"Chantier"%FOR KEY SHARE%'), true, 'la facture doit attendre le changement de client');
+        assert.equal(await attendreVerrou('%"Chantier"%FOR SHARE%'), true, 'la facture doit attendre le changement de client');
       } finally {
         changementAvantFacture.liberer();
         await changementAvantFacture.transaction;
@@ -7818,6 +7818,29 @@ if (!TEST_DATABASE_URL) {
       assert.equal(refusAnnulee.body.error, 'Cette affaire est annulée : elle n’est plus modifiable.');
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: cinquieme.id } })).clientId, ancien.id);
       assert.equal(await prisma.journalSaisieChantier.count({ where: { chantierId: cinquieme.id } }), 0);
+
+      // 6. Une annulation en cours (verrou d'une mise à jour ordinaire, FOR NO KEY UPDATE) : la
+      //    création d'une intervention ou d'une facture d'affaire l'attend, puis est refusée.
+      for (const creation of ['intervention', 'facture']) {
+        const sixieme = await prisma.chantier.create({ data: { nom: `TEST Course ${creation} pendant annulation`, client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+        const annulationEnCours = tenirVerrou(sixieme.id, 'FOR NO KEY UPDATE', tx => tx.chantier.update({ where: { id: sixieme.id }, data: { statut: 'ANNULE', annuleLe: new Date() } }));
+        await annulationEnCours.verrouPris;
+        let pendant;
+        try {
+          pendant = (creation === 'intervention'
+            ? request(app).post('/api/interventions').set(auth).send({ clientId: ancien.id, chantierId: sixieme.id, titre: 'TEST Course SAV pendant annulation' })
+            : request(app).post('/api/factures').set(auth).send({ clientId: ancien.id, origine: 'CHANTIER', chantierId: sixieme.id, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST Course facture pendant annulation', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] })
+          ).then(r => r);
+          assert.equal(await attendreVerrou('%"Chantier"%FOR SHARE%'), true, `la création (${creation}) doit attendre l’annulation`);
+        } finally {
+          annulationEnCours.liberer();
+          await annulationEnCours.transaction;
+        }
+        const refusPendant = await pendant;
+        assert.equal(refusPendant.status, creation === 'intervention' ? 404 : 409, JSON.stringify(refusPendant.body));
+        assert.equal(await prisma.intervention.count({ where: { chantierId: sixieme.id } }), 0);
+        assert.equal(await prisma.facture.count({ where: { chantierId: sixieme.id } }), 0);
+      }
     });
 
     test('#111 : un client désactivé depuis ne bloque pas la fiche, mais ne se choisit plus', async () => {
