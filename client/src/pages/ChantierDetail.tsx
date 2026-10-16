@@ -561,12 +561,11 @@ const ChantierDetail = () => {
   };
 
   const parIntervenant: BreakdownRow[] = useMemo(() => {
-    const map = new Map<string, { heures: number; cout: number; role: string }>();
+    const map = new Map<string, { heures: number; role: string }>();
     for (const p of pointages) {
       const key = p.intervenant?.nom || 'Non renseigné';
-      const cur = map.get(key) || { heures: 0, cout: 0, role: p.intervenant?.role || '' };
+      const cur = map.get(key) || { heures: 0, role: p.intervenant?.role || '' };
       cur.heures += p.nbrHeures;
-      cur.cout += p.nbrHeures * p.tauxHoraireApplique;
       map.set(key, cur);
     }
     return Array.from(map, ([label, v]) => ({ label, value: v.heures, sublabel: v.role }));
@@ -623,6 +622,9 @@ const ChantierDetail = () => {
   // taux) : le serveur ne les lui envoie pas, la fiche n'en affiche pas les sections.
   const estTechnicien = userRole === ROLE_TECHNICIEN;
   const montantsVisibles = !estTechnicien;
+  // Taux et coût de main-d'œuvre (et dépenses qui l'incluent) : réservés à l'administration, le
+  // serveur ne les envoie pas aux autres comptes, qui gardent les heures, les marges et les alertes.
+  const coutMainOeuvreVisible = montantsVisibles && metrics.moReel != null;
   const canEditCommercial = canEditChantier;
   const startEditCommercial = () => {
     if (commerciaux.length === 0) fetchCommerciaux();
@@ -862,10 +864,12 @@ const ChantierDetail = () => {
                   )}
                 </div>
 
+                {metrics.totalDepenses != null && (
                 <div className="z-10 bg-white/60 backdrop-blur-sm p-4 rounded-lg text-right">
                   <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Dépenses Réelles Cumulées</div>
                   <div className="font-bold text-2xl text-gray-800">{totalDepensesReelles.toLocaleString()} €</div>
                 </div>
+                )}
               </div>
               {/* Marge estimée en fin de chantier : les hypothèses sont écrites en clair, pour
                   qu'on sache d'où vient le chiffre et ce qui le ferait bouger. */}
@@ -879,7 +883,7 @@ const ChantierDetail = () => {
                     </div>
                   </div>
                   <ul className="mt-2 mb-0 pl-4 text-xs text-gray-600 space-y-0.5">
-                    <li>Main-d’œuvre attendue : <strong>{fmtEuro(estimation.coutMainOeuvreAttendu)}</strong> — {hypotheseCoutHoraire(estimation)}.</li>
+                    <li>Main-d’œuvre attendue : {estimation.coutMainOeuvreAttendu != null && <><strong>{fmtEuro(estimation.coutMainOeuvreAttendu)}</strong> — </>}{hypotheseCoutHoraire(estimation)}.</li>
                     <li>Matériel attendu : <strong>{fmtEuro(estimation.coutMaterielAttendu)}</strong> — {hypotheseMateriel(estimation)}.</li>
                     <li>Un poste n’est jamais estimé sous ce qui a déjà été dépensé.</li>
                   </ul>
@@ -915,7 +919,9 @@ const ChantierDetail = () => {
 
             {/* Coût main d'oeuvre (€) — distinct de la barre "Heures" ci-dessous : un
                 dépassement d'heures se traduit ici en euros réellement dépensés en salaire,
-                avec le manque à gagner correspondant s'il dépasse le budget vendu. */}
+                avec le manque à gagner correspondant s'il dépasse le budget vendu. Réservé à
+                l'administration. */}
+            {coutMainOeuvreVisible && (
             <div>
               <div className="flex justify-between items-end mb-2">
                 <h3 className="font-bold text-gray-800 flex items-center gap-2 m-0">
@@ -938,6 +944,7 @@ const ChantierDetail = () => {
                 )}
               </div>
             </div>
+            )}
             </>)}
 
             {/* Heures */}

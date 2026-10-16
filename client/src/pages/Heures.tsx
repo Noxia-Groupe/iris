@@ -3,6 +3,7 @@ import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
+import { isAdminRole, useCurrentRole } from '../roles';
 
 const Heures = () => {
   const companyTimezone = useCompanyTimezone();
@@ -11,6 +12,8 @@ const Heures = () => {
   const [heures, setHeures] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [intervenants, setIntervenants] = useState<any[]>([]);
+  // Coût interne (heures × taux) : réservé à l'administration ; le serveur n'envoie le taux qu'à elle.
+  const coutVisible = isAdminRole(useCurrentRole());
 
   useEffect(() => {
     fetchData();
@@ -176,7 +179,7 @@ const Heures = () => {
                 <th className="px-6 py-4">Chantier</th>
                 <th className="px-6 py-4">Intervenant</th>
                 <th className="px-6 py-4">Heures</th>
-                <th className="px-6 py-4 text-right">Coût Interne</th>
+                {coutVisible && <th className="px-6 py-4 text-right">Coût Interne</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -186,9 +189,11 @@ const Heures = () => {
                   <td className="px-6 py-4 font-semibold text-gray-800">{h.chantier?.nom}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{h.intervenant?.nom}</td>
                   <td className="px-6 py-4 font-bold text-primary">{h.nbrHeures}h</td>
+                  {coutVisible && (
                   <td className="px-6 py-4 text-sm font-semibold text-gray-500 text-right">
                     {(h.nbrHeures * h.tauxHoraireApplique).toFixed(2)} €
                   </td>
+                  )}
                 </tr>
               ))}
             </tbody>

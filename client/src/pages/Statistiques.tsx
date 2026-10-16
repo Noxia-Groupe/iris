@@ -189,7 +189,8 @@ function IntervenantsTab() {
               </div>
               <div className="text-right w-28 shrink-0">
                 <div className="font-black text-purple-600">{iv.heures.toFixed(1)} h</div>
-                <div className="text-xs text-gray-400">{Math.round(iv.cout).toLocaleString()} €</div>
+                {/* Coût d'un intervenant : réservé à l'administration (le serveur envoie null aux autres). */}
+                {iv.cout != null && <div className="text-xs text-gray-400">{Math.round(iv.cout).toLocaleString()} €</div>}
               </div>
             </div>
           ))}

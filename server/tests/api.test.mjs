@@ -239,6 +239,7 @@ if (!TEST_DATABASE_URL) {
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
       'ouverture.conducteur@iris.test', 'ouverture.autre.conducteur@iris.test', 'ouverture.commercial@iris.test', 'ouverture.commercial.inactif@iris.test', 'ouverture.ancien.conducteur@iris.test',
+      'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -1502,7 +1503,9 @@ if (!TEST_DATABASE_URL) {
         const fiche = await request(app).get(`/api/chantiers/${sansHeure.id}`).set(authConducteur);
         assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
         assert.ok(fiche.body.metrics.alertes.includes('MARGE_FAIBLE'));
-        assert.equal(typeof fiche.body.metrics.estimation.coutEstime, 'number');
+        // La marge estimée, sans son coût total : le coût de main-d'œuvre est réservé à l'administration.
+        assert.equal(typeof fiche.body.metrics.margeEstimee, 'number');
+        assert.equal(fiche.body.metrics.estimation.coutEstime, null);
         await sansRentabilite('clé sans finances:read', { Authorization: `Bearer ${cleSansFinances}` }, '/api/v1/chantiers');
         // Retirée au conducteur : ni sur la liste, ni sur la fiche.
         assert.equal((await reglages({ rentabiliteConducteur: false })).status, 200);
@@ -1548,7 +1551,8 @@ if (!TEST_DATABASE_URL) {
         assert.ok(liste.metrics.alertes.includes('EN_PERTE'), qui);
         assert.equal(liste.budgetGlobalVendu, 1000, qui);
         assert.equal(fiche.body.metrics.margeCommerciale, -200, qui);
-        assert.equal(typeof fiche.body.metrics.estimation?.coutEstime, 'number', qui);
+        assert.equal(typeof fiche.body.metrics.margeEstimee, 'number', qui);
+        assert.ok(fiche.body.metrics.estimation, qui);
       } else {
         assert.equal(liste.metrics.margeCommerciale, null, qui);
         assert.ok(!liste.metrics.alertes.includes('EN_PERTE'), qui);
@@ -2078,7 +2082,7 @@ if (!TEST_DATABASE_URL) {
       assert.ok(vue.metrics.alertes.includes('MATERIEL_DEPASSE'), qui);
     };
 
-    test('les autres profils et les clés d’intégration voient toujours budgets, coûts et alertes', async () => {
+    test('les autres profils et les clés d’intégration voient toujours budgets, achats et alertes', async () => {
       const comptable = await request(app).get(`/api/chantiers/${chantierComptable.id}`).set(authComptable);
       assert.equal(comptable.status, 200, JSON.stringify(comptable.body));
       avecMontants(comptable.body, 'comptable responsable du chantier');
@@ -2098,10 +2102,11 @@ if (!TEST_DATABASE_URL) {
         avecMontants(ligne, `liste, ${qui}`, budgetMainOeuvre);
         responsableSansRole(ligne, `liste, ${qui}`);
       }
-      // Le N+1 voit la main-d'œuvre et les dépassements d'heures et de main-d'œuvre du chantier
-      // de son technicien.
+      // Le N+1 voit les dépassements d'heures et de main-d'œuvre du chantier de son technicien ;
+      // le coût de main-d'œuvre lui-même est réservé à l'administration (lot (d)).
       const vueResponsable = (await request(app).get(`/api/chantiers/${chantierTechnicien.id}`).set(authDe.responsable)).body;
-      assert.equal(vueResponsable.metrics.moReel, 504);
+      assert.equal(vueResponsable.metrics.moReel, null);
+      assert.equal((await request(app).get(`/api/chantiers/${chantierTechnicien.id}`).set(auth)).body.metrics.moReel, 504);
       for (const alerte of ['HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE']) assert.ok(vueResponsable.metrics.alertes.includes(alerte), alerte);
       const admin = (await request(app).get('/api/chantiers').set(auth)).body.find((c) => c.id === chantierTechnicien.id);
       avecMontants(admin, 'administrateur', 500);
@@ -2167,6 +2172,229 @@ if (!TEST_DATABASE_URL) {
   // Annuaire des clients pour le technicien (décision de Nelson du 13-10-2026) : il consulte les
   // clients, leurs contacts et leurs sites, par exemple pour retrouver une adresse, et l'historique
   // des chantiers du client, sans montant ; il ne modifie rien et ne voit ni devis ni prix.
+  describe('Taux horaire et coût de main-d’œuvre réservés à l’administration', () => {
+    let auth = {};
+    let authDe = {};
+    let conducteur;
+    let chantier;
+    let intervenant;
+    let pointage;
+    let cle = '';
+    let ancienParametres;
+
+    // Aucun taux, où qu'il soit dans la réponse : pointage, intervenant joint, instantané du journal.
+    const sansTaux = (corps, qui) => {
+      const texte = JSON.stringify(corps);
+      for (const champ of ['tauxHoraireApplique', 'tauxHoraireCharge']) assert.equal(texte.includes(`"${champ}"`), false, `${qui} : ${champ} exposé`);
+    };
+
+    before(async () => {
+      const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(login.status, 200);
+      auth = { Authorization: `Bearer ${login.body.token}` };
+      ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      // Destinataires de la rentabilité par défaut : le conducteur, sa chaîne et les directeurs.
+      const reglage = await request(app).put('/api/parametres').set(auth)
+        .send({ margeCommercialeActive: true, rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true });
+      assert.equal(reglage.status, 200, JSON.stringify(reglage.body));
+      const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+      const responsable = await prisma.user.create({ data: { email: 'taux.responsable@iris.test', name: 'TEST Taux responsable', role: 'RESPONSABLE' } });
+      // L'archivage d'une heure est un droit individuel (chantiers:archive), accordé ici pour en tester la réponse.
+      conducteur = await prisma.user.create({ data: { email: 'taux.conducteur@iris.test', name: 'TEST Taux conducteur', role: 'CONDUCTEUR_TRAVAUX', responsableHierarchiqueId: responsable.id, permissions: ['chantiers:archive'] } });
+      const directeur = await prisma.user.create({ data: { email: 'taux.directeur@iris.test', name: 'TEST Taux directeur', role: 'DIRECTEUR' } });
+      const commercial = await prisma.user.create({ data: { email: 'taux.commercial@iris.test', name: 'TEST Taux commercial', role: 'COMMERCIAL' } });
+      authDe = { responsable: jeton(responsable), conducteur: jeton(conducteur), directeur: jeton(directeur), commercial: jeton(commercial) };
+      // Vendu 1 000 € dont 300 € de matériel et 500 € de main-d'œuvre, 10 h vendues ; 100 € d'achats
+      // et 12 h à 42 €/h (504 €) : heures et main-d'œuvre dépassées, marge du jour 396 €.
+      chantier = await prisma.chantier.create({ data: {
+        nom: 'TEST Taux chantier', client: 'TEST Client taux', dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 300,
+        budgetMainOeuvreVendu: 500, heuresVendues: 10, responsableId: conducteur.id, commercialId: commercial.id,
+      } });
+      const categorie = await prisma.categorie.create({ data: { nom: 'TEST Taux catégorie' } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Taux fournisseur' } });
+      const achat = await request(app).post('/api/achats').set(auth).send({ chantierId: chantier.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: jourCivilEntreprise(new Date()), description: 'TEST achat taux', montantHT: 100 });
+      assert.equal(achat.status, 200, JSON.stringify(achat.body));
+      intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Taux intervenant', role: 'TECHNICIEN', tauxHoraireCharge: 42 } });
+      const heures = await request(app).post('/api/heures').set(auth).send({ chantierId: chantier.id, intervenantId: intervenant.id, date: jourCivilEntreprise(new Date()), nbrHeures: 12 });
+      assert.equal(heures.status, 200, JSON.stringify(heures.body));
+      pointage = heures.body;
+      const creation = await request(app).post('/api/admin/api-keys').set(auth).send({ nom: 'TEST agent taux', scopes: ['chantiers:read'] });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      cle = creation.body.apiKey;
+    });
+
+    after(async () => {
+      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: {
+        margeCommercialeActive: ancienParametres.margeCommercialeActive,
+        rentabiliteConducteur: ancienParametres.rentabiliteConducteur,
+        rentabiliteHierarchie: ancienParametres.rentabiliteHierarchie,
+        rentabiliteDirecteurs: ancienParametres.rentabiliteDirecteurs,
+      } });
+    });
+
+    test('chantiers : heures, marges et alertes gardées, sans taux ni coût de main-d’œuvre hors administration', async () => {
+      const vues = [
+        ['conducteur du chantier', authDe.conducteur, true],
+        ['responsable de sa branche', authDe.responsable, true],
+        ['directeur', authDe.directeur, true],
+        ['commercial vendeur', authDe.commercial, false],
+      ];
+      for (const [qui, entetes, rentabilite] of vues) {
+        const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(entetes);
+        assert.equal(fiche.status, 200, `${qui} : ${JSON.stringify(fiche.body)}`);
+        const ligne = (await request(app).get('/api/chantiers').set(entetes)).body.find((c) => c.id === chantier.id);
+        for (const [ou, vue] of [['fiche', fiche.body], ['liste', ligne]]) {
+          const contexte = `${ou}, ${qui}`;
+          sansTaux(vue, contexte);
+          assert.equal(vue.metrics.moReel, null, contexte);
+          assert.equal(vue.metrics.totalDepenses, null, contexte);
+          assert.equal(vue.metrics.pctMainOeuvre, null, contexte);
+          // Gardés : heures, budget main-d'œuvre vendu, matériel et alertes de dépassement.
+          assert.equal(vue.metrics.heuresRealisees, 12, contexte);
+          assert.equal(vue.budgetMainOeuvreVendu, 500, contexte);
+          assert.equal(vue.metrics.materielReel, 100, contexte);
+          for (const alerte of ['HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE']) assert.ok(vue.metrics.alertes.includes(alerte), `${contexte} : ${alerte}`);
+          if (rentabilite) {
+            // Décision du 16-10-2026 : les destinataires de la rentabilité gardent les marges.
+            assert.equal(vue.metrics.margeCommerciale, 396, contexte);
+            assert.equal(typeof vue.metrics.margeEstimee, 'number', contexte);
+            assert.equal(vue.metrics.estimation.coutEstime, null, contexte);
+            assert.equal(vue.metrics.estimation.coutMainOeuvreAttendu, null, contexte);
+            assert.equal(vue.metrics.estimation.coutHoraireReference, null, contexte);
+            assert.equal(vue.metrics.estimation.sourceCoutHoraire, 'CHANTIER', contexte);
+            assert.equal(typeof vue.metrics.estimation.coutMaterielAttendu, 'number', contexte);
+          }
+        }
+        assert.deepEqual(fiche.body.pointages.map((p) => p.nbrHeures), [12], qui);
+        assert.equal(fiche.body.pointages[0].intervenant.nom, 'TEST Taux intervenant', qui);
+      }
+      // Témoins : l'administration et une clé d'intégration voient taux et coût de main-d'œuvre.
+      const admin = (await request(app).get(`/api/chantiers/${chantier.id}`).set(auth)).body;
+      assert.equal(admin.metrics.moReel, 504);
+      assert.equal(admin.metrics.totalDepenses, 604);
+      assert.equal(admin.metrics.estimation.coutHoraireReference, 42);
+      assert.equal(admin.pointages[0].tauxHoraireApplique, 42);
+      assert.equal(admin.pointages[0].intervenant.tauxHoraireCharge, 42);
+      const parCle = (await request(app).get('/api/v1/chantiers').set({ Authorization: `Bearer ${cle}` })).body.find((c) => c.id === chantier.id);
+      assert.equal(parCle.metrics.moReel, 504);
+      assert.equal(parCle.pointages[0].tauxHoraireApplique, 42);
+    });
+
+    test('heures, intervenants et journal des saisies : ni taux appliqué ni taux de l’intervenant hors administration', async () => {
+      for (const [qui, entetes] of [['conducteur', authDe.conducteur], ['responsable', authDe.responsable], ['directeur', authDe.directeur]]) {
+        const heures = await request(app).get('/api/heures').set(entetes);
+        assert.equal(heures.status, 200, `${qui} : ${JSON.stringify(heures.body)}`);
+        const ligne = heures.body.find((h) => h.id === pointage.id);
+        assert.equal(ligne.nbrHeures, 12, qui);
+        sansTaux(heures.body, `heures, ${qui}`);
+      }
+      for (const [qui, entetes] of [['conducteur', authDe.conducteur], ['responsable', authDe.responsable], ['directeur', authDe.directeur], ['commercial', authDe.commercial]]) {
+        const intervenants = await request(app).get('/api/intervenants').set(entetes);
+        assert.equal(intervenants.status, 200, `${qui} : ${JSON.stringify(intervenants.body)}`);
+        assert.ok(intervenants.body.some((i) => i.id === intervenant.id), qui);
+        sansTaux(intervenants.body, `intervenants, ${qui}`);
+      }
+      const journal = await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set(authDe.conducteur);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      const creationHeure = journal.body.find((e) => e.cible === 'HEURE' && e.action === 'CREATION');
+      assert.equal(creationHeure.apres.nbrHeures, 12);
+      sansTaux(journal.body, 'journal des saisies, conducteur');
+      // Le montant d'un achat reste visible : il n'est pas un coût de main-d'œuvre.
+      assert.equal(journal.body.find((e) => e.cible === 'ACHAT').apres.montantHT, 100);
+      // Témoins.
+      assert.equal((await request(app).get('/api/heures').set(auth)).body.find((h) => h.id === pointage.id).tauxHoraireApplique, 42);
+      assert.equal((await request(app).get('/api/intervenants').set(auth)).body.find((i) => i.id === intervenant.id).tauxHoraireCharge, 42);
+      const journalAdmin = (await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set(auth)).body;
+      assert.equal(journalAdmin.find((e) => e.cible === 'HEURE' && e.action === 'CREATION').apres.tauxHoraireApplique, 42);
+    });
+
+    test('saisie, correction, archivage et restauration d’heures par le conducteur : réponses sans taux, taux figé en base', async () => {
+      const saisie = await request(app).post('/api/heures').set(authDe.conducteur)
+        .send({ chantierId: chantier.id, intervenantId: intervenant.id, date: jourCivilEntreprise(new Date()), nbrHeures: 2 });
+      assert.equal(saisie.status, 200, JSON.stringify(saisie.body));
+      assert.equal(Number(saisie.body.nbrHeures), 2);
+      sansTaux(saisie.body, 'saisie');
+      assert.equal(Number((await prisma.pointageHeure.findUniqueOrThrow({ where: { id: saisie.body.id } })).tauxHoraireApplique), 42);
+      const correction = await request(app).patch(`/api/heures/${saisie.body.id}`).set(authDe.conducteur).send({ nbrHeures: 3, motifCorrection: 'TEST correction taux' });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      assert.equal(Number(correction.body.nbrHeures), 3);
+      sansTaux(correction.body, 'correction');
+      const archivage = await request(app).delete(`/api/heures/${saisie.body.id}`).set(authDe.conducteur).send({ motifArchivage: 'TEST archivage taux' });
+      assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
+      const restauration = await request(app).post(`/api/heures/${saisie.body.id}/restaurer`).set(authDe.conducteur).send({ motifRestauration: 'TEST restauration taux' });
+      assert.equal(restauration.status, 200, JSON.stringify(restauration.body));
+      sansTaux(restauration.body, 'restauration');
+      // Remet le chantier dans son état initial pour les autres tests du bloc.
+      assert.equal((await request(app).delete(`/api/heures/${saisie.body.id}`).set(auth).send({ motifArchivage: 'TEST fin du test' })).status, 200);
+      // Témoin : l'administration reçoit le taux en réponse.
+      const saisieAdmin = await request(app).patch(`/api/heures/${pointage.id}`).set(auth).send({ commentaire: 'TEST témoin', motifCorrection: 'TEST témoin taux' });
+      assert.equal(saisieAdmin.status, 200, JSON.stringify(saisieAdmin.body));
+      assert.equal(Number(saisieAdmin.body.tauxHoraireApplique), 42);
+    });
+
+    test('statistiques : coût par intervenant, dépenses et manque à gagner réservés à l’administration', async () => {
+      const ref = jourCivilEntreprise(new Date());
+      const parConducteur = await request(app).get(`/api/stats/intervenants?period=week&ref=${ref}`).set(authDe.conducteur);
+      assert.equal(parConducteur.status, 200, JSON.stringify(parConducteur.body));
+      const ligne = parConducteur.body.intervenants.find((i) => i.id === intervenant.id);
+      assert.equal(ligne.heures, 12);
+      assert.equal(ligne.cout, null);
+      const parAdmin = (await request(app).get(`/api/stats/intervenants?period=week&ref=${ref}`).set(auth)).body.intervenants.find((i) => i.id === intervenant.id);
+      assert.equal(parAdmin.cout, 504);
+      const conducteurs = await request(app).get('/api/stats/conducteurs').set(authDe.responsable);
+      assert.equal(conducteurs.status, 200, JSON.stringify(conducteurs.body));
+      const agregat = conducteurs.body.find((c) => c.id === conducteur.id);
+      assert.equal(agregat.nbChantiers, 1);
+      assert.equal(agregat.depensesTotal, null);
+      assert.equal(agregat.manqueAGagnerMainOeuvre, null);
+      // La marge reste au responsable destinataire de la rentabilité de sa branche.
+      assert.equal(agregat.margeTotal, 396);
+      const agregatAdmin = (await request(app).get('/api/stats/conducteurs').set(auth)).body.find((c) => c.id === conducteur.id);
+      assert.equal(agregatAdmin.depensesTotal, 604);
+      assert.equal(agregatAdmin.manqueAGagnerMainOeuvre, 0);
+    });
+
+    test('coûts SAV : le conducteur garde heures et matériel, sans taux ni coût de main-d’œuvre', async () => {
+      const client = await prisma.client.create({ data: { raisonSociale: 'TEST Client taux SAV' } });
+      const contrat = await prisma.contratMaintenance.create({ data: {
+        clientId: client.id, titre: 'TEST Contrat taux', statut: 'ACTIF', periodiciteMois: 12, dureePrevisionnelleMinutes: 60,
+        dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z'),
+      } });
+      // Le conducteur suit le dossier SAV qu'il a ouvert.
+      const intervention = await prisma.intervention.create({ data: {
+        reference: `I26-TAUX-${Date.now()}`, clientId: client.id, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance,
+        titre: 'TEST Intervention taux', createdById: conducteur.id,
+      } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Taux fournisseur SAV ${Date.now()}` } });
+      const heure = await prisma.coutInterventionHeure.create({ data: { interventionId: intervention.id, intervenantId: intervenant.id, date: new Date('2026-09-06'), nbrHeures: 2, tauxHoraireApplique: 42, createdById: conducteur.id } });
+      await prisma.coutInterventionAchat.create({ data: { interventionId: intervention.id, fournisseurId: fournisseur.id, date: new Date('2026-09-06'), description: 'TEST achat SAV taux', montantHT: 10, createdById: conducteur.id } });
+
+      const couts = await request(app).get(`/api/interventions/${intervention.id}/couts`).set(authDe.conducteur);
+      assert.equal(couts.status, 200, JSON.stringify(couts.body));
+      assert.deepEqual(couts.body.heures.map((h) => h.nbrHeures), [2]);
+      assert.equal(couts.body.totalMaterielHT, 10);
+      assert.equal(couts.body.totalMainOeuvreHT, null);
+      assert.equal(couts.body.totalCoutsHT, null);
+      sansTaux(couts.body, 'coûts SAV, conducteur');
+      const archivage = await request(app).post(`/api/interventions/${intervention.id}/couts/heures/${heure.id}/archiver`).set(authDe.conducteur).send({ motif: 'TEST archivage SAV taux' });
+      assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
+      sansTaux(archivage.body, 'archivage SAV, conducteur');
+      const journal = await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set(authDe.conducteur);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.ok(journal.body.some((e) => e.cible === 'COUT_INTERVENTION_HEURE' && e.action === 'ARCHIVAGE'));
+      sansTaux(journal.body, 'journal SAV, conducteur');
+      // Témoins : l'administration voit le taux et le coût de main-d'œuvre.
+      const coutsAdmin = (await request(app).get(`/api/interventions/${intervention.id}/couts`).set(auth)).body;
+      assert.equal(coutsAdmin.heures[0].tauxHoraireApplique, 42);
+      const restauration = await request(app).post(`/api/interventions/${intervention.id}/couts/heures/${heure.id}/restaurer`).set(auth).send({ motif: 'TEST restauration SAV taux' });
+      assert.equal(restauration.status, 200, JSON.stringify(restauration.body));
+      assert.equal(restauration.body.tauxHoraireApplique, 42);
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set(auth)).body.totalMainOeuvreHT, 84);
+      const journalAdmin = (await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set(auth)).body;
+      assert.equal(journalAdmin.find((e) => e.action === 'ARCHIVAGE').avant.tauxHoraireApplique, 42);
+    });
+  });
+
   describe('Annuaire des clients pour le technicien', () => {
     let auth = {};
     const jetons = {};
