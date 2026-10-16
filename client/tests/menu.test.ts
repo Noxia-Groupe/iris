@@ -7,8 +7,9 @@ const liens = (role: string, planningActif = true, permissions: string[] = []) =
   sectionsMenu({ role, permissions }, planningActif).flatMap((s) => s.entrees.map((e) => e.to)).sort();
 
 // Règles de visibilité de l'ancien menu à plat, réécrites ici à part : le regroupement ne
-// doit ni montrer ni cacher une seule entrée par rapport à elles. Seule évolution depuis :
-// l'annuaire des clients ouvert au technicien (décision de Nelson du 13-10-2026).
+// doit ni montrer ni cacher une seule entrée par rapport à elles. Seules évolutions depuis :
+// l'annuaire des clients ouvert au technicien (décision de Nelson du 13-10-2026), puis au
+// conducteur de travaux (décision du 16-10-2026).
 function attendu(role: string, planningActif: boolean, permissions: string[]) {
   const admin = role === 'ADMIN' || role === 'SUPERADMIN';
   const commercial = role === 'COMMERCIAL';
@@ -18,7 +19,7 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
     ['/devis', role === 'SUPERADMIN' || permissions.includes('devis:read')],
     ['/interventions', travaux || role === 'TECHNICIEN'],
     ['/contrats-maintenance', admin], ['/prete-a-facturer', admin], ['/factures', admin], ['/mentions-legales', admin],
-    ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN'], ['/catalogue', admin],
+    ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN' || role === 'CONDUCTEUR_TRAVAUX'], ['/catalogue', admin],
     ['/achats', travaux], ['/heures', travaux], ['/statistiques', travaux],
     ['/planning', !commercial && planningActif], ['/resultat-commercial', commercial],
     ['/admin', !commercial], ['/societe', admin], ['/administration/api', role === 'SUPERADMIN'],
@@ -54,11 +55,12 @@ test('seuls l’accueil et la liste des chantiers sont actifs sur leur chemin ex
   assert.deepEqual(entrees.filter((e) => e.exact).map((e) => e.to), ['/', '/chantiers']);
 });
 
-test('sans compte connu, le menu reprend l’ancien repli : conducteur, sans les statistiques', () => {
+test('sans compte connu, le menu reprend l’ancien repli : conducteur, sans les statistiques ni l’annuaire', () => {
   // L'ancien menu traitait un rôle absent en conducteur, mais les statistiques (comme les
-  // devis) se décident sur le compte lui-même : sans compte, elles restaient masquées.
+  // devis et, depuis le 16-10-2026, l'annuaire des clients) se décident sur le compte lui-même :
+  // sans compte, elles restent masquées.
   const versListe = (sections: ReturnType<typeof sectionsMenu>) => sections.flatMap((s) => s.entrees.map((e) => e.to)).sort();
-  const sansStatistiques = (planningActif: boolean) => attendu('CONDUCTEUR_TRAVAUX', planningActif, []).filter((to) => to !== '/statistiques');
+  const sansStatistiques = (planningActif: boolean) => attendu('CONDUCTEUR_TRAVAUX', planningActif, []).filter((to) => to !== '/statistiques' && to !== '/clients');
   assert.deepEqual(versListe(sectionsMenu(null, true)), sansStatistiques(true));
   assert.deepEqual(versListe(sectionsMenu({}, false)), sansStatistiques(false));
 });
@@ -81,12 +83,14 @@ test('l’accès financier ne vaut jamais pour un technicien, même enregistré'
   assert.equal(peutVoirFinance({ role: 'SUPERADMIN', permissions: [] }), true);
 });
 
-test('le technicien consulte l’annuaire des clients, dans les référentiels, sans le catalogue', () => {
-  const sections = sectionsMenu({ role: 'TECHNICIEN', permissions: ['chantiers:read', 'clients:read'] }, true);
-  const referentiels = sections.find((s) => s.titre === 'Référentiels');
-  assert.deepEqual(referentiels?.entrees.map((e) => e.to), ['/clients']);
+test('le technicien et le conducteur consultent l’annuaire des clients, dans les référentiels, sans le catalogue', () => {
+  for (const [role, permissions] of [['TECHNICIEN', ['chantiers:read', 'clients:read']], ['CONDUCTEUR_TRAVAUX', ['chantiers:read', 'chantiers:write', 'clients:read']]] as const) {
+    const sections = sectionsMenu({ role, permissions: [...permissions] }, true);
+    const referentiels = sections.find((s) => s.titre === 'Référentiels');
+    assert.deepEqual(referentiels?.entrees.map((e) => e.to), ['/clients'], role);
+  }
   // Les autres profils qui portent clients:read (commercial, comptable…) n'ont pas l'écran.
-  for (const role of ['COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'DIRECTEUR']) {
+  for (const role of ['COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE', 'DIRECTEUR']) {
     assert.equal(liens(role, true, ['clients:read']).includes('/clients'), false, role);
   }
 });

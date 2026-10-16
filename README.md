@@ -104,7 +104,8 @@ Il ne voit aucun devis.
 Le **conducteur de travaux** lit lui aussi les clients (décision de Nelson du 16-10-2026, #143) :
 son type de compte porte `clients:read`, pour choisir par la recherche le client d'une
 intervention SAV qu'il crée. Il ne modifie pas l'annuaire et ne voit pas de devis ; l'historique
-d'un client ne lui montre que ses chantiers, sans montant. Le menu Clients ne lui est pas ouvert.
+d'un client ne lui montre que ses chantiers, sans montant. Depuis #145 (décision du 16-10-2026), le
+menu Clients lui ouvre l'annuaire, en consultation seule comme pour le technicien ; à la différence de celui-ci, il ouvre encore par son adresse la fiche d'un client désactivé, qui le signale (question ouverte sur les clients désactivés).
 
 Les deux portes (interface et `/api/v1`) exécutent le même handler, pour qu'aucune règle
 ne puisse être appliquée d'un seul côté. L'historique des chantiers d'un client

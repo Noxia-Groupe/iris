@@ -84,11 +84,14 @@ export function estExcluDesOperations(role?: string | null): boolean {
 
 /**
  * Annuaire des clients (clients, contacts, sites) : les administrateurs, qui le tiennent à jour,
- * et le technicien, en consultation seule (décision de Nelson du 13-10-2026), par exemple pour
- * retrouver une adresse. Le serveur applique la permission clients:read.
+ * puis, en consultation seule, le technicien (décision de Nelson du 13-10-2026), par exemple pour
+ * retrouver une adresse, et le conducteur de travaux (décision du 16-10-2026). Le serveur applique
+ * la permission clients:read.
  */
+export const ROLES_ANNUAIRE = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TECHNICIEN, ROLE_CONDUCTEUR];
+// Même liste pour le menu et pour la route /clients (App.tsx) : l'un ne s'ouvre pas sans l'autre.
 export function peutConsulterAnnuaire(user?: CurrentUser | null): boolean {
-  return !!user && (isAdminRole(user.role) || user.role === ROLE_TECHNICIEN);
+  return !!user && ROLES_ANNUAIRE.includes(user.role || '');
 }
 
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */

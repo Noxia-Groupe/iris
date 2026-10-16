@@ -30,7 +30,7 @@ import Comptabilite from './pages/Comptabilite';
 import MentionsLegales from './pages/MentionsLegales';
 import PreteAFacturer from './pages/PreteAFacturer';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, estExcluDesOperations, peutAccederAuxDevis, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
+import { useCurrentUser, estExcluDesOperations, peutAccederAuxDevis, ROLES_ANNUAIRE, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
 import { useModules } from './modules';
 import { CompanyTimezoneProvider } from './companyTimezone';
 
@@ -39,8 +39,6 @@ import { CompanyTimezoneProvider } from './companyTimezone';
 const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
 const ROLES_INTERVENTIONS = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
 const ROLES_TRAVAUX = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE];
-// Annuaire des clients : tenu par l'administration, consulté par le technicien (cf. peutConsulterAnnuaire).
-const ROLES_ANNUAIRE = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TECHNICIEN];
 
 const PrivateRoute = ({ children, requiredRoles, horsOperations }: { children: JSX.Element, requiredRoles?: string[], horsOperations?: boolean }) => {
   const token = localStorage.getItem('token');

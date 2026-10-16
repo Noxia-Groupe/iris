@@ -19,7 +19,7 @@ Les permissions réutilisent le vocabulaire technique existant (`devis:read`, `d
 |---|---|
 | `SUPERADMIN` | Accès complet, réglages réservés et gestion des superadministrateurs. |
 | `ADMIN` | Administration générale, hors réglages réservés au superadministrateur. |
-| `CONDUCTEUR_TRAVAUX` | Pilotage des chantiers confiés, planning et saisie/correction métier autorisée ; lecture des clients (`clients:read` : clients, contacts, sites), pour choisir le client d'une intervention SAV qu'il crée (décision de Nelson du 16-10-2026, #143), sans écriture dans l'annuaire ni devis ; l'historique d'un client ne lui montre que ses chantiers, sans montant, et le menu Clients ne lui est pas ouvert. |
+| `CONDUCTEUR_TRAVAUX` | Pilotage des chantiers confiés, planning et saisie/correction métier autorisée ; lecture des clients (`clients:read` : clients, contacts, sites), pour choisir le client d'une intervention SAV qu'il crée (décision de Nelson du 16-10-2026, #143), sans écriture dans l'annuaire ni devis ; l'historique d'un client ne lui montre que ses chantiers, sans montant ; le menu Clients lui ouvre l'annuaire en consultation seule, sans formulaire ni parc d'équipements (décision du 16-10-2026, #145). |
 | `COMMERCIAL` | Affaires et chantiers commerciaux qui lui sont rattachés. |
 
 ## Types complémentaires décidés

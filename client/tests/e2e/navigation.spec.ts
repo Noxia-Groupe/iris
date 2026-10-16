@@ -110,7 +110,9 @@ test.describe('Navigation — menu regroupé et tiroir mobile', () => {
     const menu = page.locator('#menu-principal');
     await expect(menu.getByRole('group', { name: 'Chantiers' }).getByRole('link', { name: 'Journal des heures' })).toBeVisible();
     await expect(menu.getByRole('group', { name: 'Facturation' })).toHaveCount(0);
-    await expect(menu.getByRole('group', { name: 'Référentiels' })).toHaveCount(0);
+    // Référentiels : l'annuaire des clients seul, sans le catalogue (décision du 16-10-2026).
+    const referentiels = menu.getByRole('group', { name: 'Référentiels' });
+    await expect(referentiels.getByRole('link')).toHaveText(['Clients']);
     await expect(menu.getByRole('link', { name: 'API d’intégration' })).toHaveCount(0);
     await expect(menu).toContainText(nom);
   });
