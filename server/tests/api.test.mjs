@@ -1714,6 +1714,8 @@ if (!TEST_DATABASE_URL) {
     test('l’affaire rattachée à une intervention ne montre jamais son montant vendu', async () => {
       const client = await request(app).post('/api/clients').set(auth).send({ raisonSociale: 'TEST Client chaîne' });
       assert.equal(client.status, 201, JSON.stringify(client.body));
+      // Le rattachement passe par la fiche client du chantier : on la lie d'abord.
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { clientId: client.body.id } });
       const dossier = await request(app).post('/api/interventions').set(auth).send({ clientId: client.body.id, chantierId: chantier.id, titre: 'TEST Intervention sur chantier de la chaîne' });
       assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
       assert.equal(dossier.body.chantier.nom, 'TEST Chaîne chantier');
@@ -3818,20 +3820,28 @@ if (!TEST_DATABASE_URL) {
       assert.equal(creation.status, 404, JSON.stringify(creation.body));
     });
 
-    test('rattache un chantier appartenant au même client que le dossier SAV', async () => {
-      const client = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
-      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV lié', client: client.raisonSociale, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+    test('rattache un chantier lié à la fiche du client, quel que soit son libellé (décision du 16-10-2026)', async () => {
+      // Libellé différent de la raison sociale, comme après un renommage du client : seul clientId compte.
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV lié', client: 'TEST Ancien nom du client SAV', clientId, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
       const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
         .send({ clientId, chantierId: chantier.id, titre: 'TEST Intervention liée à affaire' });
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
       assert.equal(creation.body.chantier.id, chantier.id);
     });
 
-    test('refuse un chantier d’un autre client', async () => {
-      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV étranger', client: 'TEST Autre client SAV', dateDebut: new Date(), budgetGlobalVendu: 1000 } });
-      const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
-        .send({ clientId, chantierId: chantier.id, titre: 'TEST Cloisonnement affaire SAV' });
-      assert.equal(creation.status, 404, JSON.stringify(creation.body));
+    test('refuse un chantier d’un autre client, ou sans fiche client, même à libellé identique', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId }, select: { raisonSociale: true } });
+      const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST Autre client SAV' } });
+      const etranger = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV étranger', client: 'TEST Autre client SAV', clientId: autreClient.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      // Même libellé que le client du dossier, mais lié à une autre fiche, ou à aucune (affaire héritée).
+      const homonyme = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV homonyme', client: client.raisonSociale, clientId: autreClient.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const herite = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV hérité', client: client.raisonSociale, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      for (const chantier of [etranger, homonyme, herite]) {
+        const creation = await request(app).post('/api/interventions').set(auth).send({ clientId, chantierId: chantier.id, titre: 'TEST Cloisonnement affaire SAV' });
+        assert.equal(creation.status, 404, `${chantier.nom} : ${JSON.stringify(creation.body)}`);
+      }
+      assert.equal(await prisma.intervention.count({ where: { chantierId: { in: [etranger.id, homonyme.id, herite.id] } } }), 0);
     });
 
     test('permet au technicien affecté de consigner un compte rendu terrain', async () => {
@@ -3870,7 +3880,7 @@ if (!TEST_DATABASE_URL) {
       const responsable = await prisma.user.create({ data: { email: 'sav.responsable@iris.test', name: 'TEST Responsable SAV', role: 'RESPONSABLE' } });
       await prisma.user.update({ where: { id: conducteur.id }, data: { responsableHierarchiqueId: responsable.id } });
       const client = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
-      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier périmètre SAV', client: client.raisonSociale, dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier périmètre SAV', client: client.raisonSociale, clientId, dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
       const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
         .send({ clientId, chantierId: chantier.id, titre: 'TEST Intervention périmètre équipe' });
       assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
@@ -7565,7 +7575,7 @@ if (!TEST_DATABASE_URL) {
       const ancien = await prisma.client.create({ data: { raisonSociale: 'TEST Libellé client ancien' } });
       const nouveau = await prisma.client.create({ data: { raisonSociale: 'TEST Libellé client nouveau' } });
       const chantier = await prisma.chantier.create({ data: { nom: 'TEST Libellé réaffectation', client: ancien.raisonSociale, clientId: ancien.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
-      // Avant : le SAV du nouveau client ne peut pas viser ce chantier, qui porte l'ancien libellé.
+      // Avant : le SAV du nouveau client ne peut pas viser ce chantier, lié à l'ancien client.
       const avant = await request(app).post('/api/interventions').set(auth).send({ clientId: nouveau.id, chantierId: chantier.id, titre: 'TEST Libellé SAV avant réaffectation' });
       assert.equal(avant.status, 404, JSON.stringify(avant.body));
       const reaffectation = await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: nouveau.id });
