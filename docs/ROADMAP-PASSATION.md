@@ -42,7 +42,7 @@ Le catalogue et le plan comptable commencent vides et sont paramétrés par la s
 
   Les droits devis, saisie et archivage Travaux ne s'accordent plus à un technicien ; ceux d'un compte devenu technicien restent enregistrés sans effet et retirables ([modèle de droits](MODELE-DROITS-COMPTES.md)). L'accès financier lui est refusé de même : c'est une déduction de #123 (aucun montant), à confirmer.
 
-**Transversal — 200 clients :** Factures (#112), Devis (#114), Interventions et Contrats de maintenance (#137, sélecteur commun `SelecteurClient`), puis la réaffectation du client sur la fiche chantier (#138 : client lié toujours affiché, même désactivé, et envoyé seulement s'il change) sont livrés ; l'[issue #111](https://github.com/Noxia-Groupe/iris/issues/111) reste ouverte pour la lisibilité de la liste Clients et le retrait du contournement des fixtures E2E. Conserver le filtre actif, les permissions et le client déjà lié ; confronter chaque écran au code courant, sans réimplémenter les parcours livrés.
+**Transversal — 200 clients :** Factures (#112), Devis (#114), Interventions et Contrats de maintenance (#137, sélecteur commun `SelecteurClient`), puis la réaffectation du client sur la fiche chantier (#138 : client lié proposé hors recherche, même désactivé, et envoyé seulement s'il change) sont livrés ; l'[issue #111](https://github.com/Noxia-Groupe/iris/issues/111) reste ouverte pour la lisibilité de la liste Clients et le retrait du contournement des fixtures E2E. Conserver le filtre actif, les permissions et le client déjà lié ; confronter chaque écran au code courant, sans réimplémenter les parcours livrés.
 
 ## Lots décidés par Nelson
 

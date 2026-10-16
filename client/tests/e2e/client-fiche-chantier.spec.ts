@@ -60,8 +60,15 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
     expect(reponse.ok(), `${chemin} : ${await reponse.text()}`).toBeTruthy();
   }
   const lireChantier = async () => (await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json()) as { nom: string; clientId: string };
-  // Témoin : le client lié est hors de la liste initiale des clients.
-  expect((await (await request.get(`${api}/clients`, { headers })).json()).clients.some((c: { id: string }) => c.id === initial.id)).toBe(false);
+  // Témoin : le client lié est hors de la liste initiale des clients. Sur une base où d'autres
+  // clients sont classés après « ZZZ », on complète par lots jusqu'à l'en sortir (au plus 5 lots).
+  const dansLaListe = async () => (await (await request.get(`${api}/clients`, { headers })).json()).clients.some((c: { id: string }) => c.id === initial.id);
+  for (let lot = 0; lot < 5 && await dansLaListe(); lot += 1) {
+    const reponses = await Promise.all(Array.from({ length: 20 }, (_, j) =>
+      request.post(`${api}/clients`, { headers, data: { raisonSociale: `E2E 111 fiche complément ${Date.now()} ${lot}-${j}` } })));
+    for (const reponse of reponses) expect(reponse.status(), await reponse.text()).toBe(201);
+  }
+  expect(await dansLaListe()).toBe(false);
 
   const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
   const select = page.getByRole('combobox', { name: 'Client du chantier' });
@@ -72,17 +79,35 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
     await expect(page.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
   };
 
-  // 1. Le client lié est proposé et sélectionné ; enregistrer une autre modification ne l'envoie pas.
+  // 1. Pendant le chargement (retardé) de la liste des clients, le sélecteur est désactivé : un
+  //    renommage s'enregistre quand même, sans envoyer le client.
+  const listeInitiale = (url: URL) => url.pathname.endsWith('/api/clients') && !url.searchParams.has('q');
+  // Retard gardé pour tout le parcours : chaque ouverture recharge la liste.
+  await page.route(listeInitiale, async (route) => { await new Promise((r) => setTimeout(r, 2000)); await route.continue().catch(() => {}); });
+  await ouvrirEdition();
+  await expect(select).toBeDisabled();
+  await nom.fill(`${chantier.nom} renommé`);
+  const corpsPendantChargement = await enregistrer(page, chantier.id);
+  expect('clientId' in corpsPendantChargement).toBe(false);
+  expect(await lireChantier()).toMatchObject({ nom: `${chantier.nom} renommé`, clientId: initial.id });
+
+  // 2. Le client lié est proposé et sélectionné ; choisir un autre client puis revenir au client
+  //    lié le garde, et l'enregistrement ne l'envoie pas.
   await ouvrirEdition();
   await expect(select).toBeEnabled();
   await expect(select).toHaveValue(initial.id);
   await expect(select.locator(`option[value="${initial.id}"]`)).toHaveText(initial.raisonSociale);
-  await nom.fill(`${chantier.nom} renommé`);
+  const autreDeLaListe = await select.locator('option').nth(1).getAttribute('value');
+  expect(autreDeLaListe && autreDeLaListe !== initial.id).toBeTruthy();
+  await select.selectOption(autreDeLaListe!);
+  await select.selectOption(initial.id);
+  await expect(select).toHaveValue(initial.id);
+  await nom.fill(`${chantier.nom} renommé deux fois`);
   const corpsRenommage = await enregistrer(page, chantier.id);
   expect('clientId' in corpsRenommage).toBe(false);
-  expect(await lireChantier()).toMatchObject({ nom: `${chantier.nom} renommé`, clientId: initial.id });
+  expect(await lireChantier()).toMatchObject({ nom: `${chantier.nom} renommé deux fois`, clientId: initial.id });
 
-  // 2. Réaffectation à un autre client, retrouvé par la recherche.
+  // 3. Réaffectation à un autre client, retrouvé par la recherche.
   await ouvrirEdition();
   await page.getByRole('searchbox', { name: 'Rechercher un client' }).fill(`${prefixe} autre`);
   await expect(select.locator(`option[value="${autre.id}"]`)).toHaveCount(1);
@@ -92,7 +117,7 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
   expect(corpsReaffectation.clientId).toBe(autre.id);
   expect((await lireChantier()).clientId).toBe(autre.id);
 
-  // 3. Client désactivé depuis : il reste affiché, et la fiche s'enregistre sans le remplacer.
+  // 4. Client désactivé depuis : il reste affiché, et la fiche s'enregistre sans le remplacer.
   const desactivation = await request.delete(`${api}/clients/${autre.id}`, { headers });
   expect(desactivation.ok(), await desactivation.text()).toBeTruthy();
   await page.reload({ waitUntil: 'networkidle' });
@@ -104,7 +129,7 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
   expect('clientId' in corpsDesactive).toBe(false);
   expect(await lireChantier()).toMatchObject({ nom: `${chantier.nom} client désactivé`, clientId: autre.id });
 
-  // 4. Envoi pendant une recherche (sélecteur désactivé, hors du formulaire) : refus local, sans requête.
+  // 5. Envoi pendant une recherche (le client est désélectionné) : refus local, sans requête.
   const rechercheLente = `${prefixe} recherche lente`;
   await page.route((url) => url.pathname.endsWith('/api/clients') && url.searchParams.get('q') === rechercheLente, async (route) => {
     await new Promise((r) => setTimeout(r, 1500));

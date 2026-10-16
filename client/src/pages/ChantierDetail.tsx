@@ -198,11 +198,12 @@ const ChantierDetail = () => {
     if (conducteurs.length === 0) fetchConducteurs();
     if (commerciaux.length === 0) fetchCommerciaux();
     // Le client lié reste proposé même au-delà des 200 premiers ou désactivé : sa fiche donne
-    // sa raison sociale et son état ; à défaut, le libellé du chantier sert d'étiquette.
+    // sa raison sociale et son état. En attendant (ou si elle ne se charge pas), une étiquette
+    // neutre : le libellé historique du chantier peut désigner un ancien client.
     if (isAdminRole(userRole)) {
       const lie = chantier?.clientId || '';
       setEditClientId(lie);
-      setClientActuel(lie ? { id: lie, raisonSociale: chantier?.client || lie } : null);
+      setClientActuel(lie ? { id: lie, raisonSociale: 'Client actuellement lié' } : null);
       if (lie) apiFetch(`/clients/${lie}`).then(res => res.ok ? res.json() : null).then(data => {
         if (data?.id === lie) setClientActuel({ id: data.id, raisonSociale: data.raisonSociale, actif: data.actif });
       }).catch(() => {});
@@ -223,17 +224,19 @@ const ChantierDetail = () => {
     // (« Chantier introuvable ») alors que la réattribution est faite.
     const commercialId = String(formData.get('commercialId') || '');
     formData.delete('commercialId');
-    // Client : envoyé seulement s'il change. Pendant une recherche, le sélecteur désactivé sort
-    // du formulaire (et échappe à `required`) : on refuse plutôt que d'envoyer une fiche sans client.
+    // Client : lu dans l'état du sélecteur, pas dans le formulaire, dont il sort quand le
+    // sélecteur est désactivé (chargement de la liste, recherche en cours). Une recherche
+    // désélectionne le client : on refuse alors l'envoi. Il n'est envoyé que s'il change.
+    formData.delete('clientId');
+    let clientChange: string | null = null;
     if (isAdminRole(userRole)) {
-      const clientId = String(formData.get('clientId') || '');
-      if (!clientId) { alert('Choisissez un client.'); return; }
-      if (clientId === (chantier?.clientId || '')) formData.delete('clientId');
+      if (!editClientId) { alert('Choisissez un client.'); return; }
+      if (editClientId !== (chantier?.clientId || '')) clientChange = editClientId;
     }
     const responsableId = String(formData.get('responsableId') || '');
     // Case à cocher unique : absente de FormData quand décochée, on la force donc à
     // explicitement true/false pour que décocher l'enregistre bien (cf. 'types' ci-dessous).
-    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), baremeReduit: formData.get('baremeReduit') === 'true' };
+    const data = { ...Object.fromEntries(formData.entries()), types: formData.getAll('types'), baremeReduit: formData.get('baremeReduit') === 'true', ...(clientChange ? { clientId: clientChange } : {}) };
     setSavingChantier(true);
     // Le commercial, enregistré d'abord, le reste si la suite échoue : le message le dit.
     let commercialEnregistre = false;
@@ -1351,7 +1354,7 @@ const ChantierDetail = () => {
                 <input required name="nom" defaultValue={chantier.nom} className="form-input" />
               </div>
               <div className="form-group mb-0">
-                <label className="form-label">Client</label>
+                <label className="form-label" htmlFor={isAdminRole(userRole) ? 'client-chantier' : undefined}>Client</label>
                 {isAdminRole(userRole) ? (
                   <SelecteurClient id="client-chantier" name="clientId" label="Client du chantier" required valeur={editClientId} onChange={(client) => setEditClientId(client?.id ?? '')} clientActuel={clientActuel} />
                 ) : <input readOnly value={chantier.client} className="form-input bg-gray-50" />}

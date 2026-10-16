@@ -464,6 +464,9 @@ test('un conducteur confie son chantier à un autre conducteur depuis la fiche, 
 
     await page.goto(`/chantiers/${chantierId}`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Modifier' }).first().click();
+    // Le titulaire ne réaffecte pas le client : champ en lecture seule, sans sélecteur (#111).
+    await expect(page.getByRole('combobox', { name: 'Client du chantier' })).toHaveCount(0);
+    await expect(page.getByRole('searchbox', { name: 'Rechercher un client' })).toHaveCount(0);
     await page.locator('select[name="responsableId"]').selectOption(remplacant.id);
     const enregistrement = page.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${chantierId}`) && r.request().method() === 'PATCH');
     await page.getByRole('button', { name: 'Enregistrer les modifications' }).click();
