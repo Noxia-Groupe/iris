@@ -713,12 +713,12 @@ const Admin = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {chantiers.map(c => (
               <div key={c.id} className="p-4 bg-white border rounded shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
+                <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
+                  <div className="min-w-0">
                     <h4 className="font-bold text-lg text-primary break-words">
                       <Link to={`/chantiers/${c.id}`} className="hover:underline">{c.nom}</Link>
                     </h4>
-                    <span className="text-sm text-muted">Client : {c.client} | Devis : {c.numeroDevis || 'Non spécifié'}</span>
+                    <span className="text-sm text-muted break-words">Client : {c.client} | Devis : {c.numeroDevis || 'Non spécifié'}</span>
                     {/* Titulaire et commercial se modifient depuis la fiche (bouton « Modifier »),
                         par exemple au départ d'un conducteur en cours de chantier. */}
                     <div className="text-sm text-muted mt-0.5">Responsable : {c.responsable

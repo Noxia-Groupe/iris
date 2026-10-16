@@ -677,8 +677,9 @@ const ChantierDetail = () => {
         {/* Zone exportable en PDF */}
         <div ref={printRef} className="bg-white p-6 sm:p-8 rounded-2xl shadow-md border border-gray-100 relative">
 
-          {/* Action Bar */}
-          <div className="absolute top-6 right-6 flex gap-2">
+          {/* Barre d'actions : dans le flux sur téléphone, au-dessus du titre ; en haut à droite au-delà,
+              où le titre lui laisse sa place (sm:pr-56, ou sm:pr-28 pour le seul bouton PDF). */}
+          <div className="mb-4 flex flex-wrap justify-end gap-2 sm:absolute sm:top-6 sm:right-6 sm:mb-0">
             {canEditChantier && (
               <button
                 onClick={startEditChantier}
@@ -692,7 +693,7 @@ const ChantierDetail = () => {
             </button>
           </div>
 
-          <div className="mb-8 pr-32">
+          <div className={`mb-8 ${canEditChantier ? 'sm:pr-56' : 'sm:pr-28'}`}>
             <div className="flex items-center gap-3 flex-wrap mb-2">
               <h2 className="text-3xl font-extrabold text-primary-dark tracking-tight m-0">{chantier.nom}</h2>
               <span className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${isTermine ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-accent'}`}>
@@ -801,7 +802,7 @@ const ChantierDetail = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {showBudgetVendu && (
               <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-16 h-16 bg-blue-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+                <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-blue-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Budget Vendu</div>
                 <div className="text-2xl font-black text-primary-dark z-10">{chantier.budgetGlobalVendu.toLocaleString()} €</div>
               </div>
@@ -846,21 +847,21 @@ const ChantierDetail = () => {
             {/* Budgets par poste : non communiqués à un compte technicien (null côté serveur). */}
             {chantier.budgetMaterielVendu != null && (
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-16 h-16 bg-green-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+              <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-green-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Matériel Prévu</div>
               <div className="text-2xl font-black text-accent z-10">{chantier.budgetMaterielVendu.toLocaleString()} €</div>
             </div>
             )}
 
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-16 h-16 bg-purple-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+              <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-purple-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Heures Prévues</div>
               <div className="text-2xl font-black text-purple-600 z-10">{chantier.heuresVendues} h</div>
             </div>
 
             {chantier.budgetMainOeuvreVendu != null && (
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-16 h-16 bg-orange-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+              <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-orange-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Coût MO Prévu</div>
               <div className="text-2xl font-black text-orange-600 z-10">{chantier.budgetMainOeuvreVendu.toLocaleString()} €</div>
             </div>

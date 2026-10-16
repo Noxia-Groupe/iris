@@ -53,16 +53,17 @@ const Performances = () => {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-primary-dark m-0 flex items-center gap-2"><Activity size={22} /> Performances</h1>
           <p className="text-sm text-muted mt-1">
             Classées par marge commerciale générée. Visible uniquement par les administrateurs.
           </p>
         </div>
-        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 shrink-0">
+        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 self-start xl:shrink-0">
           <button type="button" onClick={() => setWeekRef(decalerReference(weekRef, 'week', -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine précédente">‹</button>
-          <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap">
+          {/* Sur téléphone, le libellé se replie sur deux lignes pour garder ‹ › sur la même ligne. */}
+          <span className="min-w-0 flex-1 text-center text-sm font-semibold text-gray-700 px-2 sm:flex-none sm:whitespace-nowrap">
             Semaine du {assiduite ? jourFrancais(assiduite.weekStart) : '…'} au {assiduite ? jourFrancais(assiduite.weekEnd) : '…'}
           </span>
           <button type="button" onClick={() => setWeekRef(decalerReference(weekRef, 'week', 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine suivante">›</button>
@@ -82,12 +83,12 @@ const Performances = () => {
             const tranchesMap = new Map<number, number>((a?.tranchesHoraires || []).map((t: any) => [t.heure, t.nbSaisies] as [number, number]));
             return (
             <div key={p.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-              <div className="flex items-start justify-between gap-3 mb-4">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                <div className="flex min-w-0 items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 font-bold text-sm flex items-center justify-center shrink-0">#{i + 1}</div>
-                  <div>
-                    <div className="font-bold text-gray-800">{p.name}</div>
-                    <div className="text-xs text-muted">{p.email}</div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-gray-800 break-words">{p.name}</div>
+                    <div className="text-xs text-muted break-all">{p.email}</div>
                   </div>
                 </div>
                 <div className="text-right text-xs font-semibold text-gray-500 whitespace-nowrap">

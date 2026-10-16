@@ -159,7 +159,7 @@ export default function Devis() {
   const optionsClients = resultatsClients ?? clients;
 
   return <div className="max-w-6xl mx-auto space-y-6">
-    <div className="flex items-center justify-between gap-3"><div><h1 className="text-2xl font-bold">Devis</h1><p className="text-gray-500">Éditables jusqu’à la signature du client, puis révisables par nouvelle version.</p></div><button className="btn border flex items-center gap-2" onClick={() => void load()}><RefreshCw size={16}/> Actualiser</button></div>
+    <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between sm:items-center"><div><h1 className="text-2xl font-bold">Devis</h1><p className="text-gray-500">Éditables jusqu’à la signature du client, puis révisables par nouvelle version.</p></div><button className="btn border flex items-center gap-2" onClick={() => void load()}><RefreshCw size={16}/> Actualiser</button></div>
     {error && <p className="text-red-600">{error}</p>}
     {devisASigner && <form role="dialog" aria-label="Signature client" onSubmit={signer} className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3">
       <div><h2 className="font-semibold">Signature client</h2><p className="text-sm text-gray-600">Le client confirme le devis figé. L’employé connecté enregistre son acceptation.</p></div>

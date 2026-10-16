@@ -44,11 +44,12 @@ function PeriodNav({
           ))}
         </div>
       )}
-      <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
+      {/* Sur téléphone, le libellé se replie pour garder ‹ › et « Aujourd'hui » dans l'écran. */}
+      <div className="flex max-w-full items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
         <button type="button" onClick={() => onRefChange(decalerReference(refDate, period, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période précédente">
           <ChevronLeft size={16} />
         </button>
-        <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap min-w-[10rem] text-center">{label}</span>
+        <span className="min-w-0 flex-1 text-sm font-semibold text-gray-700 px-2 text-center sm:flex-none sm:min-w-[10rem] sm:whitespace-nowrap">{label}</span>
         <button type="button" onClick={() => onRefChange(decalerReference(refDate, period, 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500" title="Période suivante">
           <ChevronRight size={16} />
         </button>

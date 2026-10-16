@@ -263,15 +263,16 @@ const Planning = () => {
 
       <section aria-label="Interventions contractuelles à planifier" className="mb-4 bg-white rounded-xl border p-4">
         <h2 className="font-bold mb-2">Interventions contractuelles à planifier</h2>
+        {/* Le tableau défile dans son cadre sur téléphone, au lieu de couper le bouton « Placer ». */}
         {contractQueue.length === 0 ? <p className="text-sm text-muted">Aucune visite en attente.</p> : (
-          <table className="w-full text-sm"><thead><tr><th>Échéance</th><th>Référence</th><th>Client / site</th><th>Contrat</th><th>Durée</th><th></th></tr></thead>
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th>Échéance</th><th>Référence</th><th>Client / site</th><th>Contrat</th><th>Durée</th><th></th></tr></thead>
             <tbody>{contractQueue.map(item => <tr key={item.id} className="border-t">
               <td>{formatDateOnly(item.echeanceContrat)}</td><td>{item.reference}</td>
               <td>{item.client.raisonSociale} — {item.site?.nom || 'Sans site'} {item.site?.ville || ''}</td>
               <td>{item.contratMaintenance.titre}</td><td>{item.dureePrevisionnelleMinutes} min</td>
               <td><button className="btn btn-primary" onClick={() => setToPlace(item)}>Placer</button></td>
             </tr>)}</tbody>
-          </table>
+          </table></div>
         )}
       </section>
 
