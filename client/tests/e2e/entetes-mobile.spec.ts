@@ -56,9 +56,14 @@ test.describe('écrans sur téléphone (375 px)', () => {
     await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
     await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
     const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
-    // Au moins un compte au plan comptable : ses boutons de ligne étaient coupés.
+    // Des listes non vides : une carte ou une ligne trop large n'apparaît qu'avec des données (les
+    // actions d'un contrat sortaient de l'écran). Un compte au plan comptable, un contrat, une
+    // intervention et une facture brouillon.
     const plan = await (await request.get(`${api}/comptabilite`, { headers })).json() as { comptes: unknown[] };
     expect(plan.comptes.length).toBeGreaterThan(0);
+    await envoyer('post', '/contrats-maintenance', { clientId: client.id, titre: `Maintenance préventive des installations ${Date.now()}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-10-2030' });
+    await envoyer('post', '/interventions', { clientId: client.id, chantierId: chantier.id, titre: `Fuite sur le réseau de chauffage ${Date.now()}` });
+    await envoyer('post', '/factures', { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Écrans sur téléphone', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'Prestation', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
 
     const routes = ['/', '/chantiers', `/chantiers/${chantier.id}`, '/devis', '/interventions', '/contrats-maintenance', '/factures',
       '/prete-a-facturer', '/mentions-legales', '/comptabilite', '/clients', `/clients/${client.id}`, '/societe', '/catalogue',

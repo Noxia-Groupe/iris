@@ -181,7 +181,7 @@ test('aperçoit un CSV en mode mise à jour puis confirme avec un motif unique',
   expect(((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ code: string; libelle: string }> }).comptes.find(c => c.code === code)?.libelle).toBe('Avant import');
   await dialogue.getByLabel(/Motif unique/).fill('Correction comptable CSV');
   await dialogue.getByRole('button', { name: 'Confirmer la mise à jour' }).click();
-  await expect(creation.locator('section.overflow-hidden tbody tr', { hasText: code })).toContainText('Après import');
+  await expect(creation.getByRole('region', { name: 'Comptes du plan' }).locator('tbody tr', { hasText: code })).toContainText('Après import');
   const compte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; code: string }> }).comptes.find(c => c.code === code)!;
   const journal = (await (await apiAdmin.get(`/comptabilite/comptes/${compte.id}/journal`)).json()) as Array<{ action: string; motif: string }>;
   expect(journal.map((j: { action: string; motif: string }) => [j.action, j.motif])).toEqual([['MODIFICATION', 'Correction comptable CSV']]);
@@ -209,7 +209,7 @@ test('annule l’aperçu sans écriture puis refuse une confirmation devenue pé
   await page.getByPlaceholder('Code', { exact: true }).fill(code);
   await page.getByPlaceholder('Libellé', { exact: true }).fill('Départ');
   await page.locator('form').filter({ hasText: 'Ajouter' }).getByRole('button', { name: 'Ajouter' }).click();
-  await expect(page.locator('section.overflow-hidden tbody tr', { hasText: code })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Comptes du plan' }).locator('tbody tr', { hasText: code })).toBeVisible();
   const compte = ((await (await apiAdmin.get('/comptabilite')).json()) as { comptes: Array<{ id: string; code: string; updatedAt: string }> }).comptes.find(c => c.code === code);
   expect(compte).toBeDefined();
   if (!compte) throw new Error(`Compte ${code} absent après création`);
