@@ -7499,6 +7499,27 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).patch(`/api/chantiers/${orpheline.id}`).set('Authorization', `Bearer ${session}`).send({ clientId: autre.body.id })).status, 409);
     });
 
+    test('#111 : un client désactivé depuis ne bloque pas la fiche, mais ne se choisit plus', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const desactive = await prisma.client.create({ data: { raisonSociale: 'TEST 111 client désactivé depuis' } });
+      const actif = await prisma.client.create({ data: { raisonSociale: 'TEST 111 client actif de remplacement' } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST 111 fiche client désactivé', client: desactive.raisonSociale, clientId: desactive.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      await prisma.client.update({ where: { id: desactive.id }, data: { actif: false } });
+      // Le même client renvoyé tel quel n'est pas un changement : le reste de la fiche s'enregistre.
+      const identique = await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: desactive.id, nom: 'TEST 111 fiche renommée' });
+      assert.equal(identique.status, 200, JSON.stringify(identique.body));
+      const apres = await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } });
+      assert.equal(apres.nom, 'TEST 111 fiche renommée');
+      assert.equal(apres.clientId, desactive.id);
+      // Un nouveau client doit être actif ; revenir à un client désactivé est refusé aussi.
+      const remplacement = await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: actif.id });
+      assert.equal(remplacement.status, 200, JSON.stringify(remplacement.body));
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).clientId, actif.id);
+      const retour = await request(app).patch(`/api/chantiers/${chantier.id}`).set(auth).send({ clientId: desactive.id });
+      assert.equal(retour.status, 404, JSON.stringify(retour.body));
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).clientId, actif.id);
+    });
+
     test('refuse le document PDF d’une facture brouillon', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST document brouillon', dateEmission: '09-09-2026', dateEcheance: '09-10-2026', lignes: [{ designation: 'TEST document brouillon', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
