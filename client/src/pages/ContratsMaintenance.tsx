@@ -66,6 +66,7 @@ export default function ContratsMaintenance() {
   };
 
   const fermerFormulaire = () => {
+    clientDemande.current = '';
     setFormulaireOuvert(false);
     setClientIdFormulaire('');
     setClientSelectionne(null);
@@ -75,6 +76,8 @@ export default function ContratsMaintenance() {
     event.preventDefault();
     setErreur(''); setSucces('');
     const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    // Pendant une recherche, le sélecteur désactivé échappe à `required` et sort du formulaire.
+    if (!body.clientId) return setErreur('Choisissez un client.');
     const res = await apiFetch('/contrats-maintenance', { method: 'POST', body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) return setErreur(data.error || 'Création du contrat impossible.');

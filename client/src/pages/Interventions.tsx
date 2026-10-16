@@ -107,6 +107,7 @@ export default function Interventions() {
   };
 
   const fermerFormulaire = () => {
+    clientDemande.current = '';
     setFormOpen(false);
     setClientIdFormulaire('');
     setClientFormulaire(null);
@@ -116,6 +117,8 @@ export default function Interventions() {
     event.preventDefault();
     setError('');
     const form = new FormData(event.currentTarget);
+    // Pendant une recherche, le sélecteur désactivé échappe à `required` et sort du formulaire.
+    if (!form.get('clientId')) return setError('Choisissez un client.');
     if (!form.get('dateDemande')) form.delete('dateDemande');
     const res = await apiFetch('/interventions', { method: 'POST', body: JSON.stringify(Object.fromEntries(form.entries())) });
     const data = await res.json();

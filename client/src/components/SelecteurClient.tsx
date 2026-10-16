@@ -18,8 +18,8 @@ type Props = {
 /**
  * Choix d'un client actif, y compris au-delà des 200 premiers (#111) : la liste initiale montre
  * les 200 premiers par raison sociale, et une recherche serveur (`GET /api/clients?q=`) retrouve
- * les autres. Les réponses périmées sont ignorées, et le client choisi reste affiché même s'il
- * sort des résultats.
+ * les autres. Les réponses périmées sont ignorées. Modifier la recherche désélectionne le client :
+ * le formulaire ne garde jamais un client qui n'est plus proposé.
  */
 export function SelecteurClient({ id, name, label, valeur, onChange, required }: Props) {
   const [initiaux, setInitiaux] = useState<ClientResume[]>([]);
@@ -29,7 +29,6 @@ export function SelecteurClient({ id, name, label, valeur, onChange, required }:
   const [resultats, setResultats] = useState<ClientResume[] | null>(null);
   const [rechercheEnCours, setRechercheEnCours] = useState(false);
   const [erreurRecherche, setErreurRecherche] = useState('');
-  const [selectionne, setSelectionne] = useState<ClientResume | null>(null);
   const requete = useRef(0);
 
   useEffect(() => {
@@ -74,7 +73,6 @@ export function SelecteurClient({ id, name, label, valeur, onChange, required }:
     setResultats(texte.trim() ? [] : null);
     setRechercheEnCours(Boolean(texte.trim()));
     setErreurRecherche('');
-    setSelectionne(null);
     onChange(null);
   };
 
@@ -82,11 +80,7 @@ export function SelecteurClient({ id, name, label, valeur, onChange, required }:
   const options = resultats ?? initiaux;
   const enCours = enRecherche ? rechercheEnCours : chargementInitial;
   const erreur = enRecherche ? erreurRecherche : erreurInitiale;
-  const choisir = (clientId: string) => {
-    const client = options.find((c) => c.id === clientId) ?? (selectionne?.id === clientId ? selectionne : null);
-    setSelectionne(client);
-    onChange(client);
-  };
+  const choisir = (clientId: string) => onChange(options.find((c) => c.id === clientId) ?? null);
 
   return (
     <div>
@@ -95,7 +89,6 @@ export function SelecteurClient({ id, name, label, valeur, onChange, required }:
       <select id={id} name={name} aria-label={label} required={required} className="form-input mt-1" value={valeur} disabled={enCours || Boolean(erreur)} onChange={(e) => choisir(e.target.value)}>
         <option value="">Client concerné</option>
         {options.map((client) => <option key={client.id} value={client.id}>{client.raisonSociale}</option>)}
-        {selectionne && !options.some((c) => c.id === selectionne.id) && <option value={selectionne.id}>{selectionne.raisonSociale}</option>}
       </select>
       {enCours && <p role="status" className="text-sm text-gray-500">{enRecherche ? 'Recherche en cours…' : 'Chargement des clients…'}</p>}
       {erreur && <p role="alert" className="text-sm text-red-600">{erreur}</p>}
