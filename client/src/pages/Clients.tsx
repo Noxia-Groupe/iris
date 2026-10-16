@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Building2, Plus, Search } from 'lucide-react';
 import { apiFetch } from '../api';
 import { isAdminRole, useCurrentUser } from '../roles';
+import { LIMITE_CLIENTS } from '../components/SelecteurClient';
 
 interface ClientResume {
   id: string;
@@ -24,19 +25,32 @@ export default function Clients() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
+  // Seule la dernière recherche s'affiche : une réponse plus lente d'une frappe précédente est ignorée.
+  const requete = useRef(0);
   const load = async (q = '') => {
+    const numero = ++requete.current;
     setLoading(true);
     try {
       const res = await apiFetch(`/clients?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Chargement impossible.');
-      setClients(data.clients || []);
-    } catch (e) { setError(e instanceof Error ? e.message : 'Chargement impossible.'); }
-    finally { setLoading(false); }
+      if (numero === requete.current) { setClients(data.clients || []); setError(''); }
+    } catch (e) { if (numero === requete.current) setError(e instanceof Error ? e.message : 'Chargement impossible.'); }
+    finally { if (numero === requete.current) setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (!query) return;
+    const minuteur = window.setTimeout(() => { void load(query.trim()); }, 250);
+    return () => window.clearTimeout(minuteur);
+  }, [query]);
 
-  const search = (value: string) => { setQuery(value); void load(value); };
+  const search = (value: string) => {
+    setQuery(value);
+    // Effacer la recherche recharge tout de suite la liste initiale ; une saisie attend 250 ms.
+    if (!value) void load();
+    else { requete.current += 1; setLoading(true); }
+  };
   const create = async (event: React.FormEvent) => {
     event.preventDefault(); setError('');
     try {
@@ -57,9 +71,10 @@ export default function Clients() {
       <button className="btn btn-primary" type="submit">Créer la fiche</button>
     </form>}
     {error && <p className="text-red-600">{error}</p>}
-    <label className="relative block"><Search className="absolute left-3 top-3 text-gray-400" size={18} /><input value={query} onChange={e => search(e.target.value)} placeholder="Rechercher une société ou un SIREN" className="w-full border rounded-lg py-2.5 pl-10 pr-3" /></label>
+    <label className="relative block"><Search className="absolute left-3 top-3 text-gray-400" size={18} /><input type="search" aria-label="Rechercher un client" value={query} onChange={e => search(e.target.value)} placeholder="Rechercher une société ou un SIREN" className="w-full border rounded-lg py-2.5 pl-10 pr-3" /></label>
+    {!loading && !error && clients.length >= LIMITE_CLIENTS && <p role="status" aria-label="Limite des résultats clients" className="text-sm text-gray-600">{query.trim() ? `${LIMITE_CLIENTS} clients maximum affichés ; veuillez affiner votre recherche.` : `Seuls les ${LIMITE_CLIENTS} premiers clients sont listés, par raison sociale : recherchez les autres par leur nom ou leur SIREN.`}</p>}
     <div className="bg-white border rounded-xl overflow-hidden">
-      {loading ? <p className="p-6 text-gray-500">Chargement…</p> : clients.length === 0 ? <p className="p-8 text-center text-gray-500">{query ? 'Aucun client ne correspond à cette recherche.' : modifiable ? 'Aucun client. Créez votre première fiche client.' : 'Aucun client.'}</p> : <ul className="divide-y">{clients.map(client => <li key={client.id}><Link to={`/clients/${client.id}`} className="block p-4 hover:bg-gray-50"><div className="flex gap-3"><Building2 className="text-blue-700 mt-0.5" size={20} /><div className="min-w-0"><p className="font-semibold text-gray-900">{client.raisonSociale}</p><p className="text-sm text-gray-500">{client.siren ? `SIREN ${client.siren} · ` : ''}{client.sites[0]?.ville || 'Adresse à compléter'}</p>{client.contacts.length > 0 && <p className="text-sm text-gray-600 mt-1">Décisionnaire{client.contacts.length > 1 ? 's' : ''} : {client.contacts.map(c => `${c.prenom ? `${c.prenom} ` : ''}${c.nom}`).join(', ')}</p>}</div></div></Link></li>)}</ul>}
+      {loading ? <p className="p-6 text-gray-500">Chargement…</p> : clients.length === 0 ? <p className="p-8 text-center text-gray-500">{query ? 'Aucun client ne correspond à cette recherche.' : modifiable ? 'Aucun client. Créez votre première fiche client.' : 'Aucun client.'}</p> : <ul aria-label="Liste des clients" className="divide-y">{clients.map(client => <li key={client.id}><Link to={`/clients/${client.id}`} className="block p-4 hover:bg-gray-50"><div className="flex gap-3"><Building2 className="text-blue-700 mt-0.5" size={20} /><div className="min-w-0"><p className="font-semibold text-gray-900">{client.raisonSociale}</p><p className="text-sm text-gray-500">{client.siren ? `SIREN ${client.siren} · ` : ''}{client.sites[0]?.ville || 'Adresse à compléter'}</p>{client.contacts.length > 0 && <p className="text-sm text-gray-600 mt-1">Décisionnaire{client.contacts.length > 1 ? 's' : ''} : {client.contacts.map(c => `${c.prenom ? `${c.prenom} ` : ''}${c.nom}`).join(', ')}</p>}</div></div></Link></li>)}</ul>}
     </div>
   </div>;
 }

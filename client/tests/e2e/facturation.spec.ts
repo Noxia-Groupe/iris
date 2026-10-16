@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { Page } from '@playwright/test';
-import { test, expect, dateDuJour } from './fixtures';
+import { test, expect, choisirClient, dateDuJour } from './fixtures';
 
 // Aucune route de connexion par mot de passe n'existe (SSO Microsoft ou accès de secours) :
 // pour ouvrir une session dans un rôle non administrateur, on signe le jeton avec le
@@ -341,9 +341,9 @@ test.describe('Facturation — parcours utilisateur', () => {
   });
 
   // Prépare une facture émise hors affaire et rend sa ligne de tableau.
-  const emettreFactureSource = async (page: Page, client: { raisonSociale: string }, lignes: Array<[string, string, string]>) => {
+  const emettreFactureSource = async (page: Page, client: { id: string; raisonSociale: string }, lignes: Array<[string, string, string]>) => {
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
-    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await choisirClient(page, client);
     await page.locator('input[name="motifHorsAffaire"]').fill('Parcours avoir partiel');
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
@@ -389,7 +389,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const client = await creerClient('multi-lignes');
     const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
-    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await choisirClient(page, client);
     await page.locator('input[name="motifHorsAffaire"]').fill('Parcours multi-lignes');
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
@@ -430,7 +430,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const client = await creerClient('avoir-partiel');
     const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
-    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await choisirClient(page, client);
     await page.locator('input[name="motifHorsAffaire"]').fill('Parcours avoir partiel');
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
@@ -540,7 +540,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const client = await creerClient('emission');
     const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
-    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await choisirClient(page, client);
     await page.locator('input[name="motifHorsAffaire"]').fill('Parcours émission');
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
@@ -567,7 +567,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const client = await creerClient('règlement');
     const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
-    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await choisirClient(page, client);
     await page.locator('input[name="motifHorsAffaire"]').fill('Parcours règlement');
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
@@ -593,7 +593,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const client = await creerClient('annulation');
     const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
-    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await choisirClient(page, client);
     await page.locator('input[name="motifHorsAffaire"]').fill('Parcours annulation');
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
@@ -620,7 +620,7 @@ test.describe('Facturation — parcours utilisateur', () => {
 
   test('refuse la ligne invalide sans créer de facture', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
     const client = await creerClient('invalide'); const page = await allerSurPageAdmin('/factures');
-    await page.getByRole('button', { name: /Nouvelle facture/ }).click(); await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await page.getByRole('button', { name: /Nouvelle facture/ }).click(); await choisirClient(page, client);
     await page.locator('input[name="motifHorsAffaire"]').fill('Validation client'); await page.getByRole('button', { name: /Ajouter une ligne/ }).click();
     await page.locator('input[aria-label="Désignation ligne 1"]').fill('Correcte'); await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('10');
     await page.locator('input[aria-label="Désignation ligne 2"]').fill('Invalide'); await page.locator('input[aria-label="Prix unitaire HT ligne 2"]').pressSequentially('douze');
@@ -632,7 +632,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const client = await creerClient('sans-site', false);
     const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
-    await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+    await choisirClient(page, client);
     await page.locator('input[name="motifHorsAffaire"]').fill('Parcours sans adresse');
     await page.locator('input[name="dateEmission"]').fill(dateDuJour());
     await page.locator('input[name="dateEcheance"]').fill(dateDuJour());
@@ -840,7 +840,7 @@ test.describe('Facturation — parcours utilisateur', () => {
       const dateEmission = page.locator('input[name="dateEmission"]');
       const jourPropose = await dateEmission.inputValue();
       expect(jourPropose).toMatch(/^\d{2}-\d{2}-\d{4}$/);
-      await page.locator('select[name="clientId"]').selectOption({ label: client.raisonSociale });
+      await choisirClient(page, client);
       await page.locator('input[name="motifHorsAffaire"]').fill('Parcours fuseau Gambier');
       await page.locator('input[aria-label="Désignation ligne 1"]').fill('Contrôle de la date proposée');
       await page.locator('input[aria-label="Prix unitaire HT ligne 1"]').pressSequentially('100');
