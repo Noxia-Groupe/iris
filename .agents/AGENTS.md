@@ -25,3 +25,13 @@ appartiennent à l'agent qui les a ouvertes.
    sans reproduction n'est pas un constat.
 5. L'auteur résout les fils qu'il a traités ; le relecteur résout les siens une fois la
    correction livrée par l'auteur.
+
+## Méthode et remarques d'audit (décision du 16-10-2026)
+
+Les règles complètes sont dans [`CLAUDE.md`](../CLAUDE.md#méthode-de-travail-décision-de-nelson-du-16-10-2026). Pour les revues :
+
+1. Le périmètre du pilote guide les priorités : une PR dit à quel besoin du premier client elle répond.
+2. Droits et périmètres, montants, factures et documents figés, journaux d'audit et sécurité gardent l'exigence maximale : une remarque qui les touche est bloquante pour la fusion et se corrige avant.
+3. Toute autre remarque non bloquante ne retarde pas la fusion : l'auteur ouvre une issue étiquetée `suivi-audit` (constat, preuve, correctif proposé) et la cite dans la PR. Elle remplace l'obligation de corriger toute remarque non bloquante avant fusion.
+4. Pas de traitement de données historiques, de migration de données existantes ni de déduction théorique tant qu'aucune donnée réelle n'existe : une ligne dans la PR suffit.
+5. Un micro-arbitrage de droits ou d'affichage prend l'option la plus simple et, en cas de doute, la plus restrictive, documentée « choix par défaut, à confirmer » dans la PR et la passation, sans solliciter le responsable.
