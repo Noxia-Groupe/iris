@@ -1,5 +1,5 @@
 import type { APIRequestContext, Page } from '@playwright/test';
-import { test, expect } from './fixtures';
+import { test, expect, choisirClient } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -79,6 +79,10 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
     await expect(page.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
   };
 
+  // En-tête de la fiche : le libellé client du chantier (Chantier.client).
+  const enTeteClient = page.locator('span', { has: page.locator('strong', { hasText: /^Client:$/ }) });
+  await expect(enTeteClient).toHaveText(`Client: ${initial.raisonSociale}`);
+
   // 1. Pendant le chargement (retardé) de la liste des clients, le sélecteur est désactivé : un
   //    renommage s'enregistre quand même, sans envoyer le client.
   const listeInitiale = (url: URL) => url.pathname.endsWith('/api/clients') && !url.searchParams.has('q');
@@ -116,6 +120,19 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
   const corpsReaffectation = await enregistrer(page, chantier.id);
   expect(corpsReaffectation.clientId).toBe(autre.id);
   expect((await lireChantier()).clientId).toBe(autre.id);
+  // Le libellé suit le nouveau client (décision de Nelson du 16-10-2026) : en-tête de la fiche,
+  // et chantier proposé à une intervention SAV du nouveau client, plus à celle de l'ancien.
+  await expect(enTeteClient).toHaveText(`Client: ${autre.raisonSociale}`);
+  const sav = await page.context().newPage();
+  await sav.goto('/interventions', { waitUntil: 'networkidle' });
+  await sav.getByRole('button', { name: 'Nouvelle intervention' }).click();
+  const chantierPropose = sav.locator(`select[name="chantierId"] option[value="${chantier.id}"]`);
+  await choisirClient(sav, autre);
+  await expect(chantierPropose).toHaveCount(1);
+  await choisirClient(sav, initial);
+  await expect(sav.locator('select[name="siteId"]')).toBeVisible();
+  await expect(chantierPropose).toHaveCount(0);
+  await sav.close();
 
   // 4. Client désactivé depuis : il reste affiché, et la fiche s'enregistre sans le remplacer.
   const desactivation = await request.delete(`${api}/clients/${autre.id}`, { headers });
