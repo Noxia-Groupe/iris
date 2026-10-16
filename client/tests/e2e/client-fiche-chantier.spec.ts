@@ -142,6 +142,15 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
   await choisirClient(sav, renomme);
   await expect(sav.locator('select[name="siteId"]')).toBeVisible();
   await expect(chantierPropose).toHaveCount(1);
+  // Homonyme : un autre client qui prend l'ancienne raison sociale, restée le libellé du chantier,
+  // ne se voit pas proposer ce chantier, lié à une autre fiche.
+  const homonyme = await creerClient('autre');
+  expect(homonyme.raisonSociale).toBe(autre.raisonSociale);
+  await sav.reload({ waitUntil: 'networkidle' });
+  await sav.getByRole('button', { name: 'Nouvelle intervention' }).click();
+  await choisirClient(sav, homonyme);
+  await expect(sav.locator('select[name="siteId"]')).toBeVisible();
+  await expect(chantierPropose).toHaveCount(0);
   await sav.close();
 
   // 4. Client désactivé depuis : il reste affiché, et la fiche s'enregistre sans le remplacer.

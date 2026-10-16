@@ -3844,6 +3844,17 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.intervention.count({ where: { chantierId: { in: [etranger.id, homonyme.id, herite.id] } } }), 0);
     });
 
+    test('refuse un chantier annulé du client, et un client désactivé', async () => {
+      const auth = { Authorization: `Bearer ${session}` };
+      const annule = await prisma.chantier.create({ data: { nom: 'TEST Chantier SAV annulé', client: 'TEST Client SAV', clientId, statut: 'ANNULE', annuleLe: new Date(), motifAnnulation: 'TEST', dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const refusAnnule = await request(app).post('/api/interventions').set(auth).send({ clientId, chantierId: annule.id, titre: 'TEST SAV chantier annulé' });
+      assert.equal(refusAnnule.status, 404, JSON.stringify(refusAnnule.body));
+      const desactive = await prisma.client.create({ data: { raisonSociale: 'TEST Client SAV désactivé', actif: false } });
+      const refusDesactive = await request(app).post('/api/interventions').set(auth).send({ clientId: desactive.id, titre: 'TEST SAV client désactivé' });
+      assert.equal(refusDesactive.status, 404, JSON.stringify(refusDesactive.body));
+      assert.equal(await prisma.intervention.count({ where: { OR: [{ chantierId: annule.id }, { clientId: desactive.id }] } }), 0);
+    });
+
     test('permet au technicien affecté de consigner un compte rendu terrain', async () => {
       const technicien = await compteTechnicienSav('sav.rapport@iris.test', 'TEST Intervenant SAV rapport');
       const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)

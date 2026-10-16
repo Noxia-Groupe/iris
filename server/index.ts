@@ -3176,9 +3176,10 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
       }
       data.clientId = cibleId;
       // Une réaffectation d'un client à un autre reprend la raison sociale du nouveau client
-      // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et le rattachement d'une
-      // intervention SAV, qui compare ce libellé, suivent le client. Une affaire héritée sans
-      // client lié garde, elle, son libellé historique quand on la répare.
+      // (décision de Nelson du 16-10-2026) : l'en-tête de la fiche et les affichages qui lisent
+      // ce libellé suivent le client ; le rattachement d'une intervention SAV, lui, passe par
+      // clientId depuis #144. Une affaire héritée sans client lié garde son libellé historique
+      // quand on la répare.
       if (existant.clientId) data.client = cible.raisonSociale;
     }
     // Format et unicité du numéro de devis : mêmes règles qu'à la création, mais appliquées
