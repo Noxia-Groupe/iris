@@ -1,8 +1,7 @@
 # IRIS — ERP pour métiers techniques
 
 **Propriété logicielle** : Noxia-Groupe / OrizonLab  
-**Repo** : https://github.com/Noxia-Groupe/iris  
-**VPS** : CommercePro 46.202.129.169  
+**Repo** : https://github.com/Noxia-Groupe/iris   
 **Déploiement** : une instance Iris dédiée par société cliente, avec sa propre base PostgreSQL
 
 ## Configuration d’une instance
