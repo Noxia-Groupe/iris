@@ -369,12 +369,12 @@ export default function Factures() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex justify-between gap-3">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Factures</h1>
           <p className="text-gray-500">Facturation française native et numérotation attribuée à l’émission.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button className="btn btn-secondary" onClick={() => void charger()}><RefreshCw size={16} /> Actualiser</button>
           <button className="btn btn-secondary" onClick={() => void exporter()}><Download size={16} /> Export comptable</button>
           <button className="btn btn-primary" onClick={ouvrirFormulaire}><FilePlus2 size={16} /> Nouvelle facture</button>

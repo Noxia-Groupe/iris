@@ -60,9 +60,10 @@ const Performances = () => {
             Classées par marge commerciale générée. Visible uniquement par les administrateurs.
           </p>
         </div>
-        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 shrink-0">
+        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 sm:shrink-0">
           <button type="button" onClick={() => setWeekRef(decalerReference(weekRef, 'week', -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine précédente">‹</button>
-          <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap">
+          {/* Sur téléphone, le libellé se replie sur deux lignes pour garder ‹ › sur la même ligne. */}
+          <span className="min-w-0 flex-1 text-center text-sm font-semibold text-gray-700 px-2 sm:flex-none sm:whitespace-nowrap">
             Semaine du {assiduite ? jourFrancais(assiduite.weekStart) : '…'} au {assiduite ? jourFrancais(assiduite.weekEnd) : '…'}
           </span>
           <button type="button" onClick={() => setWeekRef(decalerReference(weekRef, 'week', 1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Semaine suivante">›</button>

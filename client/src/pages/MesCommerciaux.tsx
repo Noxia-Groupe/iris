@@ -100,7 +100,7 @@ const MesCommerciaux = () => {
             Classés par chiffre d'affaires vendu (mois ou année civile en cours, navigable). Visible uniquement par les administrateurs.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
             {(['month', 'quarter', 'year'] as const).map((g) => (
               <button
@@ -113,7 +113,7 @@ const MesCommerciaux = () => {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
+          <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5">
             <button type="button" onClick={() => setCommerciauxRef(decalerReference(commerciauxRef, commerciauxPeriod, -1))} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-500 font-bold" title="Période précédente">‹</button>
             <span className="text-sm font-semibold text-gray-700 px-2 whitespace-nowrap">
               {commerciauxMeta ? periodLabelComm(commerciauxPeriod, commerciauxMeta.periodStart) : '…'}

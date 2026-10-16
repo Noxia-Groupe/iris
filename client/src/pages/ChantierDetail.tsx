@@ -677,8 +677,9 @@ const ChantierDetail = () => {
         {/* Zone exportable en PDF */}
         <div ref={printRef} className="bg-white p-6 sm:p-8 rounded-2xl shadow-md border border-gray-100 relative">
 
-          {/* Action Bar */}
-          <div className="absolute top-6 right-6 flex gap-2">
+          {/* Barre d'actions : dans le flux sur téléphone, au-dessus du titre ; en haut à droite au-delà,
+              où le titre lui laisse sa place (sm:pr-56) au lieu de passer dessous. */}
+          <div className="mb-4 flex flex-wrap justify-end gap-2 sm:absolute sm:top-6 sm:right-6 sm:mb-0">
             {canEditChantier && (
               <button
                 onClick={startEditChantier}
@@ -692,7 +693,7 @@ const ChantierDetail = () => {
             </button>
           </div>
 
-          <div className="mb-8 pr-32">
+          <div className="mb-8 sm:pr-56">
             <div className="flex items-center gap-3 flex-wrap mb-2">
               <h2 className="text-3xl font-extrabold text-primary-dark tracking-tight m-0">{chantier.nom}</h2>
               <span className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${isTermine ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-accent'}`}>

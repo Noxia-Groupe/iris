@@ -194,7 +194,7 @@ export default function Interventions() {
   };
 
   return <div className="space-y-6">
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
       <div><h1 className="text-2xl font-bold text-gray-900">{estTechnicien ? 'Mes interventions' : 'Interventions SAV'}</h1><p className="text-gray-500">{estTechnicien ? 'Uniquement les dossiers qui vous sont explicitement affectés.' : 'Demandes clients et interventions en cours. Le planning reste une projection prévisionnelle.'}</p></div>
       {estEncadrement && <button className="btn btn-primary flex items-center gap-2" onClick={() => setFormOpen(true)}><Plus size={18} /> Nouvelle intervention</button>}
     </div>

@@ -135,7 +135,7 @@ export default function ContratsMaintenance() {
   };
 
   return <div className="space-y-6">
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
       <div><h1 className="text-2xl font-bold text-gray-900">Contrats de maintenance</h1><p className="text-gray-500">Les échéances contractuelles génèrent des dossiers d’intervention à planifier. Le planning reste une projection.</p></div>
       <button className="btn btn-primary flex items-center gap-2" onClick={() => setFormulaireOuvert(true)}><FilePlus2 size={18} /> Nouveau contrat</button>
     </div>
