@@ -21,7 +21,7 @@
 
 `Facture` gagne deux origines facultatives, `contratId` et `echeanceId`. Une échéance ne produit qu'une facture.
 
-**Location et financeurs** : `Financeur` porte l'identité de l'organisme (par exemple Grenke). Une location est facturée par le financeur, un abonnement par l'entreprise à son client (A4). Les simulations passeront par l'API du financeur ; elles ne créent rien dans Iris tant qu'elles ne sont pas acceptées (`SimulationFinancement` : contrat ou devis, financeur, paramètres envoyés, réponse reçue, date).
+**Location et financeurs** : `Financeur` porte l'identité de l'organisme (par exemple Grenke). Une location passe par un financeur ; un abonnement est facturé par l'entreprise à son client (A4). Ce que produit l'échéancier d'un contrat `LOCATION` reste ouvert (plus bas). Les simulations passeront par l'API du financeur ; elles ne créent rien dans Iris tant qu'elles ne sont pas acceptées (`SimulationFinancement` : contrat ou devis, financeur, paramètres envoyés, réponse reçue, date).
 
 ## Règlements (lot pilote 1, décision A3)
 
@@ -49,7 +49,7 @@ Rapprocher ne modifie jamais une facture. Le prélèvement SEPA demanderait un `
 
 | Entité | Rôle | Champs principaux |
 |---|---|---|
-| paramètre général | fait générateur | commande, fin des travaux ou réception du paiement complet |
+| paramètre général | fait générateur | commande, fin des travaux ou réception du paiement complet (A5 ; lecture retenue, à confirmer : remplace le réglage par plan du 14-10-2026) |
 | `PlanCommercial` | un plan et son barème | nom, barème propre, versions datées |
 | `AttributionPlan` | plan d'un commercial | commercial, plan, date d'effet. Un changement prend effet à cette date, sans rétroactivité. Un commercial sans attribution n'a pas de commission. |
 | `CommissionCalculee` | commission figée | commercial, source (affaire, contrat ou échéance), montant de base, plan et version appliqués, fait générateur, mois de rattachement |
@@ -67,3 +67,9 @@ Une commission « en développé » se calcule sur la somme des échéances pré
 - Le calcul d'augmentation proposé par défaut (indice de révision, et lequel, ou pourcentage fixe).
 - Le périmètre de l'intégration Grenke : simulations seules, ou aussi les dossiers.
 - Le moment où le commercial doit être connu : dès le devis, si le fait générateur est la commande.
+- La date qui compte pour un changement de plan non rétroactif : celle de la commande ou celle du fait générateur.
+- Le jour de coupure du mois de rattachement : réglage général ou par plan, et rattachement d'un fait générateur survenu le jour même.
+- L'acompte constaté sur le devis (`Devis.acompteMontant`, `acompteRecuLe`), rattaché à aucune facture : comment il entre dans le reste dû, et à quel moment une affaire devient « encaissée » pour la commission.
+- Un seul `echeanceId` par facture empêche de regrouper plusieurs échéances d'un client sur une même facture ; l'articulation avec `Facture.contratMaintenanceId`, qui existe déjà, est à préciser.
+- La « date anniversaire » de `RevisionContrat` suppose une date d'application de la révision, qui n'est pas décidée.
+- Location : l'échéancier d'un contrat `LOCATION` produit-il des factures Iris, ou ne sert-il qu'au suivi, le financeur facturant le client ?
