@@ -2,7 +2,7 @@
 
 > Extraits **déplacés tels quels** de [`ROADMAP-PASSATION.md`](ROADMAP-PASSATION.md) le 17-10-2026, sans reformulation, pour que la passation reste courte. Ils décrivent l'état **au moment de leur rédaction** : les renvois « ci-dessus », « plus bas », « ci-dessous » et les mentions « prévu » s'entendent dans l'ancienne passation. L'état actuel, les questions ouvertes et les choix par défaut, à confirmer, sont tenus à jour dans la [passation](ROADMAP-PASSATION.md) ; aucune décision, question ou mention « à confirmer » n'a disparu (voir la PR #165, qui a fait ce déplacement). L'ancienne passation reste lisible en entier, pour résoudre ces renvois : `git show 66dd476:docs/ROADMAP-PASSATION.md`.
 >
-> Correspondances utiles : « la PR « contraintes différées » qui suit #155 » est la PR #158 ; « la PR prévue sur les commissions actuelles (P1b) » est devenue sans objet, et les commissions ont été fermées par #159 ; le lot pilote 2 (catalogue dans les devis) est #161.
+> Correspondances utiles : « P1a » (lot pilote 1) est la PR #155 ; « la PR « contraintes différées » qui suit #155 » est la PR #158 ; « la PR prévue sur les commissions actuelles (P1b) » est devenue sans objet, et les commissions ont été fermées par #159 ; le lot pilote 2 (catalogue dans les devis) est #161.
 
 ## Lots pilotes livrés (état d'origine)
 
