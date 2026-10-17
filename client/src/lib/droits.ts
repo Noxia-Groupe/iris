@@ -83,6 +83,15 @@ export function estExcluDesOperations(role?: string | null): boolean {
 }
 
 /**
+ * Administration : complète pour les administrateurs, réduite aux référentiels des achats
+ * (fournisseurs, catégories) pour le conducteur. Le technicien n'y a plus rien à faire depuis le
+ * lot pilote 3, qui lui retire ces écritures (choix par défaut) ; le serveur les lui refuse aussi.
+ */
+export function peutOuvrirAdministration(role?: string | null): boolean {
+  return !estExcluDesOperations(role) && role !== ROLE_TECHNICIEN;
+}
+
+/**
  * Annuaire des clients (clients, contacts, sites) : les administrateurs, qui le tiennent à jour,
  * puis, en consultation seule, le technicien (décision de Nelson du 13-10-2026), par exemple pour
  * retrouver une adresse, et le conducteur de travaux (décision du 16-10-2026). Le serveur applique

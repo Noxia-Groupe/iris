@@ -1,6 +1,6 @@
 # Iris — état et passation du développement
 
-> **État de `main` au commit `66dd476` (17-10-2026), après la PR [#161](https://github.com/Noxia-Groupe/iris/pull/161).** État du code, pas attestation de conformité ni feu vert de production.
+> **État de `main` au commit `66dd476` (17-10-2026), après la PR [#161](https://github.com/Noxia-Groupe/iris/pull/161), complété par la PR [#166](https://github.com/Noxia-Groupe/iris/pull/166) (lot pilote 3a).** État du code, pas attestation de conformité ni feu vert de production.
 >
 > Avant chaque lot : relire ce document, puis vérifier le code, les tests, les issues **et leurs commentaires**. Une case non cochée ou une issue ancienne ne prouve pas une absence.
 >
@@ -69,7 +69,11 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - interventions SAV, rapports, signatures, coûts, planning, file « à planifier », planning public ;
     - navigation sur téléphone (#118) ;
     - mesure des écrans de 320 à 1024 px (#147 ; suivi des remarques dans #149 à #152).
-  - Absent : parcours technicien dédié sur téléphone (lot pilote 3). Le technicien écrit encore hors de son affaire (planning, catégories, fournisseurs) et voit tout le planning ; choix : lui retirer ces écritures au lot 3, et limiter son planning aux chantiers dont il est chargé (à appliquer, sans lot fixé).
+  - Livré par le lot pilote 3a (#166) :
+    - l'administration relie un compte technicien à sa fiche intervenant (journalisé) ;
+    - la file « à planifier » du planning propose aussi les interventions curatives ;
+    - le technicien ne modifie plus le planning ni les référentiels des achats, et n'a plus l'Administration.
+  - Absent : parcours technicien dédié sur téléphone (lot pilote 3b : journée, fiche intervention, compte rendu, signature au doigt, heures). Le technicien voit encore tout le planning ; choix : le limiter aux chantiers dont il est chargé (à appliquer, sans lot fixé).
   - Ne pas qualifier « l'écran Travaux reste entièrement à créer » sans auditer la fiche actuelle.
   - Les issues [#16](https://github.com/Noxia-Groupe/iris/issues/16) et [#19](https://github.com/Noxia-Groupe/iris/issues/19) restent ouvertes : comparer leurs sous-points au code avant de les replanifier.
 - **Contrats de maintenance — partiel.**
@@ -116,7 +120,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
 - Création d'une intervention par un conducteur hors de son périmètre (relevé en préparant cette passation, préexistant, **non corrigé ; tranché par un choix par défaut, à appliquer (section 4)**) : `POST /api/interventions` ne contrôle que le client du chantier visé et son annulation, pas le périmètre de lecture du conducteur.
 - Dates du planning et de la demande curative, lues hors de `dateIsoStricte` (relevé par le huitième audit de #130, préexistant) : le planning est corrigé par #132 (lecture par `dateIsoStricte`). La demande curative n'accepte toujours que `JJ-MM-AAAA` et refuse une date-heure : choix par défaut, à confirmer, l'aligner sur les autres dates métier (lot (h)).
 - « Socket hang up » (lot (g)) : une occurrence en CI E2E de #123, puis une réinitialisation de connexion (`read ECONNRESET`, `facturation.spec.ts`) en CI E2E de #129, de cause probablement identique (non reproduite). Correctif probable livré par #131 (connexions inactives gardées 65 s par le serveur) ; à surveiller en CI.
-- Écrans `/admin` sur téléphone (#147) : pour le conducteur et le technicien, `/admin` garde un bouton hors écran préexistant (suivi dans #150).
+- Écrans `/admin` sur téléphone (#147) : pour le conducteur, `/admin` garde un bouton hors écran préexistant (suivi dans #150) ; le technicien n'a plus `/admin` depuis #166.
 
 ## 2. Pilote
 
@@ -130,7 +134,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 |---|---|---|
 | 1. Règlements (A3) | **Implémenté** (P1a). P1b, sur les commissions actuelles, est sans objet. | #155, garde en base renforcée par #158 ; commissions fermées par #159 |
 | 2. Catalogue dans les devis (A8) | **Implémenté** | #161 |
-| 3. Parcours technicien sur téléphone | À faire, décidé pour le premier jour | — |
+| 3. Parcours technicien sur téléphone | **Partiel** : prérequis et droits (3a) implémentés ; parcours sur téléphone (3b) à faire | #166 (3a) |
 | 4. Conversion des devis (A7) | Décidé ; place avant ou après le premier jour à confirmer (proposé : avant) | — |
 | 5. Génération automatique des visites (A9) | Décidé ; place à confirmer (proposé : avant) | — |
 | 6. Envoi des documents (A10) | Décidé ; place à confirmer (proposé : avant) | — |
@@ -150,6 +154,11 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
    - Implémenté par #161 : recherche des fiches actives, ligne pré-remplie puis copiée (référence recopiée par le serveur), prix d'achat prévu repris de la fiche et réservé à l'administration, devis signé figé en base.
    - Plus tard : connexion par API, ou autrement, aux catalogues des fournisseurs.
 3. **Parcours technicien sur téléphone** : planning du jour, intervention, rapport, signature, heures, qualifiés sur téléphone.
+   - **3a, prérequis et droits, implémenté par #166** : lien entre le compte technicien et sa fiche intervenant, posé par l'administration et journalisé ; file « à planifier » ouverte aux interventions curatives ; écritures hors affaire retirées au technicien (planning, types d'événement, catégories, fournisseurs, placement de sa propre intervention), planning en consultation seule, Administration fermée.
+   - **3b, parcours sur téléphone, à faire** : interventions du jour, fiche intervention (adresse, téléphone), compte rendu et signature sans fenêtres du navigateur, heures, tests à 375 px avec de vraies données.
+   - Décisions de Nelson du 17-10-2026 :
+     - le technicien saisit aussi ses heures sur une intervention SAV hors contrat. Une telle intervention est payante ; elle peut passer par un devis, au forfait ou au temps passé. Au temps passé, une heure au moins est facturée, et toute heure commencée est due (règle de facturation, à appliquer avec le devis et la facture d'intervention ; placement proposé, à confirmer : lot 4 ou suivant) ;
+     - la signature du client se dessine au doigt, en plus du nom et de l'acceptation explicite.
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent.
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
@@ -229,7 +238,7 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 - **Acompte et encaissé** (montants, lot pilote 1) : l'acompte constaté sur un devis (`Devis.acompteMontant`, `acompteRecuLe`), rattaché à aucune facture, entre-t-il dans le reste dû des factures de l'affaire ? À quel moment une affaire devient-elle « encaissée » pour la commission : toutes ses factures réglées, ou un autre seuil ?
 - **Commissions récurrentes** (montants, lots (i) et (k)) : le mode décidé le 14-10-2026 (activable, « en développé » ou à la prise de commande, en nombre de mois ou en pourcentage du montant mensuel) se règle-t-il dans le plan ou dans les paramètres généraux ?
 - **Lot (d), marge du commercial** (montants) : sans être destinataire de la rentabilité, le commercial retrouve le coût de main-d'œuvre de ses affaires par la marge de chaque chantier de ses statistiques, qui sert de base à sa commission. L'accepter, ou réserver cette marge par chantier aux administrateurs ?
-- **Lot (d), approche par essais successifs** (montants) : l'alerte de dépassement de main-d'œuvre, avec le droit de corriger des heures, permet d'approcher le coût de main-d'œuvre d'un chantier par essais successifs, tracés au journal. Elle reste affichée à un titulaire à qui la société a retiré la rentabilité (réglage des destinataires de la rentabilité). L'accepter, ou réserver cette alerte aux destinataires de la rentabilité ? Limite relevée par #134, restée à arbitrer.
+- **Lot (d), approche par essais successifs** (montants) : l'alerte de dépassement de main-d'œuvre, avec le droit de corriger des heures, permet d'approcher le coût de main-d'œuvre d'un chantier par essais successifs, tracés au journal. Elle reste affichée à un titulaire, ou à un compte Responsable de sa branche, à qui la société a retiré la rentabilité (réglage des destinataires de la rentabilité). L'accepter, ou réserver cette alerte aux destinataires de la rentabilité ? Limite relevée par #134, restée à arbitrer.
 - **Augmentation automatique des abonnements et locations (lot (k))** : quel calcul « habituel » proposer par défaut (indice de révision, et lequel, ou pourcentage fixe) ? Il touche les montants : Iris n'en invente pas.
 - **Facturation électronique (A2)** : taille de l'entreprise pilote et plateforme agréée retenue, et confirmation que la réception des factures électroniques est assurée hors d'Iris, avec le cabinet.
 - **API des financeurs (lot (k))** : périmètre de l'intégration Grenke (simulations seules, ou aussi les dossiers), à préciser quand le lot démarre.
@@ -260,7 +269,11 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - « Consultation seule » et refus explicite conservés. **Appliqué** (#123).
 - Son affaire n'est modifiable que par l'administration. **Appliqué** (#123).
 - Aucun accès financier : déduction de #123 (aucun montant), à confirmer. **Appliqué** (#123).
-- Ses écritures hors affaire (planning, catégories, fournisseurs) lui sont retirées au lot du parcours technicien. **À appliquer** au lot pilote 3.
+- Ses écritures hors affaire (planning, catégories, fournisseurs) lui sont retirées au lot du parcours technicien. **Appliqué** (#166), y compris le placement de sa propre intervention : il ne replanifie pas et ne change pas les intervenants de son dossier. Il garde la lecture du planning et des référentiels, et n'a plus l'Administration.
+- Seul un compte technicien actif, relié à aucune autre fiche, se relie à une fiche intervenant. Un compte qui quitte ensuite le type technicien perd sa fiche (déliée et journalisée dans la même transaction) : par ses affectations, elle lui ouvrirait les interventions avec les écritures de son nouveau type. Un changement de type simultané à une liaison de ce compte est refusé (409), à refaire. Un compte désactivé garde sa fiche, sans pouvoir se connecter. Un simple administrateur ne touche pas à la fiche d'un compte super administrateur. **Appliqué** (#166).
+- Une intervention curative placée depuis la file reçoit une durée proposée de 60 minutes, modifiable avant de confirmer. **Appliqué** (#166).
+- Terminer une intervention reste possible sans compte rendu signé (client absent, par exemple). **Appliqué** (état actuel), à revoir au lot 3b.
+- Le mode hors ligne (zone sans réseau) reste hors du lot pilote 3.
 - Son planning est limité aux chantiers dont il est chargé. **À appliquer**.
 - Sur une intervention qui lui est affectée, il garde le nom du client, l'adresse du site et le téléphone du contact, même désactivés : sans eux, il ne peut pas réaliser l'intervention qu'on lui confie. C'est une exception justifiée à l'option la plus restrictive ; la fiche du client désactivé lui reste fermée. **Appliqué** (état actuel).
 - Un compte qui quitte le type technicien perd son droit individuel de lecture des clients. **À appliquer**.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sectionsMenu } from '../src/lib/menu.ts';
-import { estExcluDesOperations, peutVoirFinance, roleLabel } from '../src/lib/droits.ts';
+import { estExcluDesOperations, peutOuvrirAdministration, peutVoirFinance, roleLabel } from '../src/lib/droits.ts';
 
 const liens = (role: string, planningActif = true, permissions: string[] = []) =>
   sectionsMenu({ role, permissions }, planningActif).flatMap((s) => s.entrees.map((e) => e.to)).sort();
@@ -23,7 +23,8 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
     ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN' || role === 'CONDUCTEUR_TRAVAUX'], ['/catalogue', admin],
     ['/achats', travaux], ['/heures', travaux], ['/statistiques', travaux],
     ['/planning', !commercial && planningActif], ['/resultat-commercial', commercial],
-    ['/admin', !commercial], ['/societe', admin], ['/administration/api', role === 'SUPERADMIN'],
+    // Administration : plus pour le technicien, qui ne modifie plus les référentiels (lot pilote 3).
+    ['/admin', !commercial && role !== 'TECHNICIEN'], ['/societe', admin], ['/administration/api', role === 'SUPERADMIN'],
     ['/performances', admin], ['/commerciaux', admin],
   ];
   return regles.filter(([, visible]) => visible).map(([to]) => to).sort();
@@ -75,6 +76,15 @@ test('un directeur pilote sans écran opérationnel : tableau de bord et chantie
   // Même exclusion que blockCommercial côté serveur : commercial et directeur seulement.
   assert.deepEqual(['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR']
     .filter((role) => estExcluDesOperations(role)), ['COMMERCIAL', 'DIRECTEUR']);
+});
+
+test('le technicien garde le planning en consultation, sans l’administration (lot pilote 3)', () => {
+  const visibles = liens('TECHNICIEN', true, ['chantiers:read', 'clients:read']);
+  assert.equal(visibles.includes('/planning'), true);
+  assert.equal(visibles.includes('/admin'), false);
+  assert.equal(peutOuvrirAdministration('TECHNICIEN'), false);
+  assert.equal(peutOuvrirAdministration('CONDUCTEUR_TRAVAUX'), true);
+  assert.equal(peutOuvrirAdministration('COMMERCIAL'), false);
 });
 
 test('l’accès financier ne vaut jamais pour un technicien, même enregistré', () => {

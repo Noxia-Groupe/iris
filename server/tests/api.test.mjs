@@ -260,6 +260,11 @@ if (!TEST_DATABASE_URL) {
       'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
+      'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
+      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test',
+      ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
+      ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
+      ...Array.from({ length: 15 }, (_, i) => `pilote3.supprtype.${i}@iris.test`),
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -4103,6 +4108,327 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
+  describe('Technicien : fiche intervenant, planning en consultation, file curative (lot pilote 3a)', () => {
+    let admin = {};
+    let clientId = '';
+    const comptes = {};
+    const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+    // Le corps est calculé AVANT la requête : `request(app)` ouvre un serveur éphémère qu'une
+    // exception levée en construisant le corps laisserait ouvert.
+    const envoyer = (methode, chemin, enTete, corps) => request(app)[methode](chemin).set(enTete).send(corps);
+    const journalFiche = (userId) => prisma.journalAdministration.findMany({ where: { action: 'FICHE_INTERVENANT', cibleId: userId }, orderBy: { createdAt: 'asc' } });
+    const voitLeDossier = async (enTete, interventionId) => (await request(app).get('/api/interventions').set(enTete)).body.some((item) => item.id === interventionId);
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      for (const [cle, email, role, actif] of [
+        ['technicien', 'pilote3.technicien@iris.test', 'TECHNICIEN', true],
+        ['autre', 'pilote3.autre.technicien@iris.test', 'TECHNICIEN', true],
+        ['inactif', 'pilote3.inactif@iris.test', 'TECHNICIEN', false],
+        ['conducteur', 'pilote3.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX', true],
+        ['tiers', 'pilote3.tiers@iris.test', 'CONDUCTEUR_TRAVAUX', true],
+      ]) comptes[cle] = await prisma.user.create({ data: { email, name: `TEST Pilote3 ${cle}`, role, actif } });
+      const client = await request(app).post('/api/clients').set(admin).send({ raisonSociale: 'TEST Client pilote 3' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      clientId = client.body.id;
+    });
+
+    test('l’administration relie un compte technicien actif à sa fiche, et chaque changement est journalisé', async () => {
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 fiche', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const autreFiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 autre fiche', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const relier = (enTete, id, userId) => envoyer('put', `/api/intervenants/${id}/compte`, enTete, { userId });
+      // Réservé à l'administration.
+      assert.equal((await relier(jeton(comptes.conducteur), fiche.id, comptes.technicien.id)).status, 403);
+      assert.equal((await relier(jeton(comptes.technicien), fiche.id, comptes.technicien.id)).status, 403);
+      assert.equal((await request(app).put(`/api/intervenants/${fiche.id}/compte`).send({ userId: comptes.technicien.id })).status, 401);
+      // Seul un compte technicien actif.
+      for (const [qui, userId] of [['conducteur', comptes.conducteur.id], ['inactif', comptes.inactif.id], ['inconnu', '00000000-0000-0000-0000-000000000000']]) {
+        const refus = await relier(admin, fiche.id, userId);
+        assert.equal(refus.status, 400, `${qui} : ${JSON.stringify(refus.body)}`);
+      }
+      assert.equal((await relier(admin, fiche.id, '')).status, 400);
+      assert.equal((await relier(admin, fiche.id, 42)).status, 400);
+      assert.equal((await relier(admin, 'fiche-inconnue', comptes.technicien.id)).status, 404);
+      assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+      assert.equal((await journalFiche(comptes.technicien.id)).length, 0);
+      // Lien, puis enregistrement à l'identique : une seule entrée.
+      const lien = await relier(admin, fiche.id, comptes.technicien.id);
+      assert.equal(lien.status, 200, JSON.stringify(lien.body));
+      assert.equal(lien.body.userId, comptes.technicien.id);
+      assert.equal(!('tauxHoraireCharge' in lien.body) || typeof lien.body.tauxHoraireCharge === 'number', true);
+      assert.equal((await relier(admin, fiche.id, comptes.technicien.id)).status, 200);
+      const [entree] = await journalFiche(comptes.technicien.id);
+      assert.equal((await journalFiche(comptes.technicien.id)).length, 1);
+      assert.deepEqual([entree.domaine, entree.type, entree.avant, entree.apres], ['DROITS', 'COMPTE', { ficheIntervenant: null }, { ficheIntervenant: 'TEST Pilote3 fiche' }]);
+      assert.match(entree.cibleLibelle, /pilote3\.technicien@iris\.test/);
+      // Un compte déjà relié ne l'est pas à une seconde fiche.
+      const doublon = await relier(admin, autreFiche.id, comptes.technicien.id);
+      assert.equal(doublon.status, 409, JSON.stringify(doublon.body));
+      assert.equal((await prisma.intervenant.findUnique({ where: { id: autreFiche.id } })).userId, null);
+      // Passage à un autre compte : une entrée pour chacun.
+      assert.equal((await relier(admin, fiche.id, comptes.autre.id)).status, 200);
+      assert.deepEqual((await journalFiche(comptes.technicien.id)).map((e) => e.apres), [{ ficheIntervenant: 'TEST Pilote3 fiche' }, { ficheIntervenant: null }]);
+      assert.deepEqual((await journalFiche(comptes.autre.id)).map((e) => e.apres), [{ ficheIntervenant: 'TEST Pilote3 fiche' }]);
+      // Déliée, puis supprimée reliée : la suppression délie aussi, et le journal le dit.
+      assert.equal((await relier(admin, fiche.id, null)).status, 200);
+      assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+      assert.deepEqual((await journalFiche(comptes.autre.id)).map((e) => e.apres), [{ ficheIntervenant: 'TEST Pilote3 fiche' }, { ficheIntervenant: null }]);
+      assert.equal((await relier(admin, autreFiche.id, comptes.autre.id)).status, 200);
+      assert.equal((await request(app).delete(`/api/intervenants/${autreFiche.id}`).set(admin)).status, 200);
+      const derniere = (await journalFiche(comptes.autre.id)).at(-1);
+      assert.deepEqual([derniere.avant, derniere.apres, derniere.detail], [{ ficheIntervenant: 'TEST Pilote3 autre fiche' }, { ficheIntervenant: null }, `Fiche intervenant supprimée (${autreFiche.id}).`]);
+      await prisma.intervenant.delete({ where: { id: fiche.id } });
+    });
+
+    test('un compte qui quitte le type technicien perd sa fiche : journalisé, et ses interventions se ferment', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.reconverti@iris.test', name: 'TEST Pilote3 reconverti', role: 'TECHNICIEN' } });
+      const promu = await prisma.user.create({ data: { email: 'pilote3.promu@iris.test', name: 'TEST Pilote3 promu', role: 'TECHNICIEN' } });
+      const simpleAdmin = await prisma.user.create({ data: { email: 'pilote3.admin@iris.test', name: 'TEST Pilote3 admin', role: 'ADMIN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 reconversion', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const fichePromu = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 promotion', role: 'Technicien', tauxHoraireCharge: 40 } });
+      try {
+        assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: compte.id })).status, 200);
+        assert.equal((await envoyer('put', `/api/intervenants/${fichePromu.id}/compte`, admin, { userId: promu.id })).status, 200);
+        const dossier = await envoyer('post', '/api/interventions', admin, { clientId, titre: 'TEST Pilote3 dossier du reconverti' });
+        assert.equal((await envoyer('put', `/api/interventions/${dossier.body.id}/planning`, admin, { dateDebut: '2099-11-10', creneau: 'JOURNEE', intervenantIds: [fiche.id] })).status, 200);
+        assert.equal(await voitLeDossier(jeton(compte), dossier.body.id), true, 'témoin : technicien relié');
+        // Devenu comptable : fiche déliée, entrée au journal, dossier fermé (lecture, placement, statut).
+        const reconversion = await envoyer('patch', `/api/users/${compte.id}/role`, admin, { role: 'COMPTABLE' });
+        assert.equal(reconversion.status, 200, JSON.stringify(reconversion.body));
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+        const entree = (await journalFiche(compte.id)).at(-1);
+        assert.deepEqual([entree.avant, entree.apres, entree.detail, entree.concerneSuperAdmin], [{ ficheIntervenant: 'TEST Pilote3 reconversion' }, { ficheIntervenant: null }, `Type de compte modifié ; fiche intervenant ${fiche.id}.`, false]);
+        assert.equal(await voitLeDossier(jeton(compte), dossier.body.id), false);
+        assert.equal((await envoyer('put', `/api/interventions/${dossier.body.id}/planning`, jeton(compte), { dateDebut: '2099-11-11', creneau: 'JOURNEE', intervenantIds: [fiche.id] })).status, 404);
+        assert.equal((await envoyer('patch', `/api/interventions/${dossier.body.id}/statut`, jeton(compte), { statut: 'ANNULEE' })).status, 404);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: dossier.body.id } })).statut, 'PLANIFIEE');
+        // Revenu technicien, il ne retrouve pas sa fiche : il faut la relier de nouveau.
+        assert.equal((await envoyer('patch', `/api/users/${compte.id}/role`, admin, { role: 'TECHNICIEN' })).status, 200);
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+        // Promu super administrateur : fiche déliée, entrée réservée au super administrateur.
+        assert.equal((await envoyer('patch', `/api/users/${promu.id}/role`, admin, { role: 'SUPERADMIN' })).status, 200);
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fichePromu.id } })).userId, null);
+        const promotion = (await journalFiche(promu.id)).at(-1);
+        assert.deepEqual([promotion.apres, promotion.concerneSuperAdmin], [{ ficheIntervenant: null }, true]);
+        // L'entrée du lien, posé quand le compte était technicien, reste visible de tous les
+        // administrateurs ; celle de la déliaison, qui concerne un super administrateur, est fermée
+        // au simple administrateur.
+        const lirePour = async (enTete) => (await request(app).get('/api/journal-administration').query({ cible: promu.id }).set(enTete)).body.entrees
+          .filter((e) => e.action === 'FICHE_INTERVENANT').map((e) => e.apres.ficheIntervenant);
+        assert.deepEqual(await lirePour(admin), [null, 'TEST Pilote3 promotion'], 'super administrateur : déliaison puis lien, du plus récent au plus ancien');
+        assert.deepEqual(await lirePour(jeton(simpleAdmin)), ['TEST Pilote3 promotion'], 'simple administrateur : sans la déliaison');
+      } finally {
+        await prisma.user.deleteMany({ where: { id: { in: [promu.id] } } });
+      }
+    });
+
+    test('un simple administrateur ne délie ni ne supprime la fiche d’un compte super administrateur', async () => {
+      const superCompte = await prisma.user.create({ data: { email: 'pilote3.superadmin@iris.test', name: 'TEST Pilote3 superadmin', role: 'SUPERADMIN' } });
+      const simpleAdmin = await prisma.user.findUniqueOrThrow({ where: { email: 'pilote3.admin@iris.test' } }).catch(() => prisma.user.create({ data: { email: 'pilote3.admin@iris.test', name: 'TEST Pilote3 admin', role: 'ADMIN' } }));
+      // Lien d'avant cette PR, posé en base (aucune route ne relie un compte non technicien).
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 fiche super', role: 'Technicien', tauxHoraireCharge: 40, userId: superCompte.id } });
+      try {
+        const avant = await journalFiche(superCompte.id);
+        const deliaison = await envoyer('put', `/api/intervenants/${fiche.id}/compte`, jeton(simpleAdmin), { userId: null });
+        assert.equal(deliaison.status, 403, JSON.stringify(deliaison.body));
+        assert.equal((await request(app).delete(`/api/intervenants/${fiche.id}`).set(jeton(simpleAdmin))).status, 403);
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, superCompte.id);
+        assert.equal((await journalFiche(superCompte.id)).length, avant.length);
+        // Le super administrateur, lui, la délie, puis supprime une fiche reliée : entrées fermées au
+        // simple administrateur.
+        const lirePour = async (enTete) => (await request(app).get('/api/journal-administration').query({ cible: superCompte.id }).set(enTete)).body.entrees
+          .filter((e) => e.action === 'FICHE_INTERVENANT').map((e) => e.detail);
+        assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: null })).status, 200);
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+        assert.equal((await journalFiche(superCompte.id)).at(-1).concerneSuperAdmin, true, 'déliaison fermée');
+        await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: superCompte.id } });
+        assert.equal((await request(app).delete(`/api/intervenants/${fiche.id}`).set(admin)).status, 200);
+        const suppression = (await journalFiche(superCompte.id)).at(-1);
+        assert.deepEqual([suppression.detail, suppression.concerneSuperAdmin], [`Fiche intervenant supprimée (${fiche.id}).`, true]);
+        assert.deepEqual(await lirePour(admin), [`Fiche intervenant supprimée (${fiche.id}).`, `Fiche intervenant ${fiche.id}.`]);
+        assert.deepEqual(await lirePour(jeton(simpleAdmin)), [], 'rien pour le simple administrateur');
+      } finally {
+        await prisma.intervenant.deleteMany({ where: { id: fiche.id } });
+        await prisma.user.deleteMany({ where: { id: superCompte.id } });
+      }
+    });
+
+    test('la promotion du démarrage (SUPERADMIN_EMAILS) délie la fiche d’un technicien, sans auteur et fermée au simple administrateur', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.demarrage@iris.test', name: 'TEST Pilote3 démarrage', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 fiche démarrage', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const emails = process.env.SUPERADMIN_EMAILS;
+      try {
+        assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: compte.id })).status, 200);
+        process.env.SUPERADMIN_EMAILS = `${emails},${compte.email}`;
+        await ensureSuperAdmins();
+        process.env.SUPERADMIN_EMAILS = emails;
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role, 'SUPERADMIN');
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+        const entree = (await journalFiche(compte.id)).at(-1);
+        assert.deepEqual([entree.apres, entree.auteurId, entree.auteurNom, entree.concerneSuperAdmin], [{ ficheIntervenant: null }, null, 'Iris (démarrage, SUPERADMIN_EMAILS)', true]);
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+        await prisma.user.deleteMany({ where: { id: compte.id } });
+      }
+    });
+
+    test('un changement de type simultané à une liaison ne laisse jamais la fiche reliée à un compte non technicien', async () => {
+      const issues = { deliee: 0, refusChangement: 0, refusLien: 0 };
+      for (let essai = 0; essai < 20; essai += 1) {
+        const compte = await prisma.user.create({ data: { email: `pilote3.course.${essai}@iris.test`, name: `TEST Pilote3 course ${essai}`, role: 'TECHNICIEN' } });
+        const fiche = await prisma.intervenant.create({ data: { nom: `TEST Pilote3 course ${essai}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+        const corpsType = { role: 'COMPTABLE' };
+        const corpsLien = { userId: compte.id };
+        const [changement, lien] = await Promise.all([envoyer('patch', `/api/users/${compte.id}/role`, admin, corpsType), envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, corpsLien)]);
+        const role = (await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role;
+        const relie = (await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId === compte.id;
+        assert.equal(relie && role !== 'TECHNICIEN', false, `essai ${essai} : ${changement.status}/${lien.status}, ${role}, relié=${relie}`);
+        if (changement.status === 409) issues.refusChangement += 1;
+        else if (lien.status === 400) issues.refusLien += 1;
+        else issues.deliee += 1;
+        assert.ok([200, 409].includes(changement.status) && [200, 400].includes(lien.status), `essai ${essai} : ${changement.status}/${lien.status}`);
+      }
+      assert.equal(issues.deliee + issues.refusChangement + issues.refusLien, 20);
+    });
+
+    test('la suppression d’un compte relié mentionne la fiche déliée, même reliée au même moment', async () => {
+      for (let essai = 0; essai < 10; essai += 1) {
+        const compte = await prisma.user.create({ data: { email: `pilote3.suppression.${essai}@iris.test`, name: `TEST Pilote3 suppression ${essai}`, role: 'TECHNICIEN' } });
+        const fiche = await prisma.intervenant.create({ data: { nom: `TEST Pilote3 suppression ${essai}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+        const corpsLien = { userId: compte.id };
+        // Premier essai sans concurrence : la fiche est reliée avant la suppression.
+        if (essai === 0) assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, corpsLien)).status, 200);
+        const [suppression, lien] = await Promise.all([
+          request(app).delete(`/api/users/${compte.id}`).set(admin),
+          essai === 0 ? Promise.resolve({ status: 200 }) : envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, corpsLien),
+        ]);
+        assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+        assert.ok([200, 400].includes(lien.status), `essai ${essai} : liaison ${lien.status}`);
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+        const entree = await prisma.journalAdministration.findFirst({ where: { action: 'SUPPRESSION', cibleId: compte.id } });
+        const mention = `fiche intervenant « ${fiche.nom} » (${fiche.id}) déliée`;
+        // Reliée avant la suppression (liaison réussie) : l'entrée la mentionne ; sinon, non.
+        assert.equal((entree.detail ?? '').includes(mention), lien.status === 200, `essai ${essai} : liaison ${lien.status}, détail ${entree.detail}`);
+      }
+    });
+
+    test('un changement de type pendant la suppression du compte répond 404, jamais 500', async () => {
+      for (let essai = 0; essai < 15; essai += 1) {
+        const compte = await prisma.user.create({ data: { email: `pilote3.supprtype.${essai}@iris.test`, name: `TEST Pilote3 suppression type ${essai}`, role: 'TECHNICIEN' } });
+        const corpsType = { role: 'COMPTABLE' };
+        const [suppression, changement] = await Promise.all([request(app).delete(`/api/users/${compte.id}`).set(admin), envoyer('patch', `/api/users/${compte.id}/role`, admin, corpsType)]);
+        assert.ok([200, 404].includes(suppression.status), `essai ${essai} : suppression ${suppression.status}`);
+        assert.ok([200, 404].includes(changement.status), `essai ${essai} : changement ${changement.status} ${JSON.stringify(changement.body)}`);
+      }
+    });
+
+    test('deux liaisons simultanées de la même fiche laissent un journal cohérent avec le lien final', async () => {
+      const a = await prisma.user.create({ data: { email: 'pilote3.concurrent.a@iris.test', name: 'TEST Pilote3 concurrent A', role: 'TECHNICIEN' } });
+      const b = await prisma.user.create({ data: { email: 'pilote3.concurrent.b@iris.test', name: 'TEST Pilote3 concurrent B', role: 'TECHNICIEN' } });
+      for (let essai = 0; essai < 5; essai += 1) {
+        const fiche = await prisma.intervenant.create({ data: { nom: `TEST Pilote3 concurrence ${essai}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+        const corpsA = { userId: a.id };
+        const corpsB = { userId: b.id };
+        const reponses = await Promise.all([envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, corpsA), envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, corpsB)]);
+        assert.deepEqual(reponses.map((r) => r.status), [200, 200], JSON.stringify(reponses.map((r) => r.body)));
+        const final = (await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId;
+        const autre = final === a.id ? b.id : a.id;
+        const entrees = await prisma.journalAdministration.findMany({ where: { action: 'FICHE_INTERVENANT', detail: `Fiche intervenant ${fiche.id}.` }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+        const deCompte = (id) => entrees.filter((e) => e.cibleId === id).map((e) => e.apres.ficheIntervenant);
+        assert.deepEqual(deCompte(final), [fiche.nom], `essai ${essai} : le compte final est relié une fois`);
+        assert.deepEqual(deCompte(autre), [fiche.nom, null], `essai ${essai} : l’autre compte est relié puis délié`);
+        await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: null } });
+      }
+    });
+
+    test('la file à planifier propose les curatives ; placée, l’intervention s’ouvre au technicien relié', async () => {
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 placement', role: 'Technicien', tauxHoraireCharge: 40 } });
+      assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: comptes.technicien.id })).status, 200);
+      const tard = await envoyer('post', '/api/interventions', admin, { clientId, titre: 'TEST Pilote3 curative tardive', dateSouhaitee: '20-12-2099' });
+      const tot = await envoyer('post', '/api/interventions', admin, { clientId, titre: 'TEST Pilote3 curative urgente', dateSouhaitee: '01-12-2099' });
+      const sansDate = await envoyer('post', '/api/interventions', jeton(comptes.conducteur), { clientId, titre: 'TEST Pilote3 curative du conducteur' });
+      for (const r of [tard, tot, sansDate]) assert.equal(r.status, 201, JSON.stringify(r.body));
+      const file = await request(app).get('/api/planning/interventions-a-planifier').set(admin);
+      assert.equal(file.status, 200, JSON.stringify(file.body));
+      const ids = file.body.map((item) => item.id);
+      const curative = file.body.find((item) => item.id === tot.body.id);
+      assert.deepEqual([curative.contratMaintenance, curative.dureePrevisionnelleMinutes, curative.echeanceContrat, curative.dateSouhaitee.slice(0, 10)], [null, null, null, '2099-12-01']);
+      assert.ok(ids.indexOf(tot.body.id) < ids.indexOf(tard.body.id), 'par date souhaitée');
+      assert.ok(ids.indexOf(tard.body.id) < ids.indexOf(sansDate.body.id), 'sans date en dernier');
+      // Le conducteur voit la curative qu'il a ouverte ; un autre conducteur ne la voit pas.
+      assert.equal((await request(app).get('/api/planning/interventions-a-planifier').set(jeton(comptes.conducteur))).body.some((i) => i.id === sansDate.body.id), true);
+      assert.equal((await request(app).get('/api/planning/interventions-a-planifier').set(jeton(comptes.tiers))).body.some((i) => i.id === sansDate.body.id), false);
+      // Placement par l'administration : la curative quitte la file et s'ouvre au technicien relié.
+      assert.equal(await voitLeDossier(jeton(comptes.technicien), tot.body.id), false);
+      const place = await envoyer('put', `/api/interventions/${tot.body.id}/planning`, admin, { dateDebut: '2099-12-01', creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:00', intervenantIds: [fiche.id] });
+      assert.equal(place.status, 200, JSON.stringify(place.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: tot.body.id } })).statut, 'PLANIFIEE');
+      assert.equal((await request(app).get('/api/planning/interventions-a-planifier').set(admin)).body.some((i) => i.id === tot.body.id), false);
+      assert.equal(await voitLeDossier(jeton(comptes.technicien), tot.body.id), true);
+      // Délié, le technicien ne voit plus le dossier.
+      assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: null })).status, 200);
+      assert.equal(await voitLeDossier(jeton(comptes.technicien), tot.body.id), false);
+    });
+
+    test('le technicien ne modifie ni le planning, ni sa propre intervention planifiée, ni les référentiels', async () => {
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 lecture seule', role: 'Technicien', tauxHoraireCharge: 40 } });
+      assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: comptes.technicien.id })).status, 200);
+      const dossier = await envoyer('post', '/api/interventions', admin, { clientId, titre: 'TEST Pilote3 dossier affecté' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      const placement = await envoyer('put', `/api/interventions/${dossier.body.id}/planning`, admin, { dateDebut: '2099-11-02', creneau: 'JOURNEE', intervenantIds: [fiche.id] });
+      assert.equal(placement.status, 200, JSON.stringify(placement.body));
+      const libre = await envoyer('post', '/api/planning/events', admin, { categorie: 'HORS_CHANTIER', titre: 'TEST Pilote3 événement libre', dateDebut: '2099-11-03', intervenantIds: [fiche.id] });
+      assert.equal(libre.status, 201, JSON.stringify(libre.body));
+      const type = await prisma.planningEventType.create({ data: { nom: `TEST Pilote3 type ${Date.now()}`, couleur: '#123456' } });
+      const categorie = await prisma.categorie.create({ data: { nom: 'TEST Pilote3 catégorie' } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: 'TEST Pilote3 fournisseur' } });
+      try {
+        const technicien = jeton(comptes.technicien);
+        assert.equal(await voitLeDossier(technicien, dossier.body.id), true, 'témoin : le dossier lui est bien ouvert');
+        const avant = {
+          evenements: await prisma.planningEvent.findMany({ where: { id: { in: [placement.body.id, libre.body.id] } }, include: { intervenants: { select: { id: true } } }, orderBy: { id: 'asc' } }),
+          affectations: await prisma.interventionAffectation.findMany({ where: { interventionId: dossier.body.id } }),
+          types: await prisma.planningEventType.count(), categories: await prisma.categorie.count(), fournisseurs: await prisma.fournisseur.count(),
+        };
+        for (const [libelle, appel] of [
+          ['créer une affectation', () => envoyer('post', '/api/planning/events', technicien, { categorie: 'HORS_CHANTIER', titre: 'TEST Pilote3 refus', dateDebut: '2099-11-04', intervenantIds: [fiche.id] })],
+          ['déplacer une affectation libre', () => envoyer('patch', `/api/planning/events/${libre.body.id}`, technicien, { dateDebut: '2099-11-05' })],
+          ['supprimer une affectation libre', () => request(app).delete(`/api/planning/events/${libre.body.id}`).set(technicien)],
+          ['changer les intervenants de sa projection', () => envoyer('patch', `/api/planning/events/${placement.body.id}`, technicien, { intervenantIds: [] })],
+          ['replanifier sa propre intervention', () => envoyer('put', `/api/interventions/${dossier.body.id}/planning`, technicien, { dateDebut: '2099-11-06', creneau: 'JOURNEE', intervenantIds: [fiche.id] })],
+          ['créer un type', () => envoyer('post', '/api/planning/types', technicien, { nom: 'TEST Pilote3 type refusé', couleur: '#654321' })],
+          ['modifier un type', () => envoyer('put', `/api/planning/types/${type.id}`, technicien, { nom: 'TEST Pilote3 renommé', couleur: '#000000' })],
+          ['supprimer un type', () => request(app).delete(`/api/planning/types/${type.id}`).set(technicien)],
+          ['créer une catégorie', () => envoyer('post', '/api/categories', technicien, { nom: 'TEST Pilote3 catégorie refusée' })],
+          ['modifier une catégorie', () => envoyer('put', `/api/categories/${categorie.id}`, technicien, { nom: 'TEST Pilote3 renommée' })],
+          ['supprimer une catégorie', () => request(app).delete(`/api/categories/${categorie.id}`).set(technicien)],
+          ['créer un fournisseur', () => envoyer('post', '/api/fournisseurs', technicien, { nom: 'TEST Pilote3 fournisseur refusé' })],
+          ['modifier un fournisseur', () => envoyer('put', `/api/fournisseurs/${fournisseur.id}`, technicien, { nom: 'TEST Pilote3 renommé' })],
+          ['supprimer un fournisseur', () => request(app).delete(`/api/fournisseurs/${fournisseur.id}`).set(technicien)],
+        ]) {
+          const refus = await appel();
+          assert.equal(refus.status, 403, `${libelle} : ${refus.status} ${JSON.stringify(refus.body)}`);
+        }
+        assert.deepEqual({
+          evenements: await prisma.planningEvent.findMany({ where: { id: { in: [placement.body.id, libre.body.id] } }, include: { intervenants: { select: { id: true } } }, orderBy: { id: 'asc' } }),
+          affectations: await prisma.interventionAffectation.findMany({ where: { interventionId: dossier.body.id } }),
+          types: await prisma.planningEventType.count(), categories: await prisma.categorie.count(), fournisseurs: await prisma.fournisseur.count(),
+        }, avant, 'aucune écriture');
+        assert.deepEqual([(await prisma.categorie.findUnique({ where: { id: categorie.id } })).nom, (await prisma.fournisseur.findUnique({ where: { id: fournisseur.id } })).nom], ['TEST Pilote3 catégorie', 'TEST Pilote3 fournisseur']);
+        // Il garde la lecture du planning et des référentiels.
+        assert.equal((await request(app).get('/api/planning/events?start=2099-11-02&end=2099-11-03').set(technicien)).status, 200);
+        assert.equal((await request(app).get('/api/categories').set(technicien)).status, 200);
+        // Témoin : le conducteur garde ces écritures.
+        const parConducteur = await envoyer('post', '/api/categories', jeton(comptes.conducteur), { nom: 'TEST Pilote3 catégorie du conducteur' });
+        assert.equal(parConducteur.status, 200, JSON.stringify(parConducteur.body));
+      } finally {
+        await prisma.planningEvent.deleteMany({ where: { id: libre.body.id } });
+        await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
+      }
+    });
+  });
+
   describe('Interventions SAV', () => {
     let session = '';
     let clientId = '';
@@ -4794,7 +5120,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(traces[0].auteurNom, auteur.name);
     });
 
-    test('file #103 : seuls les dossiers contractuels non planifiés du périmètre sont proposés, placement journalisé sans doublon', async () => {
+    test('file #103 : les dossiers non planifiés du périmètre sont proposés (visites de contrat, et curatives depuis le lot pilote 3a), placement journalisé sans doublon', async () => {
       const auth = token => ({ Authorization: `Bearer ${token}` });
       const contrat = await request(app).post('/api/contrats-maintenance').set(auth(session)).send({ clientId, siteId, titre: 'TEST File contrat', periodiciteMois: 12, dureePrevisionnelleMinutes: 105, dateDebut: '01-01-2099' });
       assert.equal(contrat.status, 201, JSON.stringify(contrat.body));

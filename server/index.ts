@@ -598,6 +598,17 @@ const blockCommercial: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+// Le technicien n'écrit que dans ses propres interventions (lot pilote 3, choix par défaut) : ni
+// le planning de l'équipe (affectations, types d'événement, placement d'une intervention, y compris
+// la sienne), ni les référentiels des achats (catégories, fournisseurs). Il garde la lecture.
+const blockTechnicien: express.RequestHandler = (req, res, next) => {
+  if ((req as AuthRequest).user?.role === ROLE_TECHNICIEN) {
+    res.status(403).json({ error: 'Un technicien ne modifie ni le planning ni les référentiels.' });
+    return;
+  }
+  next();
+};
+
 // Un administrateur peut être marqué "estCommercial" : il garde alors tous les droits
 // d'administration (blockCommercial ne le concerne pas, il reste role === 'ADMIN'), mais
 // apparaît EN PLUS comme un commercial pour l'affectation aux chantiers et les
@@ -2939,16 +2950,25 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
 // de projection. Le même filtre de périmètre gouverne la fiche SAV et son placement.
 app.get('/api/planning/interventions-a-planifier', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
   try {
+    // Visites d'un contrat actif, et interventions curatives (SAV hors contrat, lot pilote 3) : toute
+    // intervention à affecter qui n'a pas encore de projection, dans le périmètre du demandeur.
     const interventions = await prisma.intervention.findMany({
-      where: { contratMaintenanceId: { not: null }, contratMaintenance: { is: { statut: 'ACTIF' } }, statut: { in: ['A_PLANIFIER', 'PLANIFIEE'] }, planningEvent: { is: null }, ...getInterventionFilterForUser(req.user!) },
-      select: { id: true, reference: true, titre: true, echeanceContrat: true,
+      where: { AND: [
+        { statut: { in: ['A_PLANIFIER', 'PLANIFIEE'] }, planningEvent: { is: null } },
+        { OR: [{ contratMaintenanceId: null }, { contratMaintenance: { is: { statut: 'ACTIF' } } }] },
+        getInterventionFilterForUser(req.user!),
+      ] },
+      select: { id: true, reference: true, titre: true, echeanceContrat: true, dateSouhaitee: true, priorite: true,
         client: { select: { raisonSociale: true } }, site: { select: { nom: true, ville: true } },
         contratMaintenance: { select: { id: true, titre: true, dureePrevisionnelleMinutes: true } } },
-      orderBy: [{ echeanceContrat: 'asc' }, { reference: 'asc' }],
+      orderBy: [{ reference: 'asc' }],
     });
+    // Par date due : l'échéance d'une visite, la date souhaitée d'une curative ; sans date, en dernier.
+    const dateDue = (i: { echeanceContrat: Date | null; dateSouhaitee: Date | null }) => (i.echeanceContrat ?? i.dateSouhaitee)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    interventions.sort((a, b) => dateDue(a) - dateDue(b));
     res.json(interventions.map(({ contratMaintenance, ...intervention }) => ({
       ...intervention, contratMaintenance,
-      dureePrevisionnelleMinutes: contratMaintenance!.dureePrevisionnelleMinutes,
+      dureePrevisionnelleMinutes: contratMaintenance?.dureePrevisionnelleMinutes ?? null,
     })));
   } catch (error) {
     res.status(500).json({ error: 'Lecture de la file de planification impossible.' });
@@ -2958,7 +2978,7 @@ app.get('/api/planning/interventions-a-planifier', requireAuth, blockCommercial,
 // Crée ou met à jour l'unique projection prévisionnelle d'un dossier SAV. La fiche
 // Intervention reste la source de vérité et les mêmes techniciens sont synchronisés dans
 // InterventionAffectation, afin qu'un planning ne donne jamais accès à un dossier sans affectation.
-app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req: AuthRequest, res) => {
   try {
     const id = paramId(req);
     const intervention = await prisma.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
@@ -3707,6 +3727,27 @@ function libelleCompteJournal(compte: { name: string; email: string }): string {
 
 // Relit un compte en verrouillant sa ligne le temps de la transaction : l'« avant » journalisé est
 // celui que la modification remplace, même face à une modification simultanée.
+// Un compte qui quitte le type technicien perd sa fiche intervenant (lot pilote 3a, choix par
+// défaut) : par ses affectations, elle lui ouvrirait les interventions de la fiche avec les
+// écritures de son nouveau type (replanifier, annuler). La fiche, déjà verrouillée par l'appelant,
+// est déliée et le changement journalisé dans la même transaction.
+async function delierFicheSiPlusTechnicien(tx: any, req: AuthRequest | null, avant: { id: string; name: string; email: string; role: string }, nouveauRole: string, fiches: Array<{ id: string; nom: string }>) {
+  if (avant.role !== ROLE_TECHNICIEN || nouveauRole === ROLE_TECHNICIEN) return;
+  // Une fiche encore libre au premier verrouillage a pu être reliée à ce compte avant qu'il ne soit
+  // verrouillé à son tour : relue maintenant, elle n'est pas dans la liste verrouillée. Le changement
+  // est alors refusé (409), plutôt que de laisser la fiche reliée à un compte non technicien.
+  const actuelles: Array<{ id: string }> = await tx.intervenant.findMany({ where: { userId: avant.id }, select: { id: true } });
+  if (actuelles.some((f) => !fiches.some((v) => v.id === f.id))) throw Object.assign(new Error('Fiche intervenant reliée entre-temps.'), { code: 'FICHE_RELIEE' });
+  for (const fiche of fiches) {
+    await tx.intervenant.update({ where: { id: fiche.id }, data: { userId: null } });
+    await journaliserAdministration(tx, req, {
+      domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: avant.id, cibleLibelle: libelleCompteJournal(avant),
+      concerneSuperAdmin: isSuperAdminRole(nouveauRole), avant: { ficheIntervenant: fiche.nom }, apres: { ficheIntervenant: null },
+      detail: `Type de compte modifié ; fiche intervenant ${fiche.id}.`,
+    });
+  }
+}
+
 async function lireCompteVerrouille(tx: any, id: string) {
   await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
   return tx.user.findUnique({ where: { id }, select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true } });
@@ -3822,7 +3863,13 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       // donne des noms (comme le rattachement), jamais l'identifiant d'un compte qu'un simple
       // administrateur ne doit pas voir, et chaque entrée qui touche un super administrateur
       // lui est fermée.
+      // Fiches intervenant d'abord, dans le même ordre que la liaison : la suppression les délie
+      // (ON DELETE SET NULL), et le journal le dit.
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE`);
       await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
+      // Relues une fois le compte verrouillé : une fiche reliée entre-temps (la liaison valide en
+      // tenant ce verrou) est déliée par la suppression, et doit donc figurer au journal.
+      const fichesDeliees: Array<{ id: string; nom: string }> = await tx.intervenant.findMany({ where: { userId: id }, select: { id: true, nom: true } });
       const supprime = await tx.user.findUnique({
         where: { id },
         select: {
@@ -3838,6 +3885,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       const effets = [
         chantiersResponsable.count ? `retiré de ${chantiersResponsable.count} chantier(s) comme responsable` : '',
         chantiersCommercial.count ? `retiré de ${chantiersCommercial.count} chantier(s) comme commercial` : '',
+        ...fichesDeliees.map((fiche) => `fiche intervenant « ${fiche.nom} » (${fiche.id}) déliée`),
       ].filter(Boolean);
       const responsable = supprime.responsableHierarchique;
       await journaliserAdministration(tx, req as AuthRequest, {
@@ -3885,7 +3933,10 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
     }
     const user = await transactionVerifiee(async (tx) => {
+      // Fiche intervenant verrouillée avant le compte, dans le même ordre que la route qui la relie.
+      const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${target.id} FOR UPDATE`);
       const avant = await lireCompteVerrouille(tx, target.id);
+      if (!avant) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
       const apres = await tx.user.update({
       where: { id: target.id },
       // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
@@ -3899,10 +3950,13 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
       });
       await journaliserDroitsCompte(tx, req, 'TYPE_COMPTE', avant, apres, ['role', 'estCommercial']);
+      await delierFicheSiPlusTechnicien(tx, req as AuthRequest, avant, apres.role, fiches);
       return apres;
     });
     res.json(user);
   } catch (error) {
+    if ((error as { code?: string })?.code === 'FICHE_RELIEE') return res.status(409).json({ error: 'Ce compte vient d’être relié à une fiche intervenant : réessayez.' });
+    if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
     res.status(500).json({ error: 'Error updating user role' });
   }
 });
@@ -4177,6 +4231,63 @@ app.put('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) => 
   }
 });
 
+// Relier un compte à sa fiche intervenant (lot pilote 3) : c'est ce lien qui ouvre au technicien
+// les interventions auxquelles sa fiche est affectée, et sur lesquelles il saisit ses heures. Il
+// touche donc aux droits d'un compte : réservé à l'administration et journalisé dans la même
+// transaction. Seul un compte technicien actif, relié à aucune autre fiche, peut l'être (choix par
+// défaut, à confirmer) ; `userId: null` délie la fiche.
+app.put('/api/intervenants/:id/compte', requireAuth, requireAdmin, async (req, res) => {
+  const id = paramId(req);
+  const brut = (req.body ?? {}).userId;
+  if (brut !== null && (typeof brut !== 'string' || !brut.trim())) return res.status(400).json({ error: 'Compte invalide.' });
+  const userId = brut === null ? null : brut.trim();
+  try {
+    const resultat = await transactionVerifiee(async (tx) => {
+      // Verrous toujours dans le même ordre : la fiche, puis les comptes par identifiant croissant
+      // (comme le changement de type d'un compte, qui verrouille sa fiche avant lui).
+      const [fiche] = await tx.$queryRaw<Array<{ id: string; nom: string; userId: string | null }>>(Prisma.sql`SELECT "id", "nom", "userId" FROM "Intervenant" WHERE "id" = ${id} FOR UPDATE`);
+      if (!fiche) return { statut: 404, erreur: 'Intervenant introuvable.' };
+      if (fiche.userId === userId) return { statut: 200 };
+      const ids = [...new Set([userId, fiche.userId].filter((v): v is string => !!v))].sort();
+      const verrouilles = await tx.$queryRaw<Array<{ id: string; name: string; email: string; role: string; actif: boolean }>>(Prisma.sql`SELECT "id", "name", "email", "role", "actif" FROM "User" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+      const ancien = fiche.userId ? verrouilles.find((u) => u.id === fiche.userId) ?? null : null;
+      // Comme toute route de droits : un simple administrateur ne touche pas au lien d'un compte
+      // super administrateur (cf. refuseSuperAdminTarget).
+      const refus = refuseSuperAdminTarget(req, ancien?.role);
+      if (refus) return { statut: 403, erreur: refus };
+      let compte: { id: string; name: string; email: string } | null = null;
+      if (userId) {
+        const cible = verrouilles.find((u) => u.id === userId);
+        if (!cible || !cible.actif || cible.role !== ROLE_TECHNICIEN) return { statut: 400, erreur: 'Seul un compte technicien actif peut être relié à une fiche intervenant.' };
+        const autre = await tx.intervenant.findFirst({ where: { userId, id: { not: id } }, select: { nom: true } });
+        if (autre) return { statut: 409, erreur: `Ce compte est déjà relié à la fiche « ${autre.nom} ».` };
+        compte = cible;
+      }
+      await tx.intervenant.update({ where: { id }, data: { userId } });
+      // Une entrée par compte dont l'accès change : celui qui perd la fiche, celui qui la reçoit.
+      if (ancien) {
+        await journaliserAdministration(tx, req as AuthRequest, {
+          domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: ancien.id, cibleLibelle: libelleCompteJournal(ancien),
+          concerneSuperAdmin: isSuperAdminRole(ancien.role), avant: { ficheIntervenant: fiche.nom }, apres: { ficheIntervenant: null },
+          detail: `Fiche intervenant ${fiche.id}.`,
+        });
+      }
+      if (compte) {
+        await journaliserAdministration(tx, req as AuthRequest, {
+          domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: compte.id, cibleLibelle: libelleCompteJournal(compte),
+          avant: { ficheIntervenant: null }, apres: { ficheIntervenant: fiche.nom }, detail: `Fiche intervenant ${fiche.id}.`,
+        });
+      }
+      return { statut: 200 };
+    });
+    if (resultat.statut !== 200) return res.status(resultat.statut).json({ error: resultat.erreur });
+    res.json(decimalToNumber(await prisma.intervenant.findUnique({ where: { id } })));
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Ce compte vient d’être relié à une autre fiche.' });
+    res.status(500).json({ error: 'Impossible de relier le compte à cette fiche.' });
+  }
+});
+
 // Supprimer un intervenant. Bloqué s'il possède des pointages ou des coûts SAV (historique préservé) ou
 // des affectations SAV (elles gouvernent l'accès aux dossiers, ce n'est pas du prévisionnel).
 // Ses affectations de planning restent, elles, purement prévisionnelles : il en est simplement
@@ -4200,13 +4311,30 @@ app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) 
       where: { intervenants: { some: { id }, every: { id } } },
       select: { id: true },
     });
-    await prisma.$transaction([
-      prisma.planningEvent.deleteMany({ where: { id: { in: affectationsSolo.map((e) => e.id) } } }),
-      prisma.intervenant.delete({ where: { id } }),
-    ]);
+    const resultat = await transactionVerifiee(async (tx) => {
+      // Fiche, puis compte, verrouillés : le compte relu est bien celui que la suppression délie.
+      const [verrou] = await tx.$queryRaw<Array<{ nom: string; userId: string | null }>>(Prisma.sql`SELECT "nom", "userId" FROM "Intervenant" WHERE "id" = ${id} FOR UPDATE`);
+      if (!verrou) return { statut: 404, erreur: 'Intervenant introuvable.' };
+      const compte = verrou.userId ? await lireCompteVerrouille(tx, verrou.userId) : null;
+      const refus = refuseSuperAdminTarget(req, compte?.role);
+      if (refus) return { statut: 403, erreur: refus };
+      await tx.planningEvent.deleteMany({ where: { id: { in: affectationsSolo.map((e) => e.id) } } });
+      await tx.intervenant.delete({ where: { id } });
+      // Supprimer une fiche reliée délie aussi son compte : changement de droits, journalisé.
+      if (compte) {
+        await journaliserAdministration(tx, req as AuthRequest, {
+          domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: compte.id, cibleLibelle: libelleCompteJournal(compte),
+          concerneSuperAdmin: isSuperAdminRole(compte.role), avant: { ficheIntervenant: verrou.nom }, apres: { ficheIntervenant: null },
+          detail: `Fiche intervenant supprimée (${id}).`,
+        });
+      }
+      return { statut: 200 };
+    });
+    if (resultat.statut !== 200) return res.status(resultat.statut).json({ error: resultat.erreur });
     res.json({ success: true });
   } catch (error) {
     if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : cet intervenant vient d’être rattaché à des données métier.' });
+    if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Intervenant introuvable.' });
     res.status(500).json({ error: 'Error deleting intervenant' });
   }
 });
@@ -4340,7 +4468,7 @@ app.get('/api/planning/events', requireAuth, blockCommercial, requirePlanningAct
   }
 });
 
-app.post('/api/planning/events', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+app.post('/api/planning/events', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req, res) => {
   try {
     const { error, data, intervenantIds } = await validatePlanningEvent(req.body);
     if (error) return res.status(400).json({ error });
@@ -4356,7 +4484,7 @@ app.post('/api/planning/events', requireAuth, blockCommercial, requirePlanningAc
 
 // Édition complète ou déplacement (glisser-déposer) : fusion existant + corps reçu,
 // puis revalidation de l'ensemble — cf. validatePlanningEvent.
-app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+app.patch('/api/planning/events/:id', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req: AuthRequest, res) => {
   try {
     const existing = await prisma.planningEvent.findUnique({
       where: { id: paramId(req) },
@@ -4421,7 +4549,7 @@ app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlann
   }
 });
 
-app.delete('/api/planning/events/:id', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+app.delete('/api/planning/events/:id', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req: AuthRequest, res) => {
   try {
     const existing = await prisma.planningEvent.findUnique({ where: { id: paramId(req) } });
     if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
@@ -4446,7 +4574,7 @@ app.get('/api/planning/types', requireAuth, blockCommercial, requirePlanningActi
   }
 });
 
-app.post('/api/planning/types', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+app.post('/api/planning/types', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req, res) => {
   try {
     const nom = String(req.body.nom || '').trim();
     if (!nom) return res.status(400).json({ error: 'Le libellé du type est requis.' });
@@ -4458,7 +4586,7 @@ app.post('/api/planning/types', requireAuth, blockCommercial, requirePlanningAct
   }
 });
 
-app.put('/api/planning/types/:id', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+app.put('/api/planning/types/:id', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req, res) => {
   try {
     const data: Record<string, unknown> = {};
     if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
@@ -4472,7 +4600,7 @@ app.put('/api/planning/types/:id', requireAuth, blockCommercial, requirePlanning
 });
 
 // Supprimer un type d'événement. Bloqué si des affectations du planning l'utilisent.
-app.delete('/api/planning/types/:id', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+app.delete('/api/planning/types/:id', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req, res) => {
   try {
     const id = paramId(req);
     const used = await prisma.planningEvent.count({ where: { typeEventId: id } });
@@ -4633,7 +4761,7 @@ app.get('/api/planning/public/:token', async (req, res) => {
 app.get('/api/categories', requireAuth, async (req, res) => res.json(await prisma.categorie.findMany({ orderBy: { nom: 'asc' } })));
 // Un nom vide ou déjà pris est refusé avec un message, comme à la modification : sans cela,
 // la contrainte d'unicité remontait en erreur 500 et le formulaire n'en disait rien.
-app.post('/api/categories', requireAuth, blockCommercial, async (req, res) => {
+app.post('/api/categories', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
   const nom = typeof req.body?.nom === 'string' ? req.body.nom.trim() : '';
   if (!nom) return res.status(400).json({ error: 'Le nom de la catégorie est obligatoire.' });
   try {
@@ -4645,7 +4773,7 @@ app.post('/api/categories', requireAuth, blockCommercial, async (req, res) => {
 });
 
 // Modifier une catégorie (nom, description).
-app.put('/api/categories/:id', requireAuth, blockCommercial, async (req, res) => {
+app.put('/api/categories/:id', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
   try {
     const data: Record<string, unknown> = {};
     if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
@@ -4658,7 +4786,7 @@ app.put('/api/categories/:id', requireAuth, blockCommercial, async (req, res) =>
 });
 
 // Supprimer une catégorie. Bloqué si des achats ou lignes de budget l'utilisent.
-app.delete('/api/categories/:id', requireAuth, blockCommercial, async (req, res) => {
+app.delete('/api/categories/:id', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
   try {
     const id = paramId(req);
     const achats = await prisma.achatReel.count({ where: { categorieId: id } });
@@ -4674,7 +4802,7 @@ app.delete('/api/categories/:id', requireAuth, blockCommercial, async (req, res)
 });
 
 app.get('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.findMany({ orderBy: { nom: 'asc' } })));
-app.post('/api/fournisseurs', requireAuth, blockCommercial, async (req, res) => {
+app.post('/api/fournisseurs', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
   const nom = typeof req.body?.nom === 'string' ? req.body.nom.trim() : '';
   if (!nom) return res.status(400).json({ error: 'Le nom du fournisseur est obligatoire.' });
   try {
@@ -4686,7 +4814,7 @@ app.post('/api/fournisseurs', requireAuth, blockCommercial, async (req, res) => 
 });
 
 // Modifier un fournisseur (nom, contact).
-app.put('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, res) => {
+app.put('/api/fournisseurs/:id', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
   try {
     const data: Record<string, unknown> = {};
     if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
@@ -4699,7 +4827,7 @@ app.put('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, res) 
 });
 
 // Supprimer un fournisseur. Bloqué si des achats ou coûts intervention y sont rattachés (historique préservé).
-app.delete('/api/fournisseurs/:id', requireAuth, blockCommercial, async (req, res) => {
+app.delete('/api/fournisseurs/:id', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
   try {
     const id = paramId(req);
     const usedAchats = await prisma.achatReel.count({ where: { fournisseurId: id } });
@@ -7800,8 +7928,10 @@ const ensureSuperAdmins = async () => {
     if (existing) {
       if (existing.role !== ROLE_SUPERADMIN) {
         await transactionVerifiee(async (tx) => {
+          const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${existing.id} FOR UPDATE`);
           const apres = await tx.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
           await journaliserDroitsCompte(tx, { } as express.Request, 'TYPE_COMPTE', existing, apres, ['role']);
+          await delierFicheSiPlusTechnicien(tx, null, existing, ROLE_SUPERADMIN, fiches);
         });
         console.log(`Compte promu super administrateur : ${email}`);
       }
