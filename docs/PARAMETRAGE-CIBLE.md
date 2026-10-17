@@ -23,7 +23,7 @@ C'est aussi la règle permanente ajoutée le même jour à `CLAUDE.md` : toute n
    - Un paramètre qui touche un calcul de montant, une mention légale ou la comptabilité ne change pas de valeur par défaut sans la validation de Nelson.
    - Ceux qui touchent la loi demandent en plus celle du cabinet.
    - Les références légales citées ici le sont **selon notre lecture, toujours à confirmer par le cabinet**.
-6. **Un document émis ne lit jamais un paramètre vivant.** Tout ce qu'une facture imprime est figé à son émission. C'est déjà le cas de l'émetteur, porté par la version légale, et de l'adresse du client. Changer un paramètre ne modifie donc aucune facture déjà émise.
+6. **Un document émis ne doit jamais lire un paramètre vivant.** Tout ce qu'une facture imprime doit être figé à son émission : c'est déjà le cas de l'émetteur, porté par la version légale, et de l'adresse du client. Une exception existe aujourd'hui, sans effet sur le contenu : la couleur du titre, lue vivante. Les lacunes en base sont suivies par #180.
 
 ## 3. Inventaire classé
 
@@ -44,7 +44,7 @@ C'est aussi la règle permanente ajoutée le même jour à `CLAUDE.md` : toute n
 
 Constats de l'inventaire :
 - **Saisis mais sans effet** : le logo, la couleur secondaire et le pied de facture ne servent nulle part. Les coordonnées légales (SIRET, TVA, adresse) ne servent pas côté serveur.
-- **Émetteur de la facture** : il vient, **volontairement**, du texte de la version légale figée à l'émission, et non des paramètres vivants (commentaire du code, avant `server/index.ts:1160`).
+- **Émetteur de la facture** : il vient, **volontairement**, du texte de la version légale figée à l'émission, et non des paramètres vivants (commentaire du code, `server/index.ts:1158`).
 - **Couleur** : seule la couleur principale sert, au titre du PDF. Elle y est lue vivante : c'est sans effet sur le contenu, mais une facture réimprimée changerait de couleur. La couleur de l'interface, elle, est écrite en dur dans `client/src/index.css`.
 - **Doublon d'écrans** : le fuseau ne se règle que dans Administration > Société. L'écran Société (`/societe`) règle le reste de l'identité.
 
@@ -77,11 +77,11 @@ Constats de l'inventaire :
 | Règle | Raison |
 |---|---|
 | Numérotation continue et chronologique des factures et des avoirs (C-01, C-02) | Légale : séquence chronologique et continue (CGI, annexe II, art. 242 nonies A). Seuls les préfixes sont paramétrables. **Garde-fou à confirmer par le cabinet** : un préfixe changé en cours d'année continue la séquence (`F2026-0005` puis `X2026-0006`). Faut-il refuser ce changement hors début d'année, ou ouvrir une nouvelle série ? La remise à zéro annuelle est aussi à confirmer. |
-| Chronologie des règlements : au plus tôt la date d'émission de la facture, au plus tard le jour même | Intégrité de la chronologie, issue de B-35 |
+| Chronologie des règlements (C-06 bis) : au plus tôt la date d'émission de la facture, au plus tard le jour même | Intégrité de la chronologie, issue de B-35 |
 | Immutabilité de la facture émise et correction par avoir (C-03, C-04) ; devis signé figé (C-05) ; règlements immuables (C-06) | Légale et intégrité. Lacunes en base, dont les lignes et la version des mentions : #180. |
 | Arrondis, TVA par taux, comptes de TVA (C-07, C-08) | Règle fiscale et comptable ; taux normal (CGI art. 278) ; liste des taux légaux à confirmer par le cabinet. Le territoire fiscal (DOM et taux propres) ne se déduit pas du fuseau horaire. |
 | Mentions obligatoires et chronologie de l'émission (C-09, C-10) | Légale (CGI art. 289 et annexe II). Le contenu des mentions reste paramétrable et validé par le cabinet. |
-| Choix du site de facturation (`SITE_FACTURATION_ORDRE`) puis adresse figée à l'émission | L'adresse de facturation est une mention ; l'ordre de choix est une règle d'intégrité |
+| Choix du site de facturation (`SITE_FACTURATION_ORDRE`) puis adresse figée à l'émission (C-13 bis) | L'adresse de facturation est une mention, et son figement une règle d'intégrité. L'ordre de choix, lui, est une **convention actuelle, à confirmer** : à défaut de site de facturation désigné, il retombe sur le site principal, le siège, puis le premier par ordre alphabétique. Faut-il plutôt refuser l'émission sans site de facturation désigné ? |
 | Plafond des montants (C-11) | Technique : colonnes `Decimal(12,2)` |
 | Écritures comptables équilibrées et scellées (C-12) | Intégrité comptable. Leur contenu (comptes, journal) est paramétrable. |
 | Format des dates et jour civil de la société (C-13) | Décision de Nelson du 14-10-2026 ; le fuseau reste paramétrable |
@@ -142,9 +142,11 @@ Questions tirées de l'annexe, section 6. L'assistant ne tranche rien : chaque r
 | 10. Rentabilité | qui la suit, marge affichée, seuils d'alerte (Q21) | `rentabilite.voir` des rôles ; seuils ; **montants : validation** |
 | 11. Journal | durée de conservation (Q24) | conservation, **à faire trancher par le cabinet** |
 
-Deux questions n'ont pas encore de paramètre derrière elles. L'assistant ne les posera qu'avec leur lot :
+Quatre questions n'ont pas encore de paramètre derrière elles. L'assistant ne les posera qu'avec leur lot :
 - **horaires et jours travaillés** (Q12) : lot (j) ;
-- **priorités et délais de service** (Q15) : lot P3.
+- **priorités et délais de service** (Q15) : lot P3 ;
+- **figement du devis à l'envoi ou à la signature** (Q10, B-53) : question ouverte de la passation ;
+- **fin d'intervention sans compte rendu signé** (Q26, B-55) : lot 3b.
 
 ### 4.3 Préréglages
 
@@ -153,10 +155,12 @@ Un préréglage choisit **les rôles et la hiérarchie**, et rien d'autre. Tous 
 | Paramètre | « Petite équipe, sans hiérarchie » | « Équipe avec hiérarchie » | « Iris actuel » |
 |---|---|---|---|
 | Rôles | Dirigeant, Bureau, Technicien ([`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), 5.1) | rôles de la section 5.2 | les dix rôles prédéfinis |
-| Rattachements hiérarchiques | aucun | à saisir par la société | inchangés |
+| Rattachements hiérarchiques | aucun nouveau ; ceux qui existent sont conservés | à saisir par la société | inchangés |
 | Modules | à régler par la société (étape 4) | à régler par la société | valeur actuelle (tout actif) |
-| Obligations de saisie (B-22, B-23, B-24) | valeur actuelle | valeur actuelle | valeur actuelle |
+| Obligations de saisie (B-22, B-23, B-24) | valeur actuelle ¹ | valeur actuelle | valeur actuelle |
 | Durées, délais, seuils, listes | valeur actuelle | valeur actuelle | valeur actuelle |
+
+¹ Le titulaire reste obligatoire (B-22), mais l'écran ne propose aujourd'hui comme titulaires que les conducteurs de travaux. Avec les seuls rôles Dirigeant, Bureau et Technicien, aucun chantier ne pourrait être ouvert. Ce préréglage suppose donc que « qui peut être titulaire » s'exprime par les rôles ([`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), question 9).
 
 Les noms décrivent l'organisation, pour ne pas se confondre avec les catégories légales qui fixent le calendrier de la facturation électronique. L'écran affiche un récapitulatif avant d'appliquer un préréglage.
 
@@ -175,8 +179,8 @@ Elles n'existent pas dans le code. Elles sont posées ici sans valeur :
 | **P1** | Socle : stockage des nouveaux paramètres, écran Paramètres regroupé par thème, journal, doublon des écrans « Société » résorbé. Premier groupe : durée d'une curative (B-25), contrats (B-30, B-31), obligations de saisie (B-22, B-23), dates automatiques (B-33), échéance proposée (B-34). | Après les PR du découpage du serveur qui touchent ces domaines. Avant ou après le premier jour du pilote, selon les besoins de l'entreprise pilote (question 5). |
 | — | Paramètres des lots 5 et 6 (anticipation de la génération des visites, mode d'envoi) | Avec ces lots, dans la table `Parametres` actuelle, sans attendre P1 |
 | **P2** | Modules activables (B-75) | Après P1 |
-| **P3** | Listes tenues par la société : types de chantier, moyens de paiement, priorités et délais, couvertures, natures (B-44 à B-50) | Après P1. Les moyens de paiement et les natures touchent la comptabilité : validation. |
-| **P4** | Assistant de démarrage et préréglages | Les rôles paramétrables (lot D3 des droits) viennent après le pilote. D'ici là, l'assistant peut exister sans l'étape « qui fait quoi » (option, question 3). |
+| **P3** | Listes tenues par la société : types de chantier, moyens de paiement, priorités, couvertures, natures (B-44 à B-50). Un délai de service par priorité serait un comportement nouveau : vide par défaut, son effet est à décider par Nelson. | Après P1. Les moyens de paiement et les natures touchent la comptabilité : validation. |
+| **P4** | Assistant de démarrage et préréglages | Les rôles paramétrables (lot D3 des droits) viennent après le pilote. D'ici là, l'assistant peut exister sans l'étape « qui fait quoi » (option, question 3). Il ne propose alors que le préréglage « Iris actuel », et l'étape « Rentabilité » règle les trois cases actuelles des destinataires. |
 | **P5** | Documents : modèle du PDF, libellés, export comptable (B-59, B-60, B-62), avec l'envoi des documents (lot pilote 6) et #35. L'identité imprimée est copiée et figée à l'émission, ou préremplie dans le texte des mentions légales (question 6). | Avec le lot 6 |
 | — | Numérotation hors préfixe (B-58) | Sur demande, après avis du cabinet sur le garde-fou des préfixes |
 | — | Seuils, méthodes et règles touchant les montants (B-35 à B-43) | Au cas par cas, sur décision de Nelson |
