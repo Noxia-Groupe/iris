@@ -791,9 +791,13 @@ const Admin = () => {
                         <td style={{padding: '8px'}}>
                           {/* Comptes proposés : techniciens actifs reliés à aucune autre fiche, plus le
                               compte déjà relié (même s'il a changé de type ou été désactivé depuis). */}
+                          {/* Compte relié absent de la liste des comptes : réservé au super administrateur,
+                              il n'est pas modifiable ici (le serveur le refuse aussi). */}
                           <select aria-label={`Compte technicien de ${i.nom}`} className="form-input" value={i.userId || ''}
+                            disabled={!!i.userId && !users.some(u => u.id === i.userId)}
                             onChange={e => relierCompte(i.id, e.target.value)}>
                             <option value="">Aucun</option>
+                            {i.userId && !users.some(u => u.id === i.userId) && <option value={i.userId}>Compte réservé au super administrateur</option>}
                             {users.filter(u => u.id === i.userId || (u.role === ROLE_TECHNICIEN && u.actif !== false && !intervenants.some(autre => autre.id !== i.id && autre.userId === u.id)))
                               .map(u => <option key={u.id} value={u.id}>{u.name}{u.id === i.userId && (u.role !== ROLE_TECHNICIEN || u.actif === false) ? ' (n’est plus technicien actif)' : ''}</option>)}
                           </select>

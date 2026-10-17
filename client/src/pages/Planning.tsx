@@ -133,7 +133,9 @@ const Planning = () => {
     } catch (e) { console.error(e); }
   };
 
-  useEffect(() => { fetchQueue(); }, []);
+  // En consultation seule, la file n'est pas affichée : inutile de la demander.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!lectureSeule) fetchQueue(); }, []);
 
   const fetchEvents = async () => {
     const requete = ++requeteEvents.current;

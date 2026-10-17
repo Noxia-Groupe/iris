@@ -3727,6 +3727,22 @@ function libelleCompteJournal(compte: { name: string; email: string }): string {
 
 // Relit un compte en verrouillant sa ligne le temps de la transaction : l'« avant » journalisé est
 // celui que la modification remplace, même face à une modification simultanée.
+// Un compte qui quitte le type technicien perd sa fiche intervenant (lot pilote 3a, choix par
+// défaut) : par ses affectations, elle lui ouvrirait les interventions de la fiche avec les
+// écritures de son nouveau type (replanifier, annuler). La fiche, déjà verrouillée par l'appelant,
+// est déliée et le changement journalisé dans la même transaction.
+async function delierFicheSiPlusTechnicien(tx: any, req: AuthRequest | null, avant: { id: string; name: string; email: string; role: string }, nouveauRole: string, fiches: Array<{ id: string; nom: string }>) {
+  if (avant.role !== ROLE_TECHNICIEN || nouveauRole === ROLE_TECHNICIEN) return;
+  for (const fiche of fiches) {
+    await tx.intervenant.update({ where: { id: fiche.id }, data: { userId: null } });
+    await journaliserAdministration(tx, req, {
+      domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: avant.id, cibleLibelle: libelleCompteJournal(avant),
+      concerneSuperAdmin: isSuperAdminRole(nouveauRole), avant: { ficheIntervenant: fiche.nom }, apres: { ficheIntervenant: null },
+      detail: `Type de compte modifié ; fiche intervenant ${fiche.id}.`,
+    });
+  }
+}
+
 async function lireCompteVerrouille(tx: any, id: string) {
   await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
   return tx.user.findUnique({ where: { id }, select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true } });
@@ -3905,6 +3921,8 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
     }
     const user = await transactionVerifiee(async (tx) => {
+      // Fiche intervenant verrouillée avant le compte, dans le même ordre que la route qui la relie.
+      const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${target.id} FOR UPDATE`);
       const avant = await lireCompteVerrouille(tx, target.id);
       const apres = await tx.user.update({
       where: { id: target.id },
@@ -3919,6 +3937,7 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
       });
       await journaliserDroitsCompte(tx, req, 'TYPE_COMPTE', avant, apres, ['role', 'estCommercial']);
+      await delierFicheSiPlusTechnicien(tx, req as AuthRequest, avant, apres.role, fiches);
       return apres;
     });
     res.json(user);
@@ -4209,30 +4228,39 @@ app.put('/api/intervenants/:id/compte', requireAuth, requireAdmin, async (req, r
   const userId = brut === null ? null : brut.trim();
   try {
     const resultat = await transactionVerifiee(async (tx) => {
+      // Verrous toujours dans le même ordre : la fiche, puis les comptes par identifiant croissant
+      // (comme le changement de type d'un compte, qui verrouille sa fiche avant lui).
       const [fiche] = await tx.$queryRaw<Array<{ id: string; nom: string; userId: string | null }>>(Prisma.sql`SELECT "id", "nom", "userId" FROM "Intervenant" WHERE "id" = ${id} FOR UPDATE`);
       if (!fiche) return { statut: 404, erreur: 'Intervenant introuvable.' };
       if (fiche.userId === userId) return { statut: 200 };
+      const ids = [...new Set([userId, fiche.userId].filter((v): v is string => !!v))].sort();
+      const verrouilles = await tx.$queryRaw<Array<{ id: string; name: string; email: string; role: string; actif: boolean }>>(Prisma.sql`SELECT "id", "name", "email", "role", "actif" FROM "User" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+      const ancien = fiche.userId ? verrouilles.find((u) => u.id === fiche.userId) ?? null : null;
+      // Comme toute route de droits : un simple administrateur ne touche pas au lien d'un compte
+      // super administrateur (cf. refuseSuperAdminTarget).
+      const refus = refuseSuperAdminTarget(req, ancien?.role);
+      if (refus) return { statut: 403, erreur: refus };
       let compte: { id: string; name: string; email: string } | null = null;
       if (userId) {
-        const [cible] = await tx.$queryRaw<Array<{ id: string; name: string; email: string; role: string; actif: boolean }>>(Prisma.sql`SELECT "id", "name", "email", "role", "actif" FROM "User" WHERE "id" = ${userId} FOR UPDATE`);
+        const cible = verrouilles.find((u) => u.id === userId);
         if (!cible || !cible.actif || cible.role !== ROLE_TECHNICIEN) return { statut: 400, erreur: 'Seul un compte technicien actif peut être relié à une fiche intervenant.' };
         const autre = await tx.intervenant.findFirst({ where: { userId, id: { not: id } }, select: { nom: true } });
         if (autre) return { statut: 409, erreur: `Ce compte est déjà relié à la fiche « ${autre.nom} ».` };
         compte = cible;
       }
-      const ancien = fiche.userId ? await tx.user.findUnique({ where: { id: fiche.userId }, select: { id: true, name: true, email: true, role: true } }) : null;
       await tx.intervenant.update({ where: { id }, data: { userId } });
       // Une entrée par compte dont l'accès change : celui qui perd la fiche, celui qui la reçoit.
       if (ancien) {
         await journaliserAdministration(tx, req as AuthRequest, {
           domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: ancien.id, cibleLibelle: libelleCompteJournal(ancien),
           concerneSuperAdmin: isSuperAdminRole(ancien.role), avant: { ficheIntervenant: fiche.nom }, apres: { ficheIntervenant: null },
+          detail: `Fiche intervenant ${fiche.id}.`,
         });
       }
       if (compte) {
         await journaliserAdministration(tx, req as AuthRequest, {
           domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: compte.id, cibleLibelle: libelleCompteJournal(compte),
-          avant: { ficheIntervenant: null }, apres: { ficheIntervenant: fiche.nom },
+          avant: { ficheIntervenant: null }, apres: { ficheIntervenant: fiche.nom }, detail: `Fiche intervenant ${fiche.id}.`,
         });
       }
       return { statut: 200 };
@@ -4268,25 +4296,30 @@ app.delete('/api/intervenants/:id', requireAuth, requireAdmin, async (req, res) 
       where: { intervenants: { some: { id }, every: { id } } },
       select: { id: true },
     });
-    await transactionVerifiee(async (tx) => {
-      // Fiche verrouillée : le compte relu est bien celui que la suppression délie.
+    const resultat = await transactionVerifiee(async (tx) => {
+      // Fiche, puis compte, verrouillés : le compte relu est bien celui que la suppression délie.
       const [verrou] = await tx.$queryRaw<Array<{ nom: string; userId: string | null }>>(Prisma.sql`SELECT "nom", "userId" FROM "Intervenant" WHERE "id" = ${id} FOR UPDATE`);
-      const compte = verrou?.userId ? await tx.user.findUnique({ where: { id: verrou.userId }, select: { id: true, name: true, email: true, role: true } }) : null;
-      const fiche = verrou && compte ? { nom: verrou.nom, user: compte } : null;
+      if (!verrou) return { statut: 404, erreur: 'Intervenant introuvable.' };
+      const compte = verrou.userId ? await lireCompteVerrouille(tx, verrou.userId) : null;
+      const refus = refuseSuperAdminTarget(req, compte?.role);
+      if (refus) return { statut: 403, erreur: refus };
       await tx.planningEvent.deleteMany({ where: { id: { in: affectationsSolo.map((e) => e.id) } } });
       await tx.intervenant.delete({ where: { id } });
       // Supprimer une fiche reliée délie aussi son compte : changement de droits, journalisé.
-      if (fiche?.user) {
+      if (compte) {
         await journaliserAdministration(tx, req as AuthRequest, {
-          domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: fiche.user.id, cibleLibelle: libelleCompteJournal(fiche.user),
-          concerneSuperAdmin: isSuperAdminRole(fiche.user.role), avant: { ficheIntervenant: fiche.nom }, apres: { ficheIntervenant: null },
-          detail: 'Fiche intervenant supprimée.',
+          domaine: 'DROITS', type: 'COMPTE', action: 'FICHE_INTERVENANT', cibleId: compte.id, cibleLibelle: libelleCompteJournal(compte),
+          concerneSuperAdmin: isSuperAdminRole(compte.role), avant: { ficheIntervenant: verrou.nom }, apres: { ficheIntervenant: null },
+          detail: `Fiche intervenant supprimée (${id}).`,
         });
       }
+      return { statut: 200 };
     });
+    if (resultat.statut !== 200) return res.status(resultat.statut).json({ error: resultat.erreur });
     res.json({ success: true });
   } catch (error) {
     if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : cet intervenant vient d’être rattaché à des données métier.' });
+    if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Intervenant introuvable.' });
     res.status(500).json({ error: 'Error deleting intervenant' });
   }
 });
@@ -7880,8 +7913,10 @@ const ensureSuperAdmins = async () => {
     if (existing) {
       if (existing.role !== ROLE_SUPERADMIN) {
         await transactionVerifiee(async (tx) => {
+          const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${existing.id} FOR UPDATE`);
           const apres = await tx.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
           await journaliserDroitsCompte(tx, { } as express.Request, 'TYPE_COMPTE', existing, apres, ['role']);
+          await delierFicheSiPlusTechnicien(tx, null, existing, ROLE_SUPERADMIN, fiches);
         });
         console.log(`Compte promu super administrateur : ${email}`);
       }

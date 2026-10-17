@@ -1,6 +1,6 @@
 # Iris — état et passation du développement
 
-> **État de `main` au commit `66dd476` (17-10-2026), après la PR [#161](https://github.com/Noxia-Groupe/iris/pull/161).** État du code, pas attestation de conformité ni feu vert de production.
+> **État de `main` au commit `66dd476` (17-10-2026), après la PR [#161](https://github.com/Noxia-Groupe/iris/pull/161), complété par la PR [#166](https://github.com/Noxia-Groupe/iris/pull/166) (lot pilote 3a).** État du code, pas attestation de conformité ni feu vert de production.
 >
 > Avant chaque lot : relire ce document, puis vérifier le code, les tests, les issues **et leurs commentaires**. Une case non cochée ou une issue ancienne ne prouve pas une absence.
 >
@@ -120,7 +120,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
 - Création d'une intervention par un conducteur hors de son périmètre (relevé en préparant cette passation, préexistant, **non corrigé ; tranché par un choix par défaut, à appliquer (section 4)**) : `POST /api/interventions` ne contrôle que le client du chantier visé et son annulation, pas le périmètre de lecture du conducteur.
 - Dates du planning et de la demande curative, lues hors de `dateIsoStricte` (relevé par le huitième audit de #130, préexistant) : le planning est corrigé par #132 (lecture par `dateIsoStricte`). La demande curative n'accepte toujours que `JJ-MM-AAAA` et refuse une date-heure : choix par défaut, à confirmer, l'aligner sur les autres dates métier (lot (h)).
 - « Socket hang up » (lot (g)) : une occurrence en CI E2E de #123, puis une réinitialisation de connexion (`read ECONNRESET`, `facturation.spec.ts`) en CI E2E de #129, de cause probablement identique (non reproduite). Correctif probable livré par #131 (connexions inactives gardées 65 s par le serveur) ; à surveiller en CI.
-- Écrans `/admin` sur téléphone (#147) : pour le conducteur et le technicien, `/admin` garde un bouton hors écran préexistant (suivi dans #150).
+- Écrans `/admin` sur téléphone (#147) : pour le conducteur, `/admin` garde un bouton hors écran préexistant (suivi dans #150) ; le technicien n'a plus `/admin` depuis #166.
 
 ## 2. Pilote
 
@@ -157,7 +157,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
    - **3a, prérequis et droits, implémenté par #166** : lien entre le compte technicien et sa fiche intervenant, posé par l'administration et journalisé ; file « à planifier » ouverte aux interventions curatives ; écritures hors affaire retirées au technicien (planning, types d'événement, catégories, fournisseurs, placement de sa propre intervention), planning en consultation seule, Administration fermée.
    - **3b, parcours sur téléphone, à faire** : interventions du jour, fiche intervention (adresse, téléphone), compte rendu et signature sans fenêtres du navigateur, heures, tests à 375 px avec de vraies données.
    - Décisions de Nelson du 17-10-2026 :
-     - le technicien saisit aussi ses heures sur une intervention SAV hors contrat. Une telle intervention est payante ; elle peut passer par un devis, au forfait ou au temps passé. Au temps passé, une heure au moins est facturée, et toute heure commencée est due (règle de facturation, à appliquer avec le devis et la facture d'intervention, lot 4 ou suivant) ;
+     - le technicien saisit aussi ses heures sur une intervention SAV hors contrat. Une telle intervention est payante ; elle peut passer par un devis, au forfait ou au temps passé. Au temps passé, une heure au moins est facturée, et toute heure commencée est due (règle de facturation, à appliquer avec le devis et la facture d'intervention ; placement proposé, à confirmer : lot 4 ou suivant) ;
      - la signature du client se dessine au doigt, en plus du nom et de l'acceptation explicite.
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent.
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
@@ -270,7 +270,7 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Son affaire n'est modifiable que par l'administration. **Appliqué** (#123).
 - Aucun accès financier : déduction de #123 (aucun montant), à confirmer. **Appliqué** (#123).
 - Ses écritures hors affaire (planning, catégories, fournisseurs) lui sont retirées au lot du parcours technicien. **Appliqué** (#166), y compris le placement de sa propre intervention : il ne replanifie pas et ne change pas les intervenants de son dossier. Il garde la lecture du planning et des référentiels, et n'a plus l'Administration.
-- Seul un compte technicien actif, relié à aucune autre fiche, se relie à une fiche intervenant ; le lien reste si le compte change ensuite de type ou est désactivé, et l'écran le signale. **Appliqué** (#166).
+- Seul un compte technicien actif, relié à aucune autre fiche, se relie à une fiche intervenant. Un compte qui quitte ensuite le type technicien perd sa fiche (déliée et journalisée dans la même transaction) : par ses affectations, elle lui ouvrirait les interventions avec les écritures de son nouveau type. Un compte désactivé garde sa fiche, sans pouvoir se connecter. Un simple administrateur ne touche pas à la fiche d'un compte super administrateur. **Appliqué** (#166).
 - Une intervention curative placée depuis la file reçoit une durée proposée de 60 minutes, modifiable avant de confirmer. **Appliqué** (#166).
 - Terminer une intervention reste possible sans compte rendu signé (client absent, par exemple). **Appliqué** (état actuel), à revoir au lot 3b.
 - Le mode hors ligne (zone sans réseau) reste hors du lot pilote 3.

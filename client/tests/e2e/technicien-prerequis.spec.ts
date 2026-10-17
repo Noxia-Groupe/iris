@@ -77,6 +77,9 @@ test('le technicien relié à sa fiche reçoit une curative placée depuis la fi
     await expect(vue.getByRole('button', { name: /Affectation/ })).toHaveCount(0);
     await expect(vue.getByRole('button', { name: /Types d'événements/ })).toHaveCount(0);
     await expect(vue.getByRole('region', { name: 'Interventions à planifier' })).toHaveCount(0);
+    // Une case de la grille ne s'ouvre plus sur le formulaire d'affectation.
+    await vue.locator('table tbody td').first().click();
+    await expect(vue.getByRole('dialog')).toHaveCount(0);
     await vue.goto('/admin', { waitUntil: 'networkidle' });
     await expect(vue).toHaveURL(/\/$/);
   } finally {
