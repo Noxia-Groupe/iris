@@ -4,11 +4,15 @@
 -- elle-même ; celui-ci couvre aussi une contre-passation, une affectation ou un avoir écrits
 -- directement en base, sans resynchronisation du statut.
 -- Règle (décisions de Nelson des 16 et 17-10-2026) : « réglée » ⇔ reste dû nul ou négatif et au
--- moins un règlement non contre-passé.
+-- moins un règlement non contre-passé. Aucune reprise : les lignes existantes ne sont pas
+-- revalidées (aucune donnée réelle n'existe, règle 4) ; elles le sont à leur prochaine écriture.
 CREATE FUNCTION verifier_statut_reglement_facture(facture_id TEXT) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE facture RECORD; regle BOOLEAN; soldee BOOLEAN;
 BEGIN
-  SELECT "type", "statut" INTO facture FROM "Facture" WHERE "id" = facture_id;
+  -- Verrou de la facture : deux écritures directes concurrentes (deux contre-passations, par
+  -- exemple) se sérialisent, et la seconde relit l'état validé par la première. L'API tient
+  -- déjà ce verrou ; il est alors sans effet.
+  SELECT "type", "statut" INTO facture FROM "Facture" WHERE "id" = facture_id FOR UPDATE;
   IF NOT FOUND OR facture."type" <> 'FACTURE' OR facture."statut" NOT IN ('EMISE', 'REGLEE') THEN
     RETURN;
   END IF;
