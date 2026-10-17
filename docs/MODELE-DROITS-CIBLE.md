@@ -128,7 +128,7 @@ Une permission = **un domaine et une action**, écrite en langage clair. Une seu
 
 La lecture de l'identité de la société, des modules actifs, des listes de commerciaux et de conducteurs, des catégories, des fournisseurs et des intervenants sans leur taux reste ouverte à tout compte connecté, comme aujourd'hui. Toute nouvelle route déclare sa permission, comme le demande déjà `MODELE-DROITS-COMPTES.md`.
 
-Pour une TPE, l'écran regroupe ces permissions en une quinzaine de **groupes** : « Devis », « Chantiers », « Montants », « SAV »… Une case par groupe ; le détail ne s'ouvre qu'à la demande (section 5).
+Pour une TPE, l'écran regroupe ces permissions en une quinzaine de **groupes** : « Devis », « Chantiers », « Montants », « SAV »… Une case par groupe ; le détail ne s'ouvre qu'à la demande (section 6).
 
 ### 3.2 Un périmètre pour chaque permission
 
@@ -156,7 +156,7 @@ Certaines permissions n'ont qu'un périmètre utile. Le paramétrage, par exempl
 
 ### 3.3 Des rôles paramétrables
 
-Un **rôle** = un ensemble de permissions, chacune avec son périmètre et ses relations. Depuis Administration, on peut :
+Un **rôle** = un ensemble de permissions. Chacune porte un ou plusieurs couples (périmètre, relations), réunis : le responsable voit par exemple les interventions où il est affecté, **et** celles des chantiers de sa branche. Depuis Administration, on peut :
 - **créer** un rôle, vide ou à partir d'un modèle ;
 - **dupliquer** un rôle pour l'ajuster ;
 - **renommer** un rôle ;
@@ -170,7 +170,7 @@ Le rattachement hiérarchique existe déjà (`responsableHierarchiqueId`). Il ne
 - une TPE n'en règle aucun, et ces deux périmètres se réduisent alors à « ses dossiers » ;
 - une PME relie ses collaborateurs, et chaque rôle choisit, permission par permission, jusqu'où il voit.
 
-C'est une décision d'accès, comme le dit déjà le code : le rattachement reste réservé à un compte qui a `comptes.gerer` sur toute l'entreprise (section 7.1).
+C'est une décision d'accès, comme le dit déjà le code : le rattachement reste réservé à un compte qui a `comptes.gerer` sur toute l'entreprise (section 8.1).
 
 ### 3.5 Attributs du compte, hors rôle
 
@@ -183,7 +183,7 @@ C'est une décision d'accès, comme le dit déjà le code : le rattachement rest
 
 ### 4.1 Table de correspondance
 
-Chaque type de compte actuel devient un rôle prédéfini. La table l'exprime dans le vocabulaire de la section 3.1. C'est la cible de la preuve de non-régression (section 6).
+Chaque type de compte actuel devient un rôle prédéfini. La table l'exprime dans le vocabulaire de la section 3.1. C'est la cible de la preuve de non-régression (section 7).
 
 Légende des colonnes :
 - SA = super administrateur, AD = administrateur, DIR = directeur, RESP = responsable, CT = conducteur de travaux ;
@@ -222,7 +222,8 @@ Légende des cases :
 | `interventions.demarrerTerminer` | T ¹⁵ | T ¹⁵ | — | D af, B cl ¹⁵ | D af cr cl ¹⁵ | — | D af ⁷ ¹⁵ | D af ⁷ ¹⁵ | D af ⁷ ¹⁵ | D af |
 | `interventions.compteRendu` | T | T | — | D af, B cl | D af cr cl | — | D af ⁷ | D af ⁷ | D af ⁷ | D af ¹⁵ |
 | `interventions.sesHeures` | — | — | — | — | — | — | — | — | — | D af |
-| `interventions.couts`, `interventions.journal` | T | T | — | — ⁸ | D af cr cl | — | — | — | — | — |
+| `interventions.couts` | T | T | — | — ⁸ | D af cr cl | — | — | — | — | — ¹⁶ |
+| `interventions.journal` | T | T | — | D af, B cl | D af cr cl | — | D af ⁷ | D af ⁷ | D af ⁷ | — |
 | `contrats.*` | T | T | — | — | — | — | — | — | — | — |
 | `planning.consulter` | T | T | — | T ¹¹ | T ¹¹ | — | T ¹¹ | T ¹¹ | T ¹¹ | T ¹¹ |
 | `planning.modifier`, `planning.types` | T | T | — | T | T | — | T ⁷ | T ⁷ | T ⁷ | — |
@@ -240,12 +241,13 @@ Légende des cases :
 
 ### 4.2 Notes : définitions actuelles et règles à reproduire
 
-Ces règles sont celles du code d'aujourd'hui (annexe, A3 à A8). Plusieurs ne tiennent pas dans un modèle à relations simples. Au premier lot (D1), elles sont reproduites telles quelles par des **règles historiques nommées**, rattachées aux rôles prédéfinis et prouvées par la matrice (section 6). Leur harmonisation est une décision de Nelson (question 8).
+Ces règles sont celles du code d'aujourd'hui (annexe, A3 à A8). Plusieurs ne tiennent pas dans un modèle à relations simples. Au premier lot (D1), elles sont reproduites telles quelles par des **règles historiques nommées**, rattachées aux rôles prédéfinis et prouvées par la matrice (section 7). Leur harmonisation est une décision de Nelson (question 8).
 
 1. **Consultation des chantiers.**
    - **Liste** (`perimetreDemandeur`) : directeur toute l'entreprise ; commercial par `commercialId` ; responsable par titulaire dans sa branche, lui compris ; tous les autres par `responsableId`. Affaires annulées exclues pour tous, administrateurs compris.
    - **Fiche** (`isOwner`) : directeur, commercial **ou** titulaire, quel que soit le type de compte, responsable sur sa branche ; affaire annulée lisible. Un commercial titulaire voit donc la fiche, mais pas le chantier dans sa liste.
    - **Journal d'une affaire annulée** : fermé à tous (#136).
+   - **Historique d'un client** (compris dans `clients.consulter`) : il suit le périmètre des chantiers. Un conducteur qui consulte tout l'annuaire n'y voit que ses chantiers.
 2. **Modification par le titulaire.** L'API l'admet pour tout titulaire non commercial, non directeur et non technicien ; l'écran ne la propose qu'au conducteur titulaire. Le titulaire peut confier son chantier à tout compte actif (#181, question 9). Le montant vendu ne s'écrit qu'avec `rentabilite.voir`. Le statut et le client envoyés par un non-administrateur sont ignorés en silence.
 3. **Clôture par le responsable** : ses propres chantiers, et ceux des **techniciens** de sa branche seulement. Il faut un attribut du rôle du titulaire (« rôle terrain ») pour l'exprimer.
 4. **Rentabilité.** Le code croise le type et trois réglages :
@@ -259,8 +261,8 @@ Ces règles sont celles du code d'aujourd'hui (annexe, A3 à A8). Plusieurs ne t
 7. **Directeur commercial, assistante commerciale et comptable** franchissent `blockCommercial` : écritures du planning et des référentiels, routes SAV au filtre vide (#179, question 11).
 8. **SAV du responsable** : interventions où il est affecté, ou dont le chantier lié a pour titulaire un membre de sa branche ou lui-même. Il ne voit pas une intervention sans chantier affectée à un membre de sa branche. Coûts SAV : 403 dans son périmètre.
 9. **Annuaire du commercial, du directeur commercial, de l'assistante et du comptable** : l'API le leur sert, mais l'écran le leur ferme (`ROLES_ANNUAIRE`).
-10. **Technicien et clients désactivés** : l'annuaire les lui ferme (404 sur la fiche et l'historique, filtre ignoré). L'intervention qui lui est affectée lui montre pourtant client, site et contact (invariant, section 7.2).
-11. **Planning en lecture** : les événements sans intervention de toute l'entreprise, les projections d'interventions dans le périmètre SAV, et la liste de **tous** les chantiers, annulés compris.
+10. **Technicien et clients désactivés** : l'annuaire les lui ferme (404 sur la fiche et l'historique, filtre ignoré). L'intervention qui lui est affectée lui montre pourtant client, site et contact (invariant, section 8.2).
+11. **Planning en lecture** : les événements sans intervention de toute l'entreprise, les projections d'interventions dans le périmètre SAV, et la liste de **tous** les chantiers, annulés compris. En écriture, `planning.modifier` sur toute l'entreprise ne vaut que pour les événements libres : une projection d'intervention reste limitée au périmètre SAV.
 12. **Tableau de bord** : le contenu varie selon le type.
     - Les achats ne sont envoyés ni au commercial ni au technicien.
     - Les heures ne sont envoyées ni à l'administrateur ni au commercial.
@@ -268,6 +270,7 @@ Ces règles sont celles du code d'aujourd'hui (annexe, A3 à A8). Plusieurs ne t
 13. **Statistiques Travaux** : celles des fournisseurs portent sur toute l'entreprise, sans périmètre.
 14. **Séparation entre administrateur et super administrateur.** Un administrateur ne voit ni ne gère les comptes super administrateur. Il ne voit pas les entrées de journal qui les concernent, ni celles des clés d'intégration.
 15. **Transitions et compte rendu SAV.** `interventions.statut` comprend démarrer et terminer. Le technicien n'a que ces deux transitions. L'écran ne lui propose qu'à lui le compte rendu et la signature, que l'API ouvre à tout compte de la ligne `interventions.consulter`.
+16. **Coûts SAV du technicien** : il lit ses propres heures, sans montant (`GET /api/interventions/:id/couts`), au titre de `interventions.sesHeures`.
 
 Correspondance des **clés d'intégration** (portée toujours « toute l'entreprise ») :
 
@@ -316,9 +319,35 @@ Trois de ces rôles décrivent un comportement qui n'existe pas encore : l'équi
 
 Les dix rôles de la section 4, au comportement strictement identique. C'est le point de départ de la migration.
 
-## 6. Migration et moteur
+## 6. L'écran
 
-### 6.1 Matrice de non-régression
+### 6.1 Tableau rôles × permissions
+
+- **Disposition** : une ligne par permission, groupée par domaine, en langage clair (« Chantiers : voir la rentabilité ») ; une colonne par rôle.
+- **Cases** : « — », « Ses dossiers », « Son équipe », « Sa branche » ou « Toute l'entreprise ».
+  - Pour « ses dossiers », l'écran précise les relations retenues : « dont il est titulaire », « dont il est le commercial », « où il est affecté »…
+  - Une case peut combiner plusieurs périmètres, réunis : par exemple « où il est affecté, et sur sa branche les interventions des chantiers qu'elle porte ».
+- **Deux vues** :
+  - **groupes** : une quinzaine de cases par rôle, pour une petite équipe (section 3.1) ;
+  - **détail** : une case par permission.
+- **En-tête de colonne** :
+  - le nom du rôle et le nombre de comptes qui le portent ;
+  - les commandes dupliquer, renommer, supprimer ;
+  - pour un rôle prédéfini, « revenir au modèle d'origine » (question 13).
+- **Rôle « Super administrateur »** : il s'affiche sans pouvoir être modifié (section 8.1).
+- **Avertissement des déductions** : accorder une permission qui en révèle une autre par calcul affiche un avertissement, et propose d'accorder les deux (section 8.3).
+- **Enregistrement** : chaque modification est confirmée, puis journalisée (section 8.1).
+
+### 6.2 Aperçu « ce que voit ce compte »
+
+- **Contenu** : on choisit un compte, ou un rôle. L'écran affiche ses menus, puis, domaine par domaine, ce qu'il peut lire et faire, sur quel périmètre, et s'il voit les montants. Exemple : « Chantiers : les siens (3 en cours) ; montants sans rentabilité ».
+- **Calcul** : l'aperçu est **calculé par le serveur**, avec le même moteur que les routes, jamais recalculé par l'écran.
+- **Avant d'enregistrer** une modification de rôle, il montre l'écart : « ces 4 comptes gagneraient… perdraient… ».
+- **Séparation** : un administrateur ne prévisualise pas un compte super administrateur (section 8.1).
+
+## 7. Migration et moteur
+
+### 7.1 Matrice de non-régression
 
 Chaque type de compte actuel devient le rôle prédéfini correspondant, au comportement **strictement identique**. La preuve est donnée **rôle par rôle**, par une matrice enregistrée en exécutant l'API **avant** tout changement, puis rejouée sur le nouveau moteur.
 
@@ -350,11 +379,11 @@ La colonne des routes vient du script `server/scripts/routes.mjs` du chantier 2.
 
 **Écran.** D2 fait lire à l'écran les permissions effectives au lieu des types de compte. L'écran s'ouvrirait alors partout où il est plus restrictif que le serveur : annuaire du commercial, Performances du responsable, journaux d'achats du directeur. D2 doit donc soit garder ces restrictions comme règles historiques, soit les faire trancher avant (question 12).
 
-### 6.2 Moteur côté serveur
+### 7.2 Moteur côté serveur
 
 - **Données** :
   - `Role` : nom ; clé système non renommable pour les rôles système ; modèle d'origine ;
-  - `RolePermission` : rôle, permission, périmètre et relations ;
+  - `RolePermission` : rôle, permission, périmètre et relations ; plusieurs lignes par permission, réunies ;
   - `User.roleId`, en clé étrangère `RESTRICT`.
 - **Lecture** : le rôle et ses permissions sont relus avec le compte à **chaque requête**, comme aujourd'hui dans `requireAuth`. Il n'y a aucun cache des permissions entre deux requêtes, si bien qu'un retrait prend effet à la requête suivante.
 - **Deux fonctions** remplacent les gardes et les tests dispersés :
@@ -363,24 +392,24 @@ La colonne des routes vient du script `server/scripts/routes.mjs` du chantier 2.
 
   Les fonctions de montants (`voitRentabilite`…) s'appuient sur les mêmes permissions.
 - **Compatibilité** : au premier lot, `/api/me` garde `role` (la clé du rôle prédéfini) et les noms actuels des permissions. L'écran passe aux nouvelles permissions en D2. Les routes des permissions individuelles et de l'accès financier sont retirées quand la question 2 est tranchée.
-- **Clés d'intégration** : elles gardent leurs scopes, traduits par la correspondance de la section 4.2.
+- **Clés d'intégration** : elles gardent leurs scopes, traduits par la correspondance de la section 4.2. `/api/v1` reste limité à ses routes actuelles : une permission comme `devis.modifier`, qui ouvre en session la duplication et la recherche du catalogue, n'ouvre pas ces routes à une clé.
 
 Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite à associer chaque type à son rôle prédéfini.
 
-## 7. Ce qui reste dans le code, et pourquoi
+## 8. Ce qui reste dans le code, et pourquoi
 
-### 7.1 Invariants
+### 8.1 Invariants
 
 | Invariant | Raison |
 |---|---|
 | Au moins un super administrateur **actif**. Son rôle, repéré par une clé système non renommable, ne se modifie ni ne se supprime, et a toujours tout. | Sinon personne ne peut plus administrer l'instance. La règle actuelle compte les comptes désactivés et se vérifie hors transaction : #178. |
 | L'accès de secours et `SUPERADMIN_EMAILS` visent le rôle système « super administrateur », par sa clé. | Ce sont les seules portes de reprise de l'instance. |
 | Seul un super administrateur gère les comptes super administrateur, les rôles et les clés d'intégration (question 3). | Sinon un administrateur pourrait s'élever lui-même. |
-| **Pas d'élévation.** Un compte n'attribue un rôle que s'il est **inclus** dans le sien. Inclus veut dire que chaque permission du rôle attribué figure dans le sien, avec un périmètre au moins aussi large (ses dossiers ⊂ son équipe ⊂ sa branche ⊂ toute l'entreprise) et des relations comprises dans les siennes. Deux rôles incomparables : refus. | Empêcher l'auto-élévation, y compris par un rôle « de côté ». |
+| **Pas d'élévation.** Un compte n'attribue un rôle que s'il est **inclus** dans le sien. Inclus veut dire que chaque couple (permission, périmètre, relations) du rôle attribué est couvert par un couple du sien : même permission, périmètre au moins aussi large (ses dossiers ⊂ son équipe ⊂ sa branche ⊂ toute l'entreprise), relations comprises. Deux rôles incomparables : refus. | Empêcher l'auto-élévation, y compris par un rôle « de côté ». |
 | On ne modifie pas son propre rôle. | Même raison. **Changement assumé** : aujourd'hui, le changement de son propre type de compte n'est pas refusé. Il entre au lot D1. |
-| Le rattachement hiérarchique est réservé à `comptes.gerer` sur toute l'entreprise. | Il élargit la branche, donc l'accès, de toute la chaîne au-dessus du compte. |
+| Le rattachement hiérarchique est réservé à `comptes.gerer` sur toute l'entreprise. Il est refusé s'il fait entrer un compte dans l'équipe ou la branche du demandeur, sauf si le rôle du demandeur a « toute l'entreprise » partout où il a « son équipe » ou « sa branche ». | Le rattachement élargit l'équipe ou la branche, donc l'accès, de toute la chaîne au-dessus du compte : il ne doit pas servir à s'élargir soi-même. |
 | L'aperçu « ce que voit ce compte » respecte la séparation : un administrateur ne prévisualise pas un compte super administrateur. | Même séparation qu'aujourd'hui dans la liste des comptes. |
-| Chaque changement de rôle, de permission ou d'attribution est journalisé dans la même transaction, en ajout seul. Une entrée qui concerne un compte super administrateur reste fermée à un simple administrateur ; les autres lui sont visibles, comme les changements de permissions aujourd'hui. | Décision du 13-10-2026 (#133) et règle 2. |
+| Chaque changement de rôle, de permission ou d'attribution est journalisé dans la même transaction, en ajout seul. Une entrée qui concerne un compte super administrateur reste fermée à un simple administrateur ; les autres lui sont visibles, comme les changements de permissions aujourd'hui. Le choix « à appliquer » de la passation (section 4), qui ferme aussi à l'administrateur les entrées **écrites** par un super administrateur, lui fermerait toutes les modifications de rôles. | Décision du 13-10-2026 (#133) et règle 2. |
 | Les documents d'argent émis sont immuables (factures et avoirs émis, devis signés, règlements, écritures), quelle que soit la permission. | Obligation légale et d'intégrité. Lacunes en base, dont les lignes de facture et la version des mentions : #180. |
 | La numérotation des factures reste continue et chronologique. | Obligation légale. |
 | Le rôle et le statut actif sont relus en base à chaque requête. | Un retrait de droit prend effet tout de suite. |
@@ -388,7 +417,7 @@ Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite 
 | Un module désactivé est fermé à tous, sauf au super administrateur. | Réglage de la société, distinct des droits. |
 | Une clé d'intégration ne signe pas de devis et n'accède ni aux comptes ni aux droits. | La signature engage une personne. |
 
-### 7.2 Exceptions actuelles : permission ou invariant
+### 8.2 Exceptions actuelles : permission ou invariant
 
 | Exception actuelle | Proposition |
 |---|---|
@@ -411,11 +440,11 @@ Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite 
 | Champs d'ouverture d'un chantier réservés à l'administration à la conversion | `devis.ouvrirChantier`, distinct de `chantiers.reattribuer`. |
 | Fiche intervenant reliée seulement à un technicien actif, perdue en quittant ce type | Propriété du rôle « peut porter une fiche intervenant » (section 3.5). |
 | Éligibilité au titulariat : le serveur accepte tout compte actif, l'écran ne propose que des conducteurs | À décider (question 9, #181). |
-| Le super administrateur garde le planning quand le module est désactivé | Invariant des modules (7.1). |
-| Accès de secours et `SUPERADMIN_EMAILS` | Invariants (7.1). |
+| Le super administrateur garde le planning quand le module est désactivé | Invariant des modules (8.1). |
+| Accès de secours et `SUPERADMIN_EMAILS` | Invariants (8.1). |
 | Les clés d'intégration voient les taux et les clients désactivés | Correspondance des scopes (section 4.2), à aligner sur les choix « à appliquer » de la passation, section 4. |
 
-### 7.3 Montants : ce qui se déduit d'autre chose
+### 8.3 Montants : ce qui se déduit d'autre chose
 
 Certaines permissions redonnent une information réservée par une autre, par simple calcul. Les cas sont déjà relevés par `MODELE-DROITS-COMPTES.md` :
 - les budgets par poste (`montants.voir`) redonnent le montant vendu, donc la marge (`rentabilite.voir`) ;
@@ -425,20 +454,20 @@ Certaines permissions redonnent une information réservée par une autre, par si
 
 Proposition : l'écran des rôles **avertit** quand une permission en révèle une autre par déduction. Il peut aussi proposer de les accorder ensemble. Faut-il en plus un plancher dans le code, qui réserve certains montants (taux, coût de main-d'œuvre, prix d'achat) aux rôles système, quel que soit le paramétrage ? C'est la question 5 : les montants reviennent à Nelson (règle 5).
 
-## 8. Lots proposés et placement par rapport au pilote
+## 9. Lots proposés et placement par rapport au pilote
 
 | Lot | Contenu | Placement proposé |
 |---|---|---|
 | **D0** | Défauts actuels de la règle 2, chacun dans sa PR : dernier super administrateur (#178) ; lignes et mentions de facture figées en base (#180) ; réattributions et encaissement journalisés (#181) ; directeur commercial, assistante et comptable dans le planning et les référentiels (#179, sur décision de Nelson) | **Au plus tôt, sans attendre la fin du découpage du serveur** : chaque correction est une petite PR, rebasée au besoin sur les PR du découpage |
-| **D1a** | Matrice de non-régression enregistrée sur le code actuel, en tests seuls (section 6.1) | Tôt : elle protège aussi le découpage du serveur |
-| **D1** | Moteur (`autorise`, `perimetre` par permission, règles historiques), tables `Role` et `RolePermission`, dix rôles prédéfinis identiques, refus de modifier son propre rôle (changement assumé). Aucune route ne change encore de comportement. | Après le pilote, sauf si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels (question 6) |
-| **D2** | Bascule des routes sur le moteur, un ou deux domaines par PR, matrice verte à chaque fois ; l'écran lit les permissions effectives (section 6.1, Écran) | Après D1 |
+| **D1a** | Matrice de non-régression enregistrée sur le code actuel, en tests seuls (section 7.1) | Tôt : elle protège aussi le découpage du serveur |
+| **D1** | Moteur (`autorise`, `perimetre` par permission, règles historiques), tables `Role` et `RolePermission`, dix rôles prédéfinis identiques, refus de modifier son propre rôle (changement assumé). Aucune autre route ne change de comportement. | Après le pilote, sauf si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels (question 6) |
+| **D2** | Bascule des routes sur le moteur, un ou deux domaines par PR, matrice verte à chaque fois ; l'écran lit les permissions effectives (section 7.1, Écran) | Après D1 |
 | **D3** | Écran : tableau rôles × permissions, en groupes ou en détail ; créer, dupliquer, renommer, supprimer ; avertissement des déductions ; aperçu « ce que voit ce compte » ; journal | Après D2 |
 | **D4** | Modèles « petite équipe » et « équipe avec hiérarchie », appliqués depuis l'assistant de démarrage du paramétrage (proposition `PARAMETRAGE-CIBLE.md`) | Avec l'assistant |
 
 Chaque lot est une PR ou une petite série de PR, avec ses tests réels sur PostgreSQL et dans le navigateur.
 
-## 9. Questions pour Nelson
+## 10. Questions pour Nelson
 
 1. **Équipe, branche, agence.** « Son équipe » = collaborateurs directs, et « sa branche » = tous les niveaux, comme le responsable aujourd'hui : est-ce ta lecture ? Ou « sa branche » désigne-t-elle une agence ou un établissement, notion qu'Iris n'a pas encore ?
 2. **Un rôle par compte**, sans permission individuelle ? Une exception passerait alors par un rôle dupliqué. Sinon, garde-t-on les deux étages prévus par `MODELE-DROITS-COMPTES.md` ?
@@ -458,3 +487,4 @@ Chaque lot est une PR ou une petite série de PR, avec ses tests réels sur Post
 10. **Rentabilité** : faut-il garder la combinaison « sa branche oui, ses propres chantiers non », ou les deux réglages vont-ils ensemble ?
 11. **Directeur commercial, assistante commerciale et comptable** (#179) : leurs écritures dans le planning et les référentiels sont-elles voulues, ou faut-il les leur retirer comme au commercial ?
 12. **Écran plus restrictif que le serveur** (annuaire du commercial, Performances du responsable, journaux d'achats du directeur) : l'écran doit-il s'aligner sur le serveur en D2, ou le serveur se restreindre ?
+13. **Rôles prédéfinis** : modifiables, avec un retour au modèle d'origine, ou verrouillés, à dupliquer pour les ajuster ?
