@@ -599,11 +599,13 @@ test.describe('Facturation — parcours utilisateur', () => {
     await formulaire.getByRole('button', { name: 'Répartir le montant' }).click();
     await expect(part).toHaveValue('50,00');
     await formulaire.getByLabel('Moyen de paiement').selectOption('CHEQUE');
-    await formulaire.getByLabel('Référence du règlement').fill('CHQ 0042');
+    // Référence unique : la base E2E est rejouée sans être vidée.
+    const referenceCheque = `CHQ ${Date.now()}`;
+    await formulaire.getByLabel('Référence du règlement').fill(referenceCheque);
     await envoyer.click();
     await expect(page.getByText(/Règlement de 50,00\s€ enregistré/)).toBeVisible();
     const reglements = page.getByRole('table', { name: 'Règlements enregistrés' });
-    const cheque = reglements.locator('tr', { hasText: 'CHQ 0042' });
+    const cheque = reglements.locator('tr', { hasText: referenceCheque });
     await expect(cheque).toContainText(client.raisonSociale);
     await expect(cheque).toContainText('Chèque');
     await expect(cheque).toContainText('Enregistré');
