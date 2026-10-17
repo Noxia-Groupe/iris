@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures';
+import { test, expect, dateDuJour } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
@@ -116,10 +116,16 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
     await envoyer('post', `/contrats-maintenance/${contrat.id}/generer-intervention`, {});
     await envoyer('post', '/interventions', { clientId: client.id, chantierId: chantier.id, titre: `Fuite sur le réseau de chauffage ${Date.now()}` });
     await envoyer('post', '/factures', { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Écrans sur téléphone', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'Prestation', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+    // Une facture émise, en partie réglée : la liste des règlements et le formulaire ouvert sur
+    // cette facture (client, factures à régler, montants) sont mesurés avec leurs données.
+    const emise = await envoyer('post', '/factures', { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Écrans sur téléphone, règlement', dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'Prestation réglée en partie', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] }) as { id: string };
+    await envoyer('post', `/factures/${emise.id}/emettre`, {});
+    await envoyer('post', '/reglements', { clientId: client.id, dateReglement: dateDuJour(), montant: 200, moyen: 'VIREMENT', reference: `Virement de la société de maintenance des installations thermiques ${suffixe}`, affectations: [{ factureId: emise.id, montant: 200 }] });
 
     const routes = ['/', '/chantiers', `/chantiers/${chantier.id}`, '/devis', '/interventions', '/contrats-maintenance', '/factures',
       '/prete-a-facturer', '/mentions-legales', '/comptabilite', '/clients', `/clients/${client.id}`, '/societe', '/catalogue',
-      '/administration/api', '/achats', '/heures', '/planning', '/admin', '/performances', '/commerciaux', '/statistiques', '/resultat-commercial'];
+      '/administration/api', '/achats', '/heures', '/planning', '/admin', '/performances', '/commerciaux', '/statistiques', '/resultat-commercial',
+      '/reglements', `/reglements?facture=${emise.id}`];
     const page = await allerSurPageAdmin('/');
     const defauts: Record<string, { coupes: string[]; recouverts: string[] }> = {};
     // Téléphones étroit et courant, tablette en portrait et en paysage (le menu latéral apparaît à 1024 px).

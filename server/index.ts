@@ -1214,6 +1214,73 @@ function lignesAvoirPartiel(brutes: unknown): { ordre: number; designation: stri
 }
 class AvoirPlafondError extends Error {}
 
+// --- Règlements clients (décision A3 du 16-10-2026) ---
+// Saisie manuelle des encaissements, entièrement affectés aux factures émises d'un même client.
+// La banque et le rapprochement viendront plus tard ; aucun règlement n'est déduit d'un statut.
+const MOYENS_REGLEMENT = ['VIREMENT', 'CHEQUE', 'CARTE', 'PRELEVEMENT', 'ESPECES'] as const;
+const LIBELLES_MOYEN_REGLEMENT: Record<string, string> = { VIREMENT: 'virement', CHEQUE: 'chèque', CARTE: 'carte', PRELEVEMENT: 'prélèvement', ESPECES: 'espèces' };
+const MAX_AFFECTATIONS_REGLEMENT = 100;
+class ReglementRefuse extends Error {
+  statut: number;
+  constructor(statut: number, message: string) { super(message); this.statut = statut; }
+}
+const reglementInclude = {
+  client: { select: { id: true, raisonSociale: true } },
+  affectations: { select: { id: true, montant: true, facture: { select: { id: true, numero: true, dateEmission: true, totalTtc: true } } }, orderBy: { facture: { numero: 'asc' as const } } },
+  createdBy: { select: { id: true, name: true } },
+  contrepassePar: { select: { id: true, name: true } },
+};
+
+type SoldeFacture = { montantAvoirs: number; montantRegle: number; resteDu: number };
+// Reste dû d'une facture émise ou réglée : TTC, moins ses avoirs émis, moins les parts des
+// règlements non contre-passés. Même calcul que la fonction SQL `reste_du_facture`, qui garde
+// les écritures faites hors de l'API. Il peut devenir négatif (trop-perçu) quand un avoir suit
+// un règlement. Calcul en Decimal : aucun arrondi binaire sur un montant.
+async function soldesFactures(db: PrismaClient | Prisma.TransactionClient, factures: { id: string; type: string; statut: string; totalTtc: Prisma.Decimal | number }[]): Promise<Map<string, SoldeFacture>> {
+  const concernees = factures.filter(facture => facture.type === 'FACTURE' && (facture.statut === 'EMISE' || facture.statut === 'REGLEE'));
+  const soldes = new Map<string, SoldeFacture>();
+  if (!concernees.length) return soldes;
+  const ids = concernees.map(facture => facture.id);
+  const [avoirs, affectations] = await Promise.all([
+    db.facture.groupBy({ by: ['factureOrigineId'], where: { factureOrigineId: { in: ids }, type: 'AVOIR', statut: { not: 'BROUILLON' } }, _sum: { totalTtc: true } }),
+    db.affectationReglement.groupBy({ by: ['factureId'], where: { factureId: { in: ids }, reglement: { statut: 'ENREGISTRE' } }, _sum: { montant: true } }),
+  ]);
+  const sommeAvoirs = new Map(avoirs.map(ligne => [ligne.factureOrigineId, ligne._sum.totalTtc ?? new Prisma.Decimal(0)]));
+  const sommeRegle = new Map(affectations.map(ligne => [ligne.factureId, ligne._sum.montant ?? new Prisma.Decimal(0)]));
+  for (const facture of concernees) {
+    const montantAvoirs = sommeAvoirs.get(facture.id) ?? new Prisma.Decimal(0);
+    const montantRegle = sommeRegle.get(facture.id) ?? new Prisma.Decimal(0);
+    const resteDu = new Prisma.Decimal(facture.totalTtc).minus(montantAvoirs).minus(montantRegle);
+    soldes.set(facture.id, { montantAvoirs: montantAvoirs.toNumber(), montantRegle: montantRegle.toNumber(), resteDu: resteDu.toNumber() });
+  }
+  return soldes;
+}
+
+async function avecSoldes<T extends { id: string; type: string; statut: string; totalTtc: Prisma.Decimal | number }>(db: PrismaClient | Prisma.TransactionClient, factures: T[]) {
+  const soldes = await soldesFactures(db, factures);
+  return factures.map(facture => ({ ...facture, ...(soldes.get(facture.id) ?? { montantAvoirs: null, montantRegle: null, resteDu: null }) }));
+}
+
+// Prisma 5 résout une transaction interactive même quand son COMMIT échoue sur un trigger
+// différé : l'API répondrait un succès sans rien avoir enregistré (constaté sur PostgreSQL 16).
+// Vérifier les contraintes différées avant la fin du rappel fait échouer la transaction au
+// grand jour, avec son annulation.
+async function verifierContraintesDifferees(tx: Prisma.TransactionClient) {
+  await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+}
+
+// Centimes entiers : la somme des affectations se compare au montant sans erreur binaire.
+const centimesEntiers = (montant: number) => Math.round(montant * 100);
+
+function referenceReglementValide(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const reference = value.trim();
+  if (!reference) return null;
+  // Même métrique que PostgreSQL (char_length) et aucun caractère de contrôle.
+  return [...reference].length <= 200 && !/[\u0000-\u001f\u007f]/.test(reference) ? reference : undefined;
+}
+
 // Même sélection pour la lecture informative et le garde transactionnel à l'émission.
 const derniereDateFactureNumerotee = (db: PrismaClient | Prisma.TransactionClient) =>
   db.facture.findFirst({ where: { type: 'FACTURE', numero: { not: null } }, orderBy: { dateEmission: 'desc' }, select: { dateEmission: true } });
@@ -1223,6 +1290,19 @@ app.get('/api/factures/chronologie', requireAuth, requireAdmin, async (_req, res
     const derniere = await derniereDateFactureNumerotee(prisma);
     res.json({ derniereDateEmission: derniere?.dateEmission ?? null });
   } catch { res.status(500).json({ error: 'Lecture de la chronologie impossible.' }); }
+});
+
+// Factures qui attendent un règlement : émises, non soldées, de tous les clients. Le formulaire
+// de règlement y choisit le client puis les factures à régler ; la liste n'est pas tronquée.
+app.get('/api/factures/a-regler', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const factures = await prisma.$transaction(async tx => avecSoldes(tx, await tx.facture.findMany({
+      where: { type: 'FACTURE', statut: 'EMISE' },
+      select: { id: true, numero: true, type: true, statut: true, dateEmission: true, dateEcheance: true, totalTtc: true, client: { select: { id: true, raisonSociale: true, actif: true } } },
+      orderBy: [{ dateEcheance: 'asc' }, { dateEmission: 'asc' }, { numero: 'asc' }],
+    })), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    res.json(decimalToNumber({ factures: factures.filter(facture => (facture.resteDu ?? 0) > 0) }));
+  } catch { res.status(500).json({ error: 'Lecture des factures à régler impossible.' }); }
 });
 
 app.get('/api/factures', requireAuth, requireAdmin, async (req, res) => {
@@ -1238,13 +1318,14 @@ app.get('/api/factures', requireAuth, requireAdmin, async (req, res) => {
   try {
     const orderBy = [{ dateEmission: 'desc' as const }, { createdAt: 'desc' as const }, { id: 'desc' as const }];
     if (!pagine) {
-      const factures = await prisma.facture.findMany({ include: factureInclude, orderBy });
+      const factures = await prisma.$transaction(async tx => avecSoldes(tx, await tx.facture.findMany({ include: factureInclude, orderBy })), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
       return res.json(decimalToNumber(factures));
     }
     const skip = (page! - 1) * pageSize!;
+    // Une seule photo de la base : le total, la page et les soldes de ses factures.
     const { total, items } = await prisma.$transaction(async tx => {
       const total = await tx.facture.count();
-      const items = skip >= total ? [] : await tx.facture.findMany({ include: factureInclude, orderBy, skip, take: pageSize! });
+      const items = skip >= total ? [] : await avecSoldes(tx, await tx.facture.findMany({ include: factureInclude, orderBy, skip, take: pageSize! }));
       return { total, items };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     return res.json({ items: decimalToNumber(items), page, pageSize, total });
@@ -1972,29 +2053,11 @@ app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res
   }
 });
 
-// Ces transitions ne modifient jamais les lignes, les montants ni le document légal :
-// seule la situation de la facture évolue, avec une trace d'audit dans la même transaction.
-function transitionFactureEmise(statut: 'REGLEE', action: 'REGLEMENT') {
-  return async (req: AuthRequest, res: express.Response) => {
-    try {
-      const resultat = await prisma.$transaction(async (tx) => {
-        // Le prédicat d'état porte l'invariant directement dans l'écriture et ferme une
-        // course entre deux actions administratives concurrentes.
-        const maj = await tx.facture.updateMany({ where: { id: paramId(req), statut: 'EMISE', type: 'FACTURE' }, data: { statut } });
-        if (!maj.count) {
-          const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, select: { id: true } });
-          return facture ? { erreur: 'NOT_EMITTED' as const } : { erreur: 'NOT_FOUND' as const };
-        }
-        await tx.journalFacture.create({ data: { factureId: paramId(req), acteurId: req.user!.id, action, detail: `Transition EMISE → ${statut}` } });
-        return { facture: await tx.facture.findUniqueOrThrow({ where: { id: paramId(req) }, include: factureInclude }) };
-      });
-      if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise peut changer de statut.' });
-      return res.json(decimalToNumber(resultat.facture));
-    } catch { return res.status(500).json({ error: 'Changement de statut de facture impossible.' }); }
-  };
-}
-
-app.post('/api/factures/:id/regler', requireAuth, requireAdmin, transitionFactureEmise('REGLEE', 'REGLEMENT'));
+// « Réglée » ne se coche plus à la main : une facture le devient quand ses règlements la
+// soldent (POST /api/reglements). L'ancienne route répond explicitement plutôt qu'un 404 muet.
+app.post('/api/factures/:id/regler', requireAuth, requireAdmin, (_req, res) => {
+  res.status(410).json({ error: 'Une facture n’est plus marquée réglée à la main : enregistrez le règlement reçu (montant, date, moyen), elle passe à « réglée » quand elle est soldée.' });
+});
 
 // L’annulation d’une facture émise est une transition métier atomique : elle conserve la
 // facture historique, crée son unique avoir total et lie les deux documents dans la même TX.
@@ -2009,6 +2072,10 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
       if (!facture) return { erreur: 'NOT_FOUND' as const };
       if (facture.statut !== 'EMISE' || facture.type !== 'FACTURE') return { erreur: 'NOT_EMITTED' as const };
       if (facture.avoirs.length) return { erreur: 'PARTIAL_CREDITS_EXIST' as const };
+      // Un règlement affecté est un encaissement réel : l'annulation totale le laisserait sans
+      // facture. Le garde SQL `facture_statut_reglements` porte la même règle.
+      const reglee = await tx.affectationReglement.count({ where: { factureId: facture.id, reglement: { statut: 'ENREGISTRE' } } });
+      if (reglee) return { erreur: 'PAYMENTS_EXIST' as const };
       const ecritures = await ecrituresPourPiece(tx, facture, facture.id);
       const now = new Date();
       const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
@@ -2038,6 +2105,7 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
     if ('erreur' in resultat) {
       if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
       if (resultat.erreur === 'PARTIAL_CREDITS_EXIST') return res.status(409).json({ error: 'Cette facture porte déjà un ou plusieurs avoirs partiels : elle ne peut plus être annulée en totalité.' });
+      if (resultat.erreur === 'PAYMENTS_EXIST') return res.status(409).json({ error: 'Cette facture a reçu un règlement : elle ne peut plus être annulée en totalité. Émettez un avoir partiel, ou contre-passez d’abord un règlement saisi par erreur.' });
       return res.status(409).json({ error: 'Seule une facture émise peut être annulée.' });
     }
     return res.json(decimalToNumber({ ...resultat.facture, avoir: resultat.avoir }));
@@ -2115,6 +2183,149 @@ app.post('/api/factures/:id/avoirs', requireAuth, requireAdmin, async (req: Auth
     if (error instanceof AvoirPlafondError) return res.status(409).json({ error: error.message });
     if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir total déjà créé ou numéro déjà attribué, veuillez relire la facture.' });
     return res.status(500).json({ error: 'Création de l’avoir partiel impossible.' });
+  }
+});
+
+// Règlements : lecture paginée, la plus récente d'abord, filtrable par client ou par facture.
+app.get('/api/reglements', requireAuth, requireAdmin, async (req, res) => {
+  const entierStrict = (valeur: unknown, defaut: number): number | null => {
+    if (valeur === undefined) return defaut;
+    if (typeof valeur !== 'string' || !/^[1-9]\d*$/.test(valeur)) return null;
+    const nombre = Number(valeur);
+    return Number.isSafeInteger(nombre) ? nombre : null;
+  };
+  const page = entierStrict(req.query.page, 1), pageSize = entierStrict(req.query.pageSize, 25);
+  if (page === null || pageSize === null || pageSize > 100) return res.status(400).json({ error: 'page et pageSize doivent être des entiers positifs (pageSize ≤ 100).' });
+  const clientId = typeof req.query.clientId === 'string' && req.query.clientId ? req.query.clientId : null;
+  const factureId = typeof req.query.factureId === 'string' && req.query.factureId ? req.query.factureId : null;
+  const where: Prisma.ReglementWhereInput = { ...(clientId ? { clientId } : {}), ...(factureId ? { affectations: { some: { factureId } } } : {}) };
+  try {
+    const skip = (page - 1) * pageSize;
+    const { total, items } = await prisma.$transaction(async tx => {
+      const total = await tx.reglement.count({ where });
+      const items = skip >= total ? [] : await tx.reglement.findMany({ where, include: reglementInclude, orderBy: [{ dateReglement: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }], skip, take: pageSize });
+      return { total, items };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return res.json({ items: decimalToNumber(items), page, pageSize, total });
+  } catch { return res.status(500).json({ error: 'Lecture des règlements impossible.' }); }
+});
+
+// Saisie d'un règlement reçu, réparti sur une ou plusieurs factures émises du même client.
+// La somme des parts égale le montant ; chaque part reste dans le reste dû de sa facture,
+// relu sous verrou. Une facture soldée passe à « réglée » dans la même transaction.
+app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const corps = req.body || {};
+    const clientId = typeof corps.clientId === 'string' ? corps.clientId : '';
+    // Date civile : `dateIsoStricte` rend minuit UTC en ISO, comparé ici par son seul jour.
+    const dateReglementIso = dateIsoStricte(corps.dateReglement);
+    const dateReglement = dateReglementIso ? dateSeuleEnJourCivil(dateReglementIso) : null;
+    const montant = nombreDecimalNonNegatif(corps.montant, 10);
+    const moyen = String(corps.moyen || '');
+    const reference = referenceReglementValide(corps.reference);
+    if (!clientId) return res.status(400).json({ error: 'Le client du règlement est obligatoire.' });
+    if (!dateReglement) return res.status(400).json({ error: 'La date du règlement doit être valide au format JJ-MM-AAAA.' });
+    if (montant === null || montant > PLAFOND_MONTANT) return res.status(400).json({ error: 'Le montant du règlement doit être un nombre positif, avec au plus deux décimales.' });
+    if (!(MOYENS_REGLEMENT as readonly string[]).includes(moyen)) return res.status(400).json({ error: 'Le moyen de paiement doit être virement, chèque, carte, prélèvement ou espèces.' });
+    if (reference === undefined) return res.status(400).json({ error: 'La référence compte au plus 200 caractères, sans caractère de contrôle.' });
+    const brutes = Array.isArray(corps.affectations) ? corps.affectations : [];
+    if (!brutes.length || brutes.length > MAX_AFFECTATIONS_REGLEMENT) return res.status(400).json({ error: `Un règlement s’affecte à au moins une facture, et au plus ${MAX_AFFECTATIONS_REGLEMENT}.` });
+    const affectations: { factureId: string; montant: number }[] = [];
+    for (const brute of brutes) {
+      const factureId = typeof brute?.factureId === 'string' ? brute.factureId : '';
+      const part = nombreDecimalNonNegatif(brute?.montant, 10);
+      if (!factureId || part === null) return res.status(400).json({ error: 'Chaque affectation désigne une facture et un montant positif, avec au plus deux décimales.' });
+      if (affectations.some(affectation => affectation.factureId === factureId)) return res.status(400).json({ error: 'Une facture ne figure qu’une fois dans un règlement.' });
+      affectations.push({ factureId, montant: part });
+    }
+    const totalAffecte = affectations.reduce((somme, affectation) => somme + centimesEntiers(affectation.montant), 0);
+    if (totalAffecte !== centimesEntiers(montant)) return res.status(400).json({ error: `Le règlement doit être entièrement affecté : ${formatMontantFacture(totalAffecte / 100)} répartis pour un montant de ${formatMontantFacture(montant)}.` });
+    const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
+    if (dateReglement > aujourdHuiEntreprise(societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)) return res.status(400).json({ error: 'La date du règlement ne peut pas être postérieure à aujourd’hui.' });
+
+    const reglement = await prisma.$transaction(async (tx) => {
+      const client = await tx.client.findUnique({ where: { id: clientId }, select: { id: true } });
+      if (!client) throw new ReglementRefuse(404, 'Client introuvable.');
+      // Toujours le même ordre de verrous (identifiants croissants) : deux règlements
+      // concurrents sur les mêmes factures s'attendent au lieu de s'interbloquer. Avoirs et
+      // annulation verrouillent la même ligne : le reste dû relu ci-dessous ne peut plus bouger.
+      const ids = affectations.map(affectation => affectation.factureId).sort();
+      const verrouillees = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "Facture" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+      if (verrouillees.length !== ids.length) throw new ReglementRefuse(404, 'Facture introuvable.');
+      const factures = await tx.facture.findMany({ where: { id: { in: ids } }, select: { id: true, numero: true, clientId: true, type: true, statut: true, totalTtc: true, dateEmission: true } });
+      const parId = new Map(factures.map(facture => [facture.id, facture]));
+      for (const affectation of affectations) {
+        const facture = parId.get(affectation.factureId)!;
+        if (facture.clientId !== client.id) throw new ReglementRefuse(409, `La facture ${facture.numero || 'brouillon'} appartient à un autre client : un règlement ne s’affecte qu’aux factures de son client.`);
+        if (facture.type !== 'FACTURE' || facture.statut !== 'EMISE') throw new ReglementRefuse(409, `Seule une facture émise non soldée reçoit un règlement : la facture ${facture.numero || 'brouillon'} ne le peut pas.`);
+        if (dateReglement < dateSeuleEnJourCivil(facture.dateEmission)) throw new ReglementRefuse(409, `Le règlement ne peut pas précéder l’émission de la facture ${facture.numero} (${formatDateFacture(facture.dateEmission)}).`);
+      }
+      const soldes = await soldesFactures(tx, factures);
+      for (const affectation of affectations) {
+        const facture = parId.get(affectation.factureId)!;
+        const resteDu = soldes.get(facture.id)!.resteDu;
+        if (centimesEntiers(affectation.montant) > centimesEntiers(resteDu)) throw new ReglementRefuse(409, `La part de ${formatMontantFacture(affectation.montant)} dépasse le reste dû de la facture ${facture.numero} (${formatMontantFacture(resteDu)}).`);
+      }
+      const cree = await tx.reglement.create({ data: {
+        clientId: client.id, dateReglement: new Date(dateReglementIso!), montant, moyen, reference, createdById: req.user!.id,
+        affectations: { create: affectations.map(affectation => ({ factureId: affectation.factureId, montant: affectation.montant })) },
+      }, include: reglementInclude });
+      const libelle = `Règlement du ${formatDateFacture(cree.dateReglement)} (${LIBELLES_MOYEN_REGLEMENT[moyen]}${reference ? `, réf. ${reference}` : ''})`;
+      for (const affectation of affectations) {
+        const facture = parId.get(affectation.factureId)!;
+        const resteApres = (centimesEntiers(soldes.get(facture.id)!.resteDu) - centimesEntiers(affectation.montant)) / 100;
+        await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_AFFECTE', detail: `${libelle} : ${formatMontantFacture(affectation.montant)} affectés ; reste dû ${formatMontantFacture(resteApres)}` } });
+        if (resteApres <= 0) {
+          await tx.facture.updateMany({ where: { id: facture.id, statut: 'EMISE', type: 'FACTURE' }, data: { statut: 'REGLEE' } });
+          await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT', detail: 'Transition EMISE → REGLEE : facture soldée par ses règlements' } });
+        }
+      }
+      await verifierContraintesDifferees(tx);
+      return cree;
+    });
+    return res.status(201).json(decimalToNumber(reglement));
+  } catch (error) {
+    if (error instanceof ReglementRefuse) return res.status(error.statut).json({ error: error.message });
+    return res.status(500).json({ error: 'Enregistrement du règlement impossible.' });
+  }
+});
+
+// Une saisie erronée ne s'efface pas : la contre-passation la retire du reste dû de chaque
+// facture, avec motif, instant et auteur. Une facture qui n'est plus soldée redevient émise.
+app.post('/api/reglements/:id/contrepasser', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const motif = motifCorrectionValide(req.body?.motif);
+    if (!motif || /[\u0000-\u001f\u007f]/.test(motif)) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères, sans caractère de contrôle, est obligatoire.' });
+    const reglement = await prisma.$transaction(async (tx) => {
+      // Les parts sont immuables : les lire avant tout verrou est sûr. Les factures sont
+      // ensuite verrouillées avant le règlement, dans l'ordre de la saisie.
+      const parts = await tx.affectationReglement.findMany({ where: { reglementId: paramId(req) }, select: { factureId: true, montant: true } });
+      if (!parts.length) throw new ReglementRefuse(404, 'Règlement introuvable.');
+      const ids = parts.map(part => part.factureId).sort();
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Facture" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+      const [verrouille] = await tx.$queryRaw<{ statut: string }[]>(Prisma.sql`SELECT "statut" FROM "Reglement" WHERE "id" = ${paramId(req)} FOR UPDATE`);
+      if (!verrouille) throw new ReglementRefuse(404, 'Règlement introuvable.');
+      if (verrouille.statut !== 'ENREGISTRE') throw new ReglementRefuse(409, 'Ce règlement est déjà contre-passé.');
+      const maj = await tx.reglement.update({ where: { id: paramId(req) }, data: { statut: 'CONTREPASSE', motifContrepassation: motif, contrepasseLe: new Date(), contrepasseParId: req.user!.id }, include: reglementInclude });
+      const factures = await tx.facture.findMany({ where: { id: { in: ids } }, select: { id: true, type: true, statut: true, totalTtc: true } });
+      const soldes = await soldesFactures(tx, factures);
+      const libelle = `Contre-passation du règlement du ${formatDateFacture(maj.dateReglement)} de ${formatMontantFacture(maj.montant)} : « ${motif} »`;
+      for (const facture of factures) {
+        const part = parts.find(ligne => ligne.factureId === facture.id)!;
+        const resteDu = soldes.get(facture.id)?.resteDu ?? 0;
+        await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_CONTREPASSE', detail: `${libelle} ; ${formatMontantFacture(part.montant)} retirés ; reste dû ${formatMontantFacture(resteDu)}` } });
+        if (facture.statut === 'REGLEE' && resteDu > 0) {
+          await tx.facture.updateMany({ where: { id: facture.id, statut: 'REGLEE', type: 'FACTURE' }, data: { statut: 'EMISE' } });
+          await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'RETOUR_EMISE', detail: 'Transition REGLEE → EMISE : règlement contre-passé, la facture n’est plus soldée' } });
+        }
+      }
+      await verifierContraintesDifferees(tx);
+      return maj;
+    });
+    return res.json(decimalToNumber(reglement));
+  } catch (error) {
+    if (error instanceof ReglementRefuse) return res.status(error.statut).json({ error: error.message });
+    return res.status(500).json({ error: 'Contre-passation du règlement impossible.' });
   }
 });
 
