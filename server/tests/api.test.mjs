@@ -263,6 +263,8 @@ if (!TEST_DATABASE_URL) {
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
+      ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
+      ...Array.from({ length: 15 }, (_, i) => `pilote3.supprtype.${i}@iris.test`),
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -4288,6 +4290,37 @@ if (!TEST_DATABASE_URL) {
         assert.ok([200, 409].includes(changement.status) && [200, 400].includes(lien.status), `essai ${essai} : ${changement.status}/${lien.status}`);
       }
       assert.equal(issues.deliee + issues.refusChangement + issues.refusLien, 20);
+    });
+
+    test('la suppression d’un compte relié mentionne la fiche déliée, même reliée au même moment', async () => {
+      for (let essai = 0; essai < 10; essai += 1) {
+        const compte = await prisma.user.create({ data: { email: `pilote3.suppression.${essai}@iris.test`, name: `TEST Pilote3 suppression ${essai}`, role: 'TECHNICIEN' } });
+        const fiche = await prisma.intervenant.create({ data: { nom: `TEST Pilote3 suppression ${essai}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+        const corpsLien = { userId: compte.id };
+        // Premier essai sans concurrence : la fiche est reliée avant la suppression.
+        if (essai === 0) assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, corpsLien)).status, 200);
+        const [suppression, lien] = await Promise.all([
+          request(app).delete(`/api/users/${compte.id}`).set(admin),
+          essai === 0 ? Promise.resolve({ status: 200 }) : envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, corpsLien),
+        ]);
+        assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+        assert.ok([200, 400].includes(lien.status), `essai ${essai} : liaison ${lien.status}`);
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+        const entree = await prisma.journalAdministration.findFirst({ where: { action: 'SUPPRESSION', cibleId: compte.id } });
+        const mention = `fiche intervenant « ${fiche.nom} » (${fiche.id}) déliée`;
+        // Reliée avant la suppression (liaison réussie) : l'entrée la mentionne ; sinon, non.
+        assert.equal((entree.detail ?? '').includes(mention), lien.status === 200, `essai ${essai} : liaison ${lien.status}, détail ${entree.detail}`);
+      }
+    });
+
+    test('un changement de type pendant la suppression du compte répond 404, jamais 500', async () => {
+      for (let essai = 0; essai < 15; essai += 1) {
+        const compte = await prisma.user.create({ data: { email: `pilote3.supprtype.${essai}@iris.test`, name: `TEST Pilote3 suppression type ${essai}`, role: 'TECHNICIEN' } });
+        const corpsType = { role: 'COMPTABLE' };
+        const [suppression, changement] = await Promise.all([request(app).delete(`/api/users/${compte.id}`).set(admin), envoyer('patch', `/api/users/${compte.id}/role`, admin, corpsType)]);
+        assert.ok([200, 404].includes(suppression.status), `essai ${essai} : suppression ${suppression.status}`);
+        assert.ok([200, 404].includes(changement.status), `essai ${essai} : changement ${changement.status} ${JSON.stringify(changement.body)}`);
+      }
     });
 
     test('deux liaisons simultanées de la même fiche laissent un journal cohérent avec le lien final', async () => {

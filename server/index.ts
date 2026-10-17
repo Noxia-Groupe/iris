@@ -3865,8 +3865,11 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       // lui est fermée.
       // Fiches intervenant d'abord, dans le même ordre que la liaison : la suppression les délie
       // (ON DELETE SET NULL), et le journal le dit.
-      const fichesDeliees = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE`);
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE`);
       await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
+      // Relues une fois le compte verrouillé : une fiche reliée entre-temps (la liaison valide en
+      // tenant ce verrou) est déliée par la suppression, et doit donc figurer au journal.
+      const fichesDeliees: Array<{ id: string; nom: string }> = await tx.intervenant.findMany({ where: { userId: id }, select: { id: true, nom: true } });
       const supprime = await tx.user.findUnique({
         where: { id },
         select: {
