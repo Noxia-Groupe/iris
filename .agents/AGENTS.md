@@ -45,6 +45,6 @@ Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'ét
 Mêmes règles que dans [`CLAUDE.md`](../CLAUDE.md#règles-permanentes-de-conception-décision-de-nelson-du-17-10-2026), à vérifier aussi en revue :
 
 1. **Un paramètre plutôt qu'une constante.** Toute nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée, et non une constante dans le code. La valeur par défaut n'invente aucune valeur métier (ni prix, ni commission, ni compte comptable). Les règles légales ou d'intégrité restent dans le code, avec leur raison écrite.
-2. **Des fichiers de taille raisonnable.** Aucun fichier de code applicatif ne dépasse environ 800 lignes ; au-delà, on le découpe, dans une PR sans changement de comportement. Les fichiers de tests, les migrations et les fichiers générés ne sont pas concernés (choix par défaut, à confirmer).
+2. **Des fichiers de taille raisonnable.** Aucun fichier de code applicatif ne dépasse environ 800 lignes ; au-delà, on le découpe, dans une PR sans changement de comportement. Les fichiers de tests, les migrations, les fichiers générés et le schéma Prisma ne sont pas concernés (choix par défaut, à confirmer).
 
-Une revue signale un nouveau seuil, délai, statut ou circuit de validation écrit en dur, et tout fichier applicatif qui franchit ou grossit au-delà de cette taille.
+Une revue signale tout nouveau seuil, délai, statut ou circuit de validation écrit en dur. Elle signale aussi tout fichier applicatif qui dépasse cette taille, ou qui la dépassait déjà et grossit encore. Ces remarques suivent la règle 3 de la méthode.

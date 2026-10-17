@@ -228,12 +228,12 @@ Depuis le 16-10-2026, l'ordre suit le pilote : voir le tableau des lots ci-dessu
 
 ### Chantiers techniques (décision de Nelson du 17-10-2026)
 
-Quatre chantiers techniques, chacun dans sa ou ses PR, selon les règles habituelles, dans l'ordre 1, 2, puis 3 et 4 en proposition seulement :
-1. **Dépendance `xlsx`** : déclarée par le serveur sans être utilisée, et visée par des avis de sécurité. Retirée par #175 (en revue). Les autres failles relevées par `npm audit` font chacune l'objet d'une issue, de #168 à #174.
-2. **Découpage de `server/index.ts` par domaine** (environ 8 000 lignes ; 144 déclarations `app.<méthode>` depuis #166, plus 27 routes doublées en `/api/v1` par `routeMixte`), sans aucun changement de comportement : mêmes routes, réponses, codes et messages d'erreur, transactions, verrous et contraintes différées. **Prévu**, avant le lot pilote 3b.
+Quatre chantiers techniques, chacun dans sa ou ses PR, selon les règles habituelles, dans l'ordre décidé : 1, puis 2, puis 3 et 4 en proposition seulement.
+1. **Dépendance `xlsx`** : déclarée par le serveur sans être utilisée, et visée par des avis de sécurité. **Implémenté** : retirée par #175. Les autres failles relevées par `npm audit` font chacune l'objet d'une issue, de #168 à #174 (ouvertes).
+2. **Découpage de `server/index.ts` par domaine** (environ 8 000 lignes ; 144 déclarations `app.<méthode>` depuis #166, et 27 appels `routeMixte`, soit 54 routes sous `/api` et `/api/v1` : 198 routes enregistrées en tout), sans aucun changement de comportement : mêmes routes, réponses, codes et messages d'erreur, transactions, verrous et contraintes différées. **Prévu**, avant le lot pilote 3b.
    - Méthode : de petites PR ; la première propose la structure et extrait un domaine simple, chaque suivante déplace un ou deux domaines.
-   - Preuve : un script compare la liste des routes avant et après, et les suites API et E2E passent sans modification (sauf un chemin d'import).
-   - À la fin, aucun fichier de code applicatif ne dépasse environ 800 lignes. Ensuite seulement : proposition du même découpage pour les gros écrans (`ChantierDetail.tsx`, `Admin.tsx`).
+   - Preuve : un script compare la liste des routes avant et après, et les suites API et E2E passent sans modification. Nelson admet un changement de chemin d'import dans les tests ; `server/index.ts` garde les exports qu'ils lisent, pour qu'aucun ne change.
+   - À la fin, aucun fichier du serveur ne dépasse environ 800 lignes. Ensuite seulement : proposition du même découpage pour les gros écrans (`ChantierDetail.tsx`, `Admin.tsx`, et `Planning.tsx`, qui dépasse aussi 800 lignes).
 3. **Droits flexibles et simples à paramétrer** : proposition `docs/MODELE-DROITS-CIBLE.md` (permissions élémentaires, périmètres, rôles paramétrables, hiérarchie facultative, modèles TPE et PME, migration rôle par rôle à comportement identique), à valider par Nelson avant tout code. Parcours de droits : règle 2. **Prévu.**
 4. **Paramétrage plutôt que règles en dur** : proposition `docs/PARAMETRAGE-CIBLE.md` (inventaire des règles classées en déjà paramétrables, à rendre paramétrables, ou à garder dans le code ; assistant de démarrage dans Paramètres), à valider par Nelson avant tout code. Aucune valeur métier inventée. **Prévu.**
 
@@ -343,6 +343,8 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Nature proposée par famille : une prestation en main-d'œuvre, un article ou un équipement en fourniture.
 - La référence et l'unité entrent dans l'empreinte de signature ; le prix d'achat prévu, donnée interne, n'y entre pas.
 - Un devis signé est figé en base, en plus du contrôle de l'API : ses lignes et son contenu, sa signature (ni modification, ni suppression) et le vidage des trois tables (`TRUNCATE`). Son cycle de vie (statut, acompte constaté, annulation, conversion) reste possible.
+
+**Règles permanentes de conception** (décision du 17-10-2026, #176) : la limite d'environ 800 lignes ne s'applique ni aux fichiers de tests, ni aux migrations, ni aux fichiers générés (lockfiles, client Prisma), ni au schéma Prisma, que Prisma 5 ne scinde qu'avec une fonction en préversion.
 
 **Envoi des documents** (lot pilote 6) : journal des envois, choix par défaut, à confirmer, à préciser dans la PR du lot.
 
