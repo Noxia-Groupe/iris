@@ -153,7 +153,7 @@ Méthode : le périmètre du pilote est la boussole ([CLAUDE.md](../CLAUDE.md#m�
 
   **Décisions du 16-10-2026 (A5)**, pour une flexibilité maximale :
   - le fait générateur de la commission se choisit dans les paramètres généraux : la commande, la fin des travaux, ou la réception du paiement complet. La décision du 14-10-2026 le réglait par plan, avec deux options (fin du chantier, commande signée) : lecture retenue, à confirmer par Nelson, le réglage général du 16-10-2026 la remplace (question plus bas) ;
-  - un commercial sans plan n'a pas de commission : il faut lui affecter un plan commercial pour qu'il en ait. Précision du 17-10-2026 : tant qu'aucun plan n'est défini et attribué, aucun commercial ne touche de commission ; il les touche à partir de la date d'attribution de son plan. Les commissions actuelles (barème global) sont donc à fermer d'ici là (lot à planifier) ;
+  - un commercial sans plan n'a pas de commission : il faut lui affecter un plan commercial pour qu'il en ait. Précision de Nelson du 17-10-2026 : « Si pas de plan commercial alors le commercial ne touche pas de commission jusqu'à ce que le plan commercial soit défini et à date et à partir de là le commercial aura ses commissions. » Les commissions actuelles (barème global) sont donc à fermer d'ici là (lot à planifier) ;
   - un changement de plan n'est pas rétroactif : il prend effet à la date d'affectation du nouveau plan ;
   - chaque plan a son propre barème ; on peut en créer plusieurs et attribuer celui que l'on veut à chaque commercial.
 
@@ -253,7 +253,7 @@ Retenus pour les lots concernés : aucun n'est implémenté par ce document, cha
 - Règlements (lot pilote 1, P1a) :
   - moyens : virement, chèque, carte, prélèvement, espèces, sans plafond d'espèces (règle de conformité non décidée) ;
   - date ni postérieure au jour de la société, ni antérieure à l'émission d'une facture visée (un paiement reçu avant la facture relève de l'acompte) ;
-  - un règlement est entièrement affecté, sans avance client non affectée ; une part peut dépasser le reste dû, le surplus devient un trop-perçu sur cette facture (décision du 17-10-2026) ;
+  - un règlement est entièrement affecté, sans avance client non affectée ; une part peut dépasser le reste dû, le surplus devient un trop-perçu sur cette facture (décision de Nelson du 17-10-2026). Choix par défaut, à confirmer : une facture déjà soldée par avoir ne reçoit plus de règlement ; un surplus ne va sur une facture que si les autres factures du même règlement sont entièrement couvertes ; « Répartir le montant » place un surplus sur la facture à l'échéance la plus récente ;
   - une facture soldée par avoirs, sans règlement, reste émise (« Soldée par avoir ») ; un trop-perçu est affiché, sans remboursement dans ce lot.
 
 ### Sans objet tant qu'aucune donnée réelle ni instance n'existe

@@ -1274,7 +1274,8 @@ async function synchroniserStatutReglement(tx: Prisma.TransactionClient, facture
   if (cible === facture.statut) return;
   const maj = await tx.facture.updateMany({ where: { id: facture.id, type: 'FACTURE', statut: facture.statut }, data: { statut: cible } });
   if (maj.count !== 1) throw new Error('Statut de facture modifié pendant la transaction.');
-  await tx.journalFacture.create({ data: { factureId: facture.id, acteurId, action: cible === 'REGLEE' ? 'REGLEMENT' : 'RETOUR_EMISE', detail: `Transition ${facture.statut} → ${cible} (${cause}) : réglé ${formatMontantFacture(solde.montantRegle)}, reste dû ${formatMontantFacture(solde.resteDu)}` } });
+  const reste = solde.resteDu < 0 ? `trop-perçu ${formatMontantFacture(-solde.resteDu)}` : `reste dû ${formatMontantFacture(solde.resteDu)}`;
+  await tx.journalFacture.create({ data: { factureId: facture.id, acteurId, action: cible === 'REGLEE' ? 'REGLEMENT' : 'RETOUR_EMISE', detail: `Transition ${facture.statut} → ${cible} (${cause}) : réglé ${formatMontantFacture(solde.montantRegle)}, ${reste}` } });
 }
 
 // Prisma 5 résout une transaction interactive même quand son COMMIT échoue sur un trigger
@@ -2283,7 +2284,17 @@ app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, 
       }
       // Une part peut dépasser le reste dû (décision de Nelson du 17-10-2026) : la facture est
       // réglée dès que le montant reçu l'atteint ou le dépasse, et le surplus devient un trop-perçu.
+      // Choix par défaut, à confirmer : une facture déjà soldée (par avoir) ne reçoit plus rien, et
+      // un surplus ne va sur une facture que si les autres factures du règlement sont couvertes.
       const soldes = await soldesFactures(tx, factures);
+      const resteApresPart = (affectation: { factureId: string; montant: number }) => centimesEntiers(soldes.get(affectation.factureId)!.resteDu) - centimesEntiers(affectation.montant);
+      for (const affectation of affectations) {
+        const facture = parId.get(affectation.factureId)!;
+        if (centimesEntiers(soldes.get(facture.id)!.resteDu) <= 0) throw new ReglementRefuse(409, `La facture ${facture.numero} est déjà soldée (reste dû ${formatMontantFacture(soldes.get(facture.id)!.resteDu)}) : elle ne reçoit plus de règlement.`);
+      }
+      const avecSurplus = affectations.find(affectation => resteApresPart(affectation) < 0);
+      const encoreDue = affectations.find(affectation => resteApresPart(affectation) > 0);
+      if (avecSurplus && encoreDue) throw new ReglementRefuse(409, `Le surplus ne peut aller sur la facture ${parId.get(avecSurplus.factureId)!.numero} tant que la facture ${parId.get(encoreDue.factureId)!.numero} de ce règlement reste due.`);
       const cree = await tx.reglement.create({ data: {
         clientId: client.id, dateReglement: new Date(dateReglementIso!), montant, moyen, reference, createdById: req.user!.id,
         affectations: { create: affectations.map(affectation => ({ factureId: affectation.factureId, montant: affectation.montant })) },
@@ -2291,7 +2302,7 @@ app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, 
       const libelle = `Règlement ${cree.id} du ${formatDateFacture(cree.dateReglement)} (${LIBELLES_MOYEN_REGLEMENT[moyen]}${reference ? `, réf. ${reference}` : ''})`;
       for (const affectation of affectations) {
         const facture = parId.get(affectation.factureId)!;
-        const resteApres = (centimesEntiers(soldes.get(facture.id)!.resteDu) - centimesEntiers(affectation.montant)) / 100;
+        const resteApres = resteApresPart(affectation) / 100;
         const solde = resteApres < 0 ? `trop-perçu ${formatMontantFacture(-resteApres)}` : `reste dû ${formatMontantFacture(resteApres)}`;
         await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_AFFECTE', detail: `${libelle} : ${formatMontantFacture(affectation.montant)} affectés ; ${solde}` } });
         await synchroniserStatutReglement(tx, facture.id, req.user!.id, `règlement ${cree.id}`);
