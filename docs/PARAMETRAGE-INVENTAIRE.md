@@ -14,7 +14,7 @@
 
 | Classe | Contenu | Volume |
 |---|---|---|
-| (A) Déjà paramétrable | `Parametres` (9 champs), `CompanySettings` (17 champs), `ParametresRemuneration` (8 champs, sans effet), module Planning, paramétrage comptable (comptes, règles, TVA), mentions légales et CGV versionnées, 6 référentiels, partage public du planning, organisation des comptes (→ droits), 8 variables d'environnement | 11 blocs |
+| (A) Déjà paramétrable | `Parametres` (9 champs), `CompanySettings` (18 champs), `ParametresRemuneration` (8 champs, sans effet), module Planning, paramétrage comptable (comptes, règles, TVA), mentions légales et CGV versionnées, 6 référentiels, partage public du planning, organisation des comptes (→ droits), 9 variables d'environnement (8 côté serveur et `VITE_API_URL`) | 11 blocs |
 | (B) En dur, à rendre paramétrable | qui fait quoi, rattachements obligatoires, durées et horaires, seuils et méthodes de calcul, listes de valeurs, étapes de cycle de vie, numérotation et modèles de documents, calendrier, affichage, identité | 75 entrées (B-01 à B-75) |
 | (C) À garder dans le code | numérotation légale, immutabilité (triggers SQL), fiscalité et arrondis, intégrité métier décidée, invariants de droits, dates, plafonds techniques | 28 entrées (C-01 à C-28) |
 
@@ -52,7 +52,7 @@ Constats principaux :
 - **Lecture** : `getCompanySettings()` `idx:869-875` ; `GET /api/company` `idx:6665-6671` (tout compte connecté) ; `GET /api/v1/company` `idx:5558-5564` (scope `company:read`).
 - **Écriture** : `PUT /api/company` `idx:6673-6694`, garde `requireSuperAdmin`. Validation `companySettingsPayload` `idx:781-802` : texte de 2 000 caractères au plus, couleurs `#RRGGBB`, fuseau pris dans la liste `FUSEAUX_HORAIRES_FRANCAIS`.
 - **Journal** : type `SOCIETE`, `idx:6684-6685`.
-- **Écrans** : `cli/pages/Societe.tsx` (route `/societe`, `cli/App.tsx:180-183`). Un admin la consulte, seul un superadmin la modifie (`cli/App.tsx:91-93`). Le fuseau seul se règle aussi dans `cli/pages/Admin.tsx:974-990`, onglet « Société » (superadmin).
+- **Écrans** : `cli/pages/Societe.tsx` (route `/societe`, `cli/App.tsx:180-183`). Un admin la consulte, seul un superadmin la modifie (`cli/App.tsx:91-93`). Le fuseau, lui, ne se règle **que** dans `cli/pages/Admin.tsx:974-990`, onglet « Société » (superadmin).
 
 | Champ | Défaut | Ce que le code en fait |
 |---|---|---|
@@ -114,7 +114,7 @@ Constats principaux :
 | Types d'événement du planning (libellé, couleur) | `PlanningEventType` `schema:1198-1207` | `idx:4569-4615` (`blockCommercial`, `blockTechnicien`, `requirePlanningActif`) | non | `cli/pages/Planning.tsx:757-860` (modale Types) |
 | Catalogue : prestations, articles, équipements, et catégories hiérarchiques | `schema:1082-1160` | `routeMixte` `idx:6052-6057` (garde par défaut `requireAdmin` `idx:361` ; v1 : `catalogue:write`) ; payload `idx:5897-5932` | non | `cli/pages/Catalogue.tsx` (`/catalogue`, admin) |
 
-Les valeurs proposées par défaut à la création d'une fiche relèvent de B : unité « unité », TVA 20, prix de vente 0 (B-50, B-51).
+Les valeurs proposées par défaut à la création d'une fiche relèvent de B : unité « unité » et TVA 20 (B-49, B-50) ; le prix de vente initial à 0 n'a pas d'entrée B (valeur technique d'un champ obligatoire).
 
 ### 1.8 Partage public du planning
 - **Modèle** : `PlanningPublicShare` `schema:1186-1193` ; un lien à la fois, actif ou non.
@@ -267,7 +267,7 @@ Pour chaque entrée : où elle se trouve, la valeur actuelle, le comportement du
 
 | ID | Règle | Où | Code actuel |
 |---|---|---|---|
-| B-72 | Nom d'une société affiché | `cli/pages/Login.tsx:91` ; `cli/pages/PlanningPublic.tsx:135` ; favicons et `theme-color` `client/index.html:5-15` | « NØXIA GROUPE », icônes, `#002359`. Contraire à la règle « aucune valeur de société dans le code » (passation §1) |
+| B-72 | Nom d'une société affiché | `cli/pages/Login.tsx:91` ; `cli/pages/PlanningPublic.tsx:135` ; favicons et `theme-color` `client/index.html:5-15` | « NØXIA GROUPE », icônes, `#002359` ; la même couleur est écrite en dur dans `cli/index.css:9` et `:22`, alors que `couleurPrimaire` n'agit que sur le PDF. Contraire à la règle « aucune valeur de société dans le code » (passation §1) |
 | B-73 | Libellé de repli du barème réduit | `remunerationNeutre` `idx:7635` ; `cli/modules.ts:26` | « Barème réduit » (le libellé est déjà paramétrable, voir 1.3) |
 | B-74 | Valeurs par défaut de rémunération insérées par migration | `mig/20260904210000_parametres_remuneration:26-37` | Barèmes et primes d'une société (voir 1.3), sans effet depuis #159 |
 
@@ -281,7 +281,7 @@ Pour chaque entrée : où elle se trouve, la valeur actuelle, le comportement du
 
 ## 3. (C) À garder dans le code (légal ou intégrité)
 
-Raison légale : l'article n'est cité que lorsque nous en sommes sûrs, avec la mention « selon notre lecture » ; sinon « à confirmer par le cabinet ».
+Raison légale : les articles sont cités selon notre lecture, et **toujours à confirmer par le cabinet**.
 
 | ID | Règle | Où | Raison |
 |---|---|---|---|
@@ -298,6 +298,7 @@ Raison légale : l'article n'est cité que lorsque nous en sommes sûrs, avec la
 | C-11 | Plafond des montants | `PLAFOND_MONTANT` `idx:1199` (9 999 999 999,99), utilisé `idx:1236`, `idx:1451`, `idx:1459`, `idx:2183`, `idx:2267`, `idx:6114`, `idx:6135` | Technique : colonnes `Decimal(12,2)` |
 | C-12 | Écritures comptables | Équilibre et scellement (`ecrituresPourPiece` `idx:1930-1980` ; triggers `mig/20261007140000…`) ; un avoir reprend comptes et journal de l'origine (`idx:1939-1946`) ; plan comptable vide au départ ; journaux comptables en ajout seul (`mig/20260925120000_journal_activation_comptes:22-27`, `mig/20261009120000…:35-40`) | Intégrité comptable. Le contenu (comptes, journal) est paramétrable (A, 1.5) |
 | C-13 | Format et lecture des dates | `dateIsoStricte` `idx:4884-4908` (JJ-MM-AAAA, ou AAAA-MM-JJ pour les champs natifs) ; `formatDateFacture` `idx:1120-1122` ; `cli/lib/dateFormatting.ts:18-25` ; jour civil au fuseau de la société (`jourCivilEntreprise` `idx:749-755`) ; dates seules stockées à minuit UTC (`dateSeuleEnJourCivil` `idx:774-779`) | Décision de Nelson (14-10-2026) et intégrité. La demande curative n'accepte que JJ-MM-AAAA (`dateDemandeCurative` `idx:4910-4915`) ; alignement prévu (passation §4) |
+| C-13 bis | Choix du site de facturation | `SITE_FACTURATION_ORDRE` `idx:1111`, utilisé à l'émission (`idx:2063`) ; adresse ensuite figée sur la facture (`idx:2070`) | L'adresse de facturation est une mention obligatoire ; l'ordre de choix (site de facturation, principal, siège, nom) est une règle d'intégrité. Omission relevée par l'audit du 17-10-2026 |
 | C-14 | Invariants de droits (→ droits) | `isLastSuperAdmin` `idx:3766-3771` (`idx:3837`, `idx:3932`, `idx:4137`) ; pas de suppression ni de désactivation de son propre compte (`idx:3826`, `idx:4134`) ; un admin ne gère pas un superadmin (`refuseSuperAdminTarget` `idx:3714-3718`) ; pas de suppression d'un compte auteur de données tracées (`idx:3842-3860`) ; un technicien ne reçoit jamais certains droits (`DROITS_INTERDITS_TECHNICIEN` `idx:243`) | Intégrité de la gouvernance et de la traçabilité |
 | C-15 | Journaux en ajout seul | `JournalAdministration` : triggers `mig/20261015120000_journal_administration:35-67`, conservation de 1 à 90 jours (`CHECK` `:6`) ; journal des saisies, journal des factures (`mig/20260909180000_restrict_journal_facture`) | Traçabilité. La durée de conservation est réglable (A) ; le minimum est à faire trancher par le cabinet (passation §5) |
 | C-16 | Un chantier par affaire ; affaire commencée non annulable ; client figé après facturation | Conversion unique (`DevisConversion` `schema:556-566` ; `idx:6472-6496`) ; annulation refusée s'il existe des saisies vivantes (`idx:6611-6619`) ; changement de client refusé si l'affaire est facturée ou porte une intervention SAV (`idx:3510-3526`) | Décisions de Nelson (14 et 16-10-2026) et intégrité des coûts |
@@ -312,7 +313,7 @@ Raison légale : l'article n'est cité que lorsque nous en sommes sûrs, avec la
 | C-25 | Structures | Catégories de planning `PLANNING_CATEGORIES` `idx:4349` ; familles du catalogue `idx:5870-5880` ; rôles `ALLOWED_ROLES` `idx:3708` (→ droits) | Structure du modèle de données. Les contenus sont paramétrables (types d'événement, fiches) |
 | C-26 | Sécurité et paramètres techniques | Jeton de 7 jours (`idx:3089`) ; secours d'une heure (`idx:3188`), secret de 32 caractères au moins (`idx:3114`), 5 essais par quart d'heure (`idx:3141-3142`) ; `keepAliveTimeout` de 65 s (`idx:7987`) ; import de 5 Mo (`idx:37`) ; aperçu d'import valable 10 min (`idx:1707`) ; export du journal plafonné à 10 000 entrées (`idx:6910`) ; registre : 8 résultats, délai de 5 s (`idx:5454-5456`) | Politique de sécurité et d'exploitation, réglable au besoin par variable d'environnement, hors assistant métier |
 | C-27 | Fuseaux limités aux fuseaux français | `FUSEAUX_HORAIRES_FRANCAIS` `idx:736-741` ; `cli/pages/Admin.tsx:980-982` | ERP natif français. La valeur reste paramétrable (A) |
-| C-28 | Plafond des paiements en espèces | **Absent** (`MOYENS_REGLEMENT` `idx:1245` sans plafond ; passation §4 : « règle de conformité non décidée ») | Règle légale éventuelle (code monétaire et financier), à confirmer par le cabinet avant toute implémentation |
+| C-28 | Plafond des paiements en espèces (classé dans la proposition parmi les règles légales à faire confirmer, faute d'exister dans le code) | **Absent** (`MOYENS_REGLEMENT` `idx:1245` sans plafond ; passation §4 : « règle de conformité non décidée ») | Règle légale éventuelle (code monétaire et financier), à confirmer par le cabinet avant toute implémentation |
 
 ---
 
