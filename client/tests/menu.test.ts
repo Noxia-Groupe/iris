@@ -9,7 +9,8 @@ const liens = (role: string, planningActif = true, permissions: string[] = []) =
 // Règles de visibilité de l'ancien menu à plat, réécrites ici à part : le regroupement ne
 // doit ni montrer ni cacher une seule entrée par rapport à elles. Seules évolutions depuis :
 // l'annuaire des clients ouvert au technicien (décision de Nelson du 13-10-2026), puis au
-// conducteur de travaux (décision du 16-10-2026).
+// conducteur de travaux (décision du 16-10-2026), et l'écran des règlements, réservé à
+// l'administration (décision A3 du 16-10-2026).
 function attendu(role: string, planningActif: boolean, permissions: string[]) {
   const admin = role === 'ADMIN' || role === 'SUPERADMIN';
   const commercial = role === 'COMMERCIAL';
@@ -18,7 +19,7 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
     ['/', true], ['/chantiers', true],
     ['/devis', role === 'SUPERADMIN' || permissions.includes('devis:read')],
     ['/interventions', travaux || role === 'TECHNICIEN'],
-    ['/contrats-maintenance', admin], ['/prete-a-facturer', admin], ['/factures', admin], ['/mentions-legales', admin],
+    ['/contrats-maintenance', admin], ['/prete-a-facturer', admin], ['/factures', admin], ['/reglements', admin], ['/mentions-legales', admin],
     ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN' || role === 'CONDUCTEUR_TRAVAUX'], ['/catalogue', admin],
     ['/achats', travaux], ['/heures', travaux], ['/statistiques', travaux],
     ['/planning', !commercial && planningActif], ['/resultat-commercial', commercial],

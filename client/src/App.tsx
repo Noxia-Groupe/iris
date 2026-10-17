@@ -26,6 +26,7 @@ import Devis from './pages/Devis';
 import Interventions from './pages/Interventions';
 import ContratsMaintenance from './pages/ContratsMaintenance';
 import Factures from './pages/Factures';
+import Reglements from './pages/Reglements';
 import Comptabilite from './pages/Comptabilite';
 import MentionsLegales from './pages/MentionsLegales';
 import PreteAFacturer from './pages/PreteAFacturer';
@@ -140,6 +141,11 @@ function App() {
         <Route path="/factures" element={
           <PrivateRoute requiredRoles={ROLES_ADMIN}>
             <Factures />
+          </PrivateRoute>
+        } />
+        <Route path="/reglements" element={
+          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+            <Reglements />
           </PrivateRoute>
         } />
         <Route path="/prete-a-facturer" element={

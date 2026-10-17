@@ -533,7 +533,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toHaveCount(0);
     await expect(facture.getByRole('button', { name: /Annuler la facture/ })).toHaveCount(0);
     await expect(facture).toContainText(/Annulation totale impossible : 1 avoir\(s\) partiel\(s\)/);
-    await expect(facture.getByRole('button', { name: /Marquer comme réglée/ })).toBeVisible();
+    await expect(facture.getByRole('link', { name: /Enregistrer un règlement/ })).toBeVisible();
   });
 
   test('émet un brouillon, attribue un numéro et rend le PDF disponible', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
@@ -563,7 +563,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     expect((await document.body()).subarray(0, 5).toString()).toBe('%PDF-');
   });
 
-  test('règle une facture émise après confirmation et affiche son nouveau statut', async ({ allerSurPageAdmin, creerClient }) => {
+  test('règle une facture en deux règlements, puis rouvre son reste dû par contre-passation', async ({ allerSurPageAdmin, creerClient }) => {
     const client = await creerClient('règlement');
     const page = await allerSurPageAdmin('/factures');
     await page.getByRole('button', { name: /Nouvelle facture/ }).click();
@@ -578,13 +578,69 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
     const ligne = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
     await ligne.getByRole('button', { name: /Émettre/ }).click();
-    await expect(ligne.getByRole('button', { name: /Marquer comme réglée/ })).toBeVisible();
-    let confirmationDemandee = '';
-    page.once('dialog', (dialog) => { confirmationDemandee = dialog.message(); void dialog.accept(); });
-    await ligne.getByRole('button', { name: /Marquer comme réglée/ }).click();
-    await expect(page.getByText(/marquée comme réglée/i)).toBeVisible();
-    expect(confirmationDemandee).toMatch(/Confirmer le règlement de la facture/);
-    await expect(ligne).toContainText('REGLEE');
+    await expect(page.getByText(/émise et figée/)).toBeVisible();
+    // « Réglée » ne se coche plus : elle se déduit des règlements enregistrés.
+    await expect(ligne.getByRole('button', { name: /Marquer comme réglée/ })).toHaveCount(0);
+    await ligne.getByRole('link', { name: /Enregistrer un règlement/ }).click();
+    await expect(page).toHaveURL(/\/reglements\?facture=/);
+
+    // Le formulaire s'ouvre sur la facture, pour son reste dû.
+    const formulaire = page.getByRole('form', { name: 'Nouveau règlement' });
+    const montant = formulaire.getByLabel('Montant reçu');
+    const part = formulaire.getByRole('textbox', { name: /Montant affecté à la facture/ });
+    const envoyer = formulaire.getByRole('button', { name: 'Enregistrer le règlement' });
+    await expect(formulaire.getByLabel('Client du règlement')).toHaveValue(client.id);
+    await expect(montant).toHaveValue('120,00');
+    await expect(part).toHaveValue('120,00');
+    // Un règlement entièrement affecté seulement : l'écart bloque l'envoi.
+    await montant.fill('50');
+    await expect(formulaire.getByRole('status', { name: 'Affectation du règlement' })).toContainText('affecté en trop : 70,00 €');
+    await expect(envoyer).toBeDisabled();
+    await formulaire.getByRole('button', { name: 'Répartir le montant' }).click();
+    await expect(part).toHaveValue('50,00');
+    await formulaire.getByLabel('Moyen de paiement').selectOption('CHEQUE');
+    // Référence unique : la base E2E est rejouée sans être vidée.
+    const referenceCheque = `CHQ ${Date.now()}`;
+    await formulaire.getByLabel('Référence du règlement').fill(referenceCheque);
+    await envoyer.click();
+    await expect(page.getByText(/Règlement de 50,00\s€ enregistré/)).toBeVisible();
+    const reglements = page.getByRole('table', { name: 'Règlements enregistrés' });
+    const cheque = reglements.locator('tr', { hasText: referenceCheque });
+    await expect(cheque).toContainText(client.raisonSociale);
+    await expect(cheque).toContainText('Chèque');
+    await expect(cheque).toContainText('Enregistré');
+
+    await page.goto('/factures');
+    let apres = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
+    await expect(apres).toContainText('EMISE');
+    await expect(apres).toContainText('Partiellement réglée');
+    await expect(apres).toContainText(/70,00\s€/);
+    await expect(apres.getByRole('button', { name: /Annuler la facture/ })).toHaveCount(0);
+    await expect(apres).toContainText('Annulation totale impossible : un règlement a été reçu');
+
+    await apres.getByRole('link', { name: /Enregistrer un règlement/ }).click();
+    await expect(montant).toHaveValue('70,00');
+    await envoyer.click();
+    await expect(page.getByText(/Règlement de 70,00\s€ enregistré/)).toBeVisible();
+    await page.goto('/factures');
+    apres = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
+    await expect(apres).toContainText('REGLEE');
+    await expect(apres.getByRole('link', { name: /Enregistrer un règlement/ })).toHaveCount(0);
+
+    // Le chèque revient impayé : la contre-passation, motivée, rouvre le reste dû.
+    await page.goto('/reglements');
+    await cheque.getByRole('button', { name: 'Contre-passer' }).click();
+    await cheque.getByLabel('Motif de la contre-passation').fill('Chèque refusé par la banque');
+    await cheque.getByRole('button', { name: 'Confirmer la contre-passation' }).click();
+    await expect(page.getByText(/contre-passé : le reste dû de ses factures est rouvert/)).toBeVisible();
+    await expect(cheque).toContainText('Contre-passé');
+    await expect(cheque).toContainText('Motif : Chèque refusé par la banque');
+    await expect(cheque.getByRole('button', { name: 'Contre-passer' })).toHaveCount(0);
+    await page.goto('/factures');
+    apres = (await afficherFacture(page, client.raisonSociale)).filter({ hasText: 'Facture' });
+    await expect(apres).toContainText('EMISE');
+    await expect(apres).toContainText('Partiellement réglée');
+    await expect(apres).toContainText(/50,00\s€/);
   });
 
   // Ce parcours couvre confirmation, statut et téléchargement ; le contenu du PDF est

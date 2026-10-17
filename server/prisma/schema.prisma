@@ -53,6 +53,8 @@ model User {
   primesMensuelles        PrimeMensuelleCommercial[] // Primes "suivi administratif" validées par mois, si commercial
   profilIntervenant       Intervenant?               @relation("IntervenantCompte")
   rapportsIntervention    InterventionRapport[]
+  reglementsSaisis        Reglement[]                @relation("ReglementAuteur")
+  reglementsContrepasses  Reglement[]                @relation("ReglementContrepassation")
   journauxSaisie          JournalSaisieChantier[]     @relation("JournalSaisieChantierAuteur")
   journauxComptables      JournalCompteComptable[]
   journauxRegles          JournalRegleComptable[]
@@ -445,6 +447,7 @@ model Client {
   contratsMaintenance  ContratMaintenance[]
   chantiers            Chantier[] @relation("ChantierClient")
   factures             Facture[]
+  reglements           Reglement[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 }
@@ -595,6 +598,7 @@ model Facture {
   ecrituresComptables EcritureFacture[]
   ecrituresScellees Boolean @default(false)
   journal       JournalFacture[]
+  affectationsReglement AffectationReglement[]
   createdById   String?
   emisLe        DateTime?
   createdAt     DateTime       @default(now())
@@ -608,6 +612,47 @@ model Facture {
   @@index([interventionId])
   @@index([contratMaintenanceId])
   @@index([mentionsLegalesVersionId])
+}
+
+// Règlement client saisi à la main (décision A3 du 16-10-2026) : la banque viendra plus tard.
+// Il est entièrement affecté à des factures émises du même client, et n'est jamais modifié
+// ni supprimé : une saisie erronée est contre-passée, avec motif et auteur. Les gardes SQL de
+// la migration `20261016120000_reglements` portent ces invariants hors de l'API.
+model Reglement {
+  id                   String                 @id @default(uuid())
+  clientId             String
+  client               Client                 @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  // Date civile du règlement, stockée à minuit UTC comme les dates de facture.
+  dateReglement        DateTime
+  montant              Decimal                @db.Decimal(12, 2)
+  moyen                String // VIREMENT | CHEQUE | CARTE | PRELEVEMENT | ESPECES
+  reference            String?
+  statut               String                 @default("ENREGISTRE") // ENREGISTRE | CONTREPASSE
+  motifContrepassation String?
+  contrepasseLe        DateTime?
+  contrepasseParId     String?
+  contrepassePar       User?                  @relation("ReglementContrepassation", fields: [contrepasseParId], references: [id], onDelete: Restrict)
+  createdById          String
+  createdBy            User                   @relation("ReglementAuteur", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt            DateTime               @default(now())
+  affectations         AffectationReglement[]
+
+  @@index([clientId, dateReglement])
+  @@index([dateReglement, createdAt])
+}
+
+// Part d'un règlement imputée à une facture. Une contre-passation retire toutes les parts du
+// règlement du calcul du reste dû, sans effacer la ligne.
+model AffectationReglement {
+  id          String    @id @default(uuid())
+  reglementId String
+  reglement   Reglement @relation(fields: [reglementId], references: [id], onDelete: Restrict)
+  factureId   String
+  facture     Facture   @relation(fields: [factureId], references: [id], onDelete: Restrict)
+  montant     Decimal   @db.Decimal(12, 2)
+
+  @@unique([reglementId, factureId])
+  @@index([factureId])
 }
 
 model EcritureFacture {

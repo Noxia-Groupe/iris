@@ -6,7 +6,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity, Award, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2, Clock, FileText, FolderOpen,
-  KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
+  HandCoins, KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
 } from 'lucide-react';
 import {
   estExcluDesOperations, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutVoirStatistiques,
@@ -55,6 +55,7 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
     { titre: 'Facturation', entrees: [
       { to: '/prete-a-facturer', libelle: 'Prêt à facturer', icone: CheckCircle2, visible: isAdmin },
       { to: '/factures', libelle: 'Factures', icone: Receipt, visible: isAdmin },
+      { to: '/reglements', libelle: 'Règlements', icone: HandCoins, visible: isAdmin },
       { to: '/mentions-legales', libelle: 'Mentions & CGV', icone: ScrollText, visible: isAdmin },
       { to: '/comptabilite', libelle: 'Plan comptable', icone: Landmark, visible: isAdmin },
     ] },

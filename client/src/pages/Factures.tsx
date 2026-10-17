@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Ban, CheckCircle2, Download, FilePlus2, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { Ban, Download, FilePlus2, HandCoins, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
+import { situationReglement } from '../lib/reglements';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
@@ -30,6 +31,10 @@ type Facture = {
   totalHt: number;
   totalTva: number;
   totalTtc: number;
+  // Soldes déduits des règlements et des avoirs : null hors facture émise ou réglée.
+  montantRegle?: number | null;
+  montantAvoirs?: number | null;
+  resteDu?: number | null;
   origine: Origine;
   motifHorsAffaire?: string | null;
   client: Client;
@@ -315,20 +320,14 @@ export default function Factures() {
     await charger();
   };
 
-  const changerStatut = async (facture: Facture, action: 'regler' | 'annuler') => {
-    const reglement = action === 'regler';
-    const confirmation = reglement
-      ? `Confirmer le règlement de la facture ${facture.numero} ? Son montant et ses lignes resteront inchangés.`
-      : `Annuler la facture ${facture.numero} ? Cette opération crée immédiatement un avoir total numéroté, conserve les deux documents et ne peut pas être annulée depuis cet écran.`;
-    if (!window.confirm(confirmation)) return;
+  const annuler = async (facture: Facture) => {
+    if (!window.confirm(`Annuler la facture ${facture.numero} ? Cette opération crée immédiatement un avoir total numéroté, conserve les deux documents et ne peut pas être annulée depuis cet écran.`)) return;
     setErreur('');
     setSucces('');
-    const res = await apiFetch(`/factures/${facture.id}/${action}`, { method: 'POST' });
+    const res = await apiFetch(`/factures/${facture.id}/annuler`, { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) return setErreur(data.error || 'Changement de statut impossible.');
-    const document = data;
-    const avoir = !reglement ? data.avoir : null;
-    setSucces(reglement ? `Facture ${document.numero} marquée comme réglée.` : `Facture ${document.numero} annulée ; avoir ${avoir?.numero || 'créé'} disponible.`);
+    if (!res.ok) return setErreur(data.error || 'Annulation impossible.');
+    setSucces(`Facture ${data.numero} annulée ; avoir ${data.avoir?.numero || 'créé'} disponible.`);
     await charger();
   };
 
@@ -502,7 +501,7 @@ export default function Factures() {
       <div className="overflow-x-auto rounded-xl border bg-white">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left text-gray-500">
-            <tr><th className="p-3">Type / numéro</th><th className="p-3">Client</th><th className="p-3">Émission</th><th className="p-3">Origine</th><th className="p-3">Total TTC</th><th className="p-3">Statut</th><th className="p-3">Actions</th></tr>
+            <tr><th className="p-3">Type / numéro</th><th className="p-3">Client</th><th className="p-3">Émission</th><th className="p-3">Origine</th><th className="p-3">Total TTC</th><th className="p-3">Reste dû</th><th className="p-3">Statut</th><th className="p-3">Actions</th></tr>
           </thead>
           <tbody>
             {factures.map((facture) => (
@@ -512,7 +511,8 @@ export default function Factures() {
                 <td className="p-3">{formatDate(facture.dateEmission)}</td>
                 <td className="p-3">{facture.origine === 'HORS_AFFAIRE' ? `Hors affaire — ${facture.motifHorsAffaire || ''}` : facture.origine}</td>
                 <td className="p-3">{formatMontant(facture.totalTtc)}</td>
-                <td className="p-3">{facture.statut}</td>
+                <td className="p-3">{facture.resteDu === null || facture.resteDu === undefined ? '—' : formatMontant(facture.resteDu)}</td>
+                <td className="p-3">{facture.statut}{situationReglement(facture, formatMontant) && <span className="block text-xs text-gray-600">{situationReglement(facture, formatMontant)}</span>}</td>
                 <td className="p-3"><div className="flex flex-wrap gap-2">
                   <button className="btn btn-secondary" aria-expanded={factureTraceId === facture.id} aria-controls="origine-facture" onClick={() => factureTraceId === facture.id ? fermerTrace() : void chargerTrace(facture.id)}>Voir l’origine</button>
                   {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && (emissionImpossible(facture)
@@ -520,17 +520,19 @@ export default function Factures() {
                     : <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>)}
                   {facture.type === 'FACTURE' && ['EMISE', 'REGLEE'].includes(facture.statut) && <button className="btn btn-secondary" onClick={() => ouvrirAvoirPartiel(facture)}><FilePlus2 size={16} /> Créer un avoir partiel</button>}
                   {facture.type === 'FACTURE' && facture.statut === 'EMISE' && <>
-                    <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'regler')}><CheckCircle2 size={16} /> Marquer comme réglée</button>
+                    {(facture.resteDu ?? 0) > 0 && <Link className="btn btn-secondary" to={`/reglements?facture=${facture.id}`}><HandCoins size={16} /> Enregistrer un règlement</Link>}
                     {avoirsPartiels(facture).length
                       ? <span className="self-center text-xs text-gray-500">Annulation totale impossible : {avoirsPartiels(facture).length} avoir(s) partiel(s) déjà émis</span>
-                      : <button className="btn btn-secondary" onClick={() => void changerStatut(facture, 'annuler')}><Ban size={16} /> Annuler la facture</button>}
+                      : (facture.montantRegle ?? 0) > 0
+                        ? <span className="self-center text-xs text-gray-500">Annulation totale impossible : un règlement a été reçu</span>
+                        : <button className="btn btn-secondary" onClick={() => void annuler(facture)}><Ban size={16} /> Annuler la facture</button>}
                   </>}
                   {facture.statut !== 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void telechargerDocument(facture)}><Download size={16} /> PDF</button>}
                 </div></td>
               </tr>
             ))}
-            {chargement && !factures.length && <tr><td colSpan={7} role="status" className="p-5 text-center text-gray-500">Chargement des factures…</td></tr>}
-            {!chargement && !factures.length && <tr><td colSpan={7} className="p-5 text-center text-gray-500">{erreurListe ? 'Factures indisponibles. Réessayez avec Actualiser.' : 'Aucune facture.'}</td></tr>}
+            {chargement && !factures.length && <tr><td colSpan={8} role="status" className="p-5 text-center text-gray-500">Chargement des factures…</td></tr>}
+            {!chargement && !factures.length && <tr><td colSpan={8} className="p-5 text-center text-gray-500">{erreurListe ? 'Factures indisponibles. Réessayez avec Actualiser.' : 'Aucune facture.'}</td></tr>}
           </tbody>
         </table>
       </div>
