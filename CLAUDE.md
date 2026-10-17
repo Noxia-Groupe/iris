@@ -33,6 +33,18 @@ Ce qui ne change pas : une PR par lot, jamais de push direct sur `main`, l'audit
 
 Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'étiquette s'appelle `suivi-audit` ; l'issue reprend le constat, sa preuve et le correctif proposé, et la PR la cite.
 
+## Règles permanentes de conception (décision de Nelson du 17-10-2026)
+
+1. **Un paramètre plutôt qu'une constante.** Toute nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée, et non une constante dans le code. Exemples : qui valide, clôture ou convertit ; délais et seuils ; statuts et listes de valeurs ; modules activés.
+   - La valeur par défaut reprend le comportement actuel, ou, pour une règle nouvelle, l'option la plus simple ou la plus restrictive. Elle est écrite dans la PR et dans la passation.
+   - Elle n'invente aucune valeur métier : pas de prix, de commission ni de compte comptable par défaut.
+   - Un changement de paramètre est journalisé, comme les réglages existants.
+   - Restent dans le code, avec leur raison écrite, les règles légales ou d'intégrité : numérotation, immutabilité des documents émis, règles fiscales, invariants de droits.
+   - Les règles déjà écrites en dur seront inventoriées par la proposition `docs/PARAMETRAGE-CIBLE.md`, à valider par Nelson ; elles ne sont pas converties avant cette validation.
+2. **Des fichiers de taille raisonnable.** Aucun fichier de code applicatif ne dépasse environ 800 lignes ; au-delà, on le découpe, dans une PR sans changement de comportement.
+   - Les fichiers déjà trop longs (`server/index.ts`, puis `client/src/pages/ChantierDetail.tsx`, `Admin.tsx` et `Planning.tsx`) seront découpés par le chantier prévu dans la [passation](docs/ROADMAP-PASSATION.md#chantiers-techniques-décision-de-nelson-du-17-10-2026).
+   - Choix par défaut, à confirmer : les fichiers de tests, les migrations et les fichiers générés (lockfiles, client Prisma) ne sont pas concernés.
+
 ## Commandes du dépôt
 
 - Backend : `cd server && npm test` ; les tests HTTP exigent `TEST_DATABASE_URL` pointant vers une base jetable.
