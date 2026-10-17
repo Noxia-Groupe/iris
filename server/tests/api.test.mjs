@@ -251,7 +251,7 @@ if (!TEST_DATABASE_URL) {
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
       'ouverture.conducteur@iris.test', 'ouverture.autre.conducteur@iris.test', 'ouverture.commercial@iris.test', 'ouverture.commercial.inactif@iris.test', 'ouverture.ancien.conducteur@iris.test',
       'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
-      'fiche111.titulaire@iris.test', 'permissions.autre@iris.test',
+      'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -467,16 +467,17 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
-  // Chaque scénario possède son commercial et son chantier : ni les autres coûts du
-  // harnais, ni un barème par défaut à zéro ne peuvent masquer une régression financière.
-  describe('Archivage Travaux : coûts, marge et commission éligible', () => {
+  // Chaque scénario possède son commercial et son chantier : les autres coûts du harnais ne
+  // peuvent pas masquer une régression financière. Le barème global réglé à 10 % ne produit
+  // aucune commission : sans plan commercial, il n'y en a pas (décision du 17-10-2026).
+  describe('Archivage Travaux : coûts, marge, et aucune commission sans plan commercial', () => {
     for (const scenario of [
       { nom: 'achat', chemin: '/api/achats', cible: 'ACHAT', cout: 120,
         corps: (chantierId, categorieId, fournisseurId) => ({ chantierId, categorieId, fournisseurId, date: '2026-09-05', description: 'TEST achat financier', montantHT: 120 }) },
       { nom: 'pointage', chemin: '/api/heures', cible: 'HEURE', cout: 80,
         corps: (chantierId, _categorieId, _fournisseurId, intervenantId) => ({ chantierId, intervenantId, date: '2026-09-05', nbrHeures: 2 }) },
     ]) {
-      test(`${scenario.nom} : avant, archive et restauration rétablissent marge et commission sans toucher au journal`, async () => {
+      test(`${scenario.nom} : avant, archive et restauration rétablissent la marge sans toucher au journal, toujours sans commission`, async () => {
         const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
         assert.equal(login.status, 200);
         const auth = { Authorization: `Bearer ${login.body.token}` };
@@ -558,12 +559,13 @@ if (!TEST_DATABASE_URL) {
             assert.ok(resultat, 'commercial isolé présent');
             assert.equal(resultat.caTotal, 1000, 'affaire terminée et encaissée comptabilisée');
             assert.equal(resultat.margeTotal, 1000 - cout);
-            assert.equal(resultat.commissionBareme, (1000 - cout) / 10);
-            assert.equal(resultat.commissionTotal, (1000 - cout) / 10);
+            assert.equal(resultat.sansPlanCommercial, true);
+            assert.equal(resultat.commissionBareme, 0, 'barème global non appliqué sans plan commercial');
+            assert.equal(resultat.commissionTotal, 0);
             const ligne = resultat.chantiers.find(c => c.id === chantier.id);
             assert.equal(ligne.comptabiliseDansPeriode, true);
             assert.equal(ligne.margeCommerciale, 1000 - cout);
-            assert.equal(ligne.commissionEstimee, (1000 - cout) / 10);
+            assert.equal(ligne.commissionEstimee, 0);
           };
           await verifier(scenario.cout, true);
           const archive = await request(app).delete(`${scenario.chemin}/${id}`).set(auth).send({ motifArchivage: 'Saisie en double' });
@@ -590,6 +592,96 @@ if (!TEST_DATABASE_URL) {
           } });
         }
       });
+    }
+  });
+
+  // Décision de Nelson du 17-10-2026 : sans plan commercial, un commercial ne touche aucune
+  // commission ni prime, jusqu'à l'attribution d'un plan à date. Aucun plan n'existe encore :
+  // le barème global, les objectifs et la prime de suivi administratif, même réglés et
+  // atteints, ne produisent rien, ni pour l'administrateur ni pour le commercial.
+  test('sans plan commercial : ni commission ni prime, malgré un barème, des objectifs atteints et un suivi administratif validé', async () => {
+    const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+    assert.equal(login.status, 200);
+    const auth = { Authorization: `Bearer ${login.body.token}` };
+    const ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+    const anciennesRegles = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
+    const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    let commercial = null;
+    try {
+      assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true })).status, 200);
+      const regles = await request(app).put('/api/parametres/remuneration').set(auth).send({
+        baremeStandard: [{ plafond: null, taux: 10 }], baremeReduit: [{ plafond: null, taux: 5 }], libelleBaremeReduit: 'Réduit sans plan',
+        objectifCaMensuel: 500, primeObjectifCa: 100, objectifMargeMensuel: 100,
+        primeObjectifMarge: 50, primeSuiviAdministratif: 30,
+      });
+      assert.equal(regles.status, 200, JSON.stringify(regles.body));
+      // Adresse fixe, purgée par le nettoyage du harnais avec ses chantiers « TEST ».
+      commercial = await prisma.user.create({ data: {
+        email: 'sans.plan.commercial@iris.test', name: `TEST Commercial sans plan ${suffixe}`, role: 'COMMERCIAL',
+      } });
+      const clotures = [];
+      for (const [nom, montant, baremeReduit] of [['standard', 1000, false], ['réduit', 600, true]]) {
+        const chantier = await prisma.chantier.create({ data: {
+          nom: `TEST Sans plan ${nom} ${suffixe}`, client: 'TEST Client sans plan', dateDebut: new Date(),
+          budgetGlobalVendu: montant, budgetMaterielVendu: 0, heuresVendues: 0, commercialId: commercial.id, baremeReduit,
+        } });
+        const cloture = await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(auth).send({ statut: 'TERMINE' });
+        assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(auth).send({ encaisse: true })).status, 200);
+        clotures.push(cloture.body.dateFin);
+      }
+      const ref = clotures[0].slice(0, 7);
+      assert.equal(clotures[1].slice(0, 7), ref, 'les deux chantiers sont clôturés le même mois');
+      // Le suivi administratif reste un fait enregistré et journalisé ; il n'ouvre aucune prime.
+      const suivi = await request(app).put(`/api/commerciaux/${commercial.id}/prime-mensuelle`).set(auth).send({ periode: ref, suiviAdministratif: true });
+      assert.equal(suivi.status, 200, JSON.stringify(suivi.body));
+
+      const authCommercial = { Authorization: `Bearer ${jwt.sign({ id: commercial.id }, process.env.JWT_SECRET)}` };
+      for (const [qui, enTete] of [['administrateur', auth], ['commercial', authCommercial]]) {
+        const stats = await request(app).get('/api/stats/commerciaux').query({ period: 'month', ref }).set(enTete);
+        assert.equal(stats.status, 200, JSON.stringify(stats.body));
+        assert.ok(!('bareme' in stats.body) && !('objectifs' in stats.body), `${qui} : ni barème ni objectifs exposés`);
+        const resultat = stats.body.commerciaux.find((ligne) => ligne.id === commercial.id);
+        assert.ok(resultat, `${qui} : commercial présent`);
+        assert.deepEqual(
+          [resultat.caTotal, resultat.margeTotal, resultat.margeStandard, resultat.margeReduite, resultat.suiviAdministratif],
+          [1600, 1600, 1000, 600, true],
+          `${qui} : CA et marge validés restent calculés`,
+        );
+        assert.deepEqual(
+          [resultat.commissionStandard, resultat.commissionReduite, resultat.commissionBareme, resultat.primeCA, resultat.primeMarge, resultat.primeAdmin, resultat.commissionTotal],
+          [0, 0, 0, 0, 0, 0, 0],
+          `${qui} : aucune commission ni prime`,
+        );
+        assert.equal(resultat.sansPlanCommercial, true);
+        assert.equal(resultat.chantiers.length, 2);
+        for (const ligne of resultat.chantiers) assert.deepEqual([ligne.comptabiliseDansPeriode, ligne.commissionEstimee], [true, 0], ligne.nom);
+      }
+
+      const globalAdmin = await request(app).get('/api/stats/global').query({ period: 'month', ref: clotures[0] }).set(auth);
+      assert.equal(globalAdmin.status, 200, JSON.stringify(globalAdmin.body));
+      assert.deepEqual([globalAdmin.body.commissionCommercialeTotal, globalAdmin.body.sansPlanCommercial], [0, true]);
+      const globalCommercial = await request(app).get('/api/stats/global').query({ period: 'month', ref: clotures[0] }).set(authCommercial);
+      assert.equal(globalCommercial.status, 200, JSON.stringify(globalCommercial.body));
+      assert.deepEqual(
+        [globalCommercial.body.margeTotal, globalCommercial.body.commissionTotal, globalCommercial.body.sansPlanCommercial],
+        [1600, 0, true],
+      );
+    } finally {
+      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: { margeCommercialeActive: ancienParametres.margeCommercialeActive } });
+      if (anciennesRegles) await prisma.parametresRemuneration.update({ where: { id: 'singleton' }, data: {
+        baremeStandard: anciennesRegles.baremeStandard, baremeReduit: anciennesRegles.baremeReduit,
+        libelleBaremeReduit: anciennesRegles.libelleBaremeReduit,
+        objectifCaMensuel: anciennesRegles.objectifCaMensuel, primeObjectifCa: anciennesRegles.primeObjectifCa,
+        objectifMargeMensuel: anciennesRegles.objectifMargeMensuel, primeObjectifMarge: anciennesRegles.primeObjectifMarge,
+        primeSuiviAdministratif: anciennesRegles.primeSuiviAdministratif,
+      } });
+      if (commercial) {
+        const chantierIds = (await prisma.chantier.findMany({ where: { commercialId: commercial.id }, select: { id: true } })).map((c) => c.id);
+        await prisma.journalSaisieChantier.deleteMany({ where: { chantierId: { in: chantierIds } } });
+        await prisma.chantier.deleteMany({ where: { id: { in: chantierIds } } });
+        await prisma.user.delete({ where: { id: commercial.id } });
+      }
     }
   });
 

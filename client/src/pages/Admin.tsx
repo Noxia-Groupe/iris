@@ -6,6 +6,7 @@ import { refreshModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
 import OuvrirChantierAffaire from '../components/OuvrirChantierAffaire';
 import JournalAdministration from '../components/JournalAdministration';
+import { AvisSansPlanCommercial } from '../components/AvisSansPlanCommercial';
 import { DROITS_DEVIS, droitsApresBasculeDevis, etatDroitDevis } from '../lib/droitDevis';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
@@ -32,7 +33,7 @@ const EditeurBareme = ({ titre, tranches, modifiable, accent, onChange }: {
   return (
     <div className={`p-4 rounded border ${accent ? 'bg-amber-50 border-amber-200' : 'bg-gray-50'}`}>
       <div className={`text-xs font-bold uppercase tracking-wide mb-3 ${accent ? 'text-amber-700' : 'text-gray-500'}`}>{titre}</div>
-      {lignes.length === 0 && <p className="text-sm text-gray-400 italic mb-3">Aucune tranche : aucune commission ne sera calculée.</p>}
+      {lignes.length === 0 && <p className="text-sm text-gray-400 italic mb-3">Aucune tranche.</p>}
       <div className="space-y-2">
         {lignes.map((t, i) => {
           const plafondCourant = t.plafond === null || t.plafond === '' ? null : Number(t.plafond);
@@ -73,48 +74,6 @@ const EditeurBareme = ({ titre, tranches, modifiable, accent, onChange }: {
   );
 };
 
-
-// Contenu de référence "Système de rémunération commerciale" (document fourni par la
-// direction, cf. MARGES_COMMERCIAL.pdf) : primes "Boost" par solution vendue et
-// commissions sur contrats récurrents. Contrairement au barème et aux objectifs
-// mensuels ci-dessus, ces primes ne sont PAS calculées par l'application (pas de
-// saisie du nombre de caméras/points d'alarme/portes par chantier) — affichage en
-// lecture seule à titre de référence pour un calcul manuel.
-const PRIMES_VIDEOSURVEILLANCE = [
-  { label: 'Entre 4 et 8 caméras', prime: 200 },
-  { label: 'Entre 8 et 16 caméras', prime: 400 },
-  { label: 'Entre 16 et 32 caméras', prime: 600 },
-  { label: 'Plus de 32 caméras', prime: 1000 },
-];
-const PRIMES_ALARME = [
-  { label: 'Entre 0 et 10 points d’alarme', prime: 100 },
-  { label: 'Entre 10 et 20 points d’alarme', prime: 200 },
-  { label: 'Entre 20 et 30 points d’alarme', prime: 300 },
-  { label: 'Plus de 30 points d’alarme', prime: 400 },
-];
-const PRIMES_CONTROLE_ACCES = [
-  { label: 'Par tranche de 2 portes installées', prime: 80 },
-];
-const COMMISSIONS_CONTRATS_RECURRENTS = [
-  { label: 'Maintenance (engagement 36 mois)', detail: '1ère année seulement' },
-  { label: 'Puce GSM', detail: '1ère année seulement' },
-  { label: 'Routeur', detail: '1ère année seulement' },
-  { label: 'Fibre optique (FTTH / FTTO)', detail: '16 % de la marge générée sur la 1ère année' },
-];
-
-const PrimeTable = ({ title, rows }: { title: string; rows: { label: string; prime: number }[] }) => (
-  <div className="p-4 rounded border bg-gray-50">
-    <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">{title}</div>
-    <ul className="text-sm space-y-1">
-      {rows.map((r, i) => (
-        <li key={i} className="flex justify-between gap-4">
-          <span className="text-gray-500">{r.label}</span>
-          <strong className="text-gray-800">{fmtEuro(r.prime)}</strong>
-        </li>
-      ))}
-    </ul>
-  </div>
-);
 
 // Onglets ouverts aux CONDUCTEURS DE TRAVAUX : uniquement les référentiels du Journal des
 // Achats, qu'ils alimentent au quotidien. Tout le reste de l'Administration (chantiers,
@@ -1095,14 +1054,19 @@ const Admin = () => {
           {/* Règles de rémunération commerciale : stockées en base, éditables par un
               superadmin. Elles étaient auparavant écrites en dur dans le serveur, ce qui
               imposait un redéploiement pour changer un taux et livrait à chaque client les
-              barèmes d'une autre société. */}
+              barèmes d'une autre société. Sans plan commercial, le serveur ne les applique
+              plus (décision du 17-10-2026) : seul le libellé du barème réduit sert encore. */}
           <div className="card mb-4">
             <h2 className="mb-2 text-primary-dark">Rémunération commerciale</h2>
+            <AvisSansPlanCommercial className="mb-4">
+              Ces règles générales ne sont plus appliquées : un commercial sans plan commercial ne touche ni
+              commission ni prime, et aucun plan n'est encore attribué. Elles restent enregistrables, sans effet sur
+              aucun montant ; seul le libellé du barème réduit reste affiché sur les chantiers.
+            </AvisSansPlanCommercial>
             <p className="text-sm text-muted mb-4">
-              La commission des <strong>commerciaux</strong> applique un barème progressif sur la marge cumulée
-              du mois : chaque tranche est commissionnée à son propre taux, franchir un plafond ne requalifie que
-              la fraction qui le dépasse. Un second barème s'applique aux chantiers cochés « barème réduit ».
-              Détail par commercial dans le menu « Mes commerciaux ».
+              Non appliqués tant qu'aucun plan commercial n'est attribué : un barème progressif sur la marge cumulée
+              du mois (chaque tranche à son propre taux), un second barème pour les chantiers cochés « barème
+              réduit », des objectifs et des primes mensuels.
               {!isSuper && <> Seul un super administrateur peut modifier ces règles.</>}
             </p>
             {remuneration ? (
@@ -1153,9 +1117,6 @@ const Admin = () => {
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-gray-400">
-                  Un objectif laissé à 0 ne déclenche aucune prime : il n'est pas considéré comme atteint d'office.
-                </p>
 
                 {erreurRemuneration && <p className="text-sm text-red-600">{erreurRemuneration}</p>}
                 {messageRemuneration && <p className="text-sm text-emerald-700">{messageRemuneration}</p>}
@@ -1166,83 +1127,6 @@ const Admin = () => {
             )}
           </div>
 
-          <div className="card">
-            <h2 className="mb-2 text-primary-dark">Politique de Rémunération Commerciale — document de référence</h2>
-            <p className="text-sm text-muted mb-4">
-              Détail complet du « Système de rémunération commerciale » sur lequel se basent les calculs de marge et de
-              commission de l'application. Le barème et les objectifs mensuels ci-dessus sont calculés automatiquement ;
-              les primes et règles ci-dessous sont <strong>en lecture seule</strong> — à appliquer manuellement, faute de
-              saisie (nombre de caméras, points d'alarme, portes, type de contrat...) par chantier dans l'application.
-            </p>
-
-            <div className="mb-5">
-              <div className="text-sm font-bold text-gray-700 mb-2">3. Primes « Boost » (ventes de solutions)</div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <PrimeTable title="Vidéosurveillance" rows={PRIMES_VIDEOSURVEILLANCE} />
-                <PrimeTable title="Alarme" rows={PRIMES_ALARME} />
-                <PrimeTable title="Contrôle d'accès" rows={PRIMES_CONTROLE_ACCES} />
-              </div>
-            </div>
-
-            <div className="mb-5">
-              <div className="text-sm font-bold text-gray-700 mb-2">4. Commissions sur contrats et services récurrents</div>
-              <div className="p-4 rounded border bg-gray-50">
-                <ul className="text-sm space-y-1">
-                  {COMMISSIONS_CONTRATS_RECURRENTS.map((c, i) => (
-                    <li key={i} className="flex justify-between gap-4">
-                      <span className="text-gray-500">{c.label}</span>
-                      <strong className="text-gray-800">{c.detail}</strong>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            <div className="mb-5">
-              <div className="text-sm font-bold text-gray-700 mb-2">5. Modalités de paiement et système de reliquat</div>
-              <div className="p-4 rounded border bg-gray-50 text-sm text-gray-600">
-                <p className="mb-2">
-                  Les commissions sont <strong className="text-gray-800">calculées mensuellement</strong> mais{' '}
-                  <strong className="text-gray-800">versées trimestriellement</strong>, après validation des résultats.
-                </p>
-                <p>
-                  En cas de non-atteinte des objectifs mensuels ou trimestriels, un <strong className="text-gray-800">reliquat négatif</strong>{' '}
-                  (différence entre objectifs fixés et performances réalisées) est :
-                </p>
-                <ul className="list-disc list-inside mt-1 space-y-0.5">
-                  <li>reporté automatiquement sur le trimestre suivant ;</li>
-                  <li>déduit des commissions futures ;</li>
-                  <li>exigible tant que les objectifs ne sont pas compensés — le commercial doit le rattraper avant de percevoir de nouvelles commissions variables.</li>
-                </ul>
-              </div>
-            </div>
-
-            <div className="mb-5">
-              <div className="text-sm font-bold text-gray-700 mb-2">6. Clauses de sécurisation des commissions</div>
-              <div className="p-4 rounded border bg-gray-50 text-sm text-gray-600">
-                <ul className="list-disc list-inside space-y-1">
-                  <li>Les commissions sont calculées uniquement sur les marges réellement validées.</li>
-                  <li>Une affaire n'est commissionnable que si elle est <strong className="text-gray-800">signée, installée, facturée et encaissée</strong> (dans l'application : chantier Terminé + Encaissé).</li>
-                  <li>En cas d'annulation, de litige client, de non-paiement ou d'impayé, la commission associée n'est pas due, ou peut être annulée/récupérée si déjà versée.</li>
-                  <li>Toute remise commerciale exceptionnelle impactant la marge doit être validée par la direction et peut entraîner une révision de la commission.</li>
-                  <li>Les commissions ne sont définitivement acquises qu'après validation complète du chantier et paiement client.</li>
-                  <li>En cas de départ du collaborateur, seules les commissions des affaires totalement finalisées et encaissées à la date de sortie sont dues.</li>
-                </ul>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-sm font-bold text-gray-700 mb-2">7. Principe général</div>
-              <div className="p-4 rounded border bg-gray-50 text-sm text-gray-600">
-                <ul className="list-disc list-inside space-y-1">
-                  <li>Encourager la performance commerciale et la rentabilité.</li>
-                  <li>Responsabiliser les commerciaux sur la qualité des ventes.</li>
-                  <li>Valoriser la vente de solutions complètes et récurrentes.</li>
-                  <li>Garantir la sécurité financière de l'entreprise.</li>
-                </ul>
-              </div>
-            </div>
-          </div>
         </>
       )}
 

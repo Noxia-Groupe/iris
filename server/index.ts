@@ -965,10 +965,9 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
   // Marge commerciale = budget vendu − dépenses réelles (matériel + main d'œuvre).
   // Il n'y a pas de variable sur cette marge pour les conducteurs de travaux (voir la
   // marge ne leur ouvre droit à rien) : seuls les commerciaux ont une rémunération
-  // variable, calculée à part sur le barème progressif mensuel du "Système de
-  // rémunération commerciale" (cf. ParametresRemuneration et
-  // computeCommissionsParCommercial, utilisés par /api/stats/commerciaux) — sur la
-  // marge cumulée du mois du commercial, pas chantier par chantier.
+  // variable, calculée à part par computeCommissionsParCommercial (utilisé par
+  // /api/stats/commerciaux) sur la marge cumulée du mois du commercial, pas chantier par
+  // chantier. Sans plan commercial, elle est nulle (décision du 17-10-2026).
   const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
   const margeCommerciale = margeBrute;
   const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
@@ -3594,9 +3593,9 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercialSeulement, as
       return res.status(403).json({ error: 'Seul un administrateur peut réouvrir un chantier clôturé.' });
     }
 
-    // La date de clôture sert de mois de rattachement à la rémunération commerciale
-    // (barème progressif + primes d'objectifs, cf. /api/stats/commerciaux) : on la
-    // renseigne automatiquement à la clôture si elle n'a pas déjà été saisie à la main.
+    // La date de clôture sert de mois de rattachement au résultat commercial (CA et marge
+    // validés, cf. /api/stats/commerciaux) : on la renseigne automatiquement à la clôture
+    // si elle n'a pas déjà été saisie à la main.
     const data: Record<string, unknown> = { statut: nextStatut };
     if (nextStatut === 'TERMINE' && !chantier.dateFin) {
       // `dateFin` est une date-seule : elle doit retenir le jour civil de l'entreprise
@@ -5245,10 +5244,10 @@ app.post('/api/heures/:id/restaurer', requireAuth, requireTravauxArchive, async 
   }
 });
 
-// Clause de sécurisation des commissions : une commission n'est définitivement due
-// que si le chantier est Terminé ET Encaissé (cf. règle 6 du système de rémunération
-// commerciale — annulation/litige/impayé => la commission n'est pas due ou est récupérée).
-// Réservé aux admins ; togglable indépendamment du statut Terminé/En cours.
+// Clause de sécurisation : un chantier ne compte dans le CA et la marge validés du
+// commercial que s'il est Terminé ET Encaissé. Sans plan commercial, aucune commission
+// n'en découle (décision du 17-10-2026). Réservé aux admins ; togglable indépendamment
+// du statut Terminé/En cours.
 app.patch('/api/chantiers/:id/encaisse', requireAuth, requireAdmin, async (req, res) => {
   try {
     const encaisse = !!req.body.encaisse;
@@ -5262,9 +5261,10 @@ app.patch('/api/chantiers/:id/encaisse', requireAuth, requireAdmin, async (req, 
   }
 });
 
-// Prime "suivi administratif" (qualité et rigueur) du système de rémunération
-// commerciale — ne peut pas être déduite des données de gestion, validée à la main
-// par un administrateur, mois par mois (periode "YYYY-MM").
+// Suivi administratif (qualité et rigueur) d'un commercial, validé à la main par un
+// administrateur, mois par mois (periode "YYYY-MM"), et journalisé. Sans plan commercial,
+// il n'ouvre aucune prime (décision du 17-10-2026) et n'a plus de saisie à l'écran : la
+// route reste, sans montant (choix par défaut, à confirmer).
 app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async (req, res) => {
   try {
     const periode = String(req.body.periode || '');
@@ -6399,8 +6399,9 @@ app.put('/api/company', requireAuth, requireSuperAdmin, async (req, res) => {
 });
 
 // --- Règles de rémunération commerciale (singleton) ---
-// Lecture ouverte aux administrateurs (l'écran « Mes commerciaux » affiche le barème
-// appliqué), écriture réservée au superadmin : ce sont les règles de paie des commerciaux.
+// Lecture ouverte aux administrateurs, écriture réservée au superadmin. Ces règles
+// générales ne sont plus appliquées : sans plan commercial, aucune commission ni prime
+// (cf. computeCommissionsParCommercial). Seul leur libellé du barème réduit sert encore.
 app.get('/api/parametres/remuneration', requireAuth, requireAdmin, async (_req, res) => {
   try {
     const regles = await getReglesRemuneration();
@@ -6817,11 +6818,11 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
     if (params.margeCommercialeActive) {
       if (isAdmin) {
         // CA vendu / marge / commission commerciale de la période, tous commerciaux
-        // confondus — même définition que la commission (chantiers Terminés ET
-        // Encaissés, rattachés au mois de leur clôture) : ce sont des résultats
-        // FINALISÉS du mois, pas un cumul de portefeuille en cours.
+        // confondus (chantiers Terminés ET Encaissés, rattachés au mois de leur clôture) :
+        // ce sont des résultats FINALISÉS du mois, pas un cumul de portefeuille en cours.
+        // Sans plan commercial, la commission est nulle.
         const commerciaux = await prisma.user.findMany({ where: { OR: COMMERCIAL_OR_FILTER }, select: { id: true } });
-        const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params, await getReglesRemuneration());
+        const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params);
         let caTotal = 0, margeTotal = 0, commissionCommercialeTotal = 0;
         for (const agg of Object.values(byCommercial) as any[]) {
           caTotal += agg.caTotal;
@@ -6832,11 +6833,14 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
         result.margeTotal = margeTotal;
         result.margePct = caTotal > 0 ? (margeTotal / caTotal) * 100 : 0;
         result.commissionCommercialeTotal = commissionCommercialeTotal;
+        // Aucun commercial n'a de plan commercial : la carte du tableau de bord le dit.
+        result.sansPlanCommercial = (Object.values(byCommercial) as any[]).every((agg) => agg.sansPlanCommercial);
       } else if (isCommercial) {
-        const { byCommercial } = await computeCommissionsParCommercial([user.id], start, endExclusive, params, await getReglesRemuneration());
+        const { byCommercial } = await computeCommissionsParCommercial([user.id], start, endExclusive, params);
         const mine = byCommercial[user.id];
         result.margeTotal = mine?.margeTotal ?? 0;
         result.commissionTotal = mine?.commissionTotal ?? 0;
+        result.sansPlanCommercial = mine?.sansPlanCommercial ?? true;
       }
     }
 
@@ -7308,7 +7312,9 @@ app.get('/api/stats/types-chantiers', requireAuth, requireTravauxRead, async (re
 // Les taux, seuils et primes NE SONT PLUS ÉCRITS ICI : ils vivent en base
 // (ParametresRemuneration) et s'éditent depuis Administration > Rémunération commerciale.
 // Les inscrire dans le code revenait à livrer à chaque client les règles de rémunération
-// d'une autre société, et à exiger un redéploiement pour changer un taux.
+// d'une autre société, et à exiger un redéploiement pour changer un taux. Depuis la
+// décision du 17-10-2026, ces règles générales ne sont plus appliquées : sans plan
+// commercial, aucune commission ni prime (cf. computeCommissionsParCommercial).
 interface TrancheBareme { plafond: number; taux: number }
 interface ReglesRemuneration {
   baremeStandard: TrancheBareme[];
@@ -7321,21 +7327,24 @@ interface ReglesRemuneration {
   primeSuiviAdministratif: number;
 }
 
-// Valeurs de repli, utilisées uniquement si la ligne de paramètres n'existe pas encore
-// (base créée avant la migration, ou vidée à la main). Volontairement NEUTRES : aucune
-// commission, aucune prime. Mieux vaut un montant nul, visible et corrigible en deux
-// clics, qu'un barème arbitraire qui ferait calculer de fausses rémunérations sans que
-// personne ne s'en aperçoive.
-const REMUNERATION_NEUTRE: ReglesRemuneration = {
-  baremeStandard: [],
-  baremeReduit: [],
-  libelleBaremeReduit: 'Barème réduit',
-  objectifCaMensuel: 0,
-  primeObjectifCa: 0,
-  objectifMargeMensuel: 0,
-  primeObjectifMarge: 0,
-  primeSuiviAdministratif: 0,
-};
+// Valeurs NEUTRES : aucune commission, aucune prime. Repli de lecture si la ligne de
+// paramètres n'existe pas encore (base créée avant la migration, ou vidée à la main), et
+// règles appliquées à un commercial sans plan commercial (cf. computeCommissionsParCommercial).
+// Mieux vaut un montant nul, visible, qu'un barème arbitraire qui ferait calculer de
+// fausses rémunérations sans que personne ne s'en aperçoive. Un objet neuf à chaque appel :
+// aucun appelant ne peut, en le modifiant, rouvrir les commissions des autres.
+function remunerationNeutre(): ReglesRemuneration {
+  return {
+    baremeStandard: [],
+    baremeReduit: [],
+    libelleBaremeReduit: 'Barème réduit',
+    objectifCaMensuel: 0,
+    primeObjectifCa: 0,
+    objectifMargeMensuel: 0,
+    primeObjectifMarge: 0,
+    primeSuiviAdministratif: 0,
+  };
+}
 
 // Une tranche stockée avec `plafond: null` est la tranche non plafonnée : JSON ne sait pas
 // représenter Infinity, on le rétablit à la lecture. Les tranches sont triées par plafond
@@ -7354,7 +7363,7 @@ function parseBareme(valeur: unknown): TrancheBareme[] {
 
 async function getReglesRemuneration(): Promise<ReglesRemuneration> {
   const p = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
-  if (!p) return REMUNERATION_NEUTRE;
+  if (!p) return remunerationNeutre();
   const n = decimalToNumber(p);
   return {
     baremeStandard: parseBareme(p.baremeStandard),
@@ -7410,7 +7419,14 @@ function dateClotureChantier(c: any): Date | null {
 // administratif) par commercial sur [start, endExclusive[, mois par mois (cf. commentaire
 // de /api/stats/commerciaux). Réutilisé par cette route (détail par chantier) ET par
 // /api/stats/global (total agrégé pour les cartes du tableau de bord).
-async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres, regles: ReglesRemuneration) {
+//
+// Plan commercial (lot (i)) : un commercial sans plan commercial ne touche aucune commission
+// ni prime, jusqu'à ce qu'un plan lui soit attribué à date (décision de Nelson du
+// 17-10-2026). Aucun plan n'existe encore : le barème global (ParametresRemuneration) n'est
+// plus appliqué, chaque commercial reçoit les règles neutres et seuls le CA et la marge
+// restent calculés.
+async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres) {
+  const regles = remunerationNeutre();
   const commercialIdSet = new Set(commercialIds);
   const chantiers = decimalToNumber(await prisma.chantier.findMany({
     // Une affaire annulée n'a jamais existé commercialement : ni CA, ni marge, ni commission.
@@ -7465,6 +7481,7 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
       caTotal, margeTotal, margeStandard, margeReduite,
       commissionBareme, commissionStandard, commissionReduite, primeCA, primeMarge, primeAdmin,
       commissionTotal: commissionBareme + primeCA + primeMarge + primeAdmin,
+      sansPlanCommercial: true,
     };
   }
 
@@ -7474,12 +7491,13 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
 // Résultat commercial : CA vendu / marge / commission (barème progressif + primes
 // d'objectifs) par commercial, mois civil ou année civile en cours (navigable), classé
 // par CA vendu décroissant. Un admin voit tous les commerciaux (menu « Mes commerciaux »),
-// un commercial ne voit que sa propre ligne (menu « Résultat commercial »).
+// un commercial ne voit que sa propre ligne (menu « Résultat commercial »). Sans plan
+// commercial, commission et primes sont nulles et chaque commercial porte
+// `sansPlanCommercial` (cf. computeCommissionsParCommercial).
 //
-// Le barème et les primes d'objectifs sont MENSUELS (cf. doc) : seuls les chantiers
-// Terminés ET Encaissés comptent (clause de sécurisation), rattachés au mois de leur
-// clôture. La vue "Année" agrège 12 calculs mensuels indépendants — elle n'applique
-// jamais le barème à une marge annuelle globale. La liste `chantiers` de chaque
+// Le calcul est MENSUEL : seuls les chantiers Terminés ET Encaissés comptent (clause de
+// sécurisation), rattachés au mois de leur clôture. La vue "Année" agrège 12 calculs
+// mensuels indépendants. La liste `chantiers` de chaque
 // commercial reste l'intégralité de ses chantiers (toutes périodes confondues), pour la
 // vue détaillée ; `comptabiliseDansPeriode` indique lesquels comptent dans les totaux.
 app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
@@ -7495,7 +7513,8 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
     const societe = await getCompanySettings();
     const { start, endExclusive } = periodBounds(period, req.query.ref, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
     const params = await getParametres();
-    const regles = await getReglesRemuneration();
+    // Seul le libellé du barème réduit sert encore : il nomme la case cochée sur les chantiers.
+    const { libelleBaremeReduit } = await getReglesRemuneration();
 
     const users = await prisma.user.findMany({
       where: isAdmin ? { OR: COMMERCIAL_OR_FILTER } : { id: authUser.id, role: 'COMMERCIAL' },
@@ -7504,15 +7523,15 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
 
     const commercialIds = users.map((u) => u.id);
     const { byCommercial, chantiers, buckets, commissionsParMoisGroupe, moisPeriode, suiviAdminSet } =
-      await computeCommissionsParCommercial(commercialIds, start, endExclusive, params, regles);
+      await computeCommissionsParCommercial(commercialIds, start, endExclusive, params);
 
     const byUser: Record<string, any> = {};
     for (const u of users) {
       byUser[u.id] = {
         id: u.id, name: u.name, email: u.email, nbChantiers: 0,
         ...byCommercial[u.id],
-        // Pertinent seulement en vue "mois" (l'objectif est mensuel) : état de la prime
-        // pour le mois actuellement affiché, pour la case à cocher admin.
+        // Pertinent seulement en vue "mois" : suivi administratif enregistré pour le mois
+        // affiché (fait sans montant, plus saisi à l'écran ; cf. route prime-mensuelle).
         suiviAdministratif: period === 'month' ? suiviAdminSet.has(`${u.id}:${moisPeriode[0]}`) : null,
         chantiers: [] as any[],
       };
@@ -7569,9 +7588,9 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
       period,
       periodStart: start.toISOString().slice(0, 10),
       periodEnd: new Date(endExclusive.getTime() - 1).toISOString().slice(0, 10),
-      bareme: { standard: serialiseBareme(regles.baremeStandard), reduit: serialiseBareme(regles.baremeReduit) },
-      libelleBaremeReduit: regles.libelleBaremeReduit,
-      objectifs: { ca: regles.objectifCaMensuel, marge: regles.objectifMargeMensuel, primeCA: regles.primeObjectifCa, primeMarge: regles.primeObjectifMarge, primeAdmin: regles.primeSuiviAdministratif },
+      // Ni barème ni objectifs : sans plan commercial, aucune règle de rémunération ne
+      // s'applique (cf. computeCommissionsParCommercial).
+      libelleBaremeReduit,
       commerciaux: list,
     });
   } catch (error) {

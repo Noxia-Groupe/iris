@@ -146,9 +146,8 @@ const ChantierDetail = () => {
     } catch (e) { console.error(e); }
   };
 
-  // Bascule la clause de sécurisation "Encaissé" (réservée aux admins) — une commission
-  // commerciale n'est comptabilisée dans le barème mensuel que si le chantier est
-  // Terminé ET Encaissé (cf. règle 6 du système de rémunération commerciale).
+  // Bascule la clause de sécurisation "Encaissé" (réservée aux admins) : un chantier ne
+  // compte dans le CA et la marge validés du commercial que s'il est Terminé ET Encaissé.
   const [savingEncaisse, setSavingEncaisse] = useState(false);
   const handleToggleEncaisse = async () => {
     if (!id || !chantier) return;
@@ -710,7 +709,7 @@ const ChantierDetail = () => {
                   type="button"
                   onClick={handleToggleEncaisse}
                   disabled={savingEncaisse}
-                  title="Réservé aux admins : conditionne la commission commerciale du mois de clôture"
+                  title="Réservé aux admins : conditionne le résultat commercial du mois de clôture"
                   className={`text-[11px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full transition-colors ${chantier.encaisse ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
                 >
                   {chantier.encaisse ? '✓ Encaissé' : 'Non encaissé'}
@@ -776,7 +775,7 @@ const ChantierDetail = () => {
           </div>
 
           {/* Bannière de rappel : un chantier Terminé mais Non encaissé ne compte pas dans
-              la commission du commercial du mois (clause de sécurisation des commissions).
+              le résultat commercial du mois (CA et marge validés).
               Le badge ci-dessus permet déjà de basculer ce statut, mais reste discret parmi
               les autres badges — cette bannière rend l'action impossible à manquer. */}
           {isTermine && !chantier.encaisse && isAdminRole(userRole) && (
@@ -784,7 +783,7 @@ const ChantierDetail = () => {
               <div>
                 <div className="font-bold text-amber-800">Chantier terminé, en attente d'encaissement</div>
                 <div className="text-sm text-amber-700">
-                  Tant que l'encaissement n'est pas validé, la marge et la commission du commercial ne sont pas comptabilisées pour ce chantier.
+                  Tant que l'encaissement n'est pas validé, ce chantier ne compte pas dans le CA et la marge validés du commercial.
                 </div>
               </div>
               <button
@@ -1458,7 +1457,7 @@ const ChantierDetail = () => {
               <div className="form-group mb-0 md:col-span-2">
                 <label className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors w-fit">
                   <input type="checkbox" name="baremeReduit" value="true" defaultChecked={!!chantier.baremeReduit} className="w-4 h-4" />
-                  {libelleBaremeReduit} (barème de commission commerciale réduit)
+                  {libelleBaremeReduit} (sans effet tant qu'aucun plan commercial n'est attribué)
                 </label>
               </div>
               <div className="md:col-span-2 flex gap-2 mt-2">
