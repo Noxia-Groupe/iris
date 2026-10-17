@@ -2232,8 +2232,8 @@ app.get('/api/reglements', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Saisie d'un règlement reçu, réparti sur une ou plusieurs factures émises du même client.
-// La somme des parts égale le montant ; chaque part reste dans le reste dû de sa facture,
-// relu sous verrou. Une facture soldée passe à « réglée » dans la même transaction.
+// La somme des parts égale le montant ; le reste dû est relu sous verrou. Une facture que ses
+// règlements atteignent ou dépassent passe à « réglée » dans la même transaction.
 app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const corps = req.body || {};
@@ -2281,12 +2281,9 @@ app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, 
         if (facture.type !== 'FACTURE' || facture.statut !== 'EMISE') throw new ReglementRefuse(409, `Seule une facture émise non soldée reçoit un règlement : la facture ${facture.numero || 'brouillon'} ne le peut pas.`);
         if (dateReglement < dateSeuleEnJourCivil(facture.dateEmission)) throw new ReglementRefuse(409, `Le règlement ne peut pas précéder l’émission de la facture ${facture.numero} (${formatDateFacture(facture.dateEmission)}).`);
       }
+      // Une part peut dépasser le reste dû (décision de Nelson du 17-10-2026) : la facture est
+      // réglée dès que le montant reçu l'atteint ou le dépasse, et le surplus devient un trop-perçu.
       const soldes = await soldesFactures(tx, factures);
-      for (const affectation of affectations) {
-        const facture = parId.get(affectation.factureId)!;
-        const resteDu = soldes.get(facture.id)!.resteDu;
-        if (centimesEntiers(affectation.montant) > centimesEntiers(resteDu)) throw new ReglementRefuse(409, `La part de ${formatMontantFacture(affectation.montant)} dépasse le reste dû de la facture ${facture.numero} (${formatMontantFacture(resteDu)}).`);
-      }
       const cree = await tx.reglement.create({ data: {
         clientId: client.id, dateReglement: new Date(dateReglementIso!), montant, moyen, reference, createdById: req.user!.id,
         affectations: { create: affectations.map(affectation => ({ factureId: affectation.factureId, montant: affectation.montant })) },
@@ -2295,7 +2292,8 @@ app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, 
       for (const affectation of affectations) {
         const facture = parId.get(affectation.factureId)!;
         const resteApres = (centimesEntiers(soldes.get(facture.id)!.resteDu) - centimesEntiers(affectation.montant)) / 100;
-        await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_AFFECTE', detail: `${libelle} : ${formatMontantFacture(affectation.montant)} affectés ; reste dû ${formatMontantFacture(resteApres)}` } });
+        const solde = resteApres < 0 ? `trop-perçu ${formatMontantFacture(-resteApres)}` : `reste dû ${formatMontantFacture(resteApres)}`;
+        await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_AFFECTE', detail: `${libelle} : ${formatMontantFacture(affectation.montant)} affectés ; ${solde}` } });
         await synchroniserStatutReglement(tx, facture.id, req.user!.id, `règlement ${cree.id}`);
       }
       await verifierContraintesDifferees(tx);
@@ -2331,7 +2329,8 @@ app.post('/api/reglements/:id/contrepasser', requireAuth, requireAdmin, async (r
       for (const facture of factures) {
         const part = parts.find(ligne => ligne.factureId === facture.id)!;
         const resteDu = soldes.get(facture.id)?.resteDu ?? 0;
-        await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_CONTREPASSE', detail: `${libelle} ; ${formatMontantFacture(part.montant)} retirés ; reste dû ${formatMontantFacture(resteDu)}` } });
+        const solde = resteDu < 0 ? `trop-perçu ${formatMontantFacture(-resteDu)}` : `reste dû ${formatMontantFacture(resteDu)}`;
+        await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_CONTREPASSE', detail: `${libelle} ; ${formatMontantFacture(part.montant)} retirés ; ${solde}` } });
         await synchroniserStatutReglement(tx, facture.id, req.user!.id, `contre-passation du règlement ${maj.id}`);
       }
       await verifierContraintesDifferees(tx);

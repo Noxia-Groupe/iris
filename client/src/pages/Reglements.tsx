@@ -128,8 +128,9 @@ export default function Reglements() {
   const partInvalide = partsCentimes.find((part) => part.centimes === null);
   const affecte = partsCentimes.reduce((somme, part) => somme + (part.centimes ?? 0), 0);
   const resteAAffecter = (montantCentimes ?? 0) - affecte;
-  const depassement = partsCentimes.find((part) => (part.centimes ?? 0) > centimesDe(part.facture.resteDu));
-  const envoyable = !!clientId && !!montantCentimes && !partInvalide && !depassement && resteAAffecter === 0 && !envoi;
+  // Une part au-delà du reste dû est acceptée : le surplus devient un trop-perçu, annoncé avant l'envoi.
+  const tropPercus = partsCentimes.filter((part) => (part.centimes ?? 0) > centimesDe(part.facture.resteDu));
+  const envoyable = !!clientId && !!montantCentimes && !partInvalide && resteAAffecter === 0 && !envoi;
 
   const repartir = () => {
     if (!montantCentimes) return setErreur('Saisissez d’abord le montant reçu.');
@@ -259,13 +260,15 @@ export default function Reglements() {
                   </tbody>
                 </table>
               </div>
-              <p role="status" aria-label="Affectation du règlement" className={`text-sm ${resteAAffecter === 0 && !partInvalide && !depassement ? 'text-gray-600' : 'text-amber-700'}`}>
+              <p role="status" aria-label="Affectation du règlement" className={`text-sm ${resteAAffecter === 0 && !partInvalide ? 'text-gray-600' : 'text-amber-700'}`}>
                 Affecté : {saisieDeCentimes(affecte)} € sur {saisieDeCentimes(montantCentimes ?? 0)} €
                 {resteAAffecter > 0 && ` — reste à affecter : ${saisieDeCentimes(resteAAffecter)} €`}
                 {resteAAffecter < 0 && ` — affecté en trop : ${saisieDeCentimes(-resteAAffecter)} €`}
                 {partInvalide && ` — montant invalide pour la facture ${partInvalide.facture.numero}`}
-                {depassement && ` — la part de la facture ${depassement.facture.numero} dépasse son reste dû`}
               </p>
+              {tropPercus.map((part) => (
+                <p key={part.facture.id} className="text-sm text-amber-700">Trop-perçu de {saisieDeCentimes((part.centimes ?? 0) - centimesDe(part.facture.resteDu))} € sur la facture {part.facture.numero} : elle sera réglée, avec un reste dû négatif.</p>
+              ))}
             </section>
           )}
           {montant && montantCentimes === null && <p className="text-sm text-amber-700">Le montant reçu doit être un nombre positif, avec au plus deux décimales.</p>}

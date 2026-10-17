@@ -26,8 +26,8 @@ export const centimesDe = (montant: number) => Math.round(montant * 100);
 export const saisieDeCentimes = (centimes: number) => (centimes / 100).toFixed(2).replace('.', ',');
 
 // Répartit un montant sur les factures dans l'ordre reçu (échéance la plus ancienne d'abord),
-// chacune jusqu'à son reste dû. Un reliquat reste non affecté : le formulaire le signale et
-// n'envoie rien tant qu'il subsiste.
+// chacune jusqu'à son reste dû. Un montant supérieur au total dû est accepté (décision de Nelson
+// du 17-10-2026) : le surplus va sur la dernière facture, où il devient un trop-perçu.
 export function repartirReglement(montantCentimes: number, factures: { id: string; resteDu: number }[]): Record<string, number> {
   const parts: Record<string, number> = {};
   let reste = Math.max(0, montantCentimes);
@@ -36,6 +36,8 @@ export function repartirReglement(montantCentimes: number, factures: { id: strin
     parts[facture.id] = part;
     reste -= part;
   }
+  const derniere = factures.at(-1);
+  if (derniere && reste > 0) parts[derniere.id] += reste;
   return parts;
 }
 

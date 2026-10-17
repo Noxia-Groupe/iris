@@ -97,8 +97,9 @@ END $$;
 CREATE TRIGGER affectation_reglement_immuable BEFORE UPDATE OR DELETE ON "AffectationReglement"
 FOR EACH ROW EXECUTE FUNCTION figer_affectation_reglement();
 
--- Une part ne s'impute qu'à une facture émise du même client, sans dépasser son reste dû.
--- Le verrou de la facture sérialise les imputations concurrentes, même hors de l'API.
+-- Une part ne s'impute qu'à une facture émise du même client. Elle peut dépasser le reste dû :
+-- le surplus est un trop-perçu (décision de Nelson du 17-10-2026). Le verrou de la facture
+-- sérialise les imputations concurrentes, même hors de l'API.
 CREATE FUNCTION verifier_affectation_reglement() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE reglement RECORD; facture RECORD;
 BEGIN
@@ -114,9 +115,6 @@ BEGIN
   END IF;
   IF facture."clientId" <> reglement."clientId" THEN
     RAISE EXCEPTION 'Un règlement ne s’affecte qu’aux factures de son client.';
-  END IF;
-  IF NEW."montant" > reste_du_facture(NEW."factureId") THEN
-    RAISE EXCEPTION 'Affectation supérieure au reste dû de la facture %.', NEW."factureId";
   END IF;
   RETURN NEW;
 END $$;

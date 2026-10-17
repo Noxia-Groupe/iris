@@ -14,13 +14,14 @@ test('montant saisi : virgule ou point, deux décimales au plus, en centimes exa
   assert.equal(saisieDeCentimes(30), '0,30');
 });
 
-test('répartition : échéance la plus ancienne d’abord, jamais au-delà du reste dû', () => {
+test('répartition : échéance la plus ancienne d’abord, surplus en trop-perçu sur la dernière', () => {
   const factures = [{ id: 'a', resteDu: 70 }, { id: 'b', resteDu: 240 }, { id: 'c', resteDu: 0.3 }];
   assert.deepEqual(repartirReglement(10000, factures), { a: 7000, b: 3000, c: 0 });
   assert.deepEqual(repartirReglement(31030, factures), { a: 7000, b: 24000, c: 30 });
-  // Au-delà du total dû, le reliquat n'est affecté nulle part : le formulaire le signale.
-  assert.deepEqual(repartirReglement(40000, factures), { a: 7000, b: 24000, c: 30 });
+  // Au-delà du total dû, le surplus va sur la dernière facture (trop-perçu, décision du 17-10-2026).
+  assert.deepEqual(repartirReglement(40000, factures), { a: 7000, b: 24000, c: 9000 });
   assert.deepEqual(repartirReglement(0, factures), { a: 0, b: 0, c: 0 });
+  assert.deepEqual(repartirReglement(500, []), {});
 });
 
 test('situation affichée sous le statut : partielle, soldée par avoir, trop-perçu', () => {

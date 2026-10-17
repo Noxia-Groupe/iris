@@ -8417,8 +8417,6 @@ if (!TEST_DATABASE_URL) {
       const part = (factureId, montant = 10) => ({ clientId: client, montant, affectations: [{ factureId, montant }] });
       const cas = [
         [{ clientId: client, montant: 120, affectations: [{ factureId: facture.id, montant: 100 }] }, 400, /entièrement affecté/],
-        [part(facture.id, 130), 409, /dépasse le reste dû/],
-        [part(creditee.id, 120), 409, /dépasse le reste dû.*108,00 €/],
         [part(factureAutre.id), 409, /autre client/],
         [part(brouillon.body.id), 409, /émise non soldée/],
         [part(avoir.body.id), 409, /émise non soldée/],
@@ -8461,6 +8459,28 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await enregistrerReglement(part(creditee.id, 107.8))).status, 201);
       assert.equal((await factureLue(creditee.id)).statut, 'REGLEE');
       assert.equal((await enregistrerReglement(part(creditee.id, 0.01))).status, 409, 'une facture soldée ne reçoit plus de règlement');
+    });
+
+    test('règlement supérieur au reste dû : la facture est réglée et le surplus devient un trop-perçu', async () => {
+      // Décision de Nelson du 17-10-2026 : réglée dès que le montant enregistré atteint ou dépasse le dû.
+      const client = await clientReglement('TEST Client règlements surplus');
+      const facture = await emettrePourReglement(client, 'surplus', 100);
+      const autre = await emettrePourReglement(client, 'surplus partagé', 100);
+      const surplus = await enregistrerReglement({ clientId: client, montant: 130, moyen: 'CHEQUE', affectations: [{ factureId: facture.id, montant: 130 }] });
+      assert.equal(surplus.status, 201, JSON.stringify(surplus.body));
+      let lue = await factureLue(facture.id);
+      assert.deepEqual([lue.statut, lue.montantRegle, lue.resteDu], ['REGLEE', 130, -10]);
+      assert.ok((await journalDe(facture.id)).some((entree) => entree.action === 'REGLEMENT_AFFECTE' && /130,00 € affectés ; trop-perçu 10,00 €/.test(entree.detail)), 'le journal annonce le trop-perçu');
+      assert.equal((await enregistrerReglement({ clientId: client, montant: 1, affectations: [{ factureId: facture.id, montant: 1 }] })).status, 409, 'une facture réglée ne reçoit plus de règlement');
+      // Réparti sur deux factures, le surplus reste sur celle que l'on a choisie.
+      const reparti = await enregistrerReglement({ clientId: client, montant: 125, affectations: [{ factureId: autre.id, montant: 125 }] });
+      assert.equal(reparti.status, 201, JSON.stringify(reparti.body));
+      assert.equal((await factureLue(autre.id)).resteDu, -5);
+      // La contre-passation rouvre le reste dû entier.
+      assert.equal((await contrepasser(surplus.body.id)).status, 200);
+      lue = await factureLue(facture.id);
+      assert.deepEqual([lue.statut, lue.montantRegle, lue.resteDu], ['EMISE', 0, 120]);
+      assert.ok((await journalDe(facture.id)).some((entree) => entree.action === 'REGLEMENT_CONTREPASSE' && /130,00 € retirés ; reste dû 120,00 €/.test(entree.detail)));
     });
 
     test('règlements : pas d’annulation totale après encaissement ; un avoir après règlement crée un trop-perçu', async () => {
@@ -8558,7 +8578,6 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(() => prisma.$transaction(async tx => { await tx.reglement.create({ data: brut({}) }); await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`; }), /affectations totalisent 0/);
       await assert.rejects(() => prisma.reglement.create({ data: brut({}) }), /affectations totalisent 0/);
       await assert.rejects(() => prisma.reglement.create({ data: brut({ montant: 10, affectations: { create: [{ factureId: facture.id, montant: 5 }] } }) }), /affectations totalisent 5/);
-      await assert.rejects(() => prisma.reglement.create({ data: brut({ montant: 101, affectations: { create: [{ factureId: facture.id, montant: 101 }] } }) }), /reste dû/);
       await assert.rejects(() => prisma.reglement.create({ data: brut({ affectations: { create: [{ factureId: factureAutre.id, montant: 5 }] } }) }), /son client/);
       await assert.rejects(() => prisma.reglement.create({ data: brut({ statut: 'CONTREPASSE', motifContrepassation: 'TEST direct', contrepasseLe: new Date(), contrepasseParId: auteur, affectations: { create: [{ factureId: facture.id, montant: 5 }] } }) }), /créé enregistré/);
       await assert.rejects(() => prisma.reglement.create({ data: brut({ dateReglement: new Date('2026-09-12T10:00:00.000Z'), affectations: { create: [{ factureId: facture.id, montant: 5 }] } }) }), /Reglement_date_check/);
@@ -8570,6 +8589,8 @@ if (!TEST_DATABASE_URL) {
       const solde = await enregistrerReglement({ clientId: client, montant: 100, affectations: [{ factureId: facture.id, montant: 100 }] });
       assert.equal(solde.status, 201, JSON.stringify(solde.body));
       await assert.rejects(() => prisma.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE' } }), /reste « réglée »/);
+      // Réglée, elle ne reçoit plus d'affectation, même écrite directement en base.
+      await assert.rejects(() => prisma.reglement.create({ data: brut({ affectations: { create: [{ factureId: facture.id, montant: 5 }] } }) }), /émise non soldée/);
       assert.equal((await contrepasser(premier.body.id)).status, 200);
       await assert.rejects(() => prisma.reglement.update({ where: { id: premier.body.id }, data: { statut: 'ENREGISTRE', motifContrepassation: null, contrepasseLe: null, contrepasseParId: null } }), /Règlement figé/);
       assert.equal(await totalAffecte(facture.id), 100);
