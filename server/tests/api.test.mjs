@@ -128,13 +128,13 @@ if (!TEST_DATABASE_URL) {
   const nettoyer = async () => {
     // La signature dépend du devis : elle part avant le devis pour garder ce teardown explicite.
     // Elle est figée en base (lot pilote 2) : le nettoyage de la base jetable suspend ce garde le
-    // temps de purger les fixtures, puis le réactive même en cas d'échec.
-    try {
-      await prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" DISABLE TRIGGER "devis_signature_figee"');
-      await prisma.devisSignature.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
-    } finally {
-      await prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" ENABLE TRIGGER "devis_signature_figee"');
-    }
+    // temps de purger les fixtures, puis le réactive.
+    // Une seule transaction : un arrêt en cours de route ne peut pas laisser le garde désactivé.
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" DISABLE TRIGGER "devis_signature_figee"'),
+      prisma.devisSignature.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } }),
+      prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" ENABLE TRIGGER "devis_signature_figee"'),
+    ]);
     // Une conversion garde le lien vers le devis : elle part avant le devis et sa fiche client.
     await prisma.devisConversion.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     // Les devis dépendent du client ; ils doivent être retirés avant la fiche client.
@@ -2820,6 +2820,31 @@ if (!TEST_DATABASE_URL) {
       assert.equal(pourAdmin.body.find((f) => f.id === creation.body.id).prixAchatHt, 1, 'l’administration le voit');
     });
 
+    // Le parc joint le modèle du catalogue à chaque équipement : son prix d'achat suit la même règle.
+    test('parc d’équipements par clé d’intégration : prix d’achat du modèle seulement avec finances:read', async () => {
+      const cle = async (scopes) => (await request(app).post('/api/admin/api-keys').set(admin).send({ nom: `TEST parc prix ${scopes.join(' ')}`, scopes })).body.apiKey;
+      const parc = { Authorization: `Bearer ${await cle(['equipements:read', 'equipements:write', 'devis:read'])}` };
+      const financier = { Authorization: `Bearer ${await cle(['equipements:read', 'finances:read'])}` };
+      const site = await envoyer('post', `/api/clients/${clientId}/sites`, admin, { nom: 'TEST Site catalogue', adresse: '1 rue du Parc', codePostal: '14000', ville: 'Caen', estSiteIntervention: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      const chemin = `/api/v1/clients/${clientId}/equipements`;
+      const creation = await envoyer('post', chemin, parc, { catalogueEquipementId: fiches.camera.id, clientSiteId: site.body.id, numeroSerie: `TEST-SN-CAT-${suffixe}` });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.equal(creation.body.catalogueEquipement.reference, fiches.camera.reference);
+      assert.ok(!('prixAchatHt' in creation.body.catalogueEquipement), 'création : prix d’achat du modèle masqué sans finances:read');
+      const liste = await request(app).get(chemin).set(parc);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      assert.ok(liste.body.length > 0 && liste.body.every((e) => e.catalogueEquipement && !('prixAchatHt' in e.catalogueEquipement)), 'liste : masqué sans finances:read');
+      const archive = await request(app).post(`${chemin}/${creation.body.id}/archiver`).set(parc);
+      assert.equal(archive.status, 200, JSON.stringify(archive.body));
+      assert.equal(archive.body.statut, 'ARCHIVE');
+      assert.ok(!('prixAchatHt' in archive.body.catalogueEquipement), 'archivage : masqué sans finances:read');
+      const pourFinancier = await request(app).get(chemin).query({ inclureArchives: 'true' }).set(financier);
+      assert.equal(pourFinancier.body.find((e) => e.id === creation.body.id).catalogueEquipement.prixAchatHt, '120', 'lu avec finances:read');
+      const pourAdmin = await request(app).get(`/api/clients/${clientId}/equipements`).query({ inclureArchives: 'true' }).set(admin);
+      assert.equal(pourAdmin.body.find((e) => e.id === creation.body.id).catalogueEquipement.prixAchatHt, '120', 'l’administration le voit');
+    });
+
     test('une ligne reprise est copiée : référence recopiée par le serveur, prix d’achat repris de la fiche et masqué au commercial', async () => {
       const creation = await request(app).post('/api/devis').set(commercial).send({ clientId, objet: `TEST Devis catalogue ${suffixe}`, lignes: [
         { designation: fiches.camera.nom, nature: 'FOURNITURE', quantite: '2', prixUnitaireHt: '180', tauxTva: '20', unite: 'pièce', catalogueFamille: 'equipements', catalogueId: fiches.camera.id },
@@ -2958,8 +2983,13 @@ if (!TEST_DATABASE_URL) {
       // (on ne peut donc pas la retirer, modifier le devis, puis la recréer avec la même empreinte).
       await assert.rejects(prisma.devisSignature.update({ where: { devisId }, data: { empreinte: '0'.repeat(64) } }), /Signature de devis figée/);
       await assert.rejects(prisma.devisSignature.delete({ where: { devisId } }), /Signature de devis figée/);
-      await assert.rejects(prisma.$executeRawUnsafe('TRUNCATE "DevisLigne"'), /vidage interdit/);
-      await assert.rejects(prisma.$executeRawUnsafe('TRUNCATE "DevisSignature"'), /vidage interdit/);
+      // Chaque vidage est tenté dans une transaction annulée : si le garde régressait, la base de
+      // test ne serait pas réellement vidée sous les tests suivants.
+      const vidageAnnule = (table) => prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`TRUNCATE "${table}"`);
+        throw new Error(`vidage de ${table} accepté`);
+      });
+      for (const table of ['DevisLigne', 'DevisSignature']) await assert.rejects(vidageAnnule(table), /vidage interdit/, table);
       assert.ok(await prisma.devisSignature.findUnique({ where: { devisId } }), 'signature intacte');
       // Une ligne libre ne porte pas de référence (contrainte de cohérence).
       const revisionId = revision.body.id;

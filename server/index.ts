@@ -5597,6 +5597,17 @@ const modifierSite: express.RequestHandler = async (req, res) => {
 // vérification interdit de déplacer un équipement vers le site d'un autre client en
 // devinant un identifiant. L'archivage préserve la série, la garantie et l'historique.
 const equipementInclude = { catalogueEquipement: true, clientSite: true };
+// Le modèle du catalogue joint à chaque équipement suit la règle des fiches : son prix d'achat
+// ne sort que pour l'administration ou une clé portant `finances:read` (cf. ficheCataloguePourLecteur).
+function equipementPourLecteur<T>(req: express.Request, valeur: T): T {
+  if (voitPrixAchatDevis(req)) return valeur;
+  const masquer = (equipement: unknown) => {
+    if (!equipement || typeof equipement !== 'object') return equipement;
+    const { catalogueEquipement, ...reste } = equipement as Record<string, unknown>;
+    return { ...reste, catalogueEquipement: ficheCataloguePourLecteur(req, catalogueEquipement) };
+  };
+  return (Array.isArray(valeur) ? valeur.map(masquer) : masquer(valeur)) as T;
+}
 
 function equipementTexte(value: unknown, champ: string, requis = false) {
   const texte = value == null ? '' : String(value).trim();
@@ -5655,7 +5666,7 @@ const listerEquipementsClient: express.RequestHandler = async (req, res) => {
       // inclureArchives=true est demandé — l'inverse de ce qu'on veut consulter en premier.
       orderBy: [{ statut: 'desc' }, { createdAt: 'desc' }],
     });
-    res.json(equipements);
+    res.json(equipementPourLecteur(req, equipements));
   } catch (error) {
     equipementApiError(res, error);
   }
@@ -5665,7 +5676,7 @@ const creerEquipementClient: express.RequestHandler = async (req, res) => {
   const clientId = String(req.params.clientId);
   try {
     const data = await equipementPayload(clientId, (req.body ?? {}) as Record<string, unknown>);
-    res.status(201).json(await prisma.equipementInstalle.create({ data: { ...data, clientId }, include: equipementInclude }));
+    res.status(201).json(equipementPourLecteur(req, await prisma.equipementInstalle.create({ data: { ...data, clientId }, include: equipementInclude })));
   } catch (error) {
     equipementApiError(res, error);
   }
@@ -5677,7 +5688,7 @@ const archiverEquipementClient: express.RequestHandler = async (req, res) => {
   try {
     const maj = await prisma.equipementInstalle.updateMany({ where: { id, clientId }, data: { statut: 'ARCHIVE' } });
     if (!maj.count) return res.status(404).json({ error: 'Équipement introuvable.' });
-    res.json(await prisma.equipementInstalle.findUnique({ where: { id }, include: equipementInclude }));
+    res.json(equipementPourLecteur(req, await prisma.equipementInstalle.findUnique({ where: { id }, include: equipementInclude })));
   } catch (error) {
     equipementApiError(res, error);
   }
