@@ -134,7 +134,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 |---|---|---|
 | 1. Règlements (A3) | **Implémenté** (P1a). P1b, sur les commissions actuelles, est sans objet. | #155, garde en base renforcée par #158 ; commissions fermées par #159 |
 | 2. Catalogue dans les devis (A8) | **Implémenté** | #161 |
-| 3. Parcours technicien sur téléphone | **Partiel** : prérequis et droits (3a) implémentés ; parcours sur téléphone (3b) à faire | #166 (3a) |
+| 3. Parcours technicien sur téléphone | **Partiel** : prérequis et droits (3a) implémentés ; parcours sur téléphone (3b) à faire, après le découpage du serveur (chantier technique 2, plus bas) | #166 (3a) |
 | 4. Conversion des devis (A7) | Décidé ; place avant ou après le premier jour à confirmer (proposé : avant) | — |
 | 5. Génération automatique des visites (A9) | Décidé ; place à confirmer (proposé : avant) | — |
 | 6. Envoi des documents (A10) | Décidé ; place à confirmer (proposé : avant) | — |
@@ -225,6 +225,19 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 ### Ordre de travail (proposé, à confirmer par Nelson)
 
 Depuis le 16-10-2026, l'ordre suit le pilote : voir le tableau des lots ci-dessus. Après le pilote, ordre indicatif, à revoir selon les vrais utilisateurs : la facturation électronique (A2) suit l'échéance légale, à confirmer par le cabinet ; puis banque et rapprochement, abonnements et locations (lot (k)), financeurs et télécom, plan commercial (lot (i)), astreintes (lot (j)). La préparation de l'instance pilote (recette métier et sécurité, configuration vide réelle, sauvegarde **et restauration testées**, supervision, validation du cabinet, autorisation explicite de mise en service) reste un préalable à la mise en service ; pas de déploiement automatique.
+
+### Chantiers techniques (décision de Nelson du 17-10-2026)
+
+Quatre chantiers techniques, chacun dans sa ou ses PR, selon les règles habituelles, dans l'ordre décidé : 1, puis 2, puis 3 et 4 en proposition seulement.
+1. **Dépendance `xlsx`** : déclarée par le serveur sans être utilisée, et visée par des avis de sécurité. **Implémenté** : retirée par #175. Les autres failles relevées par `npm audit` font chacune l'objet d'une issue, de #168 à #174 (ouvertes).
+2. **Découpage de `server/index.ts` par domaine** (environ 8 000 lignes ; 144 déclarations `app.<méthode>` depuis #166, et 27 appels `routeMixte`, soit 54 routes sous `/api` et `/api/v1` : 198 routes enregistrées en tout), sans aucun changement de comportement : mêmes routes, réponses, codes et messages d'erreur, transactions, verrous et contraintes différées. **Prévu**, avant le lot pilote 3b.
+   - Méthode : de petites PR ; la première propose la structure et extrait un domaine simple, chaque suivante déplace un ou deux domaines.
+   - Preuve : un script compare la liste des routes avant et après, et les suites API et E2E passent sans modification. Nelson admet un changement de chemin d'import dans les tests ; `server/index.ts` garde les exports qu'ils lisent, pour qu'en pratique aucun chemin d'import ne change.
+   - À la fin, aucun fichier du serveur ne dépasse environ 800 lignes. Ensuite seulement : proposition du même découpage pour les gros écrans (`ChantierDetail.tsx`, `Admin.tsx`, et `Planning.tsx`, qui dépasse aussi 800 lignes).
+3. **Droits flexibles et simples à paramétrer** : proposition `docs/MODELE-DROITS-CIBLE.md` (permissions élémentaires, périmètres, rôles paramétrables, hiérarchie facultative, modèles TPE et PME, migration rôle par rôle à comportement identique), à valider par Nelson avant tout code. Parcours de droits : règle 2. **Prévu.**
+4. **Paramétrage plutôt que règles en dur** : proposition `docs/PARAMETRAGE-CIBLE.md` (inventaire des règles classées en déjà paramétrables, à rendre paramétrables, ou à garder dans le code ; assistant de démarrage dans Paramètres), à valider par Nelson avant tout code. Aucune valeur métier inventée. **Prévu.**
+
+Deux règles permanentes de conception sont ajoutées le même jour à [CLAUDE.md](../CLAUDE.md#règles-permanentes-de-conception-décision-de-nelson-du-17-10-2026) et à [AGENTS.md](../.agents/AGENTS.md) : une nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée ; aucun fichier de code applicatif ne dépasse environ 800 lignes.
 
 ## 3. Questions ouvertes pour Nelson
 
@@ -330,6 +343,8 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Nature proposée par famille : une prestation en main-d'œuvre, un article ou un équipement en fourniture.
 - La référence et l'unité entrent dans l'empreinte de signature ; le prix d'achat prévu, donnée interne, n'y entre pas.
 - Un devis signé est figé en base, en plus du contrôle de l'API : ses lignes et son contenu, sa signature (ni modification, ni suppression) et le vidage des trois tables (`TRUNCATE`). Son cycle de vie (statut, acompte constaté, annulation, conversion) reste possible.
+
+**Règles permanentes de conception** (décision du 17-10-2026), **appliqué** par #176 : la limite d'environ 800 lignes ne s'applique ni aux fichiers de tests, ni aux migrations, ni aux fichiers générés (lockfiles, client Prisma), ni au schéma Prisma, que Prisma 5 ne scinde qu'avec une fonction en préversion.
 
 **Envoi des documents** (lot pilote 6) : journal des envois, choix par défaut, à confirmer, à préciser dans la PR du lot.
 
