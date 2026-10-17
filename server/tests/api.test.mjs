@@ -5547,12 +5547,15 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-27T00:00:00.000Z' });
         ids.push((await creer('FACTURE', 'ANNULEE', 'TEST-F-102', '2026-09-28')).id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-28T00:00:00.000Z' });
-        // Une facture ne naît jamais « réglée » (trigger des règlements) : ce test de chronologie
-        // fabrique la pièce brute en suspendant ce seul garde, le temps de l'insertion.
+        // Une facture ne naît jamais « réglée » (gardes des règlements, immédiate et différée) : ce
+        // test de chronologie fabrique la pièce brute en suspendant ces seuls gardes, le temps de
+        // l'insertion.
         await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglements"');
+        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglement_differe"');
         try {
           ids.push((await creer('FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29')).id);
         } finally {
+          await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglement_differe"');
           await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglements"');
         }
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-29T00:00:00.000Z' });
@@ -8616,6 +8619,57 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(() => prisma.reglement.update({ where: { id: premier.body.id }, data: { statut: 'ENREGISTRE', motifContrepassation: null, contrepasseLe: null, contrepasseParId: null } }), /Règlement figé/);
       assert.equal(await totalAffecte(facture.id), 100);
       assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: facture.id } })).statut, 'EMISE');
+    });
+
+    test('base : le statut « réglée » reste cohérent avec les règlements au COMMIT, même par écriture directe', async () => {
+      const client = await clientReglement('TEST Client statut différé');
+      const facture = await emettrePourReglement(client, 'statut différé', 100);
+      const regle = await enregistrerReglement({ clientId: client, montant: 120, affectations: [{ factureId: facture.id, montant: 120 }] });
+      assert.equal(regle.status, 201, JSON.stringify(regle.body));
+      // Contre-passation écrite directement : la facture resterait « réglée » sans règlement.
+      await assert.rejects(() => prisma.$executeRaw`UPDATE "Reglement" SET "statut" = 'CONTREPASSE', "motifContrepassation" = 'TEST direct', "contrepasseLe" = now(), "contrepasseParId" = ${regle.body.createdById} WHERE "id" = ${regle.body.id}`, /incohérent avec ses règlements/);
+      assert.equal((await prisma.reglement.findUniqueOrThrow({ where: { id: regle.body.id } })).statut, 'ENREGISTRE');
+      // Affectation directe qui solde une facture sans la passer « réglée ».
+      const autre = await emettrePourReglement(client, 'statut différé solde', 100);
+      await assert.rejects(() => prisma.reglement.create({ data: { clientId: client, dateReglement: new Date('2026-09-12T00:00:00.000Z'), montant: 120, moyen: 'VIREMENT', createdById: regle.body.createdById, affectations: { create: [{ factureId: autre.id, montant: 120 }] } } }), /incohérent avec ses règlements/);
+      assert.equal(await prisma.reglement.count({ where: { clientId: client } }), 1);
+      // Par l'API, la même affectation passe : le statut est synchronisé avant le COMMIT.
+      assert.equal((await enregistrerReglement({ clientId: client, montant: 120, affectations: [{ factureId: autre.id, montant: 120 }] })).status, 201);
+      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: autre.id } })).statut, 'REGLEE');
+    });
+
+    test('transactions : une contrainte différée violée fait échouer la route, sans faux succès ni écriture', async () => {
+      // Prisma résout une transaction interactive même si son COMMIT échoue : un trigger différé de
+      // test, toujours en échec, prouve que chaque route vérifie ses contraintes avant de répondre.
+      const client = await clientReglement('TEST Client transactions différées');
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId: client, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST différé', dateEmission: '11-09-2026', dateEcheance: '11-10-2026', lignes: [{ designation: 'TEST différé', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const emise = await emettrePourReglement(client, 'différé émise', 100);
+      const compteTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION test_echec_differe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'TEST échec différé'; END $$`);
+      try {
+        await prisma.$executeRawUnsafe('CREATE CONSTRAINT TRIGGER test_echec_differe_facture AFTER INSERT ON "JournalFacture" DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION test_echec_differe()');
+        await prisma.$executeRawUnsafe('CREATE CONSTRAINT TRIGGER test_echec_differe_regle AFTER INSERT ON "JournalRegleComptable" DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION test_echec_differe()');
+        const emission = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
+        assert.equal(emission.status, 500, JSON.stringify(emission.body));
+        const relue = await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.body.id } });
+        assert.deepEqual([relue.statut, relue.numero], ['BROUILLON', null]);
+        const reglement = await enregistrerReglement({ clientId: client, montant: 120, affectations: [{ factureId: emise.id, montant: 120 }] });
+        assert.equal(reglement.status, 500, JSON.stringify(reglement.body));
+        assert.equal(await prisma.reglement.count({ where: { clientId: client } }), 0);
+        const annulation = await request(app).post(`/api/factures/${emise.id}/annuler`).set('Authorization', `Bearer ${session}`);
+        assert.equal(annulation.status, 500, JSON.stringify(annulation.body));
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: emise.id } })).statut, 'EMISE');
+        const tva = await request(app).put('/api/comptabilite/tva/3.3').set('Authorization', `Bearer ${session}`).send({ compteId: compteTva.id, motif: 'TEST différé' });
+        assert.equal(tva.status, 500, JSON.stringify(tva.body));
+        assert.equal((await prisma.regleTvaComptable.findMany()).filter((regle) => Number(regle.taux) === 3.3).length, 0, 'taux inutilisé ailleurs dans les tests');
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_echec_differe_facture ON "JournalFacture"');
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_echec_differe_regle ON "JournalRegleComptable"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_echec_differe()');
+      }
+      // Sans le trigger de test, la même émission réussit : l'échec venait bien de lui.
+      assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
     });
 
     test('courses : un seul règlement du reste dû, jamais règlement et annulation ensemble, une seule contre-passation, sans interblocage', async () => {

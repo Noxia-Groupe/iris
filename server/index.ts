@@ -13,6 +13,20 @@ dotenv.config();
 
 const app = express();
 export const prisma = new PrismaClient();
+
+// Prisma 5 résout une transaction interactive même quand son COMMIT échoue sur un trigger
+// différé (équilibre des écritures, journaux comptables, règlements) : l'appel réussirait sans
+// rien avoir enregistré (constaté sur PostgreSQL 16 avec Prisma 5.22). Toute transaction
+// interactive de l'application passe donc par cette fonction : les contraintes différées sont
+// vérifiées avant la fin du rappel, et une violation fait échouer la transaction au grand jour.
+type OptionsTransaction = { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel };
+function transactionVerifiee<T>(rappel: (tx: Prisma.TransactionClient) => Promise<T>, options?: OptionsTransaction): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    const resultat = await rappel(tx);
+    await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+    return resultat;
+  }, options);
+}
 const port = process.env.PORT || 3001;
 
 // Ne pas révéler la techno serveur (en-tête `X-Powered-By: Express`).
@@ -1278,14 +1292,6 @@ async function synchroniserStatutReglement(tx: Prisma.TransactionClient, facture
   await tx.journalFacture.create({ data: { factureId: facture.id, acteurId, action: cible === 'REGLEE' ? 'REGLEMENT' : 'RETOUR_EMISE', detail: `Transition ${facture.statut} → ${cible} (${cause}) : réglé ${formatMontantFacture(solde.montantRegle)}, ${reste}` } });
 }
 
-// Prisma 5 résout une transaction interactive même quand son COMMIT échoue sur un trigger
-// différé : l'API répondrait un succès sans rien avoir enregistré (constaté sur PostgreSQL 16).
-// Vérifier les contraintes différées avant la fin du rappel fait échouer la transaction au
-// grand jour, avec son annulation.
-async function verifierContraintesDifferees(tx: Prisma.TransactionClient) {
-  await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
-}
-
 // Centimes entiers : la somme des affectations se compare au montant sans erreur binaire.
 const centimesEntiers = (montant: number) => Math.round(montant * 100);
 
@@ -1313,7 +1319,7 @@ app.get('/api/factures/chronologie', requireAuth, requireAdmin, async (_req, res
 // de règlement y choisit le client puis les factures à régler ; la liste n'est pas tronquée.
 app.get('/api/factures/a-regler', requireAuth, requireAdmin, async (_req, res) => {
   try {
-    const factures = await prisma.$transaction(async tx => avecSoldes(tx, await tx.facture.findMany({
+    const factures = await transactionVerifiee(async tx => avecSoldes(tx, await tx.facture.findMany({
       where: { type: 'FACTURE', statut: 'EMISE' },
       select: { id: true, numero: true, type: true, statut: true, dateEmission: true, dateEcheance: true, totalTtc: true, client: { select: { id: true, raisonSociale: true, actif: true } } },
       orderBy: [{ dateEcheance: 'asc' }, { dateEmission: 'asc' }, { numero: 'asc' }],
@@ -1336,12 +1342,12 @@ app.get('/api/factures', requireAuth, requireAdmin, async (req, res) => {
     const orderBy = [{ dateEmission: 'desc' as const }, { createdAt: 'desc' as const }, { id: 'desc' as const }];
     if (!pagine) {
       // Liste complète : délai explicite, une base réelle dépasse vite les 5 s par défaut de Prisma.
-      const factures = await prisma.$transaction(async tx => avecSoldes(tx, await tx.facture.findMany({ include: factureInclude, orderBy })), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 30_000 });
+      const factures = await transactionVerifiee(async tx => avecSoldes(tx, await tx.facture.findMany({ include: factureInclude, orderBy })), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 30_000 });
       return res.json(decimalToNumber(factures));
     }
     const skip = (page! - 1) * pageSize!;
     // Une seule photo de la base : le total, la page et les soldes de ses factures.
-    const { total, items } = await prisma.$transaction(async tx => {
+    const { total, items } = await transactionVerifiee(async tx => {
       const total = await tx.facture.count();
       const items = skip >= total ? [] : await avecSoldes(tx, await tx.facture.findMany({ include: factureInclude, orderBy, skip, take: pageSize! }));
       return { total, items };
@@ -1440,7 +1446,7 @@ app.post('/api/factures', requireAuth, requireAdmin, async (req: AuthRequest, re
     const totalTva = centimes(ventilationTva.reduce((somme, ventilation) => somme + ventilation.totalTva, 0));
     const totalTtc = centimes(totalHt + totalTva);
     if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de facture hors des limites acceptées.');
-    const facture = await prisma.$transaction(async (tx) => {
+    const facture = await transactionVerifiee(async (tx) => {
       // Sous verrou partagé : un changement de client de l'affaire en cours (cf. PATCH
       // /api/chantiers/:id) attend la fin de cette création et voit alors la facture, ou s'enregistre
       // d'abord, et l'affaire n'est plus celle de ce client. Une annulation en cours est attendue de
@@ -1504,7 +1510,7 @@ function motifCompteComptableValide(value: unknown): string | null { return moti
 app.post('/api/comptabilite/comptes', requireAuth, requireAdmin, async (req, res) => {
   try { const code = String(req.body?.code || '').trim(), libelleBrut = String(req.body?.libelle || ''), libelle = libelleBrut.trim(), nature = String(req.body?.nature || '');
     if (!/^\d{3,12}$/.test(code) || !libelle || !libelleComptableValide(libelleBrut) || !['ACTIF', 'PASSIF', 'PRODUIT', 'CHARGE', 'TVA'].includes(nature)) return res.status(400).json({ error: 'Compte comptable invalide.' });
-    const compte = await prisma.$transaction(async tx => {
+    const compte = await transactionVerifiee(async tx => {
       await verrouillerParametrageComptable(tx);
       return tx.compteComptable.create({ data: { code, libelle, nature } });
     }); res.status(201).json(compte);
@@ -1565,7 +1571,7 @@ app.patch('/api/comptabilite/comptes/:id', requireAuth, requireAdmin, async (req
     return res.status(400).json({ error: 'Libellé ou nature et motif de 3 à 500 caractères requis ; code non modifiable.' });
   }
   try {
-    const compte = await prisma.$transaction(async tx => {
+    const compte = await transactionVerifiee(async tx => {
       await verrouillerCompteComptable(tx, String(req.params.id));
       const avant = await tx.compteComptable.findUnique({ where: { id: String(req.params.id) } });
       if (!avant) return null;
@@ -1600,7 +1606,7 @@ app.patch('/api/comptabilite/comptes/:id/activation', requireAuth, requireAdmin,
   }
   const motif = req.body.motif.trim();
   try {
-    const compte = await prisma.$transaction(async tx => {
+    const compte = await transactionVerifiee(async tx => {
       await verrouillerCompteComptable(tx, String(req.params.id));
       const existant = await tx.compteComptable.findUnique({ where: { id: String(req.params.id) } });
       if (!existant) return null;
@@ -1707,7 +1713,7 @@ app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req: Au
       (req.body.phase === 'confirmer' && !motifCompteComptableValide(req.body.motif)))
       return res.status(400).json({ error: 'Phase ou motif de 3 à 500 caractères invalide.' });
     try {
-      const resultat = await prisma.$transaction(async tx => {
+      const resultat = await transactionVerifiee(async tx => {
         await verrouillerParametrageComptable(tx);
         const { actions, empreinte, parCode } = await preparerApercuImport(tx, comptes);
         if (req.body.phase === 'apercu') return { actions, apercuId: signerApercu(empreinte, req.user!.id, Date.now()) };
@@ -1732,7 +1738,7 @@ app.post('/api/comptabilite/importer', requireAuth, requireAdmin, async (req: Au
   }
   if (req.body?.phase !== undefined || req.body?.motif !== undefined || req.body?.apercuId !== undefined) return res.status(400).json({ error: 'Mode d’import requis.' });
   try {
-    const resultat = await prisma.$transaction(async tx => {
+    const resultat = await transactionVerifiee(async tx => {
       // Sérialise les imports et toutes les émissions/remappages comptables.
       await verrouillerParametrageComptable(tx);
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(814081)::text AS verrou`;
@@ -1767,7 +1773,7 @@ app.put('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (req: 
     const compteId = req.body?.compteId ? String(req.body.compteId) : null; const journal = req.body?.journal == null ? null : String(req.body.journal).trim() || null;
     if (cle === 'JOURNAL_VENTES' ? !journal : !compteId) return res.status(400).json({ error: 'Paramétrage de règle incomplet.' });
     if (journal && !/^[A-Z0-9]{1,8}$/.test(journal)) return res.status(400).json({ error: 'Le code journal doit compter au plus 8 caractères alphanumériques majuscules.' });
-    const regle = await prisma.$transaction(async tx => {
+    const regle = await transactionVerifiee(async tx => {
       await verrouillerParametrageComptable(tx);
       if (compteId) {
         await verrouillerCompteComptable(tx, compteId);
@@ -1816,7 +1822,7 @@ app.delete('/api/comptabilite/regles/:cle', requireAuth, requireAdmin, async (re
       typeof body.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(body.expectedUpdatedAt)) ||
       !motifCompteComptableValide(body.motif)) return res.status(400).json({ error: 'Version et motif de 3 à 500 caractères requis.' });
   try {
-    const retire = await prisma.$transaction(async tx => {
+    const retire = await transactionVerifiee(async tx => {
       await verrouillerParametrageComptable(tx);
       const courante = await tx.regleComptable.findUnique({ where: { cle } });
       if (!courante) return false;
@@ -1846,7 +1852,7 @@ app.delete('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req:
     return res.status(400).json({ error: 'Confirmez le taux et la version de la règle TVA à retirer.' });
   }
   try {
-    const supprimee = await prisma.$transaction(async tx => {
+    const supprimee = await transactionVerifiee(async tx => {
       await verrouillerParametrageComptable(tx);
       const courante = await tx.regleTvaComptable.findUnique({ where: { taux: new Prisma.Decimal(taux.toFixed(2)) } });
       if (!courante) return false;
@@ -1867,7 +1873,7 @@ app.put('/api/comptabilite/tva/:taux', requireAuth, requireAdmin, async (req: Au
   try { const taux = nombreDecimalNonNegatif(req.params.taux, 3, true); const compteId = String(req.body?.compteId || '');
     if (taux === null || taux > 100) return res.status(400).json({ error: 'Taux de TVA invalide.' });
     const tauxDecimal = new Prisma.Decimal(taux.toFixed(2));
-    const regle = await prisma.$transaction(async tx => {
+    const regle = await transactionVerifiee(async tx => {
       await verrouillerParametrageComptable(tx);
       await verrouillerCompteComptable(tx, compteId);
       const compte = await tx.compteComptable.findFirst({ where: { id: compteId, actif: true } });
@@ -2002,7 +2008,7 @@ app.post('/api/mentions-legales/:version/publier', requireAuth, requireAdmin, as
   try {
     const version = Number(req.params.version);
     if (!Number.isInteger(version) || version < 1) return res.status(400).json({ error: 'Version légale invalide.' });
-    const publiee = await prisma.$transaction(async (tx) => {
+    const publiee = await transactionVerifiee(async (tx) => {
       const cible = await tx.mentionsLegalesVersion.findUnique({ where: { version } });
       if (!cible) return null;
       await tx.mentionsLegalesVersion.updateMany({ where: { actif: true }, data: { actif: false } });
@@ -2033,7 +2039,7 @@ app.get('/api/mentions-legales', requireAuth, requireAdmin, async (_req, res) =>
 
 app.post('/api/factures/:id/emettre', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       await verrouillerParametrageComptable(tx);
       const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: true, ventilationTva: true } });
       if (!facture) return { erreur: 'NOT_FOUND' as const };
@@ -2081,7 +2087,7 @@ app.post('/api/factures/:id/regler', requireAuth, requireAdmin, (_req, res) => {
 // facture historique, crée son unique avoir total et lie les deux documents dans la même TX.
 app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       // Toute décision qui crée un avoir ou annule la facture source acquiert ce verrou
       // d'abord. Même ordre que POST /avoirs : facture puis séquence, afin d'éviter à la
       // fois un reliquat lu périmé et les interblocages entre annulation et avoir partiel.
@@ -2140,7 +2146,7 @@ app.post('/api/factures/:id/annuler', requireAuth, requireAdmin, async (req: Aut
 app.post('/api/factures/:id/avoirs', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const lignes = lignesAvoirPartiel(req.body?.lignes);
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       // PostgreSQL verrouille la facture source jusqu’à la fin de la transaction ; sans ce
       // verrou, deux administrateurs pourraient chacun lire le même reliquat puis le dépasser.
       await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${paramId(req)} FOR UPDATE`;
@@ -2223,7 +2229,7 @@ app.get('/api/reglements', requireAuth, requireAdmin, async (req, res) => {
   const where: Prisma.ReglementWhereInput = { ...(clientId ? { clientId } : {}), ...(factureId ? { affectations: { some: { factureId } } } : {}) };
   try {
     const skip = (page - 1) * pageSize;
-    const { total, items } = await prisma.$transaction(async tx => {
+    const { total, items } = await transactionVerifiee(async tx => {
       const total = await tx.reglement.count({ where });
       const items = skip >= total ? [] : await tx.reglement.findMany({ where, include: reglementInclude, orderBy: [{ dateReglement: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }], skip, take: pageSize });
       return { total, items };
@@ -2265,7 +2271,7 @@ app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, 
     const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
     if (dateReglement > aujourdHuiEntreprise(societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)) return res.status(400).json({ error: 'La date du règlement ne peut pas être postérieure à aujourd’hui.' });
 
-    const reglement = await prisma.$transaction(async (tx) => {
+    const reglement = await transactionVerifiee(async (tx) => {
       const client = await tx.client.findUnique({ where: { id: clientId }, select: { id: true } });
       if (!client) throw new ReglementRefuse(404, 'Client introuvable.');
       // Toujours le même ordre de verrous (identifiants croissants) : deux règlements
@@ -2307,7 +2313,6 @@ app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, 
         await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_AFFECTE', detail: `${libelle} : ${formatMontantFacture(affectation.montant)} affectés ; ${solde}` } });
         await synchroniserStatutReglement(tx, facture.id, req.user!.id, `règlement ${cree.id}`);
       }
-      await verifierContraintesDifferees(tx);
       return cree;
     });
     return res.status(201).json(decimalToNumber(reglement));
@@ -2323,7 +2328,7 @@ app.post('/api/reglements/:id/contrepasser', requireAuth, requireAdmin, async (r
   try {
     const motif = motifCorrectionValide(req.body?.motif);
     if (!motif || /[\u0000-\u001f\u007f]/.test(motif)) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères, sans caractère de contrôle, est obligatoire.' });
-    const reglement = await prisma.$transaction(async (tx) => {
+    const reglement = await transactionVerifiee(async (tx) => {
       // Les parts sont immuables : les lire avant tout verrou est sûr. Les factures sont
       // ensuite verrouillées par identifiant croissant, comme à la saisie, puis le règlement.
       const parts = await tx.affectationReglement.findMany({ where: { reglementId: paramId(req) }, select: { factureId: true, montant: true } });
@@ -2344,7 +2349,6 @@ app.post('/api/reglements/:id/contrepasser', requireAuth, requireAdmin, async (r
         await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_CONTREPASSE', detail: `${libelle} ; ${formatMontantFacture(part.montant)} retirés ; ${solde}` } });
         await synchroniserStatutReglement(tx, facture.id, req.user!.id, `contre-passation du règlement ${maj.id}`);
       }
-      await verifierContraintesDifferees(tx);
       return maj;
     });
     return res.json(decimalToNumber(reglement));
@@ -2398,7 +2402,7 @@ app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: Aut
       const site = await prisma.clientSite.findFirst({ where: { id: siteId, clientId: client.id }, select: { id: true } });
       if (!site) return res.status(404).json({ error: 'Site introuvable.' });
     }
-    const contrat = await prisma.$transaction(async (tx) => {
+    const contrat = await transactionVerifiee(async (tx) => {
       const cree = await tx.contratMaintenance.create({
         data: { clientId: client.id, siteId, titre, periodiciteMois, dureePrevisionnelleMinutes, dateDebut, prochaineEcheance: dateDebut, ...couverture, createdById: req.user!.id },
         include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
@@ -2417,7 +2421,7 @@ app.patch('/api/contrats-maintenance/:id', requireAuth, requireAdmin, async (req
     if (!['politiqueMainOeuvre', 'politiqueMateriel', 'noteCouverture'].some((champ) => Object.prototype.hasOwnProperty.call(req.body || {}, champ))) return res.status(400).json({ error: 'Aucune politique de couverture à modifier.' });
     const motif = motifContratValide(req.body?.motif);
     if (!motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères sans caractère de contrôle est obligatoire.' });
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
@@ -2452,7 +2456,7 @@ app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, asy
     if (!['ACTIF', 'SUSPENDU', 'TERMINE'].includes(statut)) return res.status(400).json({ error: 'Statut de contrat invalide.' });
     const motif = motifContratValide(req.body?.motif);
     if (!motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères sans caractère de contrôle est obligatoire.' });
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
@@ -2477,7 +2481,7 @@ app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, asy
 
 app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findFirst({ where: { id: paramId(req), statut: 'ACTIF' } });
       if (!contrat) return { erreur: 'NOT_FOUND' as const };
@@ -2504,7 +2508,7 @@ app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireA
 
 app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       await verrouillerContratMaintenance(tx, paramId(req));
       const contrat = await tx.contratMaintenance.findFirst({
         where: { id: paramId(req), statut: 'ACTIF' },
@@ -2587,7 +2591,7 @@ app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, 
     if (!dateDemande) return res.status(400).json({ error: 'La date de demande doit être valide au format JJ-MM-AAAA et ne peut pas être future.' });
     if (dateSouhaitee && dateSouhaitee < dateDemande) return res.status(400).json({ error: 'La date souhaitée ne peut pas précéder la date de demande.' });
     const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
-    const intervention = await prisma.$transaction(async (tx) => {
+    const intervention = await transactionVerifiee(async (tx) => {
       // Le chantier rattaché doit être lié à la fiche de ce client (clientId), et non à un libellé
       // identique : renommer un client ne rompt pas le rattachement, et une affaire héritée sans
       // fiche se répare d'abord (décision de Nelson du 16-10-2026). Le contrôle se fait sous verrou
@@ -2732,7 +2736,7 @@ app.post('/api/interventions/:id/couts/heures', requireAuth, blockCommercial, as
     if (nbrHeures === 0 && !motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères est obligatoire pour zéro heure.' });
     const intervenant = await prisma.intervenant.findFirst({ where: { userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
     if (!intervenant) return res.status(404).json({ error: 'Intervention introuvable.' });
-    const cree = await prisma.$transaction(async (tx) => {
+    const cree = await transactionVerifiee(async (tx) => {
       const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, intervenant.id, req.user!.id);
       if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
       const intervenantActuel = await tx.intervenant.findFirst({ where: { id: intervenant.id, userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
@@ -2758,7 +2762,7 @@ app.post('/api/interventions/:id/couts/achats', requireAuth, blockCommercial, as
     if (montantHT === 0 && !motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères est obligatoire pour un montant nul.' });
     const fournisseur = await prisma.fournisseur.findUnique({ where: { id: String(req.body?.fournisseurId || '') } });
     if (!fournisseur) return res.status(404).json({ error: 'Fournisseur introuvable.' });
-    const cree = await prisma.$transaction(async (tx) => {
+    const cree = await transactionVerifiee(async (tx) => {
       const interventionActuelle = await verrouillerContexteCout(tx, intervention.id);
       if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
       const cout = await tx.coutInterventionAchat.create({ data: { interventionId: interventionActuelle.id, fournisseurId: fournisseur.id, date, description, montantHT, createdById: req.user!.id } });
@@ -2794,7 +2798,7 @@ app.patch('/api/interventions/:id/couts/:type/:coutId', requireAuth, blockCommer
     if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
     if (heures && cout.intervenantId !== (await prisma.intervenant.findFirst({ where: { userId: req.user!.id }, select: { id: true } }))?.id) return res.status(404).json({ error: 'Coût introuvable.' });
     if (cout.archivedAt) return res.status(409).json({ error: 'Un coût archivé ne peut pas être corrigé.' });
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, heures ? cout.intervenantId : undefined, heures ? req.user!.id : undefined);
       if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
       const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat;
@@ -2831,7 +2835,7 @@ app.post('/api/interventions/:id/couts/:type/:coutId/:action', requireAuth, bloc
     if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
     const motif = motifRestaurationValide(req.body?.motif); if (!motif) return res.status(400).json({ error: 'Le motif doit contenir entre 3 et 500 caractères.' });
     const archivage = action === 'archiver'; if ((archivage && cout.archivedAt) || (!archivage && !cout.archivedAt)) return res.status(409).json({ error: archivage ? 'Ce coût est déjà archivé.' : 'Ce coût est déjà actif.' });
-    const resultat = await prisma.$transaction(async (tx) => { const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat; const updated = await delegate.updateMany({ where: { id: cout.id, archivedAt: archivage ? null : { not: null } }, data: archivage ? { archivedAt: new Date(), archivedById: req.user!.id, motifArchivage: motif } : { archivedAt: null, archivedById: null, motifArchivage: null } }); if (!updated.count) return null; const apres = await delegate.findUniqueOrThrow({ where: { id: cout.id } }); await journaliserCoutIntervention(tx, req, heures ? 'COUT_INTERVENTION_HEURE' : 'COUT_INTERVENTION_ACHAT', archivage ? 'ARCHIVAGE' : 'RESTAURATION', cout.id, intervention.id, cout, apres, motif); return apres; });
+    const resultat = await transactionVerifiee(async (tx) => { const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat; const updated = await delegate.updateMany({ where: { id: cout.id, archivedAt: archivage ? null : { not: null } }, data: archivage ? { archivedAt: new Date(), archivedById: req.user!.id, motifArchivage: motif } : { archivedAt: null, archivedById: null, motifArchivage: null } }); if (!updated.count) return null; const apres = await delegate.findUniqueOrThrow({ where: { id: cout.id } }); await journaliserCoutIntervention(tx, req, heures ? 'COUT_INTERVENTION_HEURE' : 'COUT_INTERVENTION_ACHAT', archivage ? 'ARCHIVAGE' : 'RESTAURATION', cout.id, intervention.id, cout, apres, motif); return apres; });
     if (!resultat) return res.status(409).json({ error: 'État du coût modifié concurremment.' }); res.json(saisieSelonDroits(req)(decimalToNumber(resultat)));
   } catch (error) { console.error('Erreur archivage coût intervention', error); res.status(500).json({ error: 'Opération impossible.' }); }
 });
@@ -2917,7 +2921,7 @@ app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (
     if (!transitions[intervention.statut]?.includes(statut)) {
       return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
     }
-    const updated = await prisma.$transaction(async (tx) => {
+    const updated = await transactionVerifiee(async (tx) => {
       const modifiee = await tx.intervention.update({
         where: { id: intervention.id }, data: { statut }, include: { client: { select: { id: true, raisonSociale: true } } },
       });
@@ -2962,7 +2966,7 @@ app.put('/api/interventions/:id/planning', requireAuth, blockCommercial, require
     if (['TERMINEE', 'ANNULEE'].includes(intervention.statut)) return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
     const { error, data, intervenantIds } = await validatePlanningEvent({ ...req.body, categorie: 'HORS_CHANTIER', titre: intervention.titre, client: intervention.client.raisonSociale });
     if (error) return res.status(400).json({ error });
-    const event = await prisma.$transaction(async (tx) => {
+    const event = await transactionVerifiee(async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`);
       const actuel = await tx.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
       if (!actuel) throw new Error('INTERVENTION_HORS_PERIMETRE');
@@ -3474,7 +3478,7 @@ app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) =
     if ('types' in req.body) data.types = sanitizeTypes(req.body.types);
     if ('baremeReduit' in req.body) data.baremeReduit = !!req.body.baremeReduit;
 
-    const chantier = await prisma.$transaction(async (tx) => {
+    const chantier = await transactionVerifiee(async (tx) => {
       if (cibleClient) {
         // Verrou de la ligne : une intervention créée en même temps sur cette affaire attend la
         // fin du changement, ou le fait refuser si elle s'enregistre d'abord (cf. POST
@@ -3755,7 +3759,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     if (existing) {
       return res.status(409).json({ error: 'Un compte existe déjà pour cet email.' });
     }
-    const user = await prisma.$transaction(async (tx) => {
+    const user = await transactionVerifiee(async (tx) => {
       const cree = await tx.user.create({
         data: { email, name, role, estCommercial, accesFinance }, // pas de mot de passe : accès via SSO Microsoft
         select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true },
@@ -3813,7 +3817,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + journauxComptables + journauxRegles + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives + reglements > 0) {
       return res.status(409).json({ error: 'Ce compte est l’auteur de données tracées : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
-    await prisma.$transaction(async (tx) => {
+    await transactionVerifiee(async (tx) => {
       // État supprimé relu sous verrou, avec son responsable et ses collaborateurs : le journal
       // donne des noms (comme le rattachement), jamais l'identifiant d'un compte qu'un simple
       // administrateur ne doit pas voir, et chaque entrée qui touche un super administrateur
@@ -3880,7 +3884,7 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
     if (!isSuperAdminRole(role) && (await isLastSuperAdmin(target.id))) {
       return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
     }
-    const user = await prisma.$transaction(async (tx) => {
+    const user = await transactionVerifiee(async (tx) => {
       const avant = await lireCompteVerrouille(tx, target.id);
       const apres = await tx.user.update({
       where: { id: target.id },
@@ -3917,7 +3921,7 @@ app.patch('/api/users/:id/responsable-hierarchique', requireAuth, requireAdmin, 
       return res.status(400).json({ error: 'Responsable hiérarchique invalide.' });
     }
     const responsableId = brut ? String(brut) : null;
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(814090)::text AS verrou`;
       const target = await tx.user.findUnique({
         where: { id: paramId(req) },
@@ -3978,7 +3982,7 @@ app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req
     if (refus) {
       return res.status(403).json({ error: refus });
     }
-    const user = await prisma.$transaction(async (tx) => {
+    const user = await transactionVerifiee(async (tx) => {
       const avant = await lireCompteVerrouille(tx, target.id);
       const apres = await tx.user.update({
         where: { id: target.id },
@@ -4014,7 +4018,7 @@ app.put('/api/users/:id/permissions', requireAuth, requireSuperAdmin, async (req
     if (interdites.length) {
       return void res.status(400).json({ error: `Ces droits ne s’accordent pas à un compte technicien : ${interdites.join(', ')}.` });
     }
-    const user = await prisma.$transaction(async (tx) => {
+    const user = await transactionVerifiee(async (tx) => {
       const avant = await lireCompteVerrouille(tx, target.id);
       const apres = await tx.user.update({ where: { id: target.id }, data: { permissions }, select: { id: true, name: true, email: true, role: true, permissions: true } });
       await journaliserDroitsCompte(tx, req, 'PERMISSIONS', avant, apres, ['permissions']);
@@ -4037,7 +4041,7 @@ app.patch('/api/users/:id/acces-finance', requireAuth, requireSuperAdmin, async 
     if (req.body.accesFinance && target.role === ROLE_TECHNICIEN) {
       return res.status(400).json({ error: 'L’accès financier ne s’accorde pas à un compte technicien.' });
     }
-    const user = await prisma.$transaction(async (tx) => {
+    const user = await transactionVerifiee(async (tx) => {
       const avant = await lireCompteVerrouille(tx, target.id);
       const apres = await tx.user.update({
         where: { id: target.id },
@@ -4079,7 +4083,7 @@ app.patch('/api/users/:id/actif', requireAuth, requireAdmin, async (req, res) =>
     if (!actif && (await isLastSuperAdmin(target.id))) {
       return res.status(400).json({ error: "Ce compte est le dernier super administrateur : il ne peut pas être désactivé." });
     }
-    const user = await prisma.$transaction(async (tx) => {
+    const user = await transactionVerifiee(async (tx) => {
       const avant = await lireCompteVerrouille(tx, target.id);
       const apres = await tx.user.update({
         where: { id: target.id },
@@ -4386,7 +4390,7 @@ app.patch('/api/planning/events/:id', requireAuth, blockCommercial, requirePlann
     };
     const { error, data, intervenantIds } = await validatePlanningEvent(merged);
     if (error) return res.status(400).json({ error });
-    const event = await prisma.$transaction(async (tx) => {
+    const event = await transactionVerifiee(async (tx) => {
       if (existing.interventionId) {
         await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" = ${existing.interventionId} FOR UPDATE`);
         const autorisee = await tx.intervention.findFirst({ where: { id: existing.interventionId, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
@@ -4522,7 +4526,7 @@ app.get('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, 
 app.post('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, async (req, res) => {
   try {
     const token = generateShareToken();
-    const share = await prisma.$transaction(async (tx) => {
+    const share = await transactionVerifiee(async (tx) => {
       await verrouillerReglage(tx, 'PlanningPublicShare');
       const avant = await tx.planningPublicShare.findUnique({ where: { id: 'singleton' } });
       const apres = await tx.planningPublicShare.upsert({
@@ -4550,7 +4554,7 @@ app.post('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif,
 app.patch('/api/planning/share', requireAuth, requireAdmin, requirePlanningActif, async (req, res) => {
   try {
     const active = !!req.body.active;
-    const share = await prisma.$transaction(async (tx) => {
+    const share = await transactionVerifiee(async (tx) => {
       await verrouillerReglage(tx, 'PlanningPublicShare');
       const existing = await tx.planningPublicShare.findUnique({ where: { id: 'singleton' } });
       if (!existing) return null;
@@ -4952,7 +4956,7 @@ app.post('/api/achats', requireAuth, requireTravauxWrite, async (req, res) => {
     const montantHT = nombreDecimalNonNegatif(req.body.montantHT, 10, true);
     if (montantHT === null) return res.status(400).json({ error: 'Le montant HT doit être un nombre positif ou nul.' });
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
-    const cree = await prisma.$transaction(async (tx) => {
+    const cree = await transactionVerifiee(async (tx) => {
       const achat = await tx.achatReel.create({
         data: {
           date, fournisseurId: req.body.fournisseurId, numeroFacture: req.body.numeroFacture || null,
@@ -5010,7 +5014,7 @@ app.patch('/api/achats/:id', requireAuth, requireTravauxWrite, async (req, res) 
     }
 
     data.updatedById = (req as AuthRequest).user!.id;
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       // Ce filtre n’est pas redondant avec le garde ci-dessus : un archivage concurrent peut
       // passer entre le findUnique et cet UPDATE. Sans lui, une correction toucherait un archivé.
       const { count } = await tx.achatReel.updateMany({ where: { id: achatId, archivedAt: null }, data });
@@ -5040,7 +5044,7 @@ app.delete('/api/achats/:id', requireAuth, requireTravauxArchive, async (req, re
     // PostgreSQL char_length compte les caractères alors que .length compte les unités UTF-16.
     const longueurMotifArchivage = [...motifArchivage].length;
     if (longueurMotifArchivage < 3 || longueurMotifArchivage > 500) return res.status(400).json({ error: 'Le motif d’archivage doit contenir entre 3 et 500 caractères.' });
-    const archiveCree = await prisma.$transaction(async (tx) => {
+    const archiveCree = await transactionVerifiee(async (tx) => {
       const { count } = await tx.achatReel.updateMany({ where: { id: achatId, archivedAt: null }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
       if (count === 0) return false;
       const archive = await tx.achatReel.findUniqueOrThrow({ where: { id: achatId } });
@@ -5063,7 +5067,7 @@ app.post('/api/achats/:id/restaurer', requireAuth, requireTravauxArchive, async 
     if (!achat.archivedAt) return res.status(409).json({ error: 'Cet achat est déjà actif.' });
     const motifRestauration = motifRestaurationValide(req.body?.motifRestauration);
     if (!motifRestauration) return res.status(400).json({ error: 'Le motif de restauration doit contenir entre 3 et 500 caractères.' });
-    const restaure = await prisma.$transaction(async (tx) => {
+    const restaure = await transactionVerifiee(async (tx) => {
       const { count } = await tx.achatReel.updateMany({
         where: { id: achatId, archivedAt: { not: null } },
         data: { archivedAt: null, archivedById: null, motifArchivage: null, updatedById: (req as AuthRequest).user!.id },
@@ -5114,7 +5118,7 @@ app.post('/api/heures', requireAuth, requireTravauxWrite, async (req, res) => {
     if (!intervenant) return res.status(404).json({ error: 'Intervenant not found' });
     if (!(await assertChantierWritable(req, res, req.body.chantierId))) return;
 
-    const cree = await prisma.$transaction(async (tx) => {
+    const cree = await transactionVerifiee(async (tx) => {
       const pointage = await tx.pointageHeure.create({
         data: {
           date, intervenantId: req.body.intervenantId, chantierId: req.body.chantierId,
@@ -5171,7 +5175,7 @@ app.patch('/api/heures/:id', requireAuth, requireTravauxWrite, async (req, res) 
     }
 
     data.updatedById = (req as AuthRequest).user!.id;
-    const resultat = await prisma.$transaction(async (tx) => {
+    const resultat = await transactionVerifiee(async (tx) => {
       // Ce filtre n’est pas redondant avec le garde ci-dessus : un archivage concurrent peut
       // passer entre le findUnique et cet UPDATE. Sans lui, une correction toucherait un archivé.
       const { count } = await tx.pointageHeure.updateMany({ where: { id: pointageId, archivedAt: null }, data });
@@ -5201,7 +5205,7 @@ app.delete('/api/heures/:id', requireAuth, requireTravauxArchive, async (req, re
     // PostgreSQL char_length compte les caractères alors que .length compte les unités UTF-16.
     const longueurMotifArchivage = [...motifArchivage].length;
     if (longueurMotifArchivage < 3 || longueurMotifArchivage > 500) return res.status(400).json({ error: 'Le motif d’archivage doit contenir entre 3 et 500 caractères.' });
-    const archiveCree = await prisma.$transaction(async (tx) => {
+    const archiveCree = await transactionVerifiee(async (tx) => {
       const { count } = await tx.pointageHeure.updateMany({ where: { id: pointageId, archivedAt: null }, data: { archivedAt: new Date(), archivedById: (req as AuthRequest).user!.id, motifArchivage } });
       if (count === 0) return false;
       const archive = await tx.pointageHeure.findUniqueOrThrow({ where: { id: pointageId } });
@@ -5224,7 +5228,7 @@ app.post('/api/heures/:id/restaurer', requireAuth, requireTravauxArchive, async 
     if (!pointage.archivedAt) return res.status(409).json({ error: 'Ce pointage est déjà actif.' });
     const motifRestauration = motifRestaurationValide(req.body?.motifRestauration);
     if (!motifRestauration) return res.status(400).json({ error: 'Le motif de restauration doit contenir entre 3 et 500 caractères.' });
-    const restaure = await prisma.$transaction(async (tx) => {
+    const restaure = await transactionVerifiee(async (tx) => {
       const { count } = await tx.pointageHeure.updateMany({
         where: { id: pointageId, archivedAt: { not: null } },
         data: { archivedAt: null, archivedById: null, motifArchivage: null, updatedById: (req as AuthRequest).user!.id },
@@ -5272,7 +5276,7 @@ app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async
       return res.status(404).json({ error: 'Commercial introuvable.' });
     }
     const suiviAdministratif = !!req.body.suiviAdministratif;
-    const prime = await prisma.$transaction(async (tx) => {
+    const prime = await transactionVerifiee(async (tx) => {
       // Verrou sur le couple commercial + période, que la ligne existe déjà ou non : deux
       // enregistrements simultanés ne journalisent pas deux fois le même changement.
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`prime-mensuelle:${commercial.id}:${periode}`}))::text AS verrou`;
@@ -5378,7 +5382,7 @@ app.post('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (req, res)
   }
   try {
     const secret = `iris_${crypto.randomBytes(32).toString('base64url')}`;
-    const key = await prisma.$transaction(async (tx) => {
+    const key = await transactionVerifiee(async (tx) => {
       const cle = await tx.apiAccessKey.create({
         data: { nom, prefixe: secret.slice(0, 14), secretHash: apiKeyHash(secret), scopes, expireLe, creeParId: (req as AuthRequest).user!.id },
       });
@@ -5399,7 +5403,7 @@ app.post('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (req, res)
 app.post('/api/admin/api-keys/:id/revoke', requireAuth, requireSuperAdmin, async (req, res) => {
   let key;
   try {
-    key = await prisma.$transaction(async (tx) => {
+    key = await transactionVerifiee(async (tx) => {
       await tx.$queryRaw`SELECT 1 FROM "ApiAccessKey" WHERE "id" = ${paramId(req)} FOR UPDATE`;
       const avant = await tx.apiAccessKey.findUnique({ where: { id: paramId(req) } });
       if (!avant) return null;
@@ -6009,7 +6013,7 @@ const listerDevis: express.RequestHandler = async (_req, res) => { try { res.jso
 const modifierDevis: express.RequestHandler = async (req, res) => { try {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const payload = devisPayload(body);
-  const devis = await prisma.$transaction(async tx => {
+  const devis = await transactionVerifiee(async tx => {
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { signature: true, conversion: true } });
     if (precedent.signature) throw new DevisConflitError('Ce devis est signé : créez une nouvelle révision brouillon pour le modifier.');
@@ -6026,7 +6030,7 @@ const modifierDevis: express.RequestHandler = async (req, res) => { try {
   res.json(decimalToNumber(devis));
 } catch (error) { devisErreur(res, error); } };
 const creerRevision: express.RequestHandler = async (req, res) => { try {
-  const devis = await prisma.$transaction(async tx => {
+  const devis = await transactionVerifiee(async tx => {
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: devisInclude });
     if (!precedent.signature) throw new DevisConflitError('Seul un devis signé peut ouvrir une nouvelle révision.');
@@ -6048,7 +6052,7 @@ const creerRevision: express.RequestHandler = async (req, res) => { try {
 const signerDevis: express.RequestHandler = async (req, res) => { try {
   const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
   if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) throw new DevisSaisieError('Le signataire et sa confirmation explicite sont obligatoires.');
-  const signature = await prisma.$transaction(async tx => {
+  const signature = await transactionVerifiee(async tx => {
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } }, signature: true, conversion: true } });
     if (devis.signature) throw new DevisConflitError('Ce devis est déjà signé.');
@@ -6093,7 +6097,7 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
   const statut = String((req.body ?? {}).statut || '');
   // Sous le verrou du devis : un changement de statut concurrent d'une conversion attend sa fin
   // et lit alors le chantier ouvert (statut figé), au lieu d'écraser le statut d'un devis converti.
-  const maj = await prisma.$transaction(async tx => {
+  const maj = await transactionVerifiee(async tx => {
     if (!await verrouillerDevis(tx, paramId(req))) return null;
     const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { conversion: true } });
     const fige = refusStatutFige(devis);
@@ -6160,7 +6164,7 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   // 14-10-2026), enregistré en date-seule comme une date saisie, et non à l'instant UTC.
   const societe = await getCompanySettings();
   const debutParDefaut = `${aujourdHuiEntreprise(societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)}T00:00:00.000Z`;
-  const resultat = await prisma.$transaction(async tx => {
+  const resultat = await transactionVerifiee(async tx => {
     // Verrou du devis, comme pour sa modification, sa révision, sa signature, son statut, son
     // acompte et son annulation : ces écritures et deux conversions simultanées du même devis
     // passent l'une après l'autre. La seconde conversion lit celle de la première (« déjà
@@ -6252,7 +6256,7 @@ app.get('/api/devis/a-convertir', requireAuth, requirePermission('devis:read'), 
 // chantier, ce n'est pas un geste que celui qui a vendu l'affaire se rend à lui-même.
 app.post('/api/devis/:id/acompte', requireAuth, requireAdmin, async (req, res) => { try {
   // Sous le verrou du devis, comme son statut, qu'il peut faire passer à « accepté ».
-  const maj = await prisma.$transaction(async tx => {
+  const maj = await transactionVerifiee(async tx => {
     if (!await verrouillerDevis(tx, paramId(req))) return null;
     const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) } });
     if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé.');
@@ -6294,7 +6298,7 @@ app.post('/api/devis/:id/annulation', requireAuth, requireAdmin, async (req, res
   const motif = String((req.body ?? {}).motif ?? '').trim();
   if (!motif) throw new DevisSaisieError('Un motif d’annulation est obligatoire.');
 
-  const resultat = await prisma.$transaction(async tx => {
+  const resultat = await transactionVerifiee(async tx => {
     // Verrou du devis d'abord, comme la conversion : une annulation concurrente d'une conversion
     // attend sa fin et archive alors le chantier ouvert, au lieu d'annuler le devis en laissant
     // son chantier en cours. Le chantier, lui, n'est verrouillé que par sa mise à jour, après le
@@ -6374,7 +6378,7 @@ app.get('/api/company', requireAuth, async (_req, res) => {
 app.put('/api/company', requireAuth, requireSuperAdmin, async (req, res) => {
   try {
     const data = companySettingsPayload(req.body ?? {});
-    const company = await prisma.$transaction(async (tx) => {
+    const company = await transactionVerifiee(async (tx) => {
       await verrouillerReglage(tx, 'CompanySettings');
       const avant = await tx.companySettings.findUnique({ where: { id: 'singleton' } });
       const apres = await tx.companySettings.upsert({
@@ -6462,7 +6466,7 @@ app.put('/api/parametres/remuneration', requireAuth, requireSuperAdmin, async (r
       primeObjectifMarge: montantPositif(body.primeObjectifMarge, "Prime d'objectif de marge"),
       primeSuiviAdministratif: montantPositif(body.primeSuiviAdministratif, 'Prime de suivi administratif'),
     };
-    await prisma.$transaction(async (tx) => {
+    await transactionVerifiee(async (tx) => {
       await verrouillerReglage(tx, 'ParametresRemuneration');
       const avant = await tx.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
       const apres = await tx.parametresRemuneration.upsert({
@@ -6540,7 +6544,7 @@ app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
       }
       data[champ] = req.body[champ];
     }
-    const p = await prisma.$transaction(async (tx) => {
+    const p = await transactionVerifiee(async (tx) => {
       await verrouillerReglage(tx, 'Parametres');
       const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
       const apres = await tx.parametres.upsert({
@@ -6582,7 +6586,7 @@ app.get('/api/modules', requireAuth, async (req, res) => {
 app.put('/api/modules', requireAuth, requireSuperAdmin, async (req, res) => {
   try {
     const planningActif = !!req.body.planningActif;
-    const p = await prisma.$transaction(async (tx) => {
+    const p = await transactionVerifiee(async (tx) => {
       await verrouillerReglage(tx, 'Parametres');
       const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
       const apres = await tx.parametres.upsert({
@@ -6724,7 +6728,7 @@ app.put('/api/journal-administration/conservation', requireAuth, requireSuperAdm
     return res.status(400).json({ error: 'La durée de conservation est un nombre entier de jours, de 1 à 90.' });
   }
   try {
-    await prisma.$transaction(async (tx) => {
+    await transactionVerifiee(async (tx) => {
       await verrouillerReglage(tx, 'Parametres');
       const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
       const apres = await tx.parametres.upsert({ where: { id: 'singleton' }, update: { journalConservationJours: jours }, create: { id: 'singleton', journalConservationJours: jours } });
@@ -7609,7 +7613,7 @@ const ensureSuperAdmins = async () => {
     // sans auteur (AUTEUR_JOURNAL_DEMARRAGE), et réservées au super administrateur.
     if (existing) {
       if (existing.role !== ROLE_SUPERADMIN) {
-        await prisma.$transaction(async (tx) => {
+        await transactionVerifiee(async (tx) => {
           const apres = await tx.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
           await journaliserDroitsCompte(tx, { } as express.Request, 'TYPE_COMPTE', existing, apres, ['role']);
         });
@@ -7617,7 +7621,7 @@ const ensureSuperAdmins = async () => {
       }
       continue;
     }
-    await prisma.$transaction(async (tx) => {
+    await transactionVerifiee(async (tx) => {
       const cree = await tx.user.create({
         data: {
           email,
