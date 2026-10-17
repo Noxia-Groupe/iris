@@ -7,7 +7,7 @@
 #
 # Cinq travaux indépendants, pour que l'échec désigne tout de suite le coupable :
 #   - compose   : gardes d'identifiants PostgreSQL et résolution de la stack ;
-#   - backend   : génération Prisma + compilation TypeScript ;
+#   - backend   : génération Prisma, compilation TypeScript et liste des routes ;
 #   - tests     : migrations et suite complète contre un vrai PostgreSQL 16 ;
 #   - frontend  : compilation TypeScript stricte, build Vite et lint ;
 #   - parcours  : parcours navigateur contre la SPA, l'API et PostgreSQL.
@@ -101,6 +101,11 @@ jobs:
         env:
           DATABASE_URL: postgresql://user:password@localhost:5432/iris?schema=public
       - run: npm run build
+      # Découpage de server/index.ts par domaine : les routes enregistrées (ordre, méthodes,
+      # chemins et gardes) doivent rester celles de scripts/routes-reference.txt. Un lot qui
+      # ajoute ou retire une route réécrit la référence (--ecrire) dans sa propre PR.
+      - name: Routes identiques à la référence
+        run: node scripts/routes.mjs --verifier
 
   tests:
     name: Backend — tests

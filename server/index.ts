@@ -1,6 +1,6 @@
+import './src/env';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { PrismaClient, Prisma } from '@prisma/client';
 import path from 'path';
 import type http from 'http';
@@ -8,25 +8,17 @@ import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import PDFDocument from 'pdfkit';
-
-dotenv.config();
+import { prisma, transactionVerifiee } from './src/db';
+import {
+  ROLE_SUPERADMIN, ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL,
+  ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole,
+} from './src/droits/roles';
+import { AuthRequest, JWT_SECRET, brancheHierarchique, requireAuth, resolveJwtSecret } from './src/http/auth';
+import { blockCommercial, blockTechnicien, requireAdmin, requireSuperAdmin, requireTravauxRead } from './src/http/gardes';
+import { paramId } from './src/http/requete';
+import { enregistrerRoutesReferentiels } from './src/domaines/referentiels/routes';
 
 const app = express();
-export const prisma = new PrismaClient();
-
-// Prisma 5 résout une transaction interactive même quand son COMMIT échoue sur un trigger
-// différé (équilibre des écritures, journaux comptables, règlements) : l'appel réussirait sans
-// rien avoir enregistré (constaté sur PostgreSQL 16 avec Prisma 5.22). Toute transaction
-// interactive de l'application passe donc par cette fonction : les contraintes différées sont
-// vérifiées avant la fin du rappel, et une violation fait échouer la transaction au grand jour.
-type OptionsTransaction = { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel };
-function transactionVerifiee<T>(rappel: (tx: Prisma.TransactionClient) => Promise<T>, options?: OptionsTransaction): Promise<T> {
-  return prisma.$transaction(async (tx) => {
-    const resultat = await rappel(tx);
-    await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
-    return resultat;
-  }, options);
-}
 const port = process.env.PORT || 3001;
 
 // Ne pas révéler la techno serveur (en-tête `X-Powered-By: Express`).
@@ -40,19 +32,6 @@ app.use((error: Error & { type?: string }, req: express.Request, res: express.Re
   if (error.type === 'entity.too.large') return void res.status(413).json({ error: req.path === '/api/comptabilite/importer' ? 'Fichier trop volumineux (limite : 5 Mo).' : 'Requête trop volumineuse.' });
   next(error);
 });
-
-// --- Sécurité : résolution du secret JWT ---
-// En production, le secret est OBLIGATOIRE : on refuse de démarrer sinon.
-export function resolveJwtSecret(secret = process.env.JWT_SECRET, environnement = process.env.NODE_ENV): string {
-  if (!secret) {
-    if (environnement === 'production') throw new Error('JWT_SECRET manquant : définissez-le dans server/.env avant de démarrer en production.');
-    console.warn('[AVERTISSEMENT] JWT_SECRET non défini — clé de développement non sécurisée utilisée.');
-    return 'dev_only_insecure_secret_change_me';
-  }
-  if (environnement === 'production' && /^CHANGE_ME(?:_|$)/.test(secret)) throw new Error('JWT_SECRET est resté la valeur d’exemple : générez-en un avec openssl rand -base64 48.');
-  return secret;
-}
-const JWT_SECRET = resolveJwtSecret();
 
 // --- SSO Microsoft (OAuth 2.0 / OpenID Connect, endpoint v2.0) ---
 // Le SSO n'est actif que si l'application Azure AD est renseignée (tenant + client).
@@ -132,87 +111,6 @@ async function verifyMicrosoftIdentity(req: express.Request): Promise<string | n
   }
 }
 
-// --- Middlewares d'authentification / autorisation ---
-interface AuthRequest extends express.Request {
-  // equipeIds : toute la branche hiérarchique d'un compte Responsable (cf. brancheHierarchique),
-  // vide pour les autres types de compte.
-  user?: { id: string; name: string; role: string; accesFinance: boolean; permissions: string[]; equipeIds: string[] };
-}
-
-// Branche hiérarchique d'un compte : ses collaborateurs directs, puis les leurs, jusqu'au
-// bas de l'organisation — un responsable régional supervise ainsi les conducteurs de ses
-// responsables de secteur, quelle que soit la taille de la structure. Les collaborateurs
-// inactifs restent inclus : leur historique chantier ne disparaît pas du périmètre. L'API
-// refuse les boucles ; UNION et l'exclusion du compte lui-même garantissent malgré tout
-// que la lecture se termine si une boucle avait été écrite directement en base.
-async function brancheHierarchique(userId: string, db: Prisma.TransactionClient = prisma): Promise<string[]> {
-  const lignes = await db.$queryRaw<{ id: string }[]>(Prisma.sql`
-    WITH RECURSIVE branche AS (
-      SELECT "id" FROM "User" WHERE "responsableHierarchiqueId" = ${userId}
-      UNION
-      SELECT u."id" FROM "User" u JOIN branche b ON u."responsableHierarchiqueId" = b."id"
-    )
-    SELECT "id" FROM branche WHERE "id" <> ${userId}`);
-  return lignes.map((ligne) => ligne.id);
-}
-
-// Le jeton n'authentifie QUE l'identité : le rôle est systématiquement relu en base, il
-// n'est jamais repris du jeton. Un changement de droits (promotion superadmin au démarrage,
-// rétrogradation décidée par la direction, révocation d'un compte) prend ainsi effet à la
-// requête suivante, sans attendre l'expiration du jeton (7 jours) ni une reconnexion.
-const requireAuth: express.RequestHandler = async (req, res, next) => {
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Authentification requise' });
-    return;
-  }
-  let payload: { id: string };
-  try {
-    payload = jwt.verify(header.slice(7), JWT_SECRET) as { id: string; role: string };
-  } catch {
-    res.status(401).json({ error: 'Session expirée ou invalide' });
-    return;
-  }
-  try {
-    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, name: true, role: true, accesFinance: true, permissions: true, actif: true } });
-    if (!user) {
-      res.status(401).json({ error: 'Compte introuvable ou révoqué' });
-      return;
-    }
-    // Désactivation en cours de session : les jetons déjà émis cessent d'être acceptés à la
-    // requête suivante, sans attendre leur expiration (même logique que la relecture du rôle).
-    if (!user.actif) {
-      res.status(401).json({ code: 'COMPTE_DESACTIVE', error: 'Ce compte est désactivé.' });
-      return;
-    }
-    // Seul un compte Responsable tire un périmètre de sa branche : un rattachement donné à un
-    // autre type de compte reste une donnée d'organisation, sans élargir aucun accès.
-    const equipeIds = user.role === ROLE_RESPONSABLE ? await brancheHierarchique(user.id) : [];
-    (req as AuthRequest).user = { id: user.id, name: user.name, role: user.role, accesFinance: user.accesFinance, permissions: user.permissions, equipeIds };
-    next();
-  } catch {
-    res.status(500).json({ error: 'Error resolving authenticated user' });
-  }
-};
-
-// --- Rôles de l'application ---
-// SUPERADMIN : rôle « direction ». Il possède TOUS les droits d'un ADMIN (cf. isAdminRole,
-// utilisé partout où l'application testait jusqu'ici `role === 'ADMIN'`) et, EN PLUS, les
-// réglages qui lui sont réservés : gestion des comptes SUPERADMIN et activation ou
-// désactivation des modules de l'application (cf. Parametres.planningActif). Un ADMIN ne
-// peut ni se promouvoir superadmin, ni modifier/supprimer un compte superadmin — sans quoi
-// la séparation entre les deux rôles n'aurait aucune valeur.
-const ROLE_SUPERADMIN = 'SUPERADMIN';
-const ROLE_ASSISTANTE_COMMERCIALE = 'ASSISTANTE_COMMERCIALE';
-const ROLE_TECHNICIEN = 'TECHNICIEN';
-const ROLE_COMPTABLE = 'COMPTABLE';
-const ROLE_DIRECTEUR_COMMERCIAL = 'DIRECTEUR_COMMERCIAL';
-const ROLE_RESPONSABLE = 'RESPONSABLE';
-// DIRECTEUR : pilotage de toute la société sans administration ni paramétrage. Il voit
-// tous les chantiers (non annulés), leur rentabilité et leurs alertes si la société l'a
-// laissé destinataire (Parametres.rentabiliteDirecteurs), et ne saisit rien.
-const ROLE_DIRECTEUR = 'DIRECTEUR';
-
 // Droits par défaut des types de compte. Ils restent volontairement limités aux modules
 // existants ; SAV, maintenance, facturation, banques et objectifs seront ajoutés avec
 // leurs routes métier, jamais anticipés par des accès fictifs.
@@ -261,30 +159,6 @@ function requirePermission(permission: string): express.RequestHandler {
     next();
   };
 }
-
-function isAdminRole(role: string | undefined | null): boolean {
-  return role === 'ADMIN' || role === ROLE_SUPERADMIN;
-}
-function isSuperAdminRole(role: string | undefined | null): boolean {
-  return role === ROLE_SUPERADMIN;
-}
-
-const requireAdmin: express.RequestHandler = (req, res, next) => {
-  if (!isAdminRole((req as AuthRequest).user?.role)) {
-    res.status(403).json({ error: 'Accès réservé aux administrateurs' });
-    return;
-  }
-  next();
-};
-
-// Réglages réservés au superadmin (modules de l'application, comptes superadmin).
-const requireSuperAdmin: express.RequestHandler = (req, res, next) => {
-  if (!isSuperAdminRole((req as AuthRequest).user?.role)) {
-    res.status(403).json({ error: 'Accès réservé au super administrateur' });
-    return;
-  }
-  next();
-};
 
 // --- API d'intégration machine-à-machine (agents et connecteurs) ---
 // Deuxième porte d'entrée de l'application, à côté de Microsoft Entra ID : un agent
@@ -573,42 +447,6 @@ export function peutVoirFinance(user: { role: string; accesFinance?: boolean | n
 const requireTravauxWrite = requirePermission('chantiers:write');
 const requireTravauxArchive = requirePermission('chantiers:archive');
 
-// Statistiques Travaux : administration globale, responsable équipe déclarée, conducteur périmètre propre.
-const requireTravauxRead: express.RequestHandler = (req, res, next) => {
-  const role = (req as AuthRequest).user?.role;
-  if (isAdminRole(role) || role === ROLE_RESPONSABLE || role === 'CONDUCTEUR_TRAVAUX') return next();
-  res.status(403).json({ error: 'Accès réservé au suivi Travaux.' });
-};
-
-// Un commercial a un accès strictement en lecture à ses propres chantiers : ni création,
-// ni modification (chantiers, achats, heures), et pas d'accès aux statistiques
-// globales/conducteur — uniquement à son propre résultat commercial.
-// Le directeur en est exclu de la même façon : il pilote depuis la liste, le tableau de bord
-// et les fiches chantier, sans saisie, planning, SAV ni référentiel à modifier.
-const blockCommercial: express.RequestHandler = (req, res, next) => {
-  const role = (req as AuthRequest).user?.role;
-  if (role === 'COMMERCIAL') {
-    res.status(403).json({ error: 'Accès non autorisé pour un compte commercial.' });
-    return;
-  }
-  if (role === ROLE_DIRECTEUR) {
-    res.status(403).json({ error: 'Accès non autorisé pour un compte directeur.' });
-    return;
-  }
-  next();
-};
-
-// Le technicien n'écrit que dans ses propres interventions (lot pilote 3, choix par défaut) : ni
-// le planning de l'équipe (affectations, types d'événement, placement d'une intervention, y compris
-// la sienne), ni les référentiels des achats (catégories, fournisseurs). Il garde la lecture.
-const blockTechnicien: express.RequestHandler = (req, res, next) => {
-  if ((req as AuthRequest).user?.role === ROLE_TECHNICIEN) {
-    res.status(403).json({ error: 'Un technicien ne modifie ni le planning ni les référentiels.' });
-    return;
-  }
-  next();
-};
-
 // Un administrateur peut être marqué "estCommercial" : il garde alors tous les droits
 // d'administration (blockCommercial ne le concerne pas, il reste role === 'ADMIN'), mais
 // apparaît EN PLUS comme un commercial pour l'affectation aux chantiers et les
@@ -671,13 +509,6 @@ function erreurNumeroDevis(numeroDevis: string): string | null {
 async function numeroDevisDejaPris(numeroDevis: string, chantierIdExclu?: string): Promise<boolean> {
   const existant = await prisma.chantier.findFirst({ where: { numeroDevis }, select: { id: true } });
   return !!existant && existant.id !== chantierIdExclu;
-}
-
-// Express 5 type les valeurs de req.params comme `string | string[]`. Nos routes
-// n'utilisent que des paramètres simples (:id) : on en extrait toujours une string.
-function paramId(req: express.Request): string {
-  const id = req.params.id;
-  return Array.isArray(id) ? id[0] : id;
 }
 
 // Convertit récursivement les Decimal Prisma en nombres pour la sérialisation JSON
@@ -4752,97 +4583,8 @@ app.get('/api/planning/public/:token', async (req, res) => {
   }
 });
 
-// --- Categories & Fournisseurs ---
-// Référentiels partagés du Journal des Achats : leur tenue à jour est ouverte aux
-// CONDUCTEURS DE TRAVAUX en plus des administrateurs (ils saisissent les achats au
-// quotidien et ont besoin de créer un fournisseur ou une catégorie manquante sans
-// attendre la Direction), d'où `blockCommercial` plutôt que `requireAdmin` : seuls les
-// commerciaux, dont l'accès est strictement en lecture, en restent exclus.
-app.get('/api/categories', requireAuth, async (req, res) => res.json(await prisma.categorie.findMany({ orderBy: { nom: 'asc' } })));
-// Un nom vide ou déjà pris est refusé avec un message, comme à la modification : sans cela,
-// la contrainte d'unicité remontait en erreur 500 et le formulaire n'en disait rien.
-app.post('/api/categories', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
-  const nom = typeof req.body?.nom === 'string' ? req.body.nom.trim() : '';
-  if (!nom) return res.status(400).json({ error: 'Le nom de la catégorie est obligatoire.' });
-  try {
-    res.json(await prisma.categorie.create({ data: { nom, description: req.body.description || null } }));
-  } catch (error) {
-    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une catégorie porte déjà ce nom.' });
-    res.status(500).json({ error: 'Error creating categorie' });
-  }
-});
-
-// Modifier une catégorie (nom, description).
-app.put('/api/categories/:id', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
-  try {
-    const data: Record<string, unknown> = {};
-    if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
-    if ('description' in req.body) data.description = req.body.description || null;
-    res.json(await prisma.categorie.update({ where: { id: paramId(req) }, data }));
-  } catch (error) {
-    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une catégorie porte déjà ce nom.' });
-    res.status(500).json({ error: 'Error updating categorie' });
-  }
-});
-
-// Supprimer une catégorie. Bloqué si des achats ou lignes de budget l'utilisent.
-app.delete('/api/categories/:id', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
-  try {
-    const id = paramId(req);
-    const achats = await prisma.achatReel.count({ where: { categorieId: id } });
-    const lignes = await prisma.ligneBudgetPrevisionnel.count({ where: { categorieId: id } });
-    if (achats + lignes > 0) {
-      return res.status(409).json({ error: `Suppression impossible : ${achats} achat(s) et ${lignes} ligne(s) de budget utilisent cette catégorie.` });
-    }
-    await prisma.categorie.delete({ where: { id } });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Error deleting categorie' });
-  }
-});
-
-app.get('/api/fournisseurs', requireAuth, async (req, res) => res.json(await prisma.fournisseur.findMany({ orderBy: { nom: 'asc' } })));
-app.post('/api/fournisseurs', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
-  const nom = typeof req.body?.nom === 'string' ? req.body.nom.trim() : '';
-  if (!nom) return res.status(400).json({ error: 'Le nom du fournisseur est obligatoire.' });
-  try {
-    res.json(await prisma.fournisseur.create({ data: { nom, contact: req.body.contact || null } }));
-  } catch (error) {
-    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Un fournisseur porte déjà ce nom.' });
-    res.status(500).json({ error: 'Error creating fournisseur' });
-  }
-});
-
-// Modifier un fournisseur (nom, contact).
-app.put('/api/fournisseurs/:id', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
-  try {
-    const data: Record<string, unknown> = {};
-    if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
-    if ('contact' in req.body) data.contact = req.body.contact || null;
-    res.json(await prisma.fournisseur.update({ where: { id: paramId(req) }, data }));
-  } catch (error) {
-    if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Un fournisseur porte déjà ce nom.' });
-    res.status(500).json({ error: 'Error updating fournisseur' });
-  }
-});
-
-// Supprimer un fournisseur. Bloqué si des achats ou coûts intervention y sont rattachés (historique préservé).
-app.delete('/api/fournisseurs/:id', requireAuth, blockCommercial, blockTechnicien, async (req, res) => {
-  try {
-    const id = paramId(req);
-    const usedAchats = await prisma.achatReel.count({ where: { fournisseurId: id } });
-    const usedCoutsAchats = await prisma.coutInterventionAchat.count({ where: { fournisseurId: id } });
-    const usedTotal = usedAchats + usedCoutsAchats;
-    if (usedTotal > 0) {
-      return res.status(409).json({ error: `Suppression impossible : ${usedTotal} écriture(s) sont rattachées à ce fournisseur.` });
-    }
-    await prisma.fournisseur.delete({ where: { id } });
-    res.json({ success: true });
-  } catch (error) {
-    if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : ce fournisseur vient d’être rattaché à une écriture.' });
-    res.status(500).json({ error: 'Error deleting fournisseur' });
-  }
-});
+// --- Catégories et fournisseurs (src/domaines/referentiels/routes.ts) ---
+enregistrerRoutesReferentiels(app);
 
 // Un chantier clôturé (TERMINE) devient en lecture seule pour les conducteurs : ils ne
 // peuvent plus y ajouter d'heures ou de dépenses ; un admin garde un accès total (c'est
@@ -8009,6 +7751,8 @@ if (require.main === module) {
 // directement, sans base de données ni requête.
 export {
   app,
+  prisma,
+  resolveJwtSecret,
   reglerDelaisConnexion,
   initDb,
   ensureSuperAdmins,
