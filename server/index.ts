@@ -983,7 +983,8 @@ function computeChantierMetrics(chantier: any, params: Parametres, canSeeMarge: 
   //    budget main-d'œuvre vendu) ;
   //  - matériel : matériel vendu × ce que coûte en moyenne un euro de matériel vendu sur
   //    les chantiers terminés ; sans historique, le matériel restant est compté à son prix
-  //    de vente — hypothèse prudente, faute de prix d'achat prévu sur le devis.
+  //    de vente — hypothèse prudente. Le prix d'achat prévu des lignes de devis (lot pilote 2)
+  //    n'est pas encore repris par le chantier : à décider (question ouverte de la passation).
   // Un chantier clos n'a plus de reste à faire : son estimation est son réel.
   let estimation: Record<string, unknown> | null = null;
   let margeEstimee: number | null = null;
@@ -5747,6 +5748,12 @@ function catalogueNombre(value: unknown, champ: string, defaut = 0): number {
   return n;
 }
 
+// Prix d'achat facultatif : un champ laissé vide reste ABSENT. `Number('')` vaudrait 0, soit
+// un achat gratuit, que la ligne de devis reprendrait ensuite comme prix d'achat prévu.
+function cataloguePrixAchat(value: unknown): number | null {
+  return value === undefined || value === null || (typeof value === 'string' && value.trim() === '') ? null : catalogueNombre(value, "Prix d'achat");
+}
+
 // Champs communs aux trois familles.
 function cataloguePayload(body: Record<string, unknown>) {
   const reference = String(body.reference || '').trim();
@@ -5771,17 +5778,18 @@ function catalogueExtraPayload(family: CatalogueFamily, body: Record<string, unk
     return {
       unite: String(body.unite || 'unité'),
       dureeIndicativeMin: body.dureeIndicativeMin == null ? null : catalogueNombre(body.dureeIndicativeMin, 'Durée indicative'),
+      prixAchatHt: cataloguePrixAchat(body.prixAchatHt),
     };
   }
   if (family === 'articles') {
     return {
       unite: String(body.unite || 'unité'),
-      prixAchatHt: body.prixAchatHt == null ? null : catalogueNombre(body.prixAchatHt, "Prix d'achat"),
+      prixAchatHt: cataloguePrixAchat(body.prixAchatHt),
       stockSuivi: !!body.stockSuivi,
       stockActuel: catalogueNombre(body.stockActuel, 'Stock'),
     };
   }
-  return { fabricant: body.fabricant ? String(body.fabricant).trim() : null };
+  return { fabricant: body.fabricant ? String(body.fabricant).trim() : null, prixAchatHt: cataloguePrixAchat(body.prixAchatHt) };
 }
 
 // Erreur catalogue : 409 sur une référence déjà prise (contrainte unique Prisma P2002),
@@ -5871,7 +5879,8 @@ const modifierFicheCatalogue: express.RequestHandler = async (req, res) => {
 };
 
 // Désactivation (jamais de suppression) : une fiche catalogue peut déjà être référencée
-// par un équipement installé ou, demain, par un devis — la retirer casserait l'historique.
+// par un équipement installé — la retirer casserait l'historique. Un devis n'en dépend pas :
+// sa ligne est une copie figée (lot pilote 2).
 const desactiverFicheCatalogue: express.RequestHandler = async (req, res) => {
   const family = catalogueFamily(String(req.params.family));
   if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
@@ -5900,6 +5909,8 @@ class DevisSaisieError extends Error {}
 // Refus qui ne vient pas de la saisie mais de l'état de l'affaire : la requête est bien
 // formée, c'est le monde qui s'y oppose. 409, pas 400.
 class DevisConflitError extends Error {}
+// Requête bien formée, mais réservée à d'autres comptes (prix d'achat prévu) : 403.
+class DevisDroitError extends Error {}
 // Arrondi commercial exact au centime d’une ligne : quantité (au millième) × PU HT
 // (au centime). Les montants de facture et d’avoir sont toujours positifs ; leur sens est
 // porté par le type du document. Aucun flottant ne participe à ce calcul.
@@ -5928,31 +5939,150 @@ function centimesTtcLigne(totalHt: number, tauxTva: unknown): number {
 }
 
 const centimes = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+// Demande de reprise du catalogue, ou de conservation d'une ligne existante, portée par une
+// ligne saisie. `devisPayload` ne fait que la valider ; `resoudreLignesDevis` la résout en base.
+type ReferenceLigneDevis = { ligneId: string | null; catalogue: { famille: CatalogueFamily; id: string } | null; prixAchatUnitaireHt: number | null | undefined };
 function devisPayload(body: Record<string, unknown>) {
   const clientId = String(body.clientId || '').trim(), objet = String(body.objet || '').trim();
   const lignes = Array.isArray(body.lignes) ? body.lignes : [];
   if (!clientId || !objet || objet.length > 300 || !lignes.length) throw new DevisSaisieError('Client, objet et au moins une ligne sont requis.');
+  const references: ReferenceLigneDevis[] = [];
   const lignesCalculees = lignes.map((ligne, ordre) => {
-    const item = ligne as Record<string, unknown>, designation = String(item.designation || '').trim(), nature = String(item.nature || 'MAIN_OEUVRE');
+    const item = (ligne && typeof ligne === 'object' ? ligne : {}) as Record<string, unknown>, designation = String(item.designation || '').trim(), nature = String(item.nature || 'MAIN_OEUVRE');
     // Mêmes échelles que les factures : le calcul entier ne doit jamais recevoir une précision
     // que ses unités (millièmes / centimes) ne représentent pas.
     const quantite = nombreDecimalNonNegatif(item.quantite, 9, false, 3);
     const prixUnitaireHt = nombreDecimalNonNegatif(item.prixUnitaireHt, 10, true);
     const tauxTva = item.tauxTva === undefined || item.tauxTva === null ? 20 : nombreDecimalNonNegatif(item.tauxTva, 3, true);
-    if (!['MAIN_OEUVRE', 'FOURNITURE'].includes(nature) || !designation || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new DevisSaisieError('Ligne de devis invalide.');
+    const unite = item.unite === undefined || item.unite === null ? null : String(item.unite).trim() || null;
+    if (!['MAIN_OEUVRE', 'FOURNITURE'].includes(nature) || !designation || designation.length > 500 || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100 || (unite !== null && unite.length > 40)) throw new DevisSaisieError('Ligne de devis invalide.');
     const totalHt = arrondiCommercialLigneHt(quantite, prixUnitaireHt);
     const totalTtc = centimesTtcLigne(totalHt, tauxTva);
-    return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc };
+    // Même plafond que les factures : au-delà, la colonne Decimal(12, 2) refuserait le montant.
+    if (totalTtc > PLAFOND_MONTANT) throw new DevisSaisieError('Montant de ligne hors des limites acceptées.');
+    // Prix d'achat prévu : facultatif ; `undefined` signifie « non transmis », null « effacé ».
+    const prixAchatUnitaireHt = item.prixAchatUnitaireHt === undefined ? undefined
+      : item.prixAchatUnitaireHt === null || item.prixAchatUnitaireHt === '' ? null
+      : nombreDecimalNonNegatif(item.prixAchatUnitaireHt, 10, true);
+    if (prixAchatUnitaireHt === null && item.prixAchatUnitaireHt !== null && item.prixAchatUnitaireHt !== '') throw new DevisSaisieError('Prix d’achat prévu invalide.');
+    const ligneId = item.ligneId === undefined || item.ligneId === null ? null : String(item.ligneId);
+    let catalogue: ReferenceLigneDevis['catalogue'] = null;
+    if (item.catalogueFamille !== undefined && item.catalogueFamille !== null) {
+      const famille = catalogueFamily(String(item.catalogueFamille));
+      const id = typeof item.catalogueId === 'string' ? item.catalogueId.trim() : '';
+      if (!famille || !id) throw new DevisSaisieError('Fiche catalogue de la ligne invalide.');
+      catalogue = { famille, id };
+    }
+    references.push({ ligneId, catalogue, prixAchatUnitaireHt });
+    return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite };
   });
   const totalHt = centimes(lignesCalculees.reduce((t, l) => t + l.totalHt, 0));
   // Comme les factures et avoirs, la TVA est arrondie sur la base HT cumulée de chaque taux.
   const totalTva = centimes(tauxUtilises(lignesCalculees).reduce((total, taux) => total + tvaDuTaux(lignesCalculees, taux), 0));
   const totalTtc = centimes(totalHt + totalTva);
-  return { clientId, objet, lignesCalculees, totalHt, totalTva, totalTtc };
+  if (totalTtc > PLAFOND_MONTANT) throw new DevisSaisieError('Montant de devis hors des limites acceptées.');
+  return { clientId, objet, lignesCalculees, references, totalHt, totalTva, totalTtc };
 }
+
+// --- Catalogue dans les devis (lot pilote 2, décision A8 du 16-10-2026) ---
+// Nature de ligne proposée selon la famille de la fiche (choix par défaut, à confirmer) : une
+// prestation est de la main-d'œuvre, un article ou un équipement une fourniture.
+const NATURE_DEVIS_PAR_FAMILLE: Record<CatalogueFamily, 'MAIN_OEUVRE' | 'FOURNITURE'> = { prestations: 'MAIN_OEUVRE', articles: 'FOURNITURE', equipements: 'FOURNITURE' };
+
+// Prix d'achat prévu d'une ligne de devis : une donnée interne de coût. Session humaine : un
+// administrateur seulement (choix par défaut, à confirmer), comme le prix d'achat du catalogue ;
+// clé d'intégration : le scope finances:read, comme la rentabilité. Les autres porteurs du droit
+// devis ne le reçoivent jamais, sous aucune route, et ne peuvent pas l'écrire.
+function voitPrixAchatDevis(req: express.Request): boolean {
+  const cle = (req as ApiRequest).apiKey;
+  if (cle) return cle.scopes.includes('finances:read');
+  return isAdminRole((req as AuthRequest).user?.role);
+}
+function ecritPrixAchatDevis(req: express.Request): boolean {
+  return !(req as ApiRequest).apiKey && isAdminRole((req as AuthRequest).user?.role);
+}
+// Retire le prix d'achat prévu de toutes les lignes d'un devis, ou d'une liste de devis.
+function devisPourLecteur<T>(req: express.Request, valeur: T): T {
+  if (voitPrixAchatDevis(req)) return valeur;
+  const masquer = (devis: unknown): unknown => {
+    if (!devis || typeof devis !== 'object' || !Array.isArray((devis as { lignes?: unknown }).lignes)) return devis;
+    return { ...(devis as object), lignes: (devis as { lignes: Record<string, unknown>[] }).lignes.map(({ prixAchatUnitaireHt: _masque, ...ligne }) => ligne) };
+  };
+  return (Array.isArray(valeur) ? valeur.map(masquer) : masquer(valeur)) as T;
+}
+
+type LigneDevisExistante = { id: string; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null };
+// Résout la copie du catalogue et le prix d'achat prévu de chaque ligne saisie :
+//  - une ligne existante du devis (`ligneId`) garde sa fiche d'origine et sa référence, copiées
+//    à son ajout : modifier ou désactiver la fiche ensuite n'y change rien ;
+//  - une nouvelle ligne reprise du catalogue exige une fiche existante et active, dont la
+//    référence est recopiée par le serveur ;
+//  - le prix d'achat prévu n'est écrit que par un administrateur. Sinon, une ligne existante
+//    garde le sien, et une nouvelle ligne du catalogue reprend celui de la fiche.
+async function resoudreLignesDevis(
+  db: Prisma.TransactionClient | typeof prisma,
+  payload: ReturnType<typeof devisPayload>,
+  existantes: LigneDevisExistante[],
+  ecritPrixAchat: boolean,
+) {
+  if (!ecritPrixAchat && payload.references.some((r) => r.prixAchatUnitaireHt !== undefined)) {
+    throw new DevisDroitError('Le prix d’achat prévu est réservé aux administrateurs.');
+  }
+  const parId = new Map(existantes.map((ligne) => [ligne.id, ligne]));
+  const vues = new Set<string>();
+  const lignes = [];
+  for (const [index, ligne] of payload.lignesCalculees.entries()) {
+    const reference = payload.references[index];
+    let copie: { reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | number | null };
+    if (reference.ligneId) {
+      const existante = parId.get(reference.ligneId);
+      if (!existante || vues.has(reference.ligneId)) throw new DevisSaisieError('Ligne de devis inconnue : rechargez le devis.');
+      vues.add(reference.ligneId);
+      copie = { reference: existante.reference, catalogueFamille: existante.catalogueFamille, catalogueId: existante.catalogueId, prixAchatUnitaireHt: existante.prixAchatUnitaireHt };
+    } else if (reference.catalogue) {
+      const fiche = await (catalogueModels[reference.catalogue.famille] as unknown as { findUnique: (args: unknown) => Promise<{ reference: string; actif: boolean; prixAchatHt: Prisma.Decimal | null } | null> })
+        .findUnique({ where: { id: reference.catalogue.id }, select: { reference: true, actif: true, prixAchatHt: true } });
+      if (!fiche || !fiche.actif) throw new DevisSaisieError('Fiche catalogue introuvable ou désactivée.');
+      copie = { reference: fiche.reference, catalogueFamille: reference.catalogue.famille, catalogueId: reference.catalogue.id, prixAchatUnitaireHt: fiche.prixAchatHt };
+    } else {
+      copie = { reference: null, catalogueFamille: null, catalogueId: null, prixAchatUnitaireHt: null };
+    }
+    if (ecritPrixAchat && reference.prixAchatUnitaireHt !== undefined) copie.prixAchatUnitaireHt = reference.prixAchatUnitaireHt;
+    lignes.push({ ...ligne, ...copie });
+  }
+  return lignes;
+}
+
+// Fiches actives du catalogue, pour composer un devis : réservé aux porteurs du droit devis
+// (jamais le technicien, qui ne l'a jamais). La recherche porte sur la référence et la
+// désignation ; 50 fiches au plus, triées par désignation (choix par défaut, à confirmer).
+app.get('/api/devis/catalogue', requireAuth, requirePermission('devis:write'), async (req, res) => {
+  try {
+    const recherche = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
+    const famille = req.query.famille === undefined ? null : catalogueFamily(String(req.query.famille));
+    if (req.query.famille !== undefined && !famille) return void res.status(400).json({ error: 'Famille de catalogue inconnue.' });
+    const filtre = { actif: true, ...(recherche ? { OR: [{ reference: { contains: recherche, mode: 'insensitive' as const } }, { nom: { contains: recherche, mode: 'insensitive' as const } }] } : {}) };
+    const familles = famille ? [famille] : (['prestations', 'articles', 'equipements'] as CatalogueFamily[]);
+    const voitPrixAchat = voitPrixAchatDevis(req);
+    const fiches = (await Promise.all(familles.map(async (f) => {
+      const lignes = await (catalogueModels[f] as unknown as { findMany: (args: unknown) => Promise<Record<string, unknown>[]> })
+        .findMany({ where: filtre, orderBy: { nom: 'asc' }, take: 50 });
+      return lignes.map((fiche) => ({
+        famille: f, id: fiche.id, reference: fiche.reference, nom: fiche.nom,
+        unite: (fiche.unite as string | undefined) ?? null, nature: NATURE_DEVIS_PAR_FAMILLE[f],
+        prixVenteHt: fiche.prixVenteHt, tauxTva: fiche.tauxTva,
+        ...(voitPrixAchat ? { prixAchatHt: fiche.prixAchatHt ?? null } : {}),
+      }));
+    }))).flat().sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr')).slice(0, 50);
+    res.json(decimalToNumber(fiches));
+  } catch {
+    res.status(500).json({ error: 'Lecture du catalogue impossible.' });
+  }
+});
 function devisErreur(res: express.Response, error: unknown) {
   if (error instanceof DevisSaisieError) return res.status(400).json({ error: error.message });
   if (error instanceof DevisConflitError) return res.status(409).json({ error: error.message });
+  if (error instanceof DevisDroitError) return res.status(403).json({ error: error.message });
   if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
@@ -5963,19 +6093,28 @@ function montantDevisFige(value: Prisma.Decimal | number | string | null, decima
 function contenuDevisSigne(devis: {
   id: string; dossierId: string; numero: string; version: number; clientId: string; objet: string;
   acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; totalHt: Prisma.Decimal; totalTva: Prisma.Decimal; totalTtc: Prisma.Decimal;
-  lignes: { ordre: number; designation: string; nature: string; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal }[];
+  lignes: { ordre: number; designation: string; nature: string; reference: string | null; unite: string | null; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal }[];
 }) {
+  // Le prix d'achat prévu, donnée interne, n'entre jamais dans ce que le client signe.
   return {
     devisId: devis.id, dossierId: devis.dossierId, numero: devis.numero, version: devis.version,
     clientId: devis.clientId, objet: devis.objet, acompteExige: devis.acompteExige,
     tauxAcompte: montantDevisFige(devis.tauxAcompte, 2), totalHt: montantDevisFige(devis.totalHt, 2),
     totalTva: montantDevisFige(devis.totalTva, 2), totalTtc: montantDevisFige(devis.totalTtc, 2),
     lignes: devis.lignes.map(ligne => ({
-      ordre: ligne.ordre, designation: ligne.designation, nature: ligne.nature,
+      ordre: ligne.ordre, designation: ligne.designation, nature: ligne.nature, reference: ligne.reference, unite: ligne.unite,
       quantite: montantDevisFige(ligne.quantite, 3), prixUnitaireHt: montantDevisFige(ligne.prixUnitaireHt, 2),
       tauxTva: montantDevisFige(ligne.tauxTva, 2), totalHt: montantDevisFige(ligne.totalHt, 2), totalTtc: montantDevisFige(ligne.totalTtc, 2),
     })),
   };
+}
+// Copie à l'identique d'une ligne (révision, duplication) : la copie du catalogue et le prix
+// d'achat prévu suivent, comme les montants.
+function copieLigneDevis({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt }: {
+  ordre: number; designation: string; nature: string; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal;
+  unite: string | null; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null;
+}) {
+  return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt };
 }
 async function verrouillerDevis(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
   const lignes = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "Devis" WHERE "id" = ${id} FOR UPDATE`);
@@ -6005,29 +6144,31 @@ async function nouveauNumeroDevis() {
 const creerDevis: express.RequestHandler = async (req, res) => { try {
   const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
   if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
+  const lignes = await resoudreLignesDevis(prisma, payload, [], ecritPrixAchatDevis(req));
   const { acompteExige, tauxAcompte } = await acompteDevisPayload((req.body ?? {}) as Record<string, unknown>);
-  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, acompteExige, tauxAcompte, lignes: { create: payload.lignesCalculees } }, include: devisInclude });
-  res.status(201).json(decimalToNumber(devis));
+  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, acompteExige, tauxAcompte, lignes: { create: lignes } }, include: devisInclude });
+  res.status(201).json(devisPourLecteur(req, decimalToNumber(devis)));
 } catch (error) { devisErreur(res, error); } };
-const listerDevis: express.RequestHandler = async (_req, res) => { try { res.json(decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } }))); } catch (error) { devisErreur(res, error); } };
+const listerDevis: express.RequestHandler = async (req, res) => { try { res.json(devisPourLecteur(req, decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } })))); } catch (error) { devisErreur(res, error); } };
 const modifierDevis: express.RequestHandler = async (req, res) => { try {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const payload = devisPayload(body);
   const devis = await transactionVerifiee(async tx => {
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
-    const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { signature: true, conversion: true } });
+    const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { signature: true, conversion: true, lignes: true } });
     if (precedent.signature) throw new DevisConflitError('Ce devis est signé : créez une nouvelle révision brouillon pour le modifier.');
     if (precedent.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être modifié.');
     if (!['BROUILLON', 'ENVOYE'].includes(precedent.statut)) throw new DevisConflitError('Seuls les devis brouillon ou envoyés, non signés, peuvent être modifiés.');
     if (!await tx.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
     const acompte = await acompteDevisPayload(body, precedent);
+    const lignes = await resoudreLignesDevis(tx, payload, precedent.lignes, ecritPrixAchatDevis(req));
     return tx.devis.update({
       where: { id: precedent.id },
       data: { clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, ...acompte,
-        lignes: { deleteMany: {}, create: payload.lignesCalculees } }, include: devisInclude,
+        lignes: { deleteMany: {}, create: lignes } }, include: devisInclude,
     });
   });
-  res.json(decimalToNumber(devis));
+  res.json(devisPourLecteur(req, decimalToNumber(devis)));
 } catch (error) { devisErreur(res, error); } };
 const creerRevision: express.RequestHandler = async (req, res) => { try {
   const devis = await transactionVerifiee(async tx => {
@@ -6044,10 +6185,10 @@ const creerRevision: express.RequestHandler = async (req, res) => { try {
       acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte,
       acompteRecuLe: precedent.acompteRecuLe, acompteMontant: precedent.acompteMontant,
       acompteReference: precedent.acompteReference, acompteConstateParId: precedent.acompteConstateParId,
-      lignes: { create: precedent.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) },
+      lignes: { create: precedent.lignes.map(copieLigneDevis) },
     }, include: devisInclude });
   });
-  res.status(201).json(decimalToNumber(devis));
+  res.status(201).json(devisPourLecteur(req, decimalToNumber(devis)));
 } catch (error) { devisErreur(res, error); } };
 const signerDevis: express.RequestHandler = async (req, res) => { try {
   const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
@@ -6109,7 +6250,7 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
     return tx.devis.update({ where: { id: devis.id }, data: { statut }, include: devisInclude });
   });
   if (!maj) return void res.status(404).json({ error: 'Devis introuvable.' });
-  res.json(decimalToNumber(maj));
+  res.json(devisPourLecteur(req, decimalToNumber(maj)));
 } catch (error) { devisErreur(res, error); } };
 routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requirePermission('devis:write')]);
 
@@ -6282,7 +6423,7 @@ app.post('/api/devis/:id/acompte', requireAuth, requireAdmin, async (req, res) =
     });
   });
   if (!maj) return void res.status(404).json({ error: 'Devis introuvable.' });
-  res.json(decimalToNumber(maj));
+  res.json(devisPourLecteur(req, decimalToNumber(maj)));
 } catch (error) { devisErreur(res, error); } });
 
 // --- Annulation d'un devis, et archivage du chantier qui en est issu ---
@@ -6336,7 +6477,7 @@ app.post('/api/devis/:id/annulation', requireAuth, requireAdmin, async (req, res
     });
     return { devis: maj, chantierArchive };
   });
-  res.json({ devis: decimalToNumber(resultat.devis), chantierArchive: resultat.chantierArchive });
+  res.json({ devis: devisPourLecteur(req, decimalToNumber(resultat.devis)), chantierArchive: resultat.chantierArchive });
 } catch (error) { devisErreur(res, error); } });
 
 // --- Duplication ---
@@ -6359,11 +6500,11 @@ app.post('/api/devis/:id/duplication', requireAuth, requirePermission('devis:wri
       acompteExige: source.acompteExige,
       tauxAcompte: source.acompteExige ? tauxAcompteDefaut : null,
       origineDevisId: source.id,
-      lignes: { create: source.lignes.map(({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc }) => ({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc })) },
+      lignes: { create: source.lignes.map(copieLigneDevis) },
     },
     include: devisInclude,
   });
-  res.status(201).json(decimalToNumber(duplicata));
+  res.status(201).json(devisPourLecteur(req, decimalToNumber(duplicata)));
 } catch (error) { devisErreur(res, error); } });
 
 // --- Société de l'instance (singleton, hors paramètres métier) ---

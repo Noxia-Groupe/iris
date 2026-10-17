@@ -252,6 +252,7 @@ if (!TEST_DATABASE_URL) {
       'ouverture.conducteur@iris.test', 'ouverture.autre.conducteur@iris.test', 'ouverture.commercial@iris.test', 'ouverture.commercial.inactif@iris.test', 'ouverture.ancien.conducteur@iris.test',
       'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
+      'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -2731,6 +2732,193 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
+  // Lot pilote 2 (décision A8 du 16-10-2026) : les lignes d'un devis se reprennent du catalogue
+  // et y sont COPIÉES, figées ; le prix d'achat prévu est facultatif et réservé aux
+  // administrateurs (choix par défaut, à confirmer).
+  describe('Catalogue dans les devis (lot pilote 2)', () => {
+    const suffixe = `${Date.now()}`;
+    let admin = {};
+    let commercial = {};
+    let clientId = '';
+    let devisId = '';
+    const fiches = {};
+    const lignesEnBase = (id) => prisma.devisLigne.findMany({ where: { devisId: id }, orderBy: { ordre: 'asc' } });
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      const compte = await prisma.user.create({ data: { email: 'catalogue.devis.commercial@iris.test', name: 'TEST Commercial catalogue', role: 'COMMERCIAL' } });
+      commercial = { Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` };
+      const client = await request(app).post('/api/clients').set(admin).send({ raisonSociale: 'TEST Client catalogue devis' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      clientId = client.body.id;
+      const creer = async (famille, corps) => {
+        const fiche = await request(app).post(`/api/catalogue/${famille}`).set(admin).send(corps);
+        assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+        return fiche.body;
+      };
+      fiches.pose = await creer('prestations', { reference: `TEST-CAT-POSE-${suffixe}`, nom: `Pose catalogue ${suffixe}`, unite: 'forfait', prixVenteHt: '250', tauxTva: '20', prixAchatHt: '90' });
+      fiches.cable = await creer('articles', { reference: `TEST-CAT-CABLE-${suffixe}`, nom: `Câble catalogue ${suffixe}`, unite: 'm', prixVenteHt: '2.50', tauxTva: '20', prixAchatHt: '0.80' });
+      fiches.camera = await creer('equipements', { reference: `TEST-CAT-CAM-${suffixe}`, nom: `Caméra catalogue ${suffixe}`, prixVenteHt: '199', tauxTva: '20', prixAchatHt: '120' });
+      fiches.retiree = await creer('articles', { reference: `TEST-CAT-OLD-${suffixe}`, nom: `Article retiré catalogue ${suffixe}`, prixVenteHt: '5' });
+      assert.equal((await request(app).delete(`/api/catalogue/articles/${fiches.retiree.id}`).set(admin)).status, 200);
+    });
+
+    test('recherche : fiches actives seulement, prix d’achat aux seuls administrateurs, refusée sans droit devis', async () => {
+      const recherche = (enTete, query) => request(app).get('/api/devis/catalogue').query(query).set(enTete);
+      const pourCommercial = await recherche(commercial, { q: suffixe });
+      assert.equal(pourCommercial.status, 200, JSON.stringify(pourCommercial.body));
+      assert.deepEqual(pourCommercial.body.map((f) => f.reference).sort(), [fiches.cable.reference, fiches.camera.reference, fiches.pose.reference].sort(), 'la fiche désactivée n’est pas proposée');
+      assert.ok(pourCommercial.body.every((f) => !('prixAchatHt' in f)), 'aucun prix d’achat pour un commercial');
+      const pose = pourCommercial.body.find((f) => f.id === fiches.pose.id);
+      assert.deepEqual([pose.famille, pose.nature, pose.unite, pose.prixVenteHt, pose.tauxTva], ['prestations', 'MAIN_OEUVRE', 'forfait', 250, 20]);
+      const camera = pourCommercial.body.find((f) => f.id === fiches.camera.id);
+      assert.deepEqual([camera.famille, camera.nature, camera.unite], ['equipements', 'FOURNITURE', null]);
+      const pourAdmin = await recherche(admin, { q: suffixe });
+      assert.deepEqual(Object.fromEntries(pourAdmin.body.map((f) => [f.reference, f.prixAchatHt])), {
+        [fiches.pose.reference]: 90, [fiches.cable.reference]: 0.8, [fiches.camera.reference]: 120,
+      });
+      assert.deepEqual((await recherche(commercial, { q: suffixe, famille: 'articles' })).body.map((f) => f.id), [fiches.cable.id]);
+      assert.equal((await recherche(commercial, { famille: 'voitures' })).status, 400);
+      assert.equal((await request(app).get('/api/devis/catalogue')).status, 401);
+      for (const [qui, role] of [['technicien', 'TECHNICIEN'], ['conducteur', 'CONDUCTEUR_TRAVAUX']]) {
+        const compte = await prisma.user.create({ data: { email: `catalogue.devis.${qui}@iris.test`, name: `TEST ${qui} catalogue`, role } });
+        const refus = await recherche({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` }, { q: suffixe });
+        assert.equal(refus.status, 403, qui);
+      }
+    });
+
+    test('une ligne reprise est copiée : référence recopiée par le serveur, prix d’achat repris de la fiche et masqué au commercial', async () => {
+      const creation = await request(app).post('/api/devis').set(commercial).send({ clientId, objet: `TEST Devis catalogue ${suffixe}`, lignes: [
+        { designation: fiches.camera.nom, nature: 'FOURNITURE', quantite: '2', prixUnitaireHt: '180', tauxTva: '20', unite: 'pièce', catalogueFamille: 'equipements', catalogueId: fiches.camera.id },
+        { designation: 'Déplacement', quantite: '1', prixUnitaireHt: '50', tauxTva: '20' },
+      ] });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      devisId = creation.body.id;
+      assert.deepEqual([creation.body.totalHt, creation.body.totalTtc], [410, 492]);
+      const [camera, deplacement] = creation.body.lignes;
+      assert.deepEqual([camera.reference, camera.unite, camera.catalogueFamille, camera.catalogueId, camera.prixUnitaireHt], [fiches.camera.reference, 'pièce', 'equipements', fiches.camera.id, 180]);
+      assert.deepEqual([deplacement.reference, deplacement.catalogueFamille, deplacement.unite], [null, null, null]);
+      assert.ok(creation.body.lignes.every((l) => !('prixAchatUnitaireHt' in l)), 'prix d’achat masqué dans la réponse du commercial');
+      assert.deepEqual((await lignesEnBase(devisId)).map((l) => l.prixAchatUnitaireHt?.toString() ?? null), ['120', null], 'prix d’achat de la fiche copié en base');
+      const vueAdmin = (await request(app).get('/api/devis').set(admin)).body.find((d) => d.id === devisId);
+      assert.deepEqual(vueAdmin.lignes.map((l) => l.prixAchatUnitaireHt), [120, null]);
+      const vueCommercial = (await request(app).get('/api/devis').set(commercial)).body.find((d) => d.id === devisId);
+      assert.ok(vueCommercial.lignes.every((l) => !('prixAchatUnitaireHt' in l)));
+      // La référence vient de la fiche, jamais de la saisie.
+      const autre = await request(app).post('/api/devis').set(commercial).send({ clientId, objet: `TEST Devis référence ${suffixe}`, lignes: [
+        { designation: 'Câble', nature: 'FOURNITURE', quantite: '10', prixUnitaireHt: '2.50', reference: 'FAUSSE-REF', catalogueFamille: 'articles', catalogueId: fiches.cable.id },
+        { designation: 'Ligne libre', quantite: '1', prixUnitaireHt: '1', reference: 'FAUSSE-REF' },
+      ] });
+      assert.equal(autre.status, 201, JSON.stringify(autre.body));
+      assert.deepEqual(autre.body.lignes.map((l) => l.reference), [fiches.cable.reference, null]);
+      for (const ligne of [
+        { designation: 'Fiche inconnue', quantite: '1', prixUnitaireHt: '1', catalogueFamille: 'articles', catalogueId: 'inconnue' },
+        { designation: 'Mauvaise famille', quantite: '1', prixUnitaireHt: '1', catalogueFamille: 'prestations', catalogueId: fiches.cable.id },
+        { designation: 'Fiche retirée', quantite: '1', prixUnitaireHt: '1', catalogueFamille: 'articles', catalogueId: fiches.retiree.id },
+      ]) {
+        const refus = await request(app).post('/api/devis').set(commercial).send({ clientId, objet: 'TEST Devis refusé', lignes: [ligne] });
+        assert.equal(refus.status, 400, ligne.designation);
+        assert.match(refus.body.error, /Fiche catalogue introuvable ou désactivée/);
+      }
+    });
+
+    test('la copie est figée : la fiche modifiée puis désactivée ne change rien au devis, la ligne existante garde sa fiche et son prix d’achat', async () => {
+      const majFiche = await request(app).put(`/api/catalogue/equipements/${fiches.camera.id}`).set(admin)
+        .send({ reference: `TEST-CAT-CAM2-${suffixe}`, nom: 'Caméra renommée', prixVenteHt: '260', tauxTva: '20', prixAchatHt: '150' });
+      assert.equal(majFiche.status, 200, JSON.stringify(majFiche.body));
+      assert.equal((await request(app).delete(`/api/catalogue/equipements/${fiches.camera.id}`).set(admin)).status, 200);
+      const avant = (await request(app).get('/api/devis').set(commercial)).body.find((d) => d.id === devisId);
+      assert.deepEqual([avant.lignes[0].designation, avant.lignes[0].reference, avant.lignes[0].prixUnitaireHt], [fiches.camera.nom, fiches.camera.reference, 180]);
+      const maj = await request(app).patch(`/api/devis/${devisId}`).set(commercial).send({ clientId, objet: `TEST Devis catalogue ${suffixe}`, lignes: [
+        { ligneId: avant.lignes[0].id, designation: fiches.camera.nom, nature: 'FOURNITURE', quantite: '3', prixUnitaireHt: '180', tauxTva: '20', unite: 'pièce', catalogueFamille: 'equipements', catalogueId: fiches.camera.id },
+        { designation: 'Déplacement', quantite: '1', prixUnitaireHt: '50', tauxTva: '20' },
+      ] });
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      const [ligne] = await lignesEnBase(devisId);
+      assert.deepEqual([ligne.reference, ligne.catalogueId, ligne.prixAchatUnitaireHt?.toString(), ligne.quantite.toString()], [fiches.camera.reference, fiches.camera.id, '120', '3']);
+      const lignesActuelles = (await request(app).get('/api/devis').set(commercial)).body.find((d) => d.id === devisId).lignes;
+      const autreDevis = (await request(app).get('/api/devis').set(commercial)).body.find((d) => d.id !== devisId && d.lignes.length);
+      for (const [cas, lignes, attendu] of [
+        ['fiche désactivée en nouvelle ligne', [{ designation: 'Caméra', nature: 'FOURNITURE', quantite: '1', prixUnitaireHt: '1', catalogueFamille: 'equipements', catalogueId: fiches.camera.id }], /désactivée/],
+        ['ligne inconnue', [{ ligneId: 'inconnue', designation: 'X', quantite: '1', prixUnitaireHt: '1' }], /Ligne de devis inconnue/],
+        ['ligne en double', [{ ligneId: lignesActuelles[0].id, designation: 'X', quantite: '1', prixUnitaireHt: '1' }, { ligneId: lignesActuelles[0].id, designation: 'Y', quantite: '1', prixUnitaireHt: '1' }], /Ligne de devis inconnue/],
+        ['ligne d’un autre devis', [{ ligneId: autreDevis.lignes[0].id, designation: 'X', quantite: '1', prixUnitaireHt: '1' }], /Ligne de devis inconnue/],
+      ]) {
+        const refus = await request(app).patch(`/api/devis/${devisId}`).set(commercial).send({ clientId, objet: 'TEST Devis refusé', lignes });
+        assert.equal(refus.status, 400, cas);
+        assert.match(refus.body.error, attendu, cas);
+      }
+      assert.equal((await lignesEnBase(devisId)).length, 2, 'un refus ne touche pas aux lignes');
+    });
+
+    test('prix d’achat prévu : écrit par un administrateur seulement, conservé par les autres, masqué partout ailleurs', async () => {
+      const lignes = async (enTete) => (await request(app).get('/api/devis').set(enTete)).body.find((d) => d.id === devisId).lignes;
+      const corps = (lignesSaisies) => ({ clientId, objet: `TEST Devis catalogue ${suffixe}`, lignes: lignesSaisies });
+      // Chaque enregistrement recrée les lignes : leurs identifiants sont relus avant chaque envoi.
+      let actuelles = await lignes(admin);
+      const relire = async () => { actuelles = await lignes(admin); };
+      const ligneCamera = (extra) => ({ ligneId: actuelles[0].id, designation: actuelles[0].designation, nature: 'FOURNITURE', quantite: '3', prixUnitaireHt: '180', unite: 'pièce', ...extra });
+      const ligneDeplacement = (extra) => ({ ligneId: actuelles[1].id, designation: 'Déplacement', quantite: '1', prixUnitaireHt: '50', ...extra });
+      for (const valeur of ['10', null]) {
+        const refus = await request(app).patch(`/api/devis/${devisId}`).set(commercial).send(corps([ligneCamera({ prixAchatUnitaireHt: valeur }), ligneDeplacement()]));
+        assert.equal(refus.status, 403, String(valeur));
+        assert.match(refus.body.error, /réservé aux administrateurs/);
+      }
+      assert.equal((await request(app).post('/api/devis').set(commercial).send(corps([{ designation: 'Libre', quantite: '1', prixUnitaireHt: '1', prixAchatUnitaireHt: '0.5' }]))).status, 403);
+      const parAdmin = await request(app).patch(`/api/devis/${devisId}`).set(admin).send(corps([ligneCamera({ prixAchatUnitaireHt: '75,40' }), ligneDeplacement({ prixAchatUnitaireHt: '12' })]));
+      assert.equal(parAdmin.status, 200, JSON.stringify(parAdmin.body));
+      assert.deepEqual(parAdmin.body.lignes.map((l) => l.prixAchatUnitaireHt), [75.4, 12]);
+      await relire();
+      const parCommercial = await request(app).patch(`/api/devis/${devisId}`).set(commercial).send(corps([ligneCamera(), ligneDeplacement()]));
+      assert.equal(parCommercial.status, 200, JSON.stringify(parCommercial.body));
+      assert.deepEqual((await lignes(admin)).map((l) => l.prixAchatUnitaireHt), [75.4, 12], 'le commercial ne l’efface pas en modifiant le devis');
+      await relire();
+      const efface = await request(app).patch(`/api/devis/${devisId}`).set(admin).send(corps([ligneCamera(), ligneDeplacement({ prixAchatUnitaireHt: null })]));
+      assert.deepEqual(efface.body.lignes.map((l) => l.prixAchatUnitaireHt), [75.4, null], 'non transmis : conservé ; null : effacé');
+      await relire();
+      // Clés d'intégration : lecture avec finances:read seulement, jamais d'écriture.
+      const cle = async (scopes) => (await request(app).post('/api/admin/api-keys').set(admin).send({ nom: `TEST catalogue devis ${scopes.join(' ')}`, scopes })).body.apiKey;
+      const lecteur = await cle(['devis:read']);
+      const financier = await cle(['devis:read', 'finances:read']);
+      const ecrivain = await cle(['devis:write', 'finances:read']);
+      const vue = async (secret) => (await request(app).get('/api/v1/devis').set('Authorization', `Bearer ${secret}`)).body.find((d) => d.id === devisId).lignes;
+      assert.ok((await vue(lecteur)).every((l) => !('prixAchatUnitaireHt' in l)));
+      assert.deepEqual((await vue(financier)).map((l) => l.prixAchatUnitaireHt), [75.4, null]);
+      const ecriture = await request(app).patch(`/api/v1/devis/${devisId}`).set('Authorization', `Bearer ${ecrivain}`).send(corps([ligneCamera({ prixAchatUnitaireHt: '1' }), ligneDeplacement()]));
+      assert.equal(ecriture.status, 403);
+      // Toute réponse de devis au commercial est masquée : changement de statut, duplication.
+      const statut = await request(app).put(`/api/devis/${devisId}/statut`).set(commercial).send({ statut: 'ENVOYE' });
+      assert.equal(statut.status, 200, JSON.stringify(statut.body));
+      assert.ok(statut.body.lignes.every((l) => !('prixAchatUnitaireHt' in l)));
+      const duplicata = await request(app).post(`/api/devis/${devisId}/duplication`).set(commercial);
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.ok(duplicata.body.lignes.every((l) => !('prixAchatUnitaireHt' in l)));
+      assert.deepEqual((await lignesEnBase(duplicata.body.id)).map((l) => [l.reference, l.unite, l.catalogueId, l.prixAchatUnitaireHt?.toString() ?? null]),
+        [[fiches.camera.reference, 'pièce', fiches.camera.id, '75.4'], [null, null, null, null]], 'le duplicata reprend la copie et le prix d’achat');
+    });
+
+    test('révision et signature : la copie suit la révision, et la base fige les lignes et le contenu du devis signé', async () => {
+      const signature = await request(app).post(`/api/devis/${devisId}/signature`).set(admin).send({ signataire: 'TEST Client signataire', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      const revision = await request(app).post(`/api/devis/${devisId}/revisions`).set(admin);
+      assert.equal(revision.status, 201, JSON.stringify(revision.body));
+      assert.deepEqual(revision.body.lignes.map((l) => [l.reference, l.unite, l.catalogueFamille, l.prixAchatUnitaireHt]),
+        [[fiches.camera.reference, 'pièce', 'equipements', 75.4], [null, null, null, null]]);
+      const [ligne] = await lignesEnBase(devisId);
+      await assert.rejects(prisma.devisLigne.update({ where: { id: ligne.id }, data: { prixUnitaireHt: 1 } }), /lignes sont figées/);
+      await assert.rejects(prisma.devisLigne.update({ where: { id: ligne.id }, data: { prixAchatUnitaireHt: 1 } }), /lignes sont figées/);
+      await assert.rejects(prisma.devisLigne.delete({ where: { id: ligne.id } }), /lignes sont figées/);
+      await assert.rejects(prisma.devisLigne.create({ data: { devisId, ordre: 9, designation: 'Ajout', quantite: 1, prixUnitaireHt: 1, tauxTva: 20, totalHt: 1, totalTtc: 1.2 } }), /lignes sont figées/);
+      await assert.rejects(prisma.devis.update({ where: { id: devisId }, data: { totalHt: 1 } }), /sont figés/);
+      await assert.rejects(prisma.devis.update({ where: { id: devisId }, data: { objet: 'Objet changé' } }), /sont figés/);
+      await assert.rejects(prisma.devis.delete({ where: { id: devisId } }), /ne se supprime pas/);
+      // Le cycle de vie reste possible : seul le contenu est figé.
+      await prisma.devis.update({ where: { id: devisId }, data: { acompteReference: 'TEST cycle de vie' } });
+      assert.equal((await lignesEnBase(devisId)).length, 2);
+    });
+  });
+
   describe('Parc d’équipements installés', () => {
     let session = '';
     let clientId = '';
@@ -2988,7 +3176,7 @@ if (!TEST_DATABASE_URL) {
         totalHt: '300.00',
         totalTva: '60.00',
         totalTtc: '360.00',
-        lignes: [{ ordre: 0, designation: 'Pose lecteur révisée', nature: 'MAIN_OEUVRE', quantite: '3.000', prixUnitaireHt: '100.00', tauxTva: '20.00', totalHt: '300.00', totalTtc: '360.00' }],
+        lignes: [{ ordre: 0, designation: 'Pose lecteur révisée', nature: 'MAIN_OEUVRE', reference: null, unite: null, quantite: '3.000', prixUnitaireHt: '100.00', tauxTva: '20.00', totalHt: '300.00', totalTtc: '360.00' }],
       };
       assert.equal(signature.body.empreinte, createHash('sha256').update(JSON.stringify(contenu), 'utf8').digest('hex'));
     });

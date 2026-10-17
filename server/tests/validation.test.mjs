@@ -199,7 +199,20 @@ describe('Catalogue', () => {
   test('chaque famille ajoute ses propres champs', () => {
     assert.ok('dureeIndicativeMin' in catalogueExtraPayload('prestations', {}));
     assert.ok('stockSuivi' in catalogueExtraPayload('articles', {}));
-    assert.deepEqual(catalogueExtraPayload('equipements', { fabricant: ' Hikvision ' }), { fabricant: 'Hikvision' });
+    assert.deepEqual(catalogueExtraPayload('equipements', { fabricant: ' Hikvision ' }), { fabricant: 'Hikvision', prixAchatHt: null });
+  });
+
+  // Un prix d'achat laissé vide reste absent : `Number('')` vaudrait un achat gratuit, que la
+  // ligne de devis reprendrait comme prix d'achat prévu (lot pilote 2).
+  test('le prix d’achat est facultatif dans les trois familles, et un champ vide reste absent', () => {
+    for (const famille of ['prestations', 'articles', 'equipements']) {
+      assert.equal(catalogueExtraPayload(famille, {}).prixAchatHt, null, famille);
+      assert.equal(catalogueExtraPayload(famille, { prixAchatHt: '' }).prixAchatHt, null, famille);
+      assert.equal(catalogueExtraPayload(famille, { prixAchatHt: '  ' }).prixAchatHt, null, famille);
+      assert.equal(catalogueExtraPayload(famille, { prixAchatHt: '12.5' }).prixAchatHt, 12.5, famille);
+      assert.equal(catalogueExtraPayload(famille, { prixAchatHt: 0 }).prixAchatHt, 0, famille);
+      assert.throws(() => catalogueExtraPayload(famille, { prixAchatHt: '-1' }), /Prix d'achat invalide/, famille);
+    }
   });
 });
 
@@ -498,6 +511,32 @@ describe('Arrondi commercial des devis', () => {
     assert.equal(devis.totalHt, 0.1);
     assert.equal(devis.totalTva, 0.01);
     assert.equal(devis.totalTtc, 0.11);
+  });
+
+  // Lot pilote 2 : une ligne reprise du catalogue porte sa fiche, son unité et, en option, un
+  // prix d'achat prévu. La validation reste pure ; la fiche est résolue en base par l'API.
+  test('lignes reprises du catalogue : fiche, unité et prix d’achat prévu validés', () => {
+    const base = { designation: 'Caméra dôme', nature: 'FOURNITURE', quantite: '2', prixUnitaireHt: '120', tauxTva: '20' };
+    const devis = devisPayload({ clientId: 'client-test', objet: 'TEST Catalogue', lignes: [
+      { ...base, unite: ' pièce ', catalogueFamille: 'equipements', catalogueId: 'fiche-1', prixAchatUnitaireHt: '80,50' },
+      { ...base, ligneId: 'ligne-1' },
+      { ...base, prixAchatUnitaireHt: null },
+    ] });
+    assert.equal(devis.lignesCalculees[0].unite, 'pièce');
+    assert.deepEqual(devis.references, [
+      { ligneId: null, catalogue: { famille: 'equipements', id: 'fiche-1' }, prixAchatUnitaireHt: 80.5 },
+      { ligneId: 'ligne-1', catalogue: null, prixAchatUnitaireHt: undefined },
+      { ligneId: null, catalogue: null, prixAchatUnitaireHt: null },
+    ]);
+    for (const [ligne, message] of [
+      [{ ...base, catalogueFamille: 'inconnue', catalogueId: 'x' }, /Fiche catalogue de la ligne invalide/],
+      [{ ...base, catalogueFamille: 'articles' }, /Fiche catalogue de la ligne invalide/],
+      [{ ...base, prixAchatUnitaireHt: '-3' }, /Prix d’achat prévu invalide/],
+      [{ ...base, prixAchatUnitaireHt: '1.234' }, /Prix d’achat prévu invalide/],
+      [{ ...base, unite: 'u'.repeat(41) }, /Ligne de devis invalide/],
+      [{ ...base, designation: 'd'.repeat(501) }, /Ligne de devis invalide/],
+      [{ ...base, quantite: '999999999', prixUnitaireHt: '9999999999' }, /hors des limites/],
+    ]) assert.throws(() => devisPayload({ clientId: 'client-test', objet: 'TEST Catalogue invalide', lignes: [ligne] }), message);
   });
 });
 

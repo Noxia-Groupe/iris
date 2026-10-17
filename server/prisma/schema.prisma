@@ -521,6 +521,16 @@ model DevisLigne {
   tauxTva         Decimal  @db.Decimal(5, 2)
   totalHt         Decimal  @db.Decimal(12, 2)
   totalTtc        Decimal  @db.Decimal(12, 2)
+  // Ligne reprise du catalogue (lot pilote 2, décision A8) : une COPIE, figée dans le devis.
+  // La famille et l'identifiant ne servent qu'à la traçabilité ; la référence et l'unité
+  // sont recopiées à l'ajout et ne suivent plus la fiche, modifiée ou désactivée ensuite.
+  unite               String?
+  reference           String?
+  catalogueFamille    String?
+  catalogueId         String?
+  // Prix d'achat prévu, facultatif : donnée interne, réservée aux administrateurs, jamais
+  // imprimée ni signée par le client (choix par défaut, à confirmer).
+  prixAchatUnitaireHt Decimal? @db.Decimal(12, 2)
 
   @@unique([devisId, ordre])
 }
@@ -1097,6 +1107,9 @@ model CataloguePrestation {
   unite              String              @default("unité")
   dureeIndicativeMin Int?
   tauxTva            Decimal             @default(20) @db.Decimal(5, 2)
+  // Prix d'achat facultatif (sous-traitance par exemple), repris comme prix d'achat prévu
+  // d'une ligne de devis.
+  prixAchatHt        Decimal?            @db.Decimal(12, 2)
   prixVenteHt        Decimal             @default(0) @db.Decimal(12, 2)
   actif              Boolean             @default(true)
   createdAt          DateTime            @default(now())
@@ -1136,6 +1149,7 @@ model CatalogueEquipement {
   fabricant   String?
   description String?
   tauxTva     Decimal              @default(20) @db.Decimal(5, 2)
+  prixAchatHt Decimal?             @db.Decimal(12, 2)
   prixVenteHt Decimal              @default(0) @db.Decimal(12, 2)
   actif       Boolean              @default(true)
   equipements EquipementInstalle[]
