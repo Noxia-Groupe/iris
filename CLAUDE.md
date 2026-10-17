@@ -42,7 +42,7 @@ Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'ét
    - Restent dans le code, avec leur raison écrite, les règles légales ou d'intégrité : continuité et chronologie de la numérotation, immutabilité des documents émis, règles fiscales, invariants de droits.
    - Les règles déjà écrites en dur seront inventoriées par la proposition `docs/PARAMETRAGE-CIBLE.md`, à valider par Nelson ; elles ne sont pas converties avant cette validation.
 2. **Des fichiers de taille raisonnable.** Aucun fichier de code applicatif ne dépasse environ 800 lignes ; au-delà, on le découpe, dans une PR sans changement de comportement.
-   - Fichiers déjà trop longs : `server/index.ts` est découpé par le chantier 2 de la [passation](docs/ROADMAP-PASSATION.md#chantiers-techniques-décision-de-nelson-du-17-10-2026) ; le découpage des écrans `client/src/pages/ChantierDetail.tsx`, `Admin.tsx` et `Planning.tsx` sera proposé ensuite.
+   - Fichiers déjà trop longs : `server/index.ts` sera découpé par le chantier 2 de la [passation](docs/ROADMAP-PASSATION.md#chantiers-techniques-décision-de-nelson-du-17-10-2026) ; le découpage des écrans `client/src/pages/ChantierDetail.tsx`, `Admin.tsx` et `Planning.tsx` sera proposé ensuite.
    - Choix par défaut, à confirmer : les fichiers de tests, les migrations, les fichiers générés (lockfiles, client Prisma) et le schéma Prisma (`server/prisma/schema.prisma`, que Prisma 5 ne scinde qu'avec une fonction en préversion) ne sont pas concernés.
 
 ## Commandes du dépôt
