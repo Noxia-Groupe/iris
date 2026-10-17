@@ -11,7 +11,8 @@ import { apiFetch } from '../api';
  * formulaire, dont seul le bloc spécifique change selon l'onglet.
  *
  * Une fiche n'est jamais supprimée, seulement désactivée : elle peut déjà être référencée
- * par un équipement installé chez un client, et demain par un devis.
+ * par un équipement installé chez un client, ou copiée dans une ligne de devis (le devis garde
+ * sa copie, figée, même si la fiche change ou est désactivée ensuite).
  */
 type Categorie = { id: string; nom: string; parentId: string | null };
 type Fiche = {
@@ -83,9 +84,9 @@ const Catalogue = () => {
       categorieId: saisie.categorieId || null, tauxTva: saisie.tauxTva, prixVenteHt: saisie.prixVenteHt,
     };
     const specifique =
-      famille === 'prestations' ? { unite: saisie.unite, dureeIndicativeMin: saisie.dureeIndicativeMin || null }
+      famille === 'prestations' ? { unite: saisie.unite, dureeIndicativeMin: saisie.dureeIndicativeMin || null, prixAchatHt: saisie.prixAchatHt || null }
       : famille === 'articles' ? { unite: saisie.unite, prixAchatHt: saisie.prixAchatHt || null, stockSuivi: saisie.stockSuivi, stockActuel: saisie.stockActuel }
-      : { fabricant: saisie.fabricant };
+      : { fabricant: saisie.fabricant, prixAchatHt: saisie.prixAchatHt || null };
     const res = await apiFetch(`/catalogue/${famille}`, { method: 'POST', body: JSON.stringify({ ...commun, ...specifique }) });
     const data = await res.json();
     if (!res.ok) { setErreur(data.error || 'Création impossible.'); return; }
@@ -175,7 +176,8 @@ const Catalogue = () => {
             {famille === 'equipements' && champ('fabricant', 'Fabricant')}
             {famille !== 'equipements' && champ('unite', 'Unité')}
             {famille === 'prestations' && champ('dureeIndicativeMin', 'Durée indicative (min)', 'number')}
-            {famille === 'articles' && champ('prixAchatHt', "Prix d'achat HT (€)", 'number')}
+            {/* Facultatif dans les trois familles : repris comme prix d'achat prévu d'une ligne de devis. */}
+            {champ('prixAchatHt', "Prix d'achat HT (€, facultatif)", 'number')}
             {famille === 'articles' && champ('stockActuel', 'Stock actuel', 'number')}
           </div>
           {famille === 'articles' && (
@@ -200,6 +202,7 @@ const Catalogue = () => {
                 <th className="px-4 py-3 text-left font-semibold">Désignation</th>
                 <th className="px-4 py-3 text-left font-semibold">Catégorie</th>
                 <th className="px-4 py-3 text-right font-semibold">Prix HT</th>
+                <th className="px-4 py-3 text-right font-semibold">Prix d'achat HT</th>
                 <th className="px-4 py-3 text-right font-semibold">TVA</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
               </tr>
@@ -214,6 +217,7 @@ const Catalogue = () => {
                   </td>
                   <td className="px-4 py-3">{f.categorie?.nom || '—'}</td>
                   <td className="px-4 py-3 text-right">{Number(f.prixVenteHt).toFixed(2)} €</td>
+                  <td className="px-4 py-3 text-right">{f.prixAchatHt == null ? '—' : `${Number(f.prixAchatHt).toFixed(2)} €`}</td>
                   <td className="px-4 py-3 text-right">{Number(f.tauxTva).toFixed(2)} %</td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => void basculerActif(f)} className="inline-flex items-center gap-1 text-xs text-blue-700">
