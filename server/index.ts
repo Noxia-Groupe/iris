@@ -3733,6 +3733,11 @@ function libelleCompteJournal(compte: { name: string; email: string }): string {
 // est déliée et le changement journalisé dans la même transaction.
 async function delierFicheSiPlusTechnicien(tx: any, req: AuthRequest | null, avant: { id: string; name: string; email: string; role: string }, nouveauRole: string, fiches: Array<{ id: string; nom: string }>) {
   if (avant.role !== ROLE_TECHNICIEN || nouveauRole === ROLE_TECHNICIEN) return;
+  // Une fiche encore libre au premier verrouillage a pu être reliée à ce compte avant qu'il ne soit
+  // verrouillé à son tour : relue maintenant, elle n'est pas dans la liste verrouillée. Le changement
+  // est alors refusé (409), plutôt que de laisser la fiche reliée à un compte non technicien.
+  const actuelles: Array<{ id: string }> = await tx.intervenant.findMany({ where: { userId: avant.id }, select: { id: true } });
+  if (actuelles.some((f) => !fiches.some((v) => v.id === f.id))) throw Object.assign(new Error('Fiche intervenant reliée entre-temps.'), { code: 'FICHE_RELIEE' });
   for (const fiche of fiches) {
     await tx.intervenant.update({ where: { id: fiche.id }, data: { userId: null } });
     await journaliserAdministration(tx, req, {
@@ -3858,6 +3863,9 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       // donne des noms (comme le rattachement), jamais l'identifiant d'un compte qu'un simple
       // administrateur ne doit pas voir, et chaque entrée qui touche un super administrateur
       // lui est fermée.
+      // Fiches intervenant d'abord, dans le même ordre que la liaison : la suppression les délie
+      // (ON DELETE SET NULL), et le journal le dit.
+      const fichesDeliees = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE`);
       await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
       const supprime = await tx.user.findUnique({
         where: { id },
@@ -3874,6 +3882,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       const effets = [
         chantiersResponsable.count ? `retiré de ${chantiersResponsable.count} chantier(s) comme responsable` : '',
         chantiersCommercial.count ? `retiré de ${chantiersCommercial.count} chantier(s) comme commercial` : '',
+        ...fichesDeliees.map((fiche) => `fiche intervenant « ${fiche.nom} » (${fiche.id}) déliée`),
       ].filter(Boolean);
       const responsable = supprime.responsableHierarchique;
       await journaliserAdministration(tx, req as AuthRequest, {
@@ -3924,6 +3933,7 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
       // Fiche intervenant verrouillée avant le compte, dans le même ordre que la route qui la relie.
       const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${target.id} FOR UPDATE`);
       const avant = await lireCompteVerrouille(tx, target.id);
+      if (!avant) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
       const apres = await tx.user.update({
       where: { id: target.id },
       // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
@@ -3942,6 +3952,8 @@ app.patch('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => 
     });
     res.json(user);
   } catch (error) {
+    if ((error as { code?: string })?.code === 'FICHE_RELIEE') return res.status(409).json({ error: 'Ce compte vient d’être relié à une fiche intervenant : réessayez.' });
+    if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
     res.status(500).json({ error: 'Error updating user role' });
   }
 });

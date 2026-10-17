@@ -261,7 +261,8 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
-      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test',
+      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test',
+      ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -4232,13 +4233,61 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await request(app).delete(`/api/intervenants/${fiche.id}`).set(jeton(simpleAdmin))).status, 403);
         assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, superCompte.id);
         assert.equal((await journalFiche(superCompte.id)).length, avant.length);
-        // Le super administrateur, lui, la délie.
+        // Le super administrateur, lui, la délie, puis supprime une fiche reliée : entrées fermées au
+        // simple administrateur.
+        const lirePour = async (enTete) => (await request(app).get('/api/journal-administration').query({ cible: superCompte.id }).set(enTete)).body.entrees
+          .filter((e) => e.action === 'FICHE_INTERVENANT').map((e) => e.detail);
         assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: null })).status, 200);
         assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+        assert.equal((await journalFiche(superCompte.id)).at(-1).concerneSuperAdmin, true, 'déliaison fermée');
+        await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: superCompte.id } });
+        assert.equal((await request(app).delete(`/api/intervenants/${fiche.id}`).set(admin)).status, 200);
+        const suppression = (await journalFiche(superCompte.id)).at(-1);
+        assert.deepEqual([suppression.detail, suppression.concerneSuperAdmin], [`Fiche intervenant supprimée (${fiche.id}).`, true]);
+        assert.deepEqual(await lirePour(admin), [`Fiche intervenant supprimée (${fiche.id}).`, `Fiche intervenant ${fiche.id}.`]);
+        assert.deepEqual(await lirePour(jeton(simpleAdmin)), [], 'rien pour le simple administrateur');
       } finally {
         await prisma.intervenant.deleteMany({ where: { id: fiche.id } });
         await prisma.user.deleteMany({ where: { id: superCompte.id } });
       }
+    });
+
+    test('la promotion du démarrage (SUPERADMIN_EMAILS) délie la fiche d’un technicien, sans auteur et fermée au simple administrateur', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.demarrage@iris.test', name: 'TEST Pilote3 démarrage', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 fiche démarrage', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const emails = process.env.SUPERADMIN_EMAILS;
+      try {
+        assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: compte.id })).status, 200);
+        process.env.SUPERADMIN_EMAILS = `${emails},${compte.email}`;
+        await ensureSuperAdmins();
+        process.env.SUPERADMIN_EMAILS = emails;
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role, 'SUPERADMIN');
+        assert.equal((await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId, null);
+        const entree = (await journalFiche(compte.id)).at(-1);
+        assert.deepEqual([entree.apres, entree.auteurId, entree.auteurNom, entree.concerneSuperAdmin], [{ ficheIntervenant: null }, null, 'Iris (démarrage, SUPERADMIN_EMAILS)', true]);
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+        await prisma.user.deleteMany({ where: { id: compte.id } });
+      }
+    });
+
+    test('un changement de type simultané à une liaison ne laisse jamais la fiche reliée à un compte non technicien', async () => {
+      const issues = { deliee: 0, refusChangement: 0, refusLien: 0 };
+      for (let essai = 0; essai < 20; essai += 1) {
+        const compte = await prisma.user.create({ data: { email: `pilote3.course.${essai}@iris.test`, name: `TEST Pilote3 course ${essai}`, role: 'TECHNICIEN' } });
+        const fiche = await prisma.intervenant.create({ data: { nom: `TEST Pilote3 course ${essai}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+        const corpsType = { role: 'COMPTABLE' };
+        const corpsLien = { userId: compte.id };
+        const [changement, lien] = await Promise.all([envoyer('patch', `/api/users/${compte.id}/role`, admin, corpsType), envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, corpsLien)]);
+        const role = (await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role;
+        const relie = (await prisma.intervenant.findUnique({ where: { id: fiche.id } })).userId === compte.id;
+        assert.equal(relie && role !== 'TECHNICIEN', false, `essai ${essai} : ${changement.status}/${lien.status}, ${role}, relié=${relie}`);
+        if (changement.status === 409) issues.refusChangement += 1;
+        else if (lien.status === 400) issues.refusLien += 1;
+        else issues.deliee += 1;
+        assert.ok([200, 409].includes(changement.status) && [200, 400].includes(lien.status), `essai ${essai} : ${changement.status}/${lien.status}`);
+      }
+      assert.equal(issues.deliee + issues.refusChangement + issues.refusLien, 20);
     });
 
     test('deux liaisons simultanées de la même fiche laissent un journal cohérent avec le lien final', async () => {
