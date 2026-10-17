@@ -54,7 +54,7 @@ Rapprocher ne modifie jamais une facture. Le prélèvement SEPA demanderait un `
 | `AttributionPlan` | plan d'un commercial | commercial, plan, date d'effet. Un changement prend effet à cette date, sans rétroactivité. Un commercial sans attribution n'a pas de commission. |
 | `CommissionCalculee` | commission figée | commercial, source (affaire, contrat ou échéance), montant de base, plan et version appliqués, fait générateur, mois de rattachement |
 
-Ce dont les commissions ont besoin existe dans le squelette :
+Les données dont les commissions ont besoin existent dans le squelette :
 - le commercial du contrat et de l'affaire ;
 - la date de signature ;
 - les montants figés par échéance ;
@@ -73,3 +73,5 @@ Une commission « en développé » se calcule sur la somme des échéances pré
 - Un seul `echeanceId` par facture empêche de regrouper plusieurs échéances d'un client sur une même facture ; l'articulation avec `Facture.contratMaintenanceId`, qui existe déjà, est à préciser.
 - La « date anniversaire » de `RevisionContrat` suppose une date d'application de la révision, qui n'est pas décidée.
 - Location : l'échéancier d'un contrat `LOCATION` produit-il des factures Iris, ou ne sert-il qu'au suivi, le financeur facturant le client ?
+- Commissions sur abonnements et locations (décision du 14-10-2026 : activables, « en développé » ou à la prise de commande, en nombre de mois ou en pourcentage du montant mensuel) : leur réglage va-t-il dans le plan ou dans les paramètres généraux ?
+- Structure du barème d'un plan : objectifs, primes, barème réduit, paliers et hiérarchie.
