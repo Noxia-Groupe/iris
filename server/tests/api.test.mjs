@@ -2743,6 +2743,9 @@ if (!TEST_DATABASE_URL) {
     let devisId = '';
     const fiches = {};
     const lignesEnBase = (id) => prisma.devisLigne.findMany({ where: { devisId: id }, orderBy: { ordre: 'asc' } });
+    // Le corps est calculé AVANT la requête : `request(app)` ouvre un serveur éphémère, qu'une
+    // exception levée en construisant le corps laisserait ouvert, bloquant la fin des tests.
+    const envoyer = (methode, chemin, enTete, corps) => request(app)[methode](chemin).set(enTete).send(corps);
 
     before(async () => {
       const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
@@ -2830,7 +2833,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).delete(`/api/catalogue/equipements/${fiches.camera.id}`).set(admin)).status, 200);
       const avant = (await request(app).get('/api/devis').set(commercial)).body.find((d) => d.id === devisId);
       assert.deepEqual([avant.lignes[0].designation, avant.lignes[0].reference, avant.lignes[0].prixUnitaireHt], [fiches.camera.nom, fiches.camera.reference, 180]);
-      const maj = await request(app).patch(`/api/devis/${devisId}`).set(commercial).send({ clientId, objet: `TEST Devis catalogue ${suffixe}`, lignes: [
+      const maj = await envoyer('patch', `/api/devis/${devisId}`, commercial, { clientId, objet: `TEST Devis catalogue ${suffixe}`, lignes: [
         { ligneId: avant.lignes[0].id, designation: fiches.camera.nom, nature: 'FOURNITURE', quantite: '3', prixUnitaireHt: '180', tauxTva: '20', unite: 'pièce', catalogueFamille: 'equipements', catalogueId: fiches.camera.id },
         { designation: 'Déplacement', quantite: '1', prixUnitaireHt: '50', tauxTva: '20' },
       ] });
@@ -2845,7 +2848,7 @@ if (!TEST_DATABASE_URL) {
         ['ligne en double', [{ ligneId: lignesActuelles[0].id, designation: 'X', quantite: '1', prixUnitaireHt: '1' }, { ligneId: lignesActuelles[0].id, designation: 'Y', quantite: '1', prixUnitaireHt: '1' }], /Ligne de devis inconnue/],
         ['ligne d’un autre devis', [{ ligneId: autreDevis.lignes[0].id, designation: 'X', quantite: '1', prixUnitaireHt: '1' }], /Ligne de devis inconnue/],
       ]) {
-        const refus = await request(app).patch(`/api/devis/${devisId}`).set(commercial).send({ clientId, objet: 'TEST Devis refusé', lignes });
+        const refus = await envoyer('patch', `/api/devis/${devisId}`, commercial, { clientId, objet: 'TEST Devis refusé', lignes });
         assert.equal(refus.status, 400, cas);
         assert.match(refus.body.error, attendu, cas);
       }
@@ -2861,20 +2864,20 @@ if (!TEST_DATABASE_URL) {
       const ligneCamera = (extra) => ({ ligneId: actuelles[0].id, designation: actuelles[0].designation, nature: 'FOURNITURE', quantite: '3', prixUnitaireHt: '180', unite: 'pièce', ...extra });
       const ligneDeplacement = (extra) => ({ ligneId: actuelles[1].id, designation: 'Déplacement', quantite: '1', prixUnitaireHt: '50', ...extra });
       for (const valeur of ['10', null]) {
-        const refus = await request(app).patch(`/api/devis/${devisId}`).set(commercial).send(corps([ligneCamera({ prixAchatUnitaireHt: valeur }), ligneDeplacement()]));
+        const refus = await envoyer('patch', `/api/devis/${devisId}`, commercial, corps([ligneCamera({ prixAchatUnitaireHt: valeur }), ligneDeplacement()]));
         assert.equal(refus.status, 403, String(valeur));
         assert.match(refus.body.error, /réservé aux administrateurs/);
       }
       assert.equal((await request(app).post('/api/devis').set(commercial).send(corps([{ designation: 'Libre', quantite: '1', prixUnitaireHt: '1', prixAchatUnitaireHt: '0.5' }]))).status, 403);
-      const parAdmin = await request(app).patch(`/api/devis/${devisId}`).set(admin).send(corps([ligneCamera({ prixAchatUnitaireHt: '75,40' }), ligneDeplacement({ prixAchatUnitaireHt: '12' })]));
+      const parAdmin = await envoyer('patch', `/api/devis/${devisId}`, admin, corps([ligneCamera({ prixAchatUnitaireHt: '75,40' }), ligneDeplacement({ prixAchatUnitaireHt: '12' })]));
       assert.equal(parAdmin.status, 200, JSON.stringify(parAdmin.body));
       assert.deepEqual(parAdmin.body.lignes.map((l) => l.prixAchatUnitaireHt), [75.4, 12]);
       await relire();
-      const parCommercial = await request(app).patch(`/api/devis/${devisId}`).set(commercial).send(corps([ligneCamera(), ligneDeplacement()]));
+      const parCommercial = await envoyer('patch', `/api/devis/${devisId}`, commercial, corps([ligneCamera(), ligneDeplacement()]));
       assert.equal(parCommercial.status, 200, JSON.stringify(parCommercial.body));
       assert.deepEqual((await lignes(admin)).map((l) => l.prixAchatUnitaireHt), [75.4, 12], 'le commercial ne l’efface pas en modifiant le devis');
       await relire();
-      const efface = await request(app).patch(`/api/devis/${devisId}`).set(admin).send(corps([ligneCamera(), ligneDeplacement({ prixAchatUnitaireHt: null })]));
+      const efface = await envoyer('patch', `/api/devis/${devisId}`, admin, corps([ligneCamera(), ligneDeplacement({ prixAchatUnitaireHt: null })]));
       assert.deepEqual(efface.body.lignes.map((l) => l.prixAchatUnitaireHt), [75.4, null], 'non transmis : conservé ; null : effacé');
       await relire();
       // Clés d'intégration : lecture avec finances:read seulement, jamais d'écriture.
@@ -2885,7 +2888,7 @@ if (!TEST_DATABASE_URL) {
       const vue = async (secret) => (await request(app).get('/api/v1/devis').set('Authorization', `Bearer ${secret}`)).body.find((d) => d.id === devisId).lignes;
       assert.ok((await vue(lecteur)).every((l) => !('prixAchatUnitaireHt' in l)));
       assert.deepEqual((await vue(financier)).map((l) => l.prixAchatUnitaireHt), [75.4, null]);
-      const ecriture = await request(app).patch(`/api/v1/devis/${devisId}`).set('Authorization', `Bearer ${ecrivain}`).send(corps([ligneCamera({ prixAchatUnitaireHt: '1' }), ligneDeplacement()]));
+      const ecriture = await envoyer('patch', `/api/v1/devis/${devisId}`, { Authorization: `Bearer ${ecrivain}` }, corps([ligneCamera({ prixAchatUnitaireHt: '1' }), ligneDeplacement()]));
       assert.equal(ecriture.status, 403);
       // Toute réponse de devis au commercial est masquée : changement de statut, duplication.
       const statut = await request(app).put(`/api/devis/${devisId}/statut`).set(commercial).send({ statut: 'ENVOYE' });
