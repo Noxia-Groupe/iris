@@ -117,10 +117,11 @@ model Chantier {
   heuresVendues         Decimal @default(0) @db.Decimal(10, 2)
 
   // Rémunération commerciale : bascule vers le barème réduit au lieu du barème standard
-  // (cf. ParametresRemuneration.baremeReduit et son libellé configurable).
+  // (cf. ParametresRemuneration.baremeReduit et son libellé configurable). Sans effet sur
+  // un montant tant qu'aucun plan commercial n'est attribué (décision du 17-10-2026).
   baremeReduit     Boolean   @default(false)
-  // Clause de sécurisation des commissions : une commission n'est due que si le
-  // chantier est Terminé ET Encaissé (cf. règle 6 du système de rémunération commerciale).
+  // Clause de sécurisation : un chantier ne compte dans le CA et la marge validés du
+  // commercial que s'il est Terminé ET Encaissé.
   encaisse         Boolean   @default(false)
   dateEncaissement DateTime?
 
@@ -1009,6 +1010,8 @@ model ClientSite {
 // la direction sans redéploiement — et pour qu'Iris ne porte plus dans ses sources les
 // barèmes d'une société en particulier. Une nouvelle instance démarre sur les valeurs par
 // défaut ci-dessous et les ajuste depuis Administration > Rémunération commerciale.
+// Depuis la décision du 17-10-2026, ces règles générales ne sont plus appliquées : sans plan
+// commercial, aucune commission ni prime.
 //
 // Les barèmes sont stockés en JSON : un tableau de tranches, chacune { plafond, taux }.
 // `plafond: null` marque la DERNIÈRE tranche, celle qui n'est pas plafonnée (JSON ne sait
@@ -1238,11 +1241,9 @@ model PlanningEvent {
 }
 
 
-// Prime mensuelle "suivi administratif" (qualité et rigueur) du système de
-// rémunération commerciale — validée manuellement par un administrateur, mois par
-// mois, faute de pouvoir être déduite automatiquement des données de gestion.
-// Les primes CA/marge du même système sont, elles, calculées automatiquement
-// (cf. computeCommissionMensuelle) et n'ont donc pas besoin d'être stockées ici.
+// Suivi administratif (qualité et rigueur) d'un commercial, validé manuellement par un
+// administrateur, mois par mois, faute de pouvoir être déduit des données de gestion.
+// Sans plan commercial, il n'ouvre aucune prime (décision du 17-10-2026).
 model PrimeMensuelleCommercial {
   id                 String  @id @default(uuid())
   periode            String // "YYYY-MM"

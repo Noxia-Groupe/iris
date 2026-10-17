@@ -3593,9 +3593,9 @@ app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercialSeulement, as
       return res.status(403).json({ error: 'Seul un administrateur peut réouvrir un chantier clôturé.' });
     }
 
-    // La date de clôture sert de mois de rattachement à la rémunération commerciale
-    // (barème progressif + primes d'objectifs, cf. /api/stats/commerciaux) : on la
-    // renseigne automatiquement à la clôture si elle n'a pas déjà été saisie à la main.
+    // La date de clôture sert de mois de rattachement au résultat commercial (CA et marge
+    // validés, cf. /api/stats/commerciaux) : on la renseigne automatiquement à la clôture
+    // si elle n'a pas déjà été saisie à la main.
     const data: Record<string, unknown> = { statut: nextStatut };
     if (nextStatut === 'TERMINE' && !chantier.dateFin) {
       // `dateFin` est une date-seule : elle doit retenir le jour civil de l'entreprise
@@ -5244,10 +5244,10 @@ app.post('/api/heures/:id/restaurer', requireAuth, requireTravauxArchive, async 
   }
 });
 
-// Clause de sécurisation des commissions : une commission n'est définitivement due
-// que si le chantier est Terminé ET Encaissé (cf. règle 6 du système de rémunération
-// commerciale — annulation/litige/impayé => la commission n'est pas due ou est récupérée).
-// Réservé aux admins ; togglable indépendamment du statut Terminé/En cours.
+// Clause de sécurisation : un chantier ne compte dans le CA et la marge validés du
+// commercial que s'il est Terminé ET Encaissé. Sans plan commercial, aucune commission
+// n'en découle (décision du 17-10-2026). Réservé aux admins ; togglable indépendamment
+// du statut Terminé/En cours.
 app.patch('/api/chantiers/:id/encaisse', requireAuth, requireAdmin, async (req, res) => {
   try {
     const encaisse = !!req.body.encaisse;
@@ -5261,9 +5261,10 @@ app.patch('/api/chantiers/:id/encaisse', requireAuth, requireAdmin, async (req, 
   }
 });
 
-// Prime "suivi administratif" (qualité et rigueur) du système de rémunération
-// commerciale — ne peut pas être déduite des données de gestion, validée à la main
-// par un administrateur, mois par mois (periode "YYYY-MM").
+// Suivi administratif (qualité et rigueur) d'un commercial, validé à la main par un
+// administrateur, mois par mois (periode "YYYY-MM"), et journalisé. Sans plan commercial,
+// il n'ouvre aucune prime (décision du 17-10-2026) et n'a plus de saisie à l'écran : la
+// route reste, sans montant (choix par défaut, à confirmer).
 app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async (req, res) => {
   try {
     const periode = String(req.body.periode || '');
@@ -6817,9 +6818,9 @@ app.get('/api/stats/global', requireAuth, async (req, res) => {
     if (params.margeCommercialeActive) {
       if (isAdmin) {
         // CA vendu / marge / commission commerciale de la période, tous commerciaux
-        // confondus — même définition que la commission (chantiers Terminés ET
-        // Encaissés, rattachés au mois de leur clôture) : ce sont des résultats
-        // FINALISÉS du mois, pas un cumul de portefeuille en cours.
+        // confondus (chantiers Terminés ET Encaissés, rattachés au mois de leur clôture) :
+        // ce sont des résultats FINALISÉS du mois, pas un cumul de portefeuille en cours.
+        // Sans plan commercial, la commission est nulle.
         const commerciaux = await prisma.user.findMany({ where: { OR: COMMERCIAL_OR_FILTER }, select: { id: true } });
         const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params);
         let caTotal = 0, margeTotal = 0, commissionCommercialeTotal = 0;
@@ -7311,7 +7312,9 @@ app.get('/api/stats/types-chantiers', requireAuth, requireTravauxRead, async (re
 // Les taux, seuils et primes NE SONT PLUS ÉCRITS ICI : ils vivent en base
 // (ParametresRemuneration) et s'éditent depuis Administration > Rémunération commerciale.
 // Les inscrire dans le code revenait à livrer à chaque client les règles de rémunération
-// d'une autre société, et à exiger un redéploiement pour changer un taux.
+// d'une autre société, et à exiger un redéploiement pour changer un taux. Depuis la
+// décision du 17-10-2026, ces règles générales ne sont plus appliquées : sans plan
+// commercial, aucune commission ni prime (cf. computeCommissionsParCommercial).
 interface TrancheBareme { plafond: number; taux: number }
 interface ReglesRemuneration {
   baremeStandard: TrancheBareme[];
@@ -7328,17 +7331,20 @@ interface ReglesRemuneration {
 // paramètres n'existe pas encore (base créée avant la migration, ou vidée à la main), et
 // règles appliquées à un commercial sans plan commercial (cf. computeCommissionsParCommercial).
 // Mieux vaut un montant nul, visible, qu'un barème arbitraire qui ferait calculer de
-// fausses rémunérations sans que personne ne s'en aperçoive.
-const REMUNERATION_NEUTRE: ReglesRemuneration = {
-  baremeStandard: [],
-  baremeReduit: [],
-  libelleBaremeReduit: 'Barème réduit',
-  objectifCaMensuel: 0,
-  primeObjectifCa: 0,
-  objectifMargeMensuel: 0,
-  primeObjectifMarge: 0,
-  primeSuiviAdministratif: 0,
-};
+// fausses rémunérations sans que personne ne s'en aperçoive. Un objet neuf à chaque appel :
+// aucun appelant ne peut, en le modifiant, rouvrir les commissions des autres.
+function remunerationNeutre(): ReglesRemuneration {
+  return {
+    baremeStandard: [],
+    baremeReduit: [],
+    libelleBaremeReduit: 'Barème réduit',
+    objectifCaMensuel: 0,
+    primeObjectifCa: 0,
+    objectifMargeMensuel: 0,
+    primeObjectifMarge: 0,
+    primeSuiviAdministratif: 0,
+  };
+}
 
 // Une tranche stockée avec `plafond: null` est la tranche non plafonnée : JSON ne sait pas
 // représenter Infinity, on le rétablit à la lecture. Les tranches sont triées par plafond
@@ -7357,7 +7363,7 @@ function parseBareme(valeur: unknown): TrancheBareme[] {
 
 async function getReglesRemuneration(): Promise<ReglesRemuneration> {
   const p = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
-  if (!p) return REMUNERATION_NEUTRE;
+  if (!p) return remunerationNeutre();
   const n = decimalToNumber(p);
   return {
     baremeStandard: parseBareme(p.baremeStandard),
@@ -7420,7 +7426,7 @@ function dateClotureChantier(c: any): Date | null {
 // plus appliqué, chaque commercial reçoit les règles neutres et seuls le CA et la marge
 // restent calculés.
 async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres) {
-  const regles = REMUNERATION_NEUTRE;
+  const regles = remunerationNeutre();
   const commercialIdSet = new Set(commercialIds);
   const chantiers = decimalToNumber(await prisma.chantier.findMany({
     // Une affaire annulée n'a jamais existé commercialement : ni CA, ni marge, ni commission.
@@ -7484,14 +7490,14 @@ async function computeCommissionsParCommercial(commercialIds: string[], start: D
 
 // Résultat commercial : CA vendu / marge / commission (barème progressif + primes
 // d'objectifs) par commercial, mois civil ou année civile en cours (navigable), classé
-// par CA vendu décroissant. Sans plan commercial, commission et primes sont nulles et
-// chaque commercial porte `sansPlanCommercial` (cf. computeCommissionsParCommercial). Un admin voit tous les commerciaux (menu « Mes commerciaux »),
-// un commercial ne voit que sa propre ligne (menu « Résultat commercial »).
+// par CA vendu décroissant. Un admin voit tous les commerciaux (menu « Mes commerciaux »),
+// un commercial ne voit que sa propre ligne (menu « Résultat commercial »). Sans plan
+// commercial, commission et primes sont nulles et chaque commercial porte
+// `sansPlanCommercial` (cf. computeCommissionsParCommercial).
 //
-// Le barème et les primes d'objectifs sont MENSUELS (cf. doc) : seuls les chantiers
-// Terminés ET Encaissés comptent (clause de sécurisation), rattachés au mois de leur
-// clôture. La vue "Année" agrège 12 calculs mensuels indépendants — elle n'applique
-// jamais le barème à une marge annuelle globale. La liste `chantiers` de chaque
+// Le calcul est MENSUEL : seuls les chantiers Terminés ET Encaissés comptent (clause de
+// sécurisation), rattachés au mois de leur clôture. La vue "Année" agrège 12 calculs
+// mensuels indépendants. La liste `chantiers` de chaque
 // commercial reste l'intégralité de ses chantiers (toutes périodes confondues), pour la
 // vue détaillée ; `comptabiliseDansPeriode` indique lesquels comptent dans les totaux.
 app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
@@ -7524,8 +7530,8 @@ app.get('/api/stats/commerciaux', requireAuth, async (req, res) => {
       byUser[u.id] = {
         id: u.id, name: u.name, email: u.email, nbChantiers: 0,
         ...byCommercial[u.id],
-        // Pertinent seulement en vue "mois" (l'objectif est mensuel) : état de la prime
-        // pour le mois actuellement affiché, pour la case à cocher admin.
+        // Pertinent seulement en vue "mois" : suivi administratif enregistré pour le mois
+        // affiché (fait sans montant, plus saisi à l'écran ; cf. route prime-mensuelle).
         suiviAdministratif: period === 'month' ? suiviAdminSet.has(`${u.id}:${moisPeriode[0]}`) : null,
         chantiers: [] as any[],
       };

@@ -5,6 +5,7 @@ import { apiFetch } from '../api';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { SectionRepliable } from '../components/SectionRepliable';
 import { AlertesChantier } from '../components/AlertesChantier';
+import { MESSAGE_SANS_PLAN_COMMERCIAL } from '../components/AvisSansPlanCommercial';
 import { isAdminRole, peutAccederAuxDevis, roleLabel, useCurrentUser } from '../roles';
 import { estASurveiller, trierChantiers } from '../lib/suiviChantiers';
 import { useCompanyTimezone } from '../companyTimezoneContext';
@@ -228,12 +229,13 @@ const Dashboard = () => {
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
               <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600"><Award size={18} /></div>
               <div>
+                {/* Sans plan commercial, aucune commission (décision du 17-10-2026) : ni « versée »
+                    ni « gagnée », et le message de l'absence de plan. */}
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  {isAdminRole(userRole) ? 'Commission commerciale versée' : 'Ma commission gagnée'}
+                  {isAdminRole(userRole) ? 'Commission commerciale' : 'Ma commission'}
                 </div>
                 <div className="text-2xl font-black text-emerald-600 mt-0.5">{Math.round(commissionCommerciale).toLocaleString()} €</div>
-                {/* Sans plan commercial, aucune commission (décision du 17-10-2026). */}
-                <div className="text-xs text-gray-400">{globalStats.sansPlanCommercial ? 'Aucun plan commercial attribué' : periodLabel}</div>
+                <div className="text-xs text-gray-400">{globalStats.sansPlanCommercial ? MESSAGE_SANS_PLAN_COMMERCIAL : periodLabel}</div>
               </div>
             </div>
           )}

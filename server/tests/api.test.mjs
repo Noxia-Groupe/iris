@@ -251,7 +251,7 @@ if (!TEST_DATABASE_URL) {
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
       'ouverture.conducteur@iris.test', 'ouverture.autre.conducteur@iris.test', 'ouverture.commercial@iris.test', 'ouverture.commercial.inactif@iris.test', 'ouverture.ancien.conducteur@iris.test',
       'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
-      'fiche111.titulaire@iris.test', 'permissions.autre@iris.test',
+      'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
     ];
     // Les journaux sont maintenant référentiellement reliés à leurs auteurs : ils partent
     // avant les comptes afin que le harnais reste rejouable après une interruption.
@@ -615,8 +615,9 @@ if (!TEST_DATABASE_URL) {
         primeObjectifMarge: 50, primeSuiviAdministratif: 30,
       });
       assert.equal(regles.status, 200, JSON.stringify(regles.body));
+      // Adresse fixe, purgée par le nettoyage du harnais avec ses chantiers « TEST ».
       commercial = await prisma.user.create({ data: {
-        email: `sans.plan.${suffixe}@iris.test`, name: `TEST Commercial sans plan ${suffixe}`, role: 'COMMERCIAL',
+        email: 'sans.plan.commercial@iris.test', name: `TEST Commercial sans plan ${suffixe}`, role: 'COMMERCIAL',
       } });
       const clotures = [];
       for (const [nom, montant, baremeReduit] of [['standard', 1000, false], ['réduit', 600, true]]) {
@@ -675,7 +676,12 @@ if (!TEST_DATABASE_URL) {
         objectifMargeMensuel: anciennesRegles.objectifMargeMensuel, primeObjectifMarge: anciennesRegles.primeObjectifMarge,
         primeSuiviAdministratif: anciennesRegles.primeSuiviAdministratif,
       } });
-      if (commercial) await prisma.primeMensuelleCommercial.deleteMany({ where: { commercialId: commercial.id } });
+      if (commercial) {
+        const chantierIds = (await prisma.chantier.findMany({ where: { commercialId: commercial.id }, select: { id: true } })).map((c) => c.id);
+        await prisma.journalSaisieChantier.deleteMany({ where: { chantierId: { in: chantierIds } } });
+        await prisma.chantier.deleteMany({ where: { id: { in: chantierIds } } });
+        await prisma.user.delete({ where: { id: commercial.id } });
+      }
     }
   });
 

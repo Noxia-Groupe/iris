@@ -111,7 +111,7 @@ Méthode : le périmètre du pilote est la boussole ([CLAUDE.md](../CLAUDE.md#m�
   - aucune migration des débuts horodatés existants : l'application n'est pas en service et ne contient aucune donnée ;
   - la semaine de la société commence le lundi, comme le planning le fait déjà ;
   - toutes les dates s'affichent au même format `JJ-MM-AAAA` : lot (h) ;
-  - le mois de rattachement des commissions se paramètre dans le plan commercial : lot (i). D'ici là, son calcul est inchangé.
+  - le mois de rattachement des commissions se paramètre dans le plan commercial : lot (i). D'ici là, aucune commission n'est due sans plan commercial (#159), et le mois de rattachement ne vaut que pour le CA et la marge validés.
 
   Choix par défaut plus bas : l'échéance des clés d'intégration.
 - **(f) Création et réattribution de chantier depuis l'interface — implémenté par #129.** Décision du 14-10-2026 : le formulaire « Créer un nouveau chantier » d'Administration, qui aboutissait à une réponse 410, doit fonctionner sans erreur, sans jamais créer deux fois le même chantier (« chaque affaire aura son chantier ») ; un chantier doit pouvoir être réattribué à un autre conducteur sans passer par l'API, par exemple au départ d'un conducteur en cours de chantier. Livré :
@@ -147,7 +147,7 @@ Méthode : le périmètre du pilote est la boussole ([CLAUDE.md](../CLAUDE.md#m�
   - le mois de rattachement se lit en UTC sur la date de clôture, qui retombe sur la dernière modification (un instant) quand la date de fin manque : à reprendre au jour de la société avec le fait générateur (sans objet tant qu'aucune donnée n'existe) ;
   - le devis ne porte pas de commercial, qui se fixe sur le chantier : la commande signée comme fait générateur suppose de le connaître dès le devis ;
   - les commissions sur abonnements et locations supposent des contrats qui n'existent pas encore : `ContratMaintenance` ne porte ni montant, ni durée d'engagement, ni date de signature, ni commercial, et Iris n'a pas de contrat de location (ventes récurrentes, phase 9) ;
-  - les commissions sur contrats récurrents et les primes affichées en texte dans l'onglet de rémunération ne sont pas calculées ; depuis #159, ce texte de référence est présenté comme non appliqué.
+  - les commissions sur contrats récurrents et les primes « Boost » n'ont jamais été calculées : elles figuraient en texte dans l'onglet de rémunération, comme document de référence d'une politique de société écrite en dur, retiré par #159 (plus bas).
 
   Tout changement de montant reste soumis à la validation comptable de Nelson.
 
@@ -156,7 +156,12 @@ Méthode : le périmètre du pilote est la boussole ([CLAUDE.md](../CLAUDE.md#m�
   - un commercial sans plan n'a pas de commission : il faut lui affecter un plan commercial pour qu'il en ait. Précision de Nelson du 17-10-2026 : « Si pas de plan commercial alors le commercial ne touche pas de commission jusqu'à ce que le plan commercial soit défini et à date et à partir de là le commercial aura ses commissions. » Les commissions actuelles (barème global) sont fermées par #159, **implémenté** :
     - les statistiques (`/api/stats/commerciaux`, `/api/stats/global`) renvoient commissions et primes nulles, avec `sansPlanCommercial`, sans barème ni objectifs ; le CA et la marge validés restent calculés ;
     - « Résultat commercial », « Mes commerciaux », le tableau de bord et l'onglet « Marges & Commissions » affichent « Aucune commission : aucun plan commercial attribué » ;
-    - choix par défaut, à confirmer : les blocs de barème et de primes et la colonne de commission par chantier sont retirés des écrans, plutôt qu'affichés à zéro (le plan commercial les redéfinira) ; la saisie du suivi administratif disparaît de « Mes commerciaux », sa route reste ouverte aux administrateurs (fait journalisé, sans montant) ; le texte de référence de l'onglet de rémunération reste affiché, marqué non appliqué ;
+    - choix par défaut, à confirmer :
+      - les blocs de barème et de primes et la colonne de commission par chantier sont retirés des écrans, plutôt qu'affichés à zéro (le plan commercial les redéfinira) ;
+      - la carte du tableau de bord s'intitule « Commission commerciale » ou « Ma commission », et non plus « versée » ou « gagnée » ;
+      - la saisie du suivi administratif disparaît de « Mes commerciaux » ; sa route reste ouverte aux administrateurs (fait journalisé, sans montant) ;
+      - les règles générales restent enregistrables par un super administrateur, sans effet sur aucun montant ; leur libellé du barème réduit nomme toujours la case des chantiers, gardée mais présentée « sans effet tant qu'aucun plan commercial n'est attribué » ;
+      - le document de référence de l'onglet de rémunération (primes « Boost », commissions sur contrats récurrents, clauses et reliquat d'une politique de société écrite en dur) est retiré, option la plus restrictive : il contredisait la règle « aucune valeur de société dans le code » et ne s'appliquait pas ;
   - un changement de plan n'est pas rétroactif : il prend effet à la date d'affectation du nouveau plan ;
   - chaque plan a son propre barème ; on peut en créer plusieurs et attribuer celui que l'on veut à chaque commercial.
 
