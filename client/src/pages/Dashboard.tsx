@@ -162,8 +162,8 @@ const Dashboard = () => {
           </div>
 
           {/* Réservé aux admins : ce sont eux qui valident l'encaissement (cf. bouton sur
-              la fiche chantier), clause de sécurisation qui conditionne le calcul de la
-              commission commerciale du mois de clôture. */}
+              la fiche chantier), clause de sécurisation qui conditionne le résultat
+              commercial du mois de clôture. */}
           {globalStats.nbTerminesNonEncaisses != null && (
             <div className={`bg-white p-4 rounded-xl shadow-sm border flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${globalStats.nbTerminesNonEncaisses > 0 ? 'border-amber-200' : 'border-gray-100'}`}>
               <div className={`p-2 rounded-lg ${globalStats.nbTerminesNonEncaisses > 0 ? 'bg-amber-50 text-amber-600' : 'bg-gray-100 text-gray-400'}`}><AlertTriangle size={18} /></div>
@@ -232,7 +232,8 @@ const Dashboard = () => {
                   {isAdminRole(userRole) ? 'Commission commerciale versée' : 'Ma commission gagnée'}
                 </div>
                 <div className="text-2xl font-black text-emerald-600 mt-0.5">{Math.round(commissionCommerciale).toLocaleString()} €</div>
-                <div className="text-xs text-gray-400">{periodLabel}</div>
+                {/* Sans plan commercial, aucune commission (décision du 17-10-2026). */}
+                <div className="text-xs text-gray-400">{globalStats.sansPlanCommercial ? 'Aucun plan commercial attribué' : periodLabel}</div>
               </div>
             </div>
           )}

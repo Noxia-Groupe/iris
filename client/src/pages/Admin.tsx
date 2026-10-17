@@ -6,6 +6,7 @@ import { refreshModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
 import OuvrirChantierAffaire from '../components/OuvrirChantierAffaire';
 import JournalAdministration from '../components/JournalAdministration';
+import { AvisSansPlanCommercial } from '../components/AvisSansPlanCommercial';
 import { DROITS_DEVIS, droitsApresBasculeDevis, etatDroitDevis } from '../lib/droitDevis';
 
 const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
@@ -1095,14 +1096,19 @@ const Admin = () => {
           {/* Règles de rémunération commerciale : stockées en base, éditables par un
               superadmin. Elles étaient auparavant écrites en dur dans le serveur, ce qui
               imposait un redéploiement pour changer un taux et livrait à chaque client les
-              barèmes d'une autre société. */}
+              barèmes d'une autre société. Sans plan commercial, le serveur ne les applique
+              plus (décision du 17-10-2026) : seul le libellé du barème réduit sert encore. */}
           <div className="card mb-4">
             <h2 className="mb-2 text-primary-dark">Rémunération commerciale</h2>
+            <AvisSansPlanCommercial className="mb-4">
+              Ces règles générales ne sont plus appliquées : un commercial sans plan commercial ne touche ni
+              commission ni prime, et aucun plan n'est encore attribué. Seul le libellé du barème réduit reste
+              affiché sur les chantiers.
+            </AvisSansPlanCommercial>
             <p className="text-sm text-muted mb-4">
-              La commission des <strong>commerciaux</strong> applique un barème progressif sur la marge cumulée
-              du mois : chaque tranche est commissionnée à son propre taux, franchir un plafond ne requalifie que
-              la fraction qui le dépasse. Un second barème s'applique aux chantiers cochés « barème réduit ».
-              Détail par commercial dans le menu « Mes commerciaux ».
+              Barème progressif sur la marge cumulée du mois : chaque tranche est commissionnée à son propre taux,
+              franchir un plafond ne requalifie que la fraction qui le dépasse. Un second barème vise les chantiers
+              cochés « barème réduit ».
               {!isSuper && <> Seul un super administrateur peut modifier ces règles.</>}
             </p>
             {remuneration ? (
@@ -1169,10 +1175,8 @@ const Admin = () => {
           <div className="card">
             <h2 className="mb-2 text-primary-dark">Politique de Rémunération Commerciale — document de référence</h2>
             <p className="text-sm text-muted mb-4">
-              Détail complet du « Système de rémunération commerciale » sur lequel se basent les calculs de marge et de
-              commission de l'application. Le barème et les objectifs mensuels ci-dessus sont calculés automatiquement ;
-              les primes et règles ci-dessous sont <strong>en lecture seule</strong> — à appliquer manuellement, faute de
-              saisie (nombre de caméras, points d'alarme, portes, type de contrat...) par chantier dans l'application.
+              Texte de référence, <strong>en lecture seule et non appliqué</strong> : sans plan commercial,
+              l'application ne calcule aucune commission ni prime.
             </p>
 
             <div className="mb-5">

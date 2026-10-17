@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Award, CheckCircle2, Circle } from 'lucide-react';
+import { Award } from 'lucide-react';
 import { apiFetch } from '../api';
 import { decalerReference } from '../lib/dateFormatting';
 import { useReferencePeriode } from '../lib/referencePeriode';
-import { ObjectifBar } from '../components/ObjectifBar';
+import { AvisSansPlanCommercial } from '../components/AvisSansPlanCommercial';
 import { useModules } from '../modules';
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
@@ -25,11 +25,9 @@ const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
 // cf. Sidebar.tsx). Route protégée côté client (PrivateRoute requiredRole) et données
 // servies protégées côté serveur (requireAdmin / requireAuth selon la route).
 //
-// La commission ne suit plus un taux réglé à la main par chantier : elle applique le
-// barème progressif mensuel du "Système de rémunération commerciale" (standard/réduit),
-// complété par les primes d'objectifs. Cette page permet à l'admin de valider les deux
-// leviers qui restent manuels : le statut "Encaissé" par chantier (clause de sécurisation
-// des commissions) et la prime "suivi administratif" par commercial et par mois.
+// Sans plan commercial, un commercial ne touche aucune commission ni prime (décision du
+// 17-10-2026) : aucun plan n'existe encore, la page n'affiche ni barème ni primes. L'admin y
+// valide le statut "Encaissé" par chantier, qui conditionne le CA et la marge validés.
 const MesCommerciaux = () => {
   // Libellé du barème de commission réduit, configuré dans Administration : aucun nom
   // de société n'est écrit dans l'interface.
@@ -63,23 +61,8 @@ const MesCommerciaux = () => {
     }
   };
 
-  // Prime "suivi administratif" : validée à la main par mois, faute de pouvoir être
-  // déduite des données de gestion (qualité/rigueur du suivi, pas un montant).
-  const handleToggleSuiviAdmin = async (commercialId: string, current: boolean) => {
-    if (!commerciauxMeta) return;
-    try {
-      await apiFetch(`/commerciaux/${commercialId}/prime-mensuelle`, {
-        method: 'PUT',
-        body: JSON.stringify({ periode: commerciauxMeta.periodStart.slice(0, 7), suiviAdministratif: !current }),
-      });
-      fetchCommerciaux();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // Clause de sécurisation : une commission n'est comptabilisée dans le barème du mois
-  // que si le chantier est Terminé ET Encaissé.
+  // Clause de sécurisation : un chantier ne compte dans le CA et la marge validés du mois
+  // que s'il est Terminé ET Encaissé.
   const handleToggleEncaisse = async (chantierId: string, current: boolean) => {
     try {
       await apiFetch(`/chantiers/${chantierId}/encaisse`, { method: 'PATCH', body: JSON.stringify({ encaisse: !current }) });
@@ -88,8 +71,6 @@ const MesCommerciaux = () => {
       console.error(e);
     }
   };
-
-  const objectifs = commerciauxMeta?.objectifs;
 
   return (
     <div>
@@ -131,6 +112,12 @@ const MesCommerciaux = () => {
         </div>
       ) : (
         <div className="flex flex-col gap-4">
+          {commerciaux.some((c) => c.sansPlanCommercial) && (
+            <AvisSansPlanCommercial>
+              Le barème général et les primes ne s'appliquent plus ; un commercial n'aura de commissions qu'à partir de
+              la date d'attribution de son plan commercial. Le CA et la marge validés restent suivis.
+            </AvisSansPlanCommercial>
+          )}
           {commerciaux.map((c, i) => {
             const isExpanded = expandedCommercialId === c.id;
             return (
@@ -158,6 +145,7 @@ const MesCommerciaux = () => {
                     <div className="text-right">
                       <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Rémunération variable</div>
                       <div className="font-bold text-purple-600">{fmtEuro(c.commissionTotal)}</div>
+                      {c.sansPlanCommercial && <div className="text-[11px] text-gray-400">Sans plan commercial</div>}
                     </div>
                     <span className="text-gray-400 text-xs">{isExpanded ? '▲' : '▼'}</span>
                   </div>
@@ -165,38 +153,6 @@ const MesCommerciaux = () => {
 
                 {isExpanded && (
                   <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col gap-5">
-                    {/* Barème progressif : marge et commission par groupe standard/réduit. Le libellé
-                        du barème réduit est celui configuré dans Administration. */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
-                        <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Barème standard (16 / 20 / 25 %)</div>
-                        <div className="flex justify-between text-sm"><span className="text-gray-500">Marge</span><strong className="text-gray-800">{fmtEuro(c.margeStandard)}</strong></div>
-                        <div className="flex justify-between text-sm"><span className="text-gray-500">Commission</span><strong className="text-purple-600">{fmtEuro(c.commissionStandard)}</strong></div>
-                      </div>
-                      <div className="p-4 rounded-lg bg-amber-50 border border-amber-100">
-                        <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-2">{libelleBaremeReduit}</div>
-                        <div className="flex justify-between text-sm"><span className="text-amber-700/70">Marge</span><strong className="text-gray-800">{fmtEuro(c.margeReduite)}</strong></div>
-                        <div className="flex justify-between text-sm"><span className="text-amber-700/70">Commission</span><strong className="text-purple-600">{fmtEuro(c.commissionReduite)}</strong></div>
-                      </div>
-                    </div>
-
-                    {/* Primes sur objectifs mensuels (non pertinent en vue Année) */}
-                    {commerciauxPeriod === 'month' && objectifs && (
-                      <div className="p-4 rounded-lg bg-gray-50 border border-gray-100 flex flex-col gap-4">
-                        <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Primes sur objectifs mensuels</div>
-                        <ObjectifBar label={`Objectif CA (${fmtEuro(objectifs.ca)})`} value={c.caTotal} target={objectifs.ca} prime={objectifs.primeCA} />
-                        <ObjectifBar label={`Objectif marge (${fmtEuro(objectifs.marge)})`} value={c.margeTotal} target={objectifs.marge} prime={objectifs.primeMarge} />
-                        <button
-                          type="button"
-                          onClick={() => handleToggleSuiviAdmin(c.id, !!c.suiviAdministratif)}
-                          className={`flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg border w-fit transition-colors ${c.suiviAdministratif ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
-                        >
-                          {c.suiviAdministratif ? <CheckCircle2 size={16} /> : <Circle size={16} />}
-                          Suivi administratif validé (+{objectifs.primeAdmin} €)
-                        </button>
-                      </div>
-                    )}
-
                     {/* Détail des chantiers rattachés */}
                     {c.chantiers.length === 0 ? (
                       <div className="text-sm text-gray-400 italic">Aucun chantier rattaché.</div>
@@ -208,7 +164,6 @@ const MesCommerciaux = () => {
                               <th className="py-2 pr-3 font-semibold">Chantier</th>
                               <th className="py-2 pr-3 font-semibold">Statut</th>
                               <th className="py-2 pr-3 font-semibold text-right">Marge</th>
-                              <th className="py-2 pr-3 font-semibold text-right">Commission (quote-part)</th>
                               <th className="py-2 pr-3 font-semibold text-center">Encaissement</th>
                             </tr>
                           </thead>
@@ -227,9 +182,6 @@ const MesCommerciaux = () => {
                                 </td>
                                 <td className={`py-2 pr-3 text-right font-bold ${(ch.margeCommerciale ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                   {ch.margeCommerciale != null ? fmtEuro(ch.margeCommerciale) : '—'}
-                                </td>
-                                <td className="py-2 pr-3 text-right font-bold text-purple-600">
-                                  {ch.comptabiliseDansPeriode ? fmtEuro(ch.commissionEstimee ?? 0) : <span className="font-normal text-gray-400 italic">en attente</span>}
                                 </td>
                                 <td className="py-2 pr-3 text-center">
                                   {ch.statut === 'TERMINE' ? (
