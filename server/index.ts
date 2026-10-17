@@ -5828,14 +5828,27 @@ const creerCategorieCatalogue: express.RequestHandler = async (req, res) => {
   }
 };
 
+// Le prix d'achat d'une fiche suit la règle du prix d'achat prévu des devis (voitPrixAchatDevis) :
+// une clé d'intégration ne le lit qu'avec finances:read. Sinon, une clé catalogue:read retrouverait
+// par la fiche le prix d'achat recopié dans une ligne de devis qu'elle lit (catalogueId).
+function ficheCataloguePourLecteur<T>(req: express.Request, valeur: T): T {
+  if (voitPrixAchatDevis(req)) return valeur;
+  const masquer = (fiche: unknown) => {
+    if (!fiche || typeof fiche !== 'object') return fiche;
+    const { prixAchatHt: _masque, ...reste } = fiche as Record<string, unknown>;
+    return reste;
+  };
+  return (Array.isArray(valeur) ? valeur.map(masquer) : masquer(valeur)) as T;
+}
+
 const listerCatalogue: express.RequestHandler = async (req, res) => {
   const family = catalogueFamily(String(req.params.family));
   if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
   try {
-    res.json(decimalToNumber(await catalogueModels[family].findMany({
+    res.json(ficheCataloguePourLecteur(req, decimalToNumber(await catalogueModels[family].findMany({
       include: { categorie: true },
       orderBy: { nom: 'asc' },
-    })));
+    }))));
   } catch {
     res.status(500).json({ error: 'Error fetching catalogue' });
   }
@@ -5847,10 +5860,10 @@ const creerFicheCatalogue: express.RequestHandler = async (req, res) => {
   try {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const data = { ...cataloguePayload(body), ...catalogueExtraPayload(family, body) };
-    res.status(201).json(decimalToNumber(await catalogueModels[family].create({
+    res.status(201).json(ficheCataloguePourLecteur(req, decimalToNumber(await catalogueModels[family].create({
       data: data as never,
       include: { categorie: true },
-    })));
+    }))));
   } catch (error) {
     catalogueApiError(res, error);
   }
@@ -5865,11 +5878,11 @@ const modifierFicheCatalogue: express.RequestHandler = async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const data: Record<string, unknown> = { ...cataloguePayload(body), ...catalogueExtraPayload(family, body) };
     if (body.actif !== undefined) data.actif = !!body.actif;
-    res.json(decimalToNumber(await catalogueModels[family].update({
+    res.json(ficheCataloguePourLecteur(req, decimalToNumber(await catalogueModels[family].update({
       where: { id: paramId(req) },
       data: data as never,
       include: { categorie: true },
-    })));
+    }))));
   } catch (error) {
     if ((error as { code?: string })?.code === 'P2025') {
       return res.status(404).json({ error: 'Fiche catalogue introuvable.' });
@@ -5885,10 +5898,10 @@ const desactiverFicheCatalogue: express.RequestHandler = async (req, res) => {
   const family = catalogueFamily(String(req.params.family));
   if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
   try {
-    res.json(decimalToNumber(await catalogueModels[family].update({
+    res.json(ficheCataloguePourLecteur(req, decimalToNumber(await catalogueModels[family].update({
       where: { id: paramId(req) },
       data: { actif: false } as never,
-    })));
+    }))));
   } catch {
     res.status(404).json({ error: 'Fiche catalogue introuvable.' });
   }
@@ -6040,7 +6053,9 @@ async function resoudreLignesDevis(
       vues.add(reference.ligneId);
       copie = { reference: existante.reference, catalogueFamille: existante.catalogueFamille, catalogueId: existante.catalogueId, prixAchatUnitaireHt: existante.prixAchatUnitaireHt };
     } else if (reference.catalogue) {
-      const fiche = await (catalogueModels[reference.catalogue.famille] as unknown as { findUnique: (args: unknown) => Promise<{ reference: string; actif: boolean; prixAchatHt: Prisma.Decimal | null } | null> })
+      // Lue par `db`, donc dans la transaction verrouillée de la modification, et non par le client global.
+      const delegues = { prestations: db.cataloguePrestation, articles: db.catalogueArticle, equipements: db.catalogueEquipement };
+      const fiche = await (delegues[reference.catalogue.famille] as unknown as { findUnique: (args: unknown) => Promise<{ reference: string; actif: boolean; prixAchatHt: Prisma.Decimal | null } | null> })
         .findUnique({ where: { id: reference.catalogue.id }, select: { reference: true, actif: true, prixAchatHt: true } });
       if (!fiche || !fiche.actif) throw new DevisSaisieError('Fiche catalogue introuvable ou désactivée.');
       copie = { reference: fiche.reference, catalogueFamille: reference.catalogue.famille, catalogueId: reference.catalogue.id, prixAchatUnitaireHt: fiche.prixAchatHt };

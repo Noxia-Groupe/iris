@@ -14,8 +14,9 @@ ALTER TABLE "DevisLigne" ADD COLUMN "reference" TEXT;
 ALTER TABLE "DevisLigne" ADD COLUMN "catalogueFamille" TEXT;
 ALTER TABLE "DevisLigne" ADD COLUMN "catalogueId" TEXT;
 ALTER TABLE "DevisLigne" ADD COLUMN "prixAchatUnitaireHt" DECIMAL(12,2);
+-- Une référence ne vient que d'une fiche : une ligne libre n'en porte pas.
 ALTER TABLE "DevisLigne" ADD CONSTRAINT "devis_ligne_catalogue_coherent" CHECK (
-  ("catalogueFamille" IS NULL AND "catalogueId" IS NULL)
+  ("catalogueFamille" IS NULL AND "catalogueId" IS NULL AND "reference" IS NULL)
   OR ("catalogueFamille" IN ('prestations', 'articles', 'equipements') AND "catalogueId" IS NOT NULL AND "reference" IS NOT NULL)
 );
 ALTER TABLE "DevisLigne" ADD CONSTRAINT "devis_ligne_prix_achat_positif" CHECK ("prixAchatUnitaireHt" IS NULL OR "prixAchatUnitaireHt" >= 0);
@@ -65,3 +66,25 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER devis_contenu_fige_si_signe BEFORE UPDATE OR DELETE ON "Devis"
 FOR EACH ROW EXECUTE FUNCTION figer_contenu_devis_signe();
+
+-- Le figement repose sur la signature : elle est donc figée elle aussi. La supprimer, puis la
+-- recréer avec la même empreinte, rouvrirait le devis signé à toute modification.
+CREATE FUNCTION figer_signature_devis() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'Signature de devis figée : ni modification ni suppression.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER devis_signature_figee BEFORE UPDATE OR DELETE ON "DevisSignature"
+FOR EACH ROW EXECUTE FUNCTION figer_signature_devis();
+
+-- TRUNCATE ne déclenche pas les triggers de ligne : il est refusé à part, pour les trois tables.
+CREATE FUNCTION refuser_vidage_devis() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'Devis, lignes et signatures : vidage interdit (TRUNCATE).';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER devis_sans_vidage BEFORE TRUNCATE ON "Devis" FOR EACH STATEMENT EXECUTE FUNCTION refuser_vidage_devis();
+CREATE TRIGGER devis_ligne_sans_vidage BEFORE TRUNCATE ON "DevisLigne" FOR EACH STATEMENT EXECUTE FUNCTION refuser_vidage_devis();
+CREATE TRIGGER devis_signature_sans_vidage BEFORE TRUNCATE ON "DevisSignature" FOR EACH STATEMENT EXECUTE FUNCTION refuser_vidage_devis();

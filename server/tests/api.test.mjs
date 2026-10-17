@@ -127,7 +127,14 @@ if (!TEST_DATABASE_URL) {
 
   const nettoyer = async () => {
     // La signature dépend du devis : elle part avant le devis pour garder ce teardown explicite.
-    await prisma.devisSignature.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
+    // Elle est figée en base (lot pilote 2) : le nettoyage de la base jetable suspend ce garde le
+    // temps de purger les fixtures, puis le réactive même en cas d'échec.
+    try {
+      await prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" DISABLE TRIGGER "devis_signature_figee"');
+      await prisma.devisSignature.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" ENABLE TRIGGER "devis_signature_figee"');
+    }
     // Une conversion garde le lien vers le devis : elle part avant le devis et sa fiche client.
     await prisma.devisConversion.deleteMany({ where: { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
     // Les devis dépendent du client ; ils doivent être retirés avant la fiche client.
@@ -2791,6 +2798,28 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('catalogue par clé d’intégration : prix d’achat des fiches seulement avec finances:read', async () => {
+      const cle = async (scopes) => (await request(app).post('/api/admin/api-keys').set(admin).send({ nom: `TEST catalogue prix ${scopes.join(' ')}`, scopes })).body.apiKey;
+      const lecteur = await cle(['catalogue:read', 'devis:read']);
+      const financier = await cle(['catalogue:read', 'finances:read']);
+      const redacteur = await cle(['catalogue:write']);
+      const liste = async (secret, famille) => request(app).get(`/api/v1/catalogue/${famille}`).set('Authorization', `Bearer ${secret}`);
+      for (const famille of ['prestations', 'articles', 'equipements']) {
+        const sansFinance = await liste(lecteur, famille);
+        assert.equal(sansFinance.status, 200, JSON.stringify(sansFinance.body));
+        assert.ok(sansFinance.body.length > 0 && sansFinance.body.every((f) => !('prixAchatHt' in f)), `${famille} : prix d’achat masqué sans finances:read`);
+        const avecFinance = await liste(financier, famille);
+        assert.ok(avecFinance.body.some((f) => f.prixAchatHt != null), `${famille} : prix d’achat lu avec finances:read`);
+      }
+      const creation = await request(app).post('/api/v1/catalogue/articles').set('Authorization', `Bearer ${redacteur}`)
+        .send({ reference: `TEST-CAT-CLE-${suffixe}`, nom: `Article par clé ${suffixe}`, prixVenteHt: '3', prixAchatHt: '1' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.ok(!('prixAchatHt' in creation.body), 'réponse de création masquée sans finances:read');
+      assert.equal((await prisma.catalogueArticle.findUnique({ where: { id: creation.body.id } })).prixAchatHt.toString(), '1');
+      const pourAdmin = await request(app).get('/api/catalogue/articles').set(admin);
+      assert.equal(pourAdmin.body.find((f) => f.id === creation.body.id).prixAchatHt, 1, 'l’administration le voit');
+    });
+
     test('une ligne reprise est copiée : référence recopiée par le serveur, prix d’achat repris de la fiche et masqué au commercial', async () => {
       const creation = await request(app).post('/api/devis').set(commercial).send({ clientId, objet: `TEST Devis catalogue ${suffixe}`, lignes: [
         { designation: fiches.camera.nom, nature: 'FOURNITURE', quantite: '2', prixUnitaireHt: '180', tauxTva: '20', unite: 'pièce', catalogueFamille: 'equipements', catalogueId: fiches.camera.id },
@@ -2875,6 +2904,7 @@ if (!TEST_DATABASE_URL) {
       await relire();
       const parCommercial = await envoyer('patch', `/api/devis/${devisId}`, commercial, corps([ligneCamera(), ligneDeplacement()]));
       assert.equal(parCommercial.status, 200, JSON.stringify(parCommercial.body));
+      assert.ok(parCommercial.body.lignes.every((l) => !('prixAchatUnitaireHt' in l)), 'réponse du PATCH masquée au commercial');
       assert.deepEqual((await lignes(admin)).map((l) => l.prixAchatUnitaireHt), [75.4, 12], 'le commercial ne l’efface pas en modifiant le devis');
       await relire();
       const efface = await envoyer('patch', `/api/devis/${devisId}`, admin, corps([ligneCamera(), ligneDeplacement({ prixAchatUnitaireHt: null })]));
@@ -2890,6 +2920,12 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual((await vue(financier)).map((l) => l.prixAchatUnitaireHt), [75.4, null]);
       const ecriture = await envoyer('patch', `/api/v1/devis/${devisId}`, { Authorization: `Bearer ${ecrivain}` }, corps([ligneCamera({ prixAchatUnitaireHt: '1' }), ligneDeplacement()]));
       assert.equal(ecriture.status, 403);
+      const redacteur = await cle(['devis:write']);
+      const parCle = await envoyer('patch', `/api/v1/devis/${devisId}`, { Authorization: `Bearer ${redacteur}` }, corps([ligneCamera(), ligneDeplacement()]));
+      assert.equal(parCle.status, 200, JSON.stringify(parCle.body));
+      assert.ok(parCle.body.lignes.every((l) => !('prixAchatUnitaireHt' in l)), 'réponse du PATCH v1 masquée sans finances:read');
+      assert.deepEqual((await lignes(admin)).map((l) => l.prixAchatUnitaireHt), [75.4, null], 'la clé ne l’efface pas');
+      await relire();
       // Toute réponse de devis au commercial est masquée : changement de statut, duplication.
       const statut = await request(app).put(`/api/devis/${devisId}/statut`).set(commercial).send({ statut: 'ENVOYE' });
       assert.equal(statut.status, 200, JSON.stringify(statut.body));
@@ -2904,9 +2940,11 @@ if (!TEST_DATABASE_URL) {
     test('révision et signature : la copie suit la révision, et la base fige les lignes et le contenu du devis signé', async () => {
       const signature = await request(app).post(`/api/devis/${devisId}/signature`).set(admin).send({ signataire: 'TEST Client signataire', confirme: true });
       assert.equal(signature.status, 201, JSON.stringify(signature.body));
-      const revision = await request(app).post(`/api/devis/${devisId}/revisions`).set(admin);
+      const revision = await request(app).post(`/api/devis/${devisId}/revisions`).set(commercial);
       assert.equal(revision.status, 201, JSON.stringify(revision.body));
-      assert.deepEqual(revision.body.lignes.map((l) => [l.reference, l.unite, l.catalogueFamille, l.prixAchatUnitaireHt]),
+      assert.ok(revision.body.lignes.every((l) => !('prixAchatUnitaireHt' in l)), 'réponse de révision masquée au commercial');
+      const revisionVueAdmin = (await request(app).get('/api/devis').set(admin)).body.find((d) => d.id === revision.body.id);
+      assert.deepEqual(revisionVueAdmin.lignes.map((l) => [l.reference, l.unite, l.catalogueFamille, l.prixAchatUnitaireHt]),
         [[fiches.camera.reference, 'pièce', 'equipements', 75.4], [null, null, null, null]]);
       const [ligne] = await lignesEnBase(devisId);
       await assert.rejects(prisma.devisLigne.update({ where: { id: ligne.id }, data: { prixUnitaireHt: 1 } }), /lignes sont figées/);
@@ -2916,6 +2954,16 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.devis.update({ where: { id: devisId }, data: { totalHt: 1 } }), /sont figés/);
       await assert.rejects(prisma.devis.update({ where: { id: devisId }, data: { objet: 'Objet changé' } }), /sont figés/);
       await assert.rejects(prisma.devis.delete({ where: { id: devisId } }), /ne se supprime pas/);
+      // La signature, sur laquelle repose le figement, est figée elle aussi : ni réécrite, ni supprimée
+      // (on ne peut donc pas la retirer, modifier le devis, puis la recréer avec la même empreinte).
+      await assert.rejects(prisma.devisSignature.update({ where: { devisId }, data: { empreinte: '0'.repeat(64) } }), /Signature de devis figée/);
+      await assert.rejects(prisma.devisSignature.delete({ where: { devisId } }), /Signature de devis figée/);
+      await assert.rejects(prisma.$executeRawUnsafe('TRUNCATE "DevisLigne"'), /vidage interdit/);
+      await assert.rejects(prisma.$executeRawUnsafe('TRUNCATE "DevisSignature"'), /vidage interdit/);
+      assert.ok(await prisma.devisSignature.findUnique({ where: { devisId } }), 'signature intacte');
+      // Une ligne libre ne porte pas de référence (contrainte de cohérence).
+      const revisionId = revision.body.id;
+      await assert.rejects(prisma.devisLigne.create({ data: { devisId: revisionId, ordre: 9, designation: 'Libre', quantite: 1, prixUnitaireHt: 1, tauxTva: 20, totalHt: 1, totalTtc: 1.2, reference: 'REF-LIBRE' } }), /devis_ligne_catalogue_coherent/);
       // Le cycle de vie reste possible : seul le contenu est figé.
       await prisma.devis.update({ where: { id: devisId }, data: { acompteReference: 'TEST cycle de vie' } });
       assert.equal((await lignesEnBase(devisId)).length, 2);

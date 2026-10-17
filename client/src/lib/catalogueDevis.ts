@@ -61,9 +61,11 @@ export function ligneVierge(ligne: LigneDevisSaisie): boolean {
   return !ligne.designation.trim() && !ligne.ligneId && !ligne.catalogueId && Number(ligne.prixUnitaireHt) === 0;
 }
 
-// Corps envoyé à l'API. Le prix d'achat prévu n'est transmis que par qui l'écrit : sinon, le
-// serveur conserve celui de la ligne existante (ou reprend celui de la fiche) et refuserait
-// toute valeur reçue. La référence n'est jamais envoyée : le serveur la recopie de la fiche.
+// Corps envoyé à l'API. Le prix d'achat prévu n'est transmis que par qui l'écrit, et seulement
+// si la ligne le porte (champ affiché) : sinon, le serveur conserve celui de la ligne existante
+// (ou reprend celui de la fiche), et refuserait toute valeur reçue d'un autre compte. Une ligne
+// chargée sans ce champ (droits relus en cours d'édition) ne l'efface donc pas. La référence
+// n'est jamais envoyée : le serveur la recopie de la fiche.
 export function ligneAEnvoyer(ligne: LigneDevisSaisie, ecritPrixAchat: boolean) {
   const prixAchat = (ligne.prixAchatUnitaireHt ?? '').trim();
   return {
@@ -75,7 +77,7 @@ export function ligneAEnvoyer(ligne: LigneDevisSaisie, ecritPrixAchat: boolean) 
     tauxTva: ligne.tauxTva,
     unite: ligne.unite?.trim() ? ligne.unite.trim() : null,
     ...(ligne.catalogueFamille && ligne.catalogueId ? { catalogueFamille: ligne.catalogueFamille, catalogueId: ligne.catalogueId } : {}),
-    ...(ecritPrixAchat ? { prixAchatUnitaireHt: prixAchat === '' ? null : prixAchat } : {}),
+    ...(ecritPrixAchat && ligne.prixAchatUnitaireHt !== undefined ? { prixAchatUnitaireHt: prixAchat === '' ? null : prixAchat } : {}),
   };
 }
 

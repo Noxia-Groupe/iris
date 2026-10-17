@@ -21,6 +21,9 @@ test('corps envoyé : pas de prix d’achat sans droit d’écriture, ni de réf
   assert.deepEqual([sansDroit.catalogueFamille, sansDroit.catalogueId, sansDroit.unite], ['articles', 'fiche-1', 'm']);
   assert.equal(ligneAEnvoyer(ligne, true).prixAchatUnitaireHt, '0,8');
   assert.equal(ligneAEnvoyer({ ...ligne, prixAchatUnitaireHt: '  ' }, true).prixAchatUnitaireHt, null);
+  // Une ligne sans le champ (chargée pour un compte qui ne le voyait pas) n'efface rien.
+  const { prixAchatUnitaireHt: _absent, ...sansChamp } = ligne;
+  assert.ok(!('prixAchatUnitaireHt' in ligneAEnvoyer(sansChamp, true)));
   const libre = ligneAEnvoyer({ designation: 'Libre', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, unite: ' ' }, false);
   assert.ok(!('catalogueFamille' in libre) && !('ligneId' in libre));
   assert.equal(libre.unite, null);
