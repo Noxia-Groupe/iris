@@ -36,7 +36,7 @@ Mêmes règles que dans [`CLAUDE.md`](../CLAUDE.md#méthode-de-travail-décision
 4. **Rien d'historique ni de théorique sans données réelles.** Tant qu'aucune donnée réelle n'existe, ne traiter ni données historiques, ni migration de données existantes, ni déductions théoriques. Les signaler en une ligne dans la PR.
 5. **Micro-arbitrages.** Sur un micro-arbitrage de droits ou d'affichage, ne pas solliciter Nelson : choisir l'option la plus simple et, en cas de doute, la plus restrictive ; la documenter dans la PR et dans `docs/ROADMAP-PASSATION.md` avec la mention « choix par défaut, à confirmer ». Ne lui remonter que ce qui touche les montants, les règles métier, le modèle de données ou un lot entier.
 
-Ce qui ne change pas : une PR par lot, jamais de push direct sur `main`, l'audit interne et l'audit indépendant ; seul Nelson autorise les fusions (une CI verte n'y suffit pas), valide les montants et décide de la mise en production ; Iris reste sa propre source de vérité, et aucune règle de prix, de commission ou de conformité n'est inventée.
+Ce qui ne change pas : une PR par lot, jamais de push direct sur `main`, l'audit interne et l'audit indépendant ; seul Nelson autorise les fusions (une CI verte seule n'y suffit pas ; voir la délégation du 17-10-2026 dans [`CLAUDE.md`](../CLAUDE.md#mode-de-livraison)), valide les montants et décide de la mise en production ; Iris reste sa propre source de vérité, et aucune règle de prix, de commission ou de conformité n'est inventée.
 
 Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'étiquette s'appelle `suivi-audit` ; l'issue reprend le constat, sa preuve et le correctif proposé, et la PR la cite.
 
