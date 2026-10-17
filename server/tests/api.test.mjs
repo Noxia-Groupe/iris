@@ -4955,7 +4955,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(traces[0].auteurNom, auteur.name);
     });
 
-    test('file #103 : seuls les dossiers contractuels non planifiés du périmètre sont proposés, placement journalisé sans doublon', async () => {
+    test('file #103 : les dossiers non planifiés du périmètre sont proposés (visites de contrat, et curatives depuis le lot pilote 3a), placement journalisé sans doublon', async () => {
       const auth = token => ({ Authorization: `Bearer ${token}` });
       const contrat = await request(app).post('/api/contrats-maintenance').set(auth(session)).send({ clientId, siteId, titre: 'TEST File contrat', periodiciteMois: 12, dureePrevisionnelleMinutes: 105, dateDebut: '01-01-2099' });
       assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
