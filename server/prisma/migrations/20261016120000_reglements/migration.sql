@@ -146,28 +146,60 @@ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verifier_total_affec
 CREATE CONSTRAINT TRIGGER affectation_reglement_total AFTER INSERT ON "AffectationReglement"
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verifier_total_affectations_reglement();
 
--- « Réglée » se déduit des règlements : une facture n'y passe que soldée, n'en sort que si un
--- règlement contre-passé rouvre un reste dû, et ne s'annule plus après un règlement.
+-- « Réglée » se déduit des règlements (choix par défaut, à confirmer) : reste dû nul ou négatif
+-- et au moins un règlement non contre-passé. Une facture n'est jamais créée « réglée », n'y
+-- passe que dans cet état, n'en sort que s'il cesse, et ne s'annule plus après un règlement.
 CREATE FUNCTION verifier_statut_facture_reglements() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE reste NUMERIC; regle BOOLEAN;
+DECLARE regle BOOLEAN; soldee BOOLEAN;
 BEGIN
-  IF NEW."statut" IS NOT DISTINCT FROM OLD."statut" OR NEW."type" <> 'FACTURE' THEN
+  IF NEW."type" <> 'FACTURE' THEN
     RETURN NEW;
   END IF;
-  reste := reste_du_facture(NEW."id");
-  IF OLD."statut" = 'EMISE' AND NEW."statut" = 'REGLEE' AND reste > 0 THEN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW."statut" = 'REGLEE' THEN
+      RAISE EXCEPTION 'Une facture n’est jamais créée « réglée » : elle le devient par ses règlements.';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW."statut" IS NOT DISTINCT FROM OLD."statut" THEN
+    RETURN NEW;
+  END IF;
+  SELECT EXISTS (SELECT 1 FROM "AffectationReglement" p JOIN "Reglement" r ON r."id" = p."reglementId" WHERE p."factureId" = NEW."id" AND r."statut" = 'ENREGISTRE') INTO regle;
+  soldee := regle AND reste_du_facture(NEW."id") <= 0;
+  IF NEW."statut" = 'REGLEE' AND NOT soldee THEN
     RAISE EXCEPTION 'Une facture ne passe à « réglée » que soldée par ses règlements.';
   END IF;
-  IF OLD."statut" = 'REGLEE' AND NEW."statut" = 'EMISE' AND reste <= 0 THEN
-    RAISE EXCEPTION 'Une facture soldée reste « réglée ».';
+  IF OLD."statut" = 'REGLEE' AND NEW."statut" = 'EMISE' AND soldee THEN
+    RAISE EXCEPTION 'Une facture soldée par ses règlements reste « réglée ».';
   END IF;
-  IF NEW."statut" = 'ANNULEE' THEN
-    SELECT EXISTS (SELECT 1 FROM "AffectationReglement" p JOIN "Reglement" r ON r."id" = p."reglementId" WHERE p."factureId" = NEW."id" AND r."statut" = 'ENREGISTRE') INTO regle;
-    IF regle THEN
-      RAISE EXCEPTION 'Une facture qui a reçu un règlement ne peut pas être annulée.';
-    END IF;
+  IF NEW."statut" = 'ANNULEE' AND regle THEN
+    RAISE EXCEPTION 'Une facture qui a reçu un règlement ne peut pas être annulée.';
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER facture_statut_reglements BEFORE UPDATE ON "Facture"
+CREATE TRIGGER facture_statut_reglements BEFORE INSERT OR UPDATE ON "Facture"
 FOR EACH ROW EXECUTE FUNCTION verifier_statut_facture_reglements();
+
+-- Les affectations reposent sur le client, le numéro et les montants d'une facture émise : ils
+-- sont figés en base hors brouillon, comme les mentions et l'origine (migrations antérieures).
+CREATE FUNCTION figer_identite_facture_emise() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD."statut" <> 'BROUILLON' AND (
+    NEW."clientId" IS DISTINCT FROM OLD."clientId" OR
+    NEW."numero" IS DISTINCT FROM OLD."numero" OR
+    NEW."annee" IS DISTINCT FROM OLD."annee" OR
+    NEW."type" IS DISTINCT FROM OLD."type" OR
+    NEW."factureOrigineId" IS DISTINCT FROM OLD."factureOrigineId" OR
+    NEW."estAvoirAnnulation" IS DISTINCT FROM OLD."estAvoirAnnulation" OR
+    NEW."dateEmission" IS DISTINCT FROM OLD."dateEmission" OR
+    NEW."dateEcheance" IS DISTINCT FROM OLD."dateEcheance" OR
+    NEW."totalHt" IS DISTINCT FROM OLD."totalHt" OR
+    NEW."totalTva" IS DISTINCT FROM OLD."totalTva" OR
+    NEW."totalTtc" IS DISTINCT FROM OLD."totalTtc"
+  ) THEN
+    RAISE EXCEPTION 'Facture émise : client, numéro, type, dates et montants sont immuables.';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER facture_identite_figee BEFORE UPDATE ON "Facture"
+FOR EACH ROW EXECUTE FUNCTION figer_identite_facture_emise();

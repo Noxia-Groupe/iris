@@ -1261,6 +1261,22 @@ async function avecSoldes<T extends { id: string; type: string; statut: string; 
   return factures.map(facture => ({ ...facture, ...(soldes.get(facture.id) ?? { montantAvoirs: null, montantRegle: null, resteDu: null }) }));
 }
 
+// « Réglée » se déduit (choix par défaut, à confirmer) : reste dû nul ou négatif ET au moins un
+// règlement non contre-passé ; une facture soldée par ses seuls avoirs reste « émise ». Recalculé
+// après chaque événement qui change le reste dû (règlement, contre-passation, avoir partiel),
+// sous le verrou de la facture déjà pris par l'appelant ; le trigger `facture_statut_reglements`
+// refuse toute autre transition.
+async function synchroniserStatutReglement(tx: Prisma.TransactionClient, factureId: string, acteurId: string, cause: string) {
+  const facture = await tx.facture.findUnique({ where: { id: factureId }, select: { id: true, type: true, statut: true, totalTtc: true } });
+  if (!facture || facture.type !== 'FACTURE' || (facture.statut !== 'EMISE' && facture.statut !== 'REGLEE')) return;
+  const solde = (await soldesFactures(tx, [facture])).get(facture.id)!;
+  const cible = solde.resteDu <= 0 && solde.montantRegle > 0 ? 'REGLEE' : 'EMISE';
+  if (cible === facture.statut) return;
+  const maj = await tx.facture.updateMany({ where: { id: facture.id, type: 'FACTURE', statut: facture.statut }, data: { statut: cible } });
+  if (maj.count !== 1) throw new Error('Statut de facture modifié pendant la transaction.');
+  await tx.journalFacture.create({ data: { factureId: facture.id, acteurId, action: cible === 'REGLEE' ? 'REGLEMENT' : 'RETOUR_EMISE', detail: `Transition ${facture.statut} → ${cible} (${cause}) : réglé ${formatMontantFacture(solde.montantRegle)}, reste dû ${formatMontantFacture(solde.resteDu)}` } });
+}
+
 // Prisma 5 résout une transaction interactive même quand son COMMIT échoue sur un trigger
 // différé : l'API répondrait un succès sans rien avoir enregistré (constaté sur PostgreSQL 16).
 // Vérifier les contraintes différées avant la fin du rappel fait échouer la transaction au
@@ -1300,7 +1316,7 @@ app.get('/api/factures/a-regler', requireAuth, requireAdmin, async (_req, res) =
       where: { type: 'FACTURE', statut: 'EMISE' },
       select: { id: true, numero: true, type: true, statut: true, dateEmission: true, dateEcheance: true, totalTtc: true, client: { select: { id: true, raisonSociale: true, actif: true } } },
       orderBy: [{ dateEcheance: 'asc' }, { dateEmission: 'asc' }, { numero: 'asc' }],
-    })), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    })), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 30_000 });
     res.json(decimalToNumber({ factures: factures.filter(facture => (facture.resteDu ?? 0) > 0) }));
   } catch { res.status(500).json({ error: 'Lecture des factures à régler impossible.' }); }
 });
@@ -1318,7 +1334,8 @@ app.get('/api/factures', requireAuth, requireAdmin, async (req, res) => {
   try {
     const orderBy = [{ dateEmission: 'desc' as const }, { createdAt: 'desc' as const }, { id: 'desc' as const }];
     if (!pagine) {
-      const factures = await prisma.$transaction(async tx => avecSoldes(tx, await tx.facture.findMany({ include: factureInclude, orderBy })), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+      // Liste complète : délai explicite, une base réelle dépasse vite les 5 s par défaut de Prisma.
+      const factures = await prisma.$transaction(async tx => avecSoldes(tx, await tx.facture.findMany({ include: factureInclude, orderBy })), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 30_000 });
       return res.json(decimalToNumber(factures));
     }
     const skip = (page! - 1) * pageSize!;
@@ -2173,6 +2190,8 @@ app.post('/api/factures/:id/avoirs', requireAuth, requireAdmin, async (req: Auth
       }, include: factureInclude });
       await tx.facture.update({ where: { id: avoir.id }, data: { ecrituresScellees: true } });
       await tx.journalFacture.create({ data: { factureId: avoir.id, acteurId: req.user!.id, action: 'CREATION_AVOIR_PARTIEL', detail: `Avoir partiel de la facture ${facture.numero}` } });
+      // L'avoir baisse le reste dû : une facture déjà réglée en partie peut devenir soldée.
+      await synchroniserStatutReglement(tx, facture.id, req.user!.id, `avoir partiel ${numero}`);
       return { avoir: { ...avoir, ecrituresScellees: true } };
     });
     if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise ou réglée peut recevoir un avoir partiel.' });
@@ -2196,6 +2215,8 @@ app.get('/api/reglements', requireAuth, requireAdmin, async (req, res) => {
   };
   const page = entierStrict(req.query.page, 1), pageSize = entierStrict(req.query.pageSize, 25);
   if (page === null || pageSize === null || pageSize > 100) return res.status(400).json({ error: 'page et pageSize doivent être des entiers positifs (pageSize ≤ 100).' });
+  // Un filtre répété (?clientId=a&clientId=b) arrive en tableau : le refuser plutôt que tout lister.
+  if ([req.query.clientId, req.query.factureId].some(valeur => valeur !== undefined && typeof valeur !== 'string')) return res.status(400).json({ error: 'Les filtres clientId et factureId sont des valeurs uniques.' });
   const clientId = typeof req.query.clientId === 'string' && req.query.clientId ? req.query.clientId : null;
   const factureId = typeof req.query.factureId === 'string' && req.query.factureId ? req.query.factureId : null;
   const where: Prisma.ReglementWhereInput = { ...(clientId ? { clientId } : {}), ...(factureId ? { affectations: { some: { factureId } } } : {}) };
@@ -2270,15 +2291,12 @@ app.post('/api/reglements', requireAuth, requireAdmin, async (req: AuthRequest, 
         clientId: client.id, dateReglement: new Date(dateReglementIso!), montant, moyen, reference, createdById: req.user!.id,
         affectations: { create: affectations.map(affectation => ({ factureId: affectation.factureId, montant: affectation.montant })) },
       }, include: reglementInclude });
-      const libelle = `Règlement du ${formatDateFacture(cree.dateReglement)} (${LIBELLES_MOYEN_REGLEMENT[moyen]}${reference ? `, réf. ${reference}` : ''})`;
+      const libelle = `Règlement ${cree.id} du ${formatDateFacture(cree.dateReglement)} (${LIBELLES_MOYEN_REGLEMENT[moyen]}${reference ? `, réf. ${reference}` : ''})`;
       for (const affectation of affectations) {
         const facture = parId.get(affectation.factureId)!;
         const resteApres = (centimesEntiers(soldes.get(facture.id)!.resteDu) - centimesEntiers(affectation.montant)) / 100;
         await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_AFFECTE', detail: `${libelle} : ${formatMontantFacture(affectation.montant)} affectés ; reste dû ${formatMontantFacture(resteApres)}` } });
-        if (resteApres <= 0) {
-          await tx.facture.updateMany({ where: { id: facture.id, statut: 'EMISE', type: 'FACTURE' }, data: { statut: 'REGLEE' } });
-          await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT', detail: 'Transition EMISE → REGLEE : facture soldée par ses règlements' } });
-        }
+        await synchroniserStatutReglement(tx, facture.id, req.user!.id, `règlement ${cree.id}`);
       }
       await verifierContraintesDifferees(tx);
       return cree;
@@ -2298,7 +2316,7 @@ app.post('/api/reglements/:id/contrepasser', requireAuth, requireAdmin, async (r
     if (!motif || /[\u0000-\u001f\u007f]/.test(motif)) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères, sans caractère de contrôle, est obligatoire.' });
     const reglement = await prisma.$transaction(async (tx) => {
       // Les parts sont immuables : les lire avant tout verrou est sûr. Les factures sont
-      // ensuite verrouillées avant le règlement, dans l'ordre de la saisie.
+      // ensuite verrouillées par identifiant croissant, comme à la saisie, puis le règlement.
       const parts = await tx.affectationReglement.findMany({ where: { reglementId: paramId(req) }, select: { factureId: true, montant: true } });
       if (!parts.length) throw new ReglementRefuse(404, 'Règlement introuvable.');
       const ids = parts.map(part => part.factureId).sort();
@@ -2309,15 +2327,12 @@ app.post('/api/reglements/:id/contrepasser', requireAuth, requireAdmin, async (r
       const maj = await tx.reglement.update({ where: { id: paramId(req) }, data: { statut: 'CONTREPASSE', motifContrepassation: motif, contrepasseLe: new Date(), contrepasseParId: req.user!.id }, include: reglementInclude });
       const factures = await tx.facture.findMany({ where: { id: { in: ids } }, select: { id: true, type: true, statut: true, totalTtc: true } });
       const soldes = await soldesFactures(tx, factures);
-      const libelle = `Contre-passation du règlement du ${formatDateFacture(maj.dateReglement)} de ${formatMontantFacture(maj.montant)} : « ${motif} »`;
+      const libelle = `Contre-passation du règlement ${maj.id} du ${formatDateFacture(maj.dateReglement)} de ${formatMontantFacture(maj.montant)} : « ${motif} »`;
       for (const facture of factures) {
         const part = parts.find(ligne => ligne.factureId === facture.id)!;
         const resteDu = soldes.get(facture.id)?.resteDu ?? 0;
         await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'REGLEMENT_CONTREPASSE', detail: `${libelle} ; ${formatMontantFacture(part.montant)} retirés ; reste dû ${formatMontantFacture(resteDu)}` } });
-        if (facture.statut === 'REGLEE' && resteDu > 0) {
-          await tx.facture.updateMany({ where: { id: facture.id, statut: 'REGLEE', type: 'FACTURE' }, data: { statut: 'EMISE' } });
-          await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: req.user!.id, action: 'RETOUR_EMISE', detail: 'Transition REGLEE → EMISE : règlement contre-passé, la facture n’est plus soldée' } });
-        }
+        await synchroniserStatutReglement(tx, facture.id, req.user!.id, `contre-passation du règlement ${maj.id}`);
       }
       await verifierContraintesDifferees(tx);
       return maj;
@@ -3769,7 +3784,7 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     }
     // Les clés étrangères RESTRICT restent le verrou contre une course ; ce contrôle rend le refus
     // lisible à l’administrateur lorsqu’un compte porte une preuve de traçabilité métier.
-    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie, journauxComptables, journauxRegles, coutsHeuresCrees, coutsAchatsCrees, coutsHeuresArchives, coutsAchatsArchives] = await Promise.all([
+    const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie, journauxComptables, journauxRegles, coutsHeuresCrees, coutsAchatsCrees, coutsHeuresArchives, coutsAchatsArchives, reglements] = await Promise.all([
       prisma.achatReel.count({ where: { createdById: id } }),
       prisma.achatReel.count({ where: { updatedById: id } }),
       prisma.achatReel.count({ where: { archivedById: id } }),
@@ -3783,8 +3798,9 @@ app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
       prisma.coutInterventionAchat.count({ where: { createdById: id } }),
       prisma.coutInterventionHeure.count({ where: { archivedById: id } }),
       prisma.coutInterventionAchat.count({ where: { archivedById: id } }),
+      prisma.reglement.count({ where: { OR: [{ createdById: id }, { contrepasseParId: id }] } }),
     ]);
-    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + journauxComptables + journauxRegles + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives > 0) {
+    if (achatsCrees + achatsMisAJour + achatsArchives + pointagesCrees + pointagesMisAJour + pointagesArchives + journauxSaisie + journauxComptables + journauxRegles + coutsHeuresCrees + coutsAchatsCrees + coutsHeuresArchives + coutsAchatsArchives + reglements > 0) {
       return res.status(409).json({ error: 'Ce compte est l’auteur de données tracées : le supprimer effacerait une preuve de traçabilité. Désactivez-le plutôt pour lui retirer l’accès.' });
     }
     await prisma.$transaction(async (tx) => {

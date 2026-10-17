@@ -5547,7 +5547,14 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-27T00:00:00.000Z' });
         ids.push((await creer('FACTURE', 'ANNULEE', 'TEST-F-102', '2026-09-28')).id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-28T00:00:00.000Z' });
-        ids.push((await creer('FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29')).id);
+        // Une facture ne naît jamais « réglée » (trigger des règlements) : ce test de chronologie
+        // fabrique la pièce brute en suspendant ce seul garde, le temps de l'insertion.
+        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglements"');
+        try {
+          ids.push((await creer('FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29')).id);
+        } finally {
+          await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglements"');
+        }
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-29T00:00:00.000Z' });
       } finally {
         for (const id of ids.slice(1)) await purgerEcrituresJetables(id);
@@ -8384,6 +8391,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(parFacture.body.items.map((reglement) => [reglement.id, reglement.statut]).sort(), [[partiel.body.id, 'CONTREPASSE'], [reparti.body.id, 'ENREGISTRE']].sort());
       assert.equal((await request(app).get(`/api/reglements?clientId=${client}&pageSize=1`).set('Authorization', `Bearer ${session}`)).body.total, 2);
       assert.equal((await request(app).get('/api/reglements?pageSize=101').set('Authorization', `Bearer ${session}`)).status, 400);
+      assert.equal((await request(app).get(`/api/reglements?clientId=${client}&clientId=${client}`).set('Authorization', `Bearer ${session}`)).status, 400, 'un filtre répété ne liste pas tout');
       // Le reste dû rouvert se règle à nouveau ; les montants de la facture n'ont jamais bougé.
       // Daté du jour même de la société : accepté (seul un jour postérieur est refusé).
       const aujourdHui = jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
@@ -8476,6 +8484,52 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([lue.statut, lue.montantRegle, lue.montantAvoirs, lue.resteDu], ['REGLEE', 120, 12, -12]);
     });
 
+    test('statut « réglée » : même résultat quel que soit l’ordre des règlements, avoirs et contre-passations', async () => {
+      const client = await clientReglement('TEST Client règlements ordre');
+      const avoir = (facture, prixUnitaireHt) => request(app).post(`/api/factures/${facture.id}/avoirs`).set('Authorization', `Bearer ${session}`).send({ lignes: [{ designation: 'TEST avoir ordre', quantite: 1, prixUnitaireHt, tauxTva: 20 }] });
+      const etat = async (facture) => { const lue = await factureLue(facture.id); return [lue.statut, lue.montantRegle, lue.montantAvoirs, lue.resteDu]; };
+      // A : un règlement, puis un avoir qui solde la facture.
+      const a = await emettrePourReglement(client, 'ordre A', 100);
+      assert.equal((await enregistrerReglement({ clientId: client, montant: 60, affectations: [{ factureId: a.id, montant: 60 }] })).status, 201);
+      assert.equal((await avoir(a, 50)).status, 201);
+      assert.deepEqual(await etat(a), ['REGLEE', 60, 60, 0]);
+      assert.ok((await journalDe(a.id)).some((entree) => entree.action === 'REGLEMENT' && /EMISE → REGLEE \(avoir partiel /.test(entree.detail) && entree.acteurId), 'la transition par l’avoir est journalisée');
+      // B : l'avoir d'abord, le règlement ensuite : même état final.
+      const b = await emettrePourReglement(client, 'ordre B', 100);
+      assert.equal((await avoir(b, 50)).status, 201);
+      assert.deepEqual(await etat(b), ['EMISE', 0, 60, 60]);
+      assert.equal((await enregistrerReglement({ clientId: client, montant: 60, affectations: [{ factureId: b.id, montant: 60 }] })).status, 201);
+      assert.deepEqual(await etat(b), ['REGLEE', 60, 60, 0]);
+      // C : soldée, créditée en totalité, puis règlement contre-passé : sans règlement, elle redevient émise.
+      const c = await emettrePourReglement(client, 'ordre C', 100);
+      const integral = await enregistrerReglement({ clientId: client, montant: 120, affectations: [{ factureId: c.id, montant: 120 }] });
+      assert.equal(integral.status, 201, JSON.stringify(integral.body));
+      assert.equal((await avoir(c, 100)).status, 201);
+      assert.deepEqual(await etat(c), ['REGLEE', 120, 120, -120]);
+      assert.equal((await contrepasser(integral.body.id)).status, 200);
+      assert.deepEqual(await etat(c), ['EMISE', 0, 120, 0]);
+      assert.ok((await journalDe(c.id)).some((entree) => entree.action === 'RETOUR_EMISE' && /REGLEE → EMISE \(contre-passation du règlement /.test(entree.detail)));
+      // D : partiellement réglée, puis un avoir plus grand que le reste dû : réglée, avec un trop-perçu.
+      const d = await emettrePourReglement(client, 'ordre D', 100);
+      assert.equal((await enregistrerReglement({ clientId: client, montant: 50, affectations: [{ factureId: d.id, montant: 50 }] })).status, 201);
+      assert.equal((await avoir(d, 100)).status, 201);
+      assert.deepEqual(await etat(d), ['REGLEE', 50, 120, -50]);
+    });
+
+    test('règlements : le compte qui a saisi un règlement ne se supprime pas, il se désactive', async () => {
+      const client = await clientReglement('TEST Client règlements auteur');
+      const facture = await emettrePourReglement(client, 'auteur', 100);
+      const auteur = await prisma.user.create({ data: { email: `reglement.auteur.${Date.now()}@iris.test`, name: 'TEST Auteur règlement', role: 'ADMIN' } });
+      const saisie = await request(app).post('/api/reglements').set('Authorization', `Bearer ${jwt.sign({ id: auteur.id }, process.env.JWT_SECRET)}`)
+        .send({ clientId: client, dateReglement: '12-09-2026', montant: 10, moyen: 'VIREMENT', affectations: [{ factureId: facture.id, montant: 10 }] });
+      assert.equal(saisie.status, 201, JSON.stringify(saisie.body));
+      assert.equal(saisie.body.createdBy.id, auteur.id);
+      const suppression = await request(app).delete(`/api/users/${auteur.id}`).set('Authorization', `Bearer ${session}`);
+      assert.equal(suppression.status, 409, JSON.stringify(suppression.body));
+      assert.match(suppression.body.error, /auteur de données tracées/);
+      assert.ok(await prisma.user.findUnique({ where: { id: auteur.id } }));
+    });
+
     test('base : règlements immuables, entièrement affectés, dans le reste dû et le client de la facture', async () => {
       const client = await clientReglement('TEST Client règlements base');
       const autre = await clientReglement('TEST Client règlements base autre');
@@ -8487,6 +8541,12 @@ if (!TEST_DATABASE_URL) {
       const affectation = await prisma.affectationReglement.findFirstOrThrow({ where: { reglementId: premier.body.id } });
       const brut = (champs) => ({ clientId: client, dateReglement: new Date('2026-09-12T00:00:00.000Z'), montant: 5, moyen: 'VIREMENT', createdById: auteur, ...champs });
 
+      // Le client, le numéro, les dates et les montants d'une facture émise sont figés en base.
+      for (const data of [{ clientId: autre }, { totalTtc: 1 }, { numero: `TEST-REECRIT-${Date.now()}` }, { dateEcheance: new Date('2030-01-01T00:00:00.000Z') }]) {
+        await assert.rejects(() => prisma.facture.update({ where: { id: facture.id }, data }), /client, numéro, type, dates et montants sont immuables/, JSON.stringify(data));
+      }
+      // Une facture ne naît jamais « réglée », même écrite directement en base.
+      await assert.rejects(() => prisma.facture.create({ data: { clientId: client, clientRaisonSociale: 'TEST Client règlements base', type: 'FACTURE', statut: 'REGLEE', numero: `TEST-NEE-REGLEE-${Date.now()}`, dateEmission: new Date('2026-09-11T00:00:00.000Z'), dateEcheance: new Date('2026-09-11T00:00:00.000Z'), totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST garde' } }), /jamais créée « réglée »/);
       await assert.rejects(() => prisma.reglement.update({ where: { id: premier.body.id }, data: { montant: 10 } }), /Règlement figé/);
       await assert.rejects(() => prisma.reglement.update({ where: { id: premier.body.id }, data: { reference: 'réécrite' } }), /Règlement figé/);
       await assert.rejects(() => prisma.reglement.delete({ where: { id: premier.body.id } }), /Règlement figé/);
