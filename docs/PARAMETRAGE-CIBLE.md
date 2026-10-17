@@ -160,7 +160,7 @@ Un préréglage choisit **les rôles et la hiérarchie**, et rien d'autre. Tous 
 | Obligations de saisie (B-22, B-23, B-24) | valeur actuelle ¹ | valeur actuelle | valeur actuelle |
 | Durées, délais, seuils, listes | valeur actuelle | valeur actuelle | valeur actuelle |
 
-¹ Le titulaire reste obligatoire (B-22), mais l'écran ne propose aujourd'hui comme titulaires que les conducteurs de travaux. Avec les seuls rôles Dirigeant, Bureau et Technicien, aucun chantier ne pourrait être ouvert. Ce préréglage suppose donc que « qui peut être titulaire » s'exprime par les rôles ([`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), question 9).
+¹ Le titulaire reste obligatoire à la modification (B-22), mais les écrans ne proposent aujourd'hui comme titulaires que les conducteurs de travaux ; le serveur, lui, accepte tout compte actif. Avec les seuls rôles Dirigeant, Bureau et Technicien, aucun chantier ne pourrait donc être ouvert depuis l'Administration ni recevoir de titulaire depuis la fiche chantier. Seule la conversion depuis l'écran Devis, qui laisse le titulaire vide, resterait possible. Ce préréglage suppose donc que « qui peut être titulaire » s'exprime par les rôles ([`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), question 9).
 
 Les noms décrivent l'organisation, pour ne pas se confondre avec les catégories légales qui fixent le calendrier de la facturation électronique. L'écran affiche un récapitulatif avant d'appliquer un préréglage.
 
