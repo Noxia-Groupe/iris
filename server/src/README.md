@@ -52,12 +52,23 @@ Domaines prévus :
 - **Déplacer, ne pas réécrire.** Le texte est repris tel quel, commentaires compris. Seuls changent les `import`, le mot-clé `export` devant une déclaration, et l'indentation des routes placées dans leur fonction d'enregistrement. Une ligne qui continue une chaîne multiligne n'est jamais réindentée.
 - **Ordre des routes conservé.** Chaque `enregistrerRoutes…(app)` est appelé à l'endroit exact où se trouvait le bloc déplacé, si bien qu'Express essaie toujours les routes dans le même ordre.
 - **Deux preuves par PR**, à lancer depuis `server/` après `npm run build` :
-  - `node scripts/routes.mjs --verifier` compare les routes enregistrées (ordre, méthode, chemin, chaîne des gardes) à `scripts/routes-reference.txt`, écrit depuis `main` avant le découpage. La CI le rejoue.
-  - `node scripts/verifier-deplacement.mjs origin/main` vérifie qu'aucune ligne de la base n'a disparu, liste les seules lignes ajoutées et indique d'où vient chaque bloc déplacé.
-- **Limites des deux preuves.** Elles ne voient ni un changement d'ordre à l'intérieur d'un bloc, ni une ligne retirée puis remise ailleurs, ni un import renommé, ni les permissions portées par les gardes anonymes (`requirePermission(…)`, `requireApiKey(…)`). Elles seront renforcées avant la PR 2 : blocs contigus vérifiés, imports contrôlés, permissions et empreinte de chaque gestionnaire ajoutées à la référence. D'ici là, chaque PR reçoit aussi une vérification octet pour octet par son audit.
+  - `node scripts/routes.mjs --verifier` compare ce que l'application enregistre à `scripts/routes-reference.txt`, écrit depuis `main` avant le découpage. Il compare les réglages, les middlewares et leurs chemins, ainsi que les routes dans l'ordre où Express les essaie. Pour chaque gestionnaire, il compare aussi son nom, les valeurs confiées par sa fabrique (`{permission="…"}`, `{scope="…"}`) et l'empreinte de son texte compilé. Il compare enfin les exports lus par les tests. La CI le rejoue.
+  - `node scripts/verifier-deplacement.mjs origin/main` compare, instruction par instruction, tous les fichiers TypeScript du serveur entre la base et la branche. Il s'appuie sur l'analyseur du compilateur TypeScript.
+    - Chaque instruction de la base doit se retrouver une fois, à l'identique, commentaires compris, et dans le même ordre. Seuls sont admis le mot-clé `export` ajouté et un décalage d'indentation uniforme dans une fonction d'enregistrement, hors lignes de gabarit multiligne.
+    - Les imports conservés gardent leur ordre et les nouveaux viennent après eux. Aucun import n'est renommé.
+    - Chaque fonction d'enregistrement est appelée une fois, avec `app`, au premier niveau d'`index.ts`. L'ordre d'`index.ts`, ses appels remplacés par le contenu des fonctions, est celui de la base.
+    - Toute autre instruction nouvelle le fait échouer.
+    - Il liste pour la revue les blocs déplacés, les imports et commentaires ajoutés, et les instructions qui s'exécutent désormais au chargement d'un autre module qu'`index.ts`.
+- **Ce que les preuves ne couvrent pas.** Le moment où un module s'évalue : une instruction déplacée au premier niveau d'un module s'exécute à son import, avant le corps d'`index.ts`. Le vérificateur liste ces instructions ; la PR justifie chacune. Une fabrique comme `creerRouteMixte(app)`, qui enveloppe du code de la base dans une fonction nouvelle autre qu'une fonction d'enregistrement, n'est pas encore admise : la PR qui l'introduit étend le vérificateur et prouve l'extension par des mutations.
+- **Un lot fonctionnel** (hors découpage) réécrit la référence avec `node scripts/routes.mjs --ecrire`, et l'écart apparaît dans le diff de sa PR, s'il :
+  - ajoute, retire ou réordonne une route ;
+  - modifie un gestionnaire, un middleware, un réglage ou un export ;
+  - met à jour une bibliothèque dont le code d'un middleware change (`cors`, `express.json`).
+
+  `verifier-deplacement.mjs` ne concerne que les PR du découpage.
 - **Imports sans renommage** : aucun `import { a as b }` pendant le découpage.
 - **Ordre de chargement inchangé** : `index.ts` importe `src/env.ts` après les bibliothèques, au moment où il appelait `dotenv.config()` avant le découpage. Certaines bibliothèques lisent l'environnement à leur chargement (`DEBUG`, `NO_COLOR`…).
-- **Domaines dispersés dans le fichier.** Plusieurs domaines ont leurs routes en plusieurs endroits d'`index.ts` : factures, chantiers, interventions, planning, société, paramètres, commerciaux. Leur module expose alors plusieurs fonctions d'enregistrement, appelées chacune à l'emplacement de son bloc. Un réordonnancement n'est admis que s'il est prouvé sans recouvrement de chemins et annoncé dans la PR.
+- **Domaines dispersés dans le fichier.** Plusieurs domaines ont leurs routes en plusieurs endroits d'`index.ts` : factures, chantiers, interventions, planning, société, paramètres, commerciaux. Leur module expose alors plusieurs fonctions d'enregistrement, appelées chacune à l'emplacement de son bloc. Le vérificateur refuse tout réordonnancement : s'il en fallait un, il ferait l'objet d'une PR à part, prouvée sans recouvrement de chemins.
 - **`routeMixte`** dépend de `app` : il deviendra une fabrique, `creerRouteMixte(app)`, dont le corps reste identique, pour que ses appels ne changent pas.
 - **Utilitaires partagés d'abord** : une fonction dont se servent plusieurs domaines est déplacée vers `commun/`, `droits/` ou `http/` avant le premier domaine qui l'emploie.
 - **Aucun test modifié.** `index.ts` ré-exporte ce que les tests importent de `dist/index.js`.
@@ -68,7 +79,7 @@ Domaines prévus :
 ## Ordre prévu des PR (proposition)
 
 1. Socle (`env`, `db`, rôles, authentification, gardes de type de compte, `paramId`), scripts de preuve, et domaine `referentiels`.
-1 bis. Outils de preuve renforcés (blocs contigus, imports, permissions des gardes, empreintes des gestionnaires), sans déplacement de code.
+1 bis. Outils de preuve renforcés (vérification par instruction, imports, permissions des gardes, empreintes des gestionnaires), sans déplacement de code.
 2. Droits : permissions, clés d'intégration (`requireApiKey`, `routeMixte`), périmètres de lecture ; dates partagées.
 3. Journal d'administration ; domaines `parametres` et `administration`.
 4. Domaines `authentification` et `utilisateurs`.
