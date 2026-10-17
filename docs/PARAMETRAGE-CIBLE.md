@@ -85,7 +85,7 @@ Constats de l'inventaire :
 | Plafond des montants (C-11) | Technique : colonnes `Decimal(12,2)` |
 | Écritures comptables équilibrées et scellées (C-12) | Intégrité comptable. Leur contenu (comptes, journal) est paramétrable. |
 | Format des dates et jour civil de la société (C-13) | Décision de Nelson du 14-10-2026 ; le fuseau reste paramétrable |
-| Invariants de droits (C-14) | [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), section 7 |
+| Invariants de droits (C-14) | [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), section 8 |
 | Journaux en ajout seul (C-15) | Traçabilité ; la durée de conservation est paramétrable |
 | Un chantier par affaire, client figé après facturation (C-16) ; squelettes des cycles de vie (C-17) ; contrats, visites et coûts figés (C-18, C-19) ; échéance contractuelle (C-20) ; origine des factures (C-21) ; client actif pour ouvrir un dossier (C-22) | Intégrité, et décisions de Nelson des 14 et 16-10-2026 |
 | Formats de contrôle (C-23), semaine ISO (C-24), structures du modèle (C-25) | Validation technique et conventions |
