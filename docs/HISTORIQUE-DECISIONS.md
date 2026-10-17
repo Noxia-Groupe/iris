@@ -1,8 +1,20 @@
 # Iris — historique des décisions et des lots livrés
 
-> Extraits **déplacés tels quels** de [`ROADMAP-PASSATION.md`](ROADMAP-PASSATION.md) le 17-10-2026, sans reformulation, pour que la passation reste courte. Ils décrivent l'état **au moment de leur rédaction** : les renvois « ci-dessus », « plus bas », « ci-dessous » et les mentions « prévu » s'entendent dans l'ancienne passation. L'état actuel, les questions ouvertes et les choix par défaut, à confirmer, sont tenus à jour dans la [passation](ROADMAP-PASSATION.md) ; aucune décision, question ou mention « à confirmer » n'a disparu (voir la PR qui a fait ce déplacement).
+> Extraits **déplacés tels quels** de [`ROADMAP-PASSATION.md`](ROADMAP-PASSATION.md) le 17-10-2026, sans reformulation, pour que la passation reste courte. Ils décrivent l'état **au moment de leur rédaction** : les renvois « ci-dessus », « plus bas », « ci-dessous » et les mentions « prévu » s'entendent dans l'ancienne passation. L'état actuel, les questions ouvertes et les choix par défaut, à confirmer, sont tenus à jour dans la [passation](ROADMAP-PASSATION.md) ; aucune décision, question ou mention « à confirmer » n'a disparu (voir la PR #165, qui a fait ce déplacement). L'ancienne passation reste lisible en entier, pour résoudre ces renvois : `git show 66dd476:docs/ROADMAP-PASSATION.md`.
 >
 > Correspondances utiles : « la PR « contraintes différées » qui suit #155 » est la PR #158 ; « la PR prévue sur les commissions actuelles (P1b) » est devenue sans objet, et les commissions ont été fermées par #159 ; le lot pilote 2 (catalogue dans les devis) est #161.
+
+## Lots pilotes livrés (état d'origine)
+
+*Origine : « Pilote — décisions de Nelson du 16-10-2026 », lots 1 et 2, ancienne passation.*
+
+1. **Règlements (A3)** : saisie manuelle des encaissements, affectés aux factures (règlements partiels, reste dû, facture partiellement réglée) ; l'« encaissé » qui ouvre une commission se déduit des règlements, et non plus d'une case cochée sur le chantier. Banque et rapprochement viennent plus tard. Saisie et contre-passation réservées à l'administration, y compris pour un client désactivé (choix par défaut, à confirmer). Montants : exigence maximale (règle 2). **Implémenté (P1a)** : saisie, affectation, reste dû, statut « réglée » déduit des règlements et contre-passation. Règles de montants validées par Nelson le 17-10-2026 : reste dû = TTC − avoirs émis − règlements non contre-passés ; une facture est réglée dès que le montant enregistré atteint ou dépasse ce qui reste dû, le surplus devenant un trop-perçu ; une facture soldée par ses seuls avoirs reste émise ; une facture qui a reçu un règlement ne s'annule plus en totalité. Commissions : sans plan commercial, aucune commission (décision du 17-10-2026) ; l'« encaissé » déduit des règlements sera repris par le plan commercial (lot (i)), si bien que la PR prévue sur les commissions actuelles (P1b) est sans objet.
+2. **Catalogue dans les devis (A8)** : lignes reprises du catalogue et copiées figées dans le devis, prix d'achat prévu en option. Plus tard : connexion par API, ou autrement, aux catalogues des fournisseurs. **Implémenté par #161** :
+   - le formulaire de devis cherche une fiche active (prestation, article ou équipement) et l'ajoute en ligne pré-remplie : désignation, nature, unité, prix de vente, TVA ;
+   - la ligne est une copie : la référence est recopiée par le serveur, et une fiche modifiée ou désactivée ensuite ne change rien au devis ; une ligne existante garde sa fiche d'origine et sa référence ;
+   - le prix d'achat prévu, facultatif, est repris de la fiche (prix d'achat désormais facultatif dans les trois familles) ;
+   - un devis signé est figé en base : lignes, client, objet, montants et acompte exigé ne changent plus, sa signature ne se modifie ni ne se supprime, et devis, lignes et signatures ne se vident pas ; son cycle de vie (statut, acompte constaté, annulation) reste possible ;
+   - choix par défaut et questions : voir plus bas.
 
 ## Lots livrés (a) à (h)
 
@@ -63,7 +75,7 @@
   - inchangés : les documents PDF étaient déjà en `JJ-MM-AAAA`, et les échanges techniques gardent leur format : `AAAA-MM-JJ` pour l'API et les paramètres d'URL, `AAAAMMJJ` pour l'export comptable ;
   - la date de demande curative n'accepte que `JJ-MM-AAAA`, et refuse `AAAA-MM-JJ` et une date-heure, que les autres dates métier acceptent : choix par défaut, à confirmer (16-10-2026), l'aligner sur elles.
 
-## Décisions transversales appliquées
+## Paragraphes transversaux (état d'origine)
 
 *Origine : « Inventaire vérifié par domaine (paragraphes transversaux) », ancienne passation.*
 

@@ -8,11 +8,11 @@
 
 Iris est un ERP français natif, simple pour les métiers techniques, déployé **par société sur une instance et une base propres**. Iris est la source de vérité pour clients, sites, catalogue, devis, affaires, interventions, contrats et factures. Microsoft 365, la banque et les plateformes de facturation électronique ne sont que des connecteurs. Voir la [vision produit](PRODUCT-VISION-ERP-TECHNIQUE.md), l'[architecture d'instance](ARCHITECTURE-INSTANCE-DEDIEE.md) et le [modèle de droits](MODELE-DROITS-COMPTES.md). Aucune instance n'est déclarée en production : le déploiement et la validation comptable restent des conditions de sortie, pas des tâches acquises.
 
-Le catalogue et le plan comptable commencent vides et sont paramétrés par la société. Aucune règle de prix ou de commission, aucun compte ni mapping comptable, aucune identité légale ni CGV n'est inventé ou imposé au client. Les dates métier sont saisies et présentées en `JJ-MM-AAAA` ; on distingue le jour civil, au fuseau de la société, de l'instant technique.
+Le catalogue et le plan comptable commencent vides et sont paramétrés par la société. Aucune règle de prix ou de commission, aucun compte ni mapping comptable, aucune identité légale ni CGV ne doit être inventé ni imposé au client. Les dates métier sont saisies et présentées en `JJ-MM-AAAA` ; on distingue le jour civil, au fuseau de la société, de l'instant technique.
 
 ## 1. État actuel par domaine
 
-Statuts : **livré**, **partiel** ou **absent**, au commit indiqué plus haut. « Choix » renvoie à la section 4, « question » à la section 3.
+Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fermé**, au commit indiqué plus haut ; un statut peut porter une réserve (Travaux : livré, place dans le pilote en question). « Choix » renvoie à la section 4, « question » à la section 3.
 
 - **Identité, accès et droits — livré.**
   - Livré :
@@ -29,13 +29,14 @@ Statuts : **livré**, **partiel** ou **absent**, au commit indiqué plus haut. �
     - le journal ne ferme pas encore à un simple administrateur les entrées dont l'auteur est un super administrateur, ni celles d'un compte devenu super administrateur depuis ;
     - un compte qui quitte le type technicien garde son `clients:read` individuel ;
     - l'échéance d'une clé d'intégration n'est pas lue au jour civil de la société.
+  - Sans choix à ce jour : republier une ancienne version des mentions légales ne lui donne pas de nouvelle date de publication (question).
 - **Dates — livré.** Jour et heure de la société (#130), format `JJ-MM-AAAA` (#132). Seule la date de demande curative n'accepte que `JJ-MM-AAAA` ; choix : l'aligner sur les autres dates métier.
 - **Clients, sites, contacts — livré.**
   - Livré :
     - référentiel, avec sélection au-delà des 200 premiers clients (#112, #114, #137, #138, #139) ;
     - lecture par le conducteur (#143, menu ouvert par #145) et par le technicien (#127, #128) ;
     - client d'une affaire : libellé suivi (#142), rattachement SAV par la fiche client (#144), changement journalisé et refusé tant qu'une intervention est rattachée (#146).
-  - Restent à arbitrer, depuis #139 :
+  - Restent à arbitrer, depuis #139 (question) :
     - Factures et Devis n'utilisent pas le sélecteur commun `SelecteurClient`, si bien que leur liste initiale est tronquée à 200 sans le dire ;
     - une réponse allégée (sans contacts ni sites) pour les sélecteurs.
 - **Catalogue et parc — livré.**
@@ -61,13 +62,14 @@ Statuts : **livré**, **partiel** ou **absent**, au commit indiqué plus haut. �
     - ouverture depuis l'Administration et réattribution (#129), clôture par les directeurs (#128).
   - Le prix d'achat prévu des devis n'est pas repris par le chantier (question).
   - La case « Encaissé » d'un chantier reste cochée à la main par l'administration (voir Commissionnement).
+  - Appliqués à l'écran seulement (choix) : le responsable se choisit parmi les conducteurs actifs, et l'obligation de commercial ne compte que les commerciaux actifs ; le serveur vérifie seulement l'activation du compte et compte tous les commerciaux.
   - Défauts connus, plus bas.
 - **SAV, planning, mobile — partiel.**
   - Livré :
     - interventions SAV, rapports, signatures, coûts, planning, file « à planifier », planning public ;
     - navigation sur téléphone (#118) ;
     - mesure des écrans de 320 à 1024 px (#147 ; suivi des remarques dans #149 à #152).
-  - Absent : parcours technicien dédié sur téléphone (lot pilote 3). Le technicien écrit encore hors de son affaire (planning, catégories, fournisseurs) et voit tout le planning ; choix : le restreindre au lot 3.
+  - Absent : parcours technicien dédié sur téléphone (lot pilote 3). Le technicien écrit encore hors de son affaire (planning, catégories, fournisseurs) et voit tout le planning ; choix : lui retirer ces écritures au lot 3, et limiter son planning aux chantiers dont il est chargé (à appliquer, sans lot fixé).
   - Ne pas qualifier « l'écran Travaux reste entièrement à créer » sans auditer la fiche actuelle.
   - Les issues [#16](https://github.com/Noxia-Groupe/iris/issues/16) et [#19](https://github.com/Noxia-Groupe/iris/issues/19) restent ouvertes : comparer leurs sous-points au code avant de les replanifier.
 - **Contrats de maintenance — partiel.**
@@ -87,7 +89,7 @@ Statuts : **livré**, **partiel** ou **absent**, au commit indiqué plus haut. �
   - Banque et rapprochement viennent après le pilote (A3).
   - Découper et prioriser paiements, banque, abonnements télécom et financeurs avec des critères et des dépendances explicites.
 - **Commissionnement — fermé.**
-  - Depuis #159, aucune commission ni prime n'est calculée tant qu'aucun plan commercial n'est attribué. Le CA et la marge validés restent suivis.
+  - Depuis #159, aucune commission ni prime n'est due tant qu'aucun plan commercial n'est attribué : le calcul conservé reçoit des règles neutres et rend zéro. Le CA et la marge validés restent suivis.
   - Le barème global (`ParametresRemuneration`) reste enregistrable, sans effet.
   - Le plan commercial (lot (i)) est absent. Il recouvre les profils versionnés, attribués par personne et non rétroactifs de l'[issue #15](https://github.com/Noxia-Groupe/iris/issues/15) : ne pas substituer le barème global au besoin d'individualisation.
   - La case « Encaissé » d'un chantier reste manuelle. L'« encaissé » déduit des règlements, décidé au lot pilote 1 (A3), sera repris par le plan commercial.
@@ -101,19 +103,20 @@ Statuts : **livré**, **partiel** ou **absent**, au commit indiqué plus haut. �
     - les icônes et la couleur de thème viennent de [index.html](../client/index.html) et `client/public/*.png` ;
     - le menu, lui, affiche le nom de la société (#118).
   - La police est chargée depuis Google Fonts ; choix : l'héberger avec l'application.
-- **Installation et mise en service — absent.**
+- **Installation et mise en service — partiel (préparé, non validé).**
   - Compose, migrations et CI préparent une instance isolée ; accès de secours de l'instance ([configuration](CONFIGURATION-ENVIRONNEMENT.md), [accès sans Microsoft](ACCES-SANS-MICROSOFT.md)).
   - Ne sont pas attestés : portail de secours **plateforme** séparé, configuration guidée de l'authentification, recette de production, sauvegarde et restauration testées, exploitation multi-instances, validation légale ou comptable.
   - Ne pas confondre le secours de l'instance avec un accès opérateur cross-instance.
   - Séparer le rôle SQL applicatif, non propriétaire, du migrateur avant de revendiquer l'intégrité contre les écritures SQL directes (avertissement du [README](../README.md)).
 
-### Défauts connus, non corrigés
+### Défauts connus et points à surveiller
 
 - Saisie sur un chantier pendant l'annulation de son devis (relevé par le cinquième audit de #129, préexistant, **non corrigé ; tranché par un choix par défaut, à appliquer (section 4)**) : une heure saisie au même moment peut rester vivante sur un chantier annulé, contre la règle « une affaire commencée ne s'annule pas » (reproduit 20 fois sur 20, sur `main` comme avec #129). La saisie lit le chantier hors transaction (`assertChantierWritable`), et l'annulation ne le verrouille pas ; les achats sont probablement concernés aussi. Piste : l'annulation verrouille le chantier après le devis, et les saisies le verrouillent puis relisent son statut. Depuis #146, la création d'une intervention SAV rattachée et celle d'une facture d'affaire font déjà ainsi (verrou partagé, statut relu) : elles attendent une annulation en cours, puis sont refusées. De même, en théorie, la conversion et la fiche chantier pourraient poser simultanément la même référence d'affaire sur deux chantiers (non reproduit). Choix par défaut, à confirmer (16-10-2026) : corriger par un verrou du chantier dans un lot dédié.
 - Statut d'un chantier modifiable sans contrôle par l'API (relevé pendant le treizième audit de #129, préexistant, **non corrigé ; tranché par un choix par défaut, à appliquer (section 4)**) : `PATCH /api/chantiers/:id` recopie le `statut` envoyé par une session administrateur sans vérifier sa valeur (champ texte en base). Un administrateur peut ainsi annuler un chantier sans annuler son devis, sans date ni motif d'annulation, y compris un chantier qui porte déjà des heures ou des achats (que l'annulation du devis refuse), ou lui donner un statut inconnu, en contournant `PATCH /api/chantiers/:id/statut` et l'annulation du devis. Une telle annulation est sans retour : la fiche et son statut sont ensuite figés (409), et seule la duplication du devis, qui crée une nouvelle affaire, permet de la reprendre ; le devis d'origine reste « accepté », rattaché à un chantier annulé, tant qu'il n'est pas lui-même annulé (ce qui renseigne alors la date et le motif du chantier). Si le chantier portait des saisies, le devis ne peut plus être annulé (409) et ses saisies ne s'archivent plus : le chantier reste annulé sans date ni motif. Tant que le devis n'est pas annulé, l'écran Devis affiche « Chantier issu de ce devis » alors que son chantier est annulé. L'interface n'envoie jamais ce champ. Choix par défaut, à confirmer (16-10-2026) : retirer le statut de la modification générale, qui passe par les routes dédiées.
 - Création d'une intervention par un conducteur hors de son périmètre (relevé en préparant cette passation, préexistant, **non corrigé ; tranché par un choix par défaut, à appliquer (section 4)**) : `POST /api/interventions` ne contrôle que le client du chantier visé et son annulation, pas le périmètre de lecture du conducteur.
 - Dates du planning et de la demande curative, lues hors de `dateIsoStricte` (relevé par le huitième audit de #130, préexistant) : le planning est corrigé par #132 (lecture par `dateIsoStricte`). La demande curative n'accepte toujours que `JJ-MM-AAAA` et refuse une date-heure : choix par défaut, à confirmer, l'aligner sur les autres dates métier (lot (h)).
 - « Socket hang up » (lot (g)) : une occurrence en CI E2E de #123, puis une réinitialisation de connexion (`read ECONNRESET`, `facturation.spec.ts`) en CI E2E de #129, de cause probablement identique (non reproduite). Correctif probable livré par #131 (connexions inactives gardées 65 s par le serveur) ; à surveiller en CI.
+- Écrans `/admin` sur téléphone (#147) : pour le conducteur et le technicien, `/admin` garde un bouton hors écran préexistant (suivi dans #150).
 
 ## 2. Pilote
 
@@ -152,7 +155,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
    - Si Microsoft 365 n'est pas prêt au premier jour, le pilote télécharge le PDF et l'envoie à la main, comme aujourd'hui (recommandation initiale, à confirmer).
    - Journal des envois : choix par défaut, à confirmer.
-   - Ne pas déclarer l'envoi Outlook réalisé du seul fait du SSO.
+   - Ne pas déclarer l'envoi Outlook ni la synchronisation réalisés du seul fait du SSO.
 
 **Facturation électronique (A2).**
 - Si l'entreprise pilote est une PME, le pilote fonctionne en PDF avec l'export comptable. Le lot Factur-X avec plateforme agréée est cadré pour l'échéance d'émission des PME (calendrier à faire confirmer par le cabinet).
@@ -174,7 +177,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
     - « en développé » : une commission sur le total des paiements prévus pendant toute la durée du contrat ;
     - ou à la prise de commande de l'abonnement ou de la location : un nombre de mois, ou un pourcentage du montant mensuel.
 
-  Le lot recouvre les profils de commission attribués par personne et versionnés de l'[issue #15](https://github.com/Noxia-Groupe/iris/issues/15) (transversal « commissionnement » ci-dessus), dont la non-rétroactivité est décidée le 16-10-2026 (A5, ci-dessous). Existant à prendre en compte :
+  Le lot recouvre les profils de commission attribués par personne et versionnés de l'[issue #15](https://github.com/Noxia-Groupe/iris/issues/15) (section 1, « Commissionnement »), dont la non-rétroactivité est décidée le 16-10-2026 (A5, ci-dessous). Existant à prendre en compte :
   - le barème progressif, les objectifs, les primes et le barème réduit (`ParametresRemuneration`, Administration > Marges & Commissions) se règlent pour toute la société, mais ne sont plus appliqués depuis #159 (plus bas). Le calcul conservé fait naître une commission d'un chantier encaissé, rattachée au mois de sa clôture, et ne reçoit plus que des règles neutres ;
   - tant qu'elles étaient appliquées, ces règles étaient relues à chaque calcul : modifier un barème recalculait aussi les mois passés. L'issue #15 prévoit le gel de la règle et du montant au fait générateur ; A5 en décide pour le plan commercial (changement de plan à la date d'affectation), reste la date qui compte pour une affaire (question plus bas) ;
   - le mois de rattachement se lit en UTC sur la date de clôture, qui retombe sur la dernière modification (un instant) quand la date de fin manque : à reprendre au jour de la société avec le fait générateur (sans objet tant qu'aucune donnée n'existe) ;
@@ -212,7 +215,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 
 ### Ordre de travail (proposé, à confirmer par Nelson)
 
-Depuis le 16-10-2026, l'ordre suit le pilote : voir la section 2. Après le pilote, ordre indicatif, à revoir selon les vrais utilisateurs : la facturation électronique (A2) suit l'échéance légale, à confirmer par le cabinet ; puis banque et rapprochement, abonnements et locations (lot (k)), financeurs et télécom, plan commercial (lot (i)), astreintes (lot (j)). La préparation de l'instance pilote (recette métier et sécurité, configuration vide réelle, sauvegarde **et restauration testées**, supervision, validation du cabinet, autorisation explicite de mise en service) reste un préalable à la mise en service ; pas de déploiement automatique.
+Depuis le 16-10-2026, l'ordre suit le pilote : voir le tableau des lots ci-dessus. Après le pilote, ordre indicatif, à revoir selon les vrais utilisateurs : la facturation électronique (A2) suit l'échéance légale, à confirmer par le cabinet ; puis banque et rapprochement, abonnements et locations (lot (k)), financeurs et télécom, plan commercial (lot (i)), astreintes (lot (j)). La préparation de l'instance pilote (recette métier et sécurité, configuration vide réelle, sauvegarde **et restauration testées**, supervision, validation du cabinet, autorisation explicite de mise en service) reste un préalable à la mise en service ; pas de déploiement automatique.
 
 ## 3. Questions ouvertes pour Nelson
 
@@ -229,6 +232,8 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 - **Augmentation automatique des abonnements et locations (lot (k))** : quel calcul « habituel » proposer par défaut (indice de révision, et lequel, ou pourcentage fixe) ? Il touche les montants : Iris n'en invente pas.
 - **Facturation électronique (A2)** : taille de l'entreprise pilote et plateforme agréée retenue, et confirmation que la réception des factures électroniques est assurée hors d'Iris, avec le cabinet.
 - **API des financeurs (lot (k))** : périmètre de l'intégration Grenke (simulations seules, ou aussi les dossiers), à préciser quand le lot démarre.
+- **Sélection des clients (#139)** : Factures et Devis doivent-ils passer au sélecteur commun `SelecteurClient` (leur liste initiale est tronquée à 200 sans le dire), et les sélecteurs recevoir une réponse allégée, sans contacts ni sites ? Points restés à arbitrer depuis #139 ; s'il s'agit d'un micro-arbitrage d'affichage (règle 5), il sera tranché dans la PR qui les traite.
+- **Mentions légales, date de republication** : republier une ancienne version des mentions ne lui donne pas de nouvelle date de publication (`publieeLe` n'est fixé qu'à la première publication). Faut-il la dater ? L'auteur de la création et de la publication fait déjà l'objet d'un choix par défaut (section 4) ; ce trou-ci n'en a pas.
 - **Catalogue dans les devis (lot pilote 2, #161)** :
   - (montants) le prix d'achat prévu des lignes de devis doit-il alimenter le chantier ouvert (budget matériel prévu, marge estimée), à la place de la moyenne des chantiers terminés ?
   - (montants) les heures vendues d'un chantier additionnent la quantité des lignes de main-d'œuvre, quelle que soit leur unité : une prestation au forfait y compte pour une heure. Convertir par la durée indicative de la fiche, ne compter que les lignes à l'heure, ou garder ce calcul ?
@@ -236,7 +241,7 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 
 ## 4. Choix par défaut, à confirmer
 
-Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, la plus restrictive. Nelson les corrige si besoin. Chaque choix porte son état : **appliqué** (avec sa PR) ou **à appliquer** (lot à planifier, sauf mention).
+Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, la plus restrictive. Nelson les corrige si besoin. Chaque choix porte son état : **appliqué** (avec sa PR), **appliqué à l'écran** (ce que le serveur ne vérifie pas encore est précisé) ou **à appliquer** (lot à planifier, sauf mention).
 
 **Droits et comptes**
 - Création d'intervention : refusée si le chantier visé est hors du périmètre de lecture du conducteur. **À appliquer** : le serveur ne contrôle aujourd'hui que le client et l'annulation du chantier.
@@ -273,7 +278,7 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 
 **Lot (f), ouverture et réattribution d'un chantier** (#129)
 - Ouverture depuis le devis signé conservée : interprétation retenue par #129, à valider par Nelson. **Appliqué**.
-- Responsable choisi parmi les conducteurs actifs seulement. **Appliqué à l'écran** ; le serveur ne vérifie que l'activation du compte. Un titulaire autre qu'un conducteur (technicien, responsable) ne s'attribue que par l'API ; il s'affiche « (hors des conducteurs actifs) » depuis #129.
+- Responsable choisi parmi les conducteurs actifs seulement (16-10-2026). **Appliqué à l'écran** ; le serveur ne vérifie que l'activation du compte. Un titulaire autre qu'un conducteur (technicien, responsable) ne s'attribue que par l'API ; il s'affiche « (hors des conducteurs actifs) » depuis #129.
 - Pas de réattribution groupée. **Appliqué** (état actuel).
 - Réglages d'ouverture réservés à l'administration. **Appliqué** (#129).
 - Le formulaire d'Administration n'ouvre toujours pas de chantier sans conducteur actif. L'API n'est pas modifiée, car l'écran Devis convertit sans titulaire (état actuel conservé). **Appliqué**.
@@ -299,12 +304,7 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
   - « Répartir le montant » place un surplus sur la facture à l'échéance la plus récente.
 - Une facture soldée par avoirs, sans règlement, reste émise (« Soldée par avoir ») ; un trop-perçu est affiché, sans remboursement dans ce lot.
 
-**Commissions sans plan commercial** (**appliqués** par #159)
-- Les blocs de barème et de primes et la colonne de commission par chantier sont retirés des écrans, plutôt qu'affichés à zéro (le plan commercial les redéfinira).
-- La carte du tableau de bord s'intitule « Commission commerciale » ou « Ma commission », et non plus « versée » ou « gagnée ».
-- La saisie du suivi administratif disparaît de « Mes commerciaux » ; sa route reste ouverte aux administrateurs (fait journalisé, sans montant).
-- Les règles générales restent enregistrables par un super administrateur, sans effet sur aucun montant. Leur libellé du barème réduit nomme toujours la case des chantiers, gardée mais présentée « sans effet tant qu'aucun plan commercial n'est attribué ».
-- Le document de référence de l'onglet de rémunération (primes « Boost », commissions sur contrats récurrents, clauses et reliquat d'une politique de société écrite en dur) est retiré, option la plus restrictive : il contredisait la règle « aucune valeur de société dans le code » et ne s'appliquait pas.
+**Commissions sans plan commercial** (**appliqués** par #159) : les cinq choix par défaut, à confirmer, sont notés au lot (i), section 2, avec la décision A5 qu'ils appliquent ; ils ne sont pas recopiés ici, pour ne pas les tenir à deux endroits.
 
 **Catalogue dans les devis** (lot pilote 2, **appliqués** par #161)
 - Le prix d'achat prévu d'une ligne n'est lu et écrit que par l'administration (session). Une clé d'intégration le lit avec le scope `finances:read`, sans jamais l'écrire.
