@@ -1,0 +1,202 @@
+USE (global) corsMiddleware
+USE (chemin) jsonParser
+USE (global) jsonParser
+USE (global) <anonymous>
+GET /api/factures/chronologie requireAuth > requireAdmin > <anonymous>
+GET /api/factures/a-regler requireAuth > requireAdmin > <anonymous>
+GET /api/factures requireAuth > requireAdmin > <anonymous>
+GET /api/factures/:id/document.pdf requireAuth > requireAdmin > <anonymous>
+GET /api/factures/:id/journal requireAuth > requireAdmin > <anonymous>
+GET /api/factures/:id/tracabilite requireAuth > requireAdmin > <anonymous>
+POST /api/factures requireAuth > requireAdmin > <anonymous>
+GET /api/facturation/prete-a-facturer requireAuth > requireAdmin > <anonymous>
+GET /api/comptabilite requireAuth > requireAdmin > <anonymous>
+POST /api/comptabilite/comptes requireAuth > requireAdmin > <anonymous>
+PATCH /api/comptabilite/comptes/:id requireAuth > requireAdmin > <anonymous>
+GET /api/comptabilite/comptes/:id/journal requireAuth > requireAdmin > <anonymous>
+PATCH /api/comptabilite/comptes/:id/activation requireAuth > requireAdmin > <anonymous>
+POST /api/comptabilite/importer requireAuth > requireAdmin > <anonymous>
+GET /api/comptabilite/regles/journal requireAuth > requireAdmin > <anonymous>
+PUT /api/comptabilite/regles/:cle requireAuth > requireAdmin > <anonymous>
+DELETE /api/comptabilite/regles/:cle requireAuth > requireAdmin > <anonymous>
+DELETE /api/comptabilite/tva/:taux requireAuth > requireAdmin > <anonymous>
+PUT /api/comptabilite/tva/:taux requireAuth > requireAdmin > <anonymous>
+GET /api/factures/export-comptable.csv requireAuth > requireAdmin > <anonymous>
+POST /api/mentions-legales/:version/publier requireAuth > requireAdmin > <anonymous>
+POST /api/mentions-legales requireAuth > requireAdmin > <anonymous>
+GET /api/mentions-legales requireAuth > requireAdmin > <anonymous>
+POST /api/factures/:id/emettre requireAuth > requireAdmin > <anonymous>
+POST /api/factures/:id/regler requireAuth > requireAdmin > <anonymous>
+POST /api/factures/:id/annuler requireAuth > requireAdmin > <anonymous>
+POST /api/factures/:id/avoirs requireAuth > requireAdmin > <anonymous>
+GET /api/reglements requireAuth > requireAdmin > <anonymous>
+POST /api/reglements requireAuth > requireAdmin > <anonymous>
+POST /api/reglements/:id/contrepasser requireAuth > requireAdmin > <anonymous>
+GET /api/contrats-maintenance requireAuth > requireAdmin > <anonymous>
+GET /api/contrats-maintenance/:id/journal-saisies requireAuth > requireAdmin > <anonymous>
+POST /api/contrats-maintenance requireAuth > requireAdmin > <anonymous>
+PATCH /api/contrats-maintenance/:id requireAuth > requireAdmin > <anonymous>
+PATCH /api/contrats-maintenance/:id/statut requireAuth > requireAdmin > <anonymous>
+POST /api/contrats-maintenance/:id/avancer-echeance requireAuth > requireAdmin > <anonymous>
+POST /api/contrats-maintenance/:id/generer-intervention requireAuth > requireAdmin > <anonymous>
+POST /api/interventions requireAuth > blockCommercial > <anonymous> > <anonymous>
+GET /api/interventions requireAuth > blockCommercial > <anonymous>
+GET /api/interventions/:id/couts requireAuth > blockCommercial > <anonymous>
+POST /api/interventions/:id/couts/heures requireAuth > blockCommercial > <anonymous>
+POST /api/interventions/:id/couts/achats requireAuth > blockCommercial > <anonymous>
+PATCH /api/interventions/:id/couts/:type/:coutId requireAuth > blockCommercial > <anonymous>
+POST /api/interventions/:id/couts/:type/:coutId/:action requireAuth > blockCommercial > <anonymous>
+GET /api/interventions/:id/journal-saisies requireAuth > blockCommercial > <anonymous>
+POST /api/interventions/:id/rapports requireAuth > blockCommercial > <anonymous>
+POST /api/interventions/rapports/:rapportId/signature requireAuth > blockCommercial > <anonymous>
+PATCH /api/interventions/:id/statut requireAuth > blockCommercial > <anonymous>
+GET /api/planning/interventions-a-planifier requireAuth > blockCommercial > requirePlanningActif > <anonymous>
+PUT /api/interventions/:id/planning requireAuth > blockCommercial > blockTechnicien > requirePlanningActif > <anonymous>
+GET /api/health <anonymous>
+GET /api/config <anonymous>
+POST /api/auth/sso <anonymous>
+GET /api/auth/secours/etat <anonymous>
+POST /api/auth/secours <anonymous>
+GET /api/me requireAuth > <anonymous>
+PUT /api/me/theme requireAuth > <anonymous>
+GET /api/chantiers requireAuth > listerChantiers
+GET /api/v1/chantiers <anonymous> > listerChantiers
+GET /api/chantiers/:id requireAuth > <anonymous>
+GET /api/chantiers/:id/journal-saisies requireAuth > <anonymous>
+POST /api/chantiers requireAuth > blockCommercial > <anonymous>
+PATCH /api/chantiers/:id requireAuth > blockCommercial > <anonymous>
+DELETE /api/chantiers/:id requireAuth > requireAdmin > <anonymous>
+PATCH /api/chantiers/:id/statut requireAuth > blockCommercialSeulement > <anonymous>
+PATCH /api/chantiers/:id/commercial requireAuth > blockCommercial > <anonymous>
+GET /api/users requireAuth > requireAdmin > <anonymous>
+POST /api/users requireAuth > requireAdmin > <anonymous>
+DELETE /api/users/:id requireAuth > requireAdmin > <anonymous>
+PATCH /api/users/:id/role requireAuth > requireAdmin > <anonymous>
+PATCH /api/users/:id/responsable-hierarchique requireAuth > requireAdmin > <anonymous>
+PATCH /api/users/:id/est-commercial requireAuth > requireAdmin > <anonymous>
+PUT /api/users/:id/permissions requireAuth > requireSuperAdmin > <anonymous>
+PATCH /api/users/:id/acces-finance requireAuth > requireSuperAdmin > <anonymous>
+PATCH /api/users/:id/actif requireAuth > requireAdmin > <anonymous>
+GET /api/commerciaux requireAuth > <anonymous>
+GET /api/conducteurs requireAuth > <anonymous>
+GET /api/intervenants requireAuth > <anonymous>
+POST /api/intervenants requireAuth > requireAdmin > <anonymous>
+PUT /api/intervenants/:id requireAuth > requireAdmin > <anonymous>
+PUT /api/intervenants/:id/compte requireAuth > requireAdmin > <anonymous>
+DELETE /api/intervenants/:id requireAuth > requireAdmin > <anonymous>
+GET /api/planning/chantiers requireAuth > blockCommercial > requirePlanningActif > <anonymous>
+GET /api/planning/events requireAuth > blockCommercial > requirePlanningActif > <anonymous>
+POST /api/planning/events requireAuth > blockCommercial > blockTechnicien > requirePlanningActif > <anonymous>
+PATCH /api/planning/events/:id requireAuth > blockCommercial > blockTechnicien > requirePlanningActif > <anonymous>
+DELETE /api/planning/events/:id requireAuth > blockCommercial > blockTechnicien > requirePlanningActif > <anonymous>
+GET /api/planning/types requireAuth > blockCommercial > requirePlanningActif > <anonymous>
+POST /api/planning/types requireAuth > blockCommercial > blockTechnicien > requirePlanningActif > <anonymous>
+PUT /api/planning/types/:id requireAuth > blockCommercial > blockTechnicien > requirePlanningActif > <anonymous>
+DELETE /api/planning/types/:id requireAuth > blockCommercial > blockTechnicien > requirePlanningActif > <anonymous>
+GET /api/planning/share requireAuth > requireAdmin > requirePlanningActif > <anonymous>
+POST /api/planning/share requireAuth > requireAdmin > requirePlanningActif > <anonymous>
+PATCH /api/planning/share requireAuth > requireAdmin > requirePlanningActif > <anonymous>
+GET /api/planning/public/:token <anonymous>
+GET /api/categories requireAuth > <anonymous>
+POST /api/categories requireAuth > blockCommercial > blockTechnicien > <anonymous>
+PUT /api/categories/:id requireAuth > blockCommercial > blockTechnicien > <anonymous>
+DELETE /api/categories/:id requireAuth > blockCommercial > blockTechnicien > <anonymous>
+GET /api/fournisseurs requireAuth > <anonymous>
+POST /api/fournisseurs requireAuth > blockCommercial > blockTechnicien > <anonymous>
+PUT /api/fournisseurs/:id requireAuth > blockCommercial > blockTechnicien > <anonymous>
+DELETE /api/fournisseurs/:id requireAuth > blockCommercial > blockTechnicien > <anonymous>
+POST /api/achats requireAuth > <anonymous> > <anonymous>
+PATCH /api/achats/:id requireAuth > <anonymous> > <anonymous>
+DELETE /api/achats/:id requireAuth > <anonymous> > <anonymous>
+POST /api/achats/:id/restaurer requireAuth > <anonymous> > <anonymous>
+GET /api/achats requireAuth > listerAchats
+GET /api/v1/achats <anonymous> > listerAchats
+GET /api/heures requireAuth > listerHeures
+GET /api/v1/heures <anonymous> > listerHeures
+POST /api/heures requireAuth > <anonymous> > <anonymous>
+PATCH /api/heures/:id requireAuth > <anonymous> > <anonymous>
+DELETE /api/heures/:id requireAuth > <anonymous> > <anonymous>
+POST /api/heures/:id/restaurer requireAuth > <anonymous> > <anonymous>
+PATCH /api/chantiers/:id/encaisse requireAuth > requireAdmin > <anonymous>
+PUT /api/commerciaux/:id/prime-mensuelle requireAuth > requireAdmin > <anonymous>
+GET /api/parametres requireAuth > requireAdmin > <anonymous>
+GET /api/registry/companies requireAuth > requireAdmin > <anonymous>
+GET /api/admin/api-keys requireAuth > requireSuperAdmin > <anonymous>
+GET /api/admin/api-scopes requireAuth > requireSuperAdmin > <anonymous>
+POST /api/admin/api-keys requireAuth > requireSuperAdmin > <anonymous>
+POST /api/admin/api-keys/:id/revoke requireAuth > requireSuperAdmin > <anonymous>
+GET /api/v1/company <anonymous> > <anonymous>
+GET /api/clients requireAuth > <anonymous> > listerClients
+GET /api/v1/clients <anonymous> > listerClients
+POST /api/clients requireAuth > requireAdmin > creerClient
+POST /api/v1/clients <anonymous> > creerClient
+GET /api/clients/:id requireAuth > <anonymous> > lireClient
+GET /api/v1/clients/:id <anonymous> > lireClient
+PUT /api/clients/:id requireAuth > requireAdmin > modifierClient
+PUT /api/v1/clients/:id <anonymous> > modifierClient
+DELETE /api/clients/:id requireAuth > requireAdmin > desactiverClient
+DELETE /api/v1/clients/:id <anonymous> > desactiverClient
+POST /api/clients/:clientId/contacts requireAuth > requireAdmin > creerContact
+POST /api/v1/clients/:clientId/contacts <anonymous> > creerContact
+PUT /api/clients/:clientId/contacts/:id requireAuth > requireAdmin > modifierContact
+PUT /api/v1/clients/:clientId/contacts/:id <anonymous> > modifierContact
+POST /api/clients/:clientId/sites requireAuth > requireAdmin > creerSite
+POST /api/v1/clients/:clientId/sites <anonymous> > creerSite
+PUT /api/clients/:clientId/sites/:id requireAuth > requireAdmin > modifierSite
+PUT /api/v1/clients/:clientId/sites/:id <anonymous> > modifierSite
+GET /api/clients/:clientId/equipements requireAuth > requireAdmin > listerEquipementsClient
+GET /api/v1/clients/:clientId/equipements <anonymous> > listerEquipementsClient
+POST /api/clients/:clientId/equipements requireAuth > requireAdmin > creerEquipementClient
+POST /api/v1/clients/:clientId/equipements <anonymous> > creerEquipementClient
+POST /api/clients/:clientId/equipements/:id/archiver requireAuth > requireAdmin > archiverEquipementClient
+POST /api/v1/clients/:clientId/equipements/:id/archiver <anonymous> > archiverEquipementClient
+GET /api/clients/:id/chantiers requireAuth > <anonymous> > <anonymous> > <anonymous>
+GET /api/catalogue/categories requireAuth > requireAdmin > listerCategoriesCatalogue
+GET /api/v1/catalogue/categories <anonymous> > listerCategoriesCatalogue
+POST /api/catalogue/categories requireAuth > requireAdmin > creerCategorieCatalogue
+POST /api/v1/catalogue/categories <anonymous> > creerCategorieCatalogue
+GET /api/catalogue/:family requireAuth > requireAdmin > listerCatalogue
+GET /api/v1/catalogue/:family <anonymous> > listerCatalogue
+POST /api/catalogue/:family requireAuth > requireAdmin > creerFicheCatalogue
+POST /api/v1/catalogue/:family <anonymous> > creerFicheCatalogue
+PUT /api/catalogue/:family/:id requireAuth > requireAdmin > modifierFicheCatalogue
+PUT /api/v1/catalogue/:family/:id <anonymous> > modifierFicheCatalogue
+DELETE /api/catalogue/:family/:id requireAuth > requireAdmin > desactiverFicheCatalogue
+DELETE /api/v1/catalogue/:family/:id <anonymous> > desactiverFicheCatalogue
+GET /api/devis/catalogue requireAuth > <anonymous> > <anonymous>
+GET /api/devis requireAuth > <anonymous> > listerDevis
+GET /api/v1/devis <anonymous> > listerDevis
+POST /api/devis requireAuth > <anonymous> > creerDevis
+POST /api/v1/devis <anonymous> > creerDevis
+PATCH /api/devis/:id requireAuth > <anonymous> > modifierDevis
+PATCH /api/v1/devis/:id <anonymous> > modifierDevis
+POST /api/devis/:id/revisions requireAuth > <anonymous> > creerRevision
+POST /api/v1/devis/:id/revisions <anonymous> > creerRevision
+POST /api/devis/:id/signature requireAuth > <anonymous> > signerDevis
+PUT /api/devis/:id/statut requireAuth > <anonymous> > changerStatutDevis
+PUT /api/v1/devis/:id/statut <anonymous> > changerStatutDevis
+POST /api/devis/:id/convertir requireAuth > <anonymous> > convertirDevis
+POST /api/v1/devis/:id/convertir <anonymous> > convertirDevis
+GET /api/devis/a-convertir requireAuth > <anonymous> > <anonymous> > <anonymous>
+POST /api/devis/:id/acompte requireAuth > requireAdmin > <anonymous>
+POST /api/devis/:id/annulation requireAuth > requireAdmin > <anonymous>
+POST /api/devis/:id/duplication requireAuth > <anonymous> > <anonymous>
+GET /api/company requireAuth > <anonymous>
+PUT /api/company requireAuth > requireSuperAdmin > <anonymous>
+GET /api/parametres/remuneration requireAuth > requireAdmin > <anonymous>
+PUT /api/parametres/remuneration requireAuth > requireSuperAdmin > <anonymous>
+PUT /api/parametres requireAuth > requireAdmin > <anonymous>
+GET /api/modules requireAuth > <anonymous>
+PUT /api/modules requireAuth > requireSuperAdmin > <anonymous>
+GET /api/journal-administration requireAuth > requireAdmin > <anonymous>
+GET /api/journal-administration/export.csv requireAuth > requireAdmin > <anonymous>
+PUT /api/journal-administration/conservation requireAuth > requireSuperAdmin > <anonymous>
+GET /api/stats/global requireAuth > <anonymous>
+GET /api/stats/conducteurs requireAuth > requireTravauxRead > <anonymous>
+GET /api/stats/conducteurs/assiduite requireAuth > requireTravauxRead > <anonymous>
+GET /api/stats/chantiers-repartition requireAuth > requireAdmin > <anonymous>
+GET /api/stats/intervenants requireAuth > requireTravauxRead > <anonymous>
+GET /api/stats/fournisseurs requireAuth > requireTravauxRead > <anonymous>
+GET /api/stats/types-chantiers requireAuth > requireTravauxRead > <anonymous>
+GET /api/stats/commerciaux requireAuth > <anonymous>
+POST /api/chantiers/:id/analyze requireAuth > <anonymous>
