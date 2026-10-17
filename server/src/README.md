@@ -54,14 +54,21 @@ Domaines prévus :
 - **Deux preuves par PR**, à lancer depuis `server/` après `npm run build` :
   - `node scripts/routes.mjs --verifier` compare les routes enregistrées (ordre, méthode, chemin, chaîne des gardes) à `scripts/routes-reference.txt`, écrit depuis `main` avant le découpage. La CI le rejoue.
   - `node scripts/verifier-deplacement.mjs origin/main` vérifie qu'aucune ligne de la base n'a disparu, liste les seules lignes ajoutées et indique d'où vient chaque bloc déplacé.
+- **Limites des deux preuves.** Elles ne voient ni un changement d'ordre à l'intérieur d'un bloc, ni une ligne retirée puis remise ailleurs, ni un import renommé, ni les permissions portées par les gardes anonymes (`requirePermission(…)`, `requireApiKey(…)`). Elles seront renforcées avant la PR 2 : blocs contigus vérifiés, imports contrôlés, permissions et empreinte de chaque gestionnaire ajoutées à la référence. D'ici là, chaque PR reçoit aussi une vérification octet pour octet par son audit.
+- **Imports sans renommage** : aucun `import { a as b }` pendant le découpage.
+- **Ordre de chargement inchangé** : `index.ts` importe `src/env.ts` après les bibliothèques, au moment où il appelait `dotenv.config()` avant le découpage. Certaines bibliothèques lisent l'environnement à leur chargement (`DEBUG`, `NO_COLOR`…).
+- **Domaines dispersés dans le fichier.** Plusieurs domaines ont leurs routes en plusieurs endroits d'`index.ts` : factures, chantiers, interventions, planning, société, paramètres, commerciaux. Leur module expose alors plusieurs fonctions d'enregistrement, appelées chacune à l'emplacement de son bloc. Un réordonnancement n'est admis que s'il est prouvé sans recouvrement de chemins et annoncé dans la PR.
+- **`routeMixte`** dépend de `app` : il deviendra une fabrique, `creerRouteMixte(app)`, dont le corps reste identique, pour que ses appels ne changent pas.
+- **Utilitaires partagés d'abord** : une fonction dont se servent plusieurs domaines est déplacée vers `commun/`, `droits/` ou `http/` avant le premier domaine qui l'emploie.
 - **Aucun test modifié.** `index.ts` ré-exporte ce que les tests importent de `dist/index.js`.
 - **Pas de dépendance circulaire.** Un module importe `db`, `http`, `droits`, `commun` ou la logique d'un autre domaine, jamais `index.ts`.
 - **Logique métier.** Les fonctions déjà séparées des routes passent dans le `metier.ts` de leur domaine. La logique écrite dans le corps d'un gestionnaire y reste pendant le découpage, puisque l'en extraire changerait du code ; son extraction sera proposée ensuite, domaine par domaine, si elle est utile.
-- **Taille.** Aucun fichier de code applicatif ne dépasse environ 800 lignes (`CLAUDE.md`).
+- **Taille.** Aucun fichier de code applicatif ne dépasse environ 800 lignes (`CLAUDE.md`). Les grands domaines (devis, chantiers, factures, comptabilité) auront plusieurs fichiers de routes.
 
 ## Ordre prévu des PR (proposition)
 
 1. Socle (`env`, `db`, rôles, authentification, gardes de type de compte, `paramId`), scripts de preuve, et domaine `referentiels`.
+1 bis. Outils de preuve renforcés (blocs contigus, imports, permissions des gardes, empreintes des gestionnaires), sans déplacement de code.
 2. Droits : permissions, clés d'intégration (`requireApiKey`, `routeMixte`), périmètres de lecture ; dates partagées.
 3. Journal d'administration ; domaines `parametres` et `administration`.
 4. Domaines `authentification` et `utilisateurs`.

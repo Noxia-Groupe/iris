@@ -1,4 +1,3 @@
-import './src/env';
 import express from 'express';
 import cors from 'cors';
 import { PrismaClient, Prisma } from '@prisma/client';
@@ -8,12 +7,15 @@ import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import PDFDocument from 'pdfkit';
+// Chargement de server/.env au même moment qu'avant le découpage : après les bibliothèques,
+// dont certaines lisent l'environnement à leur chargement (DEBUG, NO_COLOR…).
+import './src/env';
 import { prisma, transactionVerifiee } from './src/db';
 import {
   ROLE_SUPERADMIN, ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL,
   ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole,
 } from './src/droits/roles';
-import { AuthRequest, JWT_SECRET, brancheHierarchique, requireAuth, resolveJwtSecret } from './src/http/auth';
+import { type AuthRequest, JWT_SECRET, brancheHierarchique, requireAuth, resolveJwtSecret } from './src/http/auth';
 import { blockCommercial, blockTechnicien, requireAdmin, requireSuperAdmin, requireTravauxRead } from './src/http/gardes';
 import { paramId } from './src/http/requete';
 import { enregistrerRoutesReferentiels } from './src/domaines/referentiels/routes';
