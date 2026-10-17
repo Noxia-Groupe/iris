@@ -59,6 +59,7 @@ const ACTIONS_JOURNAL: Record<string, string> = {
   REVOCATION: 'Révocation',
   PUBLICATION: 'Publication',
   NOUVEAU_LIEN: 'Nouveau lien',
+  FICHE_INTERVENANT: 'Fiche intervenant',
 };
 
 const FILTRES_VIDES: Filtres = { du: '', au: '', type: '', auteur: '' };
@@ -71,6 +72,7 @@ const CHAMPS_JOURNAL: Record<string, string> = {
   permissions: 'Permissions',
   actif: 'Actif',
   responsableHierarchique: 'Responsable hiérarchique',
+  ficheIntervenant: 'Fiche intervenant',
   margeCommercialeActive: 'Marge commerciale',
   tauxAcompteDefaut: 'Acompte par défaut (%)',
   seuilMargeFaible: 'Seuil de marge faible (%)',

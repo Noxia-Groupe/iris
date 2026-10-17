@@ -9,6 +9,7 @@ import {
 } from '../planningUtils';
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
 import { isAdminRole } from '../roles';
+import { ROLE_TECHNICIEN } from '../lib/droits';
 import { useModules } from '../modules';
 import { formatDateOnly, jourCivilEntrepriseIso, jourFrancais, jourSemaineFrancais } from '../lib/dateFormatting';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
@@ -22,12 +23,18 @@ import { planningDayToIso } from '../lib/contractPlanningDate';
 // Aucun lien avec les heures réelles : rien n'est écrit dans le Journal des Heures.
 // ---------------------------------------------------------------------------
 
+// File « à planifier » : visites d'un contrat actif (échéance, durée prévue) et interventions
+// curatives, sans contrat ni durée prévue (lot pilote 3).
 type ContractQueueItem = {
-  id: string; reference: string; titre: string; echeanceContrat: string;
+  id: string; reference: string; titre: string; echeanceContrat: string | null; dateSouhaitee: string | null;
   client: { raisonSociale: string }; site: { nom: string; ville: string } | null;
-  contratMaintenance: { id: string; titre: string };
-  dureePrevisionnelleMinutes: number;
+  contratMaintenance: { id: string; titre: string } | null;
+  dureePrevisionnelleMinutes: number | null;
 };
+// Durée proposée pour placer une curative, modifiable avant de confirmer (choix par défaut).
+const DUREE_CURATIVE_MINUTES = 60;
+// Date due : l'échéance d'une visite, la date souhaitée d'une curative ; vide sans date.
+const dateDue = (item: ContractQueueItem): string => { const date = item.echeanceContrat ?? item.dateSouhaitee; return date ? formatDateOnly(date) : ''; };
 
 type ModalState =
   | { mode: 'create'; date: string; intervenantId?: string }
@@ -54,6 +61,9 @@ const Planning = () => {
   const user = userStr ? JSON.parse(userStr) : null;
   const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
   const isAdmin = isAdminRole(userRole);
+  // Le technicien consulte le planning sans le modifier (lot pilote 3, choix par défaut) : ni
+  // affectation, ni type d'événement, ni placement. Le serveur le refuse aussi (blockTechnicien).
+  const lectureSeule = userRole === ROLE_TECHNICIEN;
   // Module désactivé par un super administrateur : la page n'est plus atteignable que par
   // lui (cf. App.tsx), d'où l'avertissement ci-dessous — il doit savoir que ce qu'il
   // prépare ici n'est visible de personne d'autre tant que le module reste coupé.
@@ -238,13 +248,19 @@ const Planning = () => {
               {!share?.published ? 'Publier' : share.active ? 'Renouveler le lien' : 'Partage désactivé'}
             </button>
           )}
-          <button onClick={() => setShowTypes(true)} className="btn btn-secondary flex items-center gap-2">
-            <Tags size={16} /> Types d'événements
-          </button>
-          {/* Date du jour préremplie seulement une fois le fuseau de la société lu (sinon, celui d'Europe/Paris) : à saisir sinon. */}
-          <button onClick={() => setModal({ mode: 'create', date: fuseauConnu ? todayStr : '' })} className="btn btn-primary flex items-center gap-2">
-            <Plus size={16} /> Affectation
-          </button>
+          {lectureSeule ? (
+            <span className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700">Consultation seule</span>
+          ) : (
+            <>
+              <button onClick={() => setShowTypes(true)} className="btn btn-secondary flex items-center gap-2">
+                <Tags size={16} /> Types d'événements
+              </button>
+              {/* Date du jour préremplie seulement une fois le fuseau de la société lu (sinon, celui d'Europe/Paris) : à saisir sinon. */}
+              <button onClick={() => setModal({ mode: 'create', date: fuseauConnu ? todayStr : '' })} className="btn btn-primary flex items-center gap-2">
+                <Plus size={16} /> Affectation
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -261,20 +277,23 @@ const Planning = () => {
         </div>
       )}
 
-      <section aria-label="Interventions contractuelles à planifier" className="mb-4 bg-white rounded-xl border p-4">
-        <h2 className="font-bold mb-2">Interventions contractuelles à planifier</h2>
+      {!lectureSeule && (
+      <section aria-label="Interventions à planifier" className="mb-4 bg-white rounded-xl border p-4">
+        <h2 className="font-bold mb-2">Interventions à planifier</h2>
         {/* Le tableau défile dans son cadre sur téléphone, au lieu de couper le bouton « Placer ». */}
-        {contractQueue.length === 0 ? <p className="text-sm text-muted">Aucune visite en attente.</p> : (
-          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th>Échéance</th><th>Référence</th><th>Client / site</th><th>Contrat</th><th>Durée</th><th></th></tr></thead>
+        {contractQueue.length === 0 ? <p className="text-sm text-muted">Aucune intervention en attente.</p> : (
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th>Date due</th><th>Référence</th><th>Client / site</th><th>Origine</th><th>Durée</th><th></th></tr></thead>
             <tbody>{contractQueue.map(item => <tr key={item.id} className="border-t">
-              <td>{formatDateOnly(item.echeanceContrat)}</td><td>{item.reference}</td>
+              <td>{dateDue(item) || '—'}</td><td>{item.reference}</td>
               <td>{item.client.raisonSociale} — {item.site?.nom || 'Sans site'} {item.site?.ville || ''}</td>
-              <td>{item.contratMaintenance.titre}</td><td>{item.dureePrevisionnelleMinutes} min</td>
+              <td>{item.contratMaintenance ? item.contratMaintenance.titre : 'SAV hors contrat'}</td>
+              <td>{item.dureePrevisionnelleMinutes ? `${item.dureePrevisionnelleMinutes} min` : '—'}</td>
               <td><button className="btn btn-primary" onClick={() => setToPlace(item)}>Placer</button></td>
             </tr>)}</tbody>
           </table></div>
         )}
       </section>
+      )}
 
       {/* Navigation de semaine */}
       <div className="flex items-center justify-between gap-3 mb-4 bg-white px-4 py-3 rounded-xl shadow-sm border border-gray-100">
@@ -338,11 +357,11 @@ const Planning = () => {
                     return (
                       <td
                         key={jStr}
-                        onClick={() => setModal({ mode: 'create', date: jStr, intervenantId: interv.id })}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => { e.preventDefault(); handleDrop(interv.id, jStr); }}
-                        className={`border border-gray-100 p-1 align-top cursor-pointer transition-colors hover:bg-gray-50 ${isToday ? 'bg-blue-50' : isWeekend ? 'bg-gray-50/50' : ''}`}
-                        title="Cliquer pour ajouter une affectation"
+                        onClick={lectureSeule ? undefined : () => setModal({ mode: 'create', date: jStr, intervenantId: interv.id })}
+                        onDragOver={lectureSeule ? undefined : (e) => e.preventDefault()}
+                        onDrop={lectureSeule ? undefined : (e) => { e.preventDefault(); handleDrop(interv.id, jStr); }}
+                        className={`border border-gray-100 p-1 align-top ${lectureSeule ? '' : 'cursor-pointer transition-colors hover:bg-gray-50'} ${isToday ? 'bg-blue-50' : isWeekend ? 'bg-gray-50/50' : ''}`}
+                        title={lectureSeule ? undefined : 'Cliquer pour ajouter une affectation'}
                       >
                         <div className="flex flex-col gap-1" style={{ minHeight: '64px' }}>
                           {cellEvents.map((ev) => {
@@ -351,13 +370,13 @@ const Planning = () => {
                             return (
                               <div
                                 key={ev.id}
-                                draggable
-                                onDragStart={(e) => {
+                                draggable={!lectureSeule}
+                                onDragStart={lectureSeule ? undefined : (e) => {
                                   dragRef.current = { eventId: ev.id, fromIntervenantId: interv.id, fromDate: jStr };
                                   e.dataTransfer.effectAllowed = 'move';
                                 }}
-                                onClick={(e) => { e.stopPropagation(); setModal({ mode: 'edit', event: ev }); }}
-                                className="rounded-md px-1.5 py-1 text-xs font-semibold cursor-pointer shadow-sm leading-tight"
+                                onClick={lectureSeule ? undefined : (e) => { e.stopPropagation(); setModal({ mode: 'edit', event: ev }); }}
+                                className={`rounded-md px-1.5 py-1 text-xs font-semibold shadow-sm leading-tight ${lectureSeule ? '' : 'cursor-pointer'}`}
                                 style={{ backgroundColor: bg, color: texteSurCouleur(bg) }}
                                 title={tooltipEvent(ev)}
                               >
@@ -449,9 +468,9 @@ const ContractPlacement = ({ item, intervenants, onClose, onSaved }: {
       <p className="text-sm mb-4">{item.titre} — {item.client.raisonSociale}</p>
       <form onSubmit={submit} className="flex flex-col gap-3">
         <label>Technicien<select required name="technicienId" className="form-input" defaultValue=""><option value="" disabled>Choisir</option>{intervenants.map(i => <option key={i.id} value={i.id}>{i.nom}</option>)}</select></label>
-        <label>Jour<input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="jour" className="form-input" defaultValue={formatDateOnly(item.echeanceContrat)} /></label>
+        <label>Jour<input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="jour" className="form-input" defaultValue={dateDue(item)} /></label>
         <label>Heure de début<input required type="time" name="heureDebut" className="form-input" defaultValue="09:00" /></label>
-        <label>Durée (minutes)<input required type="number" name="duree" min="1" max="1439" className="form-input" defaultValue={item.dureePrevisionnelleMinutes} /></label>
+        <label>Durée (minutes)<input required type="number" name="duree" min="1" max="1439" className="form-input" defaultValue={item.dureePrevisionnelleMinutes ?? DUREE_CURATIVE_MINUTES} /></label>
         {error && <p role="alert" className="text-red-700">{error}</p>}
         <div className="flex gap-2"><button disabled={saving} className="btn btn-primary">Confirmer le placement</button><button type="button" className="btn" onClick={onClose}>Annuler</button></div>
       </form>

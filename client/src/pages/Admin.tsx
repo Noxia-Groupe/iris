@@ -602,6 +602,19 @@ const Admin = () => {
     }
   };
 
+  // Relie un compte technicien à sa fiche intervenant (lot pilote 3) : c'est ce lien qui lui
+  // ouvre les interventions affectées à sa fiche. Le serveur ne relie qu'un compte technicien
+  // actif, relié à aucune autre fiche, et journalise le changement.
+  const relierCompte = async (intervenantId: string, userId: string) => {
+    try {
+      const res = await apiFetch(`/intervenants/${intervenantId}/compte`, { method: 'PUT', body: JSON.stringify({ userId: userId || null }) });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Impossible de relier ce compte.'); }
+      fetchData();
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    }
+  };
+
   const deleteEntity = async (type: string, id: string, label: string) => {
     if (!window.confirm(`Supprimer « ${label} » ? Cette action est définitive.`)) return;
     try {
@@ -754,6 +767,7 @@ const Admin = () => {
                 <tr style={{borderBottom: '1px solid var(--color-border)'}}>
                   <th style={{padding: '8px'}}>Nom</th>
                   <th style={{padding: '8px'}}>Rôle / Fonction</th>
+                  {isAdmin && <th style={{padding: '8px'}}>Compte technicien</th>}
                   {isAdmin && <th style={{padding: '8px'}}>Coût Horaire (€/h)</th>}
                   {isAdmin && <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>}
                 </tr>
@@ -773,6 +787,18 @@ const Admin = () => {
                           ? <input className="form-input" value={editRow.role} onChange={e => editField('role', e.target.value)} />
                           : i.role}
                       </td>
+                      {isAdmin && (
+                        <td style={{padding: '8px'}}>
+                          {/* Comptes proposés : techniciens actifs reliés à aucune autre fiche, plus le
+                              compte déjà relié (même s'il a changé de type ou été désactivé depuis). */}
+                          <select aria-label={`Compte technicien de ${i.nom}`} className="form-input" value={i.userId || ''}
+                            onChange={e => relierCompte(i.id, e.target.value)}>
+                            <option value="">Aucun</option>
+                            {users.filter(u => u.id === i.userId || (u.role === ROLE_TECHNICIEN && u.actif !== false && !intervenants.some(autre => autre.id !== i.id && autre.userId === u.id)))
+                              .map(u => <option key={u.id} value={u.id}>{u.name}{u.id === i.userId && (u.role !== ROLE_TECHNICIEN || u.actif === false) ? ' (n’est plus technicien actif)' : ''}</option>)}
+                          </select>
+                        </td>
+                      )}
                       {isAdmin && (
                         <td style={{padding: '8px'}}>
                           {isEditing

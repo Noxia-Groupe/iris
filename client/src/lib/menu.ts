@@ -9,7 +9,7 @@ import {
   HandCoins, KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
 } from 'lucide-react';
 import {
-  estExcluDesOperations, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutVoirStatistiques,
+  estExcluDesOperations, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutOuvrirAdministration, peutVoirStatistiques,
   ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
 } from './droits';
 
@@ -72,8 +72,8 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
     { titre: 'Réglages', entrees: [
       // Administration : complète pour les administrateurs, réduite aux référentiels
       // Fournisseurs et Catégories pour les conducteurs de travaux (cf. Admin.tsx) ; ni
-      // commercial ni directeur, qui ne paramètrent rien.
-      { to: '/admin', libelle: 'Administration', icone: Settings, visible: !horsOperations },
+      // commercial ni directeur, qui ne paramètrent rien, ni technicien (lot pilote 3).
+      { to: '/admin', libelle: 'Administration', icone: Settings, visible: peutOuvrirAdministration(role) },
       { to: '/societe', libelle: 'Société', icone: Briefcase, visible: isAdmin },
       { to: '/administration/api', libelle: 'API d’intégration', icone: KeyRound, visible: isSuperAdminRole(role) },
     ] },
