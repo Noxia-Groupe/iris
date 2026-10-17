@@ -5,32 +5,40 @@
 // Compare tous les fichiers TypeScript du serveur (ceux que compile tsconfig.json) entre la
 // base et l'arbre de travail, instruction par instruction, avec l'analyseur du compilateur
 // TypeScript. Une instruction est une instruction de premier niveau d'un fichier, ou d'une
-// fonction d'enregistrement `enregistrerRoutes…(app)`.
+// fonction d'enregistrement `enregistrerRoutes…(app)`. Base et arbre sont lus de la même
+// façon : une base qui contient déjà des fonctions d'enregistrement se compare comme une autre.
 //
 // 1. Chaque instruction de la base se retrouve une fois et une seule dans l'arbre, à
 //    l'identique, avec ses commentaires. Deux transformations seulement sont admises :
 //    - le mot-clé `export` ajouté devant une déclaration ;
 //    - un décalage d'indentation uniforme quand l'instruction entre dans une fonction
-//      d'enregistrement. Les lignes qui continuent un gabarit multiligne (`…`) ne bougent pas,
-//      puisque leur indentation fait partie de la chaîne.
+//      d'enregistrement ou en sort. Les lignes qui continuent un gabarit multiligne (`…`) ne
+//      bougent pas, puisque leur indentation fait partie de la chaîne.
 //    Des commentaires peuvent être ajoutés devant une instruction ; ils sont listés.
 // 2. L'ordre est conservé :
-//    - dans chaque fichier et chaque fonction d'enregistrement, les instructions venues d'un
-//      même fichier de la base s'y suivent dans le même ordre ;
 //    - index.ts, chaque appel d'enregistrement remplacé par le contenu de sa fonction, suit
-//      l'ordre de la base ;
+//      l'ordre de la base lue de la même façon ;
+//    - dans chaque autre fichier, les instructions venues d'une même suite de la base s'y
+//      suivent dans le même ordre ;
 //    - dans un fichier qui existait, les imports conservés gardent leur ordre et les nouveaux
 //      viennent après eux : les bibliothèques se chargent avant le code déplacé, comme avant.
 // 3. Les seules instructions nouvelles admises sont :
-//    - les imports et ré-exports, sans renommage (`as`) ;
-//    - les fonctions d'enregistrement, chacune appelée une fois, avec `app`, au premier niveau
-//      d'index.ts ;
-//    - des noms ajoutés à la liste d'exports d'un fichier (ré-exports lus par les tests). Un
-//      nom n'en est jamais retiré.
+//    - les imports et ré-exports, sans renommage (`as`) ; aucun module n'importe index.ts ;
+//    - les fonctions d'enregistrement, ni asynchrones ni génératrices, chacune appelée une
+//      fois, avec `app`, au premier niveau d'index.ts ;
+//    - des noms ajoutés aux exports d'un fichier. Un nom n'en est jamais retiré.
+// 4. Chaque fichier qui reçoit du code de la base est chargé, à l'exécution, depuis index.ts
+//    (imports compilés, imports de types écartés). Une instruction déplacée dans un autre
+//    fichier ne mentionne ni `require`, ni `module`, ni `exports`, ni `__dirname`, ni
+//    `__filename`, dont le sens dépend du fichier.
+// 5. package.json, package-lock.json et tsconfig.json ne changent pas.
 //
 // Le script échoue sur tout autre écart. Il liste pour la revue les blocs déplacés avec leurs
-// lignes d'origine, les instructions et commentaires nouveaux, et les instructions qui
-// s'exécutent désormais au chargement d'un autre module qu'index.ts, donc avant son corps.
+// lignes d'origine, les instructions, imports et commentaires nouveaux, les imports retirés,
+// les autres fichiers modifiés, et les instructions qui s'exécutent désormais au chargement
+// d'un autre module que le leur, donc à un autre moment. Il ne prouve pas l'ordre dans lequel
+// les modules s'évaluent : routes.mjs compare les lectures de l'environnement avant et après
+// le chargement de .env.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -41,6 +49,8 @@ const base = process.argv[2] || 'origin/main';
 const racine = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const git = (...args) => execFileSync('git', args, { cwd: racine, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 const ENREGISTREMENT = /^enregistrerRoutes/;
+const LIES_AU_FICHIER = new Set(['require', 'module', 'exports', '__dirname', '__filename']);
+const FIGES = ['package.json', 'package-lock.json', 'tsconfig.json'];
 
 // --- Fichiers : include "**/*.ts" de tsconfig.json, hors node_modules ---
 function fichiersArbre(dossier = '') {
@@ -63,9 +73,14 @@ function fichiersBase() {
 // --- Analyse d'un fichier ---
 const lignesDeCommentaires = (texte, plages) => (plages ?? [])
   .flatMap(({ pos, end }) => texte.slice(pos, end).split('\n').map((ligne) => ligne.trim()).filter(Boolean));
-const aExport = (noeud) => (ts.canHaveModifiers(noeud) ? ts.getModifiers(noeud) ?? [] : []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+const aModificateur = (noeud, genre) => (ts.canHaveModifiers(noeud) ? ts.getModifiers(noeud) ?? [] : []).some((m) => m.kind === genre);
 const DECLARATIONS = new Set([ts.SyntaxKind.FunctionDeclaration, ts.SyntaxKind.VariableStatement, ts.SyntaxKind.InterfaceDeclaration,
   ts.SyntaxKind.TypeAliasDeclaration, ts.SyntaxKind.ClassDeclaration, ts.SyntaxKind.EnumDeclaration]);
+const estImport = (noeud) => ts.isImportDeclaration(noeud) || ts.isImportEqualsDeclaration(noeud) || (ts.isExportDeclaration(noeud) && !!noeud.moduleSpecifier);
+const estEnregistrement = (noeud) => ts.isFunctionDeclaration(noeud) && !!noeud.name && ENREGISTREMENT.test(noeud.name.text);
+const estAppel = (noeud) => ts.isExpressionStatement(noeud) && ts.isCallExpression(noeud.expression)
+  && ts.isIdentifier(noeud.expression.expression) && ENREGISTREMENT.test(noeud.expression.expression.text);
+const moduleImporte = (texte) => /from\s+(['"])(.+?)\1|^import\s+(['"])(.+?)\3/.exec(texte)?.slice(1).filter(Boolean)[1];
 
 // Noms qu'un fichier exporte : listes `export { … }`, ré-exports et déclarations exportées.
 function nomsExportes(source) {
@@ -74,12 +89,24 @@ function nomsExportes(source) {
     if (ts.isExportDeclaration(noeud)) {
       if (noeud.exportClause && ts.isNamedExports(noeud.exportClause)) noeud.exportClause.elements.forEach((e) => noms.add(e.name.text));
       else noms.add(`* from ${noeud.moduleSpecifier?.getText(source)}`);
-    } else if (aExport(noeud)) {
+    } else if (aModificateur(noeud, ts.SyntaxKind.ExportKeyword)) {
       if (ts.isVariableStatement(noeud)) noeud.declarationList.declarations.forEach((d) => noms.add(d.name.getText(source)));
       else if (noeud.name) noms.add(noeud.name.getText(source));
     }
   }
   return noms;
+}
+
+// Modules locaux chargés à l'exécution : les `require` du code compilé, où TypeScript a retiré
+// les imports qui ne servent qu'aux types.
+function modulesCharges(fichier, texte) {
+  const js = ts.transpileModule(texte, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+  const charges = [];
+  for (const [, specificateur] of js.matchAll(/require\("(\.[^"]+)"\)/g)) {
+    const cible = path.posix.normalize(path.posix.join(path.posix.dirname(fichier), specificateur));
+    charges.push(cible.endsWith('.ts') ? cible : `${cible}.ts`);
+  }
+  return charges;
 }
 
 function analyser(fichier, texte) {
@@ -92,9 +119,10 @@ function analyser(fichier, texte) {
     ts.forEachChild(noeud, parcourir);
   }(source));
   const ligne = (position) => source.getLineAndCharacterOfPosition(position).line + 1;
+  const commentaires = (noeud) => lignesDeCommentaires(texte, ts.getLeadingCommentRanges(texte, noeud.getFullStart()));
   const instruction = (noeud, conteneur) => {
     const debut = noeud.getStart(source);
-    const exporte = aExport(noeud) && DECLARATIONS.has(noeud.kind);
+    const exporte = aModificateur(noeud, ts.SyntaxKind.ExportKeyword) && DECLARATIONS.has(noeud.kind);
     let code = texte.slice(debut, noeud.getEnd());
     if (exporte && !code.startsWith('export ')) throw new Error(`${fichier}:${ligne(debut)} : export inattendu`);
     if (exporte) code = code.slice('export '.length);
@@ -105,11 +133,34 @@ function analyser(fichier, texte) {
       ligneDebut: ligne(debut),
       ligneFin: ligne(noeud.getEnd()),
       cle: code.split('\n').map((l) => l.trim()).join('\n'),
-      commentaires: lignesDeCommentaires(texte, ts.getLeadingCommentRanges(texte, noeud.getFullStart())),
+      commentaires: commentaires(noeud),
       suivants: lignesDeCommentaires(texte, ts.getTrailingCommentRanges(texte, noeud.getEnd())),
     };
   };
-  return { fichier, source, texte, ligne, instruction };
+  const analyse = {
+    fichier, source, texte, ligne,
+    imports: [], listesExports: [], elements: [], enregistrements: new Map(),
+    finales: lignesDeCommentaires(texte, ts.getLeadingCommentRanges(texte, source.endOfFileToken.getFullStart())),
+    exportes: nomsExportes(source),
+    charges: modulesCharges(fichier, texte),
+  };
+  for (const noeud of source.statements) {
+    const l = ligne(noeud.getStart(source));
+    if (estImport(noeud)) analyse.imports.push({ noeud, ligne: l, texte: noeud.getText(source), commentaires: commentaires(noeud) });
+    else if (ts.isExportDeclaration(noeud)) analyse.listesExports.push({ noeud, ligne: l, commentaires: commentaires(noeud) });
+    else if (estEnregistrement(noeud)) {
+      const nom = noeud.name.text;
+      const derniere = noeud.body.statements.at(-1);
+      analyse.enregistrements.set(nom, {
+        nom, noeud, fichier, ligne: l, commentaires: commentaires(noeud),
+        finales: lignesDeCommentaires(texte, ts.getLeadingCommentRanges(texte, derniere ? derniere.getEnd() : noeud.body.getStart(source) + 1)),
+        corps: noeud.body.statements.map((n) => instruction(n, nom)),
+      });
+      analyse.elements.push({ type: 'enregistrement', nom, ligne: l });
+    } else if (estAppel(noeud)) analyse.elements.push({ type: 'appel', nom: noeud.expression.expression.text, noeud, ligne: l, commentaires: commentaires(noeud) });
+    else analyse.elements.push({ type: 'instruction', instruction: instruction(noeud, null) });
+  }
+  return analyse;
 }
 
 // Le code de l'arbre est-il celui de la base, au décalage d'indentation près ? Renvoie le
@@ -134,9 +185,9 @@ function ecartStrict(b, t) {
   return 0;
 }
 
-// Une instruction déplacée au premier niveau d'un autre module s'exécute au chargement de ce
-// module, avant le corps d'index.ts. Sans effet : une déclaration de fonction ou de type, ou
-// une constante initialisée par une fonction ou une valeur littérale.
+// Une instruction placée au premier niveau d'un autre module, ou sortie d'une fonction
+// d'enregistrement, s'exécute au chargement de ce module. Sans effet : une déclaration de
+// fonction ou de type, ou une constante initialisée par une fonction ou une valeur littérale.
 function sansEffetAuChargement(noeud) {
   if (ts.isFunctionDeclaration(noeud) || ts.isInterfaceDeclaration(noeud) || ts.isTypeAliasDeclaration(noeud)) return true;
   if (!ts.isVariableStatement(noeud)) return false;
@@ -144,7 +195,7 @@ function sansEffetAuChargement(noeud) {
     if (!e) return false;
     if (ts.isAsExpression(e) || ts.isParenthesizedExpression(e) || ts.isSatisfiesExpression?.(e)) return litteral(e.expression);
     if (ts.isArrowFunction(e) || ts.isFunctionExpression(e) || ts.isStringLiteral(e) || ts.isNumericLiteral(e)
-      || ts.isNoSubstitutionTemplateLiteral(e) || ts.isPrefixUnaryExpression(e) && ts.isNumericLiteral(e.operand)) return true;
+      || ts.isNoSubstitutionTemplateLiteral(e) || (ts.isPrefixUnaryExpression(e) && ts.isNumericLiteral(e.operand))) return true;
     if ([ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword].includes(e.kind)) return true;
     if (ts.isArrayLiteralExpression(e)) return e.elements.every(litteral);
     if (ts.isObjectLiteralExpression(e)) return e.properties.every((p) => ts.isPropertyAssignment(p) && litteral(p.initializer));
@@ -153,207 +204,269 @@ function sansEffetAuChargement(noeud) {
   return noeud.declarationList.declarations.every((d) => litteral(d.initializer));
 }
 
+// Identifiants dont le sens dépend du fichier (hors noms de propriétés).
+function liesAuFichier(noeud) {
+  const trouves = new Set();
+  (function parcourir(n) {
+    if (ts.isIdentifier(n) && LIES_AU_FICHIER.has(n.text)) {
+      const parent = n.parent;
+      const nomDePropriete = (ts.isPropertyAccessExpression(parent) && parent.name === n) || (ts.isPropertyAssignment(parent) && parent.name === n);
+      if (!nomDePropriete) trouves.add(n.text);
+    }
+    ts.forEachChild(n, parcourir);
+  }(noeud));
+  return [...trouves];
+}
+
 const erreurs = [];
 const erreur = (message) => erreurs.push(message);
 const premiereLigne = (texte) => (texte.split('\n')[0].length > 110 ? `${texte.split('\n')[0].slice(0, 110)}…` : texte.split('\n')[0]);
+const nouvelles = [];
+const commentairesAjoutes = [];
+const auChargement = [];
+const importsRetires = [];
+// Commentaires : ceux de la base doivent terminer ceux de l'arbre ; ce qui les précède est ajouté.
+function comparerCommentaires(ici, avant, apres, origine) {
+  const n = apres.length - avant.length;
+  if (n < 0 || apres.slice(n).join('\n') !== avant.join('\n')) erreur(`${ici} : commentaires de ${origine} modifiés ou retirés`);
+  else if (n > 0) commentairesAjoutes.push(`${ici}  ${apres.slice(0, n).join(' / ')}`);
+}
 
-// --- Base ---
+// --- Base : chaque instruction reçoit sa place dans une suite. Celle d'index.ts est
+// développée : chaque appel d'enregistrement y est remplacé par le contenu de la fonction. ---
+const analysesBase = new Map(fichiersBase().map((f) => [f, analyser(f, git('show', `${base}:server/${f}`))]));
+const enregistrementsBase = new Map([...analysesBase.values()].flatMap((a) => [...a.enregistrements]));
+const appelsBase = new Map();
 const instructionsBase = [];
-const importsBase = new Map();
-const exportsBase = new Map();
-const commentairesFinaux = (analyse) => lignesDeCommentaires(analyse.texte, ts.getLeadingCommentRanges(analyse.texte, analyse.source.endOfFileToken.getFullStart()));
-const finsBase = new Map();
-for (const fichier of fichiersBase()) {
-  const analyse = analyser(fichier, git('show', `${base}:server/${fichier}`));
-  importsBase.set(fichier, []);
-  exportsBase.set(fichier, nomsExportes(analyse.source));
-  finsBase.set(fichier, commentairesFinaux(analyse));
+const placees = new Set();
+const placer = (instruction, suite, index) => {
+  instructionsBase.push(Object.assign(instruction, { suite, index, utilisee: null }));
+  placees.add(instruction);
+};
+for (const a of analysesBase.values()) {
   let index = 0;
-  analyse.source.statements.forEach((noeud) => {
-    if (ts.isImportDeclaration(noeud) || ts.isImportEqualsDeclaration(noeud)) {
-      importsBase.get(fichier).push({ texte: noeud.getText(analyse.source), commentaires: lignesDeCommentaires(analyse.texte, ts.getLeadingCommentRanges(analyse.texte, noeud.getFullStart())) });
-    } else if (!ts.isExportDeclaration(noeud) || noeud.moduleSpecifier) {
-      // Une liste `export { … }` est comparée par noms (nomsExportes), pas comme instruction.
-      instructionsBase.push({ ...analyse.instruction(noeud, null), index: index++, utilisee: null });
+  for (const element of a.elements) {
+    if (element.type === 'instruction') placer(element.instruction, a.fichier, index++);
+    else if (element.type === 'appel' && a.fichier === 'index.ts') {
+      appelsBase.set(element.nom, element.commentaires);
+      for (const instruction of enregistrementsBase.get(element.nom)?.corps ?? []) if (!placees.has(instruction)) placer(instruction, a.fichier, index++);
     }
-  });
+  }
+}
+for (const e of enregistrementsBase.values()) {
+  e.corps.forEach((instruction, index) => { if (!placees.has(instruction)) placer(instruction, `${e.fichier}#${e.nom}`, index); });
 }
 const parCle = new Map();
 for (const b of instructionsBase) {
   if (!parCle.has(b.cle)) parCle.set(b.cle, []);
   parCle.get(b.cle).push(b);
 }
-const moduleImporte = (texte) => /from\s+(['"])(.+?)\1|^import\s+(['"])(.+?)\3/.exec(texte)?.slice(1).filter(Boolean)[1];
 
 // --- Arbre ---
-const nouvelles = [];
-const commentairesAjoutes = [];
-const auChargement = [];
-const conteneurs = [];
-const enregistrements = new Map();
-const appels = [];
+const analysesArbre = new Map(fichiersArbre().map((f) => [f, analyser(f, readFileSync(path.join(racine, f), 'utf8'))]));
+const enregistrementsArbre = new Map();
+for (const a of analysesArbre.values()) {
+  for (const [nom, e] of a.enregistrements) {
+    if (enregistrementsArbre.has(nom)) erreur(`${a.fichier}:${e.ligne} : fonction d'enregistrement ${nom} déclarée deux fois`);
+    enregistrementsArbre.set(nom, e);
+  }
+}
+const recoivent = new Set();
 
-function verifierImport(analyse, noeud) {
-  const { source } = analyse;
-  const texte = noeud.getText(source);
-  const liaisons = ts.isImportDeclaration(noeud) ? noeud.importClause?.namedBindings : ts.isExportDeclaration(noeud) ? noeud.exportClause : undefined;
-  const renomme = liaisons && (ts.isNamedImports(liaisons) || ts.isNamedExports(liaisons)) && liaisons.elements.some((e) => e.propertyName);
-  const espaceDeNoms = liaisons && ts.isNamespaceImport?.(liaisons);
-  const dejaLa = [...importsBase.values()].some((liste) => liste.some((i) => i.texte === texte));
-  if ((renomme || espaceDeNoms) && !dejaLa) erreur(`${analyse.fichier}:${analyse.ligne(noeud.getStart(source))} : import renommé, interdit pendant le découpage : ${premiereLigne(texte)}`);
+// Associe une instruction de l'arbre à une instruction de la base et contrôle l'association.
+function apparier(t, a, etat) {
+  const ici = `${a.fichier}:${t.ligneDebut}`;
+  const candidats = (parCle.get(t.cle) ?? []).filter((b) => !b.utilisee);
+  const b = candidats.find((c) => etat.precedente && c.suite === etat.precedente.suite && c.index > etat.precedente.index) ?? candidats[0];
+  if (!b) {
+    erreur(`${ici} : instruction nouvelle ou modifiée : ${premiereLigne(t.code)}`);
+    return null;
+  }
+  b.utilisee = t;
+  etat.precedente = b;
+  const ecart = ecartStrict(b, t);
+  if (ecart) erreur(`${ici} : ${b.fichier}:${b.ligneDebut} déplacée avec un écart de blancs ou d'indentation à sa ligne ${ecart} : ${premiereLigne(t.code.split('\n')[ecart - 1] ?? '')}`);
+  if (b.exporte && !t.exporte) erreur(`${ici} : export retiré de ${b.fichier}:${b.ligneDebut}`);
+  comparerCommentaires(ici, b.commentaires, t.commentaires, `${b.fichier}:${b.ligneDebut}`);
+  if (t.suivants.join('\n') !== b.suivants.join('\n')) erreur(`${ici} : commentaire de fin de ligne de ${b.fichier}:${b.ligneFin} modifié`);
+  if (b.fichier !== a.fichier) {
+    recoivent.add(a.fichier);
+    const lies = liesAuFichier(t.noeud);
+    if (lies.length) erreur(`${ici} : ${b.fichier}:${b.ligneDebut} change de fichier alors qu'elle emploie ${lies.join(', ')}, dont le sens dépend du fichier`);
+  }
+  if (!t.conteneur && (b.fichier !== a.fichier || b.conteneur) && !sansEffetAuChargement(t.noeud)) {
+    auChargement.push(`${ici}  ${premiereLigne(t.code)}  (${b.fichier}:${b.ligneDebut}${b.conteneur ? `, dans ${b.conteneur}` : ''})`);
+  }
+  return { base: b, arbre: t };
 }
 
-function traiterConteneur(analyse, noeuds, conteneur) {
-  const { fichier, source } = analyse;
-  const sequence = [];
-  conteneurs.push({ fichier, conteneur, sequence });
-  const listesBase = importsBase.get(fichier);
+function verifierImport(a, imp) {
+  const ici = `${a.fichier}:${imp.ligne}`;
+  const liaisons = ts.isImportDeclaration(imp.noeud) ? imp.noeud.importClause?.namedBindings : ts.isExportDeclaration(imp.noeud) ? imp.noeud.exportClause : undefined;
+  const renomme = liaisons && (ts.isNamedImports(liaisons) || ts.isNamedExports(liaisons)) && liaisons.elements.some((e) => e.propertyName);
+  const espaceDeNoms = liaisons && ts.isNamespaceImport(liaisons);
+  const dejaLa = [...analysesBase.values()].some((ab) => ab.imports.some((i) => i.texte === imp.texte));
+  if ((renomme || espaceDeNoms) && !dejaLa) erreur(`${ici} : import renommé, interdit pendant le découpage : ${premiereLigne(imp.texte)}`);
+}
+
+const sequences = new Map();
+for (const a of analysesArbre.values()) {
+  const ab = analysesBase.get(a.fichier);
+  // Imports : conservés dans leur ordre, nouveaux après eux.
   let dernierConserve = -1;
   let nouvelImportVu = null;
-  // Commentaires : ceux de la base doivent terminer ceux de l'arbre ; ce qui les précède est ajouté.
-  const comparerCommentaires = (ici, avant, apres, origine) => {
-    const n = apres.length - avant.length;
-    if (n < 0 || apres.slice(n).join('\n') !== avant.join('\n')) erreur(`${ici} : commentaires de ${origine} modifiés ou retirés`);
-    else if (n > 0) commentairesAjoutes.push(`${ici}  ${apres.slice(0, n).join(' / ')}`);
-  };
-  for (const noeud of noeuds) {
-    const l = analyse.ligne(noeud.getStart(source));
-    const ici = `${fichier}:${l}`;
-    const commentaires = lignesDeCommentaires(analyse.texte, ts.getLeadingCommentRanges(analyse.texte, noeud.getFullStart()));
-    if (ts.isImportDeclaration(noeud) || ts.isImportEqualsDeclaration(noeud) || ts.isExportDeclaration(noeud) && noeud.moduleSpecifier) {
-      if (conteneur) { erreur(`${ici} : import dans une fonction d'enregistrement`); continue; }
-      verifierImport(analyse, noeud);
-      const texte = noeud.getText(source);
-      // Import conservé : même module qu'un import de ce fichier dans la base, liste de noms
-      // éventuellement réduite. Les conservés gardent leur ordre ; les nouveaux les suivent.
-      const position = listesBase ? listesBase.findIndex((i) => i.texte === texte) : -1;
-      const conserve = position >= 0 ? position : (listesBase ?? []).findIndex((i) => moduleImporte(i.texte) === moduleImporte(texte));
-      if (conserve >= 0) {
-        if (nouvelImportVu) erreur(`${ici} : import conservé placé après un import nouveau (${nouvelImportVu}) ; l'ordre de chargement change`);
-        if (conserve < dernierConserve) erreur(`${ici} : imports conservés réordonnés ; l'ordre de chargement change`);
-        dernierConserve = conserve;
-        if (position < 0) nouvelles.push(`${ici}  import modifié : ${premiereLigne(texte)}`);
-        comparerCommentaires(ici, listesBase[conserve].commentaires, commentaires, 'l\'import');
-      } else {
-        if (listesBase) nouvelImportVu ??= ici;
-        nouvelles.push(`${ici}  ${premiereLigne(texte)}`);
-        if (commentaires.length) commentairesAjoutes.push(`${ici}  ${commentaires.join(' / ')}`);
-      }
-      continue;
-    }
-    if (ts.isExportDeclaration(noeud)) {
-      if (conteneur) { erreur(`${ici} : export dans une fonction d'enregistrement`); continue; }
-      verifierImport(analyse, noeud);
-      const noms = noeud.exportClause && ts.isNamedExports(noeud.exportClause) ? noeud.exportClause.elements.map((e) => e.name.text) : [];
-      const avant = exportsBase.get(fichier) ?? new Set();
-      const ajoutes = noms.filter((n) => !avant.has(n));
-      if (ajoutes.length) nouvelles.push(`${ici}  exports ajoutés : ${ajoutes.join(', ')}`);
-      continue;
-    }
-    if (!conteneur && ts.isFunctionDeclaration(noeud) && noeud.name && ENREGISTREMENT.test(noeud.name.text)) {
-      const nom = noeud.name.text;
-      if (enregistrements.has(nom)) erreur(`${ici} : fonction d'enregistrement ${nom} déclarée deux fois`);
-      if (noeud.parameters.length !== 1 || noeud.parameters[0].name.getText(source) !== 'app') erreur(`${ici} : ${nom} doit prendre le seul paramètre app`);
-      nouvelles.push(`${ici}  fonction d'enregistrement ${nom}(app)`);
-      if (commentaires.length) commentairesAjoutes.push(`${ici}  ${commentaires.join(' / ')}`);
-      const fin = analyse.ligne(noeud.body.getEnd() - 1);
-      const finales = lignesDeCommentaires(analyse.texte, ts.getLeadingCommentRanges(analyse.texte, noeud.body.statements.at(-1)?.getEnd() ?? noeud.body.getStart(source) + 1));
-      if (finales.length) commentairesAjoutes.push(`${fichier}:${fin}  ${finales.join(' / ')}`);
-      enregistrements.set(nom, { fichier, ligne: l, sequence: traiterConteneur(analyse, noeud.body.statements, nom) });
-      continue;
-    }
-    if (ts.isExpressionStatement(noeud) && ts.isCallExpression(noeud.expression) && ts.isIdentifier(noeud.expression.expression)
-      && ENREGISTREMENT.test(noeud.expression.expression.text)) {
-      const nom = noeud.expression.expression.text;
-      const args = noeud.expression.arguments;
-      if (fichier !== 'index.ts' || conteneur) erreur(`${ici} : ${nom} ne peut être appelée qu'au premier niveau d'index.ts`);
-      else if (args.length !== 1 || !ts.isIdentifier(args[0]) || args[0].text !== 'app') erreur(`${ici} : ${nom} doit être appelée avec app`);
-      appels.push({ nom, ici });
-      sequence.push({ appel: nom });
-      nouvelles.push(`${ici}  appel ${nom}(app)`);
-      if (commentaires.length) commentairesAjoutes.push(`${ici}  ${commentaires.join(' / ')}`);
-      continue;
-    }
-    const t = analyse.instruction(noeud, conteneur);
-    const candidats = (parCle.get(t.cle) ?? []).filter((b) => !b.utilisee);
-    const precedente = sequence.filter((s) => s.base).at(-1)?.base;
-    const b = candidats.find((c) => precedente && c.fichier === precedente.fichier && c.index > precedente.index) ?? candidats[0];
-    if (!b) {
-      erreur(`${ici} : instruction nouvelle ou modifiée : ${premiereLigne(t.code)}`);
-      continue;
-    }
-    b.utilisee = t;
-    sequence.push({ base: b, arbre: t });
-    const ecart = ecartStrict(b, t);
-    if (ecart) erreur(`${ici} : ${b.fichier}:${b.ligneDebut} déplacée avec un écart de blancs ou d'indentation à sa ligne ${ecart} : ${premiereLigne(t.code.split('\n')[ecart - 1] ?? '')}`);
-    if (b.exporte && !t.exporte) erreur(`${ici} : export retiré de ${b.fichier}:${b.ligneDebut}`);
-    comparerCommentaires(ici, b.commentaires, t.commentaires, `${b.fichier}:${b.ligneDebut}`);
-    if (t.suivants.join('\n') !== b.suivants.join('\n')) erreur(`${ici} : commentaire de fin de ligne de ${b.fichier}:${b.ligneFin} modifié`);
-    if (!conteneur && fichier !== b.fichier && b.fichier === 'index.ts' && !sansEffetAuChargement(noeud)) {
-      auChargement.push(`${ici}  ${premiereLigne(t.code)}  (index.ts:${b.ligneDebut})`);
+  const modulesConserves = new Set();
+  for (const imp of a.imports) {
+    const ici = `${a.fichier}:${imp.ligne}`;
+    verifierImport(a, imp);
+    const position = ab ? ab.imports.findIndex((i) => i.texte === imp.texte) : -1;
+    const conserve = position >= 0 ? position : (ab?.imports ?? []).findIndex((i) => moduleImporte(i.texte) === moduleImporte(imp.texte));
+    if (conserve >= 0) {
+      modulesConserves.add(moduleImporte(ab.imports[conserve].texte));
+      if (nouvelImportVu) erreur(`${ici} : import conservé placé après un import nouveau (${nouvelImportVu}) ; l'ordre de chargement change`);
+      if (conserve < dernierConserve) erreur(`${ici} : imports conservés réordonnés ; l'ordre de chargement change`);
+      dernierConserve = conserve;
+      if (position < 0) nouvelles.push(`${ici}  import modifié : ${premiereLigne(imp.texte)}`);
+      comparerCommentaires(ici, ab.imports[conserve].commentaires, imp.commentaires, 'l\'import');
+    } else {
+      if (ab) nouvelImportVu ??= ici;
+      nouvelles.push(`${ici}  ${premiereLigne(imp.texte)}`);
+      if (imp.commentaires.length) commentairesAjoutes.push(`${ici}  ${imp.commentaires.join(' / ')}`);
     }
   }
-  return sequence;
-}
+  for (const imp of ab?.imports ?? []) {
+    if (modulesConserves.has(moduleImporte(imp.texte))) continue;
+    const effetSeul = ts.isImportDeclaration(imp.noeud) && !imp.noeud.importClause;
+    if (effetSeul) erreur(`${a.fichier} : import ${premiereLigne(imp.texte)} retiré ; le module chargé pour son effet ne l'est plus d'ici`);
+    else importsRetires.push(`${a.fichier}  ${premiereLigne(imp.texte)}`);
+  }
+  if (a.fichier !== 'index.ts' && a.charges.includes('index.ts')) erreur(`${a.fichier} : importe index.ts, interdit (dépendance circulaire)`);
 
-const fichiers = fichiersArbre();
-for (const fichier of fichiers) {
-  const analyse = analyser(fichier, readFileSync(path.join(racine, fichier), 'utf8'));
-  traiterConteneur(analyse, analyse.source.statements, null);
-  const exportes = nomsExportes(analyse.source);
-  const retires = [...(exportsBase.get(fichier) ?? [])].filter((n) => !exportes.has(n));
-  if (retires.length) erreur(`${fichier} : exports retirés : ${retires.join(', ')}`);
-  const finales = commentairesFinaux(analyse);
-  const avant = finsBase.get(fichier) ?? [];
-  const n = finales.length - avant.length;
-  if (n < 0 || finales.slice(n).join('\n') !== avant.join('\n')) erreur(`${fichier} : commentaires de fin de fichier modifiés ou retirés`);
-  else if (n > 0) commentairesAjoutes.push(`${fichier}:fin  ${finales.slice(0, n).join(' / ')}`);
+  // Exports : aucun nom retiré ; listes `export { … }` comparées par noms et commentaires.
+  for (const [i, liste] of a.listesExports.entries()) {
+    const ici = `${a.fichier}:${liste.ligne}`;
+    verifierImport(a, { noeud: liste.noeud, ligne: liste.ligne, texte: liste.noeud.getText(a.source) });
+    const noms = liste.noeud.exportClause && ts.isNamedExports(liste.noeud.exportClause) ? liste.noeud.exportClause.elements.map((e) => e.name.text) : [];
+    const ajoutes = noms.filter((n) => !(ab?.exportes ?? new Set()).has(n));
+    if (ajoutes.length) nouvelles.push(`${ici}  exports ajoutés : ${ajoutes.join(', ')}`);
+    if (ab?.listesExports[i]) comparerCommentaires(ici, ab.listesExports[i].commentaires, liste.commentaires, 'la liste d\'exports');
+    else if (liste.commentaires.length) commentairesAjoutes.push(`${ici}  ${liste.commentaires.join(' / ')}`);
+  }
+  const retires = [...(ab?.exportes ?? [])].filter((n) => !a.exportes.has(n));
+  if (retires.length) erreur(`${a.fichier} : exports retirés : ${retires.join(', ')}`);
+
+  // Instructions de premier niveau, fonctions d'enregistrement et leurs appels.
+  const etat = { precedente: null };
+  const sequence = [];
+  sequences.set(a.fichier, sequence);
+  for (const element of a.elements) {
+    if (element.type === 'instruction') {
+      const paire = apparier(element.instruction, a, etat);
+      if (paire) sequence.push(paire);
+    } else if (element.type === 'enregistrement') {
+      const e = a.enregistrements.get(element.nom);
+      const ici = `${a.fichier}:${e.ligne}`;
+      const eb = enregistrementsBase.get(e.nom);
+      if (e.noeud.parameters.length !== 1 || e.noeud.parameters[0].name.getText(a.source) !== 'app') erreur(`${ici} : ${e.nom} doit prendre le seul paramètre app`);
+      if (e.noeud.asteriskToken || aModificateur(e.noeud, ts.SyntaxKind.AsyncKeyword)) erreur(`${ici} : ${e.nom} ne peut être ni asynchrone ni génératrice : son corps doit s'exécuter à l'appel`);
+      if (eb) {
+        comparerCommentaires(ici, eb.commentaires, e.commentaires, `la fonction ${e.nom}`);
+        comparerCommentaires(`${ici} (fin)`, eb.finales, e.finales, `la fin de ${e.nom}`);
+      } else {
+        nouvelles.push(`${ici}  fonction d'enregistrement ${e.nom}(app)`);
+        if (e.commentaires.length) commentairesAjoutes.push(`${ici}  ${e.commentaires.join(' / ')}`);
+        if (e.finales.length) commentairesAjoutes.push(`${ici} (fin)  ${e.finales.join(' / ')}`);
+      }
+      if (e.corps.length) recoivent.add(a.fichier);
+      const etatCorps = { precedente: null };
+      e.sequence = e.corps.map((t) => apparier(t, a, etatCorps)).filter(Boolean);
+    } else {
+      const ici = `${a.fichier}:${element.ligne}`;
+      const args = element.noeud.expression.arguments;
+      if (a.fichier !== 'index.ts') erreur(`${ici} : ${element.nom} ne peut être appelée qu'au premier niveau d'index.ts`);
+      else if (args.length !== 1 || !ts.isIdentifier(args[0]) || args[0].text !== 'app') erreur(`${ici} : ${element.nom} doit être appelée avec app`);
+      if (appelsBase.has(element.nom)) comparerCommentaires(ici, appelsBase.get(element.nom), element.commentaires, `l'appel de ${element.nom}`);
+      else {
+        nouvelles.push(`${ici}  appel ${element.nom}(app)`);
+        if (element.commentaires.length) commentairesAjoutes.push(`${ici}  ${element.commentaires.join(' / ')}`);
+      }
+      sequence.push({ appel: element.nom, ici });
+    }
+  }
+  comparerCommentaires(`${a.fichier} (fin)`, ab?.finales ?? [], a.finales, 'la fin du fichier');
 }
 
 // --- Fonctions d'enregistrement : une par appel ---
-for (const [nom, { fichier, ligne }] of enregistrements) {
-  const n = appels.filter((a) => a.nom === nom).length;
-  if (n !== 1) erreur(`${fichier}:${ligne} : ${nom} est appelée ${n} fois au premier niveau d'index.ts (une fois attendue)`);
+const appels = [...(sequences.get('index.ts') ?? [])].filter((s) => s.appel);
+for (const [nom, e] of enregistrementsArbre) {
+  const n = appels.filter((s) => s.appel === nom).length;
+  if (n !== 1) erreur(`${e.fichier}:${e.ligne} : ${nom} est appelée ${n} fois au premier niveau d'index.ts (une fois attendue)`);
 }
-for (const { nom, ici } of appels) if (!enregistrements.has(nom)) erreur(`${ici} : ${nom} n'est déclarée dans aucun fichier`);
+for (const s of appels) if (!enregistrementsArbre.has(s.appel)) erreur(`${s.ici} : ${s.appel} n'est déclarée dans aucun fichier`);
 
 // --- Instructions de la base disparues ---
 for (const b of instructionsBase) if (!b.utilisee) erreur(`${b.fichier}:${b.ligneDebut} : instruction disparue : ${premiereLigne(b.code)}`);
 
 // --- Ordre ---
-function verifierOrdre(libelle, sequence) {
+function verifierOrdre(libelle, paires) {
   const derniere = new Map();
-  for (const { base: b, arbre: t } of sequence) {
-    const avant = derniere.get(b.fichier);
+  for (const { base: b, arbre: t } of paires) {
+    const avant = derniere.get(b.suite);
     if (avant && b.index < avant.base.index) {
-      erreur(`${libelle} : ordre changé : l'instruction de ${b.fichier}:${b.ligneDebut} (ici ${t.fichier}:${t.ligneDebut}) vient après celle de ${b.fichier}:${avant.base.ligneDebut} (ici ${avant.arbre.fichier}:${avant.arbre.ligneDebut})`);
+      erreur(`${libelle} : ordre changé : l'instruction de ${b.fichier}:${b.ligneDebut} (ici ${t.fichier}:${t.ligneDebut}) vient après celle de ${avant.base.fichier}:${avant.base.ligneDebut} (ici ${avant.arbre.fichier}:${avant.arbre.ligneDebut})`);
     }
-    derniere.set(b.fichier, { base: b, arbre: t });
+    derniere.set(b.suite, { base: b, arbre: t });
   }
 }
-for (const { fichier, conteneur, sequence } of conteneurs) {
-  if (fichier === 'index.ts' && !conteneur) {
-    verifierOrdre('index.ts, appels d\'enregistrement développés', sequence.flatMap((s) => (s.appel ? (enregistrements.get(s.appel)?.sequence ?? []) : [s])).filter((s) => s.base));
-  } else verifierOrdre(conteneur ? `${fichier} (${conteneur})` : fichier, sequence.filter((s) => s.base));
+for (const [fichier, sequence] of sequences) {
+  if (fichier === 'index.ts') {
+    verifierOrdre('index.ts, appels d\'enregistrement développés', sequence.flatMap((s) => (s.appel ? (enregistrementsArbre.get(s.appel)?.sequence ?? []) : [s])));
+  } else verifierOrdre(fichier, sequence);
 }
+for (const e of enregistrementsArbre.values()) verifierOrdre(`${e.fichier}, fonction ${e.nom}`, e.sequence ?? []);
+
+// --- Chargement : chaque fichier qui reçoit du code est atteint depuis index.ts ---
+const atteints = new Set();
+(function atteindre(fichier) {
+  if (atteints.has(fichier) || !analysesArbre.has(fichier)) return;
+  atteints.add(fichier);
+  for (const cible of analysesArbre.get(fichier).charges) atteindre(cible);
+}('index.ts'));
+for (const fichier of recoivent) {
+  if (!atteints.has(fichier)) erreur(`${fichier} : reçoit du code de la base mais n'est chargé par aucun import depuis index.ts ; ce code ne s'exécuterait plus`);
+}
+for (const fichier of [...analysesBase.keys()].filter((f) => analysesArbre.has(f) && f !== 'index.ts')) {
+  if (!atteints.has(fichier)) erreur(`${fichier} : n'est plus chargé depuis index.ts`);
+}
+
+// --- Fichiers hors TypeScript ---
+const autres = [...new Set([
+  ...git('diff', '--name-only', '--relative', base, '--', '.').split('\n'),
+  ...git('ls-files', '--others', '--exclude-standard', '--', '.').split('\n'),
+])].filter((f) => f && !f.endsWith('.ts'));
+for (const f of autres.filter((f) => FIGES.includes(f))) erreur(`${f} : modifié ; une PR du découpage ne change ni les dépendances ni la compilation`);
+const autresModifies = autres.filter((f) => !FIGES.includes(f));
 
 // --- Rapport ---
 console.log(`Base : ${base}`);
-for (const { fichier, conteneur, sequence } of conteneurs) {
+const rapporter = (titre, paires, propre) => {
   const blocs = [];
-  for (const { base: b, arbre: t } of sequence.filter((s) => s.base)) {
+  for (const { base: b, arbre: t } of paires) {
     const dernier = blocs.at(-1);
-    if (dernier && dernier.fichier === b.fichier && dernier.fin.index + 1 === b.index) {
-      Object.assign(dernier, { fin: b, finArbre: t, n: dernier.n + 1 });
-    } else blocs.push({ fichier: b.fichier, debut: b, fin: b, debutArbre: t, finArbre: t, n: 1 });
+    if (dernier && dernier.suite === b.suite && dernier.fin.index + 1 === b.index) Object.assign(dernier, { fin: b, finArbre: t, n: dernier.n + 1 });
+    else blocs.push({ suite: b.suite, debut: b, fin: b, debutArbre: t, finArbre: t, n: 1 });
   }
-  const inchange = blocs.length === 1 && blocs[0].fichier === fichier && !conteneur && blocs[0].n === instructionsBase.filter((b) => b.fichier === fichier).length;
-  if (inchange || (!blocs.length && !conteneur)) continue;
-  console.log(`\n${fichier}${conteneur ? `, fonction ${conteneur}` : ''}`);
+  const conserve = (bloc) => bloc.debut.fichier === propre.fichier && bloc.debut.conteneur === propre.conteneur;
+  if (blocs.length <= 1 && blocs.every(conserve)) return;
+  console.log(`\n${titre}`);
   for (const bloc of blocs) {
-    const origine = bloc.fichier === fichier && !conteneur ? 'conservé' : `${bloc.fichier}:${bloc.debut.ligneDebut}-${bloc.fin.ligneFin}`;
+    const origine = conserve(bloc) ? 'conservé' : `${bloc.debut.fichier}:${bloc.debut.ligneDebut}-${bloc.fin.ligneFin}`;
     console.log(`  lignes ${bloc.debutArbre.ligneDebut}-${bloc.finArbre.ligneFin} : ${origine} (${bloc.n} instruction${bloc.n > 1 ? 's' : ''})`);
   }
+};
+for (const [fichier, sequence] of sequences) {
+  rapporter(fichier, sequence.filter((s) => s.base), { fichier, conteneur: null });
+  for (const e of analysesArbre.get(fichier).enregistrements.values()) rapporter(`${fichier}, fonction ${e.nom}`, e.sequence ?? [], { fichier, conteneur: e.nom });
 }
 const section = (titre, liste) => {
   console.log(`\n${titre} (${liste.length}) :`);
@@ -361,7 +474,9 @@ const section = (titre, liste) => {
 };
 section('Instructions nouvelles admises', nouvelles);
 section('Commentaires ajoutés', commentairesAjoutes);
-section('Instructions exécutées au chargement d\'un autre module qu\'index.ts, à relire', auChargement);
+section('Imports retirés', importsRetires);
+section('Autres fichiers modifiés, à relire', autresModifies);
+section('Instructions exécutées au chargement d\'un autre module que le leur, à relire', auChargement);
 if (erreurs.length) {
   section('Écarts', erreurs);
   console.error('\nÉchec : ce lot ne se limite pas à un déplacement.');
