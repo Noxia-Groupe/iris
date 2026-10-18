@@ -17,7 +17,7 @@ Les permissions réutilisent le vocabulaire technique existant (`devis:read`, `d
 
 | Type | Périmètre actuel |
 |---|---|
-| `SUPERADMIN` | Accès complet, réglages réservés et gestion des superadministrateurs. L'application en garde toujours au moins un **actif** : supprimer, rétrograder ou désactiver le dernier super administrateur actif est refusé, et le contrôle se fait sous verrou dans la transaction d'écriture (#178). |
+| `SUPERADMIN` | Accès complet, réglages réservés et gestion des superadministrateurs. Les routes de comptes refusent de supprimer, de rétrograder ou de désactiver le dernier super administrateur **actif** : ces retraits se sérialisent par un verrou dans leur transaction d'écriture, qui compte les autres super administrateurs actifs (#178). Une installation sans `SUPERADMIN_EMAILS` démarre sans aucun super administrateur, et le démarrage promeut un compte sans le réactiver. |
 | `ADMIN` | Administration générale, hors réglages réservés au superadministrateur. |
 | `CONDUCTEUR_TRAVAUX` | Pilotage des chantiers confiés, planning et saisie/correction métier autorisée ; lecture des clients (`clients:read` : clients, contacts, sites), pour choisir le client d'une intervention SAV qu'il crée (décision de Nelson du 16-10-2026, #143), sans écriture dans l'annuaire ni devis ; l'historique d'un client ne lui montre que ses chantiers, sans montant ; le menu Clients lui ouvre l'annuaire en consultation seule, sans formulaire ni parc d'équipements (décision du 16-10-2026, #145). |
 | `COMMERCIAL` | Affaires et chantiers commerciaux qui lui sont rattachés. |

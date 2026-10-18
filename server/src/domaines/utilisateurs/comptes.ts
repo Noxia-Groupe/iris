@@ -72,18 +72,19 @@ export async function journaliserDroitsCompte(tx: any, req: express.Request, act
   });
 }
 
-// Garde-fou : l'application doit toujours conserver au moins un super administrateur ACTIF, sinon
-// plus personne ne pilote les modules ni ne rend la main à un autre (l'accès de secours en exige un
-// actif, et le démarrage promeut sans réactiver). Appelé dans la transaction qui retire le compte
-// (suppression, autre type, désactivation), avant de le lire : le compte et tous les super
-// administrateurs sont verrouillés ensemble, par identifiant croissant comme les autres verrous de
-// comptes. Deux retraits croisés se sérialisent donc, et le second voit le premier. Un compte promu
-// pendant cette lecture n'est pas compté : le refus n'en est que plus prudent.
-async function estDernierSuperAdminActif(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
-  const comptes = await tx.$queryRaw<Array<{ id: string; role: string; actif: boolean }>>(Prisma.sql`SELECT "id", "role", "actif" FROM "User" WHERE "role" = ${ROLE_SUPERADMIN} OR "id" = ${id} ORDER BY "id" FOR UPDATE`);
-  const superAdminActif = (compte: { role: string; actif: boolean }) => isSuperAdminRole(compte.role) && compte.actif;
-  const cible = comptes.find((compte) => compte.id === id);
-  return !!cible && superAdminActif(cible) && !comptes.some((compte) => compte.id !== id && superAdminActif(compte));
+// Garde-fou : les routes de comptes refusent de retirer le dernier super administrateur ACTIF
+// (suppression, autre type, désactivation), sans quoi plus personne ne piloterait les modules ni ne
+// rendrait la main à un autre : l'accès de secours en exige un actif, et le démarrage promeut sans
+// réactiver. Ces retraits se sérialisent par un verrou consultatif, pris en tête de leur transaction
+// avant tout verrou de ligne : qui l'attend ne tient rien, d'où aucun interblocage avec les autres
+// verrous de comptes. Le compte visé est ensuite relu sous son propre verrou, et les autres super
+// administrateurs actifs sont comptés par une simple lecture : en READ COMMITTED, elle voit tout
+// retrait validé avant elle, et aucun autre ne peut aboutir avant la fin de la transaction. Une
+// promotion validée pendant ce temps peut ne pas être vue : le refus n'en est que plus prudent.
+const verrouillerRetraitsComptes = (tx: Prisma.TransactionClient) => tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`;
+async function estDernierSuperAdminActif(tx: Prisma.TransactionClient, compte: { id: string; role: string; actif: boolean }): Promise<boolean> {
+  if (!isSuperAdminRole(compte.role) || !compte.actif) return false;
+  return (await tx.user.count({ where: { role: ROLE_SUPERADMIN, actif: true, id: { not: compte.id } } })) === 0;
 }
 
 const erreurDernierSuperAdmin = () => Object.assign(new Error('Dernier super administrateur actif.'), { code: 'DERNIER_SUPERADMIN' });
@@ -215,10 +216,10 @@ export function enregistrerRoutesComptes(app: Express): void {
         // administrateur ne doit pas voir, et chaque entrée qui touche un super administrateur
         // lui est fermée.
         // Fiches intervenant d'abord, dans le même ordre que la liaison : la suppression les délie
-        // (ON DELETE SET NULL), et le journal le dit.
+        // (ON DELETE SET NULL), et le journal le dit. Avant elles, le verrou des retraits.
+        await verrouillerRetraitsComptes(tx);
         await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE`);
-        // Le compte ensuite, verrouillé avec les super administrateurs.
-        if (await estDernierSuperAdminActif(tx, id)) throw erreurDernierSuperAdmin();
+        await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
         // Relues une fois le compte verrouillé : une fiche reliée entre-temps (la liaison valide en
         // tenant ce verrou) est déliée par la suppression, et doit donc figurer au journal.
         const fichesDeliees: Array<{ id: string; nom: string }> = await tx.intervenant.findMany({ where: { userId: id }, select: { id: true, nom: true } });
@@ -231,6 +232,7 @@ export function enregistrerRoutesComptes(app: Express): void {
           },
         });
         if (!supprime) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
+        if (await estDernierSuperAdminActif(tx, supprime)) throw erreurDernierSuperAdmin();
         const chantiersResponsable = await tx.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } });
         const chantiersCommercial = await tx.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } });
         await tx.user.delete({ where: { id } });
@@ -283,11 +285,13 @@ export function enregistrerRoutesComptes(app: Express): void {
         return res.status(403).json({ error: refus });
       }
       const user = await transactionVerifiee(async (tx) => {
-        // Fiche intervenant verrouillée avant le compte, dans le même ordre que la route qui la relie.
+        // Un autre type peut retirer un super administrateur : verrou des retraits en tête. Puis la
+        // fiche intervenant, verrouillée avant le compte, dans le même ordre que la route qui la relie.
+        if (!isSuperAdminRole(role)) await verrouillerRetraitsComptes(tx);
         const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${target.id} FOR UPDATE`);
-        if (!isSuperAdminRole(role) && (await estDernierSuperAdminActif(tx, target.id))) throw erreurDernierSuperAdmin();
         const avant = await lireCompteVerrouille(tx, target.id);
         if (!avant) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
+        if (!isSuperAdminRole(role) && (await estDernierSuperAdminActif(tx, avant))) throw erreurDernierSuperAdmin();
         const apres = await tx.user.update({
         where: { id: target.id },
         // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
@@ -487,8 +491,10 @@ export function enregistrerRoutesComptes(app: Express): void {
         return res.status(400).json({ error: 'Vous ne pouvez pas désactiver votre propre compte.' });
       }
       const user = await transactionVerifiee(async (tx) => {
-        if (!actif && (await estDernierSuperAdminActif(tx, target.id))) throw erreurDernierSuperAdmin();
+        if (!actif) await verrouillerRetraitsComptes(tx);
         const avant = await lireCompteVerrouille(tx, target.id);
+        if (!avant) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
+        if (!actif && (await estDernierSuperAdminActif(tx, avant))) throw erreurDernierSuperAdmin();
         const apres = await tx.user.update({
           where: { id: target.id },
           data: { actif },
@@ -500,6 +506,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       res.json(user);
     } catch (error) {
       if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(400).json({ error: "Ce compte est le dernier super administrateur : il ne peut pas être désactivé." });
+      if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
       res.status(500).json({ error: "Impossible de modifier l'activation du compte." });
     }
   });
