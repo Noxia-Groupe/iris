@@ -1,6 +1,6 @@
 # Découpage des gros écrans du client (proposition)
 
-**Proposition validée par Nelson le 18-10-2026** (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
+**Proposition du 18-10-2026, principe validé par Nelson le même jour** ; les autres choix sont faits par sa délégation (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
 
 Trois écrans dépassent la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)) :
 
@@ -108,14 +108,16 @@ Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour
 
 - **Déplacer l'état dans les composants** : par exemple, que chaque onglet d'Admin charge ses données comme ceux de `Statistiques.tsx`, ou que les filtres des journaux du chantier vivent dans leur composant. Ce serait plus lisible, mais cela changerait la séquence des chargements, que des parcours E2E vérifient, ou le moment où un état se réinitialise. C'est un changement de comportement, donc un lot à part.
 - **Petites anomalies relevées pendant le relevé**, à corriger chacune dans sa PR, avec un test :
-  - Admin, onglet Intervenants : une branche inaccessible (l.738 et 757-761), `colSpan={4}` pour 5 colonnes (l.832) ;
-  - Admin, onglet Utilisateurs : les options de rôle dupliquées entre le formulaire (l.1194-1204) et le tableau (l.1290-1299) ;
-  - fiche chantier : deux références jamais lues (`editChantierBudgetRef`, `editChantierAdresseRef`, l.97-98), alors que le commentaire l.94-96 annonce un préremplissage qui n'existe pas ;
-  - utilitaires de format dupliqués entre écrans (`fmtEuro`, `fmtHeures`, `toDateFrancaise`, alors que `jourFrancais` existe dans `lib/dateFormatting.ts`) ;
-  - lecture du rôle : Planning et la fiche chantier lisent `localStorage.user` directement, quand Admin passe par `getCurrentUser` et `useCurrentRole`.
+  - Admin, onglet Intervenants : une branche inaccessible (l.738 et 757-761), `colSpan={4}` pour 5 colonnes (l.832) : #202 ;
+  - Admin, onglet Utilisateurs : les options de rôle dupliquées entre le formulaire (l.1194-1204) et le tableau (l.1290-1299) : #203 ;
+  - fiche chantier : deux références jamais lues (`editChantierBudgetRef`, `editChantierAdresseRef`, l.97-98), alors que le commentaire l.94-96 annonce un préremplissage qui n'existe pas : #204 ;
+  - utilitaires de format dupliqués entre écrans (`fmtEuro`, `fmtHeures`, `toDateFrancaise`, alors que `jourFrancais` existe dans `lib/dateFormatting.ts`) : #205 ;
+  - lecture du rôle : Planning et la fiche chantier lisent `localStorage.user` directement, quand Admin passe par `getCurrentUser` et `useCurrentRole` : #206.
 
-## Décisions de Nelson (18-10-2026)
+## Décisions du 18-10-2026
 
-1. **Principe et ordre validés** : déplacement pur, état laissé dans la page. Ordre : outil de comparaison du rendu, puis Planning, Admin et fiche chantier.
-2. **Fichiers dans `components/`, à plat**, comme aujourd'hui.
-3. **Petites anomalies** : Nelson a laissé le choix. Chacune a sa issue dès maintenant, et sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique.
+Réponse de Nelson aux trois questions de la proposition : « 1. Oui je valide le principe. Oui a plat comme aujourd'hui. Fait ce qui est le mieux a corriger apres ou en issu je te laisse le choix de la meulleur des facon. »
+
+1. **Principe validé par Nelson** : déplacement pur, état laissé dans la page. La question portait aussi sur l'ordre ; l'ordre proposé est retenu par délégation : outil de comparaison du rendu, puis Planning, Admin et fiche chantier.
+2. **Fichiers dans `components/`, à plat**, comme aujourd'hui (décision de Nelson).
+3. **Petites anomalies** : Nelson a laissé le choix. Chacune a son issue : #202, #203, #204, #205 et #206. Sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique.
