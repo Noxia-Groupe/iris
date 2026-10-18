@@ -41,7 +41,11 @@ export function scenarios({ comptes, noms, chantiers, planning }) {
       onglet('Modules'),
       onglet('Chantiers'),
     ] },
+    // L'administrateur sans super administration diffère du super administrateur sur les
+    // référentiels aussi (droits d'édition) : les deux onglets y sont relevés.
     { nom: 'admin-administrateur', compte: comptes.administrateur, url: '/admin', actions: [
+      onglet('Intervenants'),
+      onglet('Fournisseurs'),
       onglet('Utilisateurs'),
       onglet('Marges & Commissions'),
     ] },
