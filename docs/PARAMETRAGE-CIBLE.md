@@ -1,6 +1,6 @@
 # Paramétrage cible : proposition
 
-> **Proposition du 17-10-2026, à valider par Nelson avant tout code** (chantier technique 4). Rien de ce document n'est implémenté.
+> **Proposition du 17-10-2026, validée le 18-10-2026** (chantier technique 4). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 6 et priment sur le texte de la proposition là où il différait. Rien de ce document n'est encore implémenté : chaque lot (section 5) fait sa PR.
 >
 > L'inventaire détaillé est en annexe : [`PARAMETRAGE-INVENTAIRE.md`](PARAMETRAGE-INVENTAIRE.md). Pour chaque règle, il donne sa référence `fichier:ligne`, sa valeur actuelle et la raison pour laquelle elle varie. Les identifiants A, B-01 à B-75 et C-01 à C-28 y renvoient. Les règles « qui fait quoi » relèvent de la proposition sœur [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md).
 
@@ -76,12 +76,12 @@ Constats de l'inventaire :
 
 | Règle | Raison |
 |---|---|
-| Numérotation continue et chronologique des factures et des avoirs (C-01, C-02) | Légale : séquence chronologique et continue (CGI, annexe II, art. 242 nonies A). Seuls les préfixes sont paramétrables. **Garde-fou à confirmer par le cabinet** : un préfixe changé en cours d'année continue la séquence (`F2026-0005` puis `X2026-0006`). Faut-il refuser ce changement hors début d'année, ou ouvrir une nouvelle série ? La remise à zéro annuelle est aussi à confirmer. |
+| Numérotation continue et chronologique des factures et des avoirs (C-01, C-02) | Légale : séquence chronologique et continue (CGI, annexe II, art. 242 nonies A). Seuls les préfixes sont paramétrables. **Garde-fou à confirmer par le cabinet** : un préfixe changé en cours d'année continue la séquence (`F2026-0005` puis `X2026-0006`). En attendant l'avis, le changement est refusé dès qu'un document de l'année porte un numéro (décision 1) ; la remise à zéro annuelle actuelle est gardée. |
 | Chronologie des règlements (C-06 bis) : au plus tôt la date d'émission de la facture, au plus tard le jour même | Intégrité de la chronologie, issue de B-35 |
 | Immutabilité de la facture émise et correction par avoir (C-03, C-04) ; devis signé figé (C-05) ; règlements immuables (C-06) | Légale et intégrité. Lacunes en base, dont les lignes et la version des mentions : #180. |
 | Arrondis, TVA par taux, comptes de TVA (C-07, C-08) | Règle fiscale et comptable ; taux normal (CGI art. 278) ; liste des taux légaux à confirmer par le cabinet. Le territoire fiscal (DOM et taux propres) ne se déduit pas du fuseau horaire. |
 | Mentions obligatoires et chronologie de l'émission (C-09, C-10) | Légale (CGI art. 289 et annexe II). Le contenu des mentions reste paramétrable et validé par le cabinet. |
-| Choix du site de facturation (`SITE_FACTURATION_ORDRE`) puis adresse figée à l'émission (C-13 bis) | L'adresse de facturation est une mention, et son figement une règle d'intégrité. L'ordre de choix, lui, est une **convention actuelle, à confirmer** : à défaut de site de facturation désigné, il retombe sur le site principal, le siège, puis le premier par ordre alphabétique. Faut-il plutôt refuser l'émission sans site de facturation désigné ? |
+| Choix du site de facturation (`SITE_FACTURATION_ORDRE`) puis adresse figée à l'émission (C-13 bis) | L'adresse de facturation est une mention, et son figement une règle d'intégrité. L'ordre de choix, lui, est une **convention actuelle, gardée** (décision 1) : à défaut de site de facturation désigné, il retombe sur le site principal, le siège, puis le premier par ordre alphabétique ; « Prêt à facturer » signalera le client sans site désigné. |
 | Plafond des montants (C-11) | Technique : colonnes `Decimal(12,2)` |
 | Écritures comptables équilibrées et scellées (C-12) | Intégrité comptable. Leur contenu (comptes, journal) est paramétrable. |
 | Format des dates et jour civil de la société (C-13) | Décision de Nelson du 14-10-2026 ; le fuseau reste paramétrable |
@@ -187,17 +187,25 @@ Elles n'existent pas dans le code. Elles sont posées ici sans valeur :
 | — | Horaires, jours fériés et astreintes (B-26 à B-29, B-38, B-64) | Lot (j), déjà décidé hors pilote |
 | — | Sans lot, sur demande : B-24, B-51, B-52, B-63, B-65, B-66, et l'affichage (B-67 à B-71) | — |
 
-## 6. Questions pour Nelson
+## 6. Décisions sur les questions ouvertes (18-10-2026)
 
-1. **Classement** : valides-tu le classement A, B, C ? En particulier :
-   - le garde-fou des préfixes et la remise à zéro annuelle (C-01, à confirmer par le cabinet) ;
-   - les listes aujourd'hui verrouillées en base, comme les moyens de paiement.
-2. **Valeurs initiales d'une nouvelle société** : démarre-t-elle avec les valeurs présentes dans le code, ou avec des paramètres vides jusqu'à leur réglage dans l'assistant ? C'est le cas de l'acompte de 30 %, du seuil de marge faible de 15 %, de l'alerte après 14 jours sans saisie, de la marge affichée et de la liste des types de chantier de la sûreté.
-3. **Assistant** : réservé au super administrateur ? Un parcours court et un complet ? Faut-il le livrer avant les rôles paramétrables, sans l'étape « qui fait quoi » ?
-4. **Marque** : la page de connexion affiche-t-elle « Iris » ? Le nom de l'éditeur (Noxia-Groupe / OrizonLab, cité par le README) est-il une valeur de société à retirer, ou la marque du produit ?
-5. **Placement** : P0 au plus tôt ; P1 avant le premier jour du pilote, ou après ?
-6. **Identité sur la facture** : l'émetteur vient aujourd'hui du texte figé des mentions légales. Deux options :
-   - copier à l'émission les coordonnées de `CompanySettings` (raison sociale, SIRET, TVA, adresse) et les figer avec la facture ;
-   - les reprendre seulement pour préremplir le texte des mentions, qui reste la seule source imprimée.
+Nelson a délégué ces arbitrages le 18-10-2026 : « prends le meilleur choix pour le bien de l'application et la facilité d'utilisation, en gardant la flexibilité ». Les principes de la section 2 s'appliquent : aucune valeur métier inventée, montants et mentions légales sous validation, et avis du cabinet pour ce qui touche la loi. La numérotation reprend celle des questions.
 
-   Laquelle retenir, et pour quand : avant le premier jour du pilote, ou avec le lot 6 ?
+1. **Classement A, B, C : retenu.**
+   - **Préfixes de numérotation (C-01)** : en attendant l'avis du cabinet, la règle la plus sûre s'applique. Un préfixe de facture ou d'avoir ne se change que tant qu'aucun document de ce type n'a été numéroté dans l'année en cours. Sinon, le changement est refusé avec un message clair, pour qu'aucune séquence de l'année ne change de préfixe en cours de route. La remise à zéro annuelle, qui existe déjà (séquence par année), est gardée ; le cabinet la confirmera.
+   - **Listes verrouillées en base** (moyens de paiement, natures de ligne) : elles restent verrouillées jusqu'au lot P3, qui les fera tenir par la société. Ce lot demandera la validation de Nelson, car elles touchent la comptabilité.
+   - **Site de facturation (C-13 bis)** : l'ordre de repli actuel est gardé (site de facturation désigné, puis site principal, siège, premier par ordre alphabétique), pour ne bloquer aucune émission. La liste de contrôle « Prêt à facturer » signalera un client sans site de facturation désigné.
+2. **Valeurs initiales d'une nouvelle société.**
+   - **Réglages numériques** (acompte de 30 %, seuil de marge faible de 15 %, alerte après 14 jours sans saisie, marge affichée) : la société démarre avec les valeurs actuelles du code. L'assistant les présente comme « valeurs proposées, à confirmer ». Rien n'est bloqué, et aucune valeur nouvelle n'est inventée ; aucun montant ne change pour l'installation existante.
+   - **Listes propres à un métier**, comme les types de chantier de la sûreté : une nouvelle société les trouve vides dès que le lot P3 les rend paramétrables, et les saisit à l'étape « Listes ». Une installation existante garde les siennes.
+3. **Assistant de démarrage.**
+   - Il est réservé au super administrateur ; l'administrateur le consulte.
+   - Deux parcours, un court et un complet.
+   - Il est livré avant les rôles paramétrables, sans l'étape « qui fait quoi ». Il ne propose alors que le préréglage « Iris actuel », et l'étape « Rentabilité » règle les trois cases actuelles des destinataires (option du lot P4).
+4. **Marque.** La page de connexion affiche « Iris », la marque du produit. « NØXIA GROUPE » et les autres valeurs de société écrites en dur sont retirées au lot P0, et lues dans `CompanySettings` après la connexion. Le nom de l'éditeur reste dans le README et dans les informations du dépôt, mais pas dans l'application.
+5. **Placement.** Le lot P0 au plus tôt. Le lot P1 après le premier jour du pilote, sauf si l'entreprise pilote a besoin d'un de ses paramètres avant : le périmètre du pilote reste la boussole.
+6. **Identité de l'émetteur sur la facture : copiée et figée à l'émission (option 1).**
+   - À l'émission, les coordonnées structurées de `CompanySettings` (raison sociale, SIREN et SIRET, TVA intracommunautaire, adresse) sont copiées avec la facture, puis imprimées depuis cette copie.
+   - Le texte des mentions légales garde les autres mentions, sans répéter l'identité.
+   - Raisons : une facture émise ne lit jamais un paramètre vivant (principe 6), et la facturation électronique exigera ces données sous forme structurée.
+   - Calendrier : avec le lot 6, au lot P5. Avant le premier jour seulement si le cabinet l'exige. Le cabinet confirmera les champs imprimés.
