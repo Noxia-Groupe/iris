@@ -1,6 +1,6 @@
 # Découpage des gros écrans du client (proposition)
 
-**Proposition du 18-10-2026, principe validé par Nelson le même jour** ; les autres choix sont faits par sa délégation (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
+**Proposition du 18-10-2026.** Le même jour, Nelson en a validé le principe et les fichiers à plat, et il a délégué le traitement des petites anomalies. Les autres choix, dont l'ordre des PR, sont des choix techniques de Claude Code (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
 
 Trois écrans dépassent la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)) :
 
@@ -118,6 +118,6 @@ Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour
 
 Réponse de Nelson aux trois questions de la proposition : « 1. Oui je valide le principe. Oui a plat comme aujourd'hui. Fait ce qui est le mieux a corriger apres ou en issu je te laisse le choix de la meulleur des facon. »
 
-1. **Principe validé par Nelson** : déplacement pur, état laissé dans la page. La question portait aussi sur l'ordre ; l'ordre proposé est retenu par délégation : outil de comparaison du rendu, puis Planning, Admin et fiche chantier.
+1. **Principe validé par Nelson** : déplacement pur, état laissé dans la page. **Ordre retenu par Claude Code**, Nelson ne s'étant pas prononcé sur ce point de la question : outil de comparaison du rendu, puis Planning, Admin et fiche chantier.
 2. **Fichiers dans `components/`, à plat**, comme aujourd'hui (décision de Nelson).
-3. **Petites anomalies** : Nelson a laissé le choix. Chacune a son issue : #202, #203, #204, #205 et #206. Sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique.
+3. **Petites anomalies** : le seul point délégué par Nelson. Chacune a son issue : #202, #203, #204, #205 et #206. Sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique.
