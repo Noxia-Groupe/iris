@@ -6,3 +6,14 @@ export function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number
   const nombre = Number(texte.replace(',', '.'));
   return Number.isFinite(nombre) && (nombre > 0 || (zeroAutorise && nombre === 0)) ? nombre : null;
 }
+
+export function motifCorrectionValide(value: unknown): string | null {
+  const motif = typeof value === 'string' ? value.trim() : '';
+  // Même métrique Unicode que PostgreSQL : un emoji est un caractère métier, pas deux unités UTF-16.
+  return [...motif].length >= 3 && [...motif].length <= 500 ? motif : null;
+}
+
+export function motifRestaurationValide(value: unknown): string | null {
+  const motif = typeof value === 'string' ? value.trim() : '';
+  return [...motif].length >= 3 && [...motif].length <= 500 ? motif : null;
+}

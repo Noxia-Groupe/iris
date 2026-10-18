@@ -25,3 +25,10 @@ export async function refusCommercial(commercialId: string, actuelId: string | n
   const commercial = await prisma.user.findUnique({ where: { id: commercialId }, select: { role: true, estCommercial: true, actif: true } });
   return !commercial || !isCommercialLike(commercial) || (!commercial.actif && commercialId !== actuelId) ? 'Commercial introuvable.' : null;
 }
+
+// Le chantier tel qu'il accompagne un achat ou un pointage : de quoi l'identifier, rien
+// de plus. `include: { chantier: true }` renvoyait l'enregistrement ENTIER — budget
+// global vendu, budget matériel, budget main-d'œuvre — à tout compte connecté, y compris
+// ceux à qui serializeChantier masque précisément ces montants ailleurs. Un `select`
+// explicite ferme la fuite par construction : ce qui n'est pas listé ne peut pas sortir.
+export const CHANTIER_LITE_SELECT = { id: true, nom: true, client: true, statut: true } as const;
