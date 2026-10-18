@@ -17,6 +17,12 @@ Comme pour le serveur, chaque PR **déplace** du code sans changer le comporteme
 - **Sections du rendu** (onglets, journaux, modales) : leur JSX est déplacé tel quel dans un composant. Ce composant reçoit **par props, sous les mêmes noms**, les états, valeurs dérivées et gestionnaires qu'il lit. Les hooks restent dans la page, dans le même ordre, avant les mêmes retours anticipés. Le texte du JSX déplacé reste donc identique, et React produit le même DOM.
 - Les types, constantes et petites fonctions qu'un seul composant emploie le suivent. Ceux que la page emploie aussi sont exportés depuis le nouveau fichier.
 - Aucun nom n'est renommé. Aucune logique n'est extraite des gestionnaires. Aucun état n'est déplacé de la page vers un composant (voir « Hors périmètre »).
+- **Seul code nouveau admis**, l'équivalent des fonctions d'enregistrement du serveur :
+  - la signature de chaque composant de section, avec ses props typées. Certains types d'état n'ont pas de nom : il faudra un alias de type ou `React.Dispatch<React.SetStateAction<…>>` ;
+  - les points d'appel dans la page ;
+  - les `import` et `export`, dont `import type` pour les types (`verbatimModuleSyntax`).
+
+  Seules les props réellement lues sont passées (`noUnusedParameters`). Un composant qui reprend plusieurs onglets, comme `AdminReferentiels`, rend un fragment, sans nœud DOM supplémentaire.
 
 ## Preuves par PR
 
@@ -33,7 +39,7 @@ Côté client, il n'existe pas d'équivalent de `server/scripts/verifier-deplace
 
 ## Découpage proposé
 
-Les fichiers rejoignent `client/src/components/`, selon la convention actuelle : dossier plat, noms en PascalCase, un export nommé par composant. Le préfixe nomme l'écran (`Admin…`, `Chantier…`, `Planning…`). **Question** : préférer des sous-dossiers par écran (`components/admin/`…) ? La convention actuelle n'en a pas ; je propose de la garder.
+Les fichiers rejoignent `client/src/components/`, selon la convention actuelle : dossier plat, noms en PascalCase. Exports par défaut (5 composants) et nommés (7) y coexistent ; je propose l'export nommé. La logique sans composant va dans `client/src/lib/`, pour ne pas ajouter d'avertissement `react/only-export-components` (un fichier de composant qui exporte aussi une fonction). Le préfixe nomme l'écran (`Admin…`, `Chantier…`, `Planning…`). **Question** : préférer des sous-dossiers par écran (`components/admin/`…) ? La convention actuelle n'en a pas ; je propose de la garder.
 
 ### PR A : Planning (873 → environ 440 lignes)
 
@@ -41,7 +47,8 @@ Les trois modales ne reçoivent déjà que des props. C'est le cas le plus simpl
 
 | Nouveau fichier | Contenu déplacé (lignes de `Planning.tsx`) |
 |---|---|
-| `PlanningPlacementIntervention.tsx` | `ContractPlacement` (433-481), avec `ContractQueueItem` (26-33), `DUREE_CURATIVE_MINUTES` (34-35) et `dateDue` (36-37), exportés pour la page qui les emploie aussi |
+| `PlanningPlacementIntervention.tsx` | `ContractPlacement` (433-481), avec `DUREE_CURATIVE_MINUTES` (34-35), qu'il est seul à employer |
+| `lib/fileAPlanifier.ts` | `ContractQueueItem` (26-33) et `dateDue` (36-37), qu'emploient la page et la modale de placement |
 | `PlanningModaleAffectation.tsx` | `EventModal` (483-754), avec `ModalState` (39-41, exporté), `CATEGORIES` (43-47) et `CRENEAUX` (49-54) |
 | `PlanningModaleTypes.tsx` | `TypesModal` (756-871) |
 
@@ -82,6 +89,8 @@ Restent dans la page, inchangés :
 - tous les hooks (avant les retours anticipés l.595 et 601) et les valeurs dérivées de `metrics` (612-653) ;
 - la barre d'actions (681-693). Son bouton « Modifier » précède toujours dans le DOM celui du commercial, rendu ensuite par `ChantierEnTete` : plusieurs parcours E2E prennent le premier.
 
+**Estimation et mise en forme des props.** Les six sections reçoivent environ 120 props au total : en-tête 17, indicateurs 20, journal des achats 28, journal des heures 26, journal d'audit 9, modale 21. La page garde environ 690 lignes avant les points d'appel. Les « environ 750 lignes » supposent des props passées en écriture compacte, plusieurs par ligne. Avec une prop par ligne, la page atteindrait environ 820 à 830 lignes, au-delà de la limite : la forme compacte, plusieurs attributs par ligne, est donc retenue pour les points d'appel de cette page.
+
 La page garde environ 600 lignes de hooks et de gestionnaires. Les regrouper en hooks propres (par exemple les filtres d'un journal), appelés au même rang, serait possible plus tard, mais ce ne serait plus un simple déplacement.
 
 La zone exportée en PDF (`ref={printRef}`, 677-1014) garde le même conteneur. Les composants qu'elle contient rendent les mêmes éléments, donc `html2pdf` lit le même DOM.
@@ -99,7 +108,8 @@ Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour
 
 - **Déplacer l'état dans les composants** : par exemple, que chaque onglet d'Admin charge ses données comme ceux de `Statistiques.tsx`, ou que les filtres des journaux du chantier vivent dans leur composant. Ce serait plus lisible, mais cela changerait la séquence des chargements, que des parcours E2E vérifient, ou le moment où un état se réinitialise. C'est un changement de comportement, donc un lot à part.
 - **Petites anomalies relevées pendant le relevé**, à corriger chacune dans sa PR, avec un test :
-  - Admin, onglet Intervenants : une branche inaccessible (l.738 et 757-761), `colSpan={4}` pour 5 colonnes (l.832), les options de rôle dupliquées ;
+  - Admin, onglet Intervenants : une branche inaccessible (l.738 et 757-761), `colSpan={4}` pour 5 colonnes (l.832) ;
+  - Admin, onglet Utilisateurs : les options de rôle dupliquées entre le formulaire (l.1194-1204) et le tableau (l.1290-1299) ;
   - fiche chantier : deux références jamais lues (`editChantierBudgetRef`, `editChantierAdresseRef`, l.97-98), alors que le commentaire l.94-96 annonce un préremplissage qui n'existe pas ;
   - utilitaires de format dupliqués entre écrans (`fmtEuro`, `fmtHeures`, `toDateFrancaise`, alors que `jourFrancais` existe dans `lib/dateFormatting.ts`) ;
   - lecture du rôle : Planning et la fiche chantier lisent `localStorage.user` directement, quand Admin passe par `getCurrentUser` et `useCurrentRole`.
