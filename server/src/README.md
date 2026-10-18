@@ -26,7 +26,7 @@ server/
     commun/             utilitaires partagés : dates (jour civil, fuseau de la société),
                         montants, validation des saisies, journal d'administration, PDF, CSV
       dates.ts          jour civil et année au fuseau de la société, lecture des dates saisies
-      montants.ts       conversion des Decimal Prisma en nombres (decimalToNumber)
+      montants.ts       Decimal Prisma en nombres, calculs exacts de montants et TVA par taux
       validation.ts     validation des saisies numériques
       csv.ts            échappement des cellules CSV
       journal-administration.ts  écriture et purge du journal des paramètres et des droits
@@ -45,6 +45,9 @@ server/
     domaines/clients/         routes.ts, metier.ts (validation des saisies), equipements.ts
                               (parc d'équipements)
     domaines/catalogue/       routes.ts, metier.ts (familles, validation, fiche selon le lecteur)
+    domaines/devis/           routes.ts, metier.ts (numéro, saisie, lignes, verrous)
+    domaines/chantiers/       metier.ts (types de chantier, contrôles du titulaire et du
+                              commercial) ; ses routes restent dans index.ts jusqu'à la PR 7
 ```
 
 Domaines prévus :
@@ -58,7 +61,7 @@ Domaines prévus :
 | `parametres` | paramètres métier, rémunération, registre des entreprises (**déplacé**) |
 | `clients` | clients, contacts, sites, parc d'équipements (**déplacé**) |
 | `catalogue` | prestations, articles, équipements (**déplacé**) |
-| `devis` | devis versionnés, signature, acompte, conversion, duplication |
+| `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**) |
 | `chantiers` | affaires, achats, heures, métriques et suivi |
 | `interventions` | SAV, coûts, comptes rendus, placement au planning |
 | `contrats` | contrats de maintenance et visites |

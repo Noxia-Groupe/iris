@@ -14,8 +14,7 @@ import PDFDocument from 'pdfkit';
 import './src/env';
 import { prisma, transactionVerifiee } from './src/db';
 import {
-  ROLE_SUPERADMIN, ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole, isCommercialLike,
-  COMMERCIAL_OR_FILTER,
+  ROLE_SUPERADMIN, ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole, COMMERCIAL_OR_FILTER,
 } from './src/droits/roles';
 import { type AuthRequest, JWT_SECRET, requireAuth, resolveJwtSecret } from './src/http/auth';
 import { blockCommercial, blockTechnicien, requireAdmin, requireTravauxRead } from './src/http/gardes';
@@ -30,7 +29,10 @@ import {
   FUSEAU_HORAIRE_PAR_DEFAUT, fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise, anneeEntreprise,
   dateEmissionEstFuture, dateSeuleEnJourCivil, dateIsoStricte, jourCivilDeReference, ajouterJoursCivils, debutJourCivilEntreprise,
 } from './src/commun/dates';
-import { decimalToNumber } from './src/commun/montants';
+import {
+  decimalToNumber, PLAFOND_MONTANT, FactureInvalideError, type LigneTaxable, tauxUtilises, baseHtDuTaux, tvaDuTaux,
+  arrondiCommercialLigneHt, centimesTtcLigne, centimes,
+} from './src/commun/montants';
 import {
   type Parametres, upsertSingleton, getParametres, validerBareme, remunerationNeutre, parseBareme, getReglesRemuneration,
   serialiseBareme,
@@ -45,8 +47,7 @@ import { enregistrerRoutesParametres, enregistrerRoutesRemunerationEtReglages } 
 import { enregistrerRoutesClesIntegration, enregistrerRoutesSociete, enregistrerRoutesModules } from './src/domaines/administration/routes';
 import { enregistrerRoutesJournalAdministration } from './src/domaines/administration/journal';
 import {
-  voitMontantsChantier, sansMontantsSaisie, voitCoutMainOeuvre, sansTauxHoraire, saisieSelonDroits, voitPrixAchatDevis,
-  ecritPrixAchatDevis,
+  voitMontantsChantier, sansMontantsSaisie, voitCoutMainOeuvre, sansTauxHoraire, saisieSelonDroits,
 } from './src/droits/visibilite';
 import { normalizeEmail } from './src/domaines/authentification/sso';
 import { secretIdentique } from './src/domaines/authentification/secours';
@@ -55,8 +56,11 @@ import { libelleCompteJournal, delierFicheSiPlusTechnicien, journaliserDroitsCom
 import { enregistrerRoutesEquipes, enregistrerRoutesPrimeMensuelle } from './src/domaines/utilisateurs/equipes';
 import { clientPayload, contactPayload, sitePayload } from './src/domaines/clients/metier';
 import { enregistrerRoutesClients } from './src/domaines/clients/routes';
-import { type CatalogueFamily, catalogueModels, catalogueFamily, cataloguePayload, catalogueExtraPayload } from './src/domaines/catalogue/metier';
+import { catalogueFamily, cataloguePayload, catalogueExtraPayload } from './src/domaines/catalogue/metier';
 import { enregistrerRoutesCatalogue } from './src/domaines/catalogue/routes';
+import { TYPES_CHANTIER, sanitizeTypes, refusTitulaire, refusCommercial } from './src/domaines/chantiers/metier';
+import { normaliserNumeroDevis, erreurNumeroDevis, numeroDevisDejaPris, devisPayload } from './src/domaines/devis/metier';
+import { enregistrerRoutesDevis } from './src/domaines/devis/routes';
 
 const port = process.env.PORT || 3001;
 
@@ -217,35 +221,6 @@ const requirePlanningActif: express.RequestHandler = async (req, res, next) => {
     res.status(500).json({ error: 'Error checking planning module' });
   }
 };
-
-// Référence d'affaire portée par le chantier : celle du devis Iris dont il est issu
-// (A26-0001), attribuée par la séquence annuelle à la création du devis et recopiée
-// telle quelle par la conversion. Le format est donc celui qu'Iris émet lui-même —
-// `nouveauNumeroDevis()` en est la seule source. La saisie reste normalisée (espaces
-// retirés, minuscule acceptée) pour qu'une référence recopiée à la main soit acceptée.
-const FORMAT_NUMERO_DEVIS = /^A\d{2}-\d{4,}$/;
-
-function normaliserNumeroDevis(valeur: unknown): string {
-  return String(valeur ?? '').trim().toUpperCase();
-}
-
-// Retourne un message d'erreur si la référence est absente ou mal formée, sinon null.
-function erreurNumeroDevis(numeroDevis: string): string | null {
-  if (!numeroDevis) return 'Veuillez saisir la référence d’affaire.';
-  if (!FORMAT_NUMERO_DEVIS.test(numeroDevis)) {
-    return 'La référence d’affaire doit être au format AAA-NNNN : un A, l’année sur deux chiffres, un tiret et le rang (exemple : A26-0001).';
-  }
-  return null;
-}
-
-// Vérifie qu'aucun AUTRE chantier ne porte déjà cette référence. Le contrôle est
-// volontairement applicatif et non porté par un index unique en base : un chantier peut
-// couvrir deux affaires du même client, et un index rendrait ces cas immodifiables. La
-// règle ne s'applique donc qu'aux références nouvellement saisies.
-async function numeroDevisDejaPris(numeroDevis: string, chantierIdExclu?: string): Promise<boolean> {
-  const existant = await prisma.chantier.findFirst({ where: { numeroDevis }, select: { id: true } });
-  return !!existant && existant.id !== chantierIdExclu;
-}
 
 // --- Contexte du suivi des chantiers ---
 // Ce que le calcul d'un chantier ne peut pas lire sur le chantier lui-même : le jour civil
@@ -569,21 +544,11 @@ async function rendreDocumentFacturePdf(facture: any, societe: any): Promise<Buf
     pdf.end();
   });
 }
-const PLAFOND_MONTANT = 9_999_999_999.99;
-class FactureInvalideError extends Error {}
 class FactureRattachementRefuse extends Error {
   statut: number;
   constructor(statut: number, message: string) { super(message); this.statut = statut; }
 }
 
-type LigneTaxable = { tauxTva: unknown; totalHt: unknown };
-const tauxUtilises = (lignes: LigneTaxable[]) => [...new Set(lignes.map(ligne => Number(ligne.tauxTva)))];
-const baseHtDuTaux = (lignes: LigneTaxable[], taux: number) => centimes(lignes.filter(ligne => Number(ligne.tauxTva) === taux).reduce((somme, ligne) => somme + Number(ligne.totalHt), 0));
-const tvaDuTaux = (lignes: LigneTaxable[], taux: number) => {
-  const baseCentimes = entierDecimal(baseHtDuTaux(lignes, taux), 2);
-  const millièmesTaux = entierDecimal(taux, 3);
-  return Number((baseCentimes * millièmesTaux + 50000n) / 100000n) / 100;
-};
 type VentilationTva = { tauxTva: number; totalHt: number; totalTva: number; totalTtc: number };
 const ventilationTvaDerivee = (lignes: LigneTaxable[]): VentilationTva[] => tauxUtilises(lignes).sort((a, b) => a - b).map(tauxTva => {
   const totalHt = baseHtDuTaux(lignes, tauxTva);
@@ -2444,31 +2409,6 @@ function avecDroitDeCloture<T extends { responsableId: string | null; responsabl
   };
 }
 
-// Types de chantier (liste fermée, plusieurs possibles par chantier) — sert aussi de
-// liste blanche pour ne jamais stocker de valeur arbitraire envoyée par le client.
-const TYPES_CHANTIER = ['Vidéo', 'Alarme', "Contrôle d'accès", 'Interphonie', 'Câblage réseau'];
-function sanitizeTypes(input: unknown): string[] {
-  const arr = Array.isArray(input) ? input : input ? [input] : [];
-  return TYPES_CHANTIER.filter((t) => arr.includes(t));
-}
-
-// Titulaire et commercial d'un chantier : mêmes contrôles à l'ouverture du chantier (conversion
-// d'un devis) et à la modification de sa fiche. Un compte désactivé (départ de l'entreprise)
-// reste titulaire ou commercial des chantiers qu'il a suivis, son historique étant conservé,
-// mais ne reçoit plus de nouvelle affectation. Chacune renvoie le motif du refus, ou null.
-async function refusTitulaire(responsableId: string, actuelId: string | null): Promise<string | null> {
-  if (!responsableId) return 'Un chantier doit toujours avoir un conducteur responsable.';
-  const responsable = await prisma.user.findUnique({ where: { id: responsableId }, select: { actif: true } });
-  return !responsable || (!responsable.actif && responsableId !== actuelId) ? 'Conducteur responsable introuvable.' : null;
-}
-async function refusCommercial(commercialId: string, actuelId: string | null): Promise<string | null> {
-  if (!commercialId) {
-    return (await prisma.user.count({ where: { OR: COMMERCIAL_OR_FILTER } })) > 0 ? 'Un chantier doit toujours avoir un commercial rattaché.' : null;
-  }
-  const commercial = await prisma.user.findUnique({ where: { id: commercialId }, select: { role: true, estCommercial: true, actif: true } });
-  return !commercial || !isCommercialLike(commercial) || (!commercial.actif && commercialId !== actuelId) ? 'Commercial introuvable.' : null;
-}
-
 // Chantiers — un conducteur ne voit que les chantiers dont il est responsable, un
 // responsable ceux de sa branche ; un admin ou un directeur voit tout. Un chantier sans
 // responsable reste invisible aux conducteurs jusqu'à ce qu'un admin lui en affecte un.
@@ -3733,598 +3673,8 @@ enregistrerRoutesClients(app);
 // --- Catalogue (src/domaines/catalogue/routes.ts) ---
 enregistrerRoutesCatalogue(app);
 
-// --- Devis natifs versionnés ---
-class DevisSaisieError extends Error {}
-// Refus qui ne vient pas de la saisie mais de l'état de l'affaire : la requête est bien
-// formée, c'est le monde qui s'y oppose. 409, pas 400.
-class DevisConflitError extends Error {}
-// Requête bien formée, mais réservée à d'autres comptes (prix d'achat prévu) : 403.
-class DevisDroitError extends Error {}
-// Arrondi commercial exact au centime d’une ligne : quantité (au millième) × PU HT
-// (au centime). Les montants de facture et d’avoir sont toujours positifs ; leur sens est
-// porté par le type du document. Aucun flottant ne participe à ce calcul.
-function entierDecimal(value: unknown, decimales: number): bigint {
-  const texte = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
-  const expression = new RegExp(`^(\\d+)(?:[,.](\\d{1,${decimales}}))?$`);
-  const resultat = expression.exec(texte);
-  if (!resultat) throw new FactureInvalideError('Montant de ligne invalide.');
-  return BigInt(resultat[1]) * 10n ** BigInt(decimales) + BigInt((resultat[2] || '').padEnd(decimales, '0') || '0');
-}
-
-function arrondiCommercialLigneHt(quantite: unknown, prixUnitaireHt: unknown): number {
-  const milliemes = entierDecimal(quantite, 3);
-  const centimesPu = entierDecimal(prixUnitaireHt, 2);
-  // Le produit est exprimé en millièmes de centime. Ajouter 500 puis diviser par 1 000
-  // applique exactement « moitié vers le haut » pour les valeurs positives.
-  return Number((milliemes * centimesPu + 500n) / 1000n) / 100;
-}
-
-function centimesTtcLigne(totalHt: number, tauxTva: unknown): number {
-  const centimesHt = entierDecimal(totalHt, 2);
-  const millièmesTaux = entierDecimal(tauxTva, 3);
-  // (100 % + taux) est exprimé en millièmes de pourcentage. L'arrondi final est
-  // commercial, identique à la ligne HT, y compris aux taux 10 % et 5,5 %.
-  return Number((centimesHt * (100000n + millièmesTaux) + 50000n) / 100000n) / 100;
-}
-
-const centimes = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-// Demande de reprise du catalogue, ou de conservation d'une ligne existante, portée par une
-// ligne saisie. `devisPayload` ne fait que la valider ; `resoudreLignesDevis` la résout en base.
-type ReferenceLigneDevis = { ligneId: string | null; catalogue: { famille: CatalogueFamily; id: string } | null; prixAchatUnitaireHt: number | null | undefined };
-function devisPayload(body: Record<string, unknown>) {
-  const clientId = String(body.clientId || '').trim(), objet = String(body.objet || '').trim();
-  const lignes = Array.isArray(body.lignes) ? body.lignes : [];
-  if (!clientId || !objet || objet.length > 300 || !lignes.length) throw new DevisSaisieError('Client, objet et au moins une ligne sont requis.');
-  const references: ReferenceLigneDevis[] = [];
-  const lignesCalculees = lignes.map((ligne, ordre) => {
-    const item = (ligne && typeof ligne === 'object' ? ligne : {}) as Record<string, unknown>, designation = String(item.designation || '').trim(), nature = String(item.nature || 'MAIN_OEUVRE');
-    // Mêmes échelles que les factures : le calcul entier ne doit jamais recevoir une précision
-    // que ses unités (millièmes / centimes) ne représentent pas.
-    const quantite = nombreDecimalNonNegatif(item.quantite, 9, false, 3);
-    const prixUnitaireHt = nombreDecimalNonNegatif(item.prixUnitaireHt, 10, true);
-    const tauxTva = item.tauxTva === undefined || item.tauxTva === null ? 20 : nombreDecimalNonNegatif(item.tauxTva, 3, true);
-    const unite = item.unite === undefined || item.unite === null ? null : String(item.unite).trim() || null;
-    if (!['MAIN_OEUVRE', 'FOURNITURE'].includes(nature) || !designation || designation.length > 500 || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100 || (unite !== null && unite.length > 40)) throw new DevisSaisieError('Ligne de devis invalide.');
-    const totalHt = arrondiCommercialLigneHt(quantite, prixUnitaireHt);
-    const totalTtc = centimesTtcLigne(totalHt, tauxTva);
-    // Même plafond que les factures : au-delà, la colonne Decimal(12, 2) refuserait le montant.
-    if (totalTtc > PLAFOND_MONTANT) throw new DevisSaisieError('Montant de ligne hors des limites acceptées.');
-    // Prix d'achat prévu : facultatif ; `undefined` signifie « non transmis », null « effacé ».
-    const prixAchatUnitaireHt = item.prixAchatUnitaireHt === undefined ? undefined
-      : item.prixAchatUnitaireHt === null || item.prixAchatUnitaireHt === '' ? null
-      : nombreDecimalNonNegatif(item.prixAchatUnitaireHt, 10, true);
-    if (prixAchatUnitaireHt === null && item.prixAchatUnitaireHt !== null && item.prixAchatUnitaireHt !== '') throw new DevisSaisieError('Prix d’achat prévu invalide.');
-    const ligneId = item.ligneId === undefined || item.ligneId === null ? null : String(item.ligneId);
-    let catalogue: ReferenceLigneDevis['catalogue'] = null;
-    if (item.catalogueFamille !== undefined && item.catalogueFamille !== null) {
-      const famille = catalogueFamily(String(item.catalogueFamille));
-      const id = typeof item.catalogueId === 'string' ? item.catalogueId.trim() : '';
-      if (!famille || !id) throw new DevisSaisieError('Fiche catalogue de la ligne invalide.');
-      catalogue = { famille, id };
-    }
-    references.push({ ligneId, catalogue, prixAchatUnitaireHt });
-    return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite };
-  });
-  const totalHt = centimes(lignesCalculees.reduce((t, l) => t + l.totalHt, 0));
-  // Comme les factures et avoirs, la TVA est arrondie sur la base HT cumulée de chaque taux.
-  const totalTva = centimes(tauxUtilises(lignesCalculees).reduce((total, taux) => total + tvaDuTaux(lignesCalculees, taux), 0));
-  const totalTtc = centimes(totalHt + totalTva);
-  if (totalTtc > PLAFOND_MONTANT) throw new DevisSaisieError('Montant de devis hors des limites acceptées.');
-  return { clientId, objet, lignesCalculees, references, totalHt, totalTva, totalTtc };
-}
-
-// --- Catalogue dans les devis (lot pilote 2, décision A8 du 16-10-2026) ---
-// Nature de ligne proposée selon la famille de la fiche (choix par défaut, à confirmer) : une
-// prestation est de la main-d'œuvre, un article ou un équipement une fourniture.
-const NATURE_DEVIS_PAR_FAMILLE: Record<CatalogueFamily, 'MAIN_OEUVRE' | 'FOURNITURE'> = { prestations: 'MAIN_OEUVRE', articles: 'FOURNITURE', equipements: 'FOURNITURE' };
-
-// Retire le prix d'achat prévu de toutes les lignes d'un devis, ou d'une liste de devis.
-function devisPourLecteur<T>(req: express.Request, valeur: T): T {
-  if (voitPrixAchatDevis(req)) return valeur;
-  const masquer = (devis: unknown): unknown => {
-    if (!devis || typeof devis !== 'object' || !Array.isArray((devis as { lignes?: unknown }).lignes)) return devis;
-    return { ...(devis as object), lignes: (devis as { lignes: Record<string, unknown>[] }).lignes.map(({ prixAchatUnitaireHt: _masque, ...ligne }) => ligne) };
-  };
-  return (Array.isArray(valeur) ? valeur.map(masquer) : masquer(valeur)) as T;
-}
-
-type LigneDevisExistante = { id: string; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null };
-// Résout la copie du catalogue et le prix d'achat prévu de chaque ligne saisie :
-//  - une ligne existante du devis (`ligneId`) garde sa fiche d'origine et sa référence, copiées
-//    à son ajout : modifier ou désactiver la fiche ensuite n'y change rien ;
-//  - une nouvelle ligne reprise du catalogue exige une fiche existante et active, dont la
-//    référence est recopiée par le serveur ;
-//  - le prix d'achat prévu n'est écrit que par un administrateur. Sinon, une ligne existante
-//    garde le sien, et une nouvelle ligne du catalogue reprend celui de la fiche.
-async function resoudreLignesDevis(
-  db: Prisma.TransactionClient | typeof prisma,
-  payload: ReturnType<typeof devisPayload>,
-  existantes: LigneDevisExistante[],
-  ecritPrixAchat: boolean,
-) {
-  if (!ecritPrixAchat && payload.references.some((r) => r.prixAchatUnitaireHt !== undefined)) {
-    throw new DevisDroitError('Le prix d’achat prévu est réservé aux administrateurs.');
-  }
-  const parId = new Map(existantes.map((ligne) => [ligne.id, ligne]));
-  const vues = new Set<string>();
-  const lignes = [];
-  for (const [index, ligne] of payload.lignesCalculees.entries()) {
-    const reference = payload.references[index];
-    let copie: { reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | number | null };
-    if (reference.ligneId) {
-      const existante = parId.get(reference.ligneId);
-      if (!existante || vues.has(reference.ligneId)) throw new DevisSaisieError('Ligne de devis inconnue : rechargez le devis.');
-      vues.add(reference.ligneId);
-      copie = { reference: existante.reference, catalogueFamille: existante.catalogueFamille, catalogueId: existante.catalogueId, prixAchatUnitaireHt: existante.prixAchatUnitaireHt };
-    } else if (reference.catalogue) {
-      // Lue par `db`, donc dans la transaction verrouillée de la modification, et non par le client global.
-      const delegues = { prestations: db.cataloguePrestation, articles: db.catalogueArticle, equipements: db.catalogueEquipement };
-      const fiche = await (delegues[reference.catalogue.famille] as unknown as { findUnique: (args: unknown) => Promise<{ reference: string; actif: boolean; prixAchatHt: Prisma.Decimal | null } | null> })
-        .findUnique({ where: { id: reference.catalogue.id }, select: { reference: true, actif: true, prixAchatHt: true } });
-      if (!fiche || !fiche.actif) throw new DevisSaisieError('Fiche catalogue introuvable ou désactivée.');
-      copie = { reference: fiche.reference, catalogueFamille: reference.catalogue.famille, catalogueId: reference.catalogue.id, prixAchatUnitaireHt: fiche.prixAchatHt };
-    } else {
-      copie = { reference: null, catalogueFamille: null, catalogueId: null, prixAchatUnitaireHt: null };
-    }
-    if (ecritPrixAchat && reference.prixAchatUnitaireHt !== undefined) copie.prixAchatUnitaireHt = reference.prixAchatUnitaireHt;
-    lignes.push({ ...ligne, ...copie });
-  }
-  return lignes;
-}
-
-// Fiches actives du catalogue, pour composer un devis : réservé aux porteurs du droit devis
-// (jamais le technicien, qui ne l'a jamais). La recherche porte sur la référence et la
-// désignation ; 50 fiches au plus, triées par désignation (choix par défaut, à confirmer).
-app.get('/api/devis/catalogue', requireAuth, requirePermission('devis:write'), async (req, res) => {
-  try {
-    const recherche = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
-    const famille = req.query.famille === undefined ? null : catalogueFamily(String(req.query.famille));
-    if (req.query.famille !== undefined && !famille) return void res.status(400).json({ error: 'Famille de catalogue inconnue.' });
-    const filtre = { actif: true, ...(recherche ? { OR: [{ reference: { contains: recherche, mode: 'insensitive' as const } }, { nom: { contains: recherche, mode: 'insensitive' as const } }] } : {}) };
-    const familles = famille ? [famille] : (['prestations', 'articles', 'equipements'] as CatalogueFamily[]);
-    const voitPrixAchat = voitPrixAchatDevis(req);
-    const fiches = (await Promise.all(familles.map(async (f) => {
-      const lignes = await (catalogueModels[f] as unknown as { findMany: (args: unknown) => Promise<Record<string, unknown>[]> })
-        .findMany({ where: filtre, orderBy: { nom: 'asc' }, take: 50 });
-      return lignes.map((fiche) => ({
-        famille: f, id: fiche.id, reference: fiche.reference, nom: fiche.nom,
-        unite: (fiche.unite as string | undefined) ?? null, nature: NATURE_DEVIS_PAR_FAMILLE[f],
-        prixVenteHt: fiche.prixVenteHt, tauxTva: fiche.tauxTva,
-        ...(voitPrixAchat ? { prixAchatHt: fiche.prixAchatHt ?? null } : {}),
-      }));
-    }))).flat().sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr')).slice(0, 50);
-    res.json(decimalToNumber(fiches));
-  } catch {
-    res.status(500).json({ error: 'Lecture du catalogue impossible.' });
-  }
-});
-function devisErreur(res: express.Response, error: unknown) {
-  if (error instanceof DevisSaisieError) return res.status(400).json({ error: error.message });
-  if (error instanceof DevisConflitError) return res.status(409).json({ error: error.message });
-  if (error instanceof DevisDroitError) return res.status(403).json({ error: error.message });
-  if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
-  console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
-}
-const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true, conversion: true, signature: true };
-function montantDevisFige(value: Prisma.Decimal | number | string | null, decimales: number): string | null {
-  return value === null ? null : new Prisma.Decimal(value).toFixed(decimales);
-}
-function contenuDevisSigne(devis: {
-  id: string; dossierId: string; numero: string; version: number; clientId: string; objet: string;
-  acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; totalHt: Prisma.Decimal; totalTva: Prisma.Decimal; totalTtc: Prisma.Decimal;
-  lignes: { ordre: number; designation: string; nature: string; reference: string | null; unite: string | null; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal }[];
-}) {
-  // Le prix d'achat prévu, donnée interne, n'entre jamais dans ce que le client signe.
-  return {
-    devisId: devis.id, dossierId: devis.dossierId, numero: devis.numero, version: devis.version,
-    clientId: devis.clientId, objet: devis.objet, acompteExige: devis.acompteExige,
-    tauxAcompte: montantDevisFige(devis.tauxAcompte, 2), totalHt: montantDevisFige(devis.totalHt, 2),
-    totalTva: montantDevisFige(devis.totalTva, 2), totalTtc: montantDevisFige(devis.totalTtc, 2),
-    lignes: devis.lignes.map(ligne => ({
-      ordre: ligne.ordre, designation: ligne.designation, nature: ligne.nature, reference: ligne.reference, unite: ligne.unite,
-      quantite: montantDevisFige(ligne.quantite, 3), prixUnitaireHt: montantDevisFige(ligne.prixUnitaireHt, 2),
-      tauxTva: montantDevisFige(ligne.tauxTva, 2), totalHt: montantDevisFige(ligne.totalHt, 2), totalTtc: montantDevisFige(ligne.totalTtc, 2),
-    })),
-  };
-}
-// Copie à l'identique d'une ligne (révision, duplication) : la copie du catalogue et le prix
-// d'achat prévu suivent, comme les montants.
-function copieLigneDevis({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt }: {
-  ordre: number; designation: string; nature: string; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal;
-  unite: string | null; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null;
-}) {
-  return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt };
-}
-async function verrouillerDevis(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
-  const lignes = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "Devis" WHERE "id" = ${id} FOR UPDATE`);
-  return lignes.length === 1;
-}
-async function acompteDevisPayload(body: Record<string, unknown>, precedent?: { acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; acompteRecuLe: Date | null }) {
-  // Après encaissement, les conditions qui ont déclenché celui-ci constituent une preuve :
-  // elles sont reprises telles quelles, même si le formulaire réémet des valeurs différentes.
-  if (precedent?.acompteRecuLe) return { acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte };
-  const acompteExige = precedent && !Object.hasOwn(body, 'acompteExige') ? precedent.acompteExige : !!body.acompteExige;
-  const { tauxAcompteDefaut } = await getParametres();
-  const tauxAcompte = acompteExige
-    // Un PATCH portant sur les lignes ou l'objet ne renégocie pas silencieusement le taux.
-    ? (Object.hasOwn(body, 'tauxAcompte')
-      ? (nombreDecimalNonNegatif(body.tauxAcompte, 3) ?? Number(tauxAcompteDefaut))
-      : (precedent?.acompteExige ? precedent.tauxAcompte : null) ?? Number(tauxAcompteDefaut))
-    : null;
-  if (tauxAcompte !== null && Number(tauxAcompte) > 100) throw new DevisSaisieError('Le taux d’acompte ne peut pas dépasser 100 %.');
-  return { acompteExige, tauxAcompte };
-}
-async function nouveauNumeroDevis() {
-  const societe = await getCompanySettings();
-  const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
-  const [sequence] = await prisma.$queryRaw<{ dernierNumero: number }[]>(Prisma.sql`INSERT INTO "SequenceAffaire" ("annee", "dernierNumero") VALUES (${annee}, 1) ON CONFLICT ("annee") DO UPDATE SET "dernierNumero" = "SequenceAffaire"."dernierNumero" + 1 RETURNING "dernierNumero"`);
-  return `A${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-}
-const creerDevis: express.RequestHandler = async (req, res) => { try {
-  const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
-  if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
-  const lignes = await resoudreLignesDevis(prisma, payload, [], ecritPrixAchatDevis(req));
-  const { acompteExige, tauxAcompte } = await acompteDevisPayload((req.body ?? {}) as Record<string, unknown>);
-  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, acompteExige, tauxAcompte, lignes: { create: lignes } }, include: devisInclude });
-  res.status(201).json(devisPourLecteur(req, decimalToNumber(devis)));
-} catch (error) { devisErreur(res, error); } };
-const listerDevis: express.RequestHandler = async (req, res) => { try { res.json(devisPourLecteur(req, decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } })))); } catch (error) { devisErreur(res, error); } };
-const modifierDevis: express.RequestHandler = async (req, res) => { try {
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const payload = devisPayload(body);
-  const devis = await transactionVerifiee(async tx => {
-    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
-    const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { signature: true, conversion: true, lignes: true } });
-    if (precedent.signature) throw new DevisConflitError('Ce devis est signé : créez une nouvelle révision brouillon pour le modifier.');
-    if (precedent.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être modifié.');
-    if (!['BROUILLON', 'ENVOYE'].includes(precedent.statut)) throw new DevisConflitError('Seuls les devis brouillon ou envoyés, non signés, peuvent être modifiés.');
-    if (!await tx.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
-    const acompte = await acompteDevisPayload(body, precedent);
-    const lignes = await resoudreLignesDevis(tx, payload, precedent.lignes, ecritPrixAchatDevis(req));
-    return tx.devis.update({
-      where: { id: precedent.id },
-      data: { clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, ...acompte,
-        lignes: { deleteMany: {}, create: lignes } }, include: devisInclude,
-    });
-  });
-  res.json(devisPourLecteur(req, decimalToNumber(devis)));
-} catch (error) { devisErreur(res, error); } };
-const creerRevision: express.RequestHandler = async (req, res) => { try {
-  const devis = await transactionVerifiee(async tx => {
-    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
-    const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: devisInclude });
-    if (!precedent.signature) throw new DevisConflitError('Seul un devis signé peut ouvrir une nouvelle révision.');
-    if (precedent.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être révisé.');
-    const versionPlusRecente = await tx.devis.findFirst({ where: { dossierId: precedent.dossierId, version: { gt: precedent.version } }, select: { id: true } });
-    if (versionPlusRecente) throw new DevisConflitError('Seule la dernière version du dossier peut être révisée.');
-    const version = ((await tx.devis.aggregate({ where: { dossierId: precedent.dossierId }, _max: { version: true } }))._max.version ?? 0) + 1;
-    return tx.devis.create({ data: {
-      dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet,
-      totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc,
-      acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte,
-      acompteRecuLe: precedent.acompteRecuLe, acompteMontant: precedent.acompteMontant,
-      acompteReference: precedent.acompteReference, acompteConstateParId: precedent.acompteConstateParId,
-      lignes: { create: precedent.lignes.map(copieLigneDevis) },
-    }, include: devisInclude });
-  });
-  res.status(201).json(devisPourLecteur(req, decimalToNumber(devis)));
-} catch (error) { devisErreur(res, error); } };
-const signerDevis: express.RequestHandler = async (req, res) => { try {
-  const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
-  if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) throw new DevisSaisieError('Le signataire et sa confirmation explicite sont obligatoires.');
-  const signature = await transactionVerifiee(async tx => {
-    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
-    const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { lignes: { orderBy: { ordre: 'asc' } }, signature: true, conversion: true } });
-    if (devis.signature) throw new DevisConflitError('Ce devis est déjà signé.');
-    if (devis.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être signé.');
-    if (devis.statut === 'ANNULE' || devis.statut === 'REFUSE') throw new DevisConflitError('Ce devis ne peut plus être signé dans son état actuel.');
-    const empreinte = crypto.createHash('sha256').update(JSON.stringify(contenuDevisSigne(devis)), 'utf8').digest('hex');
-    await tx.devis.update({ where: { id: devis.id }, data: { statut: 'ACCEPTE' } });
-    const auteur = (req as AuthRequest).user;
-    if (!auteur) throw new DevisConflitError('Une session humaine active est obligatoire pour signer un devis.');
-    return tx.devisSignature.create({ data: { devisId: devis.id, enregistreParId: auteur.id, signataire, empreinte }, select: { id: true, signataire: true, empreinte: true, signeLe: true, enregistreParId: true } });
-  });
-  res.status(201).json(signature);
-} catch (error) { devisErreur(res, error); } };
-routeMixte('get', '/devis', 'devis:read', listerDevis, [requirePermission('devis:read')]);
-routeMixte('post', '/devis', 'devis:write', creerDevis, [requirePermission('devis:write')]);
-routeMixte('patch', '/devis/:id', 'devis:write', modifierDevis, [requirePermission('devis:write')]);
-routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision, [requirePermission('devis:write')]);
-// La signature engage une personne identifiée : aucune clé d'intégration ne peut l'émettre.
-app.post('/api/devis/:id/signature', requireAuth, requirePermission('devis:write'), signerDevis);
-// Cycle de vie d'un devis. `ANNULE` ne figure dans aucune liste de destinations : on n'y
-// entre que par la route d'annulation, qui exige un motif et vérifie le chantier lié — et
-// on n'en sort jamais. `EN_ATTENTE_ACOMPTE` est le choix explicite fait après acceptation :
-// ouvrir le chantier tout de suite, ou attendre l'acompte. Un devis peut y revenir tant
-// que l'acompte n'est pas constaté, mais pas une fois le chantier ouvert.
-const TRANSITIONS_DEVIS: Record<string, string[]> = {
-  BROUILLON: ['ENVOYE'],
-  ENVOYE: ['REFUSE', 'BROUILLON'],
-  ACCEPTE: ['EN_ATTENTE_ACOMPTE'],
-  EN_ATTENTE_ACOMPTE: ['ACCEPTE'],
-  REFUSE: [],
-  ANNULE: [],
-};
-
-// Un devis dont le chantier existe déjà est figé : sa seule évolution possible est
-// l'annulation, qui passe par sa propre route.
-function refusStatutFige(devis: { statut: string; conversion?: unknown }): string | null {
-  if (devis.statut === 'ANNULE') return 'Ce devis est annulé : son statut ne peut plus changer.';
-  if (devis.conversion) return 'Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus.';
-  return null;
-}
-const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
-  const statut = String((req.body ?? {}).statut || '');
-  // Sous le verrou du devis : un changement de statut concurrent d'une conversion attend sa fin
-  // et lit alors le chantier ouvert (statut figé), au lieu d'écraser le statut d'un devis converti.
-  const maj = await transactionVerifiee(async tx => {
-    if (!await verrouillerDevis(tx, paramId(req))) return null;
-    const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { conversion: true } });
-    const fige = refusStatutFige(devis);
-    if (fige) throw new DevisSaisieError(fige);
-    if (!TRANSITIONS_DEVIS[devis.statut]?.includes(statut)) throw new DevisSaisieError(`Transition ${devis.statut} → ${statut} interdite.`);
-    // Passer en attente d'acompte n'a de sens que si le devis en exige un.
-    if (statut === 'EN_ATTENTE_ACOMPTE' && !devis.acompteExige) throw new DevisSaisieError('Ce devis n’exige pas d’acompte.');
-    if (statut === 'ACCEPTE' && devis.statut === 'EN_ATTENTE_ACOMPTE' && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte de ce devis n’a pas encore été constaté.');
-    return tx.devis.update({ where: { id: devis.id }, data: { statut }, include: devisInclude });
-  });
-  if (!maj) return void res.status(404).json({ error: 'Devis introuvable.' });
-  res.json(devisPourLecteur(req, decimalToNumber(maj)));
-} catch (error) { devisErreur(res, error); } };
-routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requirePermission('devis:write')]);
-
-// Une conversion ne démarre qu'après acceptation. Phase 5 cible le chantier, déjà natif ;
-// les cibles intervention, contrat et facture seront activées par leurs modules respectifs.
-//
-// Chaque affaire a son chantier, un seul (décision de Nelson du 14-10-2026) : un devis déjà
-// converti, un dossier dont une autre version l'est déjà et une référence d'affaire déjà portée
-// par un chantier sont refusés (409). Le verrou du devis fait passer l'une après l'autre deux
-// conversions du même devis ; les contraintes uniques de DevisConversion restent le filet.
-//
-// Depuis l'Administration, la même conversion ouvre le chantier avec son titulaire, son
-// commercial, ses types et sa date de début. Ces choix relèvent de la fiche, que seuls
-// l'administration et le titulaire modifient : ils ne sont acceptés que d'une session
-// administrateur. Sans eux, c'est la conversion de l'écran Devis, et le chantier s'attribue
-// ensuite depuis sa fiche.
-const CHAMPS_OUVERTURE_CHANTIER = ['responsableId', 'commercialId', 'types', 'dateDebut'];
-const REFUS_DOUBLE_CONVERSION = 'Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier.';
-async function ouvertureChantier(body: Record<string, unknown>): Promise<{ responsableId?: string; commercialId?: string | null; types?: string[]; dateDebut?: string }> {
-  const ouverture: { responsableId?: string; commercialId?: string | null; types?: string[]; dateDebut?: string } = {};
-  if ('responsableId' in body) {
-    const responsableId = String(body.responsableId || '');
-    const refus = await refusTitulaire(responsableId, null);
-    if (refus) throw new DevisSaisieError(refus);
-    ouverture.responsableId = responsableId;
-  }
-  if ('commercialId' in body) {
-    const commercialId = String(body.commercialId || '');
-    const refus = await refusCommercial(commercialId, null);
-    if (refus) throw new DevisSaisieError(refus);
-    ouverture.commercialId = commercialId || null;
-  }
-  if ('types' in body) ouverture.types = sanitizeTypes(body.types);
-  // Une date présente mais vide est refusée, comme un titulaire vide : seule son absence laisse le
-  // chantier commencer le jour de la conversion.
-  if ('dateDebut' in body) {
-    const dateDebut = dateIsoStricte(body.dateDebut);
-    if (!dateDebut) throw new DevisSaisieError('La date de début doit être valide au format JJ-MM-AAAA.');
-    ouverture.dateDebut = dateDebut;
-  }
-  return ouverture;
-}
-const convertirDevis: express.RequestHandler = async (req, res) => { try {
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const cible = String(body.cible || '');
-  if (cible !== 'CHANTIER') throw new DevisSaisieError('Cible de conversion non disponible.');
-  if (CHAMPS_OUVERTURE_CHANTIER.some(cle => cle in body) && ((req as ApiRequest).apiKey || !isAdminRole((req as AuthRequest).user?.role))) {
-    return void res.status(403).json({ error: 'Seule l’administration choisit le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche.' });
-  }
-  const ouverture = await ouvertureChantier(body);
-  // Sans date choisie, le chantier commence le jour civil de la société (décision de Nelson du
-  // 14-10-2026), enregistré en date-seule comme une date saisie, et non à l'instant UTC.
-  const societe = await getCompanySettings();
-  const debutParDefaut = `${aujourdHuiEntreprise(societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)}T00:00:00.000Z`;
-  const resultat = await transactionVerifiee(async tx => {
-    // Verrou du devis, comme pour sa modification, sa révision, sa signature, son statut, son
-    // acompte et son annulation : ces écritures et deux conversions simultanées du même devis
-    // passent l'une après l'autre. La seconde conversion lit celle de la première (« déjà
-    // converti »), au lieu de tomber, selon le moment, sur le contrôle du dossier ou de la
-    // référence avec un message inexact.
-    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
-    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, signature: true, lignes: true } });
-    if (!devis) throw new DevisSaisieError('Devis introuvable.');
-    if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé : il ne peut plus ouvrir de chantier.');
-    const versionPlusRecente = await tx.devis.findFirst({ where: { dossierId: devis.dossierId, version: { gt: devis.version }, statut: { not: 'ANNULE' } }, select: { id: true } });
-    if (versionPlusRecente) throw new DevisConflitError('Seule la dernière version non annulée du dossier peut être convertie.');
-    if (devis.statut === 'EN_ATTENTE_ACOMPTE') throw new DevisSaisieError('Ce devis attend son acompte : le chantier ne peut pas encore être ouvert.');
-    if (devis.statut !== 'ACCEPTE') throw new DevisSaisieError('Seul un devis accepté peut être converti.');
-    if (!devis.signature) throw new DevisSaisieError('Seul un devis signé en interne peut être converti.');
-    if (devis.conversion) throw new DevisConflitError(REFUS_DOUBLE_CONVERSION);
-    // Verrou de fond, indépendant du statut : un devis qui exige un acompte n'ouvre pas de
-    // chantier tant que sa réception n'a pas été constatée. Le statut peut être manipulé,
-    // pas ce fait.
-    if (devis.acompteExige && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte exigé par ce devis n’a pas été constaté : le chantier ne peut pas être ouvert.');
-    // Une autre version du dossier a déjà ouvert le chantier de l'affaire, puis a pu être annulée
-    // avec lui : l'affaire a eu son chantier. Sa reprise passe par la duplication du devis, qui
-    // crée une nouvelle affaire (cf. POST /api/devis/:id/duplication).
-    if (await tx.devisConversion.findFirst({ where: { dossierId: devis.dossierId }, select: { id: true } })) {
-      throw new DevisConflitError('Une autre version de ce devis a déjà ouvert le chantier de l’affaire : chaque affaire n’en ouvre qu’un. Pour la reprendre, dupliquez le devis.');
-    }
-    // Un chantier saisi à la main sous cette référence (fiche corrigée, par exemple) est déjà
-    // celui de l'affaire : la fiche refuse de même un numéro déjà pris. Une affaire annulée ne
-    // se modifie plus : on oriente alors vers la duplication, et non vers une correction.
-    const chantierDeLaReference = await tx.chantier.findFirst({ where: { numeroDevis: devis.numero }, select: { statut: true } });
-    if (chantierDeLaReference) {
-      throw new DevisConflitError(chantierDeLaReference.statut === 'ANNULE'
-        ? `L’affaire ${devis.numero} a déjà eu un chantier, annulé depuis : pour la reprendre, dupliquez le devis.`
-        : `L’affaire ${devis.numero} a déjà un chantier : corrigez la référence de ce chantier avant de convertir le devis.`);
-    }
-    const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
-    const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
-    const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
-    const chantier = await tx.chantier.create({ data: {
-      nom: devis.objet, client: devis.client.raisonSociale, clientId: devis.clientId, numeroDevis: devis.numero,
-      dateDebut: ouverture.dateDebut ?? debutParDefaut, budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues,
-      responsableId: ouverture.responsableId, commercialId: ouverture.commercialId, types: ouverture.types,
-    } });
-    await tx.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CHANTIER', cibleId: chantier.id } });
-    return chantier;
-  });
-  res.status(201).json(decimalToNumber(resultat));
-} catch (error) {
-  // Défense en profondeur : les contraintes uniques de DevisConversion. Les verrous du devis
-  // (conversion, révision, annulation) les rendent inatteignables en fonctionnement normal : deux
-  // conversions du même devis passent l'une après l'autre, et une autre version du dossier ne se
-  // convertit qu'une fois la conversion précédente visible, que le contrôle du dossier refuse.
-  // Si le filet servait malgré tout, la seconde serait refusée et son chantier annulé avec la
-  // transaction.
-  if ((error as { code?: string })?.code === 'P2002') return void res.status(409).json({ error: 'Une autre version de ce devis vient d’ouvrir le chantier de l’affaire : chaque affaire n’en ouvre qu’un.' });
-  devisErreur(res, error);
-} };
-routeMixte('post', '/devis/:id/convertir', 'devis:write', convertirDevis, [requirePermission('devis:write')]);
-
-// Devis qui peuvent ouvrir leur chantier : mêmes conditions que la conversion ci-dessus (accepté,
-// signé, acompte constaté s'il est exigé, dernière version non annulée de son dossier, aucune
-// version du dossier déjà convertie, référence d'affaire portée par aucun chantier). Ils
-// alimentent le formulaire « Ouvrir le chantier d'une affaire » de l'Administration. Réservé à
-// l'interface, comme le formulaire.
-app.get('/api/devis/a-convertir', requireAuth, requirePermission('devis:read'), requirePermission('devis:write'), async (_req, res) => { try {
-  const candidats = await prisma.devis.findMany({
-    where: { statut: 'ACCEPTE', signature: { isNot: null }, conversion: { is: null }, OR: [{ acompteExige: false }, { acompteRecuLe: { not: null } }] },
-    select: { id: true, dossierId: true, numero: true, version: true, objet: true, totalHt: true, client: { select: { id: true, raisonSociale: true } } },
-    orderBy: { createdAt: 'desc' },
-  });
-  const versions = await prisma.devis.groupBy({
-    by: ['dossierId'], where: { dossierId: { in: candidats.map(d => d.dossierId) }, statut: { not: 'ANNULE' } }, _max: { version: true },
-  });
-  const derniere = new Map(versions.map(v => [v.dossierId, v._max.version]));
-  const dossiersConvertis = new Set((await prisma.devisConversion.findMany({
-    where: { dossierId: { in: candidats.map(d => d.dossierId) } }, select: { dossierId: true },
-  })).map(c => c.dossierId));
-  const referencesPrises = new Set((await prisma.chantier.findMany({
-    where: { numeroDevis: { in: candidats.map(d => d.numero) } }, select: { numeroDevis: true },
-  })).map(c => c.numeroDevis));
-  res.json(decimalToNumber(candidats.filter(d => derniere.get(d.dossierId) === d.version
-    && !dossiersConvertis.has(d.dossierId) && !referencesPrises.has(d.numero))));
-} catch (error) { devisErreur(res, error); } });
-
-// --- Constatation de l'acompte ---
-// Tant que le module paiements (phase 9) n'existe pas, la réception d'un acompte se
-// constate à la main : date, montant et référence du règlement, par un administrateur.
-// Le rapprochement bancaire alimentera ces mêmes champs plus tard sans changer la règle.
-// Réservée aux administrateurs : constater un encaissement débloque l'ouverture d'un
-// chantier, ce n'est pas un geste que celui qui a vendu l'affaire se rend à lui-même.
-app.post('/api/devis/:id/acompte', requireAuth, requireAdmin, async (req, res) => { try {
-  // Sous le verrou du devis, comme son statut, qu'il peut faire passer à « accepté ».
-  const maj = await transactionVerifiee(async tx => {
-    if (!await verrouillerDevis(tx, paramId(req))) return null;
-    const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) } });
-    if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé.');
-    if (!devis.acompteExige) throw new DevisSaisieError('Ce devis n’exige pas d’acompte.');
-    if (devis.acompteRecuLe) throw new DevisSaisieError('L’acompte de ce devis a déjà été constaté.');
-
-    const recuLe = dateIsoStricte((req.body ?? {}).recuLe);
-    if (!recuLe) throw new DevisSaisieError('La date de réception doit être valide au format JJ-MM-AAAA.');
-    const montant = nombreDecimalNonNegatif((req.body ?? {}).montant, 10);
-    if (montant === null) throw new DevisSaisieError('Le montant de l’acompte doit être un nombre strictement positif.');
-    const reference = String((req.body ?? {}).reference ?? '').trim();
-    if (!reference) throw new DevisSaisieError('La référence du règlement est requise.');
-
-    return tx.devis.update({
-      where: { id: devis.id },
-      data: {
-        acompteRecuLe: recuLe, acompteMontant: montant, acompteReference: reference,
-        acompteConstateParId: (req as AuthRequest).user!.id,
-        // Constater l'acompte remet le devis en état d'être converti.
-        statut: devis.statut === 'EN_ATTENTE_ACOMPTE' ? 'ACCEPTE' : devis.statut,
-      },
-      include: devisInclude,
-    });
-  });
-  if (!maj) return void res.status(404).json({ error: 'Devis introuvable.' });
-  res.json(devisPourLecteur(req, decimalToNumber(maj)));
-} catch (error) { devisErreur(res, error); } });
-
-// --- Annulation d'un devis, et archivage du chantier qui en est issu ---
-// C'est le SEUL chemin qui revient sur une affaire ouverte par erreur : un chantier ne se
-// supprime plus (cf. DELETE /api/chantiers/:id). Réservée aux administrateurs, elle exige
-// un motif, et elle est refusée dès qu'une heure ou un achat a été saisi sur le chantier —
-// à ce stade l'affaire a commencé à vivre, on ne l'efface pas, on la mène à son terme.
-//
-// Le chantier n'est pas détruit mais archivé : il sort des listes, des coûts, des marges et
-// des commissions, et conserve la raison de son annulation. Une annulation ne s'annule pas ;
-// la reprise passe par la duplication du devis (cf. POST /devis/:id/duplication).
-app.post('/api/devis/:id/annulation', requireAuth, requireAdmin, async (req, res) => { try {
-  const motif = String((req.body ?? {}).motif ?? '').trim();
-  if (!motif) throw new DevisSaisieError('Un motif d’annulation est obligatoire.');
-
-  const resultat = await transactionVerifiee(async tx => {
-    // Verrou du devis d'abord, comme la conversion : une annulation concurrente d'une conversion
-    // attend sa fin et archive alors le chantier ouvert, au lieu d'annuler le devis en laissant
-    // son chantier en cours. Le chantier, lui, n'est verrouillé que par sa mise à jour, après le
-    // comptage des saisies (course avec une saisie simultanée, non corrigée : constat « Saisie sur
-    // un chantier pendant l'annulation de son devis » de docs/ROADMAP-PASSATION.md).
-    if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
-    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { conversion: true } });
-    if (!devis) throw new DevisSaisieError('Devis introuvable.');
-    if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est déjà annulé.');
-
-    let chantierArchive: string | null = null;
-    if (devis.conversion?.cibleType === 'CHANTIER') {
-      const chantierId = devis.conversion.cibleId;
-      // Le verrou porte sur les écritures VIVANTES : une ligne déjà archivée n'engage rien.
-      const [heures, achats] = await Promise.all([
-        tx.pointageHeure.count({ where: { chantierId, archivedAt: null } }),
-        tx.achatReel.count({ where: { chantierId, archivedAt: null } }),
-      ]);
-      if (heures > 0 || achats > 0) {
-        throw new DevisConflitError(
-          `Annulation impossible : ce chantier porte déjà ${heures} pointage(s) d’heures et ${achats} achat(s). Une affaire commencée ne s’annule pas.`,
-        );
-      }
-      await tx.chantier.update({
-        where: { id: chantierId },
-        data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: (req as AuthRequest).user!.id, motifAnnulation: motif },
-      });
-      chantierArchive = chantierId;
-    }
-
-    const maj = await tx.devis.update({
-      where: { id: devis.id },
-      data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: (req as AuthRequest).user!.id, motifAnnulation: motif },
-      include: devisInclude,
-    });
-    return { devis: maj, chantierArchive };
-  });
-  res.json({ devis: devisPourLecteur(req, decimalToNumber(resultat.devis)), chantierArchive: resultat.chantierArchive });
-} catch (error) { devisErreur(res, error); } });
-
-// --- Duplication ---
-// Reprend un devis à l'identique — client, objet, lignes, option d'acompte — avec son
-// PROPRE numéro d'affaire et un dossier neuf. C'est la voie de reprise après une annulation :
-// on ne ressuscite pas un devis annulé, on en refait un. Le duplicata repart en BROUILLON,
-// donc à renvoyer et à faire réaccepter : dupliquer ne contourne pas l'accord du client.
-// Le lien vers l'origine évite de retrouver deux devis jumeaux sans savoir lequel remplace
-// l'autre. Le taux d'acompte est relu depuis les paramètres du jour : un duplicata est un
-// devis neuf, il suit la politique en vigueur au moment où il est émis.
-app.post('/api/devis/:id/duplication', requireAuth, requirePermission('devis:write'), async (req, res) => { try {
-  const source = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: devisInclude });
-  if (!source) return void res.status(404).json({ error: 'Devis introuvable.' });
-  const { tauxAcompteDefaut } = await getParametres();
-  const duplicata = await prisma.devis.create({
-    data: {
-      dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1,
-      clientId: source.clientId, objet: source.objet,
-      totalHt: source.totalHt, totalTva: source.totalTva, totalTtc: source.totalTtc,
-      acompteExige: source.acompteExige,
-      tauxAcompte: source.acompteExige ? tauxAcompteDefaut : null,
-      origineDevisId: source.id,
-      lignes: { create: source.lignes.map(copieLigneDevis) },
-    },
-    include: devisInclude,
-  });
-  res.status(201).json(devisPourLecteur(req, decimalToNumber(duplicata)));
-} catch (error) { devisErreur(res, error); } });
+// --- Devis (src/domaines/devis/routes.ts) ---
+enregistrerRoutesDevis(app);
 
 // --- Société (src/domaines/administration/routes.ts) ---
 enregistrerRoutesSociete(app);
