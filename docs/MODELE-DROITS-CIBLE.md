@@ -1,6 +1,6 @@
 # Modèle de droits cible : proposition
 
-> **Proposition du 17-10-2026, validée le 18-10-2026** (chantier technique 3). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 10 et priment sur le texte de la proposition là où il différait. Rien de ce document n'est encore implémenté : chaque lot (section 9) fait sa PR. C'est un parcours de droits : exigence maximale (règle 2 de la méthode).
+> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 3). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 10 et priment sur le texte de la proposition là où il différait. La fusion de la proposition, qui vaut sa validation, reste à Nelson ([CLAUDE.md](../CLAUDE.md)). Rien de ce document n'est encore implémenté : chaque lot (section 9) fait sa PR. C'est un parcours de droits : exigence maximale (règle 2 de la méthode).
 >
 > L'état décidé des droits est décrit par [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md) et par l'[historique des décisions](HISTORIQUE-DECISIONS.md). L'inventaire détaillé du code, règle par règle, avec ses références `fichier:ligne` au commit `84e27a1`, est en annexe : [`MODELE-DROITS-INVENTAIRE.md`](MODELE-DROITS-INVENTAIRE.md).
 
@@ -103,6 +103,7 @@ Une permission = **un domaine et une action**, écrite en langage clair. Une seu
 | Règlements | `reglements.consulter` | Consulter les règlements |
 | | `reglements.saisir` | Saisir un règlement |
 | | `reglements.contrepasser` | Contre-passer un règlement |
+| Suivi financier | `finances.suivi` | Suivi financier (encaissements, impayés). Réservée aux lots de facturation et de paiements : sans effet tant qu'aucune route ne l'emploie, comme la case « Finance » aujourd'hui (décision 2) |
 | Comptabilité | `comptabilite.consulter` | Consulter le plan, les règles et la TVA |
 | | `comptabilite.parametrer` | Modifier le plan, les règles et la TVA, importer |
 | | `comptabilite.exporter` | Exporter les écritures |
@@ -141,7 +142,7 @@ Chaque permission accordée porte un périmètre parmi quatre, comme le demande 
 | **Sa branche** | ses dossiers et ceux de toute sa branche hiérarchique : collaborateurs directs, puis les leurs, à tous les niveaux |
 | **Toute l'entreprise** | sans restriction |
 
-**Équipe et branche.** Aujourd'hui, seul le compte `RESPONSABLE` a un périmètre hiérarchique, et c'est toujours la branche entière (`brancheHierarchique`). Le périmètre « son équipe », limité aux collaborateurs directs, n'existe pas encore. « Sa branche » pourrait aussi désigner une agence ou un établissement : Iris ne connaît aucune de ces notions (question 1).
+**Équipe et branche.** Aujourd'hui, seul le compte `RESPONSABLE` a un périmètre hiérarchique, et c'est toujours la branche entière (`brancheHierarchique`). Le périmètre « son équipe », limité aux collaborateurs directs, n'existe pas encore. Une agence ou un établissement n'est pas un périmètre hiérarchique : Iris ne connaît aucune de ces notions, et un lot dédié les ajoutera si une société en a besoin (décision 1).
 
 **Relations.** « Ses dossiers » se définit par une ou plusieurs relations, choisies **pour chaque permission** du rôle :
 - **chantiers** : titulaire (`responsableId`), commercial (`commercialId`) ;
@@ -162,7 +163,7 @@ Un **rôle** = un ensemble de permissions. Chacune porte un ou plusieurs couples
 - **renommer** un rôle ;
 - **supprimer** un rôle qu'aucun compte ne porte. La suppression est refusée en base tant qu'un compte le porte (clé étrangère `RESTRICT`), ce qui exclut une course avec une attribution simultanée.
 
-Chaque compte porte **un rôle**, et peut recevoir en plus des **permissions individuelles, en ajout seulement** : les deux étages de `MODELE-DROITS-COMPTES.md` sont gardés (décision 2, section 10). Une exception se règle donc en cochant un ajout sur le compte, sans dupliquer de rôle ; un rôle dupliqué reste possible pour une exception partagée par plusieurs comptes.
+Chaque compte porte **un rôle**, et peut recevoir en plus des **permissions individuelles, en ajout seulement** : les deux étages de `MODELE-DROITS-COMPTES.md` sont gardés (décision 2, section 10). Une exception se règle donc en cochant un ajout sur le compte, sans dupliquer de rôle ; un rôle dupliqué reste possible pour une exception partagée par plusieurs comptes. Comme aujourd'hui, seul le super administrateur fait un ajout individuel.
 
 ### 3.4 Une hiérarchie facultative
 
@@ -183,7 +184,7 @@ C'est une décision d'accès, comme le dit déjà le code : le rattachement rest
 
 ### 4.1 Table de correspondance
 
-Chaque type de compte actuel devient un rôle prédéfini. La table l'exprime dans le vocabulaire de la section 3.1. C'est la cible de la preuve de non-régression (section 7).
+Chaque type de compte actuel devient un rôle prédéfini. La table l'exprime dans le vocabulaire de la section 3.1. C'est la cible de la preuve de non-régression (section 7). Elle décrit le comportement après les corrections du lot D0 (note 7), que la matrice D1a enregistre.
 
 Légende des colonnes :
 - SA = super administrateur, AD = administrateur, DIR = directeur, RESP = responsable, CT = conducteur de travaux ;
@@ -214,7 +215,7 @@ Légende des cases :
 | `saisies.saisir` | T | T | — | B | D ti | — | — | — | — | — |
 | `saisies.archiver` | T | T | — | B | — ⁶ | — | — | — | — | — |
 | `saisies.apresCloture` | T | T | — | — | — | — | — | — | — | — |
-| `referentiels.gerer` | T | T | — | T | T | — | T ⁷ | T ⁷ | T ⁷ | — |
+| `referentiels.gerer` | T | T | — | T | T | — | — ⁷ | — ⁷ | — ⁷ | — |
 | `intervenants.gerer`, `intervenants.relierCompte` | T | T | — | — | — | — | — | — | — | — |
 | `interventions.consulter` | T | T | — | D af, B cl ⁸ | D af cr cl | — | D af ⁷ | D af ⁷ | D af ⁷ | D af |
 | `interventions.creer` | T | T | — | — | T | — | — | — | — | — |
@@ -225,10 +226,11 @@ Légende des cases :
 | `interventions.couts` | T | T | — | — ⁸ | D af cr cl | — | — | — | — | — ¹⁶ |
 | `interventions.journal` | T | T | — | D af, B cl | D af cr cl | — | D af ⁷ | D af ⁷ | D af ⁷ | — |
 | `contrats.*` | T | T | — | — | — | — | — | — | — | — |
-| `planning.consulter` | T | T | — | T ¹¹ | T ¹¹ | — | T ¹¹ | T ¹¹ | T ¹¹ | T ¹¹ |
-| `planning.modifier`, `planning.types` | T | T | — | T | T | — | T ⁷ | T ⁷ | T ⁷ | — |
+| `planning.consulter` | T | T | — | T ¹¹ | T ¹¹ | — | — ⁷ | — ⁷ | — ⁷ | T ¹¹ |
+| `planning.modifier`, `planning.types` | T | T | — | T | T | — | — ⁷ | — ⁷ | — ⁷ | — |
 | `planning.partager` | T | T | — | — | — | — | — | — | — | — |
 | `factures.*`, `mentions.gerer`, `reglements.*`, `comptabilite.*` | T | T | — | — | — | — | — | — | — | — |
+| `finances.suivi` ¹⁷ | T | — | — | — | — | — | — | — | — | — |
 | `stats.tableauDeBord` ¹² | T | T | T | B | D ti | D co | D ti | D ti | D ti | D ti |
 | `stats.conducteurs` | T | T | — | B | — | — | — | — | — | — |
 | `stats.travaux` | T | T | — | B ¹³ | D ti ¹³ | — | — | — | — | — |
@@ -241,28 +243,28 @@ Légende des cases :
 
 ### 4.2 Notes : définitions actuelles et règles à reproduire
 
-Ces règles sont celles du code d'aujourd'hui (annexe, A3 à A8). Plusieurs ne tiennent pas dans un modèle à relations simples. Au premier lot (D1), elles sont reproduites telles quelles par des **règles historiques nommées**, rattachées aux rôles prédéfinis et prouvées par la matrice (section 7). Leur harmonisation est une décision de Nelson (question 8).
+Ces règles sont celles du code d'aujourd'hui (annexe, A3 à A8). Plusieurs ne tiennent pas dans un modèle à relations simples. Au premier lot (D1), elles sont reproduites telles quelles par des **règles historiques nommées**, rattachées aux rôles prédéfinis et prouvées par la matrice (section 7). Leur harmonisation vient en D2, une règle à la fois (décision 8).
 
 1. **Consultation des chantiers.**
    - **Liste** (`perimetreDemandeur`) : directeur toute l'entreprise ; commercial par `commercialId` ; responsable par titulaire dans sa branche, lui compris ; tous les autres par `responsableId`. Affaires annulées exclues pour tous, administrateurs compris.
    - **Fiche** (`isOwner`) : directeur, commercial **ou** titulaire, quel que soit le type de compte, responsable sur sa branche ; affaire annulée lisible. Un commercial titulaire voit donc la fiche, mais pas le chantier dans sa liste.
    - **Journal d'une affaire annulée** : fermé à tous (#136).
    - **Historique d'un client** (compris dans `clients.consulter`) : il suit le périmètre des chantiers. Un conducteur qui consulte tout l'annuaire n'y voit que ses chantiers.
-2. **Modification par le titulaire.** L'API l'admet pour tout titulaire non commercial, non directeur et non technicien ; l'écran ne la propose qu'au conducteur titulaire. Le titulaire peut confier son chantier à tout compte actif (#181, question 9). Le montant vendu ne s'écrit qu'avec `rentabilite.voir`. Le statut et le client envoyés par un non-administrateur sont ignorés en silence.
+2. **Modification par le titulaire.** L'API l'admet pour tout titulaire non commercial, non directeur et non technicien ; l'écran ne la propose qu'au conducteur titulaire. Le titulaire peut confier son chantier à tout compte actif (#181 ; cible en D2 : décision 9). Le montant vendu ne s'écrit qu'avec `rentabilite.voir`. Le statut et le client envoyés par un non-administrateur sont ignorés en silence.
 3. **Clôture par le responsable** : ses propres chantiers, et ceux des **techniciens** de sa branche seulement. Il faut un attribut du rôle du titulaire (« rôle terrain ») pour l'exprimer.
 4. **Rentabilité.** Le code croise le type et trois réglages :
    - directeur : si `rentabiliteDirecteurs` ;
    - conducteur ou responsable titulaire : si `rentabiliteConducteur` ;
    - responsable sur les chantiers de sa branche : si `rentabiliteHierarchie`.
 
-   La combinaison « branche oui, ses propres chantiers non » n'est pas exprimable avec des périmètres emboîtés : une relation « branche hors ses dossiers » est nécessaire, ou bien une décision de ne plus la permettre (question 10). Côté clé, la rentabilité exige `finances:read`.
+   La combinaison « branche oui, ses propres chantiers non » n'est pas exprimable avec des périmètres emboîtés. D1 la reproduit par une règle historique (« branche hors ses dossiers ») ; en D2, le super administrateur tranche à la migration, avec par défaut la variante restrictive (décision 10). Côté clé, la rentabilité exige `finances:read`.
 5. **Saisies en lecture.** L'API sert les journaux d'achats et d'heures à tous, dans leur périmètre de chantiers : directeur et commercial compris, sans écran pour eux.
-6. **Archivage par le conducteur** : uniquement par permission individuelle aujourd'hui. Il le reste, comme ajout individuel au rôle Conducteur (décision 2).
-7. **Directeur commercial, assistante commerciale et comptable** franchissent `blockCommercial` : écritures du planning et des référentiels, routes SAV au filtre vide (#179, question 11).
+6. **Archivage par le conducteur** : uniquement par permission individuelle aujourd'hui, accordée par le super administrateur. Il le reste, comme ajout individuel au rôle Conducteur (décision 2).
+7. **Directeur commercial, assistante commerciale et comptable** franchissent aujourd'hui `blockCommercial` (#179). Le lot D0 les refuse comme le commercial sur toutes les routes du planning (`/api/planning/…`, lectures comprises) et sur les écritures des référentiels ; la table décrit cet état (décision 11). Les routes SAV leur répondent encore, avec un filtre par affectation vide en pratique (aucune fiche intervenant ne peut être reliée à leur compte, #166) : d'où les cases « D af ⁷ », reproduites en D1 et retirées en D2.
 8. **SAV du responsable** : interventions où il est affecté, ou dont le chantier lié a pour titulaire un membre de sa branche ou lui-même. Il ne voit pas une intervention sans chantier affectée à un membre de sa branche. Coûts SAV : 403 dans son périmètre.
 9. **Annuaire du commercial, du directeur commercial, de l'assistante et du comptable** : l'API le leur sert, mais l'écran le leur ferme (`ROLES_ANNUAIRE`).
 10. **Technicien et clients désactivés** : l'annuaire les lui ferme (404 sur la fiche et l'historique, filtre ignoré). L'intervention qui lui est affectée lui montre pourtant client, site et contact (invariant, section 8.2).
-11. **Planning en lecture** : les événements sans intervention de toute l'entreprise, les projections d'interventions dans le périmètre SAV, et la liste de **tous** les chantiers, annulés compris. En écriture, `planning.modifier` sur toute l'entreprise ne vaut que pour les événements libres : une projection d'intervention reste limitée au périmètre SAV.
+11. **Planning en lecture** : les événements sans intervention de toute l'entreprise, les projections d'interventions dans le périmètre SAV, et la liste de **tous** les chantiers, annulés compris. Le directeur commercial, l'assistante et le comptable n'y ont plus accès après D0 (note 7) ; pour les autres, la liste des chantiers est harmonisée en D2 (décision 8). En écriture, `planning.modifier` sur toute l'entreprise ne vaut que pour les événements libres : une projection d'intervention reste limitée au périmètre SAV.
 12. **Tableau de bord** : le contenu varie selon le type.
     - Les achats ne sont envoyés ni au commercial ni au technicien.
     - Les heures ne sont envoyées ni à l'administrateur ni au commercial.
@@ -271,6 +273,7 @@ Ces règles sont celles du code d'aujourd'hui (annexe, A3 à A8). Plusieurs ne t
 14. **Séparation entre administrateur et super administrateur.** Un administrateur ne voit ni ne gère les comptes super administrateur. Il ne voit pas les entrées de journal qui les concernent, ni celles des clés d'intégration.
 15. **Transitions et compte rendu SAV.** `interventions.statut` comprend démarrer et terminer. Le technicien n'a que ces deux transitions. L'écran ne lui propose qu'à lui le compte rendu et la signature, que l'API ouvre à tout compte de la ligne `interventions.consulter`.
 16. **Coûts SAV du technicien** : il lit ses propres heures, sans montant (`GET /api/interventions/:id/couts`), au titre de `interventions.sesHeures`.
+17. **Accès financier** : aujourd'hui la case « Finance » (`accesFinance`), que seul le super administrateur coche ; elle n'ouvre rien en session (`peutVoirFinance` n'est employée par aucune route). Elle devient un ajout individuel de `finances.suivi`, sans effet lui aussi (décision 2). Le super administrateur a toutes les permissions.
 
 Correspondance des **clés d'intégration** (portée toujours « toute l'entreprise ») :
 
@@ -296,7 +299,7 @@ Ce sont des propositions. Chaque modèle reste modifiable après son application
 | Rôle | Contenu proposé |
 |---|---|
 | **Dirigeant** | rôle système « super administrateur » : tout, sur toute l'entreprise |
-| **Bureau** | clients, devis, chantiers, interventions et planning sur toute l'entreprise ; facturation et règlements ; montants et rentabilité ; ni rôles, ni clés d'intégration, ni modules |
+| **Bureau** | clients, devis, chantiers, interventions et planning sur toute l'entreprise ; facturation et règlements ; montants et rentabilité ; attribut « peut être titulaire » (décision 9) ; ni rôles, ni clés d'intégration, ni modules |
 | **Technicien** | comme le rôle prédéfini Technicien : ses interventions, planning en lecture, annuaire des clients actifs en lecture, aucun montant |
 
 ### 5.2 « Équipe avec hiérarchie »
@@ -305,7 +308,7 @@ Ce sont des propositions. Chaque modèle reste modifiable après son application
 |---|---|
 | **Direction** | tout, sur toute l'entreprise |
 | **Administration** | comme le rôle prédéfini Administrateur |
-| **Comptabilité** | factures, avoirs, comptabilité, export ; chantiers et devis en lecture ; toute l'entreprise. Les règlements, réservés aujourd'hui à l'administration (choix par défaut de `MODELE-DROITS-COMPTES.md`), font partie de ce modèle : saisir, affecter et contre-passer un règlement est le travail de la comptabilité. Le rôle prédéfini Comptable d'« Iris actuel » ne change pas. |
+| **Comptabilité** | factures, avoirs, comptabilité, export ; chantiers et devis en lecture ; toute l'entreprise. Les règlements, réservés aujourd'hui à l'administration (choix par défaut de `MODELE-DROITS-COMPTES.md`), font partie de ce modèle : saisir, affecter et contre-passer un règlement est le travail de la comptabilité (décision 14). Le rôle prédéfini Comptable d'« Iris actuel » ne change pas. |
 | **Directeur commercial** | devis et affaires de son équipe ou de sa branche ; statistiques commerciales de son équipe |
 | **Commercial** | ses affaires ; ses statistiques |
 | **Assistante commerciale** | devis de tous les commerciaux ; choix traçable du commercial porteur (décrit par `MODELE-DROITS-COMPTES.md`, non implémenté) |
@@ -333,7 +336,7 @@ Les dix rôles de la section 4, au comportement strictement identique. C'est le 
 - **En-tête de colonne** :
   - le nom du rôle et le nombre de comptes qui le portent ;
   - les commandes dupliquer, renommer, supprimer ;
-  - pour un rôle prédéfini, « revenir au modèle d'origine » (question 13).
+  - pour un rôle prédéfini, « revenir au modèle d'origine » (décision 13).
 - **Rôle « Super administrateur »** : il s'affiche sans pouvoir être modifié (section 8.1).
 - **Avertissement des déductions** : accorder une permission qui en révèle une autre par calcul affiche un avertissement, et propose d'accorder les deux (section 8.3).
 - **Enregistrement** : chaque modification est confirmée, puis journalisée (section 8.1).
@@ -373,9 +376,9 @@ Chaque type de compte actuel devient le rôle prédéfini correspondant, au comp
 | Clés d'intégration | chaque scope, seul |
 | Écran | parcours E2E rôle par rôle : menus, routes accessibles, boutons proposés |
 
-La colonne des routes vient du script `server/scripts/routes.mjs` du chantier 2. Il est encore dans la PR #177, non fusionnée.
+La colonne des routes vient du script `server/scripts/routes.mjs` du chantier 2 (PR #177, fusionnée).
 
-**Ordre.** La matrice est enregistrée **tôt**, comme un lot de tests seul. Elle protège alors aussi les PR du découpage du serveur. Un lot qui change volontairement un droit met la matrice à jour dans sa propre PR, l'écart restant visible au diff, comme la liste des routes. Cela vaut pour les choix « à appliquer » de la passation, section 4, et pour les corrections de D0.
+**Ordre.** La matrice est enregistrée **tôt**, comme un lot de tests seul, juste après les corrections du lot D0 (décision 6). Un lot qui change ensuite volontairement un droit met la matrice à jour dans sa propre PR, l'écart restant visible au diff, comme la liste des routes. Cela vaut pour les choix « à appliquer » de la passation, section 4, et pour chaque harmonisation de D2.
 
 **Écran.** D2 fait lire à l'écran les permissions effectives au lieu des types de compte. L'écran s'ouvrirait alors partout où il est plus restrictif que le serveur : annuaire du commercial, Performances du responsable, journaux d'achats du directeur. La décision 12 tranche : par défaut, le serveur se restreint à ce que l'écran montre, sauf si un écran que le rôle utilise a besoin de la donnée.
 
@@ -391,7 +394,7 @@ La colonne des routes vient du script `server/scripts/routes.mjs` du chantier 2.
   - `perimetre(requete, permission)`, qui renvoie le filtre de base de données de **cette permission**, avec ses relations et ses éventuelles règles historiques.
 
   Les fonctions de montants (`voitRentabilite`…) s'appuient sur les mêmes permissions.
-- **Compatibilité** : au premier lot, `/api/me` garde `role` (la clé du rôle prédéfini) et les noms actuels des permissions. L'écran passe aux nouvelles permissions en D2. Les permissions individuelles deviennent les ajouts individuels (décision 2) : `UserPermission` (compte, permission, périmètre), sous la règle « pas d'élévation » ; l'accès financier devient l'ajout de `rentabilite.voir`.
+- **Compatibilité** : au premier lot, `/api/me` garde `role` (la clé du rôle prédéfini) et les noms actuels des permissions. L'écran passe aux nouvelles permissions en D2. Les permissions individuelles deviennent les ajouts individuels (décision 2) : `UserPermission` (compte, permission, périmètre), que seul le super administrateur écrit, comme aujourd'hui. Chaque case migre vers la permission dont elle a l'effet aujourd'hui ; l'accès financier devient l'ajout de `finances.suivi`, sans effet, et non de `rentabilite.voir`, qui ouvrirait les marges.
 - **Clés d'intégration** : elles gardent leurs scopes, traduits par la correspondance de la section 4.2. `/api/v1` reste limité à ses routes actuelles : une permission comme `devis.modifier`, qui ouvre en session la duplication et la recherche du catalogue, n'ouvre pas ces routes à une clé.
 
 Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite à associer chaque type à son rôle prédéfini.
@@ -404,8 +407,11 @@ Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite 
 |---|---|
 | Au moins un super administrateur **actif**. Son rôle, repéré par une clé système non renommable, ne se modifie ni ne se supprime, et a toujours tout. | Sinon personne ne peut plus administrer l'instance. La règle actuelle compte les comptes désactivés et se vérifie hors transaction : #178. |
 | L'accès de secours et `SUPERADMIN_EMAILS` visent le rôle système « super administrateur », par sa clé. | Ce sont les seules portes de reprise de l'instance. |
-| Seul un super administrateur gère les comptes super administrateur, les rôles et les clés d'intégration (question 3). | Sinon un administrateur pourrait s'élever lui-même. |
+| Seul un super administrateur gère les comptes super administrateur, les rôles et les clés d'intégration (décision 3). | Sinon un administrateur pourrait s'élever lui-même. |
 | **Pas d'élévation.** Un compte n'attribue un rôle que s'il est **inclus** dans le sien. Inclus veut dire que chaque couple (permission, périmètre, relations) du rôle attribué est couvert par un couple du sien : même permission, périmètre au moins aussi large (ses dossiers ⊂ son équipe ⊂ sa branche ⊂ toute l'entreprise), relations comprises. Deux rôles incomparables : refus. | Empêcher l'auto-élévation, y compris par un rôle « de côté ». |
+| **Ajouts individuels réservés au super administrateur**, comme aujourd'hui (`PUT /api/users/:id/permissions`, `PATCH /api/users/:id/acces-finance`). | Un ajout passe à côté du rôle : c'est une décision de dirigeant, journalisée (décision 2). |
+| **Permissions de montant** : une liste unique dans le code, testée (décision 5). Seul le super administrateur les accorde, par un rôle ou par un ajout. Un test classe chaque permission du catalogue dans la liste ou hors d'elle : une permission nouvelle non classée fait échouer la suite. | Aucun montant ne s'ouvre à qui ne le voit pas aujourd'hui sans une décision explicite du super administrateur. |
+| **Attribut « sans montants »** d'un rôle, coché sur Technicien : le serveur refuse d'accorder à ce rôle, ou à un compte qui le porte, les permissions de montant, les saisies Travaux et `chantiers.modifier` (décision 4). Seul le super administrateur le décoche, après confirmation, journalisé. | Reprend au moins `DROITS_INTERDITS_TECHNICIEN` (décisions de Nelson du 13-10-2026). |
 | On ne modifie pas son propre rôle. | Même raison. **Changement assumé** : aujourd'hui, le changement de son propre type de compte n'est pas refusé. Il entre au lot D1. |
 | Le rattachement hiérarchique est réservé à `comptes.gerer` sur toute l'entreprise. Il est refusé s'il fait entrer un compte dans l'équipe ou la branche du demandeur, sauf si le rôle du demandeur a « toute l'entreprise » partout où il a « son équipe » ou « sa branche ». | Le rattachement élargit l'équipe ou la branche, donc l'accès, de toute la chaîne au-dessus du compte : il ne doit pas servir à s'élargir soi-même. |
 | L'aperçu « ce que voit ce compte » respecte la séparation : un administrateur ne prévisualise pas un compte super administrateur. | Même séparation qu'aujourd'hui dans la liste des comptes. |
@@ -423,14 +429,14 @@ Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite 
 |---|---|
 | Un technicien garde le client, le site et le contact d'une intervention qui lui est affectée, même désactivés | **Invariant justifié**, étendu à tout rôle : un dossier accessible montre toujours son client, sinon il ne peut pas être traité. |
 | L'annuaire ferme les clients désactivés au technicien (404 sur la fiche et l'historique) | Absence de `clients.desactives` dans son rôle. |
-| Le technicien ne reçoit jamais devis, montants ni accès financier, même individuellement | **Propriété du rôle « Technicien »** : il n'a pas ces permissions, et son attribut « sans montants » empêche de les lui ajouter (décision 4). |
+| Le technicien ne reçoit jamais devis, montants, saisie Travaux ni accès financier, même individuellement | **Propriété du rôle « Technicien »** : il n'a pas ces permissions, et son attribut « sans montants » empêche de les lui ajouter (décision 4). |
 | Refus explicites du technicien (403 et message, et non 404) | Règle historique reproduite par la matrice. |
 | Alerte d'heures dépassées retirée au technicien, alors que ce n'est pas un montant | Suit `montants.voir`, comme les autres alertes de dépassement. |
 | Le directeur clôture tout chantier en cours, sans le rouvrir | `chantiers.cloturer` sur toute l'entreprise, sans `chantiers.rouvrir`. |
 | La saisie Travaux du directeur ne s'ouvre pas par permission (`assertChantierWritable` teste le type) | Son rôle n'a pas `saisies.saisir`, et la saisie lui reste fermée (décision 8). |
 | Le responsable clôture les chantiers des seuls techniciens de sa branche | Règle historique (note 3). Elle demande l'attribut « rôle terrain » du titulaire. |
 | Le conducteur ne clôture pas le chantier d'un technicien dont il est le N+1 | Conséquence du périmètre « ses dossiers ». |
-| Destinataires de la rentabilité (trois réglages) | `rentabilite.voir`, avec son périmètre (note 4). Le réglage passe de l'administrateur (`PUT /api/parametres`) à la matrice des rôles, que seul le super administrateur modifie (décision 3). |
+| Destinataires de la rentabilité (trois réglages) | `rentabilite.voir`, avec son périmètre (note 4). Le réglage passe de l'administrateur (`PUT /api/parametres`) à la matrice des rôles, que seul le super administrateur modifie (décision 3). La combinaison « branche oui, propres non » : règle historique en D1, choix du super administrateur à la migration en D2 (décision 10). |
 | Taux horaires et coût de main-d'œuvre réservés aux administrateurs (décisions du 13, 14 et 16-10-2026) | `mainOeuvre.voir`, que seul le super administrateur accorde (décision 5). |
 | Prix d'achat lisibles et saisissables par les seuls administrateurs ; une clé les lit sans jamais les écrire | `prixAchat.voir` et `prixAchat.saisir`, séparés. |
 | Administrateur « aussi commercial » | Attribut du compte réservé aux rôles système (section 3.5). |
@@ -439,7 +445,7 @@ Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite 
 | Saisie des heures SAV réservée au technicien affecté | `interventions.sesHeures`, sur « ses dossiers ». |
 | Champs d'ouverture d'un chantier réservés à l'administration à la conversion | `devis.ouvrirChantier`, distinct de `chantiers.reattribuer`. |
 | Fiche intervenant reliée seulement à un technicien actif, perdue en quittant ce type | Propriété du rôle « peut porter une fiche intervenant » (section 3.5). |
-| Éligibilité au titulariat : le serveur accepte tout compte actif, l'écran ne propose que des conducteurs | Attribut de rôle « peut être titulaire » (décision 9) ; #181 journalise les réattributions. |
+| Éligibilité au titulariat : le serveur accepte tout compte actif, l'écran ne propose que des conducteurs | Règle actuelle reproduite en D1 ; attribut de rôle « peut être titulaire » en D2 (décision 9). #181 journalise les réattributions dès D0. |
 | Le super administrateur garde le planning quand le module est désactivé | Invariant des modules (8.1). |
 | Accès de secours et `SUPERADMIN_EMAILS` | Invariants (8.1). |
 | Les clés d'intégration voient les taux et les clients désactivés | Correspondance des scopes (section 4.2), à aligner sur les choix « à appliquer » de la passation, section 4. |
@@ -452,48 +458,69 @@ Certaines permissions redonnent une information réservée par une autre, par si
 - le prix d'achat du catalogue redonne celui du devis ;
 - le détail des commissions par chantier redonne la marge.
 
-L'écran des rôles **avertit** quand une permission en révèle une autre par déduction, et propose de les accorder ensemble. Pas de plancher figé dans le code (décision 5) : en contrepartie, seul le super administrateur peut accorder les permissions de montants, par un rôle ou un ajout individuel, et chaque octroi est journalisé.
+L'écran des rôles **avertit** quand une permission en révèle une autre par déduction, et propose de les accorder ensemble. Pas de plancher figé dans le code (décision 5) : en contrepartie, seul le super administrateur peut accorder une permission de la liste des montants, tenue dans le code, par un rôle ou un ajout individuel, et chaque octroi est journalisé.
 
 ## 9. Lots proposés et placement par rapport au pilote
 
 | Lot | Contenu | Placement proposé |
 |---|---|---|
-| **D0** | Défauts actuels de la règle 2, chacun dans sa PR : dernier super administrateur (#178) ; lignes et mentions de facture figées en base (#180) ; réattributions et encaissement journalisés (#181) ; directeur commercial, assistante et comptable dans le planning et les référentiels (#179, sur décision de Nelson) | **Au plus tôt, sans attendre la fin du découpage du serveur** : chaque correction est une petite PR, rebasée au besoin sur les PR du découpage |
-| **D1a** | Matrice de non-régression enregistrée sur le code actuel, en tests seuls (section 7.1) | Tôt : elle protège aussi le découpage du serveur |
-| **D1** | Moteur (`autorise`, `perimetre` par permission, règles historiques), tables `Role` et `RolePermission`, dix rôles prédéfinis identiques, refus de modifier son propre rôle (changement assumé). Aucune autre route ne change de comportement. | Après le pilote, sauf si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels (question 6) |
+| **D0** | Défauts actuels de la règle 2, chacun dans sa PR : dernier super administrateur (#178) ; lignes et mentions de facture figées en base (#180) ; réattributions et encaissement journalisés (#181) ; directeur commercial, assistante et comptable refusés comme le commercial sur le planning et les écritures des référentiels (#179, décision 11) | **Au plus tôt** : chaque correction est une petite PR depuis `main` (le découpage du serveur est terminé) |
+| **D1a** | Matrice de non-régression enregistrée sur le code actuel, en tests seuls (section 7.1) | Juste après D0 : elle protège les lots suivants |
+| **D1** | Moteur (`autorise`, `perimetre` par permission, règles historiques), tables `Role` et `RolePermission`, dix rôles prédéfinis identiques, refus de modifier son propre rôle (changement assumé). Aucune autre route ne change de comportement. | Après le premier jour du pilote (décision 6). Exception : si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels, D1, D2 et D3 avancent avant ce premier jour |
 | **D2** | Bascule des routes sur le moteur, un ou deux domaines par PR, matrice verte à chaque fois ; l'écran lit les permissions effectives (section 7.1, Écran) | Après D1 |
-| **D3** | Écran : tableau rôles × permissions, en groupes ou en détail ; créer, dupliquer, renommer, supprimer ; avertissement des déductions ; aperçu « ce que voit ce compte » ; journal | Après D2 |
+| **D3** | Écran : tableau rôles × permissions, en groupes ou en détail ; créer, dupliquer, renommer, supprimer ; avertissement des déductions ; aperçu « ce que voit ce compte » ; journal | Après D2 (voir D1 pour l'exception) |
 | **D4** | Modèles « petite équipe » et « équipe avec hiérarchie », appliqués depuis l'assistant de démarrage du paramétrage (proposition `PARAMETRAGE-CIBLE.md`) | Avec l'assistant |
 
 Chaque lot est une PR ou une petite série de PR, avec ses tests réels sur PostgreSQL et dans le navigateur.
 
-## 10. Décisions sur les questions ouvertes (18-10-2026)
+## 10. Décisions sur les questions ouvertes (arbitrées le 18-10-2026 par délégation)
 
-Nelson a délégué ces arbitrages le 18-10-2026 : « prends le meilleur choix pour le bien de l'application et la facilité d'utilisation, en gardant la flexibilité ». Critères retenus :
+Nelson a délégué ces arbitrages le 18-10-2026 : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Ce sont des arbitrages faits par délégation : la fusion de la proposition, qui vaut sa validation, reste à Nelson ([CLAUDE.md](../CLAUDE.md)).
+
+Critères retenus :
 - simple pour une petite équipe, et flexible pour une plus grande ;
 - aucune garde de sécurité affaiblie ;
-- aucun montant rendu visible à qui ne le voit pas aujourd'hui sans un réglage explicite du super administrateur.
+- aucun montant rendu visible à qui ne le voit pas aujourd'hui sans un réglage explicite du super administrateur ;
+- en D1, un comportement strictement identique, prouvé par la matrice ; les changements voulus viennent en D0 (défauts) ou en D2 (harmonisation), chacun dans sa PR.
 
-La numérotation reprend celle des questions, à laquelle renvoient les sections précédentes.
+La numérotation reprend celle des anciennes questions ; les sections précédentes y renvoient par « décision N ». La décision 14 tranche un point que le texte laissait ouvert (section 5.2).
 
 1. **Équipe et branche.** « Son équipe » désigne les collaborateurs directs. « Sa branche » désigne tous les niveaux, comme pour le responsable aujourd'hui. Une agence ou un établissement n'est pas un périmètre hiérarchique : si une société en a besoin, un lot dédié ajoutera cette notion (`PARAMETRAGE-CIBLE.md`, section 4.4).
 2. **Un rôle par compte, avec des ajouts individuels.** Les deux étages de `MODELE-DROITS-COMPTES.md` sont gardés : un rôle, plus des permissions individuelles **en ajout seulement**, sans retrait individuel.
-   - Raisons : une petite équipe coche une case au lieu de dupliquer un rôle. Les cases actuelles (droit devis, corriger et archiver Travaux, accès financier) migrent telles quelles, sans multiplier les rôles.
-   - Un ajout suit la règle « pas d'élévation » : on n'ajoute qu'une permission que l'on a soi-même, sur un périmètre au plus égal.
-   - Il est journalisé dans la même transaction. La liste des comptes et l'aperçu « ce que voit ce compte » le montrent (« Conducteur + 1 ajout »).
-   - Les ajouts des permissions de montants sont réservés au super administrateur (décision 5).
+   - Raisons : une petite équipe coche une case au lieu de dupliquer un rôle.
+   - Les cases actuelles migrent sans multiplier les rôles, chacune vers la permission dont elle a l'effet aujourd'hui :
+     - droit devis : `devis.consulter`, `devis.modifier`, `devis.signer` et `devis.convertir` ;
+     - corriger Travaux : `saisies.saisir` ;
+     - archiver Travaux : `saisies.archiver` ;
+     - accès financier : `finances.suivi`, sans effet comme aujourd'hui (note 17), et non `rentabilite.voir`, qui ouvrirait les marges.
+   - **Seul le super administrateur fait un ajout**, comme aujourd'hui : `PUT /api/users/:id/permissions` et `PATCH /api/users/:id/acces-finance` lui sont réservés. Si un lot ouvrait un jour les ajouts à l'administrateur, il suivrait la règle « pas d'élévation » (on n'ajoute qu'une permission que l'on a soi-même, sur un périmètre au plus égal) et exclurait toujours la liste des montants (décision 5).
+   - Un ajout est journalisé dans la même transaction. La liste des comptes et l'aperçu « ce que voit ce compte » le montrent (« Conducteur + 1 ajout »).
 3. **Qui modifie les rôles : le super administrateur seul.** L'administrateur attribue les rôles inclus dans le sien, sauf celui de super administrateur. Il ne règle plus les destinataires de la rentabilité quand ce réglage passe dans les rôles (D2) : qui voit les marges est une décision de dirigeant. C'est un changement assumé, annoncé dans la PR qui le fait.
 4. **Technicien : un garde-fou dans le code, désactivable explicitement.**
    - Chaque rôle porte un attribut « sans montants », coché sur le rôle prédéfini Technicien.
-   - Tant qu'il est coché, le serveur refuse d'accorder à ce rôle, ou à un compte qui le porte par un ajout individuel : devis, montants, prix d'achat, rentabilité, main-d'œuvre et facturation.
-   - Seul le super administrateur peut le décocher, après confirmation, et c'est journalisé.
+   - Tant qu'il est coché, le serveur refuse d'accorder à ce rôle, ou à un compte qui le porte par un ajout individuel :
+     - toute la liste des montants (décision 5), devis compris ;
+     - `saisies.saisir`, `saisies.archiver` et `saisies.apresCloture` ;
+     - `chantiers.modifier`, qui écrit les budgets, et que l'API refuse déjà au technicien titulaire (note 2).
+   - C'est au moins l'actuel `DROITS_INTERDITS_TECHNICIEN` : `devis:read` et `devis:write` (`devis.*`), `chantiers:write` (`saisies.saisir`), `chantiers:archive` (`saisies.archiver`) et `finances:read` (`finances.suivi`, `rentabilite.voir`, `prixAchat.*`). Comme aujourd'hui, une permission déjà enregistrée reste sans effet et peut seulement être retirée.
+   - La saisie de ses propres heures d'intervention (`interventions.sesHeures`, lot 3a, #166) n'est pas concernée : elle ne montre aucun montant.
+   - Seul le super administrateur peut décocher l'attribut, après confirmation, et c'est journalisé.
    - « Peut porter une fiche intervenant » est un attribut distinct. Un chef d'équipe terrain qui voit des montants reste donc possible, par un rôle composé explicitement.
-5. **Montants : pas de plancher figé, mais un contrôle fort.** Rien n'est réservé en dur aux rôles système, pour rester paramétrable : un rôle « Comptabilité » peut avoir besoin des coûts. En contrepartie :
-   - seul le super administrateur accorde `rentabilite.voir`, `mainOeuvre.voir`, `prixAchat.voir` ou `prixAchat.saisir`, par un rôle (décision 3) ou par un ajout individuel (décision 2) ;
+5. **Montants : une liste unique, pas de plancher figé, un contrôle fort.** Rien n'est réservé en dur aux rôles système, pour rester paramétrable : un rôle « Comptabilité » peut avoir besoin des coûts. En contrepartie :
+   - le code tient **une seule liste** des permissions qui montrent un montant ou permettent d'en déduire un (section 8.3) :
+     - `montants.voir`, `rentabilite.voir`, `mainOeuvre.voir`, `prixAchat.voir` et `prixAchat.saisir` ;
+     - `devis.*` et `catalogue.*` (prix de vente) ;
+     - `interventions.couts` ;
+     - `factures.*`, `reglements.*`, `comptabilite.*` et `finances.suivi` ;
+     - `stats.travaux` (totaux d'achats par fournisseur), `stats.commerciales` et `commissions.*` ;
+     - `remuneration.consulter` et `remuneration.modifier` ;
+     - `journal.consulter`, dont les entrées montrent barèmes et taux ;
+   - un test classe chaque permission du catalogue dans cette liste ou explicitement hors d'elle : une permission nouvelle non classée fait échouer la suite. Restent hors liste, par exemple, `saisies.consulter`, `stats.tableauDeBord` et `stats.conducteurs`, dont les montants suivent `montants.voir`, `rentabilite.voir` ou `mainOeuvre.voir` (décision 8) ;
+   - seul le super administrateur accorde une permission de cette liste, par un rôle (décision 3) ou par un ajout individuel (décision 2). L'attribut « sans montants » les refuse toutes (décision 4) ;
    - l'écran avertit des déductions (section 8.3) et montre l'écart avant l'enregistrement (section 6.2) ;
    - chaque octroi est journalisé ;
    - les rôles prédéfinis gardent les réservations actuelles.
-6. **Placement.** Le lot D0 tout de suite, chaque défaut dans sa PR (#178, #179, #180, #181). D1a ensuite. D1 à D4 après le premier jour du pilote. Seule exception : si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels, D1 et D3 avancent.
+6. **Placement.** Le lot D0 tout de suite, chaque défaut dans sa PR (#178, #179, #180, #181). D1a ensuite. D1 à D4 après le premier jour du pilote. Seule exception : si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels, D1, D2 et D3 avancent avant ce premier jour. Un rôle sur mesure se crée par l'écran D3, mais n'agit qu'une fois les routes basculées sur le moteur (D2).
 7. **« Aussi commercial »** : réservé aux rôles système au premier lot, au comportement identique. Si une société le demande, il deviendra un attribut de rôle.
 8. **Règles historiques.** En D1, elles sont reproduites telles quelles, et la matrice le prouve. En D2, elles sont harmonisées une à une, chacune dans sa PR avec la matrice mise à jour. La cible est la variante la plus cohérente, et à défaut la plus restrictive :
    - **titulaire** : une seule définition de « ses dossiers » par permission, la même pour la liste et pour la fiche. Un commercial titulaire verra donc aussi le chantier dans sa liste ;
@@ -502,8 +529,21 @@ La numérotation reprend celle des questions, à laquelle renvoient les sections
    - **tableau de bord** : chaque bloc suit la permission qui lui correspond, au lieu du type de compte ;
    - **statistiques des fournisseurs** : restreintes au périmètre des chantiers du demandeur ;
    - **planning** : les chantiers proposés excluent les affaires annulées et suivent le périmètre de `chantiers.consulter`.
-9. **Titulaire.** Seul peut l'être un compte actif dont le rôle a l'attribut « peut être titulaire ». L'attribut est coché pour les rôles que l'écran propose aujourd'hui comme titulaires, et pour les rôles système. Il s'applique avec le moteur (D1, D2). La correction D0 (#181) journalise les réattributions sans changer qui peut être titulaire.
-10. **Rentabilité.** Les deux réglages vont ensemble : « sa branche » comprend ses propres chantiers, et la combinaison « branche oui, ses propres chantiers non » disparaît. Si une société l'a réglée, le responsable verra, à la migration, aussi la rentabilité de ses propres chantiers. Ce changement est signalé dans la PR et sur l'écran de migration.
-11. **Directeur commercial, assistante commerciale et comptable (#179).** Leurs écritures dans le planning et les référentiels sont retirées, comme pour le commercial et comme le décrit `MODELE-DROITS-COMPTES.md`. La correction est faite au lot D0. Une société qui veut qu'une assistante planifie lui donnera `planning.modifier`, par son rôle (D3) ou par un ajout individuel.
+9. **Titulaire.**
+   - **D1** : la règle actuelle, à l'identique. Le serveur accepte tout compte actif ; l'écran ne propose que les conducteurs. La correction D0 (#181) journalise les réattributions sans changer qui peut être titulaire.
+   - **D2** : seul peut être **désigné** titulaire un compte actif dont le rôle a l'attribut « peut être titulaire ». L'écran propose alors tous ces comptes.
+   - À la migration, l'attribut est coché sur Conducteur, Responsable et Technicien, et sur les rôles système (administrateur, super administrateur). Il est décoché sur Directeur, Commercial, Directeur commercial, Assistante commerciale et Comptable. Raisons : le conducteur est le titulaire que l'écran propose ; le responsable titulaire a ses règles (notes 1 et 4) ; le technicien titulaire aussi (clôture par le responsable, note 3, gardée par la décision 8).
+   - Les titulaires existants gardent leurs chantiers : l'attribut ne joue qu'à une nouvelle désignation. L'écran de migration liste les chantiers dont le titulaire a un rôle sans l'attribut, pour que le super administrateur le coche s'il le souhaite.
+10. **Rentabilité.** Cible D2 : des portées emboîtées, où « sa branche » comprend ses propres chantiers.
+    - **D1** : la combinaison « branche oui, ses propres chantiers non » (`rentabiliteHierarchie` sans `rentabiliteConducteur`) est reproduite par une règle historique : comportement identique, prouvé par la matrice.
+    - **D2** : cette combinaison n'existe plus. Si une société l'a réglée, l'écran de migration demande au super administrateur de choisir, pour le responsable, entre « aucune rentabilité » et « sa branche, ses propres chantiers compris ». Le choix par défaut est « aucune rentabilité » : c'est la seule portée emboîtée qui ne montre aucun montant de plus qu'aujourd'hui, puisque « son équipe » comprend aussi ses propres chantiers. L'écran dit ce que le responsable perd (la rentabilité de sa branche) ou gagne (celle de ses propres chantiers), et le choix est journalisé.
+    - Les autres combinaisons s'expriment sans perte : titulaire seul, « ses dossiers » (titulaire) ; branche et propres chantiers, « sa branche » ; directeurs, « toute l'entreprise » ou rien.
+11. **Directeur commercial, assistante commerciale et comptable (#179).** Ces types franchissent `blockCommercial`, qui ne refuse que le commercial et le directeur. Au lot D0, ils sont refusés comme le commercial, avec les mêmes messages, et l'écran est aligné (menu, Administration) :
+    - **écritures** du planning, des types d'événement et des référentiels : rien ne les prévoit dans `MODELE-DROITS-COMPTES.md` ;
+    - **lectures du planning** (`/api/planning/…`) : la liste de **tous** les chantiers, annulés compris, et les affectations de toute l'entreprise sortent de leur périmètre, puisqu'ils ne consultent que les chantiers dont ils sont titulaires.
+    - Les **routes SAV** leur répondent, mais avec un filtre par affectation vide en pratique : aucune fiche intervenant ne peut être reliée à leur compte (#166), et aucune donnée n'en sort. Elles sont reproduites telles quelles en D1, puis retirées en D2, comme pour le commercial.
+
+    Une société qui veut qu'une assistante consulte ou modifie le planning lui donnera `planning.consulter` ou `planning.modifier`, par son rôle (D3) ou par un ajout individuel du super administrateur.
 12. **Écran plus restrictif que le serveur.** Par défaut, le serveur se restreint à ce que l'écran montre. Exception : si un écran que le rôle utilise a besoin de la donnée, comme le choix d'un client dans un devis, c'est l'écran qui s'aligne sur le serveur. Chaque cas est tranché ainsi en D2, matrice à l'appui.
 13. **Rôles prédéfinis** : modifiables, sauf le super administrateur, qui est verrouillé. Un repère « modifié » les signale, avec la commande « revenir au modèle d'origine ». L'attribut « sans montants » du Technicien suit la décision 4.
+14. **Règlements dans le modèle « Comptabilité »** (section 5.2). Saisir, affecter et contre-passer un règlement est le travail de la comptabilité : le modèle « équipe avec hiérarchie » les lui donne. Rien ne change pour le rôle prédéfini Comptable d'« Iris actuel », ni pour les comptes existants : les règlements restent à l'administration tant que le super administrateur n'applique pas ce modèle (D4). `reglements.*` fait partie de la liste des montants (décision 5).
