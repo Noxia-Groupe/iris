@@ -23,8 +23,10 @@
 //    - dans un fichier qui existait, les imports conservés gardent leur ordre et les nouveaux
 //      viennent après eux : les bibliothèques se chargent avant le code déplacé, comme avant.
 // 3. Les seules instructions nouvelles admises sont :
-//    - les imports et ré-exports, sans renommage (`as`), d'un module local ou d'une
-//      bibliothèque déjà importée par la base, sous le même spécificateur ;
+//    - les imports et ré-exports ES, sans renommage (`as`, import par défaut sous un autre
+//      nom que dans la base), d'un module local ou d'une bibliothèque déjà importée par la
+//      base, sous le même spécificateur ; ni `import x = …`, ni `export import`, ni
+//      `export * from` ;
 //    - les fonctions d'enregistrement, ni asynchrones ni génératrices, au seul paramètre `app`
 //      (ni reste, ni valeur par défaut), chacune appelée une fois, avec `app`, au premier
 //      niveau d'index.ts ;
@@ -297,6 +299,17 @@ for (const e of enregistrementsBase.values()) {
   e.corps.forEach((instruction, index) => { if (!placees.has(instruction)) placer(instruction, `${e.fichier}#${e.nom}`, index); });
 }
 // Bibliothèques importées par la base ; `node:crypto` et `crypto` désignent le même module.
+// Nom local de chaque import par défaut de la base, par spécificateur.
+const nomsParDefautBase = new Map();
+for (const a of analysesBase.values()) {
+  for (const i of a.imports) {
+    const nom = ts.isImportDeclaration(i.noeud) ? i.noeud.importClause?.name?.text : undefined;
+    const module = moduleImporte(i.texte)?.replace(/^node:/, '');
+    if (!nom || !module) continue;
+    if (!nomsParDefautBase.has(module)) nomsParDefautBase.set(module, new Set());
+    nomsParDefautBase.get(module).add(nom);
+  }
+}
 const bibliothequesBase = new Set([...analysesBase.values()].flatMap((a) => a.imports.map((i) => moduleImporte(i.texte)).filter((m) => m && !m.startsWith('.')).map((m) => m.replace(/^node:/, ''))));
 const parCle = new Map();
 for (const b of instructionsBase) {
@@ -355,11 +368,25 @@ function apparier(t, a, etat) {
 
 function verifierImport(a, imp) {
   const ici = `${a.fichier}:${imp.ligne}`;
+  const dejaLa = [...analysesBase.values()].some((ab) => ab.imports.some((i) => i.texte === imp.texte));
+  if (dejaLa) return;
+  // `import x = require('…')` et `import x = A.b` (ou `export import`) renomment sans `as`.
+  if (ts.isImportEqualsDeclaration(imp.noeud)) {
+    erreur(`${ici} : import … = … interdit pendant le découpage : ${premiereLigne(imp.texte)}`);
+    return;
+  }
+  if (ts.isExportDeclaration(imp.noeud) && !imp.noeud.exportClause) {
+    erreur(`${ici} : export * interdit pendant le découpage ; ré-exporter chaque nom : ${premiereLigne(imp.texte)}`);
+    return;
+  }
   const liaisons = ts.isImportDeclaration(imp.noeud) ? imp.noeud.importClause?.namedBindings : ts.isExportDeclaration(imp.noeud) ? imp.noeud.exportClause : undefined;
   const renomme = liaisons && (ts.isNamedImports(liaisons) || ts.isNamedExports(liaisons)) && liaisons.elements.some((e) => e.propertyName);
-  const espaceDeNoms = liaisons && ts.isNamespaceImport(liaisons);
-  const dejaLa = [...analysesBase.values()].some((ab) => ab.imports.some((i) => i.texte === imp.texte));
-  if ((renomme || espaceDeNoms) && !dejaLa) erreur(`${ici} : import renommé, interdit pendant le découpage : ${premiereLigne(imp.texte)}`);
+  const espaceDeNoms = liaisons && (ts.isNamespaceImport(liaisons) || ts.isNamespaceExport(liaisons));
+  if (renomme || espaceDeNoms) erreur(`${ici} : import renommé, interdit pendant le découpage : ${premiereLigne(imp.texte)}`);
+  // Import par défaut : même nom local que dans la base pour ce spécificateur.
+  const parDefaut = ts.isImportDeclaration(imp.noeud) ? imp.noeud.importClause?.name?.text : undefined;
+  const nomsBase = nomsParDefautBase.get(moduleImporte(imp.texte)?.replace(/^node:/, ''));
+  if (parDefaut && nomsBase && !nomsBase.has(parDefaut)) erreur(`${ici} : import par défaut renommé (${[...nomsBase].join(', ')} dans la base) : ${premiereLigne(imp.texte)}`);
   const specificateur = moduleImporte(imp.texte);
   if (specificateur && !specificateur.startsWith('.') && !bibliothequesBase.has(specificateur.replace(/^node:/, ''))) {
     erreur(`${ici} : bibliothèque ${specificateur} absente des imports de la base ; une PR du découpage n'en ajoute pas`);
