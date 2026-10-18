@@ -101,11 +101,30 @@ jobs:
         env:
           DATABASE_URL: postgresql://user:password@localhost:5432/iris?schema=public
       - run: npm run build
-      # Découpage de server/index.ts par domaine : les routes enregistrées (ordre, méthodes,
-      # chemins et gardes) doivent rester celles de scripts/routes-reference.txt. Un lot qui
-      # ajoute ou retire une route réécrit la référence (--ecrire) dans sa propre PR.
+      # Découpage de server/index.ts par domaine : ce que l'application met en place en se
+      # chargeant (lectures de l'environnement avant et après .env, réglages, middlewares,
+      # routes dans leur ordre, gardes avec leurs permissions, empreinte de chaque gestionnaire,
+      # exports) doit rester celui de scripts/routes-reference.txt. Un lot qui change l'un
+      # d'eux réécrit la référence (--ecrire) dans sa propre PR : l'écart apparaît dans son diff.
       - name: Routes identiques à la référence
         run: node scripts/routes.mjs --verifier
+      # PR du découpage (branches refactor/serveur-*) : le code ne fait que se déplacer.
+      # scripts/verifier-deplacement.mjs compare la PR à sa base, instruction par instruction.
+      # Il ne vaut que pour ces PR : un lot fonctionnel le ferait échouer par construction.
+      # Les outils de preuve y sont figés, sauf pour une PR d'outils (refactor/serveur-preuves-*).
+      - name: Déplacement pur (PR du découpage)
+        if: startsWith(github.head_ref, 'refactor/serveur-')
+        env:
+          BASE: ${{ github.base_ref }}
+          OUTILS: ${{ startsWith(github.head_ref, 'refactor/serveur-preuves') && '--outils-admis' || '' }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE"
+          node scripts/verifier-deplacement.mjs FETCH_HEAD $OUTILS
+      # Le gel des outils ne dépend pas du seul script qu'il protège : hors PR d'outils, ni les
+      # scripts de preuve, ni la référence, ni ce workflow ne changent dans une PR du découpage.
+      - name: Outils de preuve inchangés (PR du découpage)
+        if: startsWith(github.head_ref, 'refactor/serveur-') && !startsWith(github.head_ref, 'refactor/serveur-preuves')
+        run: git diff --exit-code FETCH_HEAD -- scripts/routes.mjs scripts/routes-reference.txt scripts/verifier-deplacement.mjs ../.github/workflows/ci.yml
 
   tests:
     name: Backend — tests
