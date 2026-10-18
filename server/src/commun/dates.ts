@@ -100,3 +100,5 @@ export function debutJourCivilEntreprise(jour: string, fuseauHoraire: string): D
   }
   return instant;
 }
+
+export const dateFrancaise = (date: Date) => date.toISOString().slice(0, 10).split('-').reverse().join('-');
