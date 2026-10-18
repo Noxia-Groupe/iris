@@ -64,6 +64,11 @@ test('un dépassement de moins d’un euro ou d’une demi-heure reste chiffré'
   assert.equal(libelleAlerte('MATERIEL_DEPASSE', juste), 'Matériel +0,30 €');
   assert.equal(libelleAlerte('MAIN_OEUVRE_DEPASSEE', juste), 'Main-d’œuvre +0,49 €');
   assert.equal(libelleAlerte('EN_PERTE', juste), 'En perte 0,30 €');
+  // Sous le demi-centime (main-d'œuvre et marge à quatre décimales), aucun montant juste ne
+  // s'affiche : l'alerte reste, sans montant, plutôt que « +0,00 € ».
+  const infime = chantier('i', 'I', { moReel: 700.0025, margeCommerciale: -0.0025 });
+  assert.equal(libelleAlerte('MAIN_OEUVRE_DEPASSEE', infime), 'Main-d’œuvre dépassée');
+  assert.equal(libelleAlerte('EN_PERTE', infime), 'En perte');
   // À partir d'un euro, l'arrondi à l'euro, moitié vers l'extérieur.
   assert.equal(libelleAlerte('MATERIEL_DEPASSE', chantier('k', 'K', { materielReel: 301.5 })), 'Matériel +2 €');
 });

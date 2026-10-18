@@ -141,17 +141,21 @@ export function trierChantiers<T extends ChantierSuivi>(chantiers: T[], tri: Tri
 
 const nombre = (valeur: number, decimales = 0) => valeur.toLocaleString('fr-FR', { maximumFractionDigits: decimales });
 // Montant d'une alerte : à l'euro, sauf sous 1 €, où l'euro afficherait « +0 € » pour un
-// dépassement réel : au centime alors.
-const montantAlerte = (valeur: number) => (Math.abs(valeur) < 1
-  ? arrondiCentime(valeur).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  : nombre(arrondiEuro(valeur)));
+// dépassement réel : au centime alors. Sous le demi-centime (coûts de main-d'œuvre à quatre
+// décimales), aucun montant juste ne s'affiche : null, et le libellé reste sans montant.
+const montantAlerte = (valeur: number): string | null => {
+  if (Math.abs(valeur) >= 1) return nombre(arrondiEuro(valeur));
+  const centimes = arrondiCentime(valeur);
+  return centimes === 0 ? null : centimes.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+const avecMontant = (libelle: string, montant: string | null, avant = '') => (montant === null ? libelle : `${avant}${montant} €`);
 
 /** Libellé court et chiffré d'une alerte : ce qui dépasse, et de combien. */
 export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): string {
   const m = chantier.metrics ?? {};
   switch (code) {
     case 'EN_PERTE':
-      return `En perte ${montantAlerte(Math.abs(m.margeCommerciale ?? 0))} €`;
+      return avecMontant('En perte', montantAlerte(Math.abs(m.margeCommerciale ?? 0)), 'En perte ');
     case 'MARGE_FAIBLE':
       return `Marge estimée ${nombre(m.margeEstimeePct ?? 0, 1)} %`;
     case 'SANS_SAISIE':
@@ -165,9 +169,9 @@ export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): st
     // Le coût de main-d'œuvre, lui, n'est transmis qu'à l'administration : sans lui, l'alerte
     // reste, sans montant.
     case 'MAIN_OEUVRE_DEPASSEE':
-      return chantier.budgetMainOeuvreVendu == null || m.moReel == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${montantAlerte(differenceExacte(m.moReel, chantier.budgetMainOeuvreVendu))} €`;
+      return chantier.budgetMainOeuvreVendu == null || m.moReel == null ? 'Main-d’œuvre dépassée' : avecMontant('Main-d’œuvre dépassée', montantAlerte(differenceExacte(m.moReel, chantier.budgetMainOeuvreVendu)), 'Main-d’œuvre +');
     case 'MATERIEL_DEPASSE':
-      return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : `Matériel +${montantAlerte(differenceExacte(m.materielReel ?? 0, chantier.budgetMaterielVendu))} €`;
+      return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : avecMontant('Matériel dépassé', montantAlerte(differenceExacte(m.materielReel ?? 0, chantier.budgetMaterielVendu)), 'Matériel +');
   }
 }
 

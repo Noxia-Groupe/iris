@@ -72,5 +72,7 @@ export const sommeExacte = (...termes: unknown[]): number =>
 export const differenceExacte = (a: unknown, b: unknown): number => new Prisma.Decimal(Number(a)).minus(Number(b)).toNumber();
 // Heures × taux horaire : quatre décimales au plus, calculées exactement.
 export const produitExact = (a: unknown, b: unknown): number => new Prisma.Decimal(Number(a)).times(Number(b)).toNumber();
-// Quotient en décimal (précision 20) : a × b ÷ c retombe exactement sur a quand b = c.
-export const quotientExact = (a: unknown, b: unknown): number => new Prisma.Decimal(Number(a)).div(Number(b)).toNumber();
+// a × b ÷ c en décimal (précision 20), sans repasser par un nombre entre le produit et le
+// quotient : retombe exactement sur a quand b = c.
+export const regleDeTroisExacte = (a: unknown, b: unknown, c: unknown): number =>
+  new Prisma.Decimal(Number(a)).times(Number(b)).div(Number(c)).toNumber();
