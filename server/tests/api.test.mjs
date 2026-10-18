@@ -262,6 +262,7 @@ if (!TEST_DATABASE_URL) {
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test',
+      'dernier.super.a@iris.test', 'dernier.super.b@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
       ...Array.from({ length: 15 }, (_, i) => `pilote3.supprtype.${i}@iris.test`),
@@ -275,6 +276,9 @@ if (!TEST_DATABASE_URL) {
   before(async () => {
     await initDb();
     await ensureSuperAdmins();
+    // Le test du dernier super administrateur désactive le compte de secours le temps d'un test :
+    // une exécution interrompue ne doit pas le laisser désactivé (le démarrage promeut sans réactiver).
+    await prisma.user.update({ where: { email: 'secours@iris.test' }, data: { actif: true } });
     // Une exécution précédente interrompue a pu laisser des enregistrements : on part
     // toujours d'un état propre, sinon la suite n'est rejouable qu'une fois.
     await nettoyer();
@@ -3528,6 +3532,122 @@ if (!TEST_DATABASE_URL) {
       const res = await request(app).put(`/api/users/${conducteurId}/permissions`).set('Authorization', `Bearer ${superSession}`).send({ permissions: ['invente:write'] });
       assert.equal(res.status, 400);
     });
+  });
+
+  // Garde-fou du dernier super administrateur (#178) : seuls les comptes actifs comptent, et le
+  // contrôle se fait dans la transaction d'écriture, sous verrou.
+  describe('Dernier super administrateur actif', () => {
+    const comptes = {};
+    const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, enTete, corps) => {
+      const requete = request(app)[methode](chemin).set(enTete);
+      return corps === undefined ? requete : requete.send(corps);
+    };
+    const superAdminsActifs = async () => (await prisma.user.findMany({ where: { role: 'SUPERADMIN', actif: true }, select: { id: true } })).map((compte) => compte.id).sort();
+    const preparer = async () => {
+      for (const cle of ['a', 'b']) {
+        const email = `dernier.super.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role: 'SUPERADMIN', actif: true }, create: { email, name: `TEST Dernier super ${cle.toUpperCase()}`, role: 'SUPERADMIN' } });
+      }
+    };
+    // A et B sont les seuls super administrateurs actifs le temps du test : les autres, dont le compte
+    // de secours, sont désactivés puis réactivés (le before() général réactive aussi le secours).
+    const isoler = async (corps) => {
+      await preparer();
+      const suspendus = (await prisma.user.findMany({ where: { role: 'SUPERADMIN', actif: true, id: { notIn: [comptes.a.id, comptes.b.id] } }, select: { id: true } })).map((compte) => compte.id);
+      await prisma.user.updateMany({ where: { id: { in: suspendus } }, data: { actif: false } });
+      try {
+        await corps();
+      } finally {
+        await prisma.user.updateMany({ where: { id: { in: suspendus } }, data: { actif: true } });
+      }
+    };
+
+    test('la rétrogradation de soi est refusée quand l’autre super administrateur est désactivé', () => isoler(async () => {
+      await prisma.user.update({ where: { id: comptes.b.id }, data: { actif: false } });
+      const entrees = await prisma.journalAdministration.count({ where: { cibleId: comptes.a.id } });
+      const refus = await envoyer('patch', `/api/users/${comptes.a.id}/role`, jeton(comptes.a), { role: 'ADMIN' });
+      assert.deepEqual([refus.status, refus.body.error], [409, 'Impossible de retirer le rôle du dernier compte super administrateur.']);
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: comptes.a.id } })).role, 'SUPERADMIN');
+      assert.equal(await prisma.journalAdministration.count({ where: { cibleId: comptes.a.id } }), entrees, 'aucune entrée de journal');
+      // B réactivé, A peut se rétrograder : un super administrateur actif demeure.
+      assert.equal((await envoyer('patch', `/api/users/${comptes.b.id}/actif`, jeton(comptes.a), { actif: true })).status, 200);
+      const retrait = await envoyer('patch', `/api/users/${comptes.a.id}/role`, jeton(comptes.a), { role: 'ADMIN' });
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      assert.deepEqual(await superAdminsActifs(), [comptes.b.id]);
+    }));
+
+    test('un super administrateur désactivé se rétrograde ou se supprime sans compter comme le dernier', () => isoler(async () => {
+      await prisma.user.update({ where: { id: comptes.b.id }, data: { actif: false } });
+      const retrait = await envoyer('patch', `/api/users/${comptes.b.id}/role`, jeton(comptes.a), { role: 'ADMIN' });
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      await prisma.user.update({ where: { id: comptes.b.id }, data: { role: 'SUPERADMIN' } });
+      const suppression = await envoyer('delete', `/api/users/${comptes.b.id}`, jeton(comptes.a));
+      assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+      assert.deepEqual(await superAdminsActifs(), [comptes.a.id]);
+    }));
+
+    // B agit sur A pendant qu'une autre transaction désactive B. La requête de B a passé
+    // l'authentification, puis attend le verrou des super administrateurs ; à sa reprise, A est le
+    // dernier actif et l'opération est refusée.
+    for (const [nom, methode, chemin, corps, statut, message] of [
+      ['suppression', 'delete', (id) => `/api/users/${id}`, undefined, 409, 'Impossible de révoquer le dernier compte super administrateur.'],
+      ['rétrogradation', 'patch', (id) => `/api/users/${id}/role`, { role: 'ADMIN' }, 409, 'Impossible de retirer le rôle du dernier compte super administrateur.'],
+      ['désactivation', 'patch', (id) => `/api/users/${id}/actif`, { actif: false }, 400, 'Ce compte est le dernier super administrateur : il ne peut pas être désactivé.'],
+    ]) test(`${nom} : contrôle refait sous verrou, après la désactivation concurrente de son auteur`, () => isoler(async () => {
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${comptes.b.id} FOR UPDATE`;
+        pret();
+        await attente;
+        await tx.user.update({ where: { id: comptes.b.id }, data: { actif: false } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      let reponse;
+      try {
+        reponse = envoyer(methode, chemin(comptes.a.id), jeton(comptes.b), corps).then((resultat) => resultat);
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM "User" WHERE "role"%FOR UPDATE%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'la requête attend le verrou des super administrateurs');
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const refus = await reponse;
+      assert.deepEqual([refus.status, refus.body.error], [statut, message]);
+      const a = await prisma.user.findUniqueOrThrow({ where: { id: comptes.a.id } });
+      assert.deepEqual([a.role, a.actif], ['SUPERADMIN', true]);
+      assert.deepEqual(await superAdminsActifs(), [comptes.a.id]);
+    }));
+
+    test('deux retraits croisés simultanés laissent toujours un super administrateur actif', () => isoler(async () => {
+      // Le second refus vient de la transaction (409, 400) ou, s'il arrive après la validation du
+      // premier retrait, de l'authentification ou du garde des comptes super administrateurs.
+      for (const [nom, methode, chemin, corps, refus] of [
+        ['rétrogradations', 'patch', (id) => `/api/users/${id}/role`, { role: 'ADMIN' }, [403, 409]],
+        ['désactivations', 'patch', (id) => `/api/users/${id}/actif`, { actif: false }, [400, 401]],
+        ['suppressions', 'delete', (id) => `/api/users/${id}`, undefined, [401, 409]],
+      ]) {
+        for (let essai = 0; essai < 10; essai += 1) {
+          await preparer();
+          const reponses = await Promise.all([
+            envoyer(methode, chemin(comptes.b.id), jeton(comptes.a), corps),
+            envoyer(methode, chemin(comptes.a.id), jeton(comptes.b), corps),
+          ]);
+          const statuts = reponses.map((reponse) => reponse.status);
+          const detail = `${nom}, essai ${essai} : ${JSON.stringify(reponses.map((reponse) => [reponse.status, reponse.body]))}`;
+          assert.equal(statuts.filter((s) => s === 200).length, 1, detail);
+          assert.ok(statuts.every((s) => s === 200 || refus.includes(s)), detail);
+          assert.equal((await superAdminsActifs()).length, 1, detail);
+        }
+      }
+    }));
   });
 
   // Cycle de vie d'une affaire : c'est la conversion d'un devis accepté qui ouvre le
