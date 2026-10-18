@@ -104,7 +104,7 @@ const Performances = () => {
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3">
                   <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge générée</div>
-                  <div className={`font-bold mt-0.5 ${p.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{arrondiEuro(p.margeTotal).toLocaleString()} €</div>
+                  <div className={`font-bold mt-0.5 ${arrondiEuro(p.margeTotal) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{arrondiEuro(p.margeTotal).toLocaleString()} €</div>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3">
                   <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge %</div>
@@ -161,8 +161,8 @@ const Performances = () => {
                     <span className={`text-sm font-black ${p.tauxDepassementHeures > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
                       {p.tauxDepassementHeures.toFixed(1)}%
                     </span>
-                    <span className={`text-sm font-black ${p.manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                      {p.manqueAGagnerMainOeuvre > 0 ? `-${arrondiEuro(p.manqueAGagnerMainOeuvre).toLocaleString()} €` : '0 €'}
+                    <span className={`text-sm font-black ${arrondiEuro(p.manqueAGagnerMainOeuvre) > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {arrondiEuro(p.manqueAGagnerMainOeuvre) > 0 ? `-${arrondiEuro(p.manqueAGagnerMainOeuvre).toLocaleString()} €` : '0 €'}
                     </span>
                   </div>
                 )}

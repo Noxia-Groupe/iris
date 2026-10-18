@@ -901,7 +901,7 @@ const ChantierDetail = () => {
                 <div className="z-10 bg-white/60 p-4 rounded-lg" data-estimation>
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <div className="text-xs text-gray-500 font-bold uppercase tracking-wider">Marge estimée en fin de chantier</div>
-                    <div className={`text-2xl font-black ${metrics.margeEstimee >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    <div className={`text-2xl font-black ${arrondiEuro(metrics.margeEstimee) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                       {fmtEuro(metrics.margeEstimee)}
                       <span className="text-sm font-bold ml-2">{(metrics.margeEstimeePct ?? 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %</span>
                     </div>
@@ -958,8 +958,8 @@ const ChantierDetail = () => {
               </div>
               {chantier.budgetMainOeuvreVendu != null && <ProgressMeter value={coutMainOeuvreReel} max={chantier.budgetMainOeuvreVendu} color="orange" striped />}
               <div className="mt-2 flex justify-between items-center text-xs font-bold">
-                <span className={manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-gray-300'}>
-                  {manqueAGagnerMainOeuvre > 0 ? `Manque à gagner : -${arrondiCentime(manqueAGagnerMainOeuvre).toLocaleString()} €` : ''}
+                <span className={arrondiCentime(manqueAGagnerMainOeuvre) > 0 ? 'text-red-600' : 'text-gray-300'}>
+                  {arrondiCentime(manqueAGagnerMainOeuvre) > 0 ? `Manque à gagner : -${arrondiCentime(manqueAGagnerMainOeuvre).toLocaleString()} €` : ''}
                 </span>
                 {chantier.budgetMainOeuvreVendu != null && (
                   <span className="text-gray-500">

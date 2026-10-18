@@ -415,6 +415,18 @@ describe('Marge estimée en fin de chantier et alertes de suivi', () => {
     assert.ok(!perte.alertes.includes('MARGE_FAIBLE'));
   });
 
+  // #198 : 21 × (362,57 / 21) vaut 362,57000000000005 en flottant ; la marge estimée d'un chantier
+  // vendu exactement à son coût attendu tombait à -5e-14, avec une alerte de marge faible.
+  test('heures vendues faites au coût réel : marge estimée exactement nulle, sans alerte', () => {
+    const vue = computeChantierMetrics(chantier({
+      budgetGlobalVendu: 362.57, budgetMaterielVendu: 0, budgetMainOeuvreVendu: 362.57, heuresVendues: 21, achats: [],
+      pointages: [{ nbrHeures: 20, tauxHoraireApplique: 17.26, date: '2026-10-12T00:00:00.000Z' }, { nbrHeures: 1, tauxHoraireApplique: 17.37, date: '2026-10-12T00:00:00.000Z' }],
+    }), { ...params, seuilMargeFaible: null }, true, contexte());
+    assert.equal(vue.estimation.coutMainOeuvreAttendu, 362.57);
+    assert.ok(Object.is(vue.margeEstimee, 0), `marge estimée ${vue.margeEstimee}`);
+    assert.ok(!vue.alertes.includes('MARGE_FAIBLE'));
+  });
+
   test('un chantier terminé n’a plus de reste à faire ni de délai sans saisie', () => {
     const vue = computeChantierMetrics(chantier({ statut: 'TERMINE', achats: [{ montantHT: 1000, date: '2026-01-05T00:00:00.000Z' }] }), params, true, contexte());
     assert.equal(vue.margeEstimee, vue.margeCommerciale);

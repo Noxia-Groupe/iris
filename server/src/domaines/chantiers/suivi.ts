@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, jourCivilEntreprise, aujourdHuiEntreprise, dateSeuleEnJourCivil } from '../../commun/dates';
-import { decimalToNumber, sommeExacte, differenceExacte, produitExact } from '../../commun/montants';
+import { decimalToNumber, sommeExacte, differenceExacte, produitExact, quotientExact } from '../../commun/montants';
 import type { Parametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { chantierSansCoutMainOeuvre, chantierSansMontants } from './droits';
@@ -144,7 +144,11 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
     if (chantier.statut === 'EN_COURS') {
       sourceCoutHoraire = coutHoraireReference != null ? 'CHANTIER' : contexte.coutHoraireSociete != null ? 'SOCIETE' : 'VENDU';
       coutHoraireReference ??= contexte.coutHoraireSociete;
-      const mainOeuvrePrevue = coutHoraireReference != null ? chantier.heuresVendues * coutHoraireReference : chantier.budgetMainOeuvreVendu;
+      // Au coût horaire du chantier : heures vendues × main-d'œuvre réelle ÷ heures réalisées, en
+      // décimal (#198), pour retomber exactement sur le réel quand les heures vendues sont faites.
+      const mainOeuvrePrevue = sourceCoutHoraire === 'CHANTIER'
+        ? quotientExact(produitExact(chantier.heuresVendues, moReel), heuresRealisees)
+        : coutHoraireReference != null ? chantier.heuresVendues * coutHoraireReference : chantier.budgetMainOeuvreVendu;
       coutMainOeuvreAttendu = Math.max(moReel, mainOeuvrePrevue);
       ratioMateriel = contexte.ratioMaterielHistorique ?? 1;
       sourceMateriel = contexte.ratioMaterielHistorique != null ? 'HISTORIQUE' : 'VENDU';

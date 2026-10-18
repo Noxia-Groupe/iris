@@ -44,6 +44,16 @@ test('arrondi au centime : moitié vers l’extérieur, sur des montants à quat
   assert.equal(arrondiCentime(0.1 + 0.2), 0.3);
 });
 
+test('un rapport (taux moyen, estimation) n’est arrondi qu’une fois', () => {
+  // Manque à gagner : 2,07 h en trop au taux moyen de 1 055,4275 € pour 21 h = 104,034996… €.
+  const manque = differenceExacte(21, 18.93, 2) * (1055.4275 / 21);
+  assert.equal(arrondiCentime(manque), 104.03, 'passer par les dix-millièmes donnerait 104,04');
+  assert.equal(arrondiCentime(-manque), -104.03);
+  assert.equal(arrondiEuro(2.4999642857), 2, 'un rapport sous la moitié reste en dessous');
+  assert.equal(arrondiEuro(2.5000357142), 3);
+  assert.equal(arrondiCentime(1 / 3), 0.33);
+});
+
 test('coût d’une ligne d’heures : produit exact, arrondi au centime supérieur à la moitié', () => {
   assert.equal(coutLigneHeures(2.5, 0.41), 1.03, '1,025 € ; toFixed(2) donnerait 1,02 €');
   assert.equal((2.5 * 0.41).toFixed(2), '1.02', 'témoin : l’erreur corrigée');

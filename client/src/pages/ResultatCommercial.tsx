@@ -90,7 +90,7 @@ const ResultatCommercial = () => {
               </div>
               <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Marge commerciale (validée, période)</div>
-                <div className={`text-2xl font-black ${moi.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtEuro(moi.margeTotal)}</div>
+                <div className={`text-2xl font-black ${arrondiEuro(moi.margeTotal) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtEuro(moi.margeTotal)}</div>
               </div>
               <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Rémunération variable (période)</div>
@@ -147,7 +147,7 @@ const ResultatCommercial = () => {
                           )}
                         </td>
                         <td style={{ padding: '8px', textAlign: 'right' }} className="font-bold text-gray-800">{fmtEuro(c.budgetGlobalVendu)}</td>
-                        <td style={{ padding: '8px', textAlign: 'right' }} className={`font-bold ${(c.margeCommerciale ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        <td style={{ padding: '8px', textAlign: 'right' }} className={`font-bold ${arrondiEuro(c.margeCommerciale ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                           {c.margeCommerciale != null ? fmtEuro(c.margeCommerciale) : '—'}
                         </td>
                       </tr>

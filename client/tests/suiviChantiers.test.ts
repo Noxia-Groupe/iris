@@ -56,6 +56,18 @@ test('chaque alerte dit de combien le réel dépasse le vendu', () => {
   assert.equal(libelleAlerte('EN_PERTE', derive), 'En perte 270 €');
 });
 
+// #198 : depuis que les dépassements sont exacts, une alerte peut porter sur moins d'un euro ;
+// l'arrondi à l'euro l'aurait affichée « +0 € ».
+test('un dépassement de moins d’un euro ou d’une demi-heure reste chiffré', () => {
+  const juste = chantier('j', 'J', { heuresRealisees: 10.25, materielReel: 300.3, moReel: 700.49, margeCommerciale: -0.3 });
+  assert.equal(libelleAlerte('HEURES_DEPASSEES', juste), 'Heures +0,25 h');
+  assert.equal(libelleAlerte('MATERIEL_DEPASSE', juste), 'Matériel +0,30 €');
+  assert.equal(libelleAlerte('MAIN_OEUVRE_DEPASSEE', juste), 'Main-d’œuvre +0,49 €');
+  assert.equal(libelleAlerte('EN_PERTE', juste), 'En perte 0,30 €');
+  // À partir d'un euro, l'arrondi à l'euro, moitié vers l'extérieur.
+  assert.equal(libelleAlerte('MATERIEL_DEPASSE', chantier('k', 'K', { materielReel: 301.5 })), 'Matériel +2 €');
+});
+
 test('marge faible et absence de saisie : libellés chiffrés et rang dans la priorité', () => {
   const faible = chantier('f', 'Faible', { margeEstimeePct: 8.25, alertes: ['MARGE_FAIBLE'] });
   const dormant = chantier('s', 'Dormant', { joursSansSaisie: 21, alertes: ['SANS_SAISIE'] });

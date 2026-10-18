@@ -213,10 +213,10 @@ const Dashboard = () => {
 
           {globalStats.margeTotal != null && (
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-              <div className={`p-2 rounded-lg ${globalStats.margeTotal >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}><TrendingUp size={18} /></div>
+              <div className={`p-2 rounded-lg ${arrondiEuro(globalStats.margeTotal) >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}><TrendingUp size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge totale</div>
-                <div className={`text-2xl font-black mt-0.5 ${globalStats.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                <div className={`text-2xl font-black mt-0.5 ${arrondiEuro(globalStats.margeTotal) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                   {arrondiEuro(globalStats.margeTotal).toLocaleString()} €
                 </div>
                 <div className="text-xs text-gray-400">
@@ -278,10 +278,10 @@ const Dashboard = () => {
                 )}
                 <div>
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge estimée en fin de chantier</div>
-                  <div className={`text-2xl font-black mt-0.5 ${margeEstimeeEnCours >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-marge-portefeuille>
+                  <div className={`text-2xl font-black mt-0.5 ${arrondiEuro(margeEstimeeEnCours) >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-marge-portefeuille>
                     {euros(margeEstimeeEnCours)}
                   </div>
-                  <div className={`text-xs font-semibold ${margeEstimeeEnCours >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  <div className={`text-xs font-semibold ${arrondiEuro(margeEstimeeEnCours) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                     {margeEstimeeEnCoursPct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % du vendu
                   </div>
                 </div>

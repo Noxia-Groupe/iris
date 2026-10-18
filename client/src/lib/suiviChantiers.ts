@@ -1,4 +1,4 @@
-import { differenceExacte } from './montants';
+import { arrondiCentime, arrondiEuro, differenceExacte } from './montants';
 
 // Suivi des chantiers : recherche, filtres et tri de la liste et du tableau de bord.
 //
@@ -140,27 +140,34 @@ export function trierChantiers<T extends ChantierSuivi>(chantiers: T[], tri: Tri
 }
 
 const nombre = (valeur: number, decimales = 0) => valeur.toLocaleString('fr-FR', { maximumFractionDigits: decimales });
+// Montant d'une alerte : à l'euro, sauf sous 1 €, où l'euro afficherait « +0 € » pour un
+// dépassement réel : au centime alors.
+const montantAlerte = (valeur: number) => (Math.abs(valeur) < 1
+  ? arrondiCentime(valeur).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  : nombre(arrondiEuro(valeur)));
 
 /** Libellé court et chiffré d'une alerte : ce qui dépasse, et de combien. */
 export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): string {
   const m = chantier.metrics ?? {};
   switch (code) {
     case 'EN_PERTE':
-      return `En perte ${nombre(Math.abs(m.margeCommerciale ?? 0))} €`;
+      return `En perte ${montantAlerte(Math.abs(m.margeCommerciale ?? 0))} €`;
     case 'MARGE_FAIBLE':
       return `Marge estimée ${nombre(m.margeEstimeePct ?? 0, 1)} %`;
     case 'SANS_SAISIE':
       return `Sans saisie depuis ${nombre(m.joursSansSaisie ?? 0)} j`;
+    // Heures saisies au centième : deux décimales au plus (un dépassement de 0,25 h ne
+    // s'affiche pas « +0 h »).
     case 'HEURES_DEPASSEES':
-      return `Heures +${nombre(differenceExacte(m.heuresRealisees ?? 0, chantier.heuresVendues), 1)} h`;
+      return `Heures +${nombre(differenceExacte(m.heuresRealisees ?? 0, chantier.heuresVendues), 2)} h`;
     // Garde défensive : un budget non communiqué ne doit jamais donner un montant de dépassement
     // (le serveur ne transmet d'ailleurs pas ces alertes au technicien, seul à ne pas voir les budgets).
     // Le coût de main-d'œuvre, lui, n'est transmis qu'à l'administration : sans lui, l'alerte
     // reste, sans montant.
     case 'MAIN_OEUVRE_DEPASSEE':
-      return chantier.budgetMainOeuvreVendu == null || m.moReel == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${nombre(differenceExacte(m.moReel, chantier.budgetMainOeuvreVendu))} €`;
+      return chantier.budgetMainOeuvreVendu == null || m.moReel == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${montantAlerte(differenceExacte(m.moReel, chantier.budgetMainOeuvreVendu))} €`;
     case 'MATERIEL_DEPASSE':
-      return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : `Matériel +${nombre(differenceExacte(m.materielReel ?? 0, chantier.budgetMaterielVendu))} €`;
+      return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : `Matériel +${montantAlerte(differenceExacte(m.materielReel ?? 0, chantier.budgetMaterielVendu))} €`;
   }
 }
 
