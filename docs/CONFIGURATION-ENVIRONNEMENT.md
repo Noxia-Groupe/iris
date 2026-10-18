@@ -87,15 +87,20 @@ En CI, les travaux « Backend — tests » et « Frontend — parcours utilisate
 
 #### Comparaison du rendu (découpage des écrans)
 
-Les PR qui découpent un gros écran du client ([docs/DECOUPAGE-ECRANS-CIBLE.md](DECOUPAGE-ECRANS-CIBLE.md)) prouvent que le rendu ne change pas avec `cd client && npm run comparer:rendu -- --reference <dossier client de main>`. Avec `RELEVE_DATABASE_URL` pointant vers une base jetable, de préférence neuve, l'outil :
+Les PR qui découpent un gros écran du client ([docs/DECOUPAGE-ECRANS-CIBLE.md](DECOUPAGE-ECRANS-CIBLE.md)) prouvent que le rendu ne change pas avec `cd client && npm run comparer:rendu -- --reference <dossier client de main>`.
 
-- refuse une base dont le nom ne contient ni `e2e` ni `test`, des ports déjà occupés, et deux arbres dont le code serveur diffère (il compare deux clients servis par le même serveur) ;
-- régénère Prisma, recompile et démarre le serveur du candidat, migre la base, puis y crée par l'API un jeu de données qui remplit chaque section des trois écrans ;
-- sert l'un après l'autre, sur le même port, le client de référence puis le candidat. Pour chacun, il ouvre l'administration (les neuf onglets et la vue du conducteur), la fiche chantier (administration, conducteur titulaire, technicien titulaire, modale et corrections) et le planning (grille, file et chaque modale), sans aucune écriture ;
-- relève à chaque étape l'URL, la liste ordonnée des requêtes API, l'état des champs et le HTML de `<main>`, où sont rendues les modales. L'horloge du navigateur est figée au même instant pour les deux relevés. Les réponses API sont libérées une à une, dans l'ordre d'émission, ce qui rend l'ordre des requêtes indépendant des temps de réponse ;
-- compare les deux relevés : code 0 s'ils sont identiques, 1 sinon, avec la première ligne qui diffère pour chaque étape. Les relevés restent dans le dossier `--sortie` (par défaut, un dossier temporaire).
+**Préparer la référence** : un worktree complet de `main` (avec `server/`), et `npm ci` dans son dossier `client`. Le candidat est par défaut le client où l'on lance la commande (`--candidat` pour un autre). Avec `RELEVE_DATABASE_URL` pointant vers une base jetable, de préférence neuve, l'outil :
 
-`RELEVE_CHROMIUM` désigne au besoin l'exécutable de Chromium (`/opt/pw-browsers/chromium` dans le conteneur de Claude Code). L'outil ne fait pas partie de la CI : une exécution prend environ six minutes.
+- refuse une base dont le nom ne contient pas `e2e` ou `test` comme mot (`iris_releve_test` oui, `production_latest` non), des ports occupés, un `--sortie` non vide, un client sans dépendances, et deux arbres dont le code serveur diffère (sources, schéma, migrations, dépendances, `tsconfig.json`) : il compare deux clients servis par le même serveur ;
+- régénère le client Prisma et recompile le serveur **du candidat** (son `server/dist` est réécrit), migre la base, démarre le serveur, puis crée par l'API un jeu de données qui rend les sections que le découpage déplace ;
+- sert l'un après l'autre, sur le même port, le client de référence puis le candidat, et y relève les mêmes étapes sans aucune écriture (toute requête autre que GET est bloquée et relevée) :
+  - **administration** : les neuf onglets, l'édition en ligne avec saisie, le formulaire d'autorisation et le choix d'un responsable hiérarchique ouvert, pour le super administrateur ; l'administrateur et le conducteur ;
+  - **fiche chantier** : la modale, les corrections, les filtres, le tri et la recherche des journaux, le choix du commercial ouvert, pour l'administration ; le conducteur et le technicien titulaires ; des chantiers terminés en attente d'encaissement et encaissé ;
+  - **planning** : la grille, la file, chaque modale et chaque branche de la modale d'affectation (heures précises, événement, nouveau type, affectation issue d'une intervention), le placement d'une visite et d'une curative, le partage, pour l'administration ; le conducteur et le technicien ;
+- relève à chaque étape l'URL, la liste ordonnée des requêtes API, l'état des champs et le HTML de `<main>`, où sont rendues les modales, ainsi que tout dialogue ou calque fixe rendu hors de `<main>`. L'horloge du navigateur est figée au même instant pour les deux relevés. Les réponses API sont libérées une à une, dans l'ordre d'émission. Avant chaque libération et chaque relevé, l'outil attend que toutes les requêtes émises par la page soient interceptées et que le DOM n'ait pas changé pendant `RELEVE_SILENCE_MS` (300 ms par défaut). Les requêtes hors de l'origine du client (polices en ligne, services du navigateur) sont abandonnées ;
+- compare les deux relevés. **Codes de sortie** : 0 s'ils sont identiques, 1 s'ils diffèrent (avec la première ligne qui diffère pour chaque étape), 2 en cas de refus ou d'erreur de l'outil. Les relevés, écrits au fil des étapes, et les journaux du serveur et de Vite restent dans `--sortie` (par défaut, un dossier temporaire).
+
+L'horloge du serveur n'est pas figée : l'outil refuse une exécution à cheval sur minuit (Europe/Paris), dont les durées et alertes calculées par le serveur différeraient. `RELEVE_CHROMIUM` désigne au besoin l'exécutable de Chromium (`/opt/pw-browsers/chromium` dans le conteneur de Claude Code). L'outil ne fait pas partie de la CI : une exécution prend environ dix minutes.
 
 ## Vérifier avant démarrage
 

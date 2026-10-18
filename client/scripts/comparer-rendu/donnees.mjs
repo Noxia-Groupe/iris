@@ -1,9 +1,12 @@
 // Données du relevé, créées par l'API en super administrateur, avant les deux relevés.
 //
 // Les deux clients voient ensuite exactement ces données (mêmes identifiants, mêmes dates) :
-// aucune normalisation n'est nécessaire. Chaque section des trois écrans doit être non vide :
+// aucune normalisation n'est nécessaire. Elles rendent les sections que le découpage déplace :
 // journaux d'achats et d'heures avec correction et archivage, journal d'audit, facture liée,
-// planning de la semaine, file à planifier, partage publié, barèmes, devis signé à ouvrir.
+// barème réduit, chantiers terminés (encaissé ou non), planning de la semaine (chantier,
+// hors suivi, événement à deux techniciens, affectation issue d'une intervention), file à
+// planifier (visite de contrat et curative), partage publié, barèmes, devis signé à ouvrir,
+// comptes de chaque sorte (administrateur, responsable hiérarchique, compte désactivé).
 // Les noms portent un suffixe propre à l'exécution, pour qu'une base déjà servie reste
 // utilisable ; une base neuve donne des relevés plus courts.
 import { JETON_SECOURS, jetonPour } from './commun.mjs';
@@ -55,6 +58,13 @@ export async function preparerDonnees(api) {
   const conducteur = await compte('conducteur', 'Conducteur', 'CONDUCTEUR_TRAVAUX');
   const commercial = await compte('commercial', 'Commercial', 'COMMERCIAL');
   const technicien = await compte('technicien', 'Technicien', 'TECHNICIEN');
+  // Administration sans super administration (onglets Société et Modules absents), responsable
+  // hiérarchique du technicien (choix du responsable non vide), compte désactivé.
+  const administrateur = await compte('administrateur', 'Administrateur', 'ADMIN');
+  const responsable = await compte('responsable', 'Responsable', 'RESPONSABLE');
+  await appel('PATCH', `/users/${technicien.id}/responsable-hierarchique`, { responsableHierarchiqueId: responsable.id });
+  const ancien = await compte('ancien', 'Ancien compte', 'CONDUCTEUR_TRAVAUX');
+  await appel('PATCH', `/users/${ancien.id}/actif`, { actif: false });
 
   // Client, référentiels, intervenants (le premier relié au compte technicien).
   const client = await appel('POST', '/clients', { raisonSociale: nom('Client') });
@@ -83,6 +93,13 @@ export async function preparerDonnees(api) {
   const chantierA = await ouvrir(await devisSigne('Affaire A'), conducteur.id);
   const chantierB = await ouvrir(await devisSigne('Affaire B'), conducteur.id);
   await appel('PATCH', `/chantiers/${chantierB.id}`, { responsableId: technicien.id });
+  // Terminés : en attente d'encaissement (badge, bannière) et encaissé.
+  const chantierC = await ouvrir(await devisSigne('Affaire terminée'), conducteur.id);
+  await appel('PATCH', `/chantiers/${chantierC.id}/statut`, { statut: 'TERMINE' });
+  const chantierD = await ouvrir(await devisSigne('Affaire encaissée'), conducteur.id);
+  await appel('PATCH', `/chantiers/${chantierD.id}/statut`, { statut: 'TERMINE' });
+  await appel('PATCH', `/chantiers/${chantierD.id}/encaisse`, { encaisse: true });
+  await appel('PATCH', `/chantiers/${chantierA.id}`, { baremeReduit: true });
   await devisSigne('Affaire à ouvrir');
 
   // Saisies du chantier A : dates et montants distincts (les tris sont par date et par valeur).
@@ -111,6 +128,9 @@ export async function preparerDonnees(api) {
   const contrat = await appel('POST', '/contrats-maintenance', { clientId: client.id, titre: nom('Visite annuelle'), periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
   await appel('POST', `/contrats-maintenance/${contrat.id}/generer-intervention`);
   await appel('POST', '/interventions', { clientId: client.id, titre: nom('Panne caméra'), dateSouhaitee: '15-12-2099' });
+  // Affectation issue d'une intervention : nature masquée, titre en lecture seule.
+  const planifiee = await appel('POST', '/interventions', { clientId: client.id, titre: nom('Remplacement détecteur'), dateSouhaitee: '20-12-2099' });
+  await appel('PUT', `/interventions/${planifiee.id}/planning`, { dateDebut: jourCivil(lundi + 4, 'iso'), creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:30', intervenantIds: [intervenants[1].id] });
   await appel('POST', '/planning/share');
 
   // Barèmes non vides pour l'onglet Marges et commissions.
@@ -120,9 +140,10 @@ export async function preparerDonnees(api) {
   });
 
   return {
-    comptes: { superAdmin: superAdmin.id, conducteur: conducteur.id, technicien: technicien.id },
-    chantiers: { A: chantierA.id, B: chantierB.id },
-    planning: { depannage: nom('Dépannage') },
+    comptes: { superAdmin: superAdmin.id, administrateur: administrateur.id, conducteur: conducteur.id, technicien: technicien.id },
+    noms: { technicien: technicien.name, fournisseurA: fournisseurs[0].nom },
+    chantiers: { A: chantierA.id, B: chantierB.id, C: chantierC.id, D: chantierD.id },
+    planning: { depannage: nom('Dépannage'), formation: type.nom, planifiee: planifiee.titre ?? nom('Remplacement détecteur') },
   };
 }
 

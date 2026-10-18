@@ -10,17 +10,19 @@
 //
 // Un seul serveur et une seule base : les deux relevés voient exactement les mêmes données
 // (mêmes identifiants, mêmes dates). L'horloge du navigateur est figée au même instant pour
-// les deux. Le serveur des deux arbres doit donc être identique : l'outil le vérifie.
+// les deux ; celle du serveur ne l'est pas, d'où le refus d'une exécution à cheval sur minuit.
+// Le serveur des deux arbres doit être identique : l'outil le vérifie.
 //
 // Usage, depuis client/ (base PostgreSQL jetable, de préférence neuve) :
 //   RELEVE_DATABASE_URL=postgresql://iris:…@localhost:5432/iris_releve_test \
 //     npm run comparer:rendu -- --reference /chemin/vers/main/client [--sortie /tmp/releve]
 // Options : --candidat <dossier client> (par défaut, ce client). Ports : RELEVE_API_PORT (3401)
 // et RELEVE_PORT_CLIENT (5401). RELEVE_CHROMIUM désigne au besoin l'exécutable de Chromium ;
-// RELEVE_SILENCE_MS (300) règle l'attente de stabilité après chaque réponse.
+// RELEVE_SILENCE_MS (300) règle la durée de calme exigée avant chaque réponse et chaque relevé.
+// Codes de sortie : 0 relevés identiques, 1 relevés différents, 2 refus ou erreur de l'outil.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,10 +35,8 @@ import { relever } from './releve.mjs';
 
 const ici = path.dirname(fileURLToPath(import.meta.url));
 
-const echec = (message) => {
-  console.error(`\n[comparaison du rendu] ${message}\n`);
-  process.exit(2);
-};
+class Refus extends Error {}
+const echec = (message) => { throw new Refus(message); };
 const journal = (message) => console.log(`[comparaison du rendu] ${message}`);
 
 function lireOptions(argv) {
@@ -55,7 +55,8 @@ function lireOptions(argv) {
   return options;
 }
 
-// Empreinte du code serveur d'un arbre : sources, point d'entrée, schéma et migrations.
+// Empreinte du code serveur d'un arbre : sources, point d'entrée, schéma, migrations,
+// dépendances et configuration de compilation.
 function empreinteServeur(dossierClient) {
   const racine = path.resolve(dossierClient, '..', 'server');
   const hash = createHash('sha256');
@@ -68,7 +69,7 @@ function empreinteServeur(dossierClient) {
       hash.update(`${relatif}\0`).update(readFileSync(absolu)).update('\0');
     }
   };
-  for (const relatif of ['index.ts', 'src', 'prisma/schema.prisma', 'prisma/migrations', 'package.json']) parcourir(relatif);
+  for (const relatif of ['index.ts', 'src', 'prisma/schema.prisma', 'prisma/migrations', 'package.json', 'package-lock.json', 'tsconfig.json']) parcourir(relatif);
   return hash.digest('hex');
 }
 
@@ -91,27 +92,32 @@ async function attendre(url, processus, delaiMs = 120_000) {
   echec(`${url} ne répond pas après ${delaiMs / 1000} s.`);
 }
 
+// Processus fils : sortie écrite au fil de l'eau dans leur journal, lisible même si l'outil
+// s'arrête brutalement.
 const processus = [];
 function lancer(commande, args, options, fichierJournal) {
-  const enfant = spawn(commande, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
-  const sortie = [];
-  enfant.stdout.on('data', (morceau) => sortie.push(morceau));
-  enfant.stderr.on('data', (morceau) => sortie.push(morceau));
-  enfant.on('exit', () => writeFileSync(fichierJournal, Buffer.concat(sortie)));
+  const descripteur = openSync(fichierJournal, 'a');
+  const enfant = spawn(commande, args, { ...options, stdio: ['ignore', descripteur, descripteur] });
+  closeSync(descripteur);
   processus.push(enfant);
   return enfant;
 }
 const arreterTout = () => { for (const enfant of processus) if (enfant.exitCode === null) enfant.kill('SIGTERM'); };
 process.on('exit', arreterTout);
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { arreterTout(); process.exit(130); });
+process.on('SIGINT', () => { arreterTout(); process.exit(130); });
+process.on('SIGTERM', () => { arreterTout(); process.exit(143); });
 
 // Vite du client donné, avec un cache de dépendances propre : deux Vite lancés depuis des
 // racines différentes qui partagent un node_modules réoptimiseraient sinon le même cache.
+// La configuration du client peut être un objet ou une fonction (defineConfig).
 function lancerVite(dossierClient, port, portApi, sortie, nom) {
   const config = path.join(sortie, `vite.${nom}.config.mjs`);
   writeFileSync(config, [
     `import base from ${JSON.stringify(path.join(dossierClient, 'vite.config.ts'))};`,
-    `export default { ...base, cacheDir: ${JSON.stringify(path.join(sortie, `vite-cache-${nom}`))} };`,
+    'export default async (env) => {',
+    "  const resolue = typeof base === 'function' ? await base(env) : base;",
+    `  return { ...resolue, cacheDir: ${JSON.stringify(path.join(sortie, `vite-cache-${nom}`))} };`,
+    '};',
     '',
   ].join('\n'));
   // Vite lancé directement (et non par npx) : l'arrêter libère bien le port pour le client suivant.
@@ -120,6 +126,11 @@ function lancerVite(dossierClient, port, portApi, sortie, nom) {
     env: { ...process.env, VITE_DEV_API_TARGET: `http://127.0.0.1:${portApi}` },
   }, path.join(sortie, `vite-${nom}.log`));
 }
+
+// Nom de fichier d'une étape : lettres, chiffres, point et tiret seulement.
+const nomDeFichier = (cle) => `${cle.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9.-]+/g, '-')}.txt`;
+
+const jourCivil = () => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'short' }).format(new Date());
 
 function comparer(reference, candidat) {
   const ecarts = [];
@@ -144,10 +155,13 @@ async function principal() {
   } catch {
     echec('RELEVE_DATABASE_URL n’est pas une URL PostgreSQL valide.');
   }
-  // L'outil crée comptes, clients, chantiers et saisies : jamais sur une base réelle.
-  if (!/e2e|test/i.test(nomBase)) echec(`La base « ${nomBase} » ne porte ni « e2e » ni « test » dans son nom : refus d’y écrire.`);
+  // L'outil crée comptes, clients, chantiers et saisies : jamais sur une base réelle. « e2e » ou
+  // « test » doit former un mot du nom (iris_releve_test, e2e-iris), pas une sous-chaîne
+  // (production_latest).
+  if (!/(^|[_-])(e2e|test)([_-]|$)/i.test(nomBase)) echec(`La base « ${nomBase} » ne porte ni « e2e » ni « test » comme mot de son nom : refus d’y écrire.`);
   for (const dossier of [options.reference, options.candidat]) {
     if (!existsSync(path.join(dossier, 'vite.config.ts'))) echec(`${dossier} n’est pas un dossier client (vite.config.ts absent).`);
+    if (!existsSync(path.join(dossier, 'node_modules', 'vite', 'bin', 'vite.js'))) echec(`${dossier} : dépendances absentes (npm ci dans ce dossier client).`);
   }
   if (empreinteServeur(options.reference) !== empreinteServeur(options.candidat)) {
     echec('Le code serveur diffère entre la référence et le candidat : l’outil compare deux clients servis par le même serveur.');
@@ -161,15 +175,18 @@ async function principal() {
   for (const [role, port] of Object.entries(ports)) {
     if (await portOccupe(port)) echec(`Le port ${port} (${role}) est déjà occupé.`);
   }
+  if (existsSync(options.sortie) && readdirSync(options.sortie).length) echec(`${options.sortie} existe et n’est pas vide : choisissez un autre --sortie.`);
   mkdirSync(options.sortie, { recursive: true });
 
+  // Le serveur du candidat est compilé et démarré : son server/dist et son client Prisma sont
+  // régénérés.
   const dossierServeur = path.resolve(options.candidat, '..', 'server');
   // Sans node_modules, npx irait chercher une autre version de Prisma que celle du dépôt.
   if (!existsSync(path.join(dossierServeur, 'node_modules', '.bin', 'prisma'))) echec(`${dossierServeur} : dépendances absentes (npm ci).`);
   const executer = (commande, args, env = process.env) => {
     journal(`${commande} ${args.join(' ')}`);
     try {
-      execFileSync(commande, args, { cwd: dossierServeur, env, stdio: 'inherit' });
+      execFileSync(commande, args, { cwd: dossierServeur, env, stdio: 'inherit', shell: process.platform === 'win32' });
     } catch {
       echec(`échec de « ${commande} ${args.join(' ')} » dans ${dossierServeur}.`);
     }
@@ -193,6 +210,7 @@ async function principal() {
   }, path.join(options.sortie, 'serveur.log'));
   await attendre(`http://127.0.0.1:${ports.api}/api/health`, serveur);
 
+  const jourDebut = jourCivil();
   journal('préparation des données');
   const donnees = await preparerDonnees(`http://127.0.0.1:${ports.api}/api`);
   writeFileSync(path.join(options.sortie, 'donnees.json'), JSON.stringify(donnees, null, 2));
@@ -204,10 +222,13 @@ async function principal() {
   try {
     for (const nom of ['reference', 'candidat']) {
       journal(`relevé du client ${nom} (${options[nom]})`);
+      const dossier = path.join(options.sortie, nom);
+      mkdirSync(dossier, { recursive: true });
       const vite = lancerVite(options[nom], ports.client, ports.api, options.sortie, nom);
       await attendre(`http://127.0.0.1:${ports.client}/`, vite);
       try {
-        releves[nom] = await relever(navigateur, `http://127.0.0.1:${ports.client}`, donnees, instant);
+        releves[nom] = await relever(navigateur, `http://127.0.0.1:${ports.client}`, donnees, instant,
+          (cle, contenu) => writeFileSync(path.join(dossier, nomDeFichier(cle)), contenu));
       } finally {
         vite.kill('SIGTERM');
         await new Promise((resolve) => (vite.exitCode !== null ? resolve() : vite.once('exit', resolve)));
@@ -217,22 +238,27 @@ async function principal() {
           await new Promise((resolve) => setTimeout(resolve, 200));
         }
       }
-      const dossier = path.join(options.sortie, nom);
-      mkdirSync(dossier, { recursive: true });
-      for (const [cle, contenu] of Object.entries(releves[nom])) writeFileSync(path.join(dossier, `${cle}.txt`), contenu);
     }
   } finally {
     await navigateur.close();
   }
+  // Le serveur calcule durées et alertes au jour civil réel : les deux relevés doivent tomber
+  // le même jour.
+  if (jourCivil() !== jourDebut) echec(`le jour a changé pendant l'exécution (${jourDebut}, puis ${jourCivil()}) : relancez l'outil.`);
 
   const ecarts = comparer(releves.reference, releves.candidat);
   journal(`relevés écrits dans ${options.sortie}`);
   if (ecarts.length) {
     console.error(`\n[comparaison du rendu] ${ecarts.length} étape(s) diffèrent :\n\n${ecarts.join('\n\n')}\n`);
-    process.exit(1);
+    return 1;
   }
   journal(`identiques : ${Object.keys(releves.reference).length} relevés (HTML et requêtes), mêmes données, même instant.`);
-  process.exit(0);
+  return 0;
 }
 
-await principal();
+try {
+  process.exit(await principal());
+} catch (erreur) {
+  console.error(`\n[comparaison du rendu] ${erreur instanceof Refus ? erreur.message : `erreur de l'outil : ${erreur?.stack ?? erreur}`}\n`);
+  process.exit(2);
+}
