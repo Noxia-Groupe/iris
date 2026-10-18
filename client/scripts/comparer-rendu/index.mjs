@@ -128,7 +128,7 @@ function lancerVite(dossierClient, port, portApi, sortie, nom) {
 }
 
 // Nom de fichier d'une étape : lettres, chiffres, point et tiret seulement.
-const nomDeFichier = (cle) => `${cle.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9.-]+/g, '-')}.txt`;
+const nomDeFichier = (cle) => `${cle.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9.-]+/g, '-')}.txt`;
 
 const jourCivil = () => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'short' }).format(new Date());
 

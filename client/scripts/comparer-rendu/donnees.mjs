@@ -6,7 +6,8 @@
 // barème réduit, chantiers terminés (encaissé ou non), planning de la semaine (chantier,
 // hors suivi, événement à deux techniciens, affectation issue d'une intervention), file à
 // planifier (visite de contrat et curative), partage publié, barèmes, devis signé à ouvrir,
-// comptes de chaque sorte (administrateur, responsable hiérarchique, compte désactivé).
+// comptes de chaque sorte (administrateur, responsable hiérarchique, actif ou désactivé, compte
+// désactivé).
 // Les noms portent un suffixe propre à l'exécution, pour qu'une base déjà servie reste
 // utilisable ; une base neuve donne des relevés plus courts.
 import { JETON_SECOURS, jetonPour } from './commun.mjs';
@@ -65,6 +66,10 @@ export async function preparerDonnees(api) {
   await appel('PATCH', `/users/${technicien.id}/responsable-hierarchique`, { responsableHierarchiqueId: responsable.id });
   const ancien = await compte('ancien', 'Ancien compte', 'CONDUCTEUR_TRAVAUX');
   await appel('PATCH', `/users/${ancien.id}/actif`, { actif: false });
+  // Responsable désactivé après coup : le choix du responsable du conducteur le marque.
+  const parti = await compte('parti', 'Responsable parti', 'RESPONSABLE');
+  await appel('PATCH', `/users/${conducteur.id}/responsable-hierarchique`, { responsableHierarchiqueId: parti.id });
+  await appel('PATCH', `/users/${parti.id}/actif`, { actif: false });
 
   // Client, référentiels, intervenants (le premier relié au compte technicien).
   const client = await appel('POST', '/clients', { raisonSociale: nom('Client') });
@@ -141,7 +146,7 @@ export async function preparerDonnees(api) {
 
   return {
     comptes: { superAdmin: superAdmin.id, administrateur: administrateur.id, conducteur: conducteur.id, technicien: technicien.id },
-    noms: { technicien: technicien.name, fournisseurA: fournisseurs[0].nom },
+    noms: { technicien: technicien.name, conducteur: conducteur.name, fournisseurA: fournisseurs[0].nom, categorieA: categories[0].nom, intervenantA: intervenants[0].nom },
     chantiers: { A: chantierA.id, B: chantierB.id, C: chantierC.id, D: chantierD.id },
     planning: { depannage: nom('Dépannage'), formation: type.nom, planifiee: planifiee.titre ?? nom('Remplacement détecteur') },
   };

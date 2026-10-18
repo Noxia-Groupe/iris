@@ -71,6 +71,8 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 | `CI` | non localement | fourni par GitHub Actions; modifie le reporter et l’isolation Playwright |
 | `RELEVE_DATABASE_URL` | seulement comparaison du rendu | PostgreSQL jetable de l'outil de comparaison du rendu |
 | `RELEVE_API_PORT`, `RELEVE_PORT_CLIENT` | non | ports de cet outil, défauts `3401` et `5401` |
+| `RELEVE_SILENCE_MS` | non | durée de calme exigée avant chaque réponse libérée et chaque relevé, défaut `300` |
+| `RELEVE_CHROMIUM` | non | exécutable de Chromium à employer, à défaut celui de Playwright |
 
 Les bases de test sont destructibles. Elles ne doivent jamais viser un volume de développement, ni une instance de production.
 
@@ -100,7 +102,7 @@ Les PR qui découpent un gros écran du client ([docs/DECOUPAGE-ECRANS-CIBLE.md]
 - relève à chaque étape l'URL, la liste ordonnée des requêtes API, l'état des champs et le HTML de `<main>`, où sont rendues les modales, ainsi que tout dialogue ou calque fixe rendu hors de `<main>`. L'horloge du navigateur est figée au même instant pour les deux relevés. Les réponses API sont libérées une à une, dans l'ordre d'émission. Avant chaque libération et chaque relevé, l'outil attend que toutes les requêtes émises par la page soient interceptées et que le DOM n'ait pas changé pendant `RELEVE_SILENCE_MS` (300 ms par défaut). Les requêtes hors de l'origine du client (polices en ligne, services du navigateur) sont abandonnées ;
 - compare les deux relevés. **Codes de sortie** : 0 s'ils sont identiques, 1 s'ils diffèrent (avec la première ligne qui diffère pour chaque étape), 2 en cas de refus ou d'erreur de l'outil. Les relevés, écrits au fil des étapes, et les journaux du serveur et de Vite restent dans `--sortie` (par défaut, un dossier temporaire).
 
-L'horloge du serveur n'est pas figée : l'outil refuse une exécution à cheval sur minuit (Europe/Paris), dont les durées et alertes calculées par le serveur différeraient. `RELEVE_CHROMIUM` désigne au besoin l'exécutable de Chromium (`/opt/pw-browsers/chromium` dans le conteneur de Claude Code). L'outil ne fait pas partie de la CI : une exécution prend environ dix minutes.
+L'horloge du serveur n'est pas figée : l'outil refuse une exécution à cheval sur minuit (Europe/Paris), dont les durées et alertes calculées par le serveur différeraient. `RELEVE_CHROMIUM` désigne au besoin l'exécutable de Chromium (`/opt/pw-browsers/chromium` dans le conteneur de Claude Code). L'outil ne fait pas partie de la CI : une exécution prend environ neuf minutes (dix sous charge).
 
 ## Vérifier avant démarrage
 

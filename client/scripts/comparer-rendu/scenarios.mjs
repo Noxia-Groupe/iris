@@ -35,6 +35,7 @@ export function scenarios({ comptes, noms, chantiers, planning }) {
       { nom: 'role-administrateur', faire: (page) => main(page).locator('select[name="role"]').selectOption('ADMIN') },
       // Les options du choix du responsable ne sont construites qu'au focus.
       { nom: 'responsable-ouvert', faire: (page) => main(page).getByLabel(`Responsable hiérarchique de ${noms.technicien}`).focus() },
+      { nom: 'responsable-desactive-ouvert', faire: (page) => main(page).getByLabel(`Responsable hiérarchique de ${noms.conducteur}`).focus() },
       onglet('Journal'),
       onglet('Société'),
       onglet('Modules'),
@@ -58,10 +59,15 @@ export function scenarios({ comptes, noms, chantiers, planning }) {
       { nom: 'corriger-pointage-annuler', faire: (page) => cliquer(formulaireCorrection(page).getByRole('button', { name: 'Annuler', exact: true })) },
       { nom: 'achats-recherche', faire: (page) => main(page).getByPlaceholder('Rechercher (description, n° de facture, fournisseur, montant...)').fill('F-') },
       { nom: 'achats-fournisseur', faire: (page) => choixParOption(page, 'Tous les fournisseurs').selectOption(noms.fournisseurA) },
+      { nom: 'achats-categorie', faire: (page) => choixParOption(page, 'Toutes les catégories').selectOption(noms.categorieA) },
       { nom: 'achats-tri', faire: (page) => choixParOption(page, 'Montant décroissant').selectOption('montant-asc') },
       { nom: 'achats-reinitialiser', faire: (page) => cliquer(main(page).getByRole('button', { name: 'Réinitialiser', exact: true }).first()) },
       { nom: 'heures-recherche', faire: (page) => main(page).getByPlaceholder('Rechercher (intervenant, rôle, commentaire, date...)').fill('Pose') },
+      { nom: 'heures-intervenant', faire: (page) => choixParOption(page, 'Tous les intervenants').selectOption(noms.intervenantA) },
+      { nom: 'heures-role', faire: (page) => choixParOption(page, 'Tous les rôles').selectOption('TECHNICIEN') },
       { nom: 'heures-tri', faire: (page) => choixParOption(page, 'Heures décroissantes').selectOption('heures-desc') },
+      // Le « Réinitialiser » des achats a disparu avec leurs filtres : reste celui des heures.
+      { nom: 'heures-reinitialiser', faire: (page) => cliquer(main(page).getByRole('button', { name: 'Réinitialiser', exact: true }).last()) },
       // En dernier : le choix du commercial se referme dès qu'il perd le focus.
       { nom: 'commercial-en-place', faire: (page) => cliquer(bouton(page, 'Modifier', 1)) },
     ] },
