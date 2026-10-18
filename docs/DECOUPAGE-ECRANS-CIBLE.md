@@ -33,6 +33,8 @@ Côté client, il n'existe pas d'équivalent de `server/scripts/verifier-deplace
    - il enregistre le HTML de `<main>` et des dialogues ouverts, ainsi que la liste ordonnée des requêtes API.
 
    La preuve d'une PR : un relevé **identique** entre `main` et la branche.
+
+   **Livré** : `cd client && npm run comparer:rendu -- --reference <dossier client de main>` ([client/scripts/comparer-rendu/](../client/scripts/comparer-rendu/index.mjs), mode d'emploi dans [CONFIGURATION-ENVIRONNEMENT.md](CONFIGURATION-ENVIRONNEMENT.md#comparaison-du-rendu-découpage-des-écrans)). Il sert les deux clients avec le même serveur et la même base, ce qui évite toute normalisation des identifiants et des dates, et libère les réponses API une à une pour fixer l'ordre des requêtes.
 2. `npm run build` (`tsc -b`, dont `noUnusedLocals` et `verbatimModuleSyntax`) et `npm run lint`, avec un nombre d'avertissements égal ou inférieur au départ : Admin 10, ChantierDetail 8, Planning 0. Les directives `eslint-disable-next-line` positionnelles (Planning l.126, 137, 153 ; ChantierDetail l.135) restent attachées à leur ligne.
 3. `npm run test:unit`, puis les E2E deux fois sur la même base. 134 parcours, dont plus de trente touchent ces trois écrans. Plusieurs de leurs sélecteurs dépendent de la structure du DOM, ce qui en fait aussi une preuve de non-régression du rendu.
 4. Un audit indépendant par PR, puis la fusion selon la délégation habituelle (aucun montant ne change).

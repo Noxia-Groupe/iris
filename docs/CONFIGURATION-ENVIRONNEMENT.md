@@ -69,6 +69,8 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 | `E2E_BASE_URL` | non | URL frontend E2E, défaut `http://127.0.0.1:5199` |
 | `E2E_API_PORT` | non | port API E2E, défaut `3001` |
 | `CI` | non localement | fourni par GitHub Actions; modifie le reporter et l’isolation Playwright |
+| `RELEVE_DATABASE_URL` | seulement comparaison du rendu | PostgreSQL jetable de l'outil de comparaison du rendu |
+| `RELEVE_API_PORT`, `RELEVE_PORT_CLIENT` | non | ports de cet outil, défauts `3401` et `5401` |
 
 Les bases de test sont destructibles. Elles ne doivent jamais viser un volume de développement, ni une instance de production.
 
@@ -82,6 +84,18 @@ En local, lancer les parcours Playwright avec `cd client && npm run test:e2e:loc
 `npm run test:e2e` seul suppose que ces étapes ont déjà été faites, comme dans la CI.
 
 En CI, les travaux « Backend — tests » et « Frontend — parcours utilisateur » démarrent le PostgreSQL 16 préinstallé du runner Ubuntu 24.04, et non un conteneur tiré d'un registre public, dont les refus (`toomanyrequests`) faisaient échouer des jobs avant tout test. Le script `.github/scripts/postgresql-runner.sh` crée le rôle `iris` et la base jetable en UTF-8 et `C.UTF-8`. Il affiche puis vérifie la version majeure (16), le fuseau du serveur (UTC) ainsi que l'encodage et la collation de la base et de `template1`. En cas d'échec, le job affiche la fin du journal du serveur PostgreSQL.
+
+#### Comparaison du rendu (découpage des écrans)
+
+Les PR qui découpent un gros écran du client ([docs/DECOUPAGE-ECRANS-CIBLE.md](DECOUPAGE-ECRANS-CIBLE.md)) prouvent que le rendu ne change pas avec `cd client && npm run comparer:rendu -- --reference <dossier client de main>`. Avec `RELEVE_DATABASE_URL` pointant vers une base jetable, de préférence neuve, l'outil :
+
+- refuse une base dont le nom ne contient ni `e2e` ni `test`, des ports déjà occupés, et deux arbres dont le code serveur diffère (il compare deux clients servis par le même serveur) ;
+- régénère Prisma, recompile et démarre le serveur du candidat, migre la base, puis y crée par l'API un jeu de données qui remplit chaque section des trois écrans ;
+- sert l'un après l'autre, sur le même port, le client de référence puis le candidat. Pour chacun, il ouvre l'administration (les neuf onglets et la vue du conducteur), la fiche chantier (administration, conducteur titulaire, technicien titulaire, modale et corrections) et le planning (grille, file et chaque modale), sans aucune écriture ;
+- relève à chaque étape l'URL, la liste ordonnée des requêtes API, l'état des champs et le HTML de `<main>`, où sont rendues les modales. L'horloge du navigateur est figée au même instant pour les deux relevés. Les réponses API sont libérées une à une, dans l'ordre d'émission, ce qui rend l'ordre des requêtes indépendant des temps de réponse ;
+- compare les deux relevés : code 0 s'ils sont identiques, 1 sinon, avec la première ligne qui diffère pour chaque étape. Les relevés restent dans le dossier `--sortie` (par défaut, un dossier temporaire).
+
+`RELEVE_CHROMIUM` désigne au besoin l'exécutable de Chromium (`/opt/pw-browsers/chromium` dans le conteneur de Claude Code). L'outil ne fait pas partie de la CI : une exécution prend environ six minutes.
 
 ## Vérifier avant démarrage
 
