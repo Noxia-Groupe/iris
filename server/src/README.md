@@ -22,7 +22,7 @@ server/
       roles.ts          types de compte, isCommercialLike
       permissions.ts    droits par type de compte, requirePermission
       perimetres.ts     périmètre de lecture du domaine chantier
-      visibilite.ts     montants et taux horaires montrés selon le demandeur
+      visibilite.ts     montants, taux horaires et prix d'achat montrés selon le demandeur
     commun/             utilitaires partagés : dates (jour civil, fuseau de la société),
                         montants, validation des saisies, journal d'administration, PDF, CSV
       dates.ts          jour civil et année au fuseau de la société, lecture des dates saisies
@@ -42,6 +42,9 @@ server/
                                 (accès de secours)
     domaines/utilisateurs/    comptes.ts (comptes, hiérarchie), equipes.ts (commerciaux,
                               conducteurs, fiches intervenant, prime mensuelle)
+    domaines/clients/         routes.ts, metier.ts (validation des saisies), equipements.ts
+                              (parc d'équipements)
+    domaines/catalogue/       routes.ts, metier.ts (familles, validation, fiche selon le lecteur)
 ```
 
 Domaines prévus :
@@ -53,8 +56,8 @@ Domaines prévus :
 | `utilisateurs` | comptes, hiérarchie, commerciaux, conducteurs, fiches intervenant (**déplacé**) |
 | `administration` | clés d'intégration, journal des paramètres et des droits, modules, société (**déplacé**) |
 | `parametres` | paramètres métier, rémunération, registre des entreprises (**déplacé**) |
-| `clients` | clients, contacts, sites, parc d'équipements |
-| `catalogue` | prestations, articles, équipements |
+| `clients` | clients, contacts, sites, parc d'équipements (**déplacé**) |
+| `catalogue` | prestations, articles, équipements (**déplacé**) |
 | `devis` | devis versionnés, signature, acompte, conversion, duplication |
 | `chantiers` | affaires, achats, heures, métriques et suivi |
 | `interventions` | SAV, coûts, comptes rendus, placement au planning |
