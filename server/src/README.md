@@ -25,7 +25,7 @@ server/
       visibilite.ts     montants, taux horaires et prix d'achat montrés selon le demandeur
     commun/             utilitaires partagés : dates (jour civil, fuseau de la société),
                         montants, validation des saisies, journal d'administration, PDF, CSV
-      dates.ts          jour civil et année au fuseau de la société, lecture des dates saisies
+      dates.ts          jour civil et année au fuseau de la société, lecture et écriture des dates
       montants.ts       Decimal Prisma en nombres, calculs exacts de montants et TVA par taux
       validation.ts     validation des saisies numériques et des motifs de correction
       csv.ts            échappement des cellules CSV
@@ -49,6 +49,10 @@ server/
     domaines/chantiers/       routes.ts, saisies.ts (achats, heures, encaissé), suivi.ts
                               (indicateurs et sérialisation), droits.ts (rentabilité, montants,
                               clôture), metier.ts (types, titulaire, commercial)
+    domaines/interventions/   routes.ts (SAV, coûts, comptes rendus, placement), metier.ts
+    domaines/contrats/        routes.ts, metier.ts (couverture, échéances, verrou)
+    domaines/planning/        metier.ts (module actif, validation des événements) ; ses routes
+                              restent dans index.ts jusqu'à la PR 9
 ```
 
 Domaines prévus :
@@ -64,8 +68,8 @@ Domaines prévus :
 | `catalogue` | prestations, articles, équipements (**déplacé**) |
 | `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**) |
 | `chantiers` | affaires, achats, heures, métriques et suivi (**déplacé**) |
-| `interventions` | SAV, coûts, comptes rendus, placement au planning |
-| `contrats` | contrats de maintenance et visites |
+| `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**) |
+| `contrats` | contrats de maintenance et visites (**déplacé**) |
 | `planning` | affectations, types d'événement, partage public |
 | `factures` | factures, avoirs, mentions légales, export comptable |
 | `reglements` | encaissements et affectations |
