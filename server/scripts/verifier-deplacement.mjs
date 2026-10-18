@@ -42,7 +42,11 @@
 //    Une instruction déplacée dans un autre fichier ne mentionne ni `require`, ni `module`, ni
 //    `exports`, ni `__dirname`, ni `__filename`, ni, hors d'une fonction, `this` ou
 //    `arguments`, dont le sens dépend du fichier.
-// 5. package.json, package-lock.json et tsconfig.json ne changent pas, ni les outils de preuve
+// 5. Le code compile sans erreur de type, et aucune directive qui suspend ce contrôle n'est
+//    ajoutée (`@ts-nocheck`, `@ts-ignore`, `@ts-expect-error`, `/// <reference …>`) : c'est le
+//    contrôle de types qui garantit qu'un nom d'une instruction déplacée désigne la même
+//    déclaration qu'avant.
+// 6. package.json, package-lock.json et tsconfig.json ne changent pas, ni les outils de preuve
 //    (scripts/routes.mjs, scripts/routes-reference.txt, ce script), sauf avec --outils-admis
 //    pour une PR qui les modifie : une PR du découpage ne doit pas pouvoir les adapter.
 //
@@ -115,6 +119,7 @@ function nomsExportes(source) {
 
 // Code compilé de l'arbre, produit en mémoire par le compilateur avec les options de
 // tsconfig.json : il retire, comme `npm run build`, les imports qui ne servent qu'aux types.
+// Les erreurs de type sont rendues avec le code.
 function compiler() {
   const lu = ts.readConfigFile(path.join(racine, 'tsconfig.json'), ts.sys.readFile);
   const config = ts.parseJsonConfigFileContent(lu.config, ts.sys, racine);
@@ -123,8 +128,18 @@ function compiler() {
   programme.emit(undefined, (nom, texte, _bom, _erreur, sources) => {
     if (nom.endsWith('.js') && sources?.length) sorties.set(path.relative(racine, sources[0].fileName).split(path.sep).join('/'), texte);
   });
-  return sorties;
+  const diagnostics = ts.getPreEmitDiagnostics(programme).filter((d) => d.category === ts.DiagnosticCategory.Error).map((d) => {
+    const message = ts.flattenDiagnosticMessageText(d.messageText, ' ');
+    if (!d.file) return message;
+    const { line } = d.file.getLineAndCharacterOfPosition(d.start ?? 0);
+    return `${path.relative(racine, d.file.fileName)}:${line + 1} : ${message}`;
+  });
+  return { sorties, diagnostics };
 }
+
+// Directives qui suspendent ou étendent le contrôle de types.
+const DIRECTIVES = /@ts-(?:nocheck|ignore|expect-error)\b|^\s*\/\/\/\s*<reference\b/gm;
+const compterDirectives = (texte) => (texte.match(DIRECTIVES) ?? []).length;
 
 // Modules locaux chargés au chargement d'un fichier : les `require` relatifs de premier niveau
 // de son code compilé. Un `import()` dynamique, compilé en `require` à l'intérieur d'une
@@ -320,7 +335,13 @@ for (const b of instructionsBase) {
 // --- Arbre ---
 const analysesArbre = new Map(fichiersArbre().map((f) => [f, analyser(f, readFileSync(path.join(racine, f), 'utf8'))]));
 {
-  const compiles = compiler();
+  const { sorties: compiles, diagnostics } = compiler();
+  for (const diagnostic of diagnostics.slice(0, 20)) erreur(`erreur de type : ${diagnostic}`);
+  if (diagnostics.length > 20) erreur(`… et ${diagnostics.length - 20} autres erreurs de type`);
+  for (const a of analysesArbre.values()) {
+    const avant = analysesBase.has(a.fichier) ? compterDirectives(analysesBase.get(a.fichier).texte) : 0;
+    if (compterDirectives(a.texte) > avant) erreur(`${a.fichier} : directive @ts-nocheck, @ts-ignore, @ts-expect-error ou /// <reference> ajoutée ; elle suspendrait le contrôle de types qui garantit les déplacements`);
+  }
   const existants = new Set(analysesArbre.keys());
   for (const a of analysesArbre.values()) {
     const js = compiles.get(a.fichier);
