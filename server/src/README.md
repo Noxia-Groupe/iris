@@ -6,19 +6,25 @@
 
 ```
 server/
-  index.ts              point d'entrée : crée l'application, enregistre les domaines dans
+  index.ts              point d'entrée : règle l'application, enregistre les domaines dans
                         l'ordre, démarre le serveur ; ré-exporte ce que lisent les tests
   src/
     env.ts              chargement de server/.env
     db.ts               client Prisma, transactionVerifiee
+    app.ts              l'application Express, créée après le chargement de .env
     http/               couche HTTP commune à tous les domaines
       auth.ts           secret JWT, requireAuth, AuthRequest, branche hiérarchique
       gardes.ts         gardes de type de compte (requireAdmin, blockCommercial…)
       requete.ts        lecture des paramètres de requête (paramId)
+      cles-api.ts       scopes et clés d'intégration (requireApiKey, ApiRequest)
+      routes-mixtes.ts  routeMixte : une opération montée sur /api et /api/v1
     droits/             types de compte, permissions, périmètres de lecture
       roles.ts
+      permissions.ts    droits par type de compte, requirePermission
+      perimetres.ts     périmètre de lecture du domaine chantier
     commun/             utilitaires partagés : dates (jour civil, fuseau de la société),
                         montants, validation des saisies, journal d'administration, PDF, CSV
+      dates.ts          jour civil et année au fuseau de la société
     domaines/<domaine>/
       routes.ts         routes HTTP du domaine : enregistrerRoutes<Domaine>(app)
       metier.ts         logique métier du domaine (calculs, contrôles, lectures et écritures
@@ -84,7 +90,7 @@ Domaines prévus :
     - la matrice des droits par rôle (`DEFAULT_USER_PERMISSIONS`, `DROITS_INTERDITS_TECHNICIEN`), absente de la référence.
 
     Pendant le découpage, ces cas relèvent du vérificateur : il protège le texte de la matrice, et l'interdiction des cycles protège sa valeur au chargement.
-  - **Les fabriques.** Une fabrique comme `creerRouteMixte(app)`, qui enveloppe du code de la base dans une fonction nouvelle autre qu'une fonction d'enregistrement, n'est pas encore admise. La PR qui l'introduit étend le vérificateur et prouve l'extension par des mutations, à moins de retenir une autre voie (par exemple créer `app` dans un module).
+  - **Les fabriques.** Une fabrique, qui envelopperait du code de la base dans une fonction nouvelle autre qu'une fonction d'enregistrement, n'est pas admise. La PR qui en introduirait une étendrait le vérificateur et prouverait l'extension par des mutations.
 - **Un lot fonctionnel** (hors découpage) réécrit la référence avec `node scripts/routes.mjs --ecrire`, et l'écart apparaît dans le diff de sa PR, s'il :
   - ajoute, retire ou réordonne une route ;
   - modifie un gestionnaire, un middleware, un réglage, un export ou une lecture de l'environnement au chargement ;
@@ -94,7 +100,7 @@ Domaines prévus :
 - **Imports sans renommage** : ni `import { a as b }`, ni `import x = …`, ni import par défaut renommé pendant le découpage.
 - **Ordre de chargement inchangé** : `index.ts` importe `src/env.ts` après les bibliothèques, au moment où il appelait `dotenv.config()` avant le découpage. Certaines bibliothèques lisent l'environnement à leur chargement (`DEBUG`, `NO_COLOR`…).
 - **Domaines dispersés dans le fichier.** Plusieurs domaines ont leurs routes en plusieurs endroits d'`index.ts` : factures, chantiers, interventions, planning, société, paramètres, commerciaux. Leur module expose alors plusieurs fonctions d'enregistrement, appelées chacune à l'emplacement de son bloc. Le vérificateur refuse tout réordonnancement : s'il en fallait un, il ferait l'objet d'une PR à part, prouvée sans recouvrement de chemins.
-- **`routeMixte`** dépend de `app` : il deviendra une fabrique, `creerRouteMixte(app)`, dont le corps reste identique, pour que ses appels ne changent pas.
+- **`routeMixte`** monte ses routes sur `app` hors d'une fonction d'enregistrement. Plutôt qu'en faire une fabrique, `app` est créée dans `src/app.ts`, importé après `src/env.ts` : `routeMixte` l'importe, et son texte comme ses appels restent identiques.
 - **Utilitaires partagés d'abord** : une fonction dont se servent plusieurs domaines est déplacée vers `commun/`, `droits/` ou `http/` avant le premier domaine qui l'emploie.
 - **Aucun test modifié.** `index.ts` ré-exporte ce que les tests importent de `dist/index.js`.
 - **Pas de dépendance circulaire.** Un module importe `db`, `http`, `droits`, `commun` ou la logique d'un autre domaine, jamais `index.ts`.
