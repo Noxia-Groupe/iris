@@ -57,6 +57,11 @@ server/
     domaines/reglements/      routes.ts, metier.ts (moyens, soldes, statut)
     domaines/comptabilite/    routes.ts (plan comptable, import, règles, TVA), metier.ts (clés
                               et natures, verrou, écritures d'une pièce, libellé d'un compte)
+    domaines/statistiques/    routes.ts (tableau de bord, conducteurs, assiduité, répartition,
+                              intervenants, fournisseurs, types de chantiers), metier.ts
+                              (bornes de semaine et de période)
+    domaines/commissions/     routes.ts (résultat commercial), metier.ts (barème progressif,
+                              calcul par commercial)
 ```
 
 Domaines prévus :
@@ -78,8 +83,8 @@ Domaines prévus :
 | `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**) |
 | `reglements` | encaissements et affectations (**déplacé**) |
 | `comptabilite` | plan comptable, règles, TVA, import, écritures (**déplacé**) |
-| `statistiques` | tableaux de bord et statistiques |
-| `commissions` | barème et calcul des commissions |
+| `statistiques` | tableaux de bord et statistiques (**déplacé**) |
+| `commissions` | barème et calcul des commissions, résultat commercial (**déplacé**) |
 
 ## Règles du découpage
 
