@@ -1,6 +1,6 @@
 # Découpage des gros écrans du client (proposition)
 
-**Proposition, à valider par Nelson avant tout code.** Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
+**Proposition validée par Nelson le 18-10-2026** (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
 
 Trois écrans dépassent la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)) :
 
@@ -39,7 +39,7 @@ Côté client, il n'existe pas d'équivalent de `server/scripts/verifier-deplace
 
 ## Découpage proposé
 
-Les fichiers rejoignent `client/src/components/`, selon la convention actuelle : dossier plat, noms en PascalCase. Exports par défaut (5 composants) et nommés (7) y coexistent ; je propose l'export nommé. La logique sans composant va dans `client/src/lib/`, pour ne pas ajouter d'avertissement `react/only-export-components` (un fichier de composant qui exporte aussi une fonction). Le préfixe nomme l'écran (`Admin…`, `Chantier…`, `Planning…`). **Question** : préférer des sous-dossiers par écran (`components/admin/`…) ? La convention actuelle n'en a pas ; je propose de la garder.
+Les fichiers rejoignent `client/src/components/`, selon la convention actuelle : dossier plat, noms en PascalCase. Exports par défaut (5 composants) et nommés (7) y coexistent ; je propose l'export nommé. La logique sans composant va dans `client/src/lib/`, pour ne pas ajouter d'avertissement `react/only-export-components` (un fichier de composant qui exporte aussi une fonction). Le préfixe nomme l'écran (`Admin…`, `Chantier…`, `Planning…`). Pas de sous-dossier par écran : la convention actuelle est gardée (décision 2).
 
 ### PR A : Planning (873 → environ 440 lignes)
 
@@ -114,8 +114,8 @@ Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour
   - utilitaires de format dupliqués entre écrans (`fmtEuro`, `fmtHeures`, `toDateFrancaise`, alors que `jourFrancais` existe dans `lib/dateFormatting.ts`) ;
   - lecture du rôle : Planning et la fiche chantier lisent `localStorage.user` directement, quand Admin passe par `getCurrentUser` et `useCurrentRole`.
 
-## Questions pour Nelson
+## Décisions de Nelson (18-10-2026)
 
-1. Valides-tu le principe (déplacement pur, état laissé dans la page) et l'ordre : outil, Planning, Admin, fiche chantier ?
-2. Fichiers dans `components/` à plat (convention actuelle), ou sous-dossiers par écran ?
-3. Les petites anomalies ci-dessus : à corriger après les trois PR, ou à laisser en issues pour plus tard ?
+1. **Principe et ordre validés** : déplacement pur, état laissé dans la page. Ordre : outil de comparaison du rendu, puis Planning, Admin et fiche chantier.
+2. **Fichiers dans `components/`, à plat**, comme aujourd'hui.
+3. **Petites anomalies** : Nelson a laissé le choix. Chacune a sa issue dès maintenant, et sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique.
