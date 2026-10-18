@@ -7,8 +7,8 @@
 // gardes qui les protègent, ni le corps des gestionnaires, ni le moment où .env est chargé.
 //
 // Lectures de l'environnement : chaque variable lue pendant le chargement, par l'application
-// ou une bibliothèque, avec sa phase, `avant` ou `apres` l'appel à dotenv.config(), et le
-// nombre de ces appels. Une variable de l'application lue avant le chargement de .env en
+// ou une bibliothèque, avec sa phase, `avant` ou `apres` l'appel à dotenv.config(), `*` pour
+// une énumération de process.env, et le nombre d'appels à dotenv.config(). Une variable de l'application lue avant le chargement de .env en
 // ignorerait la valeur (secret JWT, base de données…).
 //
 // Chaque gestionnaire (garde, middleware, handler) est décrit par :
@@ -81,13 +81,23 @@ if (attendue === sortie) {
   console.log(`Identique à la référence : ${bilan}.`);
   process.exit(0);
 }
+// Écart : lignes retirées (-) et ajoutées (+) selon la plus longue sous-suite commune, pour
+// qu'une ligne insérée ne décale pas toute la suite.
 const avant = attendue.trimEnd().split('\n');
-console.error('Diffère de scripts/routes-reference.txt :');
-for (let i = 0; i < Math.max(avant.length, lignes.length); i += 1) {
-  if (avant[i] !== lignes[i]) {
-    console.error(`  ligne ${i + 1}`);
-    console.error(`    référence : ${avant[i] ?? '(absente)'}`);
-    console.error(`    actuelle  : ${lignes[i] ?? '(absente)'}`);
+const communs = Array.from({ length: avant.length + 1 }, () => new Uint16Array(lignes.length + 1));
+for (let i = avant.length - 1; i >= 0; i -= 1) {
+  for (let j = lignes.length - 1; j >= 0; j -= 1) {
+    communs[i][j] = avant[i] === lignes[j] ? communs[i + 1][j + 1] + 1 : Math.max(communs[i + 1][j], communs[i][j + 1]);
+  }
+}
+console.error('Diffère de scripts/routes-reference.txt (- référence, + actuelle) :');
+for (let i = 0, j = 0; i < avant.length || j < lignes.length;) {
+  if (i < avant.length && j < lignes.length && avant[i] === lignes[j]) { i += 1; j += 1; } else if (j < lignes.length && (i === avant.length || communs[i][j + 1] >= communs[i + 1][j])) {
+    console.error(`  + ligne ${j + 1} : ${lignes[j]}`);
+    j += 1;
+  } else {
+    console.error(`  - ligne ${i + 1} : ${avant[i]}`);
+    i += 1;
   }
 }
 process.exit(1);
@@ -110,6 +120,8 @@ async function releve() {
   process.env = new Proxy(process.env, {
     get(cible, nom) { lire(nom); return Reflect.get(cible, nom); },
     has(cible, nom) { lire(nom); return Reflect.has(cible, nom); },
+    // Énumération ({ ...process.env }, Object.keys) : notée `*`.
+    ownKeys(cible) { lire('*'); return Reflect.ownKeys(cible); },
   });
   // dotenv.config() marque le passage d'une phase à l'autre ; server/.env n'est pas ouvert.
   const dotenv = require('dotenv');

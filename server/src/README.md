@@ -53,7 +53,7 @@ Domaines prévus :
 - **Ordre des routes conservé.** Chaque `enregistrerRoutes…(app)` est appelé à l'endroit exact où se trouvait le bloc déplacé, si bien qu'Express essaie toujours les routes dans le même ordre.
 - **Deux preuves par PR**, à lancer depuis `server/` après `npm run build` :
   - `node scripts/routes.mjs --verifier` compare ce que l'application met en place en se chargeant à `scripts/routes-reference.txt`, écrit depuis `main` avant le découpage. La CI le rejoue. Il compare :
-    - les variables d'environnement lues pendant le chargement, avant et après `dotenv.config()`, et le nombre d'appels à `dotenv.config()` : une variable de l'application lue avant le chargement de `.env` en ignorerait la valeur ;
+    - les variables d'environnement lues pendant le chargement, avant et après `dotenv.config()` (`*` pour une énumération de `process.env`), et le nombre d'appels à `dotenv.config()` : une variable de l'application lue avant le chargement de `.env` en ignorerait la valeur ;
     - les réglages et les middlewares, avec leurs chemins ;
     - les routes, dans l'ordre où Express les essaie ;
     - pour chaque gestionnaire : son nom, les valeurs confiées par sa fabrique (`{permission="…"}`, `{scope="…"}`, options) et l'empreinte de son texte compilé ;
@@ -62,10 +62,13 @@ Domaines prévus :
     Le relevé se fait dans un processus enfant dont l'environnement se réduit à `PATH`, sans terminal et sans ouvrir `server/.env` : il donne la même liste en local et en CI.
   - `node scripts/verifier-deplacement.mjs origin/main` compare, instruction par instruction, tous les fichiers TypeScript du serveur entre la base et la branche. Il s'appuie sur l'analyseur du compilateur TypeScript, et lit la base comme la branche, fonctions d'enregistrement comprises. La CI le rejoue pour les branches `refactor/serveur-*`.
     - Chaque instruction de la base doit se retrouver une fois, à l'identique, commentaires compris, et dans le même ordre. Seuls sont admis le mot-clé `export` ajouté et un décalage d'indentation uniforme dans une fonction d'enregistrement, hors lignes de gabarit multiligne.
-    - Les imports conservés gardent leur ordre et les nouveaux viennent après eux. Aucun import n'est renommé, aucun module n'importe `index.ts`, et retirer un import chargé pour son seul effet est refusé.
-    - Chaque fonction d'enregistrement, ni asynchrone ni génératrice, est appelée une fois, avec `app`, au premier niveau d'`index.ts`. L'ordre d'`index.ts`, ses appels remplacés par le contenu des fonctions, est celui de la base.
-    - Chaque fichier qui reçoit du code de la base est chargé depuis `index.ts` à l'exécution. Une instruction qui change de fichier n'emploie ni `require`, ni `module`, ni `exports`, ni `__dirname`, ni `__filename`.
-    - `package.json`, `package-lock.json` et `tsconfig.json` ne changent pas. Aucun nom exporté n'est retiré : déplacer une déclaration exportée d'un module de `src/` vers un autre impose donc d'y laisser un ré-export.
+    - Les imports conservés gardent leur ordre et les nouveaux viennent après eux. Aucun import n'est renommé, et retirer un import chargé pour son seul effet est refusé. Une bibliothèque ne s'importe que sous un spécificateur déjà présent dans la base.
+    - Chaque fonction d'enregistrement, ni asynchrone ni génératrice, prend le seul paramètre `app`, sans reste ni valeur par défaut. Elle est appelée une fois, avec `app`, au premier niveau d'`index.ts`. L'ordre d'`index.ts`, ses appels remplacés par le contenu des fonctions, est celui de la base.
+    - Chaque fichier qui reçoit du code de la base est chargé depuis `index.ts` à l'exécution (les `require` de premier niveau du code compilé, sans les imports de types ni les `import()` dynamiques).
+    - Aucun cycle d'imports entre modules locaux, `index.ts` compris. En CommonJS, un module d'un cycle peut s'évaluer avant que l'autre ait défini ce qu'il lui emprunte : des constantes valent alors `undefined`, par exemple les clés de la matrice des droits.
+    - Une instruction qui change de fichier n'emploie ni `require`, ni `module`, ni `exports`, ni `__dirname`, ni `__filename`, ni, hors d'une fonction, `this` ou `arguments`.
+    - `package.json`, `package-lock.json` et `tsconfig.json` ne changent pas. Les outils de preuve (`scripts/routes.mjs`, `scripts/routes-reference.txt` et le vérificateur) non plus, sauf avec `--outils-admis`, réservé aux PR d'outils : leur branche s'appelle `refactor/serveur-preuves-*`, et la CI ne passe cette option qu'à elles.
+    - Aucun nom exporté n'est retiré : déplacer une déclaration exportée d'un module de `src/` vers un autre impose donc d'y laisser un ré-export.
     - Toute autre instruction nouvelle le fait échouer.
     - Il liste pour la revue les blocs déplacés, les imports et commentaires ajoutés, les imports retirés, les autres fichiers modifiés et les instructions qui s'exécutent désormais au chargement d'un autre module que le leur.
 - **Ce que les preuves ne couvrent pas.**
@@ -76,7 +79,9 @@ Domaines prévus :
     - le chemin d'un middleware monté sur une expression régulière ou un tableau, noté `/` ;
     - les sous-routeurs, non parcourus ;
     - les fonctions utilitaires, qui n'ont pas d'empreinte (seuls les gestionnaires en ont une) ;
-    - la matrice des droits par rôle (`DEFAULT_USER_PERMISSIONS`, `DROITS_INTERDITS_TECHNICIEN`), absente de la référence. Pendant le découpage, ces cas relèvent du vérificateur.
+    - la matrice des droits par rôle (`DEFAULT_USER_PERMISSIONS`, `DROITS_INTERDITS_TECHNICIEN`), absente de la référence.
+
+    Pendant le découpage, ces cas relèvent du vérificateur : il protège le texte de la matrice, et l'interdiction des cycles protège sa valeur au chargement.
   - **Les fabriques.** Une fabrique comme `creerRouteMixte(app)`, qui enveloppe du code de la base dans une fonction nouvelle autre qu'une fonction d'enregistrement, n'est pas encore admise. La PR qui l'introduit étend le vérificateur et prouve l'extension par des mutations, à moins de retenir une autre voie (par exemple créer `app` dans un module).
 - **Un lot fonctionnel** (hors découpage) réécrit la référence avec `node scripts/routes.mjs --ecrire`, et l'écart apparaît dans le diff de sa PR, s'il :
   - ajoute, retire ou réordonne une route ;

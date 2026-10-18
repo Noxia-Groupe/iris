@@ -111,13 +111,15 @@ jobs:
       # PR du découpage (branches refactor/serveur-*) : le code ne fait que se déplacer.
       # scripts/verifier-deplacement.mjs compare la PR à sa base, instruction par instruction.
       # Il ne vaut que pour ces PR : un lot fonctionnel le ferait échouer par construction.
+      # Les outils de preuve y sont figés, sauf pour une PR d'outils (refactor/serveur-preuves-*).
       - name: Déplacement pur (PR du découpage)
         if: startsWith(github.head_ref, 'refactor/serveur-')
         env:
           BASE: ${{ github.base_ref }}
+          OUTILS: ${{ startsWith(github.head_ref, 'refactor/serveur-preuves') && '--outils-admis' || '' }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE"
-          node scripts/verifier-deplacement.mjs FETCH_HEAD
+          node scripts/verifier-deplacement.mjs FETCH_HEAD $OUTILS
 
   tests:
     name: Backend — tests

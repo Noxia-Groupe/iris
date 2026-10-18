@@ -1,4 +1,5 @@
 ENV dotenv.config() appelé 1 fois
+ENV avant *
 ENV avant DEBUG
 ENV avant DEBUG_COLORS
 ENV avant FORCE_COLOR
@@ -11,6 +12,7 @@ ENV avant NO_DEPRECATION
 ENV avant TERM
 ENV avant TERM_PROGRAM
 ENV avant TRACE_DEPRECATION
+ENV apres *
 ENV apres AZURE_CLIENT_ID
 ENV apres AZURE_TENANT_ID
 ENV apres BREAK_GLASS_EMAIL

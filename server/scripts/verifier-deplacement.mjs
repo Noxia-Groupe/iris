@@ -1,6 +1,6 @@
 // Vérifie qu'un lot du découpage de server/index.ts ne fait que DÉPLACER du code.
 //
-//   node scripts/verifier-deplacement.mjs [base]     (base : origin/main par défaut)
+//   node scripts/verifier-deplacement.mjs [base] [--outils-admis]     (base : origin/main par défaut)
 //
 // Compare tous les fichiers TypeScript du serveur (ceux que compile tsconfig.json) entre la
 // base et l'arbre de travail, instruction par instruction, avec l'analyseur du compilateur
@@ -23,15 +23,24 @@
 //    - dans un fichier qui existait, les imports conservés gardent leur ordre et les nouveaux
 //      viennent après eux : les bibliothèques se chargent avant le code déplacé, comme avant.
 // 3. Les seules instructions nouvelles admises sont :
-//    - les imports et ré-exports, sans renommage (`as`) ; aucun module n'importe index.ts ;
-//    - les fonctions d'enregistrement, ni asynchrones ni génératrices, chacune appelée une
-//      fois, avec `app`, au premier niveau d'index.ts ;
+//    - les imports et ré-exports, sans renommage (`as`), d'un module local ou d'une
+//      bibliothèque déjà importée par la base, sous le même spécificateur ;
+//    - les fonctions d'enregistrement, ni asynchrones ni génératrices, au seul paramètre `app`
+//      (ni reste, ni valeur par défaut), chacune appelée une fois, avec `app`, au premier
+//      niveau d'index.ts ;
 //    - des noms ajoutés aux exports d'un fichier. Un nom n'en est jamais retiré.
-// 4. Chaque fichier qui reçoit du code de la base est chargé, à l'exécution, depuis index.ts
-//    (imports compilés, imports de types écartés). Une instruction déplacée dans un autre
-//    fichier ne mentionne ni `require`, ni `module`, ni `exports`, ni `__dirname`, ni
-//    `__filename`, dont le sens dépend du fichier.
-// 5. package.json, package-lock.json et tsconfig.json ne changent pas.
+// 4. Chargement des modules, d'après les `require` de premier niveau du code compilé (imports
+//    de types et imports dynamiques écartés) :
+//    - chaque fichier qui reçoit du code de la base est chargé depuis index.ts ;
+//    - aucun cycle d'imports entre modules locaux : en CommonJS, un module d'un cycle peut
+//      s'évaluer avant que l'autre ait défini ce qu'il lui emprunte (constantes undefined) ;
+//      index.ts n'est importé par aucun module.
+//    Une instruction déplacée dans un autre fichier ne mentionne ni `require`, ni `module`, ni
+//    `exports`, ni `__dirname`, ni `__filename`, ni, hors d'une fonction, `this` ou
+//    `arguments`, dont le sens dépend du fichier.
+// 5. package.json, package-lock.json et tsconfig.json ne changent pas, ni les outils de preuve
+//    (scripts/routes.mjs, scripts/routes-reference.txt, ce script), sauf avec --outils-admis
+//    pour une PR qui les modifie : une PR du découpage ne doit pas pouvoir les adapter.
 //
 // Le script échoue sur tout autre écart. Il liste pour la revue les blocs déplacés avec leurs
 // lignes d'origine, les instructions, imports et commentaires nouveaux, les imports retirés,
@@ -45,12 +54,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-const base = process.argv[2] || 'origin/main';
+const parametres = process.argv.slice(2);
+const base = parametres.find((p) => !p.startsWith('--')) || 'origin/main';
+const outilsAdmis = parametres.includes('--outils-admis');
 const racine = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const git = (...args) => execFileSync('git', args, { cwd: racine, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 const ENREGISTREMENT = /^enregistrerRoutes/;
 const LIES_AU_FICHIER = new Set(['require', 'module', 'exports', '__dirname', '__filename']);
 const FIGES = ['package.json', 'package-lock.json', 'tsconfig.json'];
+const OUTILS = ['scripts/routes.mjs', 'scripts/routes-reference.txt', 'scripts/verifier-deplacement.mjs'];
 
 // --- Fichiers : include "**/*.ts" de tsconfig.json, hors node_modules ---
 function fichiersArbre(dossier = '') {
@@ -97,15 +109,22 @@ function nomsExportes(source) {
   return noms;
 }
 
-// Modules locaux chargés à l'exécution : les `require` du code compilé, où TypeScript a retiré
-// les imports qui ne servent qu'aux types.
+// Modules locaux chargés au chargement du fichier : les `require` de premier niveau du code
+// compilé, où TypeScript a retiré les imports qui ne servent qu'aux types. Un `import()`
+// dynamique, compilé en `require` à l'intérieur d'une fonction, n'en fait pas partie.
 function modulesCharges(fichier, texte) {
   const js = ts.transpileModule(texte, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+  const compile = ts.createSourceFile(`${fichier}.js`, js, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const charges = [];
-  for (const [, specificateur] of js.matchAll(/require\("(\.[^"]+)"\)/g)) {
-    const cible = path.posix.normalize(path.posix.join(path.posix.dirname(fichier), specificateur));
-    charges.push(cible.endsWith('.ts') ? cible : `${cible}.ts`);
-  }
+  (function parcourir(noeud) {
+    if (ts.isFunctionLike(noeud)) return;
+    if (ts.isCallExpression(noeud) && ts.isIdentifier(noeud.expression) && noeud.expression.text === 'require'
+      && noeud.arguments.length === 1 && ts.isStringLiteral(noeud.arguments[0]) && noeud.arguments[0].text.startsWith('.')) {
+      const cible = path.posix.normalize(path.posix.join(path.posix.dirname(fichier), noeud.arguments[0].text));
+      charges.push(cible.endsWith('.ts') ? cible : `${cible}.ts`);
+    }
+    ts.forEachChild(noeud, parcourir);
+  }(compile));
   return charges;
 }
 
@@ -204,17 +223,18 @@ function sansEffetAuChargement(noeud) {
   return noeud.declarationList.declarations.every((d) => litteral(d.initializer));
 }
 
-// Identifiants dont le sens dépend du fichier (hors noms de propriétés).
+// Identifiants dont le sens dépend du fichier (hors noms de propriétés), et `this` ou
+// `arguments` hors d'une fonction qui les redéfinit (les fonctions fléchées ne le font pas).
 function liesAuFichier(noeud) {
   const trouves = new Set();
-  (function parcourir(n) {
-    if (ts.isIdentifier(n) && LIES_AU_FICHIER.has(n.text)) {
-      const parent = n.parent;
-      const nomDePropriete = (ts.isPropertyAccessExpression(parent) && parent.name === n) || (ts.isPropertyAssignment(parent) && parent.name === n);
-      if (!nomDePropriete) trouves.add(n.text);
-    }
-    ts.forEachChild(n, parcourir);
-  }(noeud));
+  (function parcourir(n, dansFonction) {
+    const nomDePropriete = (id) => (ts.isPropertyAccessExpression(id.parent) && id.parent.name === id) || (ts.isPropertyAssignment(id.parent) && id.parent.name === id);
+    if (ts.isIdentifier(n) && LIES_AU_FICHIER.has(n.text) && !nomDePropriete(n)) trouves.add(n.text);
+    if (!dansFonction && ts.isIdentifier(n) && n.text === 'arguments' && !nomDePropriete(n)) trouves.add('arguments');
+    if (!dansFonction && n.kind === ts.SyntaxKind.ThisKeyword) trouves.add('this');
+    const redefinit = ts.isFunctionLike(n) && !ts.isArrowFunction(n);
+    ts.forEachChild(n, (enfant) => parcourir(enfant, dansFonction || redefinit));
+  }(noeud, false));
   return [...trouves];
 }
 
@@ -256,6 +276,7 @@ for (const a of analysesBase.values()) {
 for (const e of enregistrementsBase.values()) {
   e.corps.forEach((instruction, index) => { if (!placees.has(instruction)) placer(instruction, `${e.fichier}#${e.nom}`, index); });
 }
+const bibliothequesBase = new Set([...analysesBase.values()].flatMap((a) => a.imports.map((i) => moduleImporte(i.texte)).filter((m) => m && !m.startsWith('.'))));
 const parCle = new Map();
 for (const b of instructionsBase) {
   if (!parCle.has(b.cle)) parCle.set(b.cle, []);
@@ -307,6 +328,10 @@ function verifierImport(a, imp) {
   const espaceDeNoms = liaisons && ts.isNamespaceImport(liaisons);
   const dejaLa = [...analysesBase.values()].some((ab) => ab.imports.some((i) => i.texte === imp.texte));
   if ((renomme || espaceDeNoms) && !dejaLa) erreur(`${ici} : import renommé, interdit pendant le découpage : ${premiereLigne(imp.texte)}`);
+  const specificateur = moduleImporte(imp.texte);
+  if (specificateur && !specificateur.startsWith('.') && !bibliothequesBase.has(specificateur)) {
+    erreur(`${ici} : bibliothèque ${specificateur} absente des imports de la base ; une PR du découpage n'en ajoute pas`);
+  }
 }
 
 const sequences = new Map();
@@ -367,7 +392,10 @@ for (const a of analysesArbre.values()) {
       const e = a.enregistrements.get(element.nom);
       const ici = `${a.fichier}:${e.ligne}`;
       const eb = enregistrementsBase.get(e.nom);
-      if (e.noeud.parameters.length !== 1 || e.noeud.parameters[0].name.getText(a.source) !== 'app') erreur(`${ici} : ${e.nom} doit prendre le seul paramètre app`);
+      const [parametre, ...autresParametres] = e.noeud.parameters;
+      const parametreSimple = parametre && !autresParametres.length && ts.isIdentifier(parametre.name) && parametre.name.text === 'app'
+        && !parametre.dotDotDotToken && !parametre.initializer && !parametre.questionToken;
+      if (!parametreSimple) erreur(`${ici} : ${e.nom} doit prendre le seul paramètre app, sans reste ni valeur par défaut`);
       if (e.noeud.asteriskToken || aModificateur(e.noeud, ts.SyntaxKind.AsyncKeyword)) erreur(`${ici} : ${e.nom} ne peut être ni asynchrone ni génératrice : son corps doit s'exécuter à l'appel`);
       if (eb) {
         comparerCommentaires(ici, eb.commentaires, e.commentaires, `la fonction ${e.nom}`);
@@ -438,6 +466,38 @@ for (const fichier of recoivent) {
 for (const fichier of [...analysesBase.keys()].filter((f) => analysesArbre.has(f) && f !== 'index.ts')) {
   if (!atteints.has(fichier)) erreur(`${fichier} : n'est plus chargé depuis index.ts`);
 }
+// Cycles d'imports (composantes fortement connexes, algorithme de Tarjan).
+{
+  let compteur = 0;
+  const rang = new Map();
+  const bas = new Map();
+  const pile = [];
+  const surPile = new Set();
+  const visiter = (fichier) => {
+    rang.set(fichier, compteur);
+    bas.set(fichier, compteur++);
+    pile.push(fichier);
+    surPile.add(fichier);
+    for (const cible of analysesArbre.get(fichier).charges) {
+      if (!analysesArbre.has(cible)) continue;
+      if (!rang.has(cible)) {
+        visiter(cible);
+        bas.set(fichier, Math.min(bas.get(fichier), bas.get(cible)));
+      } else if (surPile.has(cible)) bas.set(fichier, Math.min(bas.get(fichier), rang.get(cible)));
+    }
+    if (bas.get(fichier) !== rang.get(fichier)) return;
+    const composante = [];
+    let membre;
+    do {
+      membre = pile.pop();
+      surPile.delete(membre);
+      composante.push(membre);
+    } while (membre !== fichier);
+    const boucle = composante.length === 1 && analysesArbre.get(fichier).charges.includes(fichier);
+    if (composante.length > 1 || boucle) erreur(`cycle d'imports : ${composante.reverse().join(' <-> ')} ; un module du cycle s'évaluerait avant que l'autre ait défini ce qu'il lui emprunte`);
+  };
+  for (const fichier of analysesArbre.keys()) if (!rang.has(fichier)) visiter(fichier);
+}
 
 // --- Fichiers hors TypeScript ---
 const autres = [...new Set([
@@ -445,7 +505,8 @@ const autres = [...new Set([
   ...git('ls-files', '--others', '--exclude-standard', '--', '.').split('\n'),
 ])].filter((f) => f && !f.endsWith('.ts'));
 for (const f of autres.filter((f) => FIGES.includes(f))) erreur(`${f} : modifié ; une PR du découpage ne change ni les dépendances ni la compilation`);
-const autresModifies = autres.filter((f) => !FIGES.includes(f));
+if (!outilsAdmis) for (const f of autres.filter((f) => OUTILS.includes(f))) erreur(`${f} : modifié ; une PR du découpage n'adapte pas ses outils de preuve (--outils-admis pour une PR d'outils)`);
+const autresModifies = autres.filter((f) => !FIGES.includes(f) && !(outilsAdmis ? [] : OUTILS).includes(f));
 
 // --- Rapport ---
 console.log(`Base : ${base}`);
