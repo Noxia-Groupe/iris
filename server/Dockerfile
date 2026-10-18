@@ -14,9 +14,10 @@ COPY tsconfig.json ./
 # Installer les dépendances
 RUN npm install
 
-# Copier le code source, le schéma Prisma et les migrations
+# Copier le code source (point d'entrée index.ts et modules de src/), le schéma Prisma et les migrations
 COPY prisma ./prisma
 COPY *.ts ./
+COPY src ./src
 
 # DATABASE_URL factice : nécessaire au build de `prisma generate` (aucune connexion
 # réelle n'est effectuée ici). La vraie URL est injectée au runtime par docker-compose.

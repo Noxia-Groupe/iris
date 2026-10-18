@@ -125,7 +125,7 @@ autorisation sur l'ensemble du domaine, et c'est au superadmin de ne délivrer q
 scopes utiles à l'agent.
 
 Ce n'est pas un chemin plus permissif accordé aux robots : les deux portes exécutent le
-**même handler** (cf. `routeMixte` dans `server/index.ts`), avec les mêmes validations et
+**même handler** (cf. `routeMixte` dans `server/src/http/routes-mixtes.ts`), avec les mêmes validations et
 les mêmes réponses d'erreur. Seule la façon de calculer le périmètre diffère, comme elle
 diffère déjà entre un administrateur et un conducteur.
 
@@ -140,7 +140,7 @@ curl -H "Authorization: Bearer iris_xxxxxxxx" https://<instance>/api/v1/heures
 ```
 
 Les routes `/api/v1/…` sont servies par **exactement les mêmes handlers** que l'interface
-(cf. `routeMixte` dans `server/index.ts`). Un agent ne dispose donc d'aucun chemin plus
+(cf. `routeMixte` dans `server/src/http/routes-mixtes.ts`). Un agent ne dispose donc d'aucun chemin plus
 permissif qu'un humain : mêmes validations, mêmes messages d'erreur, mêmes règles métier.
 Une correction faite pour l'interface vaut aussitôt pour l'agent.
 
