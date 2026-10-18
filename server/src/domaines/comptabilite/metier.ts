@@ -72,3 +72,5 @@ export async function ecrituresPourPiece(tx: Prisma.TransactionClient, piece: Pi
   if (difference !== 0) throw new ImputationIncompletError('Écriture comptable déséquilibrée.');
   return ecritures;
 }
+
+export function libelleComptableValide(libelle: string): boolean { return !/[\p{Cc}\p{Cf}]/u.test(libelle); }

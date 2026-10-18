@@ -55,8 +55,8 @@ server/
                               (module actif, validation des événements)
     domaines/factures/        routes.ts, metier.ts (sélection, adresse, avoirs), pdf.ts
     domaines/reglements/      routes.ts, metier.ts (moyens, soldes, statut)
-    domaines/comptabilite/    metier.ts (clés et natures, verrou, écritures d'une pièce) ; ses
-                              routes restent dans index.ts jusqu'à la PR 11
+    domaines/comptabilite/    routes.ts (plan comptable, import, règles, TVA), metier.ts (clés
+                              et natures, verrou, écritures d'une pièce, libellé d'un compte)
 ```
 
 Domaines prévus :
@@ -77,7 +77,7 @@ Domaines prévus :
 | `planning` | affectations, types d'événement, partage public (**déplacé**) |
 | `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**) |
 | `reglements` | encaissements et affectations (**déplacé**) |
-| `comptabilite` | plan comptable, règles, TVA, import, écritures |
+| `comptabilite` | plan comptable, règles, TVA, import, écritures (**déplacé**) |
 | `statistiques` | tableaux de bord et statistiques |
 | `commissions` | barème et calcul des commissions |
 
