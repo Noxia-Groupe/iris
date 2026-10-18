@@ -1,8 +1,8 @@
 # Code du serveur : organisation par domaine
 
-**Découpage en cours** (chantier technique 2, décision de Nelson du 17-10-2026). `server/index.ts` n'enregistre plus aucune route lui-même : chaque domaine a les siennes dans `src/`, et il ne reste à en sortir que le démarrage du serveur. Chaque PR du chantier déplace un ou deux domaines vers `src/`, **sans aucun changement de comportement** : mêmes routes, mêmes réponses, mêmes codes et messages d'erreur, mêmes transactions, verrous et contraintes différées.
+**Découpage terminé** (chantier technique 2, décision de Nelson du 17-10-2026). `server/index.ts` n'est plus que le point d'entrée : les routes et la logique sont dans `src/`, rangées par domaine. Les PR du chantier les y ont déplacées une à une, **sans aucun changement de comportement** : mêmes routes, mêmes réponses, mêmes codes et messages d'erreur, mêmes transactions, verrous et contraintes différées.
 
-## Structure cible (proposition)
+## Structure
 
 ```
 server/
@@ -12,6 +12,8 @@ server/
     env.ts              chargement de server/.env
     db.ts               client Prisma, transactionVerifiee
     app.ts              l'application Express, créée après le chargement de .env
+    demarrage.ts        initialisation de la base, comptes super administrateurs de départ,
+                        délais de connexion du serveur HTTP
     http/               couche HTTP commune à tous les domaines
       auth.ts           secret JWT, requireAuth, AuthRequest, branche hiérarchique
       gardes.ts         gardes de type de compte (requireAdmin, blockCommercial…)
@@ -64,7 +66,7 @@ server/
                               calcul par commercial)
 ```
 
-Domaines prévus :
+Domaines :
 
 | Domaine | Contenu |
 |---|---|
@@ -138,9 +140,9 @@ Domaines prévus :
 - **Aucun test modifié.** `index.ts` ré-exporte ce que les tests importent de `dist/index.js`.
 - **Pas de dépendance circulaire.** Un module importe `db`, `http`, `droits`, `commun` ou la logique d'un autre domaine, jamais `index.ts`.
 - **Logique métier.** Les fonctions déjà séparées des routes passent dans le `metier.ts` de leur domaine. La logique écrite dans le corps d'un gestionnaire y reste pendant le découpage, puisque l'en extraire changerait du code ; son extraction sera proposée ensuite, domaine par domaine, si elle est utile.
-- **Taille.** Aucun fichier de code applicatif ne dépasse environ 800 lignes (`CLAUDE.md`). Les grands domaines (devis, chantiers, factures, comptabilité) auront plusieurs fichiers de routes.
+- **Taille.** Aucun fichier de code applicatif ne dépasse environ 800 lignes (`CLAUDE.md`). Un domaine qui grandit se répartit en plusieurs fichiers, comme `chantiers` (routes, saisies, suivi, droits).
 
-## Ordre prévu des PR (proposition)
+## Ordre des PR
 
 1. Socle (`env`, `db`, rôles, authentification, gardes de type de compte, `paramId`), scripts de preuve, et domaine `referentiels`.
 1 bis. Outils de preuve renforcés, sans déplacement de code : vérification par instruction, imports, chargement depuis `index.ts`, lectures de l'environnement, permissions des gardes, empreintes des gestionnaires, chemins des middlewares, réglages.
