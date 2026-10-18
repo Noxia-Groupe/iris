@@ -21,13 +21,27 @@ import { paramId } from './src/http/requete';
 import { enregistrerRoutesReferentiels } from './src/domaines/referentiels/routes';
 import { app } from './src/app';
 import { DROITS_INTERDITS_TECHNICIEN, permissionsEffectives, requirePermission } from './src/droits/permissions';
-import { API_SCOPES, type ApiScope, type ApiRequest, apiKeyHash, requireApiKey } from './src/http/cles-api';
+import { API_SCOPES, type ApiRequest, apiKeyHash } from './src/http/cles-api';
 import { routeMixte } from './src/http/routes-mixtes';
 import { AFFAIRE_NON_ANNULEE, perimetreChantiers } from './src/droits/perimetres';
 import {
   FUSEAU_HORAIRE_PAR_DEFAUT, fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise, anneeEntreprise,
-  dateEmissionEstFuture, dateSeuleEnJourCivil,
+  dateEmissionEstFuture, dateSeuleEnJourCivil, dateIsoStricte, jourCivilDeReference, ajouterJoursCivils, debutJourCivilEntreprise,
 } from './src/commun/dates';
+import { decimalToNumber } from './src/commun/montants';
+import {
+  type Parametres, upsertSingleton, getParametres, validerBareme, remunerationNeutre, parseBareme, getReglesRemuneration,
+  serialiseBareme,
+} from './src/domaines/parametres/metier';
+import { companySettingsPayload, getCompanySettings } from './src/domaines/administration/metier';
+import { csvComptable } from './src/commun/csv';
+import { nombreDecimalNonNegatif } from './src/commun/validation';
+import {
+  valeurJournal, journaliserAdministration, changementsJournal, purgerJournalAdministration, verrouillerReglage,
+} from './src/commun/journal-administration';
+import { enregistrerRoutesParametres, enregistrerRoutesRemunerationEtReglages } from './src/domaines/parametres/routes';
+import { enregistrerRoutesClesIntegration, enregistrerRoutesSociete, enregistrerRoutesModules } from './src/domaines/administration/routes';
+import { enregistrerRoutesJournalAdministration } from './src/domaines/administration/journal';
 
 const port = process.env.PORT || 3001;
 
@@ -361,82 +375,6 @@ async function numeroDevisDejaPris(numeroDevis: string, chantierIdExclu?: string
   return !!existant && existant.id !== chantierIdExclu;
 }
 
-// Convertit récursivement les Decimal Prisma en nombres pour la sérialisation JSON
-// (sinon ils seraient sérialisés en chaînes côté client). Les montants sont stockés
-// en Decimal (précis) en base, et exposés en `number` à l'API.
-function decimalToNumber(value: any): any {
-  if (value === null || value === undefined) return value;
-  if (Prisma.Decimal.isDecimal(value)) return (value as Prisma.Decimal).toNumber();
-  if (value instanceof Date) return value;
-  if (Array.isArray(value)) return value.map(decimalToNumber);
-  if (typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value)) {
-      out[key] = decimalToNumber(value[key]);
-    }
-    return out;
-  }
-  return value;
-}
-
-// --- Paramètres globaux (singleton) ---
-interface Parametres {
-  margeCommercialeActive: boolean; planningActif: boolean; tauxAcompteDefaut: number; seuilMargeFaible: number | null; joursSansSaisie: number | null;
-  rentabiliteConducteur: boolean; rentabiliteHierarchie: boolean; rentabiliteDirecteurs: boolean;
-  journalConservationJours: number;
-}
-
-// Réglage unique (singleton) créé à sa première lecture. Avec un `update` vide, Prisma
-// n'exécute pas l'upsert comme un INSERT … ON CONFLICT atomique : il lit, puis crée. Deux
-// premières requêtes simultanées peuvent donc toutes deux tenter la création ; celle qui perd
-// (violation d'unicité, P2002) rejoue l'upsert, qui trouve alors la ligne créée par l'autre.
-async function upsertSingleton<T>(upsert: () => Promise<T>): Promise<T> {
-  try {
-    return await upsert();
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return upsert();
-    throw error;
-  }
-}
-
-// Retourne les paramètres avec les Decimal convertis en nombres.
-async function getParametres(): Promise<Parametres> {
-  const p = await upsertSingleton(() => prisma.parametres.upsert({
-    where: { id: 'singleton' },
-    update: {},
-    create: { id: 'singleton' },
-  }));
-  return decimalToNumber(p) as Parametres;
-}
-
-const COMPANY_TEXT_FIELDS = [
-  'raisonSociale', 'nomCommercial', 'siret', 'tvaIntra', 'adresse', 'codePostal',
-  'ville', 'pays', 'telephone', 'email', 'siteWeb', 'logoUrl', 'prefixeFacture', 'prefixeAvoir', 'piedFacture',
-] as const;
-const COULEUR_HEX = /^#[0-9a-fA-F]{6}$/;
-function companySettingsPayload(body: Record<string, unknown>): Record<string, string | null> {
-  const data: Record<string, string | null> = {};
-  for (const field of COMPANY_TEXT_FIELDS) {
-    if (body[field] === undefined) continue;
-    if (typeof body[field] !== 'string' || body[field].length > 2000) {
-      throw new Error(`Champ société invalide : ${field}`);
-    }
-    data[field] = body[field].trim() || null;
-  }
-  for (const field of ['couleurPrimaire', 'couleurSecondaire'] as const) {
-    if (body[field] === undefined) continue;
-    if (typeof body[field] !== 'string' || !COULEUR_HEX.test(body[field])) {
-      throw new Error(`Couleur invalide : ${field}`);
-    }
-    data[field] = body[field].toLowerCase();
-  }
-  if (body.fuseauHoraire !== undefined) {
-    if (!fuseauHoraireEntrepriseValide(body.fuseauHoraire)) throw new Error('Fuseau horaire invalide.');
-    data.fuseauHoraire = body.fuseauHoraire;
-  }
-  return data;
-}
-
 const EMAIL_SIMPLE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function optionalClientText(value: unknown, field: string, max = 500): string | null {
   if (value === undefined || value === null) return null;
@@ -500,14 +438,6 @@ function sitePayload(body: Record<string, unknown>, creation = false) {
     if (value !== undefined) data[field] = value;
   }
   return data;
-}
-
-async function getCompanySettings() {
-  return upsertSingleton(() => prisma.companySettings.upsert({
-    where: { id: 'singleton' },
-    update: {},
-    create: { id: 'singleton' },
-  }));
 }
 
 // --- Contexte du suivi des chantiers ---
@@ -1615,10 +1545,6 @@ async function ecrituresPourPiece(tx: Prisma.TransactionClient, piece: PieceComp
   return ecritures;
 }
 
-const csvComptable = (v: unknown) => {
-  const texte = String(v ?? ''); const formule = /^[=+@\t\r]/.test(texte) || (texte.startsWith('-') && !Number.isFinite(Number(texte)));
-  return `"${(formule ? `'${texte}` : texte).replace(/"/g, '""')}"`;
-};
 app.get('/api/factures/export-comptable.csv', requireAuth, requireAdmin, async (_req, res) => {
   try {
     const societe = await getCompanySettings();
@@ -4428,32 +4354,6 @@ async function assertChantierWritable(req: express.Request, res: express.Respons
   return chantier;
 }
 
-function dateIsoStricte(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  // Le format métier français est JJ-MM-AAAA. YYYY-MM-DD reste accepté pour les champs
-  // HTML natifs. Une date-heure ISO est également acceptée, car l'API la renvoie elle-même. Une
-  // date-seule ne peut pas porter l'heure : on retient la date telle qu'elle est écrite, selon la
-  // réponse de Nelson du 14-10-2026 (« Avec l'api qui renvoi une date avec heure tu retiens la
-  // date simplement si ce n'est pas possible de prendre egalement en compte l'heure qui va
-  // avec »). Sans décalage, l'heure ne désigne aucun instant. Avec un décalage, la date écrite est
-  // gardée aussi, et non le jour de la société de l'instant (décision de Nelson du 15-10-2026 :
-  // « garde le comportement actuel ») : cette lecture le faisait déjà pour « Z » et ±HH:MM
-  // (±HHMM est accepté depuis #130), et l'API d'Iris renvoie une date-seule sous la forme
-  // …T00:00:00.000Z, qu'une conversion au jour de la société décalerait. L'heure et le décalage
-  // doivent être valides (HH:MM de 00:00 à 23:59, secondes et fraction facultatives).
-  const isoComplet = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?$/.exec(value);
-  if (isoComplet) return dateIsoStricte(`${isoComplet[1]}-${isoComplet[2]}-${isoComplet[3]}`);
-  const match = /^(?:(\d{2})-(\d{2})-(\d{4})|(\d{4})-(\d{2})-(\d{2}))$/.exec(value);
-  if (!match) return null;
-  const [, jourFr, moisFr, anneeFr, anneeIso, moisIso, jourIso] = match;
-  const annee = Number(anneeFr || anneeIso);
-  const mois = Number(moisFr || moisIso);
-  const jour = Number(jourFr || jourIso);
-  const date = new Date(Date.UTC(annee, mois - 1, jour));
-  if (date.getUTCFullYear() !== annee || date.getUTCMonth() !== mois - 1 || date.getUTCDate() !== jour) return null;
-  return date.toISOString();
-}
-
 function dateDemandeCurative(value: unknown, fuseauHoraire: string, instant = new Date()): string | null {
   if (value === undefined) return `${aujourdHuiEntreprise(fuseauHoraire, instant)}T00:00:00.000Z`;
   if (typeof value !== 'string' || !/^\d{2}-\d{2}-\d{4}$/.test(value)) return null;
@@ -4479,85 +4379,6 @@ function echeanceSuivante(dateDebut: Date, echeanceCourante: Date, periodiciteMo
   return ajouterMoisUTC(dateDebut, (periodesEcoulees + 1) * periodiciteMois);
 }
 
-function valeurJournal(value: unknown): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(decimalToNumber(value))) as Record<string, unknown>;
-}
-
-// --- Journal des paramètres et des droits (lot (a), décision de Nelson du 13-10-2026) ---
-// Chaque changement de réglage ou de droits d'un compte s'écrit dans la même transaction que le
-// changement lui-même : si l'entrée ne peut pas être écrite, le changement est annulé. Seuls les
-// champs qui changent sont gardés (avant / après) ; un enregistrement sans changement n'écrit
-// rien. Aucun secret n'y entre (clé d'intégration, jeton du partage public).
-type EntreeJournalAdministration = {
-  domaine: 'DROITS' | 'REGLAGES';
-  type: 'COMPTE' | 'PARAMETRES' | 'MODULES' | 'REMUNERATION' | 'PRIME_COMMERCIAL' | 'SOCIETE' | 'CLE_INTEGRATION' | 'PARTAGE_PLANNING' | 'CONSERVATION_JOURNAL';
-  action: string;
-  cibleId?: string | null;
-  cibleLibelle?: string | null;
-  avant?: Record<string, unknown> | null;
-  apres?: Record<string, unknown> | null;
-  detail?: string | null;
-  // Entrée fermée au simple administrateur : elle concerne un compte super administrateur
-  // (décision du 14-10-2026), ou relève d'un réglage réservé au super administrateur dont
-  // l'historique lui est réservé aussi (clés d'intégration).
-  concerneSuperAdmin?: boolean;
-  reserveSuperAdmin?: boolean;
-};
-
-const AUTEUR_JOURNAL_DEMARRAGE = 'Iris (démarrage, SUPERADMIN_EMAILS)';
-
-async function journaliserAdministration(tx: any, req: AuthRequest | null, entree: EntreeJournalAdministration) {
-  const auteur = req?.user;
-  await tx.journalAdministration.create({
-    data: {
-      domaine: entree.domaine,
-      type: entree.type,
-      action: entree.action,
-      cibleId: entree.cibleId ?? null,
-      cibleLibelle: entree.cibleLibelle ?? null,
-      avant: entree.avant ? valeurJournal(entree.avant) : undefined,
-      apres: entree.apres ? valeurJournal(entree.apres) : undefined,
-      detail: entree.detail ?? null,
-      concerneSuperAdmin: !!entree.concerneSuperAdmin,
-      reserveSuperAdmin: !!entree.reserveSuperAdmin,
-      auteurId: auteur?.id ?? null,
-      auteurNom: auteur?.name?.trim() || AUTEUR_JOURNAL_DEMARRAGE,
-      auteurSuperAdmin: isSuperAdminRole(auteur?.role),
-    },
-  });
-}
-
-// Champs qui changent entre deux états, valeurs normalisées comme dans le journal (décimaux en
-// nombres, dates en ISO). Null si rien ne change.
-function changementsJournal(avant: Record<string, unknown> | null | undefined, apres: Record<string, unknown> | null | undefined, champs: readonly string[]) {
-  const ancien: Record<string, unknown> = {};
-  const nouveau: Record<string, unknown> = {};
-  for (const champ of champs) {
-    const a = valeurJournal({ v: avant?.[champ] ?? null }).v ?? null;
-    const b = valeurJournal({ v: apres?.[champ] ?? null }).v ?? null;
-    if (JSON.stringify(a) !== JSON.stringify(b)) {
-      ancien[champ] = a;
-      nouveau[champ] = b;
-    }
-  }
-  return Object.keys(nouveau).length ? { avant: ancien, apres: nouveau } : null;
-}
-
-// Supprime les entrées plus anciennes que la durée de conservation (Parametres.
-// journalConservationJours). Le trigger de la table refuse toute autre suppression. Appelée au
-// démarrage et à chaque consultation du journal : sans tâche planifiée, une entrée échue
-// disparaît au plus tard à la consultation suivante.
-async function purgerJournalAdministration() {
-  await prisma.$executeRaw`DELETE FROM "JournalAdministration" WHERE "createdAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(days => COALESCE((SELECT "journalConservationJours" FROM "Parametres" WHERE "id" = 'singleton'), 90))`;
-}
-
-// Verrouille la ligne d'un réglage unique le temps de la transaction : deux enregistrements
-// simultanés ne peuvent pas journaliser le même « avant ». Sans ligne (première écriture), rien
-// n'est verrouillé, et l'avant est vide.
-async function verrouillerReglage(tx: any, table: 'Parametres' | 'ParametresRemuneration' | 'CompanySettings' | 'PlanningPublicShare') {
-  await tx.$queryRawUnsafe(`SELECT 1 FROM "${table}" WHERE "id" = 'singleton' FOR UPDATE`);
-}
-
 async function journaliserSaisieTravaux(
   tx: any,
   req: AuthRequest,
@@ -4576,15 +4397,6 @@ async function journaliserSaisieTravaux(
     apres: apres ? valeurJournal(apres) : undefined,
     motif: motif || null,
   } });
-}
-
-function nombreDecimalNonNegatif(value: unknown, maxIntegerDigits: number, zeroAutorise = false, maxDecimales = 2): number | null {
-  // Ne jamais laisser PostgreSQL arrondir silencieusement une valeur métier ; notation scientifique refusée.
-  const texte = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
-  const expression = new RegExp(`^\\d{1,${maxIntegerDigits}}(?:[,.]\\d{1,${maxDecimales}})?$`);
-  if (!expression.test(texte)) return null;
-  const nombre = Number(texte.replace(',', '.'));
-  return Number.isFinite(nombre) && (nombre > 0 || (zeroAutorise && nombre === 0)) ? nombre : null;
 }
 
 function motifCorrectionValide(value: unknown): string | null {
@@ -4978,137 +4790,11 @@ app.put('/api/commerciaux/:id/prime-mensuelle', requireAuth, requireAdmin, async
   }
 });
 
-// Paramètres globaux (admin uniquement)
-app.get('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    res.json(await getParametres());
-  } catch (error) {
-    res.status(500).json({ error: 'Error fetching parametres' });
-  }
-});
+// --- Paramètres et registre des entreprises (src/domaines/parametres/routes.ts) ---
+enregistrerRoutesParametres(app);
 
-// --- Registre national des entreprises (lecture publique, via le backend) ---
-// Utilisé pour préremplir l'identité de l'instance et, plus tard, les fiches clients.
-// Aucun appel direct navigateur : limite de recherche, délai et sélection explicite restent
-// sous contrôle Iris. Les résultats ne sont jamais persistés sans validation utilisateur.
-app.get('/api/registry/companies', requireAuth, requireAdmin, async (req, res) => {
-  const q = String(req.query.q ?? '').trim();
-  if (q.length < 3 || q.length > 100) {
-    res.status(400).json({ error: 'La recherche doit contenir entre 3 et 100 caractères.' });
-    return;
-  }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
-  try {
-    const upstream = await fetch(`https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(q)}&page=1&per_page=8`, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    });
-    if (!upstream.ok) throw new Error(`Registre entreprises HTTP ${upstream.status}`);
-    const payload = await upstream.json() as { results?: Array<any> };
-    const companies = (payload.results ?? []).map((company) => {
-      const siege = company.siege ?? {};
-      return {
-        siren: company.siren ?? null,
-        siret: siege.siret ?? null,
-        raisonSociale: company.nom_raison_sociale || company.nom_complet || null,
-        nomCommercial: siege.nom_commercial || null,
-        adresse: siege.adresse || null,
-        codePostal: siege.code_postal || null,
-        ville: siege.libelle_commune || null,
-        activitePrincipale: company.activite_principale || siege.activite_principale || null,
-        etatAdministratif: siege.etat_administratif || null,
-      };
-    });
-    res.json({ companies });
-  } catch (error) {
-    res.status(502).json({ error: 'Le registre des entreprises est temporairement indisponible.' });
-  } finally {
-    clearTimeout(timeout);
-  }
-});
-
-function publicApiKey(key: { id: string; nom: string; prefixe: string; scopes: string[]; actif: boolean; expireLe: Date | null; dernierUsageLe: Date | null; creeLe: Date; revoqueLe: Date | null }) {
-  return { id: key.id, nom: key.nom, prefixe: key.prefixe, scopes: key.scopes, actif: key.actif, expireLe: key.expireLe, dernierUsageLe: key.dernierUsageLe, creeLe: key.creeLe, revoqueLe: key.revoqueLe };
-}
-
-app.get('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (_req, res) => {
-  try {
-    const keys = await prisma.apiAccessKey.findMany({ orderBy: { creeLe: 'desc' } });
-    res.json(keys.map(publicApiKey));
-  } catch {
-    res.status(500).json({ error: 'Error fetching API keys' });
-  }
-});
-
-// Liste des scopes disponibles, pour que l'écran d'administration n'ait pas à les
-// dupliquer (une divergence donnerait une case à cocher que le serveur refuserait).
-app.get('/api/admin/api-scopes', requireAuth, requireSuperAdmin, (_req, res) => {
-  res.json({ scopes: API_SCOPES });
-});
-
-app.post('/api/admin/api-keys', requireAuth, requireSuperAdmin, async (req, res) => {
-  const nom = String(req.body?.nom || '').trim();
-  const scopes = Array.isArray(req.body?.scopes)
-    ? req.body.scopes.filter((s: unknown): s is ApiScope => typeof s === 'string' && (API_SCOPES as readonly string[]).includes(s))
-    : [];
-  const expireLe = req.body?.expireLe ? new Date(String(req.body.expireLe)) : null;
-  if (!nom || nom.length > 100 || scopes.length === 0 || (expireLe && Number.isNaN(expireLe.getTime()))) {
-    return res.status(400).json({ error: 'Nom, scopes autorisés et date d’expiration valide requis.' });
-  }
-  try {
-    const secret = `iris_${crypto.randomBytes(32).toString('base64url')}`;
-    const key = await transactionVerifiee(async (tx) => {
-      const cle = await tx.apiAccessKey.create({
-        data: { nom, prefixe: secret.slice(0, 14), secretHash: apiKeyHash(secret), scopes, expireLe, creeParId: (req as AuthRequest).user!.id },
-      });
-      // Ni le secret ni son empreinte : seulement le préfixe affiché dans l'administration.
-      await journaliserAdministration(tx, req as AuthRequest, {
-        domaine: 'REGLAGES', type: 'CLE_INTEGRATION', action: 'CREATION', cibleId: cle.id, cibleLibelle: cle.nom, reserveSuperAdmin: true,
-        apres: { nom: cle.nom, prefixe: cle.prefixe, scopes: cle.scopes, expireLe: cle.expireLe },
-      });
-      return cle;
-    });
-    console.warn(`[API] Clé d'intégration créée : « ${nom} » (${scopes.join(', ')}) par ${(req as AuthRequest).user!.id}`);
-    res.status(201).json({ apiKey: secret, key: publicApiKey(key), warning: 'Copiez cette clé maintenant : elle ne sera plus jamais affichée.' });
-  } catch {
-    res.status(500).json({ error: 'Création de la clé impossible.' });
-  }
-});
-
-app.post('/api/admin/api-keys/:id/revoke', requireAuth, requireSuperAdmin, async (req, res) => {
-  let key;
-  try {
-    key = await transactionVerifiee(async (tx) => {
-      await tx.$queryRaw`SELECT 1 FROM "ApiAccessKey" WHERE "id" = ${paramId(req)} FOR UPDATE`;
-      const avant = await tx.apiAccessKey.findUnique({ where: { id: paramId(req) } });
-      if (!avant) return null;
-      // Une clé déjà révoquée le reste : ni nouvelle date de révocation, ni nouvelle entrée.
-      if (!avant.actif && avant.revoqueLe) return avant;
-      const cle = await tx.apiAccessKey.update({ where: { id: avant.id }, data: { actif: false, revoqueLe: new Date() } });
-      await journaliserAdministration(tx, req as AuthRequest, {
-        domaine: 'REGLAGES', type: 'CLE_INTEGRATION', action: 'REVOCATION', cibleId: cle.id, cibleLibelle: cle.nom, reserveSuperAdmin: true,
-        avant: { actif: avant.actif, revoqueLe: avant.revoqueLe }, apres: { actif: cle.actif, revoqueLe: cle.revoqueLe },
-      });
-      return cle;
-    });
-  } catch {
-    return res.status(500).json({ error: 'Révocation de la clé impossible.' });
-  }
-  if (!key) return res.status(404).json({ error: 'Clé API introuvable.' });
-  console.warn(`[API] Clé d'intégration révoquée : « ${key.nom} »`);
-  res.json(publicApiKey(key));
-});
-
-// Identité de la société : lecture seule pour un agent (en-tête de devis, mentions
-// légales d'un document qu'il rédige). L'écriture reste réservée à un superadmin humain.
-app.get('/api/v1/company', requireApiKey('company:read'), async (_req, res) => {
-  try {
-    res.json(await getCompanySettings());
-  } catch {
-    res.status(500).json({ error: 'Error fetching company settings' });
-  }
-});
+// --- Clés d'intégration et société pour l'API (src/domaines/administration/routes.ts) ---
+enregistrerRoutesClesIntegration(app);
 
 // --- Référentiel Clients natif Iris ---
 // Les handlers sont écrits UNE fois puis montés sur deux portes d'entrée (cf. routeMixte
@@ -6208,382 +5894,17 @@ app.post('/api/devis/:id/duplication', requireAuth, requirePermission('devis:wri
   res.status(201).json(devisPourLecteur(req, decimalToNumber(duplicata)));
 } catch (error) { devisErreur(res, error); } });
 
-// --- Société de l'instance (singleton, hors paramètres métier) ---
-app.get('/api/company', requireAuth, async (_req, res) => {
-  try {
-    res.json(await getCompanySettings());
-  } catch {
-    res.status(500).json({ error: 'Error fetching company settings' });
-  }
-});
+// --- Société (src/domaines/administration/routes.ts) ---
+enregistrerRoutesSociete(app);
 
-app.put('/api/company', requireAuth, requireSuperAdmin, async (req, res) => {
-  try {
-    const data = companySettingsPayload(req.body ?? {});
-    const company = await transactionVerifiee(async (tx) => {
-      await verrouillerReglage(tx, 'CompanySettings');
-      const avant = await tx.companySettings.findUnique({ where: { id: 'singleton' } });
-      const apres = await tx.companySettings.upsert({
-        where: { id: 'singleton' },
-        update: data,
-        create: { id: 'singleton', ...data },
-      });
-      const changements = changementsJournal(avant, apres, Object.keys(data));
-      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'SOCIETE', action: 'MODIFICATION', ...changements });
-      return apres;
-    });
-    res.json(company);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Error updating company settings';
-    res.status(message.startsWith('Champ société invalide') || message.startsWith('Couleur invalide') || message.startsWith('Fuseau horaire invalide') ? 400 : 500)
-      .json({ error: message });
-  }
-});
+// --- Rémunération commerciale et paramètres métier (src/domaines/parametres/routes.ts) ---
+enregistrerRoutesRemunerationEtReglages(app);
 
-// --- Règles de rémunération commerciale (singleton) ---
-// Lecture ouverte aux administrateurs, écriture réservée au superadmin. Ces règles
-// générales ne sont plus appliquées : sans plan commercial, aucune commission ni prime
-// (cf. computeCommissionsParCommercial). Seul leur libellé du barème réduit sert encore.
-app.get('/api/parametres/remuneration', requireAuth, requireAdmin, async (_req, res) => {
-  try {
-    const regles = await getReglesRemuneration();
-    res.json({ ...regles, baremeStandard: serialiseBareme(regles.baremeStandard), baremeReduit: serialiseBareme(regles.baremeReduit) });
-  } catch {
-    res.status(500).json({ error: 'Error fetching remuneration settings' });
-  }
-});
+// --- Modules (src/domaines/administration/routes.ts) ---
+enregistrerRoutesModules(app);
 
-// Valide un barème envoyé par le client. Un barème vide est accepté (aucune commission) ;
-// ce qui est refusé, c'est un barème incohérent, qui produirait des montants faux en
-// silence : taux hors de [0, 100], plafonds non croissants, ou plusieurs tranches non
-// plafonnées — seule la dernière peut l'être, sinon les suivantes ne servent à rien.
-function validerBareme(valeur: unknown, champ: string): TrancheBareme[] {
-  if (!Array.isArray(valeur)) throw new Error(`${champ} : un tableau de tranches est attendu.`);
-  if (valeur.length > 20) throw new Error(`${champ} : 20 tranches au maximum.`);
-  const tranches: TrancheBareme[] = valeur.map((t: any, i: number) => {
-    const taux = Number(t?.taux);
-    if (!Number.isFinite(taux) || taux < 0 || taux > 100) {
-      throw new Error(`${champ}, tranche ${i + 1} : le taux doit être compris entre 0 et 100.`);
-    }
-    const brut = t?.plafond;
-    const plafond = brut === null || brut === undefined || brut === '' ? Infinity : Number(brut);
-    if (plafond !== Infinity && (!Number.isFinite(plafond) || plafond <= 0)) {
-      throw new Error(`${champ}, tranche ${i + 1} : le plafond doit être un montant positif, ou vide pour la dernière tranche.`);
-    }
-    return { plafond, taux };
-  });
-  // Ce contrôle passe AVANT celui de la croissance : deux tranches sans plafond valent
-  // toutes deux Infinity, donc « non croissantes » — un message exact mais incompréhensible
-  // pour qui vient simplement de laisser deux plafonds vides.
-  if (tranches.filter((t) => t.plafond === Infinity).length > 1) {
-    throw new Error(`${champ} : une seule tranche peut être sans plafond, et ce doit être la dernière.`);
-  }
-  for (let i = 1; i < tranches.length; i++) {
-    if (tranches[i].plafond <= tranches[i - 1].plafond) {
-      throw new Error(`${champ} : les plafonds doivent être strictement croissants.`);
-    }
-  }
-  return tranches;
-}
-
-function montantPositif(valeur: unknown, champ: string): number {
-  const n = Number(valeur ?? 0);
-  if (!Number.isFinite(n) || n < 0) throw new Error(`${champ} : montant invalide.`);
-  return n;
-}
-
-app.put('/api/parametres/remuneration', requireAuth, requireSuperAdmin, async (req, res) => {
-  try {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const libelle = String(body.libelleBaremeReduit ?? '').trim();
-    if (!libelle || libelle.length > 80) {
-      return res.status(400).json({ error: 'Le libellé du barème réduit est obligatoire (80 caractères au plus).' });
-    }
-    const data = {
-      baremeStandard: serialiseBareme(validerBareme(body.baremeStandard, 'Barème standard')),
-      baremeReduit: serialiseBareme(validerBareme(body.baremeReduit, 'Barème réduit')),
-      libelleBaremeReduit: libelle,
-      objectifCaMensuel: montantPositif(body.objectifCaMensuel, 'Objectif de CA mensuel'),
-      primeObjectifCa: montantPositif(body.primeObjectifCa, "Prime d'objectif de CA"),
-      objectifMargeMensuel: montantPositif(body.objectifMargeMensuel, 'Objectif de marge mensuel'),
-      primeObjectifMarge: montantPositif(body.primeObjectifMarge, "Prime d'objectif de marge"),
-      primeSuiviAdministratif: montantPositif(body.primeSuiviAdministratif, 'Prime de suivi administratif'),
-    };
-    await transactionVerifiee(async (tx) => {
-      await verrouillerReglage(tx, 'ParametresRemuneration');
-      const avant = await tx.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
-      const apres = await tx.parametresRemuneration.upsert({
-        where: { id: 'singleton' },
-        update: data,
-        create: { id: 'singleton', ...data },
-      });
-      const changements = changementsJournal(avant, apres, Object.keys(data));
-      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'REMUNERATION', action: 'MODIFICATION', ...changements });
-    });
-    console.warn(`[REMUNERATION] Règles modifiées par ${(req as AuthRequest).user!.id}`);
-    const regles = await getReglesRemuneration();
-    res.json({ ...regles, baremeStandard: serialiseBareme(regles.baremeStandard), baremeReduit: serialiseBareme(regles.baremeReduit) });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Enregistrement impossible.';
-    res.status(message.includes('Barème') || message.includes('montant') || message.includes('libellé') ? 400 : 500).json({ error: message });
-  }
-});
-
-// N'écrit QUE les réglages de marge, d'acompte et d'alertes : l'activation des modules (planningActif) est
-// réservée au superadmin et passe par PUT /api/modules — un ADMIN ne doit pas pouvoir la
-// modifier, même en glissant le champ dans le corps de cette requête.
-app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    // Comme les autres réglages, un champ absent garde sa valeur : un appel qui ne règle que
-    // les destinataires ne doit pas désactiver la marge commerciale au passage.
-    const data: Record<string, unknown> = {};
-    if ('margeCommercialeActive' in req.body) {
-      if (typeof req.body.margeCommercialeActive !== 'boolean') {
-        return res.status(400).json({ error: 'L’activation de la marge commerciale se règle par oui ou non.' });
-      }
-      data.margeCommercialeActive = req.body.margeCommercialeActive;
-    }
-    // Politique d'acompte de la société : jamais en dur dans le code, éditable ici.
-    // Ne s'applique qu'aux devis émis ensuite (cf. Devis.tauxAcompte, figé à l'émission).
-    if ('tauxAcompteDefaut' in req.body) {
-      const taux = nombreDecimalNonNegatif(req.body.tauxAcompteDefaut, 3, true);
-      if (taux === null || taux > 100) {
-        return res.status(400).json({ error: 'Le taux d’acompte par défaut doit être un pourcentage compris entre 0 et 100.' });
-      }
-      data.tauxAcompteDefaut = taux;
-    }
-    // Alertes de suivi des chantiers : une valeur vide (null ou chaîne vide) désactive le
-    // délai sans saisie, ou retire le seuil de marge faible — une marge estimée négative reste
-    // alors signalée. Toute autre valeur doit rester dans des bornes qui ont un sens métier.
-    if ('seuilMargeFaible' in req.body) {
-      const brut = req.body.seuilMargeFaible;
-      if (brut === null || brut === '') data.seuilMargeFaible = null;
-      else {
-        const seuil = nombreDecimalNonNegatif(brut, 3, true);
-        if (seuil === null || seuil > 100) {
-          return res.status(400).json({ error: 'Le seuil de marge faible doit être un pourcentage compris entre 0 et 100, ou vide pour le retirer (une marge estimée négative reste signalée).' });
-        }
-        data.seuilMargeFaible = seuil;
-      }
-    }
-    if ('joursSansSaisie' in req.body) {
-      const brut = req.body.joursSansSaisie;
-      if (brut === null || brut === '') data.joursSansSaisie = null;
-      else {
-        const jours = typeof brut === 'number' ? brut : typeof brut === 'string' && /^\d+$/.test(brut.trim()) ? Number(brut.trim()) : NaN;
-        if (!Number.isInteger(jours) || jours < 1 || jours > 365) {
-          return res.status(400).json({ error: 'Le délai sans saisie doit être un nombre entier de jours entre 1 et 365, ou vide pour désactiver l’alerte.' });
-        }
-        data.joursSansSaisie = jours;
-      }
-    }
-    // Destinataires du suivi de rentabilité (cf. voitRentabilite) : chaque case absente du
-    // corps garde sa valeur ; une valeur présente doit être un vrai booléen, pour qu'une
-    // chaîne « false » ne soit jamais lue comme une activation.
-    for (const champ of ['rentabiliteConducteur', 'rentabiliteHierarchie', 'rentabiliteDirecteurs'] as const) {
-      if (!(champ in req.body)) continue;
-      if (typeof req.body[champ] !== 'boolean') {
-        return res.status(400).json({ error: 'Les destinataires du suivi de rentabilité se règlent par oui ou non.' });
-      }
-      data[champ] = req.body[champ];
-    }
-    const p = await transactionVerifiee(async (tx) => {
-      await verrouillerReglage(tx, 'Parametres');
-      const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
-      const apres = await tx.parametres.upsert({
-        where: { id: 'singleton' },
-        update: data,
-        create: { id: 'singleton', ...data },
-      });
-      const changements = changementsJournal(avant, apres, Object.keys(data));
-      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'PARAMETRES', action: 'MODIFICATION', ...changements });
-      return apres;
-    });
-    res.json(decimalToNumber(p));
-  } catch (error) {
-    res.status(500).json({ error: 'Error updating parametres' });
-  }
-});
-
-// --- Modules de l'application (activation par le superadmin) ---
-// Lecture : accessible à TOUT compte authentifié — le client en a besoin pour savoir
-// quelles entrées de menu afficher. On renvoie la visibilité EFFECTIVE pour le compte
-// connecté : un superadmin garde toujours accès au planning, même désactivé (c'est lui
-// qui le pilote), les autres suivent le réglage global.
-app.get('/api/modules', requireAuth, async (req, res) => {
-  try {
-    const { planningActif } = await getParametres();
-    const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
-    // Le libellé du barème réduit voyage avec les modules : c'est le seul réglage lu par
-    // TOUS les comptes (la route /parametres/remuneration, elle, est réservée aux admins),
-    // et il s'affiche sur la fiche chantier comme sur les écrans commerciaux.
-    const { libelleBaremeReduit } = await getReglesRemuneration();
-    res.json({ planningActif: isSuper || planningActif, planningActifGlobal: planningActif, libelleBaremeReduit });
-  } catch (error) {
-    res.status(500).json({ error: 'Error fetching modules' });
-  }
-});
-
-// Écriture : superadmin uniquement. Désactiver le planning ne supprime RIEN — les
-// affectations et types d'événements restent en base et réapparaissent à la réactivation.
-app.put('/api/modules', requireAuth, requireSuperAdmin, async (req, res) => {
-  try {
-    const planningActif = !!req.body.planningActif;
-    const p = await transactionVerifiee(async (tx) => {
-      await verrouillerReglage(tx, 'Parametres');
-      const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
-      const apres = await tx.parametres.upsert({
-        where: { id: 'singleton' },
-        update: { planningActif },
-        create: { id: 'singleton', planningActif },
-      });
-      const changements = changementsJournal(avant, apres, ['planningActif']);
-      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'MODULES', action: planningActif ? 'ACTIVATION' : 'DESACTIVATION', cibleLibelle: 'Planning', ...changements });
-      return apres;
-    });
-    res.json({ planningActif: true, planningActifGlobal: p.planningActif });
-  } catch (error) {
-    res.status(500).json({ error: 'Error updating modules' });
-  }
-});
-
-// --- Journal des paramètres et des droits : consultation et export (administrateurs) ---
-// Option retenue par Nelson (13-10-2026) : un onglet « Journal » dans Administration, filtrable par
-// date, type et auteur, avec export CSV. Un simple administrateur ne reçoit ni les entrées qui
-// concernent un compte super administrateur, ni l'historique des clés d'intégration.
-const TYPES_JOURNAL_ADMINISTRATION = ['COMPTE', 'PARAMETRES', 'MODULES', 'REMUNERATION', 'PRIME_COMMERCIAL', 'SOCIETE', 'CLE_INTEGRATION', 'PARTAGE_PLANNING', 'CONSERVATION_JOURNAL'];
-const AUTEUR_FILTRE_DEMARRAGE = 'DEMARRAGE';
-const ENTREES_JOURNAL_PAR_PAGE = 50;
-const ENTREES_JOURNAL_EXPORT_MAX = 10000;
-
-function entreesVisiblesJournal(req: express.Request) {
-  return isSuperAdminRole((req as AuthRequest).user?.role) ? {} : { concerneSuperAdmin: false, reserveSuperAdmin: false };
-}
-
-// Filtres : du / au (jours civils de la société, JJ-MM-AAAA ou AAAA-MM-JJ, bornes incluses),
-// type, auteur (identifiant, ou DEMARRAGE pour les entrées sans auteur), cible (identifiant du compte,
-// de la clé ou du commercial concerné).
-async function filtreJournalAdministration(req: express.Request): Promise<{ where: Record<string, unknown>; fuseau: string } | { erreur: string }> {
-  const fuseau = (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
-  const where: Record<string, unknown> = { ...entreesVisiblesJournal(req) };
-  const { du, au, type, auteur, cible } = req.query;
-  const periode: { gte?: Date; lt?: Date } = {};
-  if (du !== undefined && du !== '') {
-    const jour = dateIsoStricte(du);
-    if (!jour) return { erreur: 'Date de début invalide (JJ-MM-AAAA).' };
-    periode.gte = debutJourCivilEntreprise(jour.slice(0, 10), fuseau);
-  }
-  if (au !== undefined && au !== '') {
-    const jour = dateIsoStricte(au);
-    if (!jour) return { erreur: 'Date de fin invalide (JJ-MM-AAAA).' };
-    periode.lt = debutJourCivilEntreprise(ajouterJoursCivils(jour.slice(0, 10), 1), fuseau);
-  }
-  if (periode.gte && periode.lt && periode.gte >= periode.lt) return { erreur: 'La date de fin doit être postérieure ou égale à la date de début.' };
-  if (periode.gte || periode.lt) where.createdAt = periode;
-  if (type !== undefined && type !== '') {
-    if (typeof type !== 'string' || !TYPES_JOURNAL_ADMINISTRATION.includes(type)) return { erreur: 'Type d’entrée inconnu.' };
-    where.type = type;
-  }
-  if (auteur !== undefined && auteur !== '') {
-    if (typeof auteur !== 'string') return { erreur: 'Auteur invalide.' };
-    where.auteurId = auteur === AUTEUR_FILTRE_DEMARRAGE ? null : auteur;
-  }
-  if (cible !== undefined && cible !== '') {
-    if (typeof cible !== 'string') return { erreur: 'Cible invalide.' };
-    where.cibleId = cible;
-  }
-  return { where, fuseau };
-}
-
-function entreeJournalPublique(entree: { id: string; createdAt: Date; domaine: string; type: string; action: string; cibleId: string | null; cibleLibelle: string | null; avant: unknown; apres: unknown; detail: string | null; auteurId: string | null; auteurNom: string }) {
-  const { id, createdAt, domaine, type, action, cibleId, cibleLibelle, avant, apres, detail, auteurId, auteurNom } = entree;
-  return { id, createdAt, domaine, type, action, cibleId, cibleLibelle, avant, apres, detail, auteurId, auteurNom };
-}
-
-app.get('/api/journal-administration', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    await purgerJournalAdministration();
-    const filtre = await filtreJournalAdministration(req);
-    if ('erreur' in filtre) return res.status(400).json({ error: filtre.erreur });
-    const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1);
-    const [total, entrees, auteurs, parametres] = await Promise.all([
-      prisma.journalAdministration.count({ where: filtre.where }),
-      prisma.journalAdministration.findMany({
-        where: filtre.where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip: (page - 1) * ENTREES_JOURNAL_PAR_PAGE, take: ENTREES_JOURNAL_PAR_PAGE,
-      }),
-      // Auteurs proposés au filtre : ceux des seules entrées visibles par le demandeur.
-      prisma.journalAdministration.findMany({
-        where: entreesVisiblesJournal(req), distinct: ['auteurId', 'auteurNom'],
-        select: { auteurId: true, auteurNom: true }, orderBy: { auteurNom: 'asc' },
-      }),
-      getParametres(),
-    ]);
-    res.json({
-      entrees: entrees.map(entreeJournalPublique), total, page, parPage: ENTREES_JOURNAL_PAR_PAGE,
-      auteurs: auteurs.map((a) => ({ id: a.auteurId ?? AUTEUR_FILTRE_DEMARRAGE, nom: a.auteurNom })),
-      conservationJours: parametres.journalConservationJours,
-    });
-  } catch {
-    res.status(500).json({ error: 'Lecture du journal impossible.' });
-  }
-});
-
-// Valeurs avant / après d'une entrée, lisibles dans un tableur : « champ : valeur ; … ».
-function valeursJournalCsv(valeurs: unknown): string {
-  if (!valeurs || typeof valeurs !== 'object') return '';
-  return Object.entries(valeurs as Record<string, unknown>)
-    .map(([champ, valeur]) => `${champ} : ${typeof valeur === 'string' ? valeur : JSON.stringify(valeur)}`)
-    .join(' ; ');
-}
-
-app.get('/api/journal-administration/export.csv', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    await purgerJournalAdministration();
-    const filtre = await filtreJournalAdministration(req);
-    if ('erreur' in filtre) return res.status(400).json({ error: filtre.erreur });
-    const entrees = await prisma.journalAdministration.findMany({
-      where: filtre.where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: ENTREES_JOURNAL_EXPORT_MAX,
-    });
-    const heure = new Intl.DateTimeFormat('fr-FR', { timeZone: filtre.fuseau, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
-    const lignes = ['Date;Heure;Auteur;Domaine;Type;Action;Cible;Avant;Après;Détail'];
-    for (const e of entrees) {
-      lignes.push([
-        jourCivilEntreprise(e.createdAt, filtre.fuseau).split('-').reverse().join('-'), heure.format(e.createdAt), e.auteurNom, e.domaine, e.type, e.action,
-        e.cibleLibelle ?? '', valeursJournalCsv(e.avant), valeursJournalCsv(e.apres), e.detail ?? '',
-      ].map(csvComptable).join(';'));
-    }
-    const jour = aujourdHuiEntreprise(filtre.fuseau).split('-').reverse().join('-');
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="journal-parametres-droits-${jour}.csv"`);
-    res.send(`\uFEFF${lignes.join('\n')}\n`);
-  } catch {
-    res.status(500).json({ error: 'Export du journal impossible.' });
-  }
-});
-
-// Durée de conservation (1 à 90 jours) : réglée par un super administrateur, et journalisée.
-// La réduire efface aussitôt les entrées devenues plus anciennes que la nouvelle durée.
-app.put('/api/journal-administration/conservation', requireAuth, requireSuperAdmin, async (req, res) => {
-  const brut = req.body?.jours;
-  const jours = typeof brut === 'number' ? brut : typeof brut === 'string' && /^\d+$/.test(brut.trim()) ? Number(brut.trim()) : NaN;
-  if (!Number.isInteger(jours) || jours < 1 || jours > 90) {
-    return res.status(400).json({ error: 'La durée de conservation est un nombre entier de jours, de 1 à 90.' });
-  }
-  try {
-    await transactionVerifiee(async (tx) => {
-      await verrouillerReglage(tx, 'Parametres');
-      const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
-      const apres = await tx.parametres.upsert({ where: { id: 'singleton' }, update: { journalConservationJours: jours }, create: { id: 'singleton', journalConservationJours: jours } });
-      const changements = changementsJournal(avant, apres, ['journalConservationJours']);
-      if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'CONSERVATION_JOURNAL', action: 'MODIFICATION', ...changements });
-    });
-    await purgerJournalAdministration();
-    res.json({ conservationJours: jours });
-  } catch {
-    res.status(500).json({ error: 'Enregistrement de la durée de conservation impossible.' });
-  }
-});
+// --- Journal d'administration (src/domaines/administration/journal.ts) ---
+enregistrerRoutesJournalAdministration(app);
 
 // Statistiques globales (agrégées côté serveur, périmètre selon le rôle)
 // Statistiques du tableau de bord : compteurs de statut (instantanés, jamais filtrés par
@@ -6807,38 +6128,6 @@ app.get('/api/stats/conducteurs', requireAuth, requireTravauxRead, async (req, r
     res.status(500).json({ error: 'Error computing conducteurs stats' });
   }
 });
-
-// Les dates-seules restent des jours métier et ne doivent donc jamais être relues dans
-// un fuseau. En revanche, une référence qui est un instant (ou l'instant courant) doit
-// d'abord devenir le jour civil de l'entreprise.
-function jourCivilDeReference(refParam: unknown, fuseauHoraire: string, instant = new Date()): string {
-  if (typeof refParam === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(refParam)) return refParam;
-  const parsed = refParam instanceof Date ? refParam : (typeof refParam === 'string' && refParam ? new Date(refParam) : instant);
-  return jourCivilEntreprise(isNaN(parsed.getTime()) ? instant : parsed, fuseauHoraire);
-}
-
-function ajouterJoursCivils(jour: string, nombre: number): string {
-  return new Date(new Date(`${jour}T00:00:00.000Z`).getTime() + nombre * 86400000).toISOString().slice(0, 10);
-}
-
-// Convertit minuit du jour civil entreprise en instant pour les champs DateTime tels
-// que createdAt. L'itération couvre les fuseaux à changement d'offset sans dépendre du
-// fuseau de la machine qui exécute le serveur.
-function debutJourCivilEntreprise(jour: string, fuseauHoraire: string): Date {
-  const [annee, mois, numeroJour] = jour.split('-').map(Number);
-  const cible = Date.UTC(annee, mois - 1, numeroJour);
-  let instant = new Date(cible);
-  for (let i = 0; i < 2; i++) {
-    const parties = new Intl.DateTimeFormat('en-CA', {
-      timeZone: fuseauHoraire, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-    }).formatToParts(instant);
-    const valeur = (type: Intl.DateTimeFormatPartTypes) => Number(parties.find((partie) => partie.type === type)?.value);
-    const lu = Date.UTC(valeur('year'), valeur('month') - 1, valeur('day'), valeur('hour'), valeur('minute'), valeur('second'));
-    instant = new Date(instant.getTime() + cible - lu);
-  }
-  return instant;
-}
 
 // Bornes lundi 00:00 -> samedi 00:00 (exclusif) de la semaine civile contenant `weekParam`.
 // Les bornes sont des instants car elles filtrent createdAt ; les jours retournés restent
@@ -7145,84 +6434,6 @@ app.get('/api/stats/types-chantiers', requireAuth, requireTravauxRead, async (re
     res.status(500).json({ error: 'Error computing types chantiers stats' });
   }
 });
-
-// --- Système de rémunération commerciale : barème progressif mensuel ---
-// Chaque tranche de marge du MOIS est commissionnée à son propre taux, comme un barème
-// d'impôt progressif : atteindre la tranche haute ne fait pas basculer toute la marge à
-// son taux, seule la fraction qui la dépasse l'est.
-//
-// Les taux, seuils et primes NE SONT PLUS ÉCRITS ICI : ils vivent en base
-// (ParametresRemuneration) et s'éditent depuis Administration > Rémunération commerciale.
-// Les inscrire dans le code revenait à livrer à chaque client les règles de rémunération
-// d'une autre société, et à exiger un redéploiement pour changer un taux. Depuis la
-// décision du 17-10-2026, ces règles générales ne sont plus appliquées : sans plan
-// commercial, aucune commission ni prime (cf. computeCommissionsParCommercial).
-interface TrancheBareme { plafond: number; taux: number }
-interface ReglesRemuneration {
-  baremeStandard: TrancheBareme[];
-  baremeReduit: TrancheBareme[];
-  libelleBaremeReduit: string;
-  objectifCaMensuel: number;
-  primeObjectifCa: number;
-  objectifMargeMensuel: number;
-  primeObjectifMarge: number;
-  primeSuiviAdministratif: number;
-}
-
-// Valeurs NEUTRES : aucune commission, aucune prime. Repli de lecture si la ligne de
-// paramètres n'existe pas encore (base créée avant la migration, ou vidée à la main), et
-// règles appliquées à un commercial sans plan commercial (cf. computeCommissionsParCommercial).
-// Mieux vaut un montant nul, visible, qu'un barème arbitraire qui ferait calculer de
-// fausses rémunérations sans que personne ne s'en aperçoive. Un objet neuf à chaque appel :
-// aucun appelant ne peut, en le modifiant, rouvrir les commissions des autres.
-function remunerationNeutre(): ReglesRemuneration {
-  return {
-    baremeStandard: [],
-    baremeReduit: [],
-    libelleBaremeReduit: 'Barème réduit',
-    objectifCaMensuel: 0,
-    primeObjectifCa: 0,
-    objectifMargeMensuel: 0,
-    primeObjectifMarge: 0,
-    primeSuiviAdministratif: 0,
-  };
-}
-
-// Une tranche stockée avec `plafond: null` est la tranche non plafonnée : JSON ne sait pas
-// représenter Infinity, on le rétablit à la lecture. Les tranches sont triées par plafond
-// croissant, le calcul progressif en dépendant.
-function parseBareme(valeur: unknown): TrancheBareme[] {
-  if (!Array.isArray(valeur)) return [];
-  return valeur
-    .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
-    .map((t) => ({
-      plafond: t.plafond === null || t.plafond === undefined ? Infinity : Number(t.plafond),
-      taux: Number(t.taux),
-    }))
-    .filter((t) => Number.isFinite(t.taux) && t.taux >= 0 && (t.plafond === Infinity || Number.isFinite(t.plafond)))
-    .sort((a, b) => a.plafond - b.plafond);
-}
-
-async function getReglesRemuneration(): Promise<ReglesRemuneration> {
-  const p = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
-  if (!p) return remunerationNeutre();
-  const n = decimalToNumber(p);
-  return {
-    baremeStandard: parseBareme(p.baremeStandard),
-    baremeReduit: parseBareme(p.baremeReduit),
-    libelleBaremeReduit: p.libelleBaremeReduit,
-    objectifCaMensuel: n.objectifCaMensuel,
-    primeObjectifCa: n.primeObjectifCa,
-    objectifMargeMensuel: n.objectifMargeMensuel,
-    primeObjectifMarge: n.primeObjectifMarge,
-    primeSuiviAdministratif: n.primeSuiviAdministratif,
-  };
-}
-
-// Sérialisation inverse, pour l'écriture : Infinity redevient null.
-function serialiseBareme(bareme: TrancheBareme[]) {
-  return bareme.map((t) => ({ plafond: t.plafond === Infinity ? null : t.plafond, taux: t.taux }));
-}
 
 function commissionBaremeProgressif(marge: number, bareme: { plafond: number; taux: number }[]): number {
   if (marge <= 0) return 0;
