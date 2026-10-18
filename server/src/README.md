@@ -19,9 +19,10 @@ server/
       cles-api.ts       scopes et clés d'intégration (requireApiKey, ApiRequest)
       routes-mixtes.ts  routeMixte : une opération montée sur /api et /api/v1
     droits/             types de compte, permissions, périmètres de lecture
-      roles.ts
+      roles.ts          types de compte, isCommercialLike
       permissions.ts    droits par type de compte, requirePermission
       perimetres.ts     périmètre de lecture du domaine chantier
+      visibilite.ts     montants et taux horaires montrés selon le demandeur
     commun/             utilitaires partagés : dates (jour civil, fuseau de la société),
                         montants, validation des saisies, journal d'administration, PDF, CSV
       dates.ts          jour civil et année au fuseau de la société, lecture des dates saisies
@@ -37,6 +38,10 @@ server/
     domaines/parametres/      routes.ts, metier.ts (paramètres, singletons, rémunération)
     domaines/administration/  routes.ts (clés, société, modules), journal.ts (consultation
                               du journal), metier.ts (paramètres de la société)
+    domaines/authentification/  routes.ts, sso.ts (Microsoft Entra ID), secours.ts
+                                (accès de secours)
+    domaines/utilisateurs/    comptes.ts (comptes, hiérarchie), equipes.ts (commerciaux,
+                              conducteurs, fiches intervenant, prime mensuelle)
 ```
 
 Domaines prévus :
@@ -44,8 +49,8 @@ Domaines prévus :
 | Domaine | Contenu |
 |---|---|
 | `referentiels` | catégories et fournisseurs des achats (**déplacé**) |
-| `authentification` | SSO Microsoft, accès de secours, `/api/me`, configuration publique, santé |
-| `utilisateurs` | comptes, hiérarchie, commerciaux, conducteurs, fiches intervenant |
+| `authentification` | SSO Microsoft, accès de secours, `/api/me`, configuration publique, santé (**déplacé**) |
+| `utilisateurs` | comptes, hiérarchie, commerciaux, conducteurs, fiches intervenant (**déplacé**) |
 | `administration` | clés d'intégration, journal des paramètres et des droits, modules, société (**déplacé**) |
 | `parametres` | paramètres métier, rémunération, registre des entreprises (**déplacé**) |
 | `clients` | clients, contacts, sites, parc d'équipements |
@@ -106,7 +111,7 @@ Domaines prévus :
 
   `verifier-deplacement.mjs` ne concerne que les PR du découpage.
 - **Imports sans renommage** : ni `import { a as b }`, ni `import x = …`, ni import par défaut renommé pendant le découpage.
-- **Ordre de chargement inchangé** : `index.ts` importe `src/env.ts` après les bibliothèques, au moment où il appelait `dotenv.config()` avant le découpage. Certaines bibliothèques lisent l'environnement à leur chargement (`DEBUG`, `NO_COLOR`…).
+- **Ordre de chargement inchangé** : `index.ts` importe `src/env.ts` après les bibliothèques, au moment où il appelait `dotenv.config()` avant le découpage. Certaines bibliothèques lisent l'environnement à leur chargement (`DEBUG`, `NO_COLOR`…). Le compilateur retire le `require` d'un import dont aucun nom n'est plus employé : quand le dernier emploi d'une bibliothèque quitte `index.ts`, son import y devient un import pour son seul effet (`import 'jsonwebtoken';`), à la même place, sans quoi elle se chargerait plus tard, depuis `src/`, après `.env`. `routes.mjs` le détecte quand la bibliothèque lit l'environnement.
 - **Domaines dispersés dans le fichier.** Plusieurs domaines ont leurs routes en plusieurs endroits d'`index.ts` : factures, chantiers, interventions, planning, société, paramètres, commerciaux. Leur module expose alors plusieurs fonctions d'enregistrement, appelées chacune à l'emplacement de son bloc. Le vérificateur refuse tout réordonnancement : s'il en fallait un, il ferait l'objet d'une PR à part, prouvée sans recouvrement de chemins.
 - **`routeMixte`** monte ses routes sur `app` hors d'une fonction d'enregistrement. Plutôt qu'en faire une fabrique, `app` est créée dans `src/app.ts`, importé après `src/env.ts` : `routeMixte` l'importe, et son texte comme ses appels restent identiques.
 - **Utilitaires partagés d'abord** : une fonction dont se servent plusieurs domaines est déplacée vers `commun/`, `droits/` ou `http/` avant le premier domaine qui l'emploie.

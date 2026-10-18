@@ -22,3 +22,18 @@ export function isAdminRole(role: string | undefined | null): boolean {
 export function isSuperAdminRole(role: string | undefined | null): boolean {
   return role === ROLE_SUPERADMIN;
 }
+
+// Un administrateur peut être marqué "estCommercial" : il garde alors tous les droits
+// d'administration (blockCommercial ne le concerne pas, il reste role === 'ADMIN'), mais
+// apparaît EN PLUS comme un commercial pour l'affectation aux chantiers et les
+// statistiques/marges de "Mes commerciaux" — au même titre qu'un compte de rôle
+// COMMERCIAL. isCommercialLike() et COMMERCIAL_OR_FILTER couvrent les deux cas partout où
+// l'appli devait jusqu'ici filtrer strictement sur role === 'COMMERCIAL'.
+export function isCommercialLike(u: { role: string; estCommercial?: boolean | null }): boolean {
+  return u.role === 'COMMERCIAL' || (isAdminRole(u.role) && !!u.estCommercial);
+}
+export const COMMERCIAL_OR_FILTER = [
+  { role: 'COMMERCIAL' },
+  { role: 'ADMIN', estCommercial: true },
+  { role: ROLE_SUPERADMIN, estCommercial: true },
+];
