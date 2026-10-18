@@ -51,8 +51,8 @@ server/
                               clôture), metier.ts (types, titulaire, commercial)
     domaines/interventions/   routes.ts (SAV, coûts, comptes rendus, placement), metier.ts
     domaines/contrats/        routes.ts, metier.ts (couverture, échéances, verrou)
-    domaines/planning/        metier.ts (module actif, validation des événements) ; ses routes
-                              restent dans index.ts jusqu'à la PR 9
+    domaines/planning/        routes.ts (événements, types, partage, lien public), metier.ts
+                              (module actif, validation des événements)
 ```
 
 Domaines prévus :
@@ -70,7 +70,7 @@ Domaines prévus :
 | `chantiers` | affaires, achats, heures, métriques et suivi (**déplacé**) |
 | `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**) |
 | `contrats` | contrats de maintenance et visites (**déplacé**) |
-| `planning` | affectations, types d'événement, partage public |
+| `planning` | affectations, types d'événement, partage public (**déplacé**) |
 | `factures` | factures, avoirs, mentions légales, export comptable |
 | `reglements` | encaissements et affectations |
 | `comptabilite` | plan comptable, règles, TVA, import, écritures |
