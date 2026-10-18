@@ -15,7 +15,7 @@ Trois écrans dépassent la règle permanente des 800 lignes ([CLAUDE.md](../CLA
 Comme pour le serveur, chaque PR **déplace** du code sans changer le comportement ni le rendu. Elle ne change ni le DOM, ni les classes, ni les textes, ni les noms d'accès, ni les requêtes, ni l'ordre des chargements. Concrètement :
 - **Composants internes déjà autonomes** (props seules) : déplacés tels quels dans leur propre fichier.
 - **Sections du rendu** (onglets, journaux, modales) : leur JSX est déplacé tel quel dans un composant. Ce composant reçoit **par props, sous les mêmes noms**, les états, valeurs dérivées et gestionnaires qu'il lit. Les hooks restent dans la page, dans le même ordre, avant les mêmes retours anticipés. Le texte du JSX déplacé reste donc identique, et React produit le même DOM.
-- Les types, constantes et petites fonctions qu'un seul composant emploie le suivent. Ceux que la page emploie aussi sont exportés depuis le nouveau fichier.
+- Les types, constantes et petites fonctions qu'un seul composant emploie le suivent. Pour ceux que la page emploie aussi : un type ou une constante littérale est exporté depuis le nouveau fichier ; une fonction ou une constante non littérale (tableau, objet) va dans `client/src/lib/`, pour ne pas déclencher `react/only-export-components`.
 - Aucun nom n'est renommé. Aucune logique n'est extraite des gestionnaires. Aucun état n'est déplacé de la page vers un composant (voir « Hors périmètre »).
 - **Seul code nouveau admis**, l'équivalent des fonctions d'enregistrement du serveur :
   - la signature de chaque composant de section, avec ses props typées. Certains types d'état n'ont pas de nom : il faudra un alias de type ou `React.Dispatch<React.SetStateAction<…>>` ;
