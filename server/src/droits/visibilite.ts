@@ -52,3 +52,16 @@ export function saisieSelonDroits(req: express.Request): <T>(valeur: T) => T {
   if (!voitCoutMainOeuvre(req)) return sansTauxHoraire;
   return (valeur) => valeur;
 }
+
+// Prix d'achat prévu d'une ligne de devis : une donnée interne de coût. Session humaine : un
+// administrateur seulement (choix par défaut, à confirmer), comme le prix d'achat du catalogue ;
+// clé d'intégration : le scope finances:read, comme la rentabilité. Les autres porteurs du droit
+// devis ne le reçoivent jamais, sous aucune route, et ne peuvent pas l'écrire.
+export function voitPrixAchatDevis(req: express.Request): boolean {
+  const cle = (req as ApiRequest).apiKey;
+  if (cle) return cle.scopes.includes('finances:read');
+  return isAdminRole((req as AuthRequest).user?.role);
+}
+export function ecritPrixAchatDevis(req: express.Request): boolean {
+  return !(req as ApiRequest).apiKey && isAdminRole((req as AuthRequest).user?.role);
+}
