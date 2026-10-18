@@ -134,11 +134,21 @@ function compiler() {
     const { line } = d.file.getLineAndCharacterOfPosition(d.start ?? 0);
     return `${path.relative(racine, d.file.fileName)}:${line + 1} : ${message}`;
   });
-  return { sorties, diagnostics };
+  // Directives telles que le compilateur les a reconnues dans chaque fichier, quelle que soit
+  // leur casse : @ts-nocheck, @ts-ignore et @ts-expect-error, /// <reference …>.
+  const directives = new Map();
+  for (const source of programme.getSourceFiles()) {
+    const relatif = path.relative(racine, source.fileName).split(path.sep).join('/');
+    if (relatif.startsWith('..') || relatif.split('/').includes('node_modules')) continue;
+    directives.set(relatif, (source.checkJsDirective && !source.checkJsDirective.enabled ? 1 : 0) + (source.commentDirectives?.length ?? 0)
+      + source.referencedFiles.length + source.typeReferenceDirectives.length + source.libReferenceDirectives.length);
+  }
+  return { sorties, diagnostics, directives };
 }
 
-// Directives qui suspendent ou étendent le contrôle de types.
-const DIRECTIVES = /@ts-(?:nocheck|ignore|expect-error)\b|^\s*\/\/\/\s*<reference\b/gm;
+// Directives qui suspendent ou étendent le contrôle de types, recherchées aussi dans le texte,
+// sans tenir compte de la casse, comme le compilateur.
+const DIRECTIVES = /@ts-(?:nocheck|ignore|expect-error)\b|^\s*\/\/\/\s*<reference\b/gim;
 const compterDirectives = (texte) => (texte.match(DIRECTIVES) ?? []).length;
 
 // Modules locaux chargés au chargement d'un fichier : les `require` relatifs de premier niveau
@@ -335,12 +345,12 @@ for (const b of instructionsBase) {
 // --- Arbre ---
 const analysesArbre = new Map(fichiersArbre().map((f) => [f, analyser(f, readFileSync(path.join(racine, f), 'utf8'))]));
 {
-  const { sorties: compiles, diagnostics } = compiler();
+  const { sorties: compiles, diagnostics, directives } = compiler();
   for (const diagnostic of diagnostics.slice(0, 20)) erreur(`erreur de type : ${diagnostic}`);
   if (diagnostics.length > 20) erreur(`… et ${diagnostics.length - 20} autres erreurs de type`);
   for (const a of analysesArbre.values()) {
     const avant = analysesBase.has(a.fichier) ? compterDirectives(analysesBase.get(a.fichier).texte) : 0;
-    if (compterDirectives(a.texte) > avant) erreur(`${a.fichier} : directive @ts-nocheck, @ts-ignore, @ts-expect-error ou /// <reference> ajoutée ; elle suspendrait le contrôle de types qui garantit les déplacements`);
+    if (Math.max(compterDirectives(a.texte), directives.get(a.fichier) ?? 0) > avant) erreur(`${a.fichier} : directive @ts-nocheck, @ts-ignore, @ts-expect-error ou /// <reference> ajoutée ; elle suspendrait le contrôle de types qui garantit les déplacements`);
   }
   const existants = new Set(analysesArbre.keys());
   for (const a of analysesArbre.values()) {
