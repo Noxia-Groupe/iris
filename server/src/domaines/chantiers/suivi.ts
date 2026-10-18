@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, jourCivilEntreprise, aujourdHuiEntreprise, dateSeuleEnJourCivil } from '../../commun/dates';
-import { decimalToNumber } from '../../commun/montants';
+import { decimalToNumber, sommeExacte, differenceExacte, produitExact } from '../../commun/montants';
 import type { Parametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { chantierSansCoutMainOeuvre, chantierSansMontants } from './droits';
@@ -63,15 +63,17 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
   const achats: any[] = (chantier.achats || []).filter((a: any) => !a.archivedAt);
   const pointages: any[] = (chantier.pointages || []).filter((p: any) => !p.archivedAt);
 
-  const materielReel = achats.reduce((s: number, a: any) => s + a.montantHT, 0);
+  // Sommes exactes, indépendantes de l'ordre des lignes (#198) : les alertes de
+  // dépassement ci-dessous comparent ces totaux au vendu, au centime près.
+  const materielReel = achats.reduce((s: number, a: any) => sommeExacte(s, a.montantHT), 0);
   let heuresRealisees = 0;
   let moReel = 0;
   for (const p of pointages) {
-    heuresRealisees += p.nbrHeures;
-    moReel += p.nbrHeures * p.tauxHoraireApplique;
+    heuresRealisees = sommeExacte(heuresRealisees, p.nbrHeures);
+    moReel = sommeExacte(moReel, produitExact(p.nbrHeures, p.tauxHoraireApplique));
   }
-  const totalDepenses = materielReel + moReel;
-  const diffHeures = chantier.heuresVendues - heuresRealisees;
+  const totalDepenses = sommeExacte(materielReel, moReel);
+  const diffHeures = differenceExacte(chantier.heuresVendues, heuresRealisees);
   const pctMateriel = chantier.budgetMaterielVendu > 0 ? (materielReel / chantier.budgetMaterielVendu) * 100 : 0;
   const pctHeures = chantier.heuresVendues > 0 ? (heuresRealisees / chantier.heuresVendues) * 100 : 0;
   const pctMainOeuvre = chantier.budgetMainOeuvreVendu > 0 ? (moReel / chantier.budgetMainOeuvreVendu) * 100 : 0;
@@ -111,7 +113,7 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
   // variable, calculée à part par computeCommissionsParCommercial (utilisé par
   // /api/stats/commerciaux) sur la marge cumulée du mois du commercial, pas chantier par
   // chantier. Sans plan commercial, elle est nulle (décision du 17-10-2026).
-  const margeBrute = chantier.budgetGlobalVendu - totalDepenses;
+  const margeBrute = differenceExacte(chantier.budgetGlobalVendu, totalDepenses);
   const margeCommerciale = margeBrute;
   const margePct = chantier.budgetGlobalVendu > 0 ? (margeCommerciale / chantier.budgetGlobalVendu) * 100 : 0;
   // Le signe de la marge est une donnée commerciale : l'alerte « en perte » ne sort que
@@ -148,8 +150,8 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
       sourceMateriel = contexte.ratioMaterielHistorique != null ? 'HISTORIQUE' : 'VENDU';
       coutMaterielAttendu = Math.max(materielReel, chantier.budgetMaterielVendu * ratioMateriel);
     }
-    const coutEstime = coutMainOeuvreAttendu + coutMaterielAttendu;
-    margeEstimee = chantier.budgetGlobalVendu - coutEstime;
+    const coutEstime = sommeExacte(coutMainOeuvreAttendu, coutMaterielAttendu);
+    margeEstimee = differenceExacte(chantier.budgetGlobalVendu, coutEstime);
     margeEstimeePct = chantier.budgetGlobalVendu > 0 ? (margeEstimee / chantier.budgetGlobalVendu) * 100 : 0;
     estimation = { coutEstime, coutMainOeuvreAttendu, coutMaterielAttendu, coutHoraireReference, sourceCoutHoraire, ratioMateriel, sourceMateriel };
     // Une affaire déjà en perte porte l'alerte la plus forte ; sinon une marge estimée

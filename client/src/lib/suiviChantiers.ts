@@ -1,3 +1,5 @@
+import { differenceExacte } from './montants';
+
 // Suivi des chantiers : recherche, filtres et tri de la liste et du tableau de bord.
 //
 // Les alertes elles-mêmes sont calculées par le serveur (computeChantierMetrics) : le
@@ -150,15 +152,15 @@ export function libelleAlerte(code: AlerteChantier, chantier: ChantierSuivi): st
     case 'SANS_SAISIE':
       return `Sans saisie depuis ${nombre(m.joursSansSaisie ?? 0)} j`;
     case 'HEURES_DEPASSEES':
-      return `Heures +${nombre((m.heuresRealisees ?? 0) - chantier.heuresVendues, 1)} h`;
+      return `Heures +${nombre(differenceExacte(m.heuresRealisees ?? 0, chantier.heuresVendues), 1)} h`;
     // Garde défensive : un budget non communiqué ne doit jamais donner un montant de dépassement
     // (le serveur ne transmet d'ailleurs pas ces alertes au technicien, seul à ne pas voir les budgets).
     // Le coût de main-d'œuvre, lui, n'est transmis qu'à l'administration : sans lui, l'alerte
     // reste, sans montant.
     case 'MAIN_OEUVRE_DEPASSEE':
-      return chantier.budgetMainOeuvreVendu == null || m.moReel == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${nombre(m.moReel - chantier.budgetMainOeuvreVendu)} €`;
+      return chantier.budgetMainOeuvreVendu == null || m.moReel == null ? 'Main-d’œuvre dépassée' : `Main-d’œuvre +${nombre(differenceExacte(m.moReel, chantier.budgetMainOeuvreVendu))} €`;
     case 'MATERIEL_DEPASSE':
-      return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : `Matériel +${nombre((m.materielReel ?? 0) - chantier.budgetMaterielVendu)} €`;
+      return chantier.budgetMaterielVendu == null ? 'Matériel dépassé' : `Matériel +${nombre(differenceExacte(m.materielReel ?? 0, chantier.budgetMaterielVendu))} €`;
   }
 }
 

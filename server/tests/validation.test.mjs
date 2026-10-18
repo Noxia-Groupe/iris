@@ -262,6 +262,35 @@ describe('Métriques de chantier', () => {
     const vue = computeChantierMetrics(chantier, { margeCommercialeActive: false, planningActif: true }, true);
     assert.equal(vue.margeCommerciale, null);
   });
+
+  // #198 : en nombres à virgule, 0,1 + 0,2 + 0,3 vaut 0,6000000000000001, mais 0,3 + 0,2 + 0,1
+  // vaut 0,6. Un budget exactement consommé déclenchait ou non une alerte de dépassement
+  // selon l'ordre des lignes.
+  test('totaux au centime près, quel que soit l’ordre des lignes (#198)', () => {
+    const params = { margeCommercialeActive: true, planningActif: true };
+    for (const valeurs of [[0.1, 0.2, 0.3], [0.3, 0.2, 0.1], [0.2, 0.1, 0.3]]) {
+      const vue = computeChantierMetrics({
+        budgetGlobalVendu: 10, budgetMaterielVendu: 0.6, budgetMainOeuvreVendu: 0.6, heuresVendues: 0.6,
+        achats: valeurs.map((montantHT) => ({ montantHT })),
+        pointages: valeurs.map((nbrHeures) => ({ nbrHeures, tauxHoraireApplique: 1 })),
+      }, params, true);
+      assert.deepEqual(
+        [vue.materielReel, vue.heuresRealisees, vue.moReel, vue.totalDepenses, vue.diffHeures, vue.margeCommerciale],
+        [0.6, 0.6, 0.6, 1.2, 0, 8.8],
+        `ordre ${valeurs.join(', ')}`,
+      );
+      for (const alerte of ['MATERIEL_DEPASSE', 'HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE']) {
+        assert.ok(!vue.alertes.includes(alerte), `${alerte} à budget exactement consommé (ordre ${valeurs.join(', ')})`);
+      }
+    }
+    // Heures × taux : 1,1 h × 1,10 € = 1,21 € exactement (1,2100000000000002 en flottant).
+    const produit = computeChantierMetrics({
+      budgetGlobalVendu: 0, budgetMaterielVendu: 0, budgetMainOeuvreVendu: 1.21, heuresVendues: 1.1,
+      achats: [], pointages: [{ nbrHeures: 1.1, tauxHoraireApplique: 1.1 }],
+    }, params, true);
+    assert.equal(produit.moReel, 1.21);
+    assert.ok(!produit.alertes.includes('MAIN_OEUVRE_DEPASSEE'));
+  });
 });
 
 describe('Destinataires de la rentabilité d’un chantier', () => {

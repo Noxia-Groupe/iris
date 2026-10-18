@@ -10,6 +10,7 @@ import {
   alertesDuChantier, ancienneteSaisie, estASurveiller, filtrerChantiers, trierChantiers,
   type ChantierSuivi, type FiltreChantiers, type TriChantiers,
 } from '../lib/suiviChantiers';
+import { arrondiEuro } from '../lib/montants';
 
 type ChantierListe = ChantierSuivi & { metrics?: ChantierSuivi['metrics'] & { diffHeures?: number } };
 
@@ -30,7 +31,7 @@ const TRIS: { valeur: TriChantiers; libelle: string; margeRequise?: boolean }[] 
   { valeur: 'NOM', libelle: 'Nom (A → Z)' },
 ];
 
-const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
+const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString('fr-FR')} €`;
 const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
 
 // Compteurs cliquables : un chiffre qui intrigue mène directement à la liste filtrée.

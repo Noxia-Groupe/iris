@@ -8,8 +8,9 @@ import OuvrirChantierAffaire from '../components/OuvrirChantierAffaire';
 import JournalAdministration from '../components/JournalAdministration';
 import { AvisSansPlanCommercial } from '../components/AvisSansPlanCommercial';
 import { DROITS_DEVIS, droitsApresBasculeDevis, etatDroitDevis } from '../lib/droitDevis';
+import { arrondiEuro } from '../lib/montants';
 
-const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
+const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString()} €`;
 
 // Éditeur d'un barème progressif. Une tranche = un plafond et un taux ; la DERNIÈRE peut
 // avoir un plafond vide, ce qui signifie « au-delà, sans borne » (JSON ne représente pas

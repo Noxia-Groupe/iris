@@ -3,6 +3,7 @@ import { Activity } from 'lucide-react';
 import { apiFetch } from '../api';
 import { decalerReference, jourFrancais } from '../lib/dateFormatting';
 import { useReferencePeriode } from '../lib/referencePeriode';
+import { arrondiEuro } from '../lib/montants';
 
 
 // Plage d'heures affichée pour le créneau de saisie habituel (6h -> 19h).
@@ -99,11 +100,11 @@ const Performances = () => {
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-gray-50 rounded-lg p-3">
                   <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">CA vendu</div>
-                  <div className="font-bold text-gray-800 mt-0.5">{Math.round(p.caTotal).toLocaleString()} €</div>
+                  <div className="font-bold text-gray-800 mt-0.5">{arrondiEuro(p.caTotal).toLocaleString()} €</div>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3">
                   <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge générée</div>
-                  <div className={`font-bold mt-0.5 ${p.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{Math.round(p.margeTotal).toLocaleString()} €</div>
+                  <div className={`font-bold mt-0.5 ${p.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{arrondiEuro(p.margeTotal).toLocaleString()} €</div>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3">
                   <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge %</div>
@@ -161,7 +162,7 @@ const Performances = () => {
                       {p.tauxDepassementHeures.toFixed(1)}%
                     </span>
                     <span className={`text-sm font-black ${p.manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                      {p.manqueAGagnerMainOeuvre > 0 ? `-${Math.round(p.manqueAGagnerMainOeuvre).toLocaleString()} €` : '0 €'}
+                      {p.manqueAGagnerMainOeuvre > 0 ? `-${arrondiEuro(p.manqueAGagnerMainOeuvre).toLocaleString()} €` : '0 €'}
                     </span>
                   </div>
                 )}

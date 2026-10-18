@@ -5,6 +5,7 @@ import { decalerReference, jourCivilChantier } from '../lib/dateFormatting';
 import { useReferencePeriode } from '../lib/referencePeriode';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { AvisSansPlanCommercial } from '../components/AvisSansPlanCommercial';
+import { arrondiEuro } from '../lib/montants';
 
 type Period = 'month' | 'quarter' | 'year';
 
@@ -17,7 +18,7 @@ const periodLabel = (period: Period, periodStart: string) => {
   return `${MOIS[m - 1]} ${y}`;
 };
 
-const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
+const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString()} €`;
 
 const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé' };
 
