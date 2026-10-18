@@ -19,8 +19,16 @@ import { type AuthRequest, JWT_SECRET, brancheHierarchique, requireAuth, resolve
 import { blockCommercial, blockTechnicien, requireAdmin, requireSuperAdmin, requireTravauxRead } from './src/http/gardes';
 import { paramId } from './src/http/requete';
 import { enregistrerRoutesReferentiels } from './src/domaines/referentiels/routes';
+import { app } from './src/app';
+import { DROITS_INTERDITS_TECHNICIEN, permissionsEffectives, requirePermission } from './src/droits/permissions';
+import { API_SCOPES, type ApiScope, type ApiRequest, apiKeyHash, requireApiKey } from './src/http/cles-api';
+import { routeMixte } from './src/http/routes-mixtes';
+import { AFFAIRE_NON_ANNULEE, perimetreChantiers } from './src/droits/perimetres';
+import {
+  FUSEAU_HORAIRE_PAR_DEFAUT, fuseauHoraireEntrepriseValide, jourCivilEntreprise, aujourdHuiEntreprise, anneeEntreprise,
+  dateEmissionEstFuture, dateSeuleEnJourCivil,
+} from './src/commun/dates';
 
-const app = express();
 const port = process.env.PORT || 3001;
 
 // Ne pas révéler la techno serveur (en-tête `X-Powered-By: Express`).
@@ -111,166 +119,6 @@ async function verifyMicrosoftIdentity(req: express.Request): Promise<string | n
   } catch {
     return null;
   }
-}
-
-// Droits par défaut des types de compte. Ils restent volontairement limités aux modules
-// existants ; SAV, maintenance, facturation, banques et objectifs seront ajoutés avec
-// leurs routes métier, jamais anticipés par des accès fictifs.
-const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
-  ADMIN: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive'],
-  // Le conducteur saisit et corrige les écritures de son affaire. L'archivage, qui retire
-  // un coût ou des heures des marges actives, est distinct et réservé par défaut aux rôles
-  // d'encadrement ; il peut être accordé individuellement si l'organisation le décide.
-  // Il lit les clients (clients, contacts, sites) pour choisir celui d'une intervention SAV
-  // qu'il crée (décision de Nelson du 16-10-2026), sans les modifier ni voir de devis.
-  CONDUCTEUR_TRAVAUX: ['chantiers:read', 'chantiers:write', 'clients:read'],
-  COMMERCIAL: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
-  [ROLE_ASSISTANTE_COMMERCIALE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
-  [ROLE_COMPTABLE]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
-  [ROLE_DIRECTEUR_COMMERCIAL]: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'],
-  [ROLE_RESPONSABLE]: ['chantiers:read', 'chantiers:write', 'chantiers:archive'],
-  // Annuaire des clients (clients, contacts, sites) en consultation, par exemple pour retrouver
-  // une adresse ; ni devis ni montants (décision de Nelson du 13-10-2026).
-  [ROLE_TECHNICIEN]: ['chantiers:read', 'clients:read'],
-  // Lecture seule. Le droit devis peut s'accorder individuellement ; la saisie Travaux non :
-  // assertChantierWritable ne la permet qu'au conducteur, au responsable de branche et à l'administration.
-  [ROLE_DIRECTEUR]: ['chantiers:read'],
-};
-
-// Droits jamais accordés à un technicien, ni par son type de compte ni individuellement : il ne
-// modifie aucune affaire et ne voit ni prix ni coûts (décisions de Nelson du 13-10-2026). Une
-// permission déjà enregistrée, par exemple avant un changement de type, reste sans effet.
-const DROITS_INTERDITS_TECHNICIEN = ['devis:read', 'devis:write', 'chantiers:write', 'chantiers:archive', 'finances:read'];
-
-function permissionsEffectives(user: { role: string; accesFinance?: boolean | null; permissions?: string[] }): string[] {
-  const droits = new Set([...(DEFAULT_USER_PERMISSIONS[user.role] ?? []), ...(user.permissions ?? [])]);
-  if (user.accesFinance) droits.add('finances:read');
-  // Un superadministrateur ne dépend jamais d'une liste fragile de permissions.
-  if (isSuperAdminRole(user.role)) API_SCOPES.forEach((permission) => droits.add(permission));
-  if (user.role === ROLE_TECHNICIEN) DROITS_INTERDITS_TECHNICIEN.forEach((permission) => droits.delete(permission));
-  return [...droits].sort();
-}
-
-function hasUserPermission(user: AuthRequest['user'], permission: string): boolean {
-  return !!user && permissionsEffectives(user).includes(permission);
-}
-
-function requirePermission(permission: string): express.RequestHandler {
-  return (req, res, next) => {
-    if (!hasUserPermission((req as AuthRequest).user, permission)) return void res.status(403).json({ error: `Permission requise : ${permission}` });
-    next();
-  };
-}
-
-// --- API d'intégration machine-à-machine (agents et connecteurs) ---
-// Deuxième porte d'entrée de l'application, à côté de Microsoft Entra ID : un agent
-// (Hermes) ou un connecteur n'a pas de compte Microsoft et ne doit pas en avoir. Il
-// s'authentifie avec une clé Iris, dont le secret n'est JAMAIS stocké — seule son
-// empreinte SHA-256 l'est, et la valeur n'est affichée qu'une fois, à sa création.
-//
-// Le SHA-256 nu suffit ici, contrairement à un mot de passe : le secret est tiré de 32
-// octets aléatoires (256 bits d'entropie), il n'est ni mémorisable ni devinable, donc il
-// n'y a rien à ralentir par un bcrypt. Le hachage protège la base, pas la clé.
-const API_SCOPES = [
-  'clients:read', 'clients:write',
-  'catalogue:read', 'catalogue:write',
-  'equipements:read', 'equipements:write',
-  'devis:read', 'devis:write',
-  'company:read',
-  // Domaine chantier : les chantiers eux-mêmes, leurs achats et leurs heures. Un agent
-  // qui prépare un devis ou un rapport a besoin des trois, qui décrivent le même objet.
-  'chantiers:read',
-  // Saisie/correction et archivage sont deux capacités distinctes : l'archivage sort une
-  // écriture des coûts actifs et requiert donc une délégation explicite.
-  'chantiers:write', 'chantiers:archive',
-  // Montants vendus et marge. Scope SÉPARÉ, jamais inclus dans chantiers:read : côté
-  // interface ces champs sont déjà réservés à certains rôles (cf. serializeChantier), une
-  // clé d'intégration ne doit pas les obtenir par le simple fait de lire un chantier.
-  'finances:read',
-] as const;
-type ApiScope = typeof API_SCOPES[number];
-interface ApiRequest extends express.Request { apiKey?: { id: string; nom: string; scopes: string[] }; }
-
-function apiKeyHash(key: string) {
-  return crypto.createHash('sha256').update(key).digest('hex');
-}
-
-const requireApiKey = (scope: ApiScope): express.RequestHandler => async (req, res, next) => {
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer iris_') ? header.slice(7) : '';
-  if (!token) return void res.status(401).json({ error: 'Clé API Iris requise' });
-  try {
-    const key = await prisma.apiAccessKey.findUnique({ where: { secretHash: apiKeyHash(token) } });
-    if (!key || !key.actif || key.revoqueLe || (key.expireLe && key.expireLe <= new Date())) {
-      return void res.status(401).json({ error: 'Clé API invalide, expirée ou révoquée' });
-    }
-    if (!key.scopes.includes(scope)) {
-      return void res.status(403).json({ error: `Scope requis : ${scope}` });
-    }
-    (req as ApiRequest).apiKey = { id: key.id, nom: key.nom, scopes: key.scopes };
-    // Trace de dernière utilisation : sans attente ni échec bloquant, elle sert à repérer
-    // une clé oubliée (jamais utilisée) ou toujours vivante avant de la révoquer.
-    void prisma.apiAccessKey.update({ where: { id: key.id }, data: { dernierUsageLe: new Date() } }).catch(() => undefined);
-    next();
-  } catch {
-    res.status(500).json({ error: "Erreur d'authentification de la clé API" });
-  }
-};
-
-// Monte une même opération sur les deux portes d'entrée de l'application :
-//   - /api/…    : session humaine (Entra ID ou accès de secours) ;
-//   - /api/v1/… : clé d'intégration (agent, connecteur) portant le scope demandé.
-// Un seul handler pour les deux : impossible qu'un agent contourne une règle appliquée à
-// l'interface, ou qu'une correction ne soit faite que d'un côté.
-//
-// `gardes` protège la porte interface. Par défaut requireAdmin, qui convient aux
-// référentiels (clients, catalogue). Les journaux d'achats et d'heures, eux, sont ouverts
-// à tous les rôles : ce n'est pas l'accès à la route qui les restreint, mais le périmètre
-// de ce qu'elle renvoie (cf. perimetreChantiers) — passer [] est donc délibéré, pas un
-// oubli. La porte /api/v1 ne prend jamais de garde de rôle : une clé n'en a pas.
-type MethodeHttp = 'get' | 'post' | 'put' | 'patch' | 'delete';
-function routeMixte(
-  methode: MethodeHttp,
-  chemin: string,
-  scope: ApiScope,
-  handler: express.RequestHandler,
-  gardes: express.RequestHandler[] = [requireAdmin],
-) {
-  app[methode](`/api${chemin}`, requireAuth, ...gardes, handler);
-  app[methode](`/api/v1${chemin}`, requireApiKey(scope), handler);
-}
-
-// --- Périmètre de lecture du domaine chantier ---
-// Une même liste (achats, heures, chantiers) ne montre pas la même chose selon qui la
-// demande. Deux natures de porteur, deux façons de le décider :
-//
-//   - session humaine : le RÔLE décide. Un administrateur ou un directeur voit tout ; un
-//     conducteur de travaux, les chantiers dont il est responsable ; un responsable, les
-//     siens et ceux de toute sa branche hiérarchique ; un commercial, ceux qu'il a vendus.
-//     C'est exactement la règle qu'applique déjà GET /api/chantiers.
-//   - clé d'intégration : le SCOPE décide. Une clé ne représente personne en particulier,
-//     elle n'a donc pas de rôle à interroger ; porter `chantiers:read` vaut autorisation
-//     sur le domaine, et c'est au superadmin de ne délivrer que les scopes utiles.
-//
-// Renvoie un filtre Prisma applicable à un champ `chantier` imbriqué comme à un chantier
-// racine ; `{}` signifie « aucune restriction ».
-// Une affaire ANNULÉE sort du périmètre de tout le monde, administrateurs compris : elle
-// n'a plus à peser sur une liste, un coût, une marge ou une commission. Elle n'est pas
-// perdue pour autant — GET /api/chantiers/:id la rend toujours, avec le motif de son
-// annulation, et c'est bien là qu'on va la chercher quand on veut comprendre.
-const AFFAIRE_NON_ANNULEE = { statut: { not: 'ANNULE' } } as const;
-
-function perimetreChantiers(req: express.Request): Prisma.ChantierWhereInput {
-  return { ...AFFAIRE_NON_ANNULEE, ...perimetreDemandeur(req) };
-}
-
-function perimetreDemandeur(req: express.Request): Prisma.ChantierWhereInput {
-  if ((req as ApiRequest).apiKey) return {};
-  const user = (req as AuthRequest).user;
-  if (!user || isAdminRole(user.role) || user.role === ROLE_DIRECTEUR) return {};
-  if (user.role === 'COMMERCIAL') return { commercialId: user.id };
-  if (user.role === ROLE_RESPONSABLE) return { responsableId: { in: [user.id, ...user.equipeIds] } };
-  return { responsableId: user.id };
 }
 
 // Le chantier tel qu'il accompagne un achat ou un pointage : de quoi l'identifier, rien
@@ -566,51 +414,6 @@ const COMPANY_TEXT_FIELDS = [
   'ville', 'pays', 'telephone', 'email', 'siteWeb', 'logoUrl', 'prefixeFacture', 'prefixeAvoir', 'piedFacture',
 ] as const;
 const COULEUR_HEX = /^#[0-9a-fA-F]{6}$/;
-const FUSEAUX_HORAIRES_FRANCAIS = [
-  'Europe/Paris', 'America/Guadeloupe', 'America/Martinique', 'America/Cayenne',
-  'America/Miquelon', 'Indian/Mayotte', 'Indian/Reunion', 'Pacific/Noumea',
-  'Pacific/Wallis', 'Pacific/Tahiti', 'Pacific/Marquesas', 'Pacific/Gambier',
-] as const;
-const FUSEAU_HORAIRE_PAR_DEFAUT = 'Europe/Paris';
-
-function fuseauHoraireEntrepriseValide(fuseauHoraire: unknown): fuseauHoraire is typeof FUSEAUX_HORAIRES_FRANCAIS[number] {
-  return typeof fuseauHoraire === 'string' && (FUSEAUX_HORAIRES_FRANCAIS as readonly string[]).includes(fuseauHoraire);
-}
-
-// Un jour civil dérivé d'un instant doit toujours être lu dans le fuseau de l'entreprise,
-// jamais dans UTC ou dans le fuseau de la machine qui exécute le serveur.
-function jourCivilEntreprise(instant: Date, fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT): string {
-  const parties = new Intl.DateTimeFormat('en-CA', {
-    timeZone: fuseauHoraire, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(instant);
-  const valeur = (type: Intl.DateTimeFormatPartTypes) => parties.find((partie) => partie.type === type)?.value;
-  return `${valeur('year')}-${valeur('month')}-${valeur('day')}`;
-}
-
-function aujourdHuiEntreprise(fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT, instant = new Date()): string {
-  return jourCivilEntreprise(instant, fuseauHoraire);
-}
-
-// Les références annuelles sont dérivées d'un instant de création : leur exercice est
-// donc celui du jour civil de l'entreprise, jamais celui d'UTC ou de la machine serveur.
-function anneeEntreprise(instant: Date, fuseauHoraire = FUSEAU_HORAIRE_PAR_DEFAUT): number {
-  return Number(jourCivilEntreprise(instant, fuseauHoraire).slice(0, 4));
-}
-
-// La règle « pas de facture postdatée » compare des JOURS CIVILS de l'entreprise, jamais
-// des instants. `instant` est injectable pour que la règle soit testable sans dépendre de
-// l'heure qu'il est au moment où la suite tourne.
-function dateEmissionEstFuture(dateEmission: string, fuseauHoraire: string, instant = new Date()): boolean {
-  return dateSeuleEnJourCivil(dateEmission) > aujourdHuiEntreprise(fuseauHoraire, instant);
-}
-
-function dateSeuleEnJourCivil(dateSeule: Date | string): string {
-  // Une date-seule est stockée à minuit UTC et ne désigne pas un instant : on lit ses
-  // composantes telles quelles. La relire dans un fuseau la ferait basculer d'un jour
-  // à l'ouest de Greenwich — et d'un exercice quand la date est un 1er janvier.
-  return (typeof dateSeule === 'string' ? dateSeule : dateSeule.toISOString()).slice(0, 10);
-}
-
 function companySettingsPayload(body: Record<string, unknown>): Record<string, string | null> {
   const data: Record<string, string | null> = {};
   for (const field of COMPANY_TEXT_FIELDS) {
