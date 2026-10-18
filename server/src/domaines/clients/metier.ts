@@ -1,4 +1,3 @@
-
 const EMAIL_SIMPLE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function optionalClientText(value: unknown, field: string, max = 500): string | null {
   if (value === undefined || value === null) return null;
