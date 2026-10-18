@@ -29,8 +29,10 @@
 //      (ni reste, ni valeur par défaut), chacune appelée une fois, avec `app`, au premier
 //      niveau d'index.ts ;
 //    - des noms ajoutés aux exports d'un fichier. Un nom n'en est jamais retiré.
-// 4. Chargement des modules, d'après les `require` de premier niveau du code compilé (imports
-//    de types et imports dynamiques écartés) :
+// 4. Chargement des modules, d'après les `require` de premier niveau du code que produit le
+//    compilateur avec tsconfig.json (imports de types et imports dynamiques écartés), résolus
+//    comme Node et TypeScript (`x.ts`, `x.js` lu comme `x.ts`, `x/index.ts`) ; un import
+//    relatif non résolu fait échouer le script :
 //    - chaque fichier qui reçoit du code de la base est chargé depuis index.ts ;
 //    - aucun cycle d'imports entre modules locaux : en CommonJS, un module d'un cycle peut
 //      s'évaluer avant que l'autre ait défini ce qu'il lui emprunte (constantes undefined) ;
@@ -109,23 +111,41 @@ function nomsExportes(source) {
   return noms;
 }
 
-// Modules locaux chargés au chargement du fichier : les `require` de premier niveau du code
-// compilé, où TypeScript a retiré les imports qui ne servent qu'aux types. Un `import()`
-// dynamique, compilé en `require` à l'intérieur d'une fonction, n'en fait pas partie.
-function modulesCharges(fichier, texte) {
-  const js = ts.transpileModule(texte, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+// Code compilé de l'arbre, produit en mémoire par le compilateur avec les options de
+// tsconfig.json : il retire, comme `npm run build`, les imports qui ne servent qu'aux types.
+function compiler() {
+  const lu = ts.readConfigFile(path.join(racine, 'tsconfig.json'), ts.sys.readFile);
+  const config = ts.parseJsonConfigFileContent(lu.config, ts.sys, racine);
+  const programme = ts.createProgram(config.fileNames, { ...config.options, noEmit: false, declaration: false, sourceMap: false });
+  const sorties = new Map();
+  programme.emit(undefined, (nom, texte, _bom, _erreur, sources) => {
+    if (nom.endsWith('.js') && sources?.length) sorties.set(path.relative(racine, sources[0].fileName).split(path.sep).join('/'), texte);
+  });
+  return sorties;
+}
+
+// Modules locaux chargés au chargement d'un fichier : les `require` relatifs de premier niveau
+// de son code compilé. Un `import()` dynamique, compilé en `require` à l'intérieur d'une
+// fonction, n'en fait pas partie. Résolution de Node et TypeScript : `x.ts`, `x.js` lu comme
+// `x.ts`, puis `x/index.ts`.
+function modulesCharges(fichier, js, existants) {
   const compile = ts.createSourceFile(`${fichier}.js`, js, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const charges = [];
+  const nonResolus = [];
   (function parcourir(noeud) {
     if (ts.isFunctionLike(noeud)) return;
     if (ts.isCallExpression(noeud) && ts.isIdentifier(noeud.expression) && noeud.expression.text === 'require'
       && noeud.arguments.length === 1 && ts.isStringLiteral(noeud.arguments[0]) && noeud.arguments[0].text.startsWith('.')) {
-      const cible = path.posix.normalize(path.posix.join(path.posix.dirname(fichier), noeud.arguments[0].text));
-      charges.push(cible.endsWith('.ts') ? cible : `${cible}.ts`);
+      const specificateur = noeud.arguments[0].text;
+      const chemin = path.posix.normalize(path.posix.join(path.posix.dirname(fichier), specificateur));
+      const candidats = chemin.endsWith('.js') ? [chemin.replace(/\.js$/, '.ts')] : [`${chemin}.ts`, chemin, `${chemin}/index.ts`];
+      const cible = candidats.find((c) => existants.has(c));
+      if (cible) charges.push(cible);
+      else nonResolus.push(specificateur);
     }
     ts.forEachChild(noeud, parcourir);
   }(compile));
-  return charges;
+  return { charges, nonResolus };
 }
 
 function analyser(fichier, texte) {
@@ -161,7 +181,7 @@ function analyser(fichier, texte) {
     imports: [], listesExports: [], elements: [], enregistrements: new Map(),
     finales: lignesDeCommentaires(texte, ts.getLeadingCommentRanges(texte, source.endOfFileToken.getFullStart())),
     exportes: nomsExportes(source),
-    charges: modulesCharges(fichier, texte),
+    charges: [],
   };
   for (const noeud of source.statements) {
     const l = ligne(noeud.getStart(source));
@@ -276,7 +296,8 @@ for (const a of analysesBase.values()) {
 for (const e of enregistrementsBase.values()) {
   e.corps.forEach((instruction, index) => { if (!placees.has(instruction)) placer(instruction, `${e.fichier}#${e.nom}`, index); });
 }
-const bibliothequesBase = new Set([...analysesBase.values()].flatMap((a) => a.imports.map((i) => moduleImporte(i.texte)).filter((m) => m && !m.startsWith('.'))));
+// Bibliothèques importées par la base ; `node:crypto` et `crypto` désignent le même module.
+const bibliothequesBase = new Set([...analysesBase.values()].flatMap((a) => a.imports.map((i) => moduleImporte(i.texte)).filter((m) => m && !m.startsWith('.')).map((m) => m.replace(/^node:/, ''))));
 const parCle = new Map();
 for (const b of instructionsBase) {
   if (!parCle.has(b.cle)) parCle.set(b.cle, []);
@@ -285,6 +306,17 @@ for (const b of instructionsBase) {
 
 // --- Arbre ---
 const analysesArbre = new Map(fichiersArbre().map((f) => [f, analyser(f, readFileSync(path.join(racine, f), 'utf8'))]));
+{
+  const compiles = compiler();
+  const existants = new Set(analysesArbre.keys());
+  for (const a of analysesArbre.values()) {
+    const js = compiles.get(a.fichier);
+    if (js === undefined) { erreur(`${a.fichier} : absent de la compilation de tsconfig.json`); continue; }
+    const { charges, nonResolus } = modulesCharges(a.fichier, js, existants);
+    a.charges = charges;
+    for (const specificateur of nonResolus) erreur(`${a.fichier} : import relatif ${specificateur} non résolu vers un fichier .ts du serveur`);
+  }
+}
 const enregistrementsArbre = new Map();
 for (const a of analysesArbre.values()) {
   for (const [nom, e] of a.enregistrements) {
@@ -329,7 +361,7 @@ function verifierImport(a, imp) {
   const dejaLa = [...analysesBase.values()].some((ab) => ab.imports.some((i) => i.texte === imp.texte));
   if ((renomme || espaceDeNoms) && !dejaLa) erreur(`${ici} : import renommé, interdit pendant le découpage : ${premiereLigne(imp.texte)}`);
   const specificateur = moduleImporte(imp.texte);
-  if (specificateur && !specificateur.startsWith('.') && !bibliothequesBase.has(specificateur)) {
+  if (specificateur && !specificateur.startsWith('.') && !bibliothequesBase.has(specificateur.replace(/^node:/, ''))) {
     erreur(`${ici} : bibliothèque ${specificateur} absente des imports de la base ; une PR du découpage n'en ajoute pas`);
   }
 }
