@@ -24,11 +24,19 @@ server/
       perimetres.ts     périmètre de lecture du domaine chantier
     commun/             utilitaires partagés : dates (jour civil, fuseau de la société),
                         montants, validation des saisies, journal d'administration, PDF, CSV
-      dates.ts          jour civil et année au fuseau de la société
+      dates.ts          jour civil et année au fuseau de la société, lecture des dates saisies
+      montants.ts       conversion des Decimal Prisma en nombres (decimalToNumber)
+      validation.ts     validation des saisies numériques
+      csv.ts            échappement des cellules CSV
+      journal-administration.ts  écriture et purge du journal des paramètres et des droits
     domaines/<domaine>/
       routes.ts         routes HTTP du domaine : enregistrerRoutes<Domaine>(app)
       metier.ts         logique métier du domaine (calculs, contrôles, lectures et écritures
                         réutilisées), sans objet HTTP ; plusieurs fichiers si besoin
+    domaines/referentiels/    routes.ts
+    domaines/parametres/      routes.ts, metier.ts (paramètres, singletons, rémunération)
+    domaines/administration/  routes.ts (clés, société, modules), journal.ts (consultation
+                              du journal), metier.ts (paramètres de la société)
 ```
 
 Domaines prévus :
@@ -38,8 +46,8 @@ Domaines prévus :
 | `referentiels` | catégories et fournisseurs des achats (**déplacé**) |
 | `authentification` | SSO Microsoft, accès de secours, `/api/me`, configuration publique, santé |
 | `utilisateurs` | comptes, hiérarchie, commerciaux, conducteurs, fiches intervenant |
-| `administration` | clés d'intégration, journal des paramètres et des droits, modules, société |
-| `parametres` | paramètres métier, rémunération, registre des entreprises |
+| `administration` | clés d'intégration, journal des paramètres et des droits, modules, société (**déplacé**) |
+| `parametres` | paramètres métier, rémunération, registre des entreprises (**déplacé**) |
 | `clients` | clients, contacts, sites, parc d'équipements |
 | `catalogue` | prestations, articles, équipements |
 | `devis` | devis versionnés, signature, acompte, conversion, duplication |
