@@ -1,6 +1,6 @@
 # Code du serveur : organisation par domaine
 
-**Découpage en cours** (chantier technique 2, décision de Nelson du 17-10-2026). `server/index.ts` contient encore la plupart des routes. Chaque PR du chantier en déplace un ou deux domaines vers `src/`, **sans aucun changement de comportement** : mêmes routes, mêmes réponses, mêmes codes et messages d'erreur, mêmes transactions, verrous et contraintes différées.
+**Découpage en cours** (chantier technique 2, décision de Nelson du 17-10-2026). `server/index.ts` n'enregistre plus aucune route lui-même : chaque domaine a les siennes dans `src/`, et il ne reste à en sortir que le démarrage du serveur. Chaque PR du chantier déplace un ou deux domaines vers `src/`, **sans aucun changement de comportement** : mêmes routes, mêmes réponses, mêmes codes et messages d'erreur, mêmes transactions, verrous et contraintes différées.
 
 ## Structure cible (proposition)
 
