@@ -26,7 +26,7 @@ server/
       perimetres.ts     périmètre de lecture du domaine chantier
       visibilite.ts     montants, taux horaires et prix d'achat montrés selon le demandeur
     commun/             utilitaires partagés : dates (jour civil, fuseau de la société),
-                        montants, validation des saisies, journal d'administration, PDF, CSV
+                        montants, validation des saisies, journal d'administration, CSV
       dates.ts          jour civil et année au fuseau de la société, lecture et écriture des dates
       montants.ts       Decimal Prisma en nombres, calculs exacts de montants et TVA par taux
       validation.ts     validation des saisies numériques et des motifs de correction
