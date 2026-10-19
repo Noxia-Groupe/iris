@@ -18,6 +18,13 @@ test('l’aperçu d’un premier avoir arrondit ligne et TVA au centime, moitié
   assert.deepEqual(totauxApercuAvoir([ligne('1', '33,33', '20'), ligne('2', '16,67', '5,5'), ligne('1', '0,01', '20')]), { totalHt: 66.68, totalTva: 8.50, totalTtc: 75.18 });
   // Saisie incomplète : zéro, sans erreur.
   assert.deepEqual(totauxApercuAvoir([ligne('', '10', '20'), ligne('1', 'abc', '20')]), { totalHt: 0, totalTva: 0, totalTtc: 0 });
+  // La saisie est lue comme l'écran l'envoie au serveur, qui en relit l'écriture la plus courte : les
+  // zéros superflus ne changent rien, et une quantité au-delà du millième, refusée, compte pour zéro.
+  assert.deepEqual(totauxApercuAvoir([ligne('1', '10', '20,0000')]), { totalHt: 10, totalTva: 2, totalTtc: 12 });
+  assert.deepEqual(totauxApercuAvoir([ligne('1', '100', '5,5000')]), { totalHt: 100, totalTva: 5.5, totalTtc: 105.5 });
+  assert.deepEqual(totauxApercuAvoir([ligne('1,5000', '10', '20')]), { totalHt: 15, totalTva: 3, totalTtc: 18 });
+  assert.deepEqual(totauxApercuAvoir([ligne('1', '10,500', '20')]), { totalHt: 10.5, totalTva: 2.1, totalTtc: 12.6 });
+  assert.deepEqual(totauxApercuAvoir([ligne('1,0001', '10', '20')]), { totalHt: 0, totalTva: 0, totalTtc: 0 });
 });
 
 test('l’aperçu d’un avoir suivant déduit sa TVA des bases déjà créditées, comme le serveur', () => {
@@ -27,12 +34,14 @@ test('l’aperçu d’un avoir suivant déduit sa TVA des bases déjà crédité
   assert.deepEqual(totauxApercuAvoir([ligne('1', '0,05', '10')], [precedent]), { totalHt: 0.05, totalTva: 0, totalTtc: 0.05 });
   // Déjà crédité : 0,02 € HT à 20 % (TVA 0,00). Avec 0,02 € de plus, la base de 0,04 € porte 0,01.
   assert.deepEqual(totauxApercuAvoir([ligne('1', '0,02', '20')], [{ ventilationTva: [{ tauxTva: 20, totalHt: 0.02 }] }]), { totalHt: 0.02, totalTva: 0.01, totalTtc: 0.03 });
-  // Un avoir historique sans ventilation enregistrée compte par ses lignes ; un autre taux ne compte pas.
-  assert.deepEqual(totauxApercuAvoir([ligne('1', '0,02', '20')], [{ ventilationTva: [], lignes: [{ tauxTva: 20, totalHt: 0.01 }, { tauxTva: 20, totalHt: 0.01 }, { tauxTva: 10, totalHt: 7 }] }]), { totalHt: 0.02, totalTva: 0.01, totalTtc: 0.03 });
+  // Un avoir historique sans ventilation enregistrée compte par ses lignes, et un autre taux ne compte
+  // pas : avec la ligne de 0,01 € à 10 %, la base précédente serait de 0,03 € et la TVA nulle.
+  assert.deepEqual(totauxApercuAvoir([ligne('1', '0,02', '20')], [{ ventilationTva: [], lignes: [{ tauxTva: 20, totalHt: 0.01 }, { tauxTva: 20, totalHt: 0.01 }, { tauxTva: 10, totalHt: 0.01 }] }]), { totalHt: 0.02, totalTva: 0.01, totalTtc: 0.03 });
   // Avoirs fractionnés à 5,5 % (test API « fige la TVA cumulée… ») : le second porte 0,49 €, et non 0,50 €.
   assert.deepEqual(totauxApercuAvoir([ligne('1', '9', '5,5')], [{ ventilationTva: [{ tauxTva: 5.5, totalHt: 9 }] }]), { totalHt: 9, totalTva: 0.49, totalTtc: 9.49 });
-  // Plusieurs avoirs précédents s'additionnent.
-  assert.deepEqual(totauxApercuAvoir([ligne('1', '0,02', '20')], [{ ventilationTva: [{ tauxTva: 20, totalHt: 0.01 }] }, { ventilationTva: [{ tauxTva: 20, totalHt: 0.01 }] }]), { totalHt: 0.02, totalTva: 0.01, totalTtc: 0.03 });
+  // Plusieurs avoirs précédents s'additionnent : 0,01 puis 0,02 € à 20 % (base de 0,03 €, TVA 0,01), et
+  // 0,02 € de plus (base de 0,05 €, TVA 0,01) ne portent pas de TVA ; le premier seul en donnerait 0,01.
+  assert.deepEqual(totauxApercuAvoir([ligne('1', '0,02', '20')], [{ ventilationTva: [{ tauxTva: 20, totalHt: 0.01 }] }, { ventilationTva: [{ tauxTva: 20, totalHt: 0.02 }] }]), { totalHt: 0.02, totalTva: 0, totalTtc: 0.02 });
 });
 
 // Contre-épreuve sur un grand nombre de montants : la TVA d'un avoir suivant égale la différence des
@@ -42,8 +51,14 @@ test('l’aperçu suit la règle d’arrondi exacte pour des bases et des taux v
     const numerateur = BigInt(centimes) * BigInt(tauxMilliemes);
     return Number(numerateur / 100000n + (numerateur % 100000n >= 50000n ? 1n : 0n));
   };
+  // Générateur mulberry32 (entiers sur 32 bits, Math.imul) : la suite est reproductible.
   let graine = 236;
-  const hasard = (borne: number) => { graine = (graine * 1103515245 + 12345) % 2147483648; return graine % borne; };
+  const hasard = (borne: number) => {
+    graine = (graine + 0x6D2B79F5) | 0;
+    let t = Math.imul(graine ^ (graine >>> 15), 1 | graine);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) % borne;
+  };
   for (let essai = 0; essai < 5000; essai += 1) {
     const [taux, milliemes] = [['20', 20000], ['10', 10000], ['5,5', 5500], ['2,1', 2100], ['8,5', 8500]][hasard(5)] as [string, number];
     const precedent = hasard(100000), ajout = 1 + hasard(100000);

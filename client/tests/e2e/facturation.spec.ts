@@ -554,6 +554,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     expect(await avoirsApi()).toEqual([[21.35, 2.14, 23.49]]);
 
     await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toHaveCount(0);
+    // La liste rechargée porte le premier avoir : le formulaire rouvert en tient compte.
+    await expect(facture).toContainText(/Annulation totale impossible : 1 avoir\(s\) partiel\(s\)/);
     await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
     await remplirLigneAvoir(page, 1, '1', '0,05', '10');
     const apercu = page.getByTestId('aperçu-avoir');

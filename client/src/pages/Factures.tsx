@@ -4,7 +4,7 @@ import { Ban, Download, FilePlus2, HandCoins, Plus, RefreshCw, Send, Trash2 } fr
 import { apiFetch } from '../api';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 import { situationReglement } from '../lib/reglements';
-import { totauxApercuAvoir, type AvoirPrecedent } from '../lib/apercuAvoir';
+import { nombreFr, totauxApercuAvoir, type AvoirPrecedent } from '../lib/apercuAvoir';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
@@ -45,7 +45,6 @@ type Facture = {
 };
 
 const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: '1', prixUnitaireHt: '', tauxTva: '20' });
-const nombreFr = (valeur: string): number | null => { const normalise = valeur.trim().replace(',', '.'); return /^\d+(\.\d+)?$/.test(normalise) ? Number(normalise) : null; };
 const formatDate = (date: string) => formatDateOnly(date);
 const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoir) => !avoir.estAvoirAnnulation);
@@ -144,6 +143,9 @@ export default function Factures() {
         return;
       }
       setFactures(facturesData.items);
+      // Un avoir partiel en cours de saisie suit la facture rechargée : son aperçu compte alors les
+      // avoirs créés depuis l'ouverture du formulaire.
+      setFactureAvoir((ouverte) => ouverte && ((facturesData.items as Facture[]).find((facture) => facture.id === ouverte.id) ?? ouverte));
       setTotal(facturesData.total);
       setChargement(false);
       setClients(clientsData.clients || clientsData || []);
@@ -507,7 +509,7 @@ export default function Factures() {
                   {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && (emissionImpossible(facture)
                     ? <span className="text-sm text-amber-700"><button className="btn btn-secondary" disabled><Send size={16} /> Émission impossible</button> Date antérieure à la dernière facture numérotée du {formatDate(derniereDateEmission!)}</span>
                     : <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>)}
-                  {facture.type === 'FACTURE' && ['EMISE', 'REGLEE'].includes(facture.statut) && <button className="btn btn-secondary" onClick={() => ouvrirAvoirPartiel(facture)}><FilePlus2 size={16} /> Créer un avoir partiel</button>}
+                  {facture.type === 'FACTURE' && ['EMISE', 'REGLEE'].includes(facture.statut) && <button className="btn btn-secondary" disabled={chargement} title={chargement ? 'Liste en cours de chargement' : undefined} onClick={() => ouvrirAvoirPartiel(facture)}><FilePlus2 size={16} /> Créer un avoir partiel</button>}
                   {facture.type === 'FACTURE' && facture.statut === 'EMISE' && <>
                     {(facture.resteDu ?? 0) > 0 && <Link className="btn btn-secondary" to={`/reglements?facture=${facture.id}`}><HandCoins size={16} /> Enregistrer un règlement</Link>}
                     {avoirsPartiels(facture).length
