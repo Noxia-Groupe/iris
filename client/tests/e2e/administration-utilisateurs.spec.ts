@@ -12,14 +12,26 @@ function jetonPour(userId: string) {
   return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
 }
 
+// Attente armée avant l'action qu'elle observe. Si le test échoue avant de l'attendre, elle est
+// rejetée à la fermeture de la page : ce rejet ne doit pas interrompre le test, ce qui ferait
+// échouer son nettoyage et masquerait l'erreur d'origine. Attendue, elle échoue comme avant.
+const armee = <T,>(attente: Promise<T>) => {
+  attente.catch(() => undefined);
+  return attente;
+};
+
 // Message de la prochaine alerte de la page, acceptée aussitôt. L'attente est bornée : sans alerte,
 // le test échoue ici plutôt qu'à l'expiration de son délai.
-const prochaineAlerte = async (page: Page) => {
+const prochaineAlerte = (page: Page) => armee((async () => {
   const alerte = await page.waitForEvent('dialog', { timeout: 15_000 });
   const message = alerte.message();
   await alerte.accept();
   return message;
-};
+})());
+
+// Prochain rechargement de la liste des comptes par la page, attente bornée comme celle des alertes.
+const rechargementListe = (page: Page) =>
+  armee(page.waitForResponse((r) => r.url().endsWith('/api/users') && r.request().method() === 'GET', { timeout: 15_000 }));
 
 // Note toutes les alertes de la page jusqu'à l'arrêt : un parcours accepté n'en affiche aucune.
 const noterAlertes = (page: Page) => {
@@ -154,7 +166,7 @@ test('Administration > Utilisateurs : un refus du type de compte ou de la case C
   type Compte = { id: string; name: string; email: string; role: string };
   const creerCompte = (cle: string, role: string) => envoyer('post', '/users', { email: `refus.${cle}.${suffixe}@iris.test`, name: `Compte refus ${cle} ${suffixe}`, role }) as Promise<Compte>;
   const changementDe = (page: Page, compte: Compte, route: 'role' | 'est-commercial') =>
-    page.waitForResponse((r) => r.url().endsWith(`/api/users/${compte.id}/${route}`) && r.request().method() === 'PATCH');
+    armee(page.waitForResponse((r) => r.url().endsWith(`/api/users/${compte.id}/${route}`) && r.request().method() === 'PATCH', { timeout: 15_000 }));
 
   // Type de compte, vu par un administrateur (non super administrateur).
   const administrateur = await creerCompte('administrateur', 'ADMIN');
@@ -183,7 +195,7 @@ test('Administration > Utilisateurs : un refus du type de compte ou de la case C
 
     // Serveur injoignable : signalé, puis la liste est rechargée ; le type reste celui de la base.
     await vueAdministrateur.route(`**/api/users/${promu.id}/role`, (route) => (route.request().method() === 'PATCH' ? route.abort('failed') : route.continue()));
-    const rechargement = vueAdministrateur.waitForResponse((r) => r.url().endsWith('/api/users') && r.request().method() === 'GET');
+    const rechargement = rechargementListe(vueAdministrateur);
     const alerteReseau = prochaineAlerte(vueAdministrateur);
     await typePromu.selectOption('COMMERCIAL');
     expect(await alerteReseau).toBe('Impossible de joindre le serveur.');
@@ -230,6 +242,17 @@ test('Administration > Utilisateurs : un refus du type de compte ou de la case C
   }
   suivi.arreter();
   expect(suivi.alertes).toEqual([]);
+
+  // Serveur injoignable : signalé, puis la liste est rechargée ; la case reste celle de la base.
+  await admin.route(`**/api/users/${commercial.id}/est-commercial`, (route) => (route.request().method() === 'PATCH' ? route.abort('failed') : route.continue()));
+  const rechargement = rechargementListe(admin);
+  const alerteReseau = prochaineAlerte(admin);
+  await caseCommercialDe(commercial).click();
+  expect(await alerteReseau).toBe('Impossible de joindre le serveur.');
+  expect((await rechargement).status()).toBe(200);
+  await expect(caseCommercialDe(commercial)).not.toBeChecked();
+  expect((await lire(commercial.id))?.estCommercial).toBe(false);
+  await admin.unroute(`**/api/users/${commercial.id}/est-commercial`);
 
   // Administrateur passé conducteur depuis le chargement de la liste : refus 400, affiché ; la liste
   // rechargée montre le nouveau type, sans case.
