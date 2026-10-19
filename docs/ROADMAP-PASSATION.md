@@ -25,7 +25,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - taux horaire et coût de main-d'œuvre réservés aux administrateurs (#134) ;
     - journal des paramètres et des droits, onglet Administration > Journal (#133) ;
     - garde-fous des comptes (règle 2), [détail](HISTORIQUE-DECISIONS.md#décisions-et-lots-des-18-et-19-10-2026) :
-      - au moins un super administrateur actif ; suppression, changement de type et désactivation sérialisés par un verrou, en READ COMMITTED explicite (#216) ;
+      - au moins un super administrateur actif ; suppression, changement de type (hors promotion en super administrateur) et désactivation (non la réactivation) sérialisés par un verrou, en READ COMMITTED explicite (#216) ;
       - garde des comptes super administrateurs refait sur le compte relu sous verrou ; rattachement hiérarchique sous le verrou des retraits (#224) ;
       - suppression d'un compte et de sa fiche intervenant sans interblocage ; liaison d'une fiche sous le verrou des retraits ; READ COMMITTED explicite pour les fiches, le démarrage, les permissions et l'accès financier (#228) ;
       - promotion `SUPERADMIN_EMAILS` du démarrage retentée une fois, échec signalé sans arrêter le serveur (#232).
