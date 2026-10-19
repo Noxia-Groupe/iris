@@ -157,9 +157,17 @@ enregistrerRoutesAnalyseChantier(app);
 // fermer un serveur derrière lui.
 if (require.main === module) {
   reglerDelaisConnexion(app.listen(port, async () => {
-    await initDb();
-    await ensureSuperAdmins();
-    console.log(`Server running on port ${port}`);
+    // Une initialisation impossible (base injoignable, par exemple) est signalée explicitement et
+    // arrête le processus, au lieu d'un rejet non géré sans contexte (#231). Les comptes de départ,
+    // eux, ne l'arrêtent jamais : ensureSuperAdmins signale ses échecs sans rejeter.
+    try {
+      await initDb();
+      await ensureSuperAdmins();
+      console.log(`Server running on port ${port}`);
+    } catch (error) {
+      console.error('[DÉMARRAGE] Initialisation impossible :', error);
+      process.exit(1);
+    }
   }));
 }
 

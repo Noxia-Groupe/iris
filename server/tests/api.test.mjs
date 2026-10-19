@@ -259,7 +259,7 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
-      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test',
+      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
       'garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
@@ -4856,6 +4856,101 @@ if (!TEST_DATABASE_URL) {
         assert.equal(await prisma.intervenant.count({ where: { id: fiche.id } }), 0, contexte);
         assert.equal(await prisma.user.count({ where: { id: compte.id } }), 0, contexte);
       }
+    });
+
+    // #231 : la promotion du démarrage, refusée une fois parce qu'une fiche est reliée au compte
+    // pendant qu'elle attend son verrou (FICHE_RELIEE), est retentée : elle délie alors la fiche et
+    // aboutit, sans rejet qui arrêterait le serveur.
+    test('la promotion du démarrage refusée une fois (fiche reliée au même moment) est retentée et aboutit', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.demarrage.course@iris.test', name: 'TEST Pilote3 démarrage course', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 démarrage course', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const emails = process.env.SUPERADMIN_EMAILS;
+      const erreurs = mock.method(console, 'error', () => {});
+      const avertissements = mock.method(console, 'warn', () => {});
+      let appelsErreur = [];
+      let appelsAvertissement = [];
+      process.env.SUPERADMIN_EMAILS = `${emails},${compte.email}`;
+      try {
+        let demarrage;
+        const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
+        try {
+          demarrage = ensureSuperAdmins().then(() => null, (erreur) => erreur);
+          assert.equal(await attendreAttentesVerrou(1), true, 'la promotion attend le compte');
+          await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: compte.id } });
+        } finally {
+          await relacher();
+        }
+        assert.equal(await demarrage, null);
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+        appelsErreur = [...erreurs.mock.calls];
+        appelsAvertissement = [...avertissements.mock.calls];
+        erreurs.mock.restore();
+        avertissements.mock.restore();
+      }
+      // Le premier essai est signalé comme tel ; le second aboutit, sans signalement d'échec.
+      assert.deepEqual(appelsErreur.map((appel) => String(appel.arguments[0])), [], 'aucun signalement quand le second essai aboutit');
+      assert.equal(appelsAvertissement.length, 1);
+      assert.match(String(appelsAvertissement[0].arguments[0]), new RegExp(`${compte.email.replace(/\./g, '\\.')} : essai 1 en échec, nouvel essai`));
+      assert.equal(appelsAvertissement[0].arguments[1]?.code, 'FICHE_RELIEE');
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role, 'SUPERADMIN');
+      assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, null);
+      // Le premier essai, annulé, n'a rien journalisé : une promotion et une fiche déliée.
+      assert.equal((await journalCompte(compte.id, 'TYPE_COMPTE')).length, 1);
+      assert.equal((await journalFiche(compte.id)).length, 1);
+    });
+
+    // #231 : un compte de départ dont la promotion échoue à chaque essai (ici, refusée par un trigger
+    // de test) est signalé, sans rejet ; les comptes suivants sont traités.
+    test('un compte de départ impossible à promouvoir est signalé sans arrêter le démarrage, et les suivants sont traités', async () => {
+      const bloque = await prisma.user.create({ data: { email: 'pilote3.demarrage.bloque@iris.test', name: 'TEST Pilote3 démarrage bloqué', role: 'CONDUCTEUR_TRAVAUX' } });
+      const nouveau = 'pilote3.demarrage.nouveau@iris.test';
+      const emails = process.env.SUPERADMIN_EMAILS;
+      // Rejouable après une exécution interrompue : fonction remplacée, trigger recréé.
+      await prisma.$executeRawUnsafe('CREATE OR REPLACE FUNCTION test_refuser_promotion_demarrage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION \'Promotion refusée par le test\'; END $$');
+      const erreurs = mock.method(console, 'error', () => {});
+      const avertissements = mock.method(console, 'warn', () => {});
+      let appels = [];
+      let appelsAvertissement = [];
+      process.env.SUPERADMIN_EMAILS = `${emails},${bloque.email},${nouveau}`;
+      try {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_refuser_promotion_demarrage ON "User"');
+        await prisma.$executeRawUnsafe(`CREATE TRIGGER test_refuser_promotion_demarrage BEFORE UPDATE ON "User" FOR EACH ROW WHEN (OLD."id" = '${bloque.id}') EXECUTE FUNCTION test_refuser_promotion_demarrage()`);
+        await ensureSuperAdmins();
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+        appels = [...erreurs.mock.calls];
+        appelsAvertissement = [...avertissements.mock.calls];
+        erreurs.mock.restore();
+        avertissements.mock.restore();
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_refuser_promotion_demarrage ON "User"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_refuser_promotion_demarrage()');
+      }
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: bloque.id } })).role, 'CONDUCTEUR_TRAVAUX');
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { email: nouveau } })).role, 'SUPERADMIN');
+      const signalements = appels.filter((appel) => String(appel.arguments[0]).includes(bloque.email));
+      assert.equal(signalements.length, 1, JSON.stringify(appels.map((appel) => String(appel.arguments[0]))));
+      assert.match(String(signalements[0].arguments[0]), /ni promu ni créé après 2 essais : nouvel essai au prochain démarrage/);
+      assert.match(String(signalements[0].arguments[1]?.message), /Promotion refusée par le test/);
+      assert.equal(appelsAvertissement.filter((appel) => String(appel.arguments[0]).includes(bloque.email)).length, 1);
+    });
+
+    // #231 : le décompte final des super administrateurs, s'il échoue, est signalé sans rejet.
+    test('un décompte des super administrateurs impossible au démarrage est signalé sans rejet', async () => {
+      const decompte = appPrisma.user.count;
+      const erreurs = mock.method(console, 'error', () => {});
+      let appels = [];
+      appPrisma.user.count = async () => { throw new Error('Décompte refusé par le test'); };
+      try {
+        await ensureSuperAdmins();
+      } finally {
+        appPrisma.user.count = decompte;
+        appels = [...erreurs.mock.calls];
+        erreurs.mock.restore();
+      }
+      assert.equal(appels.length, 1, JSON.stringify(appels.map((appel) => String(appel.arguments[0]))));
+      assert.match(String(appels[0].arguments[0]), /\[DÉMARRAGE\] Décompte des super administrateurs impossible/);
+      assert.match(String(appels[0].arguments[1]?.message), /Décompte refusé par le test/);
     });
 
     test('un changement de type pendant la suppression du compte répond 404, jamais 500', async () => {
