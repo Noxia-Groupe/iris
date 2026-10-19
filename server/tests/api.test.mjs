@@ -8239,8 +8239,8 @@ if (!TEST_DATABASE_URL) {
       const statut = async (id) => (await prisma.facture.findUniqueOrThrow({ where: { id } })).statut;
       // Pièce insérée non scellée, puis dotée d'écritures équilibrées et scellée, comme le ferait une
       // création valide : seul le garde du cycle peut alors la refuser.
-      const naissance = (type, statutPiece) => transaction(async (tx) => {
-        const creee = await tx.facture.create({ data: piece(type, statutPiece) });
+      const naissance = (type, statutPiece, extra = {}) => transaction(async (tx) => {
+        const creee = await tx.facture.create({ data: piece(type, statutPiece, extra) });
         await tx.ecritureFacture.createMany({ data: ecritures(creee.id, type) });
         await tx.facture.update({ where: { id: creee.id }, data: { ecrituresScellees: true } });
       });
@@ -8250,7 +8250,9 @@ if (!TEST_DATABASE_URL) {
         // Création : une pièce ne naît ni réglée ni annulée, même scellée avec des écritures équilibrées ;
         // un statut inconnu reste refusé par la contrainte.
         await assert.rejects(naissance('FACTURE', 'ANNULEE'), creationHorsCycle, 'facture née annulée');
-        for (const statutAvoir of ['REGLEE', 'ANNULEE']) await assert.rejects(naissance('AVOIR', statutAvoir), creationHorsCycle, `avoir né ${statutAvoir}`);
+        // L'avoir porte sa facture d'origine, émise : sans elle, Facture_avoir_origine_check le refuserait.
+        const origine = await emettre('TEST cycle origine des avoirs');
+        for (const statutAvoir of ['REGLEE', 'ANNULEE']) await assert.rejects(naissance('AVOIR', statutAvoir, { factureOrigineId: origine.id }), creationHorsCycle, `avoir né ${statutAvoir}`);
         await assert.rejects(prisma.facture.create({ data: piece('FACTURE', 'ARCHIVEE') }), /Facture_statut_check/);
 
         // Brouillon → annulée, même scellé avec des écritures équilibrées dans la même mise à jour.
@@ -8292,6 +8294,14 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual([Number(partiel.body.totalHt), Number(partiel.body.totalTva), Number(partiel.body.totalTtc), partiel.body.estAvoirAnnulation], [10, 2, 12, false]);
         await assert.rejects(transaction((tx) => tx.facture.update({ where: { id: partielle.id }, data: { statut: 'ANNULEE' } })), sansAvoir, 'annulée avec un avoir partiel');
         assert.equal(await statut(partielle.id), 'EMISE');
+        // Le garde réciproque relit la ligne à la validation : un avoir brouillon marqué avoir
+        // d'annulation puis démarqué dans la même transaction n'en est plus un, et passe.
+        const avoirDemarque = await transaction(async (tx) => {
+          const avoirBrouillon = await tx.facture.create({ data: piece('AVOIR', 'BROUILLON', { factureOrigineId: partielle.id }) });
+          await tx.facture.update({ where: { id: avoirBrouillon.id }, data: { estAvoirAnnulation: true } });
+          return tx.facture.update({ where: { id: avoirBrouillon.id }, data: { estAvoirAnnulation: false } });
+        });
+        purger.push(avoirDemarque.id);
 
         // L'annulation de l'API, avec son avoir, passe ; « annulée » est ensuite définitif.
         const avoir = await annulerParApi(facture);
@@ -8309,7 +8319,13 @@ if (!TEST_DATABASE_URL) {
         await transaction((tx) => tx.$executeRaw`UPDATE "Facture" SET "updatedAt" = now() WHERE "id" = ${autre.id}`);
         for (const [colonne, t] of autresMontants) await assert.rejects(transaction((tx) => avoirAnnulation(tx, autre.id, { t })), avoirSansFacture, `avoir d’annulation historique d’un autre ${colonne}`);
         await assert.rejects(transaction((tx) => avoirAnnulation(tx, autre.id, { statut: 'BROUILLON' })), avoirSansFacture, 'avoir d’annulation historique resté brouillon');
-        await transaction((tx) => avoirAnnulation(tx, autre.id));
+        // Le vrai passe, même créé brouillon puis émis et scellé dans la même transaction : le garde
+        // réciproque juge la ligne telle qu'à la validation, pas telle qu'à sa création.
+        await transaction(async (tx) => {
+          const avoir = await avoirAnnulation(tx, autre.id, { statut: 'BROUILLON' });
+          await tx.ecritureFacture.createMany({ data: ecritures(avoir.id, 'AVOIR') });
+          await tx.facture.update({ where: { id: avoir.id }, data: { statut: 'EMISE', ecrituresScellees: true } });
+        });
         assert.equal(await prisma.facture.count({ where: { factureOrigineId: autre.id, estAvoirAnnulation: true } }), 1);
 
         // #222 : règlements, affectations et journaux comptables en ajout seul ne se vident pas ; le
