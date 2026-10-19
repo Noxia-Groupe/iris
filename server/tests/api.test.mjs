@@ -8672,6 +8672,195 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // #230 : les règles de plafond des avoirs, que l'API appliquait seule, tiennent en base pour un
+    // avoir écrit directement en SQL. Les avoirs émis d'une facture ne dépassent ni ses montants, ni sa
+    // ventilation par taux ; un avoir partiel ne crédite qu'une facture émise ou réglée. Chaque refus
+    // est prouvé par un cas que seul son contrôle arrête ; les parcours de l'API restent inchangés.
+    test('les avoirs émis d’une facture ne dépassent ni ses montants ni sa ventilation, même écrits en SQL', async () => {
+      const auth = `Bearer ${session}`;
+      const compteTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
+      await tvaFixture(10, compteTva.id);
+      const ligne = (prixUnitaireHt, tauxTva) => ({ designation: `TEST plafond ${tauxTva} %`, nature: 'PRESTATION', quantite: 1, prixUnitaireHt, tauxTva });
+      const creer = async (motif, lignes) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', auth).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        return brouillon.body;
+      };
+      const emettre = async (motif, lignes = [ligne(10, 20)]) => {
+        const facture = await creer(motif, lignes);
+        const emission = await request(app).post(`/api/factures/${facture.id}/emettre`).set('Authorization', auth);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return facture;
+      };
+      const avoirPartielApi = async (facture, lignes) => {
+        const reponse = await request(app).post(`/api/factures/${facture.id}/avoirs`).set('Authorization', auth).send({ lignes });
+        assert.equal(reponse.status, 201, JSON.stringify(reponse.body));
+        return reponse.body;
+      };
+      const montantTotal = /Les avoirs de la facture .* dépassent son montant total/;
+      const ventilationDepassee = (taux) => new RegExp(`Les avoirs de la facture .* dépassent sa ventilation à la TVA de ${taux} %`);
+      const tauxAbsent = /porte un taux de TVA \(5\.50 %\) absent de la facture/;
+      const statutRefuse = /Un avoir partiel ne crédite qu'une facture émise ou réglée/;
+      const centimes = (montant) => Math.round(montant * 100) / 100;
+      // Pièce écrite en SQL comme le ferait une création valide : ses montants, ses lignes ou sa
+      // ventilation (taux, HT, TVA), puis, émise, des écritures équilibrées sur son TTC et le scellement.
+      // `contenu` : 'ventilation' (lignes et ventilation), 'lignes' (ventilation déduite des lignes) ou
+      // 'aucun' (montants seuls : seul le contrôle des montants totaux la voit).
+      const pieceSql = async (tx, { type = 'AVOIR', statut = 'EMISE', factureOrigineId = null, estAvoirAnnulation = false, taux = [], contenu = 'ventilation', montants = null }) => {
+        const totalHt = montants?.totalHt ?? centimes(taux.reduce((somme, [, ht]) => somme + ht, 0));
+        const totalTva = montants?.totalTva ?? centimes(taux.reduce((somme, [, , tva]) => somme + tva, 0));
+        const totalTtc = montants?.totalTtc ?? centimes(totalHt + totalTva);
+        const piece = await tx.facture.create({ data: {
+          clientId, clientRaisonSociale: 'TEST Client plafond', type, statut, factureOrigineId, estAvoirAnnulation,
+          dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
+          totalHt, totalTva, totalTtc, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST plafond SQL',
+        } });
+        if (contenu !== 'aucun') {
+          await tx.factureLigne.createMany({ data: taux.map(([t, ht, tva], ordre) => ({ factureId: piece.id, ordre, designation: `TEST plafond SQL ${t} %`, nature: 'PRESTATION', quantite: 1, prixUnitaireHt: ht, tauxTva: t, totalHt: ht, totalTtc: centimes(ht + tva) })) });
+        }
+        if (contenu === 'ventilation') {
+          await tx.factureVentilationTva.createMany({ data: taux.map(([t, ht, tva]) => ({ factureId: piece.id, tauxTva: t, totalHt: ht, totalTva: tva, totalTtc: centimes(ht + tva) })) });
+        }
+        if (statut !== 'BROUILLON') await sceller(tx, piece);
+        return piece;
+      };
+      const sceller = async (tx, piece) => {
+        const auDebit = (montant, debit) => (debit === (piece.type === 'FACTURE') ? { debit: montant, credit: 0 } : { debit: 0, credit: montant });
+        await tx.ecritureFacture.createMany({ data: [
+          { factureId: piece.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'TEST Clients', ...auDebit(Number(piece.totalTtc), true) },
+          { factureId: piece.id, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'TEST Ventes', ...auDebit(centimes(Number(piece.totalTtc) - Number(piece.totalTva)), false) },
+          { factureId: piece.id, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TEST TVA', ...auDebit(Number(piece.totalTva), false) },
+        ] });
+        await tx.facture.update({ where: { id: piece.id }, data: { ecrituresScellees: true } });
+      };
+      // Les gardes différés sont vérifiés avant la fin : Prisma résoudrait une transaction dont le COMMIT échoue.
+      const transaction = (operations, options) => prisma.$transaction(async (tx) => {
+        const resultat = await operations(tx);
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        return resultat;
+      }, options);
+      const avoirSql = (factureOrigineId, options) => transaction((tx) => pieceSql(tx, { factureOrigineId, ...options }));
+      const purger = [];
+      let echec = null;
+      try {
+        // Montants totaux. Facture de 10 € HT à 20 %, créditée de 5 € HT par l'API : il reste 5 € HT,
+        // 1 € de TVA et 6 € TTC. Un avoir sans contenu, en dépassement d'un centime sur une seule
+        // colonne, est refusé ; le reste exact passe, et la facture n'accepte plus rien.
+        const simple = await emettre('TEST plafond montants');
+        purger.push(simple.id);
+        await avoirPartielApi(simple, [ligne(5, 20)]);
+        for (const [colonne, montants] of [
+          ['HT', { totalHt: 5.01, totalTva: 1, totalTtc: 6 }],
+          ['TVA', { totalHt: 5, totalTva: 1.01, totalTtc: 6 }],
+          ['TTC', { totalHt: 5, totalTva: 1, totalTtc: 6.01 }],
+        ]) await assert.rejects(avoirSql(simple.id, { contenu: 'aucun', montants }), montantTotal, `dépassement du ${colonne} total`);
+        await avoirSql(simple.id, { contenu: 'aucun', montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } });
+        await assert.rejects(avoirSql(simple.id, { contenu: 'aucun', montants: { totalHt: 0, totalTva: 0, totalTtc: 0.01 } }), montantTotal, 'facture entièrement créditée');
+        // Un avoir resté brouillon ne compte pas ; il est vérifié quand il est émis.
+        const brouillonAvoir = await avoirSql(simple.id, { statut: 'BROUILLON', taux: [[20, 1, 0.2]] });
+        await assert.rejects(transaction(async (tx) => {
+          const avoir = await tx.facture.update({ where: { id: brouillonAvoir.id }, data: { statut: 'EMISE' } });
+          await sceller(tx, avoir);
+        }), montantTotal, 'avoir brouillon émis au-delà du plafond');
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillonAvoir.id } })).statut, 'BROUILLON');
+
+        // Ventilation par taux. Facture de 10 € HT à 20 % et 10 € HT à 10 %, créditée de 5 € HT à 20 %
+        // par l'API : il reste 5 € HT et 1 € de TVA à 20 %, 10 € HT et 1 € de TVA à 10 %. Chaque avoir
+        // ci-dessous reste sous les montants totaux de la facture : seul le contrôle par taux l'arrête.
+        const mixte = await emettre('TEST plafond ventilation', [ligne(10, 20), ligne(10, 10)]);
+        purger.push(mixte.id);
+        await avoirPartielApi(mixte, [ligne(5, 20)]);
+        await assert.rejects(avoirSql(mixte.id, { taux: [[10, 10.01, 1]] }), ventilationDepassee('10.00'), 'HT à 10 % dépassé (ventilation enregistrée)');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[10, 10.01, 1]], contenu: 'lignes' }), ventilationDepassee('10.00'), 'HT à 10 % dépassé (ventilation déduite des lignes)');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[20, 1, 1.01]] }), ventilationDepassee('20.00'), 'TVA à 20 % dépassée');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[5.5, 1, 0.06]] }), tauxAbsent, 'taux absent de la facture');
+        // Le reste exact du taux passe.
+        await avoirSql(mixte.id, { taux: [[10, 10, 1]] });
+
+        // Facture historique sans ventilation enregistrée : sa ventilation est déduite de ses lignes.
+        const historique = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2], [10, 10, 1]], contenu: 'lignes' }));
+        purger.push(historique.id);
+        await assert.rejects(avoirSql(historique.id, { taux: [[10, 10.01, 1]] }), ventilationDepassee('10.00'), 'HT à 10 % d’une facture historique dépassé');
+        await assert.rejects(avoirSql(historique.id, { taux: [[5.5, 1, 0.06]] }), tauxAbsent, 'taux absent d’une facture historique');
+        await avoirSql(historique.id, { taux: [[10, 10, 1]] });
+
+        // Statut de la pièce créditée, avec des avoirs partiels sous son plafond : facture brouillon,
+        // avoir, et facture annulée avant la migration de #227, sans avoir (simulée en retirant celui
+        // de l'API).
+        const brouillon = await creer('TEST plafond brouillon', [ligne(10, 20)]);
+        purger.push(brouillon.id);
+        await assert.rejects(avoirSql(brouillon.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’un brouillon');
+        const avoirCredite = await avoirSql(mixte.id, { statut: 'BROUILLON', taux: [[20, 2, 0.4]] });
+        await assert.rejects(transaction((tx) => pieceSql(tx, { factureOrigineId: avoirCredite.id, taux: [[20, 1, 0.2]] })), statutRefuse, 'avoir partiel d’un avoir');
+        const annulee = await emettre('TEST plafond annulée');
+        purger.push(annulee.id);
+        const annulation = await request(app).post(`/api/factures/${annulee.id}/annuler`).set('Authorization', auth);
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        await purgerPieceJetable(annulation.body.avoir.id);
+        await assert.rejects(avoirSql(annulee.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’une facture annulée');
+
+        // Annulation à côté d'un avoir partiel : l'avoir d'annulation, émis aux mêmes montants, satisfait
+        // les gardes de #227 ; le partiel la fait refuser.
+        const partielle = await emettre('TEST plafond annulation');
+        purger.push(partielle.id);
+        await avoirPartielApi(partielle, [ligne(1, 20)]);
+        await assert.rejects(transaction(async (tx) => {
+          await tx.facture.update({ where: { id: partielle.id }, data: { statut: 'ANNULEE' } });
+          await pieceSql(tx, { factureOrigineId: partielle.id, estAvoirAnnulation: true, taux: [[20, 10, 2]] });
+        }), statutRefuse, 'annulation à côté d’un avoir partiel');
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: partielle.id } })).statut, 'EMISE');
+
+        // Deux transactions qui créditent chacune 6 € TTC sur une facture de 12 € se sérialisent : la
+        // seconde attend la première sur la facture, puis relit ses avoirs et est refusée.
+        const disputee = await emettre('TEST plafond concurrent');
+        purger.push(disputee.id);
+        let liberer, pret;
+        const attente = new Promise((resolve) => { liberer = resolve; });
+        const premiereValidee = new Promise((resolve) => { pret = resolve; });
+        const premiere = transaction(async (tx) => {
+          const avoir = await pieceSql(tx, { factureOrigineId: disputee.id, taux: [[20, 6, 1.2]] });
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          pret();
+          await attente;
+          return avoir;
+        }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+        await premiereValidee;
+        const seconde = avoirSql(disputee.id, { taux: [[20, 6, 1.2]] }).then(() => null, (erreur) => erreur);
+        try {
+          let bloque = false;
+          for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%Facture%') AS attente`;
+            bloque = etat.attente;
+            if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          assert.equal(bloque, true, 'le second avoir attend la facture verrouillée par le premier');
+        } finally {
+          liberer();
+        }
+        assert.equal(await premiere, null, 'le premier avoir est validé');
+        assert.match(String((await seconde)?.message), montantTotal, 'le second avoir est refusé');
+        const credite = await prisma.facture.aggregate({ where: { factureOrigineId: disputee.id, statut: { not: 'BROUILLON' } }, _sum: { totalTtc: true } });
+        assert.equal(Number(credite._sum.totalTtc), 7.2);
+      } catch (erreur) {
+        echec = erreur;
+        throw erreur;
+      } finally {
+        // Les avoirs d'abord (y compris un avoir accepté à tort) ; une erreur de nettoyage ne masque
+        // pas l'échec d'origine.
+        try {
+          for (const id of purger) {
+            for (const { id: avoirId } of await prisma.facture.findMany({ where: { factureOrigineId: id }, select: { id: true } })) {
+              for (const { id: sousAvoirId } of await prisma.facture.findMany({ where: { factureOrigineId: avoirId }, select: { id: true } })) await purgerPieceJetable(sousAvoirId);
+              await purgerPieceJetable(avoirId);
+            }
+            await purgerPieceJetable(id);
+          }
+        } catch (erreur) {
+          if (!echec) throw erreur;
+        }
+      }
+    });
+
     // #222 : deux insertions concurrentes d'écritures dans une même pièce non scellée, chacune suivie
     // d'une mise à jour de la pièce, se sérialisent sans interblocage (le verrou partagé d'origine s'y
     // interbloquait). Prisma résout une transaction dont le COMMIT échoue : le nombre d'écritures fait foi.
