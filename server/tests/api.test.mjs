@@ -4865,9 +4865,13 @@ if (!TEST_DATABASE_URL) {
       const compte = await prisma.user.create({ data: { email: 'pilote3.demarrage.course@iris.test', name: 'TEST Pilote3 démarrage course', role: 'TECHNICIEN' } });
       const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 démarrage course', role: 'Technicien', tauxHoraireCharge: 40 } });
       const emails = process.env.SUPERADMIN_EMAILS;
+      const erreurs = mock.method(console, 'error', () => {});
+      const avertissements = mock.method(console, 'warn', () => {});
+      let appelsErreur = [];
+      let appelsAvertissement = [];
       process.env.SUPERADMIN_EMAILS = `${emails},${compte.email}`;
-      let demarrage;
       try {
+        let demarrage;
         const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
         try {
           demarrage = ensureSuperAdmins().then(() => null, (erreur) => erreur);
@@ -4876,10 +4880,19 @@ if (!TEST_DATABASE_URL) {
         } finally {
           await relacher();
         }
+        assert.equal(await demarrage, null);
       } finally {
         process.env.SUPERADMIN_EMAILS = emails;
+        appelsErreur = [...erreurs.mock.calls];
+        appelsAvertissement = [...avertissements.mock.calls];
+        erreurs.mock.restore();
+        avertissements.mock.restore();
       }
-      assert.equal(await demarrage, null);
+      // Le premier essai est signalé comme tel ; le second aboutit, sans signalement d'échec.
+      assert.deepEqual(appelsErreur.map((appel) => String(appel.arguments[0])), [], 'aucun signalement quand le second essai aboutit');
+      assert.equal(appelsAvertissement.length, 1);
+      assert.match(String(appelsAvertissement[0].arguments[0]), new RegExp(`${compte.email.replace(/\./g, '\\.')} : essai 1 en échec, nouvel essai`));
+      assert.equal(appelsAvertissement[0].arguments[1]?.code, 'FICHE_RELIEE');
       assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role, 'SUPERADMIN');
       assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, null);
       // Le premier essai, annulé, n'a rien journalisé : une promotion et une fiche déliée.
@@ -4893,26 +4906,51 @@ if (!TEST_DATABASE_URL) {
       const bloque = await prisma.user.create({ data: { email: 'pilote3.demarrage.bloque@iris.test', name: 'TEST Pilote3 démarrage bloqué', role: 'CONDUCTEUR_TRAVAUX' } });
       const nouveau = 'pilote3.demarrage.nouveau@iris.test';
       const emails = process.env.SUPERADMIN_EMAILS;
-      await prisma.$executeRawUnsafe('CREATE FUNCTION test_refuser_promotion_demarrage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION \'Promotion refusée par le test\'; END $$');
-      await prisma.$executeRawUnsafe(`CREATE TRIGGER test_refuser_promotion_demarrage BEFORE UPDATE ON "User" FOR EACH ROW WHEN (OLD."id" = '${bloque.id}') EXECUTE FUNCTION test_refuser_promotion_demarrage()`);
+      // Rejouable après une exécution interrompue : fonction remplacée, trigger recréé.
+      await prisma.$executeRawUnsafe('CREATE OR REPLACE FUNCTION test_refuser_promotion_demarrage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION \'Promotion refusée par le test\'; END $$');
       const erreurs = mock.method(console, 'error', () => {});
+      const avertissements = mock.method(console, 'warn', () => {});
       let appels = [];
+      let appelsAvertissement = [];
       process.env.SUPERADMIN_EMAILS = `${emails},${bloque.email},${nouveau}`;
       try {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_refuser_promotion_demarrage ON "User"');
+        await prisma.$executeRawUnsafe(`CREATE TRIGGER test_refuser_promotion_demarrage BEFORE UPDATE ON "User" FOR EACH ROW WHEN (OLD."id" = '${bloque.id}') EXECUTE FUNCTION test_refuser_promotion_demarrage()`);
         await ensureSuperAdmins();
       } finally {
         process.env.SUPERADMIN_EMAILS = emails;
         appels = [...erreurs.mock.calls];
+        appelsAvertissement = [...avertissements.mock.calls];
         erreurs.mock.restore();
-        await prisma.$executeRawUnsafe('DROP TRIGGER test_refuser_promotion_demarrage ON "User"');
-        await prisma.$executeRawUnsafe('DROP FUNCTION test_refuser_promotion_demarrage()');
+        avertissements.mock.restore();
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_refuser_promotion_demarrage ON "User"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_refuser_promotion_demarrage()');
       }
       assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: bloque.id } })).role, 'CONDUCTEUR_TRAVAUX');
       assert.equal((await prisma.user.findUniqueOrThrow({ where: { email: nouveau } })).role, 'SUPERADMIN');
       const signalements = appels.filter((appel) => String(appel.arguments[0]).includes(bloque.email));
       assert.equal(signalements.length, 1, JSON.stringify(appels.map((appel) => String(appel.arguments[0]))));
-      assert.match(String(signalements[0].arguments[0]), /ni promu ni créé après 2 essais/);
+      assert.match(String(signalements[0].arguments[0]), /ni promu ni créé après 2 essais : nouvel essai au prochain démarrage/);
       assert.match(String(signalements[0].arguments[1]?.message), /Promotion refusée par le test/);
+      assert.equal(appelsAvertissement.filter((appel) => String(appel.arguments[0]).includes(bloque.email)).length, 1);
+    });
+
+    // #231 : le décompte final des super administrateurs, s'il échoue, est signalé sans rejet.
+    test('un décompte des super administrateurs impossible au démarrage est signalé sans rejet', async () => {
+      const decompte = appPrisma.user.count;
+      const erreurs = mock.method(console, 'error', () => {});
+      let appels = [];
+      appPrisma.user.count = async () => { throw new Error('Décompte refusé par le test'); };
+      try {
+        await ensureSuperAdmins();
+      } finally {
+        appPrisma.user.count = decompte;
+        appels = [...erreurs.mock.calls];
+        erreurs.mock.restore();
+      }
+      assert.equal(appels.length, 1, JSON.stringify(appels.map((appel) => String(appel.arguments[0]))));
+      assert.match(String(appels[0].arguments[0]), /\[DÉMARRAGE\] Décompte des super administrateurs impossible/);
+      assert.match(String(appels[0].arguments[1]?.message), /Décompte refusé par le test/);
     });
 
     test('un changement de type pendant la suppression du compte répond 404, jamais 500', async () => {

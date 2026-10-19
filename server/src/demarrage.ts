@@ -23,11 +23,12 @@ function nameFromEmail(email: string): string {
   return local.replace(/\b\w/g, (c) => c.toUpperCase()) || email;
 }
 
-// Un compte de départ dont la promotion ou la création échoue (fiche intervenant reliée au même
-// moment, base momentanément indisponible…) n'arrête pas le serveur : appelée depuis le rappel de
-// listen, cette fonction ne rejette jamais, sans quoi le processus s'arrêterait sur un rejet non
-// géré (#231). L'opération est retentée une fois, puis l'échec est signalé et le démarrage
-// continue avec les comptes suivants ; elle sera rejouée au prochain démarrage.
+// Un compte de départ dont la promotion ou la création échoue n'arrête pas le serveur : appelée
+// depuis le rappel de listen, cette fonction ne rejette jamais, sans quoi le processus
+// s'arrêterait sur un rejet non géré (#231). L'opération est retentée une fois, aussitôt : ce
+// second essai vise les refus de concurrence (fiche intervenant reliée au même moment, compte créé
+// au même moment par ailleurs) ; une base indisponible le fait échouer aussi. L'échec est alors
+// signalé, le démarrage continue avec les comptes suivants, et le prochain démarrage réessaiera.
 const ESSAIS_COMPTE_DE_DEPART = 2;
 
 export const ensureSuperAdmins = async () => {
@@ -42,8 +43,10 @@ export const ensureSuperAdmins = async () => {
         await assurerSuperAdmin(email);
         break;
       } catch (error) {
-        if (essai === ESSAIS_COMPTE_DE_DEPART) {
-          console.error(`[DÉMARRAGE] Compte super administrateur ${email} ni promu ni créé après ${ESSAIS_COMPTE_DE_DEPART} essais : il le sera au prochain démarrage.`, error);
+        if (essai < ESSAIS_COMPTE_DE_DEPART) {
+          console.warn(`[DÉMARRAGE] Compte super administrateur ${email} : essai ${essai} en échec, nouvel essai.`, error);
+        } else {
+          console.error(`[DÉMARRAGE] Compte super administrateur ${email} ni promu ni créé après ${ESSAIS_COMPTE_DE_DEPART} essais : nouvel essai au prochain démarrage.`, error);
         }
       }
     }

@@ -3,6 +3,7 @@
 // qui la réutilise à cet instant reçoit ECONNRESET. Ces tests ouvrent une vraie connexion TCP,
 // sans base de données : /api/health ne lit rien.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import net from 'node:net';
 import test, { describe } from 'node:test';
@@ -88,4 +89,18 @@ describe('Délais de connexion du serveur HTTP', { timeout: 20_000 }, () => {
   test('une connexion keep-alive inactive depuis 7,5 s reste ouverte et sert la requête suivante', async () => {
     assert.equal(await fermeeApresInactivite(reglerDelaisConnexion(app.listen(0)), 7_500), false);
   });
+});
+
+// Démarrage (#231) : une base injoignable arrête le processus avec un message explicite, et non sur
+// un rejet non géré sans contexte. Le serveur compilé est lancé pour de vrai, sur un port libre
+// choisi par le système, avec une base qui refuse la connexion.
+test('une base injoignable au démarrage arrête le serveur avec un message explicite (code 1)', () => {
+  const serveur = spawnSync(process.execPath, [new URL('../dist/index.js', import.meta.url).pathname], {
+    env: { ...process.env, PORT: '0', SUPERADMIN_EMAILS: '', DATABASE_URL: 'postgresql://iris:iris@127.0.0.1:1/iris_injoignable?schema=public&connect_timeout=5' },
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  assert.equal(serveur.status, 1, `sortie : ${serveur.status} ${serveur.signal}\n${serveur.stderr}`);
+  assert.match(serveur.stderr, /\[DÉMARRAGE\] Initialisation impossible/);
+  assert.doesNotMatch(serveur.stdout, /Server running/);
 });
