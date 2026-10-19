@@ -6532,20 +6532,30 @@ if (!TEST_DATABASE_URL) {
       const initial = await request(app).get(url).set('Authorization', auth);
       assert.equal(initial.status, 200, JSON.stringify(initial.body));
       assert.deepEqual(initial.body, { derniereDateEmission: null });
-      const creer = (type, statut, numero, jour, factureOrigineId = null) => prisma.$transaction(async tx => {
-        const piece = await tx.facture.create({ data: {
-          clientId, clientRaisonSociale: 'TEST Client contrat maintenance', type, statut, numero, factureOrigineId,
+      const piece = async (tx, type, statut, numero, jour, factureOrigineId = null, estAvoirAnnulation = false) => {
+        const creee = await tx.facture.create({ data: {
+          clientId, clientRaisonSociale: 'TEST Client contrat maintenance', type, statut, numero, factureOrigineId, estAvoirAnnulation,
           dateEmission: new Date(`${jour}T00:00:00.000Z`), dateEcheance: new Date(`${jour}T00:00:00.000Z`),
           totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST chronologie',
           ecrituresScellees: false,
         } });
         if (statut !== 'BROUILLON') await tx.ecritureFacture.createMany({ data: [
-          { factureId: piece.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'Clients', debit: type === 'AVOIR' ? 0 : 12, credit: type === 'AVOIR' ? 12 : 0 },
-          { factureId: piece.id, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'Ventes', debit: type === 'AVOIR' ? 10 : 0, credit: type === 'AVOIR' ? 0 : 10 },
-          { factureId: piece.id, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TVA', debit: type === 'AVOIR' ? 2 : 0, credit: type === 'AVOIR' ? 0 : 2 },
+          { factureId: creee.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'Clients', debit: type === 'AVOIR' ? 0 : 12, credit: type === 'AVOIR' ? 12 : 0 },
+          { factureId: creee.id, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'Ventes', debit: type === 'AVOIR' ? 10 : 0, credit: type === 'AVOIR' ? 0 : 10 },
+          { factureId: creee.id, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TVA', debit: type === 'AVOIR' ? 2 : 0, credit: type === 'AVOIR' ? 0 : 2 },
         ] });
-        if (statut !== 'BROUILLON') await tx.facture.update({ where: { id: piece.id }, data: { ecrituresScellees: true } });
-        return piece;
+        if (statut !== 'BROUILLON') await tx.facture.update({ where: { id: creee.id }, data: { ecrituresScellees: true } });
+        return creee;
+      };
+      const creer = (type, statut, numero, jour, factureOrigineId = null) => prisma.$transaction(async tx => {
+        // Une pièce ne naît jamais annulée (cycle des statuts, #221) : la facture naît émise, puis
+        // s'annule avec son avoir d'annulation dans la même transaction, comme dans l'application.
+        if (statut !== 'ANNULEE') return piece(tx, type, statut, numero, jour, factureOrigineId);
+        const facture = await piece(tx, type, 'EMISE', numero, jour);
+        await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
+        const avoir = await piece(tx, 'AVOIR', 'EMISE', `${numero}-AV`, jour, facture.id, true);
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        return { ...facture, avoirId: avoir.id };
       });
       const ids = [];
       try {
@@ -6554,16 +6564,19 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: null });
         ids.push((await creer('FACTURE', 'EMISE', 'TEST-F-101', '2026-09-27')).id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-27T00:00:00.000Z' });
-        ids.push((await creer('FACTURE', 'ANNULEE', 'TEST-F-102', '2026-09-28')).id);
+        const annulee = await creer('FACTURE', 'ANNULEE', 'TEST-F-102', '2026-09-28');
+        ids.push(annulee.avoirId, annulee.id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-28T00:00:00.000Z' });
-        // Une facture ne naît jamais « réglée » (gardes des règlements, immédiate et différée) : ce
-        // test de chronologie fabrique la pièce brute en suspendant ces seuls gardes, le temps de
-        // l'insertion.
+        // Une facture ne naît jamais « réglée » (gardes des règlements, immédiate et différée, et
+        // cycle des statuts) : ce test de chronologie fabrique la pièce brute en suspendant ces seuls
+        // gardes, le temps de l'insertion.
         await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglements"');
         await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglement_differe"');
+        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_transitions"');
         try {
           ids.push((await creer('FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29')).id);
         } finally {
+          await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_transitions"');
           await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglement_differe"');
           await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglements"');
         }
@@ -8114,11 +8127,11 @@ if (!TEST_DATABASE_URL) {
       try {
         let bloque = false;
         for (let tour = 0; tour < 150 && !bloque; tour += 1) {
-          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock') AS attente`;
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%FactureLigne%') AS attente`;
           bloque = etat.attente;
           if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
         }
-        assert.equal(bloque, true, 'la seconde transaction attend la première');
+        assert.equal(bloque, true, 'l’ajout de la seconde transaction attend la première');
       } finally {
         liberer();
       }
@@ -8161,46 +8174,132 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.factureLigne.count({ where: { factureId: brouillon.body.id } }), 1);
     });
 
-    // #221 (décision du 19-10-2026) : le statut d'une pièce ne suit que son cycle. Brouillon → émise ;
-    // pour une facture, émise ⇄ réglée et émise → annulée avec son avoir d'annulation ; « annulée »
-    // est définitif, et un avoir né émis le reste.
+    // #221 (décision du 19-10-2026) : le statut d'une pièce ne suit que son cycle. Une pièce naît
+    // brouillon ou émise ; brouillon → émise ; pour une facture, émise ⇄ réglée et émise → annulée avec
+    // son avoir d'annulation, émis aux mêmes montants dans la même transaction ; « annulée » est
+    // définitif, et un avoir né émis le reste. Chaque refus est prouvé par un cas que seul son garde arrête.
     test('le statut d’une pièce ne suit que son cycle, et une facture ne s’annule qu’avec son avoir', async () => {
+      const auth = `Bearer ${session}`;
       const creer = async (motif) => {
-        const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST cycle', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        const brouillon = await request(app).post('/api/factures').set('Authorization', auth).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST cycle', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
         assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
         return brouillon.body;
       };
+      const emettre = async (motif) => {
+        const facture = await creer(motif);
+        const emission = await request(app).post(`/api/factures/${facture.id}/emettre`).set('Authorization', auth);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return facture;
+      };
+      const annulerParApi = async (facture) => {
+        const annulation = await request(app).post(`/api/factures/${facture.id}/annuler`).set('Authorization', auth);
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        return annulation.body.avoir;
+      };
       const horsCycle = /hors du cycle des pièces/;
-      const brouillon = await creer('TEST cycle brouillon');
-      await assert.rejects(prisma.facture.update({ where: { id: brouillon.id }, data: { statut: 'ANNULEE' } }), horsCycle);
-      const facture = await creer('TEST cycle facture');
-      assert.equal((await request(app).post(`/api/factures/${facture.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
-      // Annulée sans avoir : refusée à la validation (garde différé, vérifié ici avant la fin).
-      await assert.rejects(prisma.$transaction(async (tx) => {
-        await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
-        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
-      }), /ne s'annule qu'avec son avoir d'annulation/);
-      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: facture.id } })).statut, 'EMISE');
-      // L'annulation de l'API, avec son avoir, passe ; « annulée » est ensuite définitif.
-      const annulation = await request(app).post(`/api/factures/${facture.id}/annuler`).set('Authorization', `Bearer ${session}`);
-      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
-      // Annulée → réglée est déjà refusée par le garde des règlements (non soldée), avec son message.
-      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE' } }), horsCycle, 'annulée → émise');
-      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'REGLEE' } }), /soldée par ses règlements|hors du cycle des pièces/, 'annulée → réglée');
-      // Un avoir, né émis, ne se règle ni ne s'annule.
-      for (const statut of ['REGLEE', 'ANNULEE']) await assert.rejects(prisma.facture.update({ where: { id: annulation.body.avoir.id }, data: { statut } }), horsCycle, `avoir → ${statut}`);
-      assert.deepEqual([(await prisma.facture.findUniqueOrThrow({ where: { id: facture.id } })).statut, (await prisma.facture.findUniqueOrThrow({ where: { id: annulation.body.avoir.id } })).statut], ['ANNULEE', 'EMISE']);
-      // À l'insertion, un statut hors des quatre valeurs documentées reste refusé par la contrainte.
-      await assert.rejects(prisma.facture.create({ data: {
-        clientId, clientRaisonSociale: 'TEST Client cycle', type: 'FACTURE', statut: 'ARCHIVEE', dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
-        totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST statut inconnu',
-      } }), /Facture_statut_check/);
-      // #222 : règlements et affectations ne se vident pas, tenté dans une transaction annulée.
-      const vidageAnnule = (table) => prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(`TRUNCATE "${table}" CASCADE`);
-        throw new Error(`vidage de ${table} accepté`);
+      const creationHorsCycle = /Création hors du cycle des pièces/;
+      const sansAvoir = /ne s'annule qu'avec son avoir d'annulation/;
+      const avoirSansFacture = /n'existe qu'avec sa facture annulée/;
+      const totaux = { totalHt: 10, totalTva: 2, totalTtc: 12 };
+      const piece = (type, statut, extra = {}) => ({
+        clientId, clientRaisonSociale: 'TEST Client cycle', type, statut, dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
+        ...totaux, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST cycle SQL', ...extra,
       });
-      for (const table of ['Reglement', 'AffectationReglement']) await assert.rejects(vidageAnnule(table), /vidage interdit/, table);
+      const ecritures = (factureId, type, t = totaux) => {
+        const sens = (montant, auDebit) => (auDebit === (type === 'FACTURE') ? { debit: montant, credit: 0 } : { debit: 0, credit: montant });
+        return [
+          { factureId, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'TEST Clients', ...sens(t.totalTtc, true) },
+          { factureId, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'TEST Ventes', ...sens(t.totalHt, false) },
+          { factureId, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TEST TVA', ...sens(t.totalTva, false) },
+        ];
+      };
+      // Avoir d'annulation fabriqué en SQL : émis, il porte des écritures équilibrées et scellées.
+      const avoirAnnulation = async (tx, factureOrigineId, { statut = 'EMISE', t = totaux } = {}) => {
+        const avoir = await tx.facture.create({ data: piece('AVOIR', statut, { ...t, estAvoirAnnulation: true, factureOrigineId }) });
+        if (statut !== 'BROUILLON') {
+          await tx.ecritureFacture.createMany({ data: ecritures(avoir.id, 'AVOIR', t) });
+          await tx.facture.update({ where: { id: avoir.id }, data: { ecrituresScellees: true } });
+        }
+        return avoir;
+      };
+      // Les gardes différés sont vérifiés avant la fin : Prisma résoudrait une transaction dont le COMMIT échoue.
+      const transaction = (operations) => prisma.$transaction(async (tx) => {
+        const resultat = await operations(tx);
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        return resultat;
+      });
+      const statut = async (id) => (await prisma.facture.findUniqueOrThrow({ where: { id } })).statut;
+      const purger = [];
+      try {
+        // Création : une pièce ne naît ni réglée ni annulée ; un statut inconnu reste refusé par la contrainte.
+        await assert.rejects(prisma.facture.create({ data: piece('FACTURE', 'ANNULEE') }), creationHorsCycle, 'facture née annulée');
+        for (const statutAvoir of ['REGLEE', 'ANNULEE']) await assert.rejects(prisma.facture.create({ data: piece('AVOIR', statutAvoir) }), creationHorsCycle, `avoir né ${statutAvoir}`);
+        await assert.rejects(prisma.facture.create({ data: piece('FACTURE', 'ARCHIVEE') }), /Facture_statut_check/);
+
+        // Brouillon → annulée, même scellé avec des écritures équilibrées dans la même mise à jour.
+        const brouillon = await creer('TEST cycle brouillon');
+        purger.push(brouillon.id);
+        await prisma.ecritureFacture.createMany({ data: ecritures(brouillon.id, 'FACTURE') });
+        await assert.rejects(prisma.facture.update({ where: { id: brouillon.id }, data: { statut: 'ANNULEE', ecrituresScellees: true } }), horsCycle, 'brouillon → annulée');
+
+        // Une autre facture déjà annulée par l'API : son avoir ne vaut pas pour celle-ci.
+        const autre = await emettre('TEST cycle autre');
+        const avoirAutre = await annulerParApi(autre);
+        const facture = await emettre('TEST cycle facture');
+        await assert.rejects(transaction((tx) => tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } })), sansAvoir, 'annulée sans avoir');
+        // Avoir d'annulation resté brouillon, ou d'un autre montant : refusés.
+        await assert.rejects(transaction(async (tx) => {
+          await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
+          await avoirAnnulation(tx, facture.id, { statut: 'BROUILLON' });
+        }), sansAvoir, 'avoir d’annulation brouillon');
+        await assert.rejects(transaction(async (tx) => {
+          await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
+          await avoirAnnulation(tx, facture.id, { t: { totalHt: 0.01, totalTva: 0, totalTtc: 0.01 } });
+        }), sansAvoir, 'avoir d’annulation d’un autre montant');
+        // Avoir d'annulation créé sans annuler sa facture : refusé (il naîtrait avant l'annulation).
+        await assert.rejects(transaction((tx) => avoirAnnulation(tx, facture.id)), avoirSansFacture, 'avoir d’annulation d’une facture émise');
+        assert.equal(await statut(facture.id), 'EMISE');
+        assert.equal(await prisma.facture.count({ where: { factureOrigineId: facture.id } }), 0);
+
+        // Un avoir partiel, même du montant total, n'est pas un avoir d'annulation.
+        const partielle = await emettre('TEST cycle partielle');
+        const partiel = await request(app).post(`/api/factures/${partielle.id}/avoirs`).set('Authorization', auth).send({ lignes: [{ designation: 'TEST cycle avoir partiel total', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(partiel.status, 201, JSON.stringify(partiel.body));
+        assert.deepEqual([Number(partiel.body.totalHt), Number(partiel.body.totalTva), Number(partiel.body.totalTtc), partiel.body.estAvoirAnnulation], [10, 2, 12, false]);
+        await assert.rejects(transaction((tx) => tx.facture.update({ where: { id: partielle.id }, data: { statut: 'ANNULEE' } })), sansAvoir, 'annulée avec un avoir partiel');
+        assert.equal(await statut(partielle.id), 'EMISE');
+
+        // L'annulation de l'API, avec son avoir, passe ; « annulée » est ensuite définitif.
+        const avoir = await annulerParApi(facture);
+        await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE' } }), horsCycle, 'annulée → émise');
+        // Annulée → réglée : le garde des règlements, nommé pour passer le premier, refuse avec son message.
+        await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'REGLEE' } }), /soldée par ses règlements/, 'annulée → réglée');
+        // Un avoir, né émis, ne se règle ni ne s'annule.
+        for (const statutAvoir of ['REGLEE', 'ANNULEE']) await assert.rejects(prisma.facture.update({ where: { id: avoir.id }, data: { statut: statutAvoir } }), horsCycle, `avoir → ${statutAvoir}`);
+        assert.deepEqual([await statut(facture.id), await statut(avoir.id)], ['ANNULEE', 'EMISE']);
+
+        // Facture annulée avant la migration, sans avoir (simulée en retirant celui de « autre ») :
+        // elle se modifie hors statut sans revérification, et ne reçoit qu'un vrai avoir d'annulation.
+        await purgerPieceJetable(avoirAutre.id);
+        purger.push(autre.id);
+        await transaction((tx) => tx.$executeRaw`UPDATE "Facture" SET "updatedAt" = now() WHERE "id" = ${autre.id}`);
+        await assert.rejects(transaction((tx) => avoirAnnulation(tx, autre.id, { t: { totalHt: 0.01, totalTva: 0, totalTtc: 0.01 } })), avoirSansFacture, 'avoir d’annulation d’un autre montant');
+        const avoirHistorique = await transaction((tx) => avoirAnnulation(tx, autre.id));
+        purger.unshift(avoirHistorique.id);
+        assert.equal(await prisma.facture.count({ where: { factureOrigineId: autre.id, estAvoirAnnulation: true } }), 1);
+
+        // #222 : règlements, affectations et journaux comptables en ajout seul ne se vident pas ; le
+        // refus nomme la table, tenté dans une transaction annulée.
+        const vidageAnnule = (table) => prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(`TRUNCATE "${table}" CASCADE`);
+          throw new Error(`vidage de ${table} accepté`);
+        });
+        for (const table of ['Reglement', 'AffectationReglement', 'JournalCompteComptable', 'JournalRegleComptable', 'TransitionRegleComptable']) {
+          await assert.rejects(vidageAnnule(table), new RegExp(`Vidage de « ${table} » interdit`), table);
+        }
+      } finally {
+        for (const id of purger) await purgerPieceJetable(id);
+      }
     });
 
     // #222 : deux insertions concurrentes d'écritures dans une même pièce non scellée, chacune suivie
@@ -8228,11 +8327,11 @@ if (!TEST_DATABASE_URL) {
       try {
         let bloque = false;
         for (let tour = 0; tour < 150 && !bloque; tour += 1) {
-          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock') AS attente`;
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%EcritureFacture%') AS attente`;
           bloque = etat.attente;
           if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
         }
-        assert.equal(bloque, true, 'la seconde transaction attend la première');
+        assert.equal(bloque, true, 'l’insertion de la seconde transaction attend la première');
       } finally {
         liberer();
       }
