@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import net from 'node:net';
 import test, { describe } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const { app, reglerDelaisConnexion } = await import('../dist/index.js');
 
@@ -95,7 +96,7 @@ describe('Délais de connexion du serveur HTTP', { timeout: 20_000 }, () => {
 // un rejet non géré sans contexte. Le serveur compilé est lancé pour de vrai, sur un port libre
 // choisi par le système, avec une base qui refuse la connexion.
 test('une base injoignable au démarrage arrête le serveur avec un message explicite (code 1)', () => {
-  const serveur = spawnSync(process.execPath, [new URL('../dist/index.js', import.meta.url).pathname], {
+  const serveur = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/index.js', import.meta.url))], {
     env: { ...process.env, PORT: '0', SUPERADMIN_EMAILS: '', DATABASE_URL: 'postgresql://iris:iris@127.0.0.1:1/iris_injoignable?schema=public&connect_timeout=5' },
     encoding: 'utf8',
     timeout: 60_000,
