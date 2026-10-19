@@ -89,11 +89,11 @@ export async function journaliserDroitsCompte(tx: any, req: express.Request, act
 // aucun interblocage, et l'ordre des verrous de ligne qui suivent reste celui d'avant. Le compte visé
 // est ensuite relu sous son propre verrou, et les autres super administrateurs actifs sont comptés
 // par une simple lecture. Leur transaction est explicitement en READ COMMITTED (ISOLATION_RETRAIT,
-// comme toute route qui relit un compte sous verrou pour son garde), quel que soit le réglage de la
-// base : chaque lecture y voit tout retrait validé avant elle, et aucun autre ne peut aboutir avant
-// la fin de la transaction. En REPEATABLE READ, l'instantané pris
-// avant l'attente du verrou ignorerait le retrait qui vient d'aboutir. Une promotion validée pendant
-// ce temps peut ne pas être vue : le refus n'en est que plus prudent.
+// comme les routes de ce fichier qui relisent un compte sous verrou pour leur garde), quel que soit
+// le réglage de la base : chaque lecture y voit tout retrait validé avant elle, et aucun autre ne
+// peut aboutir avant la fin de la transaction. En REPEATABLE READ, l'instantané pris avant l'attente
+// du verrou ignorerait le retrait qui vient d'aboutir. Une promotion validée pendant ce temps peut ne
+// pas être vue : le refus n'en est que plus prudent.
 const ISOLATION_RETRAIT = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted };
 const verrouillerRetraitsComptes = (tx: Prisma.TransactionClient) => tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`;
 async function estDernierSuperAdminActif(tx: Prisma.TransactionClient, compte: { id: string; role: string; actif: boolean }): Promise<boolean> {
