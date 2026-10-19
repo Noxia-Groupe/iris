@@ -261,6 +261,7 @@ if (!TEST_DATABASE_URL) {
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
+      'garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
       ...Array.from({ length: 15 }, (_, i) => `pilote3.supprtype.${i}@iris.test`),
@@ -3735,6 +3736,120 @@ if (!TEST_DATABASE_URL) {
         }
       }
     }));
+
+    // #215 : le garde « un simple administrateur ne touche pas un compte super administrateur » est
+    // refait sur le compte relu sous son verrou. #218 : le rattachement attend les retraits en cours.
+    describe('Garde des comptes super administrateurs relu sous verrou', () => {
+      const CIBLES = ['garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test'];
+      const preparerComptes = async () => {
+        await preparer();
+        await prisma.user.updateMany({ where: { email: { in: CIBLES } }, data: { responsableHierarchiqueId: null } });
+        await prisma.user.deleteMany({ where: { email: { in: CIBLES } } });
+        const admin = await prisma.user.upsert({ where: { email: EMAILS[2] }, update: { role: 'ADMIN', actif: true }, create: { email: EMAILS[2], name: 'TEST Dernier super admin', role: 'ADMIN' } });
+        const cible = await prisma.user.create({ data: { email: CIBLES[0], name: 'TEST Garde verrou cible', role: 'ADMIN' } });
+        const responsable = await prisma.user.create({ data: { email: CIBLES[1], name: 'TEST Garde verrou responsable', role: 'CONDUCTEUR_TRAVAUX' } });
+        const ancien = await prisma.user.create({ data: { email: CIBLES[2], name: 'TEST Garde verrou ancien responsable', role: 'CONDUCTEUR_TRAVAUX' } });
+        return { admin, cible, responsable, ancien };
+      };
+      // Une transaction de test tient un compte, puis le modifie (promotion, autre type) : la requête
+      // envoyée pendant ce temps a passé ses contrôles préalables et attend le verrou de ce compte.
+      const pendantChangement = async (compteId, donnees, envoi) => {
+        let liberer, pret;
+        const attente = new Promise((resolve) => { liberer = resolve; });
+        const tenu = new Promise((resolve) => { pret = resolve; });
+        const changement = prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compteId} FOR UPDATE`;
+          pret();
+          await attente;
+          await tx.user.update({ where: { id: compteId }, data: donnees });
+        }, { timeout: 15000 });
+        await tenu;
+        let reponse;
+        try {
+          reponse = envoi().then((resultat) => resultat);
+          assert.equal(await attendreAttente(false), true, 'la requête attend le verrou du compte');
+        } finally {
+          liberer();
+          await changement;
+        }
+        return reponse;
+      };
+      const dernierRattachement = (cibleId) => prisma.journalAdministration.findFirst({ where: { action: 'RATTACHEMENT', cibleId }, orderBy: { createdAt: 'desc' } });
+      after(async () => {
+        await prisma.user.updateMany({ where: { email: { in: CIBLES } }, data: { responsableHierarchiqueId: null } });
+        await prisma.user.deleteMany({ where: { email: { in: CIBLES } } });
+      });
+
+      // Un super administrateur promeut la cible pendant qu'un simple administrateur la modifie : la
+      // requête passe le contrôle préalable, attend le verrou du compte, puis voit la promotion.
+      for (const [nom, methode, chemin, corps, verifier] of [
+        ['suppression', 'delete', (f) => `/api/users/${f.cible.id}`, undefined, async (f) => assert.equal(await prisma.user.count({ where: { id: f.cible.id } }), 1)],
+        ['changement de type', 'patch', (f) => `/api/users/${f.cible.id}/role`, { role: 'COMPTABLE' }, async (f) => assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).role, 'SUPERADMIN')],
+        ['« aussi commercial »', 'patch', (f) => `/api/users/${f.cible.id}/est-commercial`, { estCommercial: true }, async (f) => assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).estCommercial, false)],
+        ['désactivation', 'patch', (f) => `/api/users/${f.cible.id}/actif`, { actif: false }, async (f) => assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).actif, true)],
+        ['rattachement', 'patch', (f) => `/api/users/${f.cible.id}/responsable-hierarchique`, (f) => ({ responsableHierarchiqueId: f.responsable.id }), async (f) => assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).responsableHierarchiqueId, null)],
+      ]) test(`${nom} par un simple administrateur pendant la promotion de la cible : refusé sous verrou`, async () => {
+        const f = await preparerComptes();
+        const entrees = await entreesJournal(f.cible.id);
+        const refus = await pendantChangement(f.cible.id, { role: 'SUPERADMIN' }, () => envoyer(methode, chemin(f), jeton(f.admin), typeof corps === 'function' ? corps(f) : corps));
+        assert.deepEqual([refus.status, refus.body.error], [403, 'Seul un super administrateur peut gérer un compte super administrateur.']);
+        await verifier(f);
+        assert.equal(await entreesJournal(f.cible.id), entrees, 'aucune entrée de journal');
+      });
+
+      // Même relecture pour le type : une cible qui quitte l'administration pendant la requête ne
+      // reçoit pas un « aussi commercial » orphelin.
+      test('« aussi commercial » pendant que la cible quitte l’administration : refusé sous verrou', async () => {
+        const f = await preparerComptes();
+        const refus = await pendantChangement(f.cible.id, { role: 'COMPTABLE', estCommercial: false }, () => envoyer('patch', `/api/users/${f.cible.id}/est-commercial`, jeton(f.admin), { estCommercial: true }));
+        assert.deepEqual([refus.status, refus.body.error], [400, 'Seul un compte Administrateur peut être marqué "aussi commercial".']);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).estCommercial, false);
+      });
+
+      test('« aussi commercial » d’un compte supprimé au même moment : 404', async () => {
+        const f = await preparerComptes();
+        const { suppression, autre } = await pendantSuppressionArretee(f.cible, comptes.a, () => envoyer('patch', `/api/users/${f.cible.id}/est-commercial`, jeton(f.admin), { estCommercial: true }));
+        assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+        assert.deepEqual([autre.status, autre.body.error], [404, 'Utilisateur introuvable.']);
+      });
+
+      // Le responsable choisi et l'ancien sont relus sous verrou : un responsable promu pendant la
+      // requête n'est pas proposé à un simple administrateur, et l'entrée de journal d'un
+      // rattachement qui touche un super administrateur lui reste fermée.
+      test('rattachement par un simple administrateur à un responsable promu au même moment : refusé', async () => {
+        const f = await preparerComptes();
+        const entrees = await entreesJournal(f.cible.id);
+        const refus = await pendantChangement(f.responsable.id, { role: 'SUPERADMIN' }, () => envoyer('patch', `/api/users/${f.cible.id}/responsable-hierarchique`, jeton(f.admin), { responsableHierarchiqueId: f.responsable.id }));
+        assert.deepEqual([refus.status, refus.body.error], [400, 'Responsable hiérarchique introuvable ou désactivé.']);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).responsableHierarchiqueId, null);
+        assert.equal(await entreesJournal(f.cible.id), entrees, 'aucune entrée de journal');
+      });
+
+      for (const [nom, promu, avant] of [
+        ['du responsable choisi', (f) => f.responsable, null],
+        ['de l’ancien responsable', (f) => f.ancien, (f) => f.ancien.id],
+      ]) test(`rattachement par un super administrateur pendant la promotion ${nom} : entrée fermée au simple administrateur`, async () => {
+        const f = await preparerComptes();
+        if (avant) await prisma.user.update({ where: { id: f.cible.id }, data: { responsableHierarchiqueId: avant(f) } });
+        const reponse = await pendantChangement(promu(f).id, { role: 'SUPERADMIN' }, () => envoyer('patch', `/api/users/${f.cible.id}/responsable-hierarchique`, jeton(comptes.a), { responsableHierarchiqueId: f.responsable.id }));
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+        const entree = await dernierRattachement(f.cible.id);
+        assert.equal(entree?.concerneSuperAdmin, true, JSON.stringify(entree));
+      });
+
+      // #218 : un rattachement croisant la suppression du compte ou de son responsable attend la fin
+      // de cette suppression, puis répond comme si elle avait précédé, et jamais 500.
+      for (const [nom, supprime, statut, message] of [
+        ['du responsable choisi', (f) => f.responsable, 400, 'Responsable hiérarchique introuvable ou désactivé.'],
+        ['du compte rattaché', (f) => f.cible, 404, 'Utilisateur introuvable.'],
+      ]) test(`rattachement pendant la suppression ${nom} : ${statut}, jamais 500`, async () => {
+        const f = await preparerComptes();
+        const { suppression, autre, attendaitLesRetraits } = await pendantSuppressionArretee(supprime(f), comptes.a, () => envoyer('patch', `/api/users/${f.cible.id}/responsable-hierarchique`, jeton(f.admin), { responsableHierarchiqueId: f.responsable.id }));
+        assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+        assert.deepEqual([autre.status, autre.body.error], [statut, message]);
+        assert.equal(attendaitLesRetraits, true, 'le rattachement attend le verrou des retraits');
+      });
+    });
   });
 
   // Cycle de vie d'une affaire : c'est la conversion d'un devis accepté qui ouvre le
