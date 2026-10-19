@@ -4831,12 +4831,15 @@ if (!TEST_DATABASE_URL) {
       assert.equal(refus.body.error, 'Ce compte vient d’être relié à une fiche intervenant : réessayez.');
       assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role, 'TECHNICIEN');
       assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, compte.id);
+      // Refus annulé avec sa transaction : aucun changement de type au journal.
+      assert.equal((await journalCompte(compte.id, 'TYPE_COMPTE')).length, 0);
     });
 
     // #219, par l'API : liaison de la fiche, suppression de la fiche et suppression du compte lancées
     // ensemble, à répétition. Chacune aboutit ou refuse proprement, sans interblocage ni 500. La
-    // liaison attend la suppression du compte (verrou des retraits), et la suppression de la fiche la
-    // précède ou la suit sans la bloquer : la suppression du compte aboutit toujours.
+    // liaison et la suppression du compte se sérialisent (verrou des retraits), et la suppression de
+    // la fiche précède ou suit celle du compte sans la bloquer : la suppression du compte aboutit
+    // toujours.
     test('liaison, suppression de la fiche et suppression du compte simultanées : jamais de 500', async () => {
       for (let essai = 0; essai < 12; essai += 1) {
         const compte = await prisma.user.create({ data: { email: `pilote3.trio.${essai}@iris.test`, name: `TEST Pilote3 trio ${essai}`, role: 'TECHNICIEN' } });
