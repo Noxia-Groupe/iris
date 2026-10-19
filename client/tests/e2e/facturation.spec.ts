@@ -162,6 +162,10 @@ test.describe('Facturation — parcours utilisateur', () => {
   });
   const afficherFacture = async (page: Page, raisonSociale: string) => {
     const ligne = page.locator('tbody tr', { hasText: raisonSociale });
+    // Signal positif d'abord : le compte n'apparaît qu'une fois une réponse reçue (#211), même si la
+    // page n'est pas encore montée quand le parcours arrive ici. Il reste affiché pendant un
+    // changement de page : chaque clic attend ensuite la fin du chargement.
+    await expect(page.getByTestId('pagination-factures')).toContainText('document(s)');
     await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
     // Deux factures créées à la suite peuvent tomber de part et d'autre d'une frontière
     // de page ; repartir du début aussi bien pour l'ancienne que pour la nouvelle.
@@ -178,6 +182,49 @@ test.describe('Facturation — parcours utilisateur', () => {
     }
     return ligne;
   };
+  // #211 : tant que la première réponse n'est pas arrivée, la page ne se dit pas vide, ne donne pas de
+  // compte et ne propose pas de date ; les parcours qui attendent la fin du chargement l'attendent bien.
+  // Un observateur installé avant le premier rendu relève tout état vide affiché, même fugace (un
+  // rendu initial remplacé aussitôt par l'effet de chargement échapperait aux sondages).
+  test('#211 : la liste n’affiche ni vide, ni compte, ni date proposée avant sa première réponse', async ({ allerSurPageAdmin }) => {
+    const page = await allerSurPageAdmin('/');
+    let liberer!: () => void;
+    const attente = new Promise<void>(resolve => { liberer = resolve; });
+    const listeFactures = (url: URL) => url.pathname === '/api/factures';
+    await page.route(listeFactures, async route => { await attente; await route.continue(); });
+    await page.addInitScript(() => {
+      const releves: string[] = [];
+      (window as unknown as { etatsVidesReleves: string[] }).etatsVidesReleves = releves;
+      const relever = (etat: string, present: boolean) => { if (present && !releves.includes(etat)) releves.push(etat); };
+      new MutationObserver(() => {
+        const texte = document.body?.textContent ?? '';
+        relever('liste vide', texte.includes('Aucune facture.'));
+        relever('compte', /\d+ document\(s\)/.test(texte));
+        relever('aucune facture numérotée', texte.includes('Dernière facture numérotée : aucune'));
+      }).observe(document, { childList: true, subtree: true, characterData: true });
+    });
+    const pagination = page.getByTestId('pagination-factures');
+    const dateEmission = page.locator('input[name="dateEmission"]');
+    try {
+      await page.goto('/factures');
+      await expect(page.locator('tbody [role="status"]')).toHaveText('Chargement des factures…');
+      await expect(pagination.locator('span')).toHaveText('Page 1');
+      await expect(page.getByTestId('derniere-date-facture')).toHaveText('Dernière facture numérotée : en cours de chargement.');
+      await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+      await expect(dateEmission).toBeDisabled();
+      await expect(dateEmission).toHaveValue('');
+      expect(await page.evaluate(() => (window as unknown as { etatsVidesReleves: string[] }).etatsVidesReleves)).toEqual([]);
+    } finally {
+      liberer();
+    }
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    await expect(pagination).toContainText(/Page 1 sur \d+ — \d+ document\(s\)/);
+    await expect(page.getByTestId('derniere-date-facture')).not.toContainText('en cours de chargement');
+    await expect(dateEmission).toBeEnabled();
+    await expect(dateEmission).toHaveValue(/^\d{2}-\d{2}-\d{4}$/);
+    await page.unroute(listeFactures);
+  });
+
   test('#105 : consulte la chaîne de l’affaire depuis la facture puis navigue vers la fiche affaire', async ({ allerSurPageAdmin, creerClient, request, session }) => {
     const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
     const headers = { Authorization: `Bearer ${session.token}` };
@@ -894,6 +941,8 @@ test.describe('Facturation — parcours utilisateur', () => {
 
       await page.getByRole('button', { name: /Nouvelle facture/ }).click();
       const dateEmission = page.locator('input[name="dateEmission"]');
+      // Le champ n'est prérempli qu'une fois le fuseau de la société lu (#211) : il est actif alors.
+      await expect(dateEmission).toBeEnabled();
       const jourPropose = await dateEmission.inputValue();
       expect(jourPropose).toMatch(/^\d{2}-\d{2}-\d{4}$/);
       await choisirClient(page, client);
