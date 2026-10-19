@@ -4062,6 +4062,51 @@ if (!TEST_DATABASE_URL) {
       assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
     });
 
+    // #163 : la duplication lit le devis source sous son verrou, dans la transaction qui crée le
+    // duplicata, comme une révision. Une modification en cours du devis (lignes, puis totaux) est
+    // attendue, puis copiée en entier : le duplicata ne mêle jamais des lignes neuves et des totaux anciens.
+    test('la duplication attend une modification en cours du devis source et la copie en entier', async () => {
+      const cree = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Affaire dupliquée pendant sa modification', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const source = cree.body;
+      assert.equal(source.totalTtc, 240);
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const lignesModifiees = new Promise((resolve) => { pret = resolve; });
+      const modification = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Devis" WHERE "id" = ${source.id} FOR UPDATE`;
+        await tx.devisLigne.deleteMany({ where: { devisId: source.id } });
+        await tx.devisLigne.create({ data: { devisId: source.id, ordre: 0, designation: 'Pose révisée', nature: 'MAIN_OEUVRE', quantite: 3, prixUnitaireHt: 100, tauxTva: 20, totalHt: 300, totalTtc: 360 } });
+        pret();
+        await attente;
+        await tx.devis.update({ where: { id: source.id }, data: { totalHt: 300, totalTva: 60, totalTtc: 360 } });
+      }, { timeout: 15000 });
+      await lignesModifiees;
+      let duplication;
+      try {
+        duplication = request(app).post(`/api/devis/${source.id}/duplication`).set('Authorization', `Bearer ${session}`).then((reponse) => reponse);
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM "Devis"%FOR UPDATE%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'la duplication attend le verrou du devis source');
+      } finally {
+        liberer();
+        await modification;
+      }
+      const duplicata = await duplication;
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.deepEqual([duplicata.body.totalHt, duplicata.body.totalTva, duplicata.body.totalTtc], [300, 60, 360], 'les totaux validés par la modification');
+      assert.deepEqual(duplicata.body.lignes.map((ligne) => [ligne.designation, ligne.quantite, ligne.totalHt]), [['Pose révisée', 3, 300]], 'les lignes validées par la modification');
+      assert.equal(duplicata.body.origineDevisId, source.id);
+      const introuvable = await request(app).post('/api/devis/00000000-0000-0000-0000-000000000000/duplication').set('Authorization', `Bearer ${session}`);
+      assert.equal(introuvable.status, 404, JSON.stringify(introuvable.body));
+    });
+
     // Ouverture du chantier d'une affaire depuis l'Administration (décision de Nelson du
     // 14-10-2026) : la conversion du devis signé fixe aussitôt titulaire, commercial, types et
     // date de début, et chaque affaire n'a qu'un chantier.
