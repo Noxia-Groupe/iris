@@ -7722,6 +7722,11 @@ if (!TEST_DATABASE_URL) {
         await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE' } });
         await tx.factureLigne.update({ where: { id: ligneBrouillon.id }, data: { designation: 'TEST après émission' } });
       }), figee);
+      // La suppression ne passe que par le contrôle de la pièce d'origine : il porte aussi sur le statut.
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE' } });
+        await tx.factureLigne.delete({ where: { id: ligneBrouillon.id } });
+      }), figee);
       // Ventilation de TVA : ni ajout, ni modification, ni suppression.
       const ventilation = await prisma.factureVentilationTva.findMany({ where: { factureId: facture.id } });
       const ventilationFigee = /ventilation TVA d’une facture émise est immuable/;
@@ -7757,6 +7762,45 @@ if (!TEST_DATABASE_URL) {
       });
       for (const table of ['FactureLigne', 'FactureVentilationTva', 'EcritureFacture', 'JournalFacture']) await assert.rejects(vidageAnnule(table), /vidage interdit/, table);
       assert.equal(await prisma.factureLigne.count({ where: { factureId: facture.id } }), lignes.length);
+    });
+
+    // Deux ajouts concurrents dans un même brouillon, chacun suivi d'une mise à jour de la pièce, se
+    // sérialisent sans interblocage : un verrou partagé (FOR SHARE) dans le garde s'y interbloquerait.
+    // Prisma résout une transaction dont le COMMIT échoue : le nombre de lignes fait foi.
+    test('deux ajouts concurrents de lignes dans un brouillon ne s’interbloquent pas', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST interblocage', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST interblocage', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const id = brouillon.body.id;
+      const ligne = (ordre) => ({ factureId: id, ordre, designation: `TEST concurrente ${ordre}`, quantite: 1, prixUnitaireHt: 0, tauxTva: 20, totalHt: 0, totalTtc: 0 });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const premierAjout = new Promise((resolve) => { pret = resolve; });
+      const premiere = prisma.$transaction(async (tx) => {
+        await tx.factureLigne.create({ data: ligne(7) });
+        pret();
+        await attente;
+        await tx.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST interblocage 1' } });
+      }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+      await premierAjout;
+      const seconde = prisma.$transaction(async (tx) => {
+        await tx.factureLigne.create({ data: ligne(8) });
+        await tx.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST interblocage 2' } });
+      }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+      try {
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'la seconde transaction attend la première');
+      } finally {
+        liberer();
+      }
+      const [erreurPremiere, erreurSeconde] = await Promise.all([premiere, seconde]);
+      assert.equal(erreurPremiere, null, String(erreurPremiere?.message));
+      assert.equal(erreurSeconde, null, String(erreurSeconde?.message));
+      assert.equal(await prisma.factureLigne.count({ where: { factureId: id } }), 3);
     });
 
     // Le garde des lignes verrouille la pièce : un ajout concurrent de son scellement attend, puis
