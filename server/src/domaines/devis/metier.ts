@@ -5,7 +5,6 @@ import { voitPrixAchatDevis } from '../../droits/visibilite';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise } from '../../commun/dates';
 import { PLAFOND_MONTANT, tauxUtilises, tvaDuTaux, arrondiCommercialLigneHt, centimesTtcLigne, centimes } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
-import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { type CatalogueFamily, catalogueFamily } from '../catalogue/metier';
 
@@ -184,12 +183,14 @@ export async function verrouillerDevis(tx: Prisma.TransactionClient, id: string)
   const lignes = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "Devis" WHERE "id" = ${id} FOR UPDATE`);
   return lignes.length === 1;
 }
-export async function acompteDevisPayload(body: Record<string, unknown>, precedent?: { acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; acompteRecuLe: Date | null }) {
+// Le taux par défaut est lu par l'appelant avant sa transaction (#240) : lu pendant celle-ci par le
+// client global, il réclamait une seconde connexion du pool en gardant la première, et des
+// modifications simultanées l'épuisaient jusqu'à l'expiration.
+export function acompteDevisPayload(body: Record<string, unknown>, tauxAcompteDefaut: number, precedent?: { acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; acompteRecuLe: Date | null }) {
   // Après encaissement, les conditions qui ont déclenché celui-ci constituent une preuve :
   // elles sont reprises telles quelles, même si le formulaire réémet des valeurs différentes.
   if (precedent?.acompteRecuLe) return { acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte };
   const acompteExige = precedent && !Object.hasOwn(body, 'acompteExige') ? precedent.acompteExige : !!body.acompteExige;
-  const { tauxAcompteDefaut } = await getParametres();
   const tauxAcompte = acompteExige
     // Un PATCH portant sur les lignes ou l'objet ne renégocie pas silencieusement le taux.
     ? (Object.hasOwn(body, 'tauxAcompte')

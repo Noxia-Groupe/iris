@@ -4127,6 +4127,30 @@ if (!TEST_DATABASE_URL) {
       assert.equal(new Set(reponses.map((reponse) => reponse.body.numero)).size, nombre, 'chaque duplicata a son propre numéro d’affaire');
     });
 
+    // #240 : la modification lisait le taux d'acompte par défaut pendant sa transaction, par le
+    // client global, qui réclamait une seconde connexion du pool en gardant la première. Des
+    // modifications simultanées l'épuisaient : elles attendaient toutes, puis répondaient 500.
+    test('des modifications simultanées d’un même devis, plus nombreuses que le pool de connexions, aboutissent toutes', async () => {
+      const cree = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Affaire modifiée en rafale', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const { tauxAcompteDefaut } = (await request(app).get('/api/parametres').set('Authorization', `Bearer ${session}`)).body;
+      const nombre = 2 * cpus().length + 2;
+      const objets = Array.from({ length: nombre }, (_, rang) => `TEST Affaire modifiée en rafale ${rang}`);
+      // Acompte exigé sans taux : chaque modification lit le taux par défaut.
+      const reponses = await Promise.all(objets.map((objet) => request(app).patch(`/api/devis/${cree.body.id}`).set('Authorization', `Bearer ${session}`).send({
+        clientId, objet, acompteExige: true, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }],
+      })));
+      assert.deepEqual(reponses.map((reponse) => reponse.status), Array(nombre).fill(200), JSON.stringify(reponses.map((reponse) => reponse.body.error).filter(Boolean)));
+      const relu = await prisma.devis.findUniqueOrThrow({ where: { id: cree.body.id }, include: { lignes: true } });
+      assert.ok(objets.includes(relu.objet), relu.objet);
+      assert.equal(relu.acompteExige, true);
+      assert.equal(Number(relu.tauxAcompte), Number(tauxAcompteDefaut));
+      assert.equal(Number(relu.totalHt), 200);
+      assert.equal(relu.lignes.length, 1, 'chaque modification remplace les lignes, sans doublon');
+    });
+
     // Ouverture du chantier d'une affaire depuis l'Administration (décision de Nelson du
     // 14-10-2026) : la conversion du devis signé fixe aussitôt titulaire, commercial, types et
     // date de début, et chaque affaire n'a qu'un chantier.

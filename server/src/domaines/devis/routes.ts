@@ -34,7 +34,7 @@ const creerDevis: express.RequestHandler = async (req, res) => { try {
   const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
   if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
   const lignes = await resoudreLignesDevis(prisma, payload, [], ecritPrixAchatDevis(req));
-  const { acompteExige, tauxAcompte } = await acompteDevisPayload((req.body ?? {}) as Record<string, unknown>);
+  const { acompteExige, tauxAcompte } = acompteDevisPayload((req.body ?? {}) as Record<string, unknown>, (await getParametres()).tauxAcompteDefaut);
   const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, acompteExige, tauxAcompte, lignes: { create: lignes } }, include: devisInclude });
   res.status(201).json(devisPourLecteur(req, decimalToNumber(devis)));
 } catch (error) { devisErreur(res, error); } };
@@ -42,6 +42,9 @@ const listerDevis: express.RequestHandler = async (req, res) => { try { res.json
 const modifierDevis: express.RequestHandler = async (req, res) => { try {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const payload = devisPayload(body);
+  // Lu avant la transaction, comme pour la duplication : le client global y réclamerait une seconde
+  // connexion du pool (#240).
+  const { tauxAcompteDefaut } = await getParametres();
   const devis = await transactionVerifiee(async tx => {
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const precedent = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: { signature: true, conversion: true, lignes: true } });
@@ -49,7 +52,7 @@ const modifierDevis: express.RequestHandler = async (req, res) => { try {
     if (precedent.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être modifié.');
     if (!['BROUILLON', 'ENVOYE'].includes(precedent.statut)) throw new DevisConflitError('Seuls les devis brouillon ou envoyés, non signés, peuvent être modifiés.');
     if (!await tx.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
-    const acompte = await acompteDevisPayload(body, precedent);
+    const acompte = acompteDevisPayload(body, tauxAcompteDefaut, precedent);
     const lignes = await resoudreLignesDevis(tx, payload, precedent.lignes, ecritPrixAchatDevis(req));
     return tx.devis.update({
       where: { id: precedent.id },
