@@ -80,7 +80,7 @@ En local, lancer les parcours Playwright avec `cd client && npm run test:e2e:loc
 
 - régénère le client Prisma et recompile le backend (`server/dist`), que Playwright démarre tel quel ;
 - applique les migrations sur `E2E_DATABASE_URL` ;
-- refuse une base dont le nom ne porte ni `e2e` ni `test` comme mot, en bord de nom ou séparé par `_` ou `-`, ou s'écrit avec d'autres caractères que des lettres, des chiffres, `_` et `-` (`iris_e2e`, `iris-test`, `iris_e2e_2` oui ; `production_latest`, `iris_tests`, `iris_test2`, `iris.test`, `production/iris_e2e` non). C'est la règle commune avec l'outil de comparaison du rendu (`client/scripts/base-jetable.mjs`) ;
+- refuse une base dont le nom ne porte ni `e2e` ni `test` comme mot, en bord de nom ou séparé par `_` ou `-`, ou s'écrit avec d'autres caractères que des lettres sans accent, des chiffres, `_` et `-` (`iris_e2e`, `iris-test`, `iris_e2e_2` oui ; `production_latest`, `iris_tests`, `iris_test2`, `iris.test`, `production/iris_e2e` non). C'est la règle commune avec l'outil de comparaison du rendu (`client/scripts/base-jetable.mjs`) ;
 - refuse de démarrer si un serveur écoute déjà sur les ports API ou frontend, car Playwright le réutiliserait hors CI.
 
 `npm run test:e2e` seul suppose que ces étapes ont déjà été faites, comme dans la CI.

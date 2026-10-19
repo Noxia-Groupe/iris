@@ -13,15 +13,16 @@ test('une base jetable porte « e2e » ou « test » comme mot de son nom', () =
   for (const nom of ['iris_e2e', 'iris-test', 'e2e', 'test', 'e2e-iris', 'iris_releve_test', 'IRIS_E2E', 'iris_e2e_a220', 'iris_e2e_2', 'test_iris']) {
     assert.equal(estNomBaseJetable(nom), true, nom);
   }
-  for (const nom of ['production_latest', 'latest', 'latest_prod', 'iris', 'iris_tests', 'iris_test2', 'contest', 'e2eiris', 'iris.test', 'e2e.iris', 'production/iris_e2e', '"iris_e2e"', '']) {
+  for (const nom of ['production_latest', 'latest', 'latest_prod', 'iris', 'iris_tests', 'iris_test2', 'contest', 'e2eiris', 'iris.test', 'e2e.iris', 'production/iris_e2e', '"iris_e2e"', 'iris.v2_e2e', 'iris x_e2e', 'iris_e2e_dév', 'prod\n_e2e', '']) {
     assert.equal(estNomBaseJetable(nom), false, nom);
   }
 });
 
 const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
-// Les scripts sont lancés pour de bon. Trois garde-fous, indépendants de la règle testée, empêchent
-// toute action si elle régressait : leur port d'API est occupé par ce test, aucun exécutable n'est
-// trouvable par leur PATH (node est lancé par son chemin absolu), et la base visée est injoignable.
+// Les scripts sont lancés pour de bon. Des garde-fous indépendants de la règle testée empêchent toute
+// action si elle régressait : aucun exécutable n'est trouvable par leur PATH (node est lancé par son
+// chemin absolu), la base visée est injoignable, et, en plus, le port d'API de la préparation E2E est
+// occupé par ce test, comme le dossier de référence de l'outil de comparaison est inexistant.
 const sansExecutable = path.join(os.tmpdir(), 'iris-aucun-executable-inexistant');
 const url = (nom: string) => `postgresql://iris:iris@127.0.0.1:1/${nom}?schema=public&connect_timeout=5`;
 const refusNom = (nom: string) => new RegExp(`La base « ${nom.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')} » n’est pas une base jetable \\(« e2e » ou « test » comme mot de son nom`);
@@ -64,9 +65,11 @@ test('la préparation E2E admet une base jetable, puis s’arrête sur le port o
 });
 
 test('l’outil de comparaison du rendu applique la même règle', () => {
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: sansExecutable, RELEVE_DATABASE_URL: url('production_latest') };
-  // --reference inexistant : si la règle régressait, le contrôle suivant refuserait encore, avant tout.
-  const resultat = spawnSync(process.execPath, [path.join(scripts, 'comparer-rendu', 'index.mjs'), '--reference', sansExecutable], { env, encoding: 'utf8', timeout: 30_000 });
-  assert.equal(resultat.status, 2);
-  assert.match(resultat.stderr, refusNom('production_latest'));
+  for (const nom of ['production_latest', 'production/iris_e2e']) {
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: sansExecutable, RELEVE_DATABASE_URL: url(nom) };
+    // --reference inexistant : si la règle régressait, le contrôle suivant refuserait encore, avant tout.
+    const resultat = spawnSync(process.execPath, [path.join(scripts, 'comparer-rendu', 'index.mjs'), '--reference', sansExecutable], { env, encoding: 'utf8', timeout: 30_000 });
+    assert.equal(resultat.status, 2, nom);
+    assert.match(resultat.stderr, refusNom(nom), nom);
+  }
 });
