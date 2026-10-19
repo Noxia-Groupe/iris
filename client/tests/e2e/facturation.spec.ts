@@ -178,6 +178,35 @@ test.describe('Facturation — parcours utilisateur', () => {
     }
     return ligne;
   };
+  // #211 : tant que la première réponse n'est pas arrivée, la page ne se dit pas vide, ne donne pas de
+  // compte et ne propose pas de date ; les parcours qui attendent la fin du chargement l'attendent bien.
+  test('#211 : la liste n’affiche ni vide, ni compte, ni date proposée avant sa première réponse', async ({ allerSurPageAdmin }) => {
+    const page = await allerSurPageAdmin('/');
+    let liberer!: () => void;
+    const attente = new Promise<void>(resolve => { liberer = resolve; });
+    const listeFactures = (url: URL) => url.pathname === '/api/factures';
+    await page.route(listeFactures, async route => { await attente; await route.continue(); });
+    const pagination = page.getByTestId('pagination-factures');
+    const dateEmission = page.locator('input[name="dateEmission"]');
+    try {
+      await page.goto('/factures');
+      await expect(page.locator('tbody [role="status"]')).toHaveText('Chargement des factures…');
+      await expect(pagination).toHaveText(/Page 1/);
+      await expect(pagination).not.toContainText('document(s)');
+      await expect(page.getByText('Aucune facture.')).toHaveCount(0);
+      await page.getByRole('button', { name: /Nouvelle facture/ }).click();
+      await expect(dateEmission).toBeDisabled();
+      await expect(dateEmission).toHaveValue('');
+    } finally {
+      liberer();
+    }
+    await expect(page.locator('tbody [role="status"]')).toHaveCount(0);
+    await expect(pagination).toContainText(/Page 1 sur \d+ — \d+ document\(s\)/);
+    await expect(dateEmission).toBeEnabled();
+    await expect(dateEmission).toHaveValue(/^\d{2}-\d{2}-\d{4}$/);
+    await page.unroute(listeFactures);
+  });
+
   test('#105 : consulte la chaîne de l’affaire depuis la facture puis navigue vers la fiche affaire', async ({ allerSurPageAdmin, creerClient, request, session }) => {
     const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
     const headers = { Authorization: `Bearer ${session.token}` };
@@ -894,6 +923,8 @@ test.describe('Facturation — parcours utilisateur', () => {
 
       await page.getByRole('button', { name: /Nouvelle facture/ }).click();
       const dateEmission = page.locator('input[name="dateEmission"]');
+      // Le champ n'est prérempli qu'une fois le fuseau de la société lu (#211) : il est actif alors.
+      await expect(dateEmission).toBeEnabled();
       const jourPropose = await dateEmission.inputValue();
       expect(jourPropose).toMatch(/^\d{2}-\d{2}-\d{4}$/);
       await choisirClient(page, client);
