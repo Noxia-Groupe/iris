@@ -187,13 +187,13 @@ Les PR du découpage du serveur fusionnées le 18-10-2026 jusqu'à `dd92bf3` (#1
 
 ### Suivis ouverts pendant ces lots
 
-Issues ouvertes pendant ces lots et non corrigées dans la même PR ; celles corrigées depuis sont signalées. #202 à #206 (anomalies des écrans), #210 (nom de base jetable des E2E, corrigé par #238), #212 (affichages à zéro), #220 (refus silencieux du changement de type, corrigé par #234), #223 (comptes rendus et signatures SAV non figés en base, lot 3b) et #230 (plafond des avoirs non garanti en base, corrigé par #235).
+Suivis cités par la passation précédente (#233) ; ceux corrigés depuis sont signalés. Les suivis ouverts puis corrigés avant elle (#211, #215, #218, #219, #221, #222, #225, #226, #231) figurent avec leur lot correctif dans « Lots fusionnés ». #202 à #206 (anomalies des écrans), #210 (nom de base jetable des E2E, corrigé par #238), #212 (affichages à zéro), #220 (refus silencieux du changement de type, corrigé par #234), #223 (comptes rendus et signatures SAV non figés en base, lot 3b) et #230 (plafond des avoirs non garanti en base, corrigé par #235).
 
-Puis, pendant les lots suivants : #236 (aperçu de TVA d'un avoir partiel, correctif #242), #239 (autres actions de l'Administration), #240 (pool de connexions de `PATCH /api/devis/:id`), #241 (CLAUDE.md, règle du nom de base jetable), #243 (cohérence interne des pièces émises), #244 (jeton de session E2E recopié dans 16 parcours) et #247 (double envoi du formulaire d'avoir partiel). #152 (parcours `entetes-mobile`) reçoit un nouveau constat : un échec intermittent au premier passage complet local.
+Puis, pendant les lots suivants : #236 (aperçu de TVA d'un avoir partiel, correctif #242), #239 (autres actions de l'Administration), #240 (pool de connexions de `PATCH /api/devis/:id`), #241 (CLAUDE.md, règle du nom de base jetable), #243 (cohérence interne des pièces émises), #244 (jeton de session E2E recopié dans 16 parcours), #247 (double envoi du formulaire d'avoir partiel) et #248 (gardes des bases et ports de test). #152 (parcours `entetes-mobile`) reçoit un nouveau constat : un échec intermittent au premier passage complet local.
 
 ### En attente de Nelson au 19-10-2026
 
-- #208 (#198) et #242 (#236) : elles changent des montants affichés : leur fusion revient donc à Nelson. #208, en conflit avec `main` depuis #238, est à rafraîchir puis à réauditer ; #242 est prête (audit interne fusionnable et CI 5/5 sur `5f8426d`). L'état à jour est tenu dans le corps de chaque PR.
+- #208 (#198) et #242 (#236) : elles changent des montants affichés : leur fusion revient donc à Nelson. #208, en conflit avec `main` depuis #238, est à rafraîchir puis à réauditer ; #242 est prête (audit interne fusionnable et CI 5/5 sur `5f8426d`) ; #247 porte sur le même formulaire, à arbitrer en la fusionnant. L'état est tenu dans chaque PR, corps et commentaires.
 - #207 : état du découpage dans CLAUDE.md.
-- #246 (#241) : règle du nom de base jetable dans CLAUDE.md.
+- #246 (#241) : règle du nom de base jetable dans CLAUDE.md ; audit interne en cours à la rédaction de cette passation, fusion réservée à Nelson par choix de Claude Code.
 - #182 et #183 : propositions 3 et 4, arbitrées par délégation, à valider par leur fusion.
