@@ -2,13 +2,13 @@
 
 **Proposition du 18-10-2026.** Le même jour, Nelson en a validé le principe et les fichiers à plat, et il a délégué le traitement des petites anomalies. Les autres choix, dont l'ordre des PR, sont des choix techniques de Claude Code (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
 
-Trois écrans dépassent la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)) :
+Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 19-10-2026** : PR A (#213) et PR B (#214) implémentées ; PR C prévue après la fusion de #208, qui modifie aussi `ChantierDetail.tsx`. Les numéros de ligne de ce document se rapportent au relevé du 18-10-2026 : chaque PR de découpage revérifie ses plages sur son `main`.
 
 | Écran | Lignes | Composants internes déjà séparés |
 |---|---|---|
-| `client/src/pages/Admin.tsx` | 1 477 | `EditeurBareme`, `ChoixResponsable` |
+| `client/src/pages/Admin.tsx` | 1 477 (684 après #214) | `EditeurBareme`, `ChoixResponsable` |
 | `client/src/pages/ChantierDetail.tsx` | 1 477 | aucun |
-| `client/src/pages/Planning.tsx` | 873 | `ContractPlacement`, `EventModal`, `TypesModal` |
+| `client/src/pages/Planning.tsx` | 873 (406 après #213) | `ContractPlacement`, `EventModal`, `TypesModal` |
 
 ## Principe : déplacer, ne pas réécrire
 
@@ -47,7 +47,7 @@ Côté client, il n'existe pas d'équivalent de `server/scripts/verifier-deplace
 
 Les fichiers rejoignent `client/src/components/`, selon la convention actuelle : dossier plat, noms en PascalCase. Exports par défaut (5 composants) et nommés (7) y coexistent ; je propose l'export nommé. La logique sans composant va dans `client/src/lib/`, pour ne pas ajouter d'avertissement `react/only-export-components` (un fichier de composant qui exporte aussi une fonction). Le préfixe nomme l'écran (`Admin…`, `Chantier…`, `Planning…`). Pas de sous-dossier par écran : la convention actuelle est gardée (décision 2).
 
-### PR A : Planning (873 → environ 440 lignes)
+### PR A : Planning (873 → environ 440 lignes) — implémentée par #213 (406 lignes)
 
 Les trois modales ne reçoivent déjà que des props. C'est le cas le plus simple, qui servira à éprouver l'outil de comparaison.
 
@@ -60,7 +60,7 @@ Les trois modales ne reçoivent déjà que des props. C'est le cas le plus simpl
 
 La grille (316-404) reste dans la page : elle partage `dragRef`, `handleDrop`, `eventsCellule` et `setModal` avec le composant.
 
-### PR B : Admin (1 477 → environ 700 lignes)
+### PR B : Admin (1 477 → environ 700 lignes) — implémentée par #214 (684 lignes)
 
 | Nouveau fichier | Contenu déplacé (lignes d'`Admin.tsx`) |
 |---|---|
@@ -79,7 +79,7 @@ Restent dans la page :
 
 L'onglet Utilisateurs recevra une vingtaine de props : c'est le prix d'un déplacement sans changement d'état.
 
-### PR C : fiche chantier (1 477 → environ 750 lignes)
+### PR C : fiche chantier (1 477 → environ 750 lignes) — prévue, après #208
 
 | Nouveau fichier | Contenu déplacé (lignes de `ChantierDetail.tsx`) |
 |---|---|
