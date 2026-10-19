@@ -89,17 +89,24 @@ export async function journaliserDroitsCompte(tx: any, req: express.Request, act
 // aucun interblocage, et l'ordre des verrous de ligne qui suivent reste celui d'avant. Le compte visé
 // est ensuite relu sous son propre verrou, et les autres super administrateurs actifs sont comptés
 // par une simple lecture. Leur transaction est explicitement en READ COMMITTED (ISOLATION_RETRAIT,
-// comme les routes de ce fichier qui relisent un compte sous verrou pour leur garde), quel que soit
+// comme les routes de comptes et de fiches qui relisent un compte sous verrou pour leur garde), quel que soit
 // le réglage de la base : chaque lecture y voit tout retrait validé avant elle, et aucun autre ne
 // peut aboutir avant la fin de la transaction. En REPEATABLE READ, l'instantané pris avant l'attente
 // du verrou ignorerait le retrait qui vient d'aboutir. Une promotion validée pendant ce temps peut ne
 // pas être vue : le refus n'en est que plus prudent.
-const ISOLATION_RETRAIT = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted };
+export const ISOLATION_RETRAIT = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted };
 const verrouillerRetraitsComptes = (tx: Prisma.TransactionClient) => tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`;
 async function estDernierSuperAdminActif(tx: Prisma.TransactionClient, compte: { id: string; role: string; actif: boolean }): Promise<boolean> {
   if (!isSuperAdminRole(compte.role) || !compte.actif) return false;
   return (await tx.user.count({ where: { role: ROLE_SUPERADMIN, actif: true, id: { not: compte.id } } })) === 0;
 }
+
+// Verrou refusé sans attente (FOR UPDATE NOWAIT) : code PostgreSQL 55P03, remonté par Prisma dans
+// l'erreur d'une requête brute (P2010).
+const estVerrouIndisponible = (error: unknown) => {
+  const erreur = error as { code?: string; meta?: { code?: string } };
+  return erreur?.code === 'P2010' && erreur.meta?.code === '55P03';
+};
 
 const erreurDernierSuperAdmin = () => Object.assign(new Error('Dernier super administrateur actif.'), { code: 'DERNIER_SUPERADMIN' });
 
@@ -235,8 +242,11 @@ export function enregistrerRoutesComptes(app: Express): void {
         await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE`);
         await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
         // Relues une fois le compte verrouillé : une fiche reliée entre-temps (la liaison valide en
-        // tenant ce verrou) est déliée par la suppression, et doit donc figurer au journal.
-        const fichesDeliees: Array<{ id: string; nom: string }> = await tx.intervenant.findMany({ where: { userId: id }, select: { id: true, nom: true } });
+        // tenant ce verrou) est déliée par la suppression, et doit donc figurer au journal. Elles sont
+        // verrouillées sans attendre (NOWAIT) : la cascade ON DELETE SET NULL les modifiera, et une
+        // fiche tenue par une autre transaction (sa suppression, qui attend ce compte) formerait un
+        // interblocage (#219). La suppression est alors refusée, à réessayer.
+        const fichesDeliees = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE NOWAIT`);
         const supprime = await tx.user.findUnique({
           where: { id },
           select: {
@@ -278,6 +288,7 @@ export function enregistrerRoutesComptes(app: Express): void {
     } catch (error) {
       if (estRefusCibleSuperAdmin(error)) return res.status(403).json({ error: error.message });
       if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
+      if (estVerrouIndisponible(error)) return res.status(409).json({ error: 'Ce compte vient d’être relié à une fiche intervenant : réessayez.' });
       if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : ce compte vient d’être rattaché à des données métier.' });
       if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
       res.status(500).json({ error: 'Error deleting user' });

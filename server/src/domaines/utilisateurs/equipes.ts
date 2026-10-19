@@ -8,7 +8,7 @@ import { requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { decimalToNumber } from '../../commun/montants';
 import { journaliserAdministration, changementsJournal } from '../../commun/journal-administration';
-import { refuseSuperAdminTarget, libelleCompteJournal, lireCompteVerrouille } from './comptes';
+import { refuseSuperAdminTarget, libelleCompteJournal, lireCompteVerrouille, ISOLATION_RETRAIT } from './comptes';
 
 export function enregistrerRoutesEquipes(app: Express): void {
   // Liste minimale des commerciaux (id + nom), pour peupler les sélecteurs d'affectation
@@ -136,7 +136,7 @@ export function enregistrerRoutesEquipes(app: Express): void {
           });
         }
         return { statut: 200 };
-      });
+      }, ISOLATION_RETRAIT);
       if (resultat.statut !== 200) return res.status(resultat.statut).json({ error: resultat.erreur });
       res.json(decimalToNumber(await prisma.intervenant.findUnique({ where: { id } })));
     } catch (error) {
@@ -186,7 +186,7 @@ export function enregistrerRoutesEquipes(app: Express): void {
           });
         }
         return { statut: 200 };
-      });
+      }, ISOLATION_RETRAIT);
       if (resultat.statut !== 200) return res.status(resultat.statut).json({ error: resultat.erreur });
       res.json({ success: true });
     } catch (error) {
