@@ -71,7 +71,9 @@ export default function Factures() {
   const requeteListe = useRef(0);
   const taillePage = 25;
   const nombrePages = Math.max(1, Math.ceil((total ?? 0) / taillePage));
-  const [derniereDateEmission, setDerniereDateEmission] = useState<string | null>(null);
+  // Inconnue (undefined) avant la réponse de la chronologie, absente (null) s'il n'y a encore aucune
+  // facture numérotée : la page ne dit « aucune » qu'une fois la réponse reçue (#211).
+  const [derniereDateEmission, setDerniereDateEmission] = useState<string | null | undefined>(undefined);
   const [clients, setClients] = useState<Client[]>([]);
   const [rechercheClient, setRechercheClient] = useState('');
   const [resultatsClients, setResultatsClients] = useState<Client[] | null>(null);
@@ -386,7 +388,7 @@ export default function Factures() {
 
       {erreur && <p className="text-red-600">{erreur}</p>}
       {erreurListe && <p className="text-red-600">{erreurListe}</p>}
-      <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
+      <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission === undefined ? (erreurListe ? 'indisponible' : 'en cours de chargement') : derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
       {succes && <p className="text-emerald-700">{succes}</p>}
 
       {factureAvoir && (
