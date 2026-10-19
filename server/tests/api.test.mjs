@@ -146,8 +146,18 @@ if (!TEST_DATABASE_URL) {
     await prisma.devis.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Le parc dépend à la fois du client/site et du catalogue : il part donc en premier.
     await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
-    // Les attestations dépendent des rapports ; elles partent avant les interventions.
-    await prisma.interventionSignature.deleteMany({ where: { rapport: { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } } } });
+    // Comptes rendus et attestations d'intervention sont figés en base (#223) et retiennent leur
+    // intervention : la base jetable les purge avant les interventions, gardes suspendus le temps
+    // d'une transaction (un arrêt en cours de route ne peut pas les laisser désactivés).
+    const rapportsDeTest = { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } };
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe('ALTER TABLE "InterventionSignature" DISABLE TRIGGER "intervention_signature_figee"'),
+      prisma.$executeRawUnsafe('ALTER TABLE "InterventionRapport" DISABLE TRIGGER "intervention_rapport_ajout_seul"'),
+      prisma.interventionSignature.deleteMany({ where: { rapport: rapportsDeTest } }),
+      prisma.interventionRapport.deleteMany({ where: rapportsDeTest }),
+      prisma.$executeRawUnsafe('ALTER TABLE "InterventionRapport" ENABLE TRIGGER "intervention_rapport_ajout_seul"'),
+      prisma.$executeRawUnsafe('ALTER TABLE "InterventionSignature" ENABLE TRIGGER "intervention_signature_figee"'),
+    ]);
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
     // Les snapshots ont une FK RESTRICT et sont append-only, comme les lignes et le journal des
@@ -251,7 +261,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
@@ -5287,6 +5297,65 @@ if (!TEST_DATABASE_URL) {
       assert.equal(relu.rapports.length, 1);
       assert.equal(relu.rapports[0].contenu, rapport.body.contenu);
       assert.equal(relu.rapports[0].signature.signataire, 'TEST Client signataire');
+    });
+
+    // #223 : un compte rendu est en ajout seul dès son enregistrement et la signature qui l'atteste est
+    // figée, en base et non plus seulement faute de route. Chaque vidage est tenté dans une transaction
+    // annulée : si le garde régressait, la base de test ne serait pas réellement vidée.
+    test('comptes rendus et signatures d’intervention sont figés en base : ni modification, ni suppression, ni vidage', async () => {
+      const technicien = await compteTechnicienSav('sav.fige@iris.test', 'TEST Intervenant SAV figé');
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Comptes rendus figés SAV' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      await prisma.interventionAffectation.create({ data: { interventionId: dossier.body.id, intervenantId: technicien.intervenantId } });
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) {
+        const transition = await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      }
+      const consigner = (contenu) => request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`).send({ contenu });
+      const signe = await consigner('TEST Compte rendu signé : sirène remplacée et essai concluant.');
+      const libre = await consigner('TEST Compte rendu non signé : essai de la ligne à refaire.');
+      assert.equal(signe.status, 201, JSON.stringify(signe.body));
+      assert.equal(libre.status, 201, JSON.stringify(libre.body));
+      const signature = await request(app).post(`/api/interventions/rapports/${signe.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
+        .send({ signataire: 'TEST Client signataire figé', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      const rapportsEnBase = () => prisma.interventionRapport.findMany({ where: { interventionId: dossier.body.id }, include: { signature: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+      const avant = await rapportsEnBase();
+      assert.equal(avant.length, 2);
+
+      // Signé ou non, un compte rendu ne se réécrit ni ne se supprime, par Prisma comme en SQL.
+      for (const rapport of [signe.body, libre.body]) {
+        await assert.rejects(prisma.interventionRapport.update({ where: { id: rapport.id }, data: { contenu: 'TEST Compte rendu réécrit.' } }), /Compte rendu d'intervention figé/);
+        await assert.rejects(prisma.interventionRapport.delete({ where: { id: rapport.id } }), /Compte rendu d'intervention figé/);
+        await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionRapport" SET "createdAt" = $1 WHERE "id" = $2', new Date('2020-01-01T00:00:00.000Z'), rapport.id), /Compte rendu d'intervention figé/);
+      }
+      // La signature ne se réécrit pas et ne se supprime pas : la retirer pour en enregistrer une
+      // autre effacerait l'attestation d'origine.
+      await assert.rejects(prisma.interventionSignature.update({ where: { id: signature.body.id }, data: { signataire: 'TEST Signataire usurpé' } }), /Signature d'intervention figée/);
+      await assert.rejects(prisma.interventionSignature.delete({ where: { id: signature.body.id } }), /Signature d'intervention figée/);
+      await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionSignature" SET "empreinte" = $1 WHERE "id" = $2', '0'.repeat(64), signature.body.id), /Signature d'intervention figée/);
+      const vidageAnnule = (table) => prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`TRUNCATE "${table}" CASCADE`);
+        throw new Error(`vidage de ${table} accepté`);
+      });
+      for (const table of ['InterventionRapport', 'InterventionSignature']) {
+        await assert.rejects(vidageAnnule(table), new RegExp(`Vidage de « ${table} » interdit`), table);
+      }
+
+      // Une intervention qui porte un compte rendu ne se supprime pas, et ses comptes rendus ne partent
+      // pas en cascade. Le dossier témoin, créé sans journal ni affectation, n'est retenu que par eux.
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true } });
+      const temoin = await prisma.intervention.create({ data: { reference: `TEST-SAV-FIGE-${randomUUID()}`, clientId, titre: 'TEST Dossier témoin figé', statut: 'EN_COURS' } });
+      await prisma.interventionRapport.create({ data: { interventionId: temoin.id, auteurId: auteur.id, contenu: 'TEST Compte rendu du dossier témoin.' } });
+      await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "Intervention" WHERE "id" = $1', temoin.id), /InterventionRapport_interventionId_fkey/);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: temoin.id } }), 1);
+
+      // L'ajout reste ouvert : une correction passe par un nouveau compte rendu, sans toucher aux autres.
+      const complement = await consigner('TEST Complément : ligne essayée de nouveau, transmission correcte.');
+      assert.equal(complement.status, 201, JSON.stringify(complement.body));
+      const apres = await rapportsEnBase();
+      assert.equal(apres.length, 3);
+      assert.deepEqual(apres.filter((rapport) => rapport.id !== complement.body.id), avant, 'comptes rendus et signature intacts');
     });
 
     test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {
