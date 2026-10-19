@@ -76,11 +76,15 @@ export async function journaliserDroitsCompte(tx: any, req: express.Request, act
 // (suppression, autre type, désactivation), sans quoi plus personne ne piloterait les modules ni ne
 // rendrait la main à un autre : l'accès de secours en exige un actif, et le démarrage promeut sans
 // réactiver. Ces retraits se sérialisent par un verrou consultatif, pris en tête de leur transaction
-// avant tout verrou de ligne : qui l'attend ne tient rien, d'où aucun interblocage avec les autres
-// verrous de comptes. Le compte visé est ensuite relu sous son propre verrou, et les autres super
-// administrateurs actifs sont comptés par une simple lecture : en READ COMMITTED, elle voit tout
-// retrait validé avant elle, et aucun autre ne peut aboutir avant la fin de la transaction. Une
-// promotion validée pendant ce temps peut ne pas être vue : le refus n'en est que plus prudent.
+// avant tout verrou de ligne : qui l'attend ne tient rien, si bien que ce verrou ne peut entrer dans
+// aucun interblocage, et l'ordre des verrous de ligne qui suivent reste celui d'avant. Le compte visé
+// est ensuite relu sous son propre verrou, et les autres super administrateurs actifs sont comptés
+// par une simple lecture. Leur transaction est explicitement en READ COMMITTED (ISOLATION_RETRAIT),
+// quel que soit le réglage de la base : chaque lecture y voit tout retrait validé avant elle, et
+// aucun autre ne peut aboutir avant la fin de la transaction. En REPEATABLE READ, l'instantané pris
+// avant l'attente du verrou ignorerait le retrait qui vient d'aboutir. Une promotion validée pendant
+// ce temps peut ne pas être vue : le refus n'en est que plus prudent.
+const ISOLATION_RETRAIT = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted };
 const verrouillerRetraitsComptes = (tx: Prisma.TransactionClient) => tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`;
 async function estDernierSuperAdminActif(tx: Prisma.TransactionClient, compte: { id: string; role: string; actif: boolean }): Promise<boolean> {
   if (!isSuperAdminRole(compte.role) || !compte.actif) return false;
@@ -258,7 +262,7 @@ export function enregistrerRoutesComptes(app: Express): void {
             detail: 'Responsable hiérarchique supprimé.',
           });
         }
-      });
+      }, ISOLATION_RETRAIT);
       res.json({ success: true });
     } catch (error) {
       if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
@@ -307,7 +311,7 @@ export function enregistrerRoutesComptes(app: Express): void {
         await journaliserDroitsCompte(tx, req, 'TYPE_COMPTE', avant, apres, ['role', 'estCommercial']);
         await delierFicheSiPlusTechnicien(tx, req as AuthRequest, avant, apres.role, fiches);
         return apres;
-      });
+      }, ISOLATION_RETRAIT);
       res.json(user);
     } catch (error) {
       if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
@@ -502,7 +506,7 @@ export function enregistrerRoutesComptes(app: Express): void {
         });
         await journaliserDroitsCompte(tx, req, actif ? 'ACTIVATION' : 'DESACTIVATION', avant, apres, ['actif']);
         return apres;
-      });
+      }, ISOLATION_RETRAIT);
       res.json(user);
     } catch (error) {
       if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(400).json({ error: "Ce compte est le dernier super administrateur : il ne peut pas être désactivé." });

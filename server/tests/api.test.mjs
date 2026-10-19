@@ -3681,6 +3681,16 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await entreesJournal(comptes.a.id), entrees, 'aucune entrée de journal pour A');
     }));
 
+    // Un compte supprimé pendant sa désactivation ou sa réactivation : 404, comme pour les autres
+    // routes de comptes, et non une erreur 500.
+    for (const actif of [false, true]) test(`${actif ? 'réactivation' : 'désactivation'} d’un compte supprimé au même moment : 404`, () => isoler(async () => {
+      await prisma.user.deleteMany({ where: { email: EMAILS[3] } });
+      const compte = await prisma.user.create({ data: { email: EMAILS[3], name: 'TEST Dernier super responsable', role: 'CONDUCTEUR_TRAVAUX', actif: !actif } });
+      const { suppression, autre } = await pendantSuppressionArretee(compte, comptes.a, () => envoyer('patch', `/api/users/${compte.id}/actif`, jeton(comptes.a), { actif }));
+      assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+      assert.deepEqual([autre.status, autre.body.error], [404, 'Utilisateur introuvable.']);
+    }));
+
     // Non-régression : le verrou des retraits n'introduit aucun interblocage avec les autres routes
     // de comptes. La suppression d'un responsable, arrêtée en cours, croise une désactivation, un
     // changement de type ou un rattachement de son collaborateur (vers un super administrateur) :
