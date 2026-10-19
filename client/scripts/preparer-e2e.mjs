@@ -10,7 +10,7 @@ import net from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { estNomBaseJetable } from './base-jetable.mjs';
+import { REGLE_BASE_JETABLE, estNomBaseJetable } from './base-jetable.mjs';
 
 const racineClient = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dossierServeur = path.join(racineClient, '..', 'server');
@@ -30,7 +30,7 @@ try {
 }
 // Les parcours écrivent factures, clients et clés d'API : ne jamais viser une base réelle.
 if (!estNomBaseJetable(nomBase)) {
-  echec(`La base « ${nomBase} » ne porte ni « e2e » ni « test » comme mot de son nom : refus de la migrer et d’y écrire.`);
+  echec(`La base « ${nomBase} » n’est pas une base jetable (${REGLE_BASE_JETABLE}) : refus de la migrer et d’y écrire.`);
 }
 
 const portOccupe = (port) => new Promise((resolve) => {
