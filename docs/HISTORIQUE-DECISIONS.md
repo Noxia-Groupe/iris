@@ -3,6 +3,8 @@
 > Extraits **déplacés tels quels** de [`ROADMAP-PASSATION.md`](ROADMAP-PASSATION.md) le 17-10-2026, sans reformulation, pour que la passation reste courte. Ils décrivent l'état **au moment de leur rédaction** : les renvois « ci-dessus », « plus bas », « ci-dessous » et les mentions « prévu » s'entendent dans l'ancienne passation. L'état actuel, les questions ouvertes et les choix par défaut, à confirmer, sont tenus à jour dans la [passation](ROADMAP-PASSATION.md) ; aucune décision, question ou mention « à confirmer » n'a disparu (voir la PR #165, qui a fait ce déplacement). L'ancienne passation reste lisible en entier, pour résoudre ces renvois : `git show 66dd476:docs/ROADMAP-PASSATION.md`.
 >
 > Correspondances utiles : « P1a » (lot pilote 1) est la PR #155 ; « la PR « contraintes différées » qui suit #155 » est la PR #158 ; « la PR prévue sur les commissions actuelles (P1b) » est devenue sans objet, et les commissions ont été fermées par #159 ; le lot pilote 2 (catalogue dans les devis) est #161.
+>
+> Les sections datées après le 17-10-2026 sont rédigées directement ici, et non déplacées de la passation ; celle-ci n'en garde que l'état.
 
 ## Lots pilotes livrés (état d'origine)
 
@@ -131,3 +133,49 @@ Les constats relevés pendant les audits et la CI de #123 à #129 sont devenus l
   - un changement de statut pouvait mettre un devis converti en attente d'acompte ;
   - une révision pouvait réussir en même temps qu'elle.
 - Transactions Prisma et contraintes différées (relevé pendant P1a, préexistant, **corrigé** par la PR « contraintes différées » qui suit #155) : Prisma 5.22 résout une transaction interactive même si son COMMIT échoue sur un trigger différé ; l'appel réussissait alors sans rien avoir enregistré (constaté sur base jetable). Toutes les transactions interactives de l'API passent désormais par `transactionVerifiee`, qui vérifie les contraintes différées (`SET CONSTRAINTS ALL IMMEDIATE`) avant la fin de la transaction : émission, annulation, avoirs (équilibre des écritures), comptes et règles comptables (journal), règlements. Une vérification différée « statut réglé ⇔ règlements », garde en base de la règle validée par Nelson le 17-10-2026, couvre aussi les écritures faites directement en base (contre-passation, affectation ou avoir sans resynchronisation du statut) ; elle verrouille la facture, si bien que deux écritures directes concurrentes se sérialisent. Les lignes existantes ne sont pas revalidées par la migration (règle 4).
+
+## Décisions et lots des 18 et 19-10-2026
+
+*Rédigé le 19-10-2026. Tests, preuves et audits : voir le corps de chaque PR.*
+
+### Décisions de Nelson
+
+- **Découpage des écrans (18-10-2026, #200).** « 1. Oui je valide le principe. Oui a plat comme aujourd'hui. Fait ce qui est le mieux a corriger apres ou en issu je te laisse le choix de la meulleur des facon. » Principe validé : déplacement pur, état laissé dans la page, fichiers à plat dans `components/`. Petites anomalies, seul point délégué : une issue chacune (#202 à #206), corrigées après les trois déplacements. L'ordre des PR (outil, Planning, Administration, fiche chantier) est un choix technique de Claude Code.
+- **Sommes en flottants (18-10-2026, #198).** « 3. Prend le meilleur choix possible et surtout ne pas laisser passer une erreur eventuel d'affichage de montant. » Choix retenu : correction à la source, sommes en décimal exact et arrondis d'affichage corrigés (#208). La PR change des montants affichés : sa fusion reste à Nelson.
+- **Propositions 3 et 4 (18-10-2026, #182, #183).** Nelson a délégué l'arbitrage de leurs questions ouvertes : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Quatorze décisions pour les droits et six pour le paramétrage sont consignées dans ces PR. Leur fusion, qui vaut validation des propositions, reste à Nelson.
+- **Délégation de fusion (rappel).** Les lots de cette section ont été fusionnés par Claude Code selon la délégation du 17-10-2026, consignée dans [CLAUDE.md](../CLAUDE.md) (« Mode de livraison », #176), que Nelson a rappelée ainsi : « Tu fusionnes si vert + audit ».
+  - Conditions, sur la même SHA : CI verte, et audit interne qui juge la PR fusionnable. Jamais par la fusion automatique de GitHub.
+  - Restent à Nelson : les changements de montants (#208), les propositions 3 et 4 (#182, #183) et la mise en production. Par prudence, Claude Code ne fusionne pas non plus une PR qui modifie CLAUDE.md (#207).
+- **Cycle des statuts des factures (19-10-2026, #221).** « #221 ok pour moi avec ta proposition ». Une pièce naît brouillon ou émise et passe de brouillon à émise ; une facture passe d'émise à réglée, et inversement, selon ses règlements ; elle ne passe à annulée qu'avec son avoir d'annulation, créé dans la même transaction ; « annulée » est définitif, et un avoir, né émis, le reste. Appliqué par #227.
+
+### Lots fusionnés
+
+**Découpage des écrans du client** (chantier technique 2, sans changement de comportement) :
+- #200 : proposition [`DECOUPAGE-ECRANS-CIBLE.md`](DECOUPAGE-ECRANS-CIBLE.md), documentation seule.
+- #209 : outil de comparaison du rendu (`npm run comparer:rendu`). Il relève, pour chaque étape, le HTML, l'état des champs et la liste ordonnée des requêtes API des clients de `main` et de la branche, servis avec le même serveur et la même base jetable. Aucun code applicatif.
+- #213 (PR A) : les trois modales du planning et la file à planifier dans leurs fichiers ; `Planning.tsx` passe de 873 à 406 lignes.
+- #214 (PR B) : barème, choix du responsable et onglets Utilisateurs, Marges, référentiels et Modules dans leurs fichiers ; `Admin.tsx` passe de 1 477 à 684 lignes. L'outil passe de 77 à 79 étapes.
+- La PR C (fiche chantier) attend la fusion de #208, qui modifie aussi `ChantierDetail.tsx`.
+
+**Comptes** (règle 2, droits) :
+- #216 (#178) : les routes de comptes refusent de retirer le dernier super administrateur **actif** ; un compte désactivé ne compte plus. Suppression, changement de type et désactivation prennent un verrou consultatif en tête de transaction, comptent les autres super administrateurs actifs dans cette transaction et se sérialisent, en READ COMMITTED explicite. Refus inchangés : 409 pour la suppression et le changement de type, 400 pour la désactivation.
+- #224 (#215, #218) : le garde « un simple administrateur ne touche pas un compte super administrateur » est refait sur le compte relu sous son verrou, dans cinq routes, pour qu'une promotion simultanée ne le contourne pas. Le rattachement hiérarchique prend le verrou des retraits, puis ses comptes par identifiant croissant ; un compte ou un responsable supprimé pendant la requête donne 404 ou 400, et non plus 500.
+- #228 (#219, #226) : la suppression d'un compte et celle de sa fiche intervenant ne s'interbloquent plus. La liaison d'une fiche prend le verrou des retraits et se sérialise avec la suppression et le changement de type du compte, hors promotion super administrateur. Une fiche reliée entre-temps sans ce verrou fait refuser la suppression du compte (409, à refaire). READ COMMITTED explicite pour la liaison et la suppression d'une fiche, la promotion du démarrage, les permissions et l'accès financier.
+- #232 (#231) : au démarrage, la promotion ou la création d'un compte de `SUPERADMIN_EMAILS` est retentée une fois ; un échec persistant est signalé sans arrêter le serveur, et le prochain démarrage réessaie. Une initialisation impossible, par exemple une base injoignable, arrête le serveur avec un message explicite.
+
+**Factures** (règle 2, documents figés et écritures d'argent) :
+- #217 (#180) : une facture émise a ses lignes, sa ventilation de TVA, sa version des mentions légales et sa date d'émission figées en base. Son journal est en ajout seul, horodaté par la base. Le retour au brouillon et un statut inconnu sont refusés, comme le vidage (`TRUNCATE`) des lignes, de la ventilation, des écritures et du journal.
+- #227 (#221, #222) : le cycle des statuts décidé le 19-10-2026 est garanti en base dès la création. Une facture ne passe à annulée qu'avec un avoir d'annulation émis, aux mêmes montants HT, TVA et TTC, dans la même transaction ; les pièces annulées avant cette migration ne sont pas revérifiées. Le vidage est refusé sur les règlements, les affectations et trois journaux comptables. L'insertion d'une écriture verrouille la pièce en `FOR NO KEY UPDATE`, sans interblocage.
+
+**Tests** :
+- #229 (#225, #211) : les attentes de verrou des tests serveur ne comptent plus que les requêtes de la base du test, hors de la session qui interroge ; la page Factures n'affiche ni liste vide, ni compte, ni « aucune » avant sa première réponse.
+
+### Suivis ouverts pendant ces lots
+
+#202 à #206 (anomalies des écrans), #210 (nom de base jetable des E2E), #212 (affichages à zéro), #220 (refus silencieux du changement de type), #223 (comptes rendus et signatures SAV non figés en base, lot 3b) et #230 (plafond des avoirs non garanti en base).
+
+### En attente de Nelson au 19-10-2026
+
+- #208 (#198) : prête, audit interne fusionnable et CI 5/5 verte sur `0c6ef05` ; fusion réservée à Nelson (montants affichés).
+- #207 : état du découpage dans CLAUDE.md.
+- #182 et #183 : propositions 3 et 4, arbitrées par délégation, à valider par leur fusion.
