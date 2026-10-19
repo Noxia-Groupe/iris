@@ -52,8 +52,9 @@ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
 WHEN (OLD."statut" IS DISTINCT FROM NEW."statut" AND NEW."statut" = 'ANNULEE')
 EXECUTE FUNCTION verifier_avoir_annulation_facture();
 
--- Réciproquement, un avoir d'annulation n'existe qu'avec sa facture annulée, aux mêmes montants :
--- vérifié à la validation de chaque transaction qui le crée ou le modifie. La contrainte
+-- Réciproquement, un avoir d'annulation est émis et n'existe qu'avec sa facture annulée, aux mêmes
+-- montants : vérifié à la validation de chaque transaction qui le crée ou le modifie, sur la ligne
+-- telle qu'elle est alors (et non telle qu'à l'événement qui a déclenché le contrôle). La contrainte
 -- Facture_avoir_annulation_check en fait déjà un avoir, et l'index unique
 -- Facture_un_avoir_annulation_par_origine le seul de sa facture. Comme « annulée » est
 -- définitif et que la facture n'y passe qu'avec son avoir, les deux naissent dans la même
@@ -61,12 +62,12 @@ EXECUTE FUNCTION verifier_avoir_annulation_facture();
 -- le seul. Seule une facture annulée avant cette migration, sans avoir, peut encore en recevoir un.
 CREATE FUNCTION verifier_origine_avoir_annulation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM "Facture" f
-    WHERE f."id" = NEW."factureOrigineId" AND f."type" = 'FACTURE' AND f."statut" = 'ANNULEE'
-      AND f."totalHt" = NEW."totalHt" AND f."totalTva" = NEW."totalTva" AND f."totalTtc" = NEW."totalTtc"
+  IF EXISTS (SELECT 1 FROM "Facture" WHERE "id" = NEW."id" AND "estAvoirAnnulation") AND NOT EXISTS (
+    SELECT 1 FROM "Facture" a JOIN "Facture" f ON f."id" = a."factureOrigineId"
+    WHERE a."id" = NEW."id" AND a."statut" = 'EMISE' AND f."type" = 'FACTURE' AND f."statut" = 'ANNULEE'
+      AND f."totalHt" = a."totalHt" AND f."totalTva" = a."totalTva" AND f."totalTtc" = a."totalTtc"
   ) THEN
-    RAISE EXCEPTION 'Un avoir d''annulation n''existe qu''avec sa facture annulée, aux mêmes montants.';
+    RAISE EXCEPTION 'Un avoir d''annulation est émis et n''existe qu''avec sa facture annulée, aux mêmes montants.';
   END IF;
   RETURN NULL;
 END $$;

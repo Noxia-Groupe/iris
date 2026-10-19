@@ -6569,17 +6569,17 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-28T00:00:00.000Z' });
         // Une facture ne naît jamais « réglée » (gardes des règlements, immédiate et différée, et
         // cycle des statuts) : ce test de chronologie fabrique la pièce brute en suspendant ces seuls
-        // gardes, le temps de l'insertion.
-        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglements"');
-        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglement_differe"');
-        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_transitions"');
-        try {
-          ids.push((await creer('FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29')).id);
-        } finally {
-          await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_transitions"');
-          await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglement_differe"');
-          await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglements"');
-        }
+        // gardes, dans une seule transaction (un échec en cours de route les rétablit avec elle). Les
+        // autres gardes différés sont vérifiés avant de réactiver les triggers, qui ne le seraient
+        // pas avec des événements en attente.
+        const gardesReglee = ['facture_statut_reglements', 'facture_statut_reglement_differe', 'facture_statut_transitions'];
+        ids.push((await prisma.$transaction(async tx => {
+          for (const garde of gardesReglee) await tx.$executeRawUnsafe(`ALTER TABLE "Facture" DISABLE TRIGGER "${garde}"`);
+          const reglee = await piece(tx, 'FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29');
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          for (const garde of gardesReglee) await tx.$executeRawUnsafe(`ALTER TABLE "Facture" ENABLE TRIGGER "${garde}"`);
+          return reglee;
+        })).id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-29T00:00:00.000Z' });
       } finally {
         for (const id of ids.slice(1)) await purgerPieceJetable(id);
@@ -8205,14 +8205,22 @@ if (!TEST_DATABASE_URL) {
         clientId, clientRaisonSociale: 'TEST Client cycle', type, statut, dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
         ...totaux, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST cycle SQL', ...extra,
       });
+      // Écritures équilibrées sur le TTC de la pièce (seul montant que contrôle le garde d'équilibre) :
+      // une pièce peut ainsi ne différer d'une autre que par une seule de ses colonnes de montant.
       const ecritures = (factureId, type, t = totaux) => {
         const sens = (montant, auDebit) => (auDebit === (type === 'FACTURE') ? { debit: montant, credit: 0 } : { debit: 0, credit: montant });
         return [
           { factureId, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'TEST Clients', ...sens(t.totalTtc, true) },
-          { factureId, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'TEST Ventes', ...sens(t.totalHt, false) },
+          { factureId, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'TEST Ventes', ...sens(Math.round((t.totalTtc - t.totalTva) * 100) / 100, false) },
           { factureId, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TEST TVA', ...sens(t.totalTva, false) },
         ];
       };
+      // Montants qui ne diffèrent de ceux de la facture que par une colonne.
+      const autresMontants = [
+        ['HT', { totalHt: 10.01, totalTva: 2, totalTtc: 12 }],
+        ['TVA', { totalHt: 10, totalTva: 2.01, totalTtc: 12 }],
+        ['TTC', { totalHt: 10, totalTva: 2, totalTtc: 12.01 }],
+      ];
       // Avoir d'annulation fabriqué en SQL : émis, il porte des écritures équilibrées et scellées.
       const avoirAnnulation = async (tx, factureOrigineId, { statut = 'EMISE', t = totaux } = {}) => {
         const avoir = await tx.facture.create({ data: piece('AVOIR', statut, { ...t, estAvoirAnnulation: true, factureOrigineId }) });
@@ -8229,11 +8237,20 @@ if (!TEST_DATABASE_URL) {
         return resultat;
       });
       const statut = async (id) => (await prisma.facture.findUniqueOrThrow({ where: { id } })).statut;
+      // Pièce insérée non scellée, puis dotée d'écritures équilibrées et scellée, comme le ferait une
+      // création valide : seul le garde du cycle peut alors la refuser.
+      const naissance = (type, statutPiece) => transaction(async (tx) => {
+        const creee = await tx.facture.create({ data: piece(type, statutPiece) });
+        await tx.ecritureFacture.createMany({ data: ecritures(creee.id, type) });
+        await tx.facture.update({ where: { id: creee.id }, data: { ecrituresScellees: true } });
+      });
       const purger = [];
+      let echec = null;
       try {
-        // Création : une pièce ne naît ni réglée ni annulée ; un statut inconnu reste refusé par la contrainte.
-        await assert.rejects(prisma.facture.create({ data: piece('FACTURE', 'ANNULEE') }), creationHorsCycle, 'facture née annulée');
-        for (const statutAvoir of ['REGLEE', 'ANNULEE']) await assert.rejects(prisma.facture.create({ data: piece('AVOIR', statutAvoir) }), creationHorsCycle, `avoir né ${statutAvoir}`);
+        // Création : une pièce ne naît ni réglée ni annulée, même scellée avec des écritures équilibrées ;
+        // un statut inconnu reste refusé par la contrainte.
+        await assert.rejects(naissance('FACTURE', 'ANNULEE'), creationHorsCycle, 'facture née annulée');
+        for (const statutAvoir of ['REGLEE', 'ANNULEE']) await assert.rejects(naissance('AVOIR', statutAvoir), creationHorsCycle, `avoir né ${statutAvoir}`);
         await assert.rejects(prisma.facture.create({ data: piece('FACTURE', 'ARCHIVEE') }), /Facture_statut_check/);
 
         // Brouillon → annulée, même scellé avec des écritures équilibrées dans la même mise à jour.
@@ -8252,12 +8269,19 @@ if (!TEST_DATABASE_URL) {
           await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
           await avoirAnnulation(tx, facture.id, { statut: 'BROUILLON' });
         }), sansAvoir, 'avoir d’annulation brouillon');
-        await assert.rejects(transaction(async (tx) => {
-          await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
-          await avoirAnnulation(tx, facture.id, { t: { totalHt: 0.01, totalTva: 0, totalTtc: 0.01 } });
-        }), sansAvoir, 'avoir d’annulation d’un autre montant');
-        // Avoir d'annulation créé sans annuler sa facture : refusé (il naîtrait avant l'annulation).
+        for (const [colonne, t] of autresMontants) {
+          await assert.rejects(transaction(async (tx) => {
+            await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
+            await avoirAnnulation(tx, facture.id, { t });
+          }), sansAvoir, `avoir d’annulation d’un autre ${colonne}`);
+        }
+        // Avoir d'annulation créé sans annuler sa facture, ou avoir brouillon qui le devient : refusés
+        // (il naîtrait avant l'annulation).
         await assert.rejects(transaction((tx) => avoirAnnulation(tx, facture.id)), avoirSansFacture, 'avoir d’annulation d’une facture émise');
+        await assert.rejects(transaction(async (tx) => {
+          const avoirBrouillon = await tx.facture.create({ data: piece('AVOIR', 'BROUILLON', { factureOrigineId: facture.id }) });
+          await tx.facture.update({ where: { id: avoirBrouillon.id }, data: { estAvoirAnnulation: true } });
+        }), avoirSansFacture, 'avoir devenu avoir d’annulation d’une facture émise');
         assert.equal(await statut(facture.id), 'EMISE');
         assert.equal(await prisma.facture.count({ where: { factureOrigineId: facture.id } }), 0);
 
@@ -8283,9 +8307,9 @@ if (!TEST_DATABASE_URL) {
         await purgerPieceJetable(avoirAutre.id);
         purger.push(autre.id);
         await transaction((tx) => tx.$executeRaw`UPDATE "Facture" SET "updatedAt" = now() WHERE "id" = ${autre.id}`);
-        await assert.rejects(transaction((tx) => avoirAnnulation(tx, autre.id, { t: { totalHt: 0.01, totalTva: 0, totalTtc: 0.01 } })), avoirSansFacture, 'avoir d’annulation d’un autre montant');
-        const avoirHistorique = await transaction((tx) => avoirAnnulation(tx, autre.id));
-        purger.unshift(avoirHistorique.id);
+        for (const [colonne, t] of autresMontants) await assert.rejects(transaction((tx) => avoirAnnulation(tx, autre.id, { t })), avoirSansFacture, `avoir d’annulation historique d’un autre ${colonne}`);
+        await assert.rejects(transaction((tx) => avoirAnnulation(tx, autre.id, { statut: 'BROUILLON' })), avoirSansFacture, 'avoir d’annulation historique resté brouillon');
+        await transaction((tx) => avoirAnnulation(tx, autre.id));
         assert.equal(await prisma.facture.count({ where: { factureOrigineId: autre.id, estAvoirAnnulation: true } }), 1);
 
         // #222 : règlements, affectations et journaux comptables en ajout seul ne se vident pas ; le
@@ -8297,8 +8321,20 @@ if (!TEST_DATABASE_URL) {
         for (const table of ['Reglement', 'AffectationReglement', 'JournalCompteComptable', 'JournalRegleComptable', 'TransitionRegleComptable']) {
           await assert.rejects(vidageAnnule(table), new RegExp(`Vidage de « ${table} » interdit`), table);
         }
+      } catch (erreur) {
+        echec = erreur;
+        throw erreur;
       } finally {
-        for (const id of purger) await purgerPieceJetable(id);
+        // Les avoirs d'abord (y compris un avoir accepté à tort) ; une erreur de nettoyage ne masque
+        // pas l'échec d'origine.
+        try {
+          for (const id of purger) {
+            for (const { id: avoirId } of await prisma.facture.findMany({ where: { factureOrigineId: id }, select: { id: true } })) await purgerPieceJetable(avoirId);
+            await purgerPieceJetable(id);
+          }
+        } catch (erreur) {
+          if (!echec) throw erreur;
+        }
       }
     });
 
