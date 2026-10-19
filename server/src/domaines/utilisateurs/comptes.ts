@@ -88,9 +88,10 @@ export async function journaliserDroitsCompte(tx: any, req: express.Request, act
 // avant tout verrou de ligne : qui l'attend ne tient rien, si bien que ce verrou ne peut entrer dans
 // aucun interblocage, et l'ordre des verrous de ligne qui suivent reste celui d'avant. Le compte visé
 // est ensuite relu sous son propre verrou, et les autres super administrateurs actifs sont comptés
-// par une simple lecture. Leur transaction est explicitement en READ COMMITTED (ISOLATION_RETRAIT),
-// quel que soit le réglage de la base : chaque lecture y voit tout retrait validé avant elle, et
-// aucun autre ne peut aboutir avant la fin de la transaction. En REPEATABLE READ, l'instantané pris
+// par une simple lecture. Leur transaction est explicitement en READ COMMITTED (ISOLATION_RETRAIT,
+// comme toute route qui relit un compte sous verrou pour son garde), quel que soit le réglage de la
+// base : chaque lecture y voit tout retrait validé avant elle, et aucun autre ne peut aboutir avant
+// la fin de la transaction. En REPEATABLE READ, l'instantané pris
 // avant l'attente du verrou ignorerait le retrait qui vient d'aboutir. Une promotion validée pendant
 // ce temps peut ne pas être vue : le refus n'en est que plus prudent.
 const ISOLATION_RETRAIT = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted };
@@ -351,10 +352,11 @@ export function enregistrerRoutesComptes(app: Express): void {
       const resultat = await transactionVerifiee(async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(814090)::text AS verrou`;
         // Puis le verrou des retraits : ni le compte ni l'un de ses responsables ne peut être supprimé,
-        // désactivé ou changer de type pendant ce rattachement, et la cascade d'une suppression sur
-        // ses collaborateurs n'attend jamais un compte que le rattachement tiendrait. Le compte, le
-        // responsable choisi et l'ancien sont ensuite verrouillés par identifiant croissant : les types
-        // lus pour le garde et pour le journal sont ceux du moment de l'écriture (#215).
+        // désactivé ou rétrogradé pendant ce rattachement, et la cascade d'une suppression sur ses
+        // collaborateurs n'attend jamais un compte que le rattachement tiendrait. Le compte, le
+        // responsable choisi et l'ancien sont ensuite verrouillés par identifiant croissant (une
+        // promotion attend ce verrou de ligne) : les types lus pour le garde et pour le journal sont
+        // ceux du moment de l'écriture (#215). Plus aucun verrou n'est demandé ensuite.
         await verrouillerRetraitsComptes(tx);
         const actuel = await tx.user.findUnique({ where: { id: paramId(req) }, select: { responsableHierarchiqueId: true } });
         if (!actuel) return { statut: 404, erreur: 'Utilisateur introuvable.' };
@@ -433,7 +435,7 @@ export function enregistrerRoutesComptes(app: Express): void {
         });
         await journaliserDroitsCompte(tx, req, 'AUSSI_COMMERCIAL', avant, apres, ['estCommercial']);
         return apres;
-      });
+      }, ISOLATION_RETRAIT);
       res.json(user);
     } catch (error) {
       if (estRefusCibleSuperAdmin(error)) return res.status(403).json({ error: error.message });
