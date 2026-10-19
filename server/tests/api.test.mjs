@@ -251,7 +251,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
@@ -5393,6 +5393,72 @@ if (!TEST_DATABASE_URL) {
       assert.equal(saisie.body.interventionId, undefined);
     });
 
+    // Lot pilote 3b (décision de Nelson du 17-10-2026) : le technicien saisit aussi ses heures sur une
+    // intervention hors contrat. Le matériel reste réservé aux contrats ; l'administration voit le coût
+    // de main-d'œuvre (décision du 19-10-2026), le conducteur les heures sans taux ni coût.
+    test('le technicien affecté saisit et corrige ses heures sur une intervention hors contrat, sans matériel', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.curative@iris.test', 'TEST Technicien heures curative');
+      const collegue = await compteTechnicienSav('sav.cout.curative.collegue@iris.test', 'TEST Collègue heures curative');
+      const conducteur = await prisma.user.create({ data: { email: 'sav.cout.curative.conducteur@iris.test', name: 'TEST Conducteur heures curative', role: 'CONDUCTEUR_TRAVAUX' } });
+      const jetonConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const curative = await request(app).post('/api/interventions').set('Authorization', `Bearer ${jetonConducteur}`).send({ clientId, titre: 'TEST Curative heures hors contrat' });
+      assert.equal(curative.status, 201, JSON.stringify(curative.body));
+      const id = curative.body.id;
+      await prisma.interventionAffectation.createMany({ data: [{ interventionId: id, intervenantId: technicien.intervenantId }, { interventionId: id, intervenantId: collegue.intervenantId }] });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur curative ${Date.now()}` } });
+      // Jours civils de la société : la date future se juge au fuseau de l'entreprise, pas en UTC.
+      const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+      const enJJMMAAAA = (jourIso) => jourIso.split('-').reverse().join('-');
+      const aujourdhui = enJJMMAAAA(jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris'));
+      const demain = enJJMMAAAA(jourCivilEntreprise(new Date(Date.now() + 86_400_000), societe?.fuseauHoraire || 'Europe/Paris'));
+      const heuresDe = (jeton) => request(app).post(`/api/interventions/${id}/couts/heures`).set('Authorization', `Bearer ${jeton}`);
+      const corriger = (jeton, corps) => request(app).patch(`/api/interventions/${id}/couts/heures/${saisie.body.id}`).set('Authorization', `Bearer ${jeton}`).send(corps);
+
+      const saisie = await heuresDe(technicien.jeton).send({ date: aujourdhui, nbrHeures: 1.25, commentaire: 'TEST Dépannage' });
+      assert.equal(saisie.status, 201, JSON.stringify(saisie.body));
+      assert.equal(saisie.body.tauxHoraireApplique, undefined, 'aucun taux renvoyé au technicien');
+      assert.equal(saisie.body.intervenantId, undefined);
+      const lectureTechnicien = await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`);
+      assert.equal(lectureTechnicien.status, 200, JSON.stringify(lectureTechnicien.body));
+      assert.deepEqual(lectureTechnicien.body.heures.map((heure) => [heure.nbrHeures, heure.commentaire, heure.tauxHoraireApplique]), [[1.25, 'TEST Dépannage', undefined]]);
+
+      // Refus : date future, encadrement, collègue sur l'heure d'un autre, matériel hors contrat.
+      const future = await heuresDe(technicien.jeton).send({ date: demain, nbrHeures: 1 });
+      assert.equal(future.status, 400, JSON.stringify(future.body));
+      assert.match(future.body.error, /une fois faites/);
+      assert.equal((await heuresDe(session).send({ date: aujourdhui, nbrHeures: 1 })).status, 403, 'l’encadrement ne saisit pas les heures');
+      assert.equal((await corriger(collegue.jeton, { nbrHeures: 3, motifCorrection: 'Correction usurpée' })).status, 404, 'un collègue ne corrige pas l’heure d’un autre');
+      const achat = await request(app).post(`/api/interventions/${id}/couts/achats`).set('Authorization', `Bearer ${session}`).send({ date: aujourdhui, fournisseurId: fournisseur.id, description: 'TEST Pièce hors contrat', montantHT: 10 });
+      assert.equal(achat.status, 409, 'le matériel reste réservé aux interventions de contrat');
+      assert.equal(await prisma.coutInterventionAchat.count({ where: { interventionId: id } }), 0);
+
+      // Correction par le technicien, avec motif ; une date future est refusée aussi en correction.
+      const correctionFuture = await corriger(technicien.jeton, { date: demain, motifCorrection: 'Date décalée' });
+      assert.equal(correctionFuture.status, 400, JSON.stringify(correctionFuture.body));
+      assert.match(correctionFuture.body.error, /une fois faites/);
+      const correction = await corriger(technicien.jeton, { nbrHeures: 2, motifCorrection: 'Durée réelle relevée' });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      assert.equal(correction.body.nbrHeures, 2);
+
+      // L'administration voit le coût de main-d'œuvre (2 h × 42 €), sans total matériel ; le conducteur,
+      // les heures sans taux ni coût.
+      const lectureAdmin = await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${session}`);
+      assert.equal(lectureAdmin.status, 200, JSON.stringify(lectureAdmin.body));
+      assert.deepEqual([lectureAdmin.body.heures.length, lectureAdmin.body.heures[0].tauxHoraireApplique, lectureAdmin.body.totalMainOeuvreHT, lectureAdmin.body.totalMaterielHT, lectureAdmin.body.totalCoutsHT, lectureAdmin.body.achats], [1, 42, 84, null, 84, []]);
+      const lectureConducteur = await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${jetonConducteur}`);
+      assert.equal(lectureConducteur.status, 200, JSON.stringify(lectureConducteur.body));
+      assert.deepEqual([lectureConducteur.body.heures[0].nbrHeures, 'tauxHoraireApplique' in lectureConducteur.body.heures[0], lectureConducteur.body.totalMainOeuvreHT, lectureConducteur.body.totalMaterielHT, lectureConducteur.body.totalCoutsHT], [2, false, null, null, null]);
+
+      // Archivage et restauration par l'encadrement, puis plus aucune saisie une fois le dossier annulé.
+      assert.equal((await request(app).post(`/api/interventions/${id}/couts/heures/${saisie.body.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Saisie à revoir' })).status, 200);
+      assert.equal((await request(app).post(`/api/interventions/${id}/couts/heures/${saisie.body.id}/restaurer`).set('Authorization', `Bearer ${session}`).send({ motif: 'Saisie confirmée' })).status, 200);
+      assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ANNULEE' })).status, 200);
+      assert.equal((await heuresDe(technicien.jeton).send({ date: aujourdhui, nbrHeures: 1 })).status, 409, 'un dossier annulé ne reçoit plus d’heures');
+      assert.equal((await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 409);
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, cible: 'COUT_INTERVENTION_HEURE' }, select: { action: true }, orderBy: { createdAt: 'asc' } });
+      assert.deepEqual(journal.map((entree) => entree.action), ['CREATION', 'CORRECTION', 'ARCHIVAGE', 'RESTAURATION']);
+    });
+
     test('réserve les coûts à un technicien et fige son taux à la saisie', async () => {
       const technicien = await compteTechnicienSav('sav.cout.garde.taux@iris.test', 'TEST Garde taux technicien');
       const responsable = await prisma.user.create({ data: { email: 'sav.cout.garde.responsable@iris.test', name: 'TEST Garde taux responsable', role: 'RESPONSABLE' } });
@@ -5445,7 +5511,9 @@ if (!TEST_DATABASE_URL) {
       await prisma.interventionAffectation.create({ data: { interventionId: intervention.id, intervenantId: (await prisma.intervenant.create({ data: { nom: 'TEST Garde commercial', role: 'Commercial', tauxHoraireCharge: 0, userId: commercial.id } })).id } });
 
       assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set('Authorization', `Bearer ${jetonCommercial}`)).status, 403, 'un rôle affecté non autorisé ne lit pas les coûts');
-      assert.equal((await request(app).get(`/api/interventions/${sansContrat.id}/couts`).set('Authorization', `Bearer ${session}`)).status, 409, 'sans contrat, la lecture des coûts est refusée');
+      const lectureSansContrat = await request(app).get(`/api/interventions/${sansContrat.id}/couts`).set('Authorization', `Bearer ${session}`);
+      assert.equal(lectureSansContrat.status, 200, 'sans contrat, l’encadrement lit les heures (lot 3b)');
+      assert.deepEqual([lectureSansContrat.body.heures, lectureSansContrat.body.achats, lectureSansContrat.body.totalMaterielHT], [[], [], null], 'sans contrat, ni matériel ni total matériel');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${session}`).send({ date: '06-09-2026', nbrHeures: 1 })).status, 403, 'l’encadrement ne saisit pas les heures');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', nbrHeures: 0 })).status, 400, 'zéro heure exige un motif');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', fournisseurId: fournisseur.id, description: 'TEST', montantHT: 1 })).status, 403, 'un technicien ne saisit pas un achat');
@@ -5462,7 +5530,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({})).status, 400, 'un archivage exige un motif');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Archivage justifié' })).status, 200);
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Double archivage' })).status, 409);
-      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/heures/${heure.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Hors contrat' })).status, 409);
+      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Hors contrat' })).status, 409, 'hors contrat, aucun matériel à archiver');
+      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/heures/${heure.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Heure d’un autre dossier' })).status, 404, 'une heure se rattache à son propre dossier');
       assert.equal((await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 403, 'le journal financier reste fermé au technicien');
       assert.equal((await request(app).post('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`).send({ clientId, titre: 'TEST Création technicien refusée' })).status, 403, 'la création est réservée à l’encadrement');
       const creationConducteur = await request(app).post('/api/interventions').set('Authorization', `Bearer ${jetonConducteur}`).send({ clientId, titre: 'TEST Création conducteur visible' });
