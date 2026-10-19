@@ -95,6 +95,11 @@ export default function Factures() {
   const [fuseauHoraire, setFuseauHoraire] = useState<string | null>(null);
   const [factureAvoir, setFactureAvoir] = useState<Facture | null>(null);
   const [lignesAvoir, setLignesAvoir] = useState<Ligne[]>([nouvelleLigne()]);
+  // Un avoir émis est figé : un double clic ou une touche Entrée répétée ne doit pas en émettre deux
+  // (#247). L'indicateur synchrone arrête une seconde soumission du même instant, avant que l'état
+  // n'ait désactivé le bouton ; l'état garde ce bouton désactivé jusqu'à la réponse.
+  const envoiAvoirEnCours = useRef(false);
+  const [envoiAvoir, setEnvoiAvoir] = useState(false);
   const [factureTraceId, setFactureTraceId] = useState<string | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [traceErreur, setTraceErreur] = useState('');
@@ -264,18 +269,29 @@ export default function Factures() {
 
   const creerAvoirPartiel = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!factureAvoir) return;
+    if (!factureAvoir || envoiAvoirEnCours.current) return;
     setErreur('');
     setSucces('');
     const lignesConverties = lignesAvoir.map((ligne) => ({ ...ligne, designation: ligne.designation.trim(), quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
     const fautive = lignesConverties.findIndex((ligne) => !ligne.designation || ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.prixUnitaireHt < 0 || ligne.tauxTva === null || ligne.tauxTva < 0 || ligne.tauxTva > 100);
     if (fautive >= 0) return setErreur(`Ligne d’avoir ${fautive + 1} : désignation obligatoire, quantité supérieure à zéro et montants numériques attendus (TVA entre 0 et 100).`);
-    const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
-    const data = await res.json();
-    if (!res.ok) return setErreur(data.error || 'Création de l’avoir partiel impossible.');
-    setFactureAvoir(null);
-    setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
-    await charger();
+    envoiAvoirEnCours.current = true;
+    setEnvoiAvoir(true);
+    let cree = false;
+    try {
+      const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return setErreur(data.error || 'Création de l’avoir partiel impossible.');
+      setFactureAvoir(null);
+      setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
+      cree = true;
+    } catch {
+      setErreur('Impossible de joindre le serveur.');
+    } finally {
+      envoiAvoirEnCours.current = false;
+      setEnvoiAvoir(false);
+    }
+    if (cree) await charger();
   };
 
   const creer = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -429,7 +445,7 @@ export default function Factures() {
             <span><strong>TVA</strong><br />{formatMontant(totauxAvoir.totalTva)}</span>
             <span><strong>Total TTC</strong><br />{formatMontant(totauxAvoir.totalTtc)}</span>
           </div>
-          <button className="btn btn-primary" type="submit"><Send size={16} /> Créer l’avoir partiel</button>
+          <button className="btn btn-primary" type="submit" disabled={envoiAvoir}><Send size={16} /> Créer l’avoir partiel</button>
         </form>
       )}
 
