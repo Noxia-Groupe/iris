@@ -409,22 +409,32 @@ export function enregistrerRoutesDevis(app: Express): void {
   // Le lien vers l'origine évite de retrouver deux devis jumeaux sans savoir lequel remplace
   // l'autre. Le taux d'acompte est relu depuis les paramètres du jour : un duplicata est un
   // devis neuf, il suit la politique en vigueur au moment où il est émis.
+  // La source est lue sous son verrou, dans la transaction qui crée le duplicata, comme pour une
+  // révision : une modification en cours est attendue puis copiée en entier, lignes et totaux.
+  // Le taux et le numéro d'affaire sont lus avant, sur le client global : pendant la transaction,
+  // chaque appel réclamerait une seconde connexion du pool en gardant la première, et des
+  // duplications simultanées l'épuiseraient. Un devis introuvable ne consomme pas de numéro.
   app.post('/api/devis/:id/duplication', requireAuth, requirePermission('devis:write'), async (req, res) => { try {
-    const source = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: devisInclude });
-    if (!source) return void res.status(404).json({ error: 'Devis introuvable.' });
+    if (!await prisma.devis.findUnique({ where: { id: paramId(req) }, select: { id: true } })) return void res.status(404).json({ error: 'Devis introuvable.' });
     const { tauxAcompteDefaut } = await getParametres();
-    const duplicata = await prisma.devis.create({
-      data: {
-        dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1,
-        clientId: source.clientId, objet: source.objet,
-        totalHt: source.totalHt, totalTva: source.totalTva, totalTtc: source.totalTtc,
-        acompteExige: source.acompteExige,
-        tauxAcompte: source.acompteExige ? tauxAcompteDefaut : null,
-        origineDevisId: source.id,
-        lignes: { create: source.lignes.map(copieLigneDevis) },
-      },
-      include: devisInclude,
+    const numero = await nouveauNumeroDevis();
+    const duplicata = await transactionVerifiee(async tx => {
+      if (!await verrouillerDevis(tx, paramId(req))) return null;
+      const source = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: devisInclude });
+      return tx.devis.create({
+        data: {
+          dossierId: crypto.randomUUID(), numero, version: 1,
+          clientId: source.clientId, objet: source.objet,
+          totalHt: source.totalHt, totalTva: source.totalTva, totalTtc: source.totalTtc,
+          acompteExige: source.acompteExige,
+          tauxAcompte: source.acompteExige ? tauxAcompteDefaut : null,
+          origineDevisId: source.id,
+          lignes: { create: source.lignes.map(copieLigneDevis) },
+        },
+        include: devisInclude,
+      });
     });
+    if (!duplicata) return void res.status(404).json({ error: 'Devis introuvable.' });
     res.status(201).json(devisPourLecteur(req, decimalToNumber(duplicata)));
   } catch (error) { devisErreur(res, error); } });
 }
