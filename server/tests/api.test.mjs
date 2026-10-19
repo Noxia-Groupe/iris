@@ -259,7 +259,7 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
-      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test',
+      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
       'garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
@@ -4856,6 +4856,63 @@ if (!TEST_DATABASE_URL) {
         assert.equal(await prisma.intervenant.count({ where: { id: fiche.id } }), 0, contexte);
         assert.equal(await prisma.user.count({ where: { id: compte.id } }), 0, contexte);
       }
+    });
+
+    // #231 : la promotion du démarrage, refusée une fois parce qu'une fiche est reliée au compte
+    // pendant qu'elle attend son verrou (FICHE_RELIEE), est retentée : elle délie alors la fiche et
+    // aboutit, sans rejet qui arrêterait le serveur.
+    test('la promotion du démarrage refusée une fois (fiche reliée au même moment) est retentée et aboutit', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.demarrage.course@iris.test', name: 'TEST Pilote3 démarrage course', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 démarrage course', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const emails = process.env.SUPERADMIN_EMAILS;
+      process.env.SUPERADMIN_EMAILS = `${emails},${compte.email}`;
+      let demarrage;
+      try {
+        const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
+        try {
+          demarrage = ensureSuperAdmins().then(() => null, (erreur) => erreur);
+          assert.equal(await attendreAttentesVerrou(1), true, 'la promotion attend le compte');
+          await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: compte.id } });
+        } finally {
+          await relacher();
+        }
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+      }
+      assert.equal(await demarrage, null);
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role, 'SUPERADMIN');
+      assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, null);
+      // Le premier essai, annulé, n'a rien journalisé : une promotion et une fiche déliée.
+      assert.equal((await journalCompte(compte.id, 'TYPE_COMPTE')).length, 1);
+      assert.equal((await journalFiche(compte.id)).length, 1);
+    });
+
+    // #231 : un compte de départ dont la promotion échoue à chaque essai (ici, refusée par un trigger
+    // de test) est signalé, sans rejet ; les comptes suivants sont traités.
+    test('un compte de départ impossible à promouvoir est signalé sans arrêter le démarrage, et les suivants sont traités', async () => {
+      const bloque = await prisma.user.create({ data: { email: 'pilote3.demarrage.bloque@iris.test', name: 'TEST Pilote3 démarrage bloqué', role: 'CONDUCTEUR_TRAVAUX' } });
+      const nouveau = 'pilote3.demarrage.nouveau@iris.test';
+      const emails = process.env.SUPERADMIN_EMAILS;
+      await prisma.$executeRawUnsafe('CREATE FUNCTION test_refuser_promotion_demarrage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION \'Promotion refusée par le test\'; END $$');
+      await prisma.$executeRawUnsafe(`CREATE TRIGGER test_refuser_promotion_demarrage BEFORE UPDATE ON "User" FOR EACH ROW WHEN (OLD."id" = '${bloque.id}') EXECUTE FUNCTION test_refuser_promotion_demarrage()`);
+      const erreurs = mock.method(console, 'error', () => {});
+      let appels = [];
+      process.env.SUPERADMIN_EMAILS = `${emails},${bloque.email},${nouveau}`;
+      try {
+        await ensureSuperAdmins();
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+        appels = [...erreurs.mock.calls];
+        erreurs.mock.restore();
+        await prisma.$executeRawUnsafe('DROP TRIGGER test_refuser_promotion_demarrage ON "User"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION test_refuser_promotion_demarrage()');
+      }
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: bloque.id } })).role, 'CONDUCTEUR_TRAVAUX');
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { email: nouveau } })).role, 'SUPERADMIN');
+      const signalements = appels.filter((appel) => String(appel.arguments[0]).includes(bloque.email));
+      assert.equal(signalements.length, 1, JSON.stringify(appels.map((appel) => String(appel.arguments[0]))));
+      assert.match(String(signalements[0].arguments[0]), /ni promu ni créé après 2 essais/);
+      assert.match(String(signalements[0].arguments[1]?.message), /Promotion refusée par le test/);
     });
 
     test('un changement de type pendant la suppression du compte répond 404, jamais 500', async () => {
