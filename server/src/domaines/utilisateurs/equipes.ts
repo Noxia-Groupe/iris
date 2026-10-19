@@ -8,7 +8,7 @@ import { requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { decimalToNumber } from '../../commun/montants';
 import { journaliserAdministration, changementsJournal } from '../../commun/journal-administration';
-import { refuseSuperAdminTarget, libelleCompteJournal, lireCompteVerrouille } from './comptes';
+import { refuseSuperAdminTarget, libelleCompteJournal, lireCompteVerrouille, ISOLATION_RETRAIT, verrouillerRetraitsComptes } from './comptes';
 
 export function enregistrerRoutesEquipes(app: Express): void {
   // Liste minimale des commerciaux (id + nom), pour peupler les sélecteurs d'affectation
@@ -99,8 +99,17 @@ export function enregistrerRoutesEquipes(app: Express): void {
     if (brut !== null && (typeof brut !== 'string' || !brut.trim())) return res.status(400).json({ error: 'Compte invalide.' });
     const userId = brut === null ? null : brut.trim();
     try {
+      // READ COMMITTED explicite (#226) : les comptes relus sous verrou pour le garde sont ceux du
+      // moment, quel que soit le réglage de la base (ISOLATION_RETRAIT).
       const resultat = await transactionVerifiee(async (tx) => {
-        // Verrous toujours dans le même ordre : la fiche, puis les comptes par identifiant croissant
+        // Le verrou des retraits en tête, comme le rattachement : la liaison verrouille l'ancien
+        // compte de la fiche, qui peut être le collaborateur d'un compte en cours de suppression, et
+        // la cascade de cette suppression l'attendrait pendant que la liaison attend le compte
+        // supprimé (interblocage). Qui attend ce verrou ne tient rien. La liaison se sérialise ainsi
+        // avec la suppression d'un compte et son changement de type (hors promotion super
+        // administrateur) : aucune fiche ne lui est reliée par cette route pendant ce temps.
+        await verrouillerRetraitsComptes(tx);
+        // Puis toujours dans le même ordre : la fiche, puis les comptes par identifiant croissant
         // (comme le changement de type d'un compte, qui verrouille sa fiche avant lui).
         const [fiche] = await tx.$queryRaw<Array<{ id: string; nom: string; userId: string | null }>>(Prisma.sql`SELECT "id", "nom", "userId" FROM "Intervenant" WHERE "id" = ${id} FOR UPDATE`);
         if (!fiche) return { statut: 404, erreur: 'Intervenant introuvable.' };
@@ -136,7 +145,7 @@ export function enregistrerRoutesEquipes(app: Express): void {
           });
         }
         return { statut: 200 };
-      });
+      }, ISOLATION_RETRAIT);
       if (resultat.statut !== 200) return res.status(resultat.statut).json({ error: resultat.erreur });
       res.json(decimalToNumber(await prisma.intervenant.findUnique({ where: { id } })));
     } catch (error) {
@@ -168,6 +177,7 @@ export function enregistrerRoutesEquipes(app: Express): void {
         where: { intervenants: { some: { id }, every: { id } } },
         select: { id: true },
       });
+      // READ COMMITTED explicite (#226), comme la liaison : le compte relu sous verrou est celui du moment.
       const resultat = await transactionVerifiee(async (tx) => {
         // Fiche, puis compte, verrouillés : le compte relu est bien celui que la suppression délie.
         const [verrou] = await tx.$queryRaw<Array<{ nom: string; userId: string | null }>>(Prisma.sql`SELECT "nom", "userId" FROM "Intervenant" WHERE "id" = ${id} FOR UPDATE`);
@@ -186,7 +196,7 @@ export function enregistrerRoutesEquipes(app: Express): void {
           });
         }
         return { statut: 200 };
-      });
+      }, ISOLATION_RETRAIT);
       if (resultat.statut !== 200) return res.status(resultat.statut).json({ error: resultat.erreur });
       res.json({ success: true });
     } catch (error) {

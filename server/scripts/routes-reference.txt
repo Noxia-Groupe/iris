@@ -97,20 +97,20 @@ PATCH /api/chantiers/:id/statut requireAuth#76fb48c2d0f5 > blockCommercialSeulem
 PATCH /api/chantiers/:id/commercial requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c5b6f454900d
 GET /api/users requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0552dd3633a7
 POST /api/users requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d2a05dc6e5a0
-DELETE /api/users/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4f0805592971
+DELETE /api/users/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#74803f5b5389
 PATCH /api/users/:id/role requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4060c5d2dbe0
 PATCH /api/users/:id/responsable-hierarchique requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5a6000b3b5b1
 PATCH /api/users/:id/est-commercial requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0d3026b18794
-PUT /api/users/:id/permissions requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#5a99575093cc
-PATCH /api/users/:id/acces-finance requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#1644f06a9c66
+PUT /api/users/:id/permissions requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#af6a696dea18
+PATCH /api/users/:id/acces-finance requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#72b545dfd957
 PATCH /api/users/:id/actif requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#76a3352c758f
 GET /api/commerciaux requireAuth#76fb48c2d0f5 > <anonymous>#bed7235de09c
 GET /api/conducteurs requireAuth#76fb48c2d0f5 > <anonymous>#73f7374f60c7
 GET /api/intervenants requireAuth#76fb48c2d0f5 > <anonymous>#7f11ac3852d4
 POST /api/intervenants requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c6ba071ecbe1
 PUT /api/intervenants/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#783c0d87a196
-PUT /api/intervenants/:id/compte requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#36737a9a5bb7
-DELETE /api/intervenants/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#ee11722c740a
+PUT /api/intervenants/:id/compte requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5e61db3bb78c
+DELETE /api/intervenants/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#86e1b7b43b2b
 GET /api/planning/chantiers requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > requirePlanningActif#20945635a340 > <anonymous>#7bc2ad31da02
 GET /api/planning/events requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > requirePlanningActif#20945635a340 > <anonymous>#7445940fb21c
 POST /api/planning/events requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d20ba39cc1f2
