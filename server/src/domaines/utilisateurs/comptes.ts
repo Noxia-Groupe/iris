@@ -53,7 +53,10 @@ export async function delierFicheSiPlusTechnicien(tx: any, req: AuthRequest | nu
   if (avant.role !== ROLE_TECHNICIEN || nouveauRole === ROLE_TECHNICIEN) return;
   // Une fiche encore libre au premier verrouillage a pu être reliée à ce compte avant qu'il ne soit
   // verrouillé à son tour : relue maintenant, elle n'est pas dans la liste verrouillée. Le changement
-  // est alors refusé (409), plutôt que de laisser la fiche reliée à un compte non technicien.
+  // est alors refusé (409), plutôt que de laisser la fiche reliée à un compte non technicien. La
+  // liaison de l'API prend le verrou des retraits, comme le changement de type : ce cas ne vient
+  // donc que d'une promotion super administrateur (qui ne le prend pas), du démarrage, ou d'un
+  // écrivain qui relierait une fiche sans ce verrou.
   const actuelles: Array<{ id: string }> = await tx.intervenant.findMany({ where: { userId: avant.id }, select: { id: true } });
   if (actuelles.some((f) => !fiches.some((v) => v.id === f.id))) throw Object.assign(new Error('Fiche intervenant reliée entre-temps.'), { code: 'FICHE_RELIEE' });
   for (const fiche of fiches) {
@@ -243,14 +246,16 @@ export function enregistrerRoutesComptes(app: Express): void {
         await verrouillerRetraitsComptes(tx);
         await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE`);
         await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
-        // Relues une fois le compte verrouillé : une fiche reliée entre-temps (la liaison valide en
-        // tenant ce verrou) est déliée par la suppression, et doit donc figurer au journal. Elles sont
+        // Relues une fois le compte verrouillé. La liaison de l'API attend le verrou des retraits, que
+        // la suppression tient : elle ne relie aucune fiche pendant ce temps. Cette relecture reste la
+        // garde contre tout écrivain qui relierait une fiche sans ce verrou : une fiche reliée
+        // entre-temps est déliée par la suppression, et doit donc figurer au journal. Elles sont
         // verrouillées sans attendre (NOWAIT), car la cascade ON DELETE SET NULL les modifiera : une
-        // fiche reliée entre-temps et tenue par une autre transaction (sa suppression ou sa liaison à
-        // un autre compte, qui attendent ce compte, voire une simple écriture en cours) formerait un
-        // interblocage ou une attente inutile (#219). La suppression est alors refusée, à réessayer,
-        // comme le changement de type (FICHE_RELIEE). Les fiches verrouillées plus haut ne sont pas
-        // concernées : ce verrou est déjà le nôtre.
+        // fiche reliée entre-temps et tenue par une autre transaction (sa suppression, qui attend ce
+        // compte, voire une simple écriture en cours) formerait un interblocage ou une attente
+        // inutile (#219). La suppression est alors refusée, à réessayer, comme le changement de type
+        // (FICHE_RELIEE). Les fiches verrouillées plus haut ne sont pas concernées : ce verrou est
+        // déjà le nôtre.
         const fichesDeliees = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE NOWAIT`)
           .catch((error: unknown) => { throw estVerrouIndisponible(error) ? Object.assign(new Error('Fiche intervenant reliée entre-temps.'), { code: 'FICHE_RELIEE' }) : error; });
         const supprime = await tx.user.findUnique({

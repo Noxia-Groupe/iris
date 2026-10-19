@@ -105,7 +105,9 @@ export function enregistrerRoutesEquipes(app: Express): void {
         // Le verrou des retraits en tête, comme le rattachement : la liaison verrouille l'ancien
         // compte de la fiche, qui peut être le collaborateur d'un compte en cours de suppression, et
         // la cascade de cette suppression l'attendrait pendant que la liaison attend le compte
-        // supprimé (interblocage). Qui attend ce verrou ne tient rien.
+        // supprimé (interblocage). Qui attend ce verrou ne tient rien. La liaison se sérialise ainsi
+        // avec la suppression d'un compte et son changement de type (hors promotion super
+        // administrateur) : aucune fiche ne lui est reliée par cette route pendant ce temps.
         await verrouillerRetraitsComptes(tx);
         // Puis toujours dans le même ordre : la fiche, puis les comptes par identifiant croissant
         // (comme le changement de type d'un compte, qui verrouille sa fiche avant lui).
