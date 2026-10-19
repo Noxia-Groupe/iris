@@ -4104,8 +4104,12 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([duplicata.body.totalHt, duplicata.body.totalTva, duplicata.body.totalTtc], [300, 60, 360], 'les totaux validés par la modification');
       assert.deepEqual(duplicata.body.lignes.map((ligne) => [ligne.designation, ligne.quantite, ligne.totalHt]), [['Pose révisée', 3, 300]], 'les lignes validées par la modification');
       assert.equal(duplicata.body.origineDevisId, source.id);
+      // Un devis introuvable ne consomme pas de numéro d'affaire.
+      const numerosTires = async () => (await prisma.sequenceAffaire.aggregate({ _sum: { dernierNumero: true } }))._sum.dernierNumero ?? 0;
+      const numerosAvant = await numerosTires();
       const introuvable = await request(app).post('/api/devis/00000000-0000-0000-0000-000000000000/duplication').set('Authorization', `Bearer ${session}`);
       assert.equal(introuvable.status, 404, JSON.stringify(introuvable.body));
+      assert.equal(await numerosTires(), numerosAvant, 'un devis introuvable ne consomme pas de numéro d’affaire');
     });
 
     // Le taux et le numéro d'affaire de la duplication sont lus avant sa transaction. Lus pendant, ils
