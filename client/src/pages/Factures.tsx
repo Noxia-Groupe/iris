@@ -61,13 +61,19 @@ const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoi
 export default function Factures() {
   const [factures, setFactures] = useState<Facture[]>([]);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [chargement, setChargement] = useState(false);
+  // Inconnu (null) jusqu'à la première réponse : la pagination ne donne pas de compte qu'elle n'a pas
+  // reçu, « 0 document(s) » se lirait comme une liste vide (#211).
+  const [total, setTotal] = useState<number | null>(null);
+  // Vrai dès le premier rendu : la page ne montre jamais « Aucune facture » avant sa première réponse,
+  // et les parcours qui attendent la fin du chargement attendent bien cette réponse (#211).
+  const [chargement, setChargement] = useState(true);
   const pageCourante = useRef(1);
   const requeteListe = useRef(0);
   const taillePage = 25;
-  const nombrePages = Math.max(1, Math.ceil(total / taillePage));
-  const [derniereDateEmission, setDerniereDateEmission] = useState<string | null>(null);
+  const nombrePages = Math.max(1, Math.ceil((total ?? 0) / taillePage));
+  // Inconnue (undefined) avant la réponse de la chronologie, absente (null) s'il n'y a encore aucune
+  // facture numérotée : la page ne dit « aucune » qu'une fois la réponse reçue (#211).
+  const [derniereDateEmission, setDerniereDateEmission] = useState<string | null | undefined>(undefined);
   const [clients, setClients] = useState<Client[]>([]);
   const [rechercheClient, setRechercheClient] = useState('');
   const [resultatsClients, setResultatsClients] = useState<Client[] | null>(null);
@@ -382,7 +388,7 @@ export default function Factures() {
 
       {erreur && <p className="text-red-600">{erreur}</p>}
       {erreurListe && <p className="text-red-600">{erreurListe}</p>}
-      <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
+      <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission === undefined ? (erreurListe ? 'indisponible' : 'en cours de chargement') : derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
       {succes && <p className="text-emerald-700">{succes}</p>}
 
       {factureAvoir && (
@@ -538,7 +544,7 @@ export default function Factures() {
       </div>
       <nav data-testid="pagination-factures" aria-label="Pagination des factures" className="flex flex-wrap items-center justify-between gap-3 text-sm">
         <button type="button" className="btn btn-secondary" disabled={page <= 1} onClick={() => changerPage(page - 1)}>Page précédente</button>
-        <span>Page {page} sur {nombrePages} — {total} document(s)</span>
+        <span>{total === null ? `Page ${page}` : `Page ${page} sur ${nombrePages} — ${total} document(s)`}</span>
         <button type="button" className="btn btn-secondary" disabled={page >= nombrePages} onClick={() => changerPage(page + 1)}>Page suivante</button>
       </nav>
       {factureTraceId && (
