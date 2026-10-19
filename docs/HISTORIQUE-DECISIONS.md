@@ -149,6 +149,7 @@ Les PR du découpage du serveur fusionnées le 18-10-2026 jusqu'à `dd92bf3` (#1
   - Claude Code fusionne lui-même la PR qu'il a codée lorsque deux conditions portent sur la même SHA : la CI y est verte, et son sous-agent d'audit l'y juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 ; jamais par la fusion automatique de GitHub.
   - La délégation ne couvre ni une PR qui change des montants (#208), ni une proposition soumise à la validation de Nelson (#182, #183), ni la mise en production.
   - Choix de Claude Code, et non exclusion de Nelson : il ne fusionne pas lui-même une PR qui modifie CLAUDE.md (#200, #207).
+- **Suite des lots du 19-10-2026.** Dans le même message que l'accord sur #221 : « Fait ce qu'il faut pour terminer ce qu'il reste en prenant les meilleur solution que tu propose. Ok tu peux continuer ». Claude Code a retenu, pour #230, toutes les pistes de l'issue : garde différé, contrôle par taux sur la ventilation enregistrée (déduite des lignes pour une pièce historique) et, sur proposition de l'audit interne, cohérence de chaque avoir émis (#235). Les autres lots de la journée corrigent des constats d'audit sans règle métier nouvelle.
 - **Cycle des statuts des factures (19-10-2026, #221).** « #221 ok pour moi avec ta proposition ». La proposition de #221 : brouillon → émise ; une facture passe d'émise à réglée, et inversement, selon ses règlements ; elle ne passe à annulée qu'avec son avoir d'annulation, créé dans la même transaction ; « annulée » est définitif. Appliqué par #227, qui l'étend, pour suivre le comportement actuel de l'application, à la création des pièces et aux avoirs (une pièce naît brouillon ou émise ; un avoir, né émis, le reste) : choix de mise en œuvre relevé par l'audit interne, non décision de Nelson.
 
 ### Lots fusionnés
@@ -169,16 +170,31 @@ Les PR du découpage du serveur fusionnées le 18-10-2026 jusqu'à `dd92bf3` (#1
 **Factures** (règle 2, documents figés et écritures d'argent) :
 - #217 (#180) : une facture émise a ses lignes, sa ventilation de TVA, sa version des mentions légales et sa date d'émission figées en base. Son journal est en ajout seul, horodaté par la base. Le retour au brouillon et un statut inconnu sont refusés, comme le vidage (`TRUNCATE`) des lignes, de la ventilation, des écritures et du journal.
 - #227 (#221, #222) : le cycle des statuts décidé le 19-10-2026 est garanti en base, et étendu à la création des pièces et aux avoirs (choix de mise en œuvre). Une facture ne passe à annulée qu'avec un avoir d'annulation émis, aux mêmes montants HT, TVA et TTC, dans la même transaction ; les pièces annulées avant cette migration ne sont pas revérifiées. Le vidage est refusé sur les règlements, les affectations et trois journaux comptables. L'insertion d'une écriture verrouille la pièce en `FOR NO KEY UPDATE`, sans interblocage.
+- #235 (#230) : le plafond des avoirs est garanti en base par un garde différé, vérifié à la validation de la transaction. Chaque avoir émis est cohérent et positif : aucun montant négatif, TTC = HT + TVA, ventilation par taux égale à ses totaux. Ensemble, les avoirs émis d'une facture ne dépassent ni son HT, ni sa TVA, ni son TTC, ni sa ventilation à chaque taux, et un taux absent de la facture est refusé. Un avoir partiel ne crédite qu'une facture émise ou réglée, ce qui refuse aussi l'annulation à côté d'un avoir partiel. La facture créditée est verrouillée avant la lecture de ses avoirs. Les avoirs brouillons ne comptent pas, et les pièces existantes ne sont pas revérifiées (règle 4).
+
+**Devis** :
+- #237 (#163) : la duplication d'un devis lit la source sous son verrou, dans la transaction qui crée le duplicata : une modification en cours est attendue, puis copiée en entier. Le taux d'acompte et le numéro d'affaire sont lus avant la transaction, pour ne pas épuiser le pool de connexions sous des duplications simultanées.
+
+**Administration** :
+- #234 (#220) : dans Administration > Utilisateurs, un refus du changement de type de compte ou de la case « Commercial » est affiché avec le message de l'API, puis la liste est rechargée ; une erreur réseau est signalée. Les réponses 500 de ces deux routes passent en français, et la case reçoit un nom accessible.
 
 **Tests** :
 - #229 (#225, #211) : les attentes de verrou des tests serveur ne comptent plus que les requêtes de la base du test, hors de la session qui interroge ; la page Factures n'affiche ni liste vide, ni compte, ni « aucune » avant sa première réponse.
+- #238 (#210) : la préparation des E2E et l'outil de comparaison du rendu partagent une règle stricte du nom de base jetable : « e2e » ou « test » doit former un mot du nom, écrit en lettres sans accent, chiffres, `_` ou `-` (`client/scripts/base-jetable.mjs`).
+
+**Documentation** :
+- #233 : passation du 19-10-2026, état de `main` à `44f65f7`.
 
 ### Suivis ouverts pendant ces lots
 
-#202 à #206 (anomalies des écrans), #210 (nom de base jetable des E2E), #212 (affichages à zéro), #220 (refus silencieux du changement de type), #223 (comptes rendus et signatures SAV non figés en base, lot 3b) et #230 (plafond des avoirs non garanti en base).
+#202 à #206 (anomalies des écrans), #210 (nom de base jetable des E2E, corrigé par #238), #212 (affichages à zéro), #220 (refus silencieux du changement de type, corrigé par #234), #223 (comptes rendus et signatures SAV non figés en base, lot 3b) et #230 (plafond des avoirs non garanti en base, corrigé par #235).
+
+Puis, pendant les lots suivants : #236 (aperçu de TVA d'un avoir partiel, correctif #242), #239 (autres actions de l'Administration), #240 (pool de connexions de `PATCH /api/devis/:id`), #241 (CLAUDE.md, règle du nom de base jetable), #243 (cohérence interne des pièces émises) et #244 (jeton de session E2E recopié dans 16 parcours). #152 (parcours `entetes-mobile`) est complétée d'un échec intermittent au premier passage local.
 
 ### En attente de Nelson au 19-10-2026
 
-- #208 (#198) : prête sur sa base `778f9d5` (audit interne fusionnable et CI 5/5 verte sur `0c6ef05`) ; rafraîchissement sur `main` en cours, CI et audit à rejouer sur la nouvelle SHA avant sa fusion par Nelson (montants affichés).
+- #208 (#198) et #242 (#236) : elles changent des montants affichés, leur fusion revient donc à Nelson. L'état de leur audit et de leur CI sur leur dernière SHA est tenu dans le corps de chaque PR.
 - #207 : état du découpage dans CLAUDE.md.
 - #182 et #183 : propositions 3 et 4, arbitrées par délégation, à valider par leur fusion.
+- #241 : mise à jour de CLAUDE.md proposée (règle du nom de base jetable), laissée à Nelson.
+- #239 : question de droits (masquer ou non le refus 403 qui révèle une promotion en super administrateur).
