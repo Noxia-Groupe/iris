@@ -110,18 +110,22 @@ if (!TEST_DATABASE_URL) {
     const compte = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
     await tvaFixture(5.5, compte.id);
   };
-  const purgerEcrituresJetables = async id => {
-    try {
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_immutable"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre_immediat"');
-      await prisma.ecritureFacture.deleteMany({ where: { factureId: id } });
-    } finally {
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre_immediat"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_immutable"');
-    }
-  };
+
+  // Lignes, journal et écritures d'une pièce émise sont figés en base : seul le nettoyage de la base
+  // jetable les purge, gardes suspendus le temps d'une transaction (un arrêt en cours de route ne
+  // peut pas les laisser désactivés).
+  const GARDES_PIECE = [['FactureLigne', 'facture_ligne_figee'], ['JournalFacture', 'journal_facture_ajout_seul'], ['EcritureFacture', 'ecriture_facture_immutable'], ['EcritureFacture', 'ecriture_facture_equilibre'], ['EcritureFacture', 'ecriture_facture_equilibre_immediat']];
+  const sansGardesPiece = (operations) => prisma.$transaction([
+    ...GARDES_PIECE.map(([table, garde]) => prisma.$executeRawUnsafe(`ALTER TABLE "${table}" DISABLE TRIGGER "${garde}"`)),
+    ...operations,
+    ...GARDES_PIECE.map(([table, garde]) => prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ENABLE TRIGGER "${garde}"`)),
+  ]);
+  const purgerPieceJetable = (id) => sansGardesPiece([
+    prisma.journalFacture.deleteMany({ where: { factureId: id } }),
+    prisma.factureLigne.deleteMany({ where: { factureId: id } }),
+    prisma.ecritureFacture.deleteMany({ where: { factureId: id } }),
+    prisma.facture.deleteMany({ where: { id } }),
+  ]);
 
   let cleApi = '';
 
@@ -145,19 +149,13 @@ if (!TEST_DATABASE_URL) {
     await prisma.interventionSignature.deleteMany({ where: { rapport: { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } } } });
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
-    // Les snapshots ont une FK RESTRICT et sont append-only : purge uniquement sur la base jetable.
-    try {
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_immutable"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre_immediat"');
-      await prisma.ecritureFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
-    } finally {
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre_immediat"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_immutable"');
-    }
-    await prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
-    await prisma.journalFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
+    // Les snapshots ont une FK RESTRICT et sont append-only, comme les lignes et le journal des
+    // pièces émises : purge uniquement sur la base jetable.
+    await sansGardesPiece([
+      prisma.ecritureFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } }),
+      prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } }),
+      prisma.journalFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } }),
+    ]);
     // Les règlements sont immuables par trigger : seul ce nettoyage de base jetable les purge,
     // avant leurs factures et leurs clients de test.
     try {
@@ -6571,8 +6569,7 @@ if (!TEST_DATABASE_URL) {
         }
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-29T00:00:00.000Z' });
       } finally {
-        for (const id of ids.slice(1)) await purgerEcrituresJetables(id);
-        await prisma.facture.deleteMany({ where: { id: { in: ids.slice(1) } } });
+        for (const id of ids.slice(1)) await purgerPieceJetable(id);
         await prisma.facture.deleteMany({ where: { id: ids[0] } });
       }
     });
@@ -8020,6 +8017,149 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(() => prisma.ecritureFacture.update({ where: { id: ecriture.id }, data: { credit: 1 } }));
     });
 
+    // #180 : comme ses totaux et ses écritures, les lignes, la ventilation, les mentions légales et
+    // le journal d'une facture émise sont figés en base, sans retour au brouillon ; un brouillon
+    // reste modifiable.
+    test('la base fige les lignes, la ventilation, les mentions et le journal d’une facture émise, sans retour au brouillon ; pas ceux d’un brouillon', async () => {
+      const creer = async (motif) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST figement', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        return brouillon.body;
+      };
+      const ligneLibre = (factureId, ordre) => ({ factureId, ordre, designation: 'TEST ligne ajoutée', quantite: 1, prixUnitaireHt: 0, tauxTva: 20, totalHt: 0, totalTtc: 0 });
+      const brouillon = await creer('TEST figement brouillon');
+      const [ligneBrouillon] = await prisma.factureLigne.findMany({ where: { factureId: brouillon.id } });
+      await prisma.factureLigne.update({ where: { id: ligneBrouillon.id }, data: { designation: 'TEST brouillon corrigé' } });
+      await prisma.factureLigne.delete({ where: { id: (await prisma.factureLigne.create({ data: ligneLibre(brouillon.id, 9) })).id } });
+      const facture = await creer('TEST figement émise');
+      const emission = await request(app).post(`/api/factures/${facture.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const lignes = await prisma.factureLigne.findMany({ where: { factureId: facture.id } });
+      const figee = /lignes d’une facture émise sont immuables/;
+      await assert.rejects(prisma.factureLigne.update({ where: { id: lignes[0].id }, data: { prixUnitaireHt: 1 } }), figee);
+      await assert.rejects(prisma.factureLigne.delete({ where: { id: lignes[0].id } }), figee);
+      await assert.rejects(prisma.factureLigne.create({ data: ligneLibre(facture.id, 9) }), figee);
+      await assert.rejects(prisma.factureLigne.update({ where: { id: ligneBrouillon.id }, data: { factureId: facture.id, ordre: 9 } }), figee, 'une ligne de brouillon ne passe pas sur une pièce émise');
+      assert.deepEqual(await prisma.factureLigne.findMany({ where: { factureId: facture.id } }), lignes);
+      // Dès l'émission, avant même le scellement de la même transaction, la ligne est figée.
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE' } });
+        await tx.factureLigne.update({ where: { id: ligneBrouillon.id }, data: { designation: 'TEST après émission' } });
+      }), figee);
+      // La suppression ne passe que par le contrôle de la pièce d'origine : il porte aussi sur le statut.
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE' } });
+        await tx.factureLigne.delete({ where: { id: ligneBrouillon.id } });
+      }), figee);
+      // Ventilation de TVA : ni ajout, ni modification, ni suppression.
+      const ventilation = await prisma.factureVentilationTva.findMany({ where: { factureId: facture.id } });
+      const ventilationFigee = /ventilation TVA d’une facture émise est immuable/;
+      await assert.rejects(prisma.factureVentilationTva.create({ data: { factureId: facture.id, tauxTva: 5.5, totalHt: 100, totalTva: 5.5, totalTtc: 105.5 } }), ventilationFigee);
+      await assert.rejects(prisma.factureVentilationTva.update({ where: { id: ventilation[0].id }, data: { totalHt: 1 } }), ventilationFigee);
+      await assert.rejects(prisma.factureVentilationTva.delete({ where: { id: ventilation[0].id } }), ventilationFigee);
+      assert.deepEqual(await prisma.factureVentilationTva.findMany({ where: { factureId: facture.id } }), ventilation);
+      // Mentions légales imprimées et instant d'émission : figés. Le retour au brouillon, qui
+      // rouvrirait tous les gardes, est refusé.
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { mentionsLegalesVersionId: null } }), /immuables/);
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { emisLe: new Date() } }), /immuables/);
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'BROUILLON' } }), /ne redevient jamais brouillon/);
+      // Un statut hors du cycle documenté rouvrirait les gardes écrits pour des statuts nommés.
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'ARCHIVEE' } }), /Facture_statut_check/);
+      const enBase = await prisma.facture.findUniqueOrThrow({ where: { id: facture.id } });
+      assert.deepEqual([enBase.statut, enBase.mentionsLegalesVersionId, enBase.emisLe.toISOString()], ['EMISE', emission.body.mentionsLegalesVersionId, emission.body.emisLe]);
+      // Journal en ajout seul, émise ou brouillon.
+      for (const id of [facture.id, brouillon.id]) {
+        const entree = await prisma.journalFacture.findFirstOrThrow({ where: { factureId: id } });
+        await assert.rejects(prisma.journalFacture.update({ where: { id: entree.id }, data: { detail: 'TEST réécrit' } }), /Journal des factures immuable/);
+        await assert.rejects(prisma.journalFacture.delete({ where: { id: entree.id } }), /Journal des factures immuable/);
+        assert.deepEqual(await prisma.journalFacture.findUnique({ where: { id: entree.id } }), entree);
+      }
+      // L'horodatage d'une entrée est celui de la base, pas celui qu'on lui fournit.
+      const avantAjout = new Date();
+      const ajout = await prisma.journalFacture.create({ data: { factureId: facture.id, action: 'TEST', detail: 'TEST horodatage', createdAt: new Date('2020-01-01T00:00:00.000Z') } });
+      assert.ok(ajout.createdAt.getTime() >= avantAjout.getTime() - 5000, `horodatage imposé : ${ajout.createdAt.toISOString()}`);
+      // Vidages tentés dans une transaction annulée : si le garde régressait, la base de test ne
+      // serait pas réellement vidée sous les tests suivants.
+      const vidageAnnule = (table) => prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`TRUNCATE "${table}" CASCADE`);
+        throw new Error(`vidage de ${table} accepté`);
+      });
+      for (const table of ['FactureLigne', 'FactureVentilationTva', 'EcritureFacture', 'JournalFacture']) await assert.rejects(vidageAnnule(table), /vidage interdit/, table);
+      assert.equal(await prisma.factureLigne.count({ where: { factureId: facture.id } }), lignes.length);
+    });
+
+    // Deux ajouts concurrents dans un même brouillon, chacun suivi d'une mise à jour de la pièce, se
+    // sérialisent sans interblocage : un verrou partagé (FOR SHARE) dans le garde s'y interbloquerait.
+    // Prisma résout une transaction dont le COMMIT échoue : le nombre de lignes fait foi.
+    test('deux ajouts concurrents de lignes dans un brouillon ne s’interbloquent pas', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST interblocage', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST interblocage', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const id = brouillon.body.id;
+      const ligne = (ordre) => ({ factureId: id, ordre, designation: `TEST concurrente ${ordre}`, quantite: 1, prixUnitaireHt: 0, tauxTva: 20, totalHt: 0, totalTtc: 0 });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const premierAjout = new Promise((resolve) => { pret = resolve; });
+      const premiere = prisma.$transaction(async (tx) => {
+        await tx.factureLigne.create({ data: ligne(7) });
+        pret();
+        await attente;
+        await tx.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST interblocage 1' } });
+      }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+      await premierAjout;
+      const seconde = prisma.$transaction(async (tx) => {
+        await tx.factureLigne.create({ data: ligne(8) });
+        await tx.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST interblocage 2' } });
+      }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+      try {
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'la seconde transaction attend la première');
+      } finally {
+        liberer();
+      }
+      const [erreurPremiere, erreurSeconde] = await Promise.all([premiere, seconde]);
+      assert.equal(erreurPremiere, null, String(erreurPremiere?.message));
+      assert.equal(erreurSeconde, null, String(erreurSeconde?.message));
+      assert.equal(await prisma.factureLigne.count({ where: { factureId: id } }), 3);
+    });
+
+    // Le garde des lignes verrouille la pièce : un ajout concurrent de son scellement attend, puis
+    // voit la pièce scellée et est refusé.
+    test('un ajout de ligne pendant le scellement de la pièce attend, puis est refusé', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST figement concurrent', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST figement', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${brouillon.body.id} FOR UPDATE`;
+        pret();
+        await attente;
+        await tx.facture.update({ where: { id: brouillon.body.id }, data: { ecrituresScellees: true } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      let ajout;
+      try {
+        ajout = prisma.factureLigne.create({ data: { factureId: brouillon.body.id, ordre: 9, designation: 'TEST ajout concurrent', quantite: 1, prixUnitaireHt: 0, tauxTva: 20, totalHt: 0, totalTtc: 0 } }).then(() => null, (erreur) => erreur);
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%FactureLigne%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'l’ajout attend le verrou de la pièce');
+      } finally {
+        liberer();
+        await verrou;
+      }
+      assert.match(String((await ajout)?.message), /lignes d’une facture émise sont immuables/);
+      assert.equal(await prisma.factureLigne.count({ where: { factureId: brouillon.body.id } }), 1);
+    });
+
     test('émet et exporte une facture entièrement offerte sans écriture déséquilibrée', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST remise totale', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST offerte', quantite: 1, prixUnitaireHt: 0, tauxTva: 0 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
@@ -8145,10 +8285,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(rang(avoirSecond.numero), rang(avoirPremier.numero) + 1, 'la séquence des avoirs progresse indépendamment');
       } finally {
         for (const id of [avoirPremier.id, avoirSecond.id, premiere.id, seconde.id]) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
-          await purgerEcrituresJetables(id);
-          await prisma.facture.delete({ where: { id } });
+          await purgerPieceJetable(id);
         }
       }
     });
@@ -8196,15 +8333,9 @@ if (!TEST_DATABASE_URL) {
       } finally {
         const avoirs = await prisma.facture.findMany({ where: { factureOrigineId: facture.id }, select: { id: true } });
         for (const { id } of avoirs) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
-          await purgerEcrituresJetables(id);
-          await prisma.facture.delete({ where: { id } });
+          await purgerPieceJetable(id);
         }
-        await prisma.journalFacture.deleteMany({ where: { factureId: facture.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: facture.id } });
-        await purgerEcrituresJetables(facture.id);
-        await prisma.facture.deleteMany({ where: { id: facture.id } });
+        await purgerPieceJetable(facture.id);
       }
     });
 
@@ -8249,15 +8380,9 @@ if (!TEST_DATABASE_URL) {
       } finally {
         const avoirs = await prisma.facture.findMany({ where: { factureOrigineId: facture.id }, select: { id: true } });
         for (const { id } of avoirs) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
-          await purgerEcrituresJetables(id);
-          await prisma.facture.delete({ where: { id } });
+          await purgerPieceJetable(id);
         }
-        await prisma.journalFacture.deleteMany({ where: { factureId: facture.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: facture.id } });
-        await purgerEcrituresJetables(facture.id);
-        await prisma.facture.deleteMany({ where: { id: facture.id } });
+        await purgerPieceJetable(facture.id);
       }
     });
 
@@ -8469,15 +8594,9 @@ if (!TEST_DATABASE_URL) {
       } finally {
         const avoir = await prisma.facture.findFirst({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
         if (avoir) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
-          await purgerEcrituresJetables(avoir.id);
-          await prisma.facture.delete({ where: { id: avoir.id } });
+          await purgerPieceJetable(avoir.id);
         }
-        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
-        await purgerEcrituresJetables(emission.body.id);
-        await prisma.facture.delete({ where: { id: emission.body.id } });
+        await purgerPieceJetable(emission.body.id);
       }
     });
 
@@ -8520,14 +8639,8 @@ if (!TEST_DATABASE_URL) {
         }
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
-        await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
-        await purgerEcrituresJetables(avoir.id);
-        await prisma.facture.delete({ where: { id: avoir.id } });
-        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
-        await purgerEcrituresJetables(emission.body.id);
-        await prisma.facture.delete({ where: { id: emission.body.id } });
+        await purgerPieceJetable(avoir.id);
+        await purgerPieceJetable(emission.body.id);
       }
     });
 
@@ -8547,11 +8660,8 @@ if (!TEST_DATABASE_URL) {
       // Retire l'avoir pour exercer le chemin historique de contre-passation, pas son
       // remplacement moderne. L'instant est volontairement à cheval sur le nouvel an.
       const avoir = annulation.body.avoir;
-      await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
-      await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
-      await purgerEcrituresJetables(avoir.id);
-      await prisma.facture.delete({ where: { id: avoir.id } });
-      await prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2027-01-01T00:30:00.000Z') } });
+      await purgerPieceJetable(avoir.id);
+      await sansGardesPiece([prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2027-01-01T00:30:00.000Z') } })]);
       const jourComptable = async () => {
         const csv = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
         assert.equal(csv.status, 200, csv.text);
@@ -8569,15 +8679,9 @@ if (!TEST_DATABASE_URL) {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
         const avoir = await prisma.facture.findFirst({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
         if (avoir) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
-          await purgerEcrituresJetables(avoir.id);
-          await prisma.facture.delete({ where: { id: avoir.id } });
+          await purgerPieceJetable(avoir.id);
         }
-        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
-        await purgerEcrituresJetables(emission.body.id);
-        await prisma.facture.delete({ where: { id: emission.body.id } });
+        await purgerPieceJetable(emission.body.id);
       }
     });
 
@@ -9054,7 +9158,17 @@ if (!TEST_DATABASE_URL) {
     test('refuse le document d’une facture émise sans mentions figées', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST document sans mentions', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST document sans mentions', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
-      await prisma.facture.update({ where: { id: brouillon.body.id }, data: { mentionsLegalesVersionId: null } });
+      // Les mentions d'une facture émise sont figées en base (#180) : la pièce sans mentions, que
+      // l'API doit toujours refuser d'imprimer, est fabriquée en suspendant ce seul garde.
+      await assert.rejects(prisma.facture.update({ where: { id: brouillon.body.id }, data: { mentionsLegalesVersionId: null } }), /immuables/);
+      await prisma.$transaction([
+        prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "Facture_immutabilite_origine_emise"'),
+        prisma.facture.update({ where: { id: brouillon.body.id }, data: { mentionsLegalesVersionId: null } }),
+        // Les gardes différés de la pièce sont vérifiés avant de réactiver le trigger (PostgreSQL
+        // refuse un ALTER TABLE tant que des événements différés sont en attente).
+        prisma.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE'),
+        prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "Facture_immutabilite_origine_emise"'),
+      ]);
       const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
       assert.equal(document.status, 409, JSON.stringify(document.body)); assert.match(document.body.error, /mentions légales/i);
     });
