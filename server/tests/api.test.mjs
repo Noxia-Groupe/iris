@@ -8765,17 +8765,26 @@ if (!TEST_DATABASE_URL) {
       const purger = [];
       let echec = null;
       try {
-        // Montants totaux. Facture de 10 € HT à 20 %, créditée de 5 € HT par l'API : il reste 5 € HT et
-        // 1 € de TVA. Un avoir cohérent en dépassement d'un centime du HT, ou de la TVA, est refusé ; le
-        // TTC suit (un avoir cohérent ne le dépasse pas sans dépasser l'un des deux). Le reste exact
-        // passe, et la facture n'accepte plus rien.
+        // Montants totaux. Facture de 10 € HT à 20 %, créditée de 5 € HT par l'API : il reste 5 € HT, 1 €
+        // de TVA et 6 € TTC. Un avoir cohérent qui dépasse d'un centime le HT seul, ou la TVA seule, est
+        // refusé ; le reste exact passe, et la facture n'accepte plus rien.
         const simple = await emettre('TEST plafond montants');
         purger.push(simple.id);
         await avoirPartielApi(simple, [ligne(5, 20)]);
-        await assert.rejects(avoirSql(simple.id, { taux: [[20, 5.01, 1]] }), montantTotal, 'dépassement du HT total');
-        await assert.rejects(avoirSql(simple.id, { taux: [[20, 5, 1.01]] }), montantTotal, 'dépassement de la TVA totale');
+        await assert.rejects(avoirSql(simple.id, { taux: [[20, 5.01, 0.99]] }), montantTotal, 'dépassement du HT total seul');
+        await assert.rejects(avoirSql(simple.id, { taux: [[20, 4.99, 1.01]] }), montantTotal, 'dépassement de la TVA totale seule');
         await avoirSql(simple.id, { taux: [[20, 5, 1]] });
         await assert.rejects(avoirSql(simple.id, { taux: [[20, 0.01, 0]] }), montantTotal, 'facture entièrement créditée');
+        // Un avoir cohérent ne dépasse le TTC qu'avec le HT ou la TVA, sauf sur une facture incohérente,
+        // que la base ne refuse pas encore (#243) : TTC de 11,99 € pour 10 € HT et 2 € de TVA. Seul le
+        // contrôle du TTC total arrête alors l'avoir de 12 € ; et, sur une facture dont la ventilation
+        // porte ce TTC faux, seul celui du TTC du taux.
+        const ttcFaux = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2]], montants: { totalHt: 10, totalTva: 2, totalTtc: 11.99 } }));
+        purger.push(ttcFaux.id);
+        await assert.rejects(avoirSql(ttcFaux.id, { taux: [[20, 10, 2]] }), montantTotal, 'dépassement du TTC total seul');
+        const ttcTauxFaux = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2, 11.99]] }));
+        purger.push(ttcTauxFaux.id);
+        await assert.rejects(avoirSql(ttcTauxFaux.id, { taux: [[20, 10, 2]] }), ventilationDepassee('20.00'), 'dépassement du TTC d’un taux seul');
         // Un avoir resté brouillon ne compte pas ; il est vérifié quand il est émis.
         const brouillonAvoir = await avoirSql(simple.id, { statut: 'BROUILLON', taux: [[20, 1, 0.2]] });
         await assert.rejects(transaction(async (tx) => {
@@ -8790,12 +8799,20 @@ if (!TEST_DATABASE_URL) {
         const libre = await emettre('TEST plafond cohérence');
         purger.push(libre.id);
         await assert.rejects(avoirSql(libre.id, { contenu: 'aucun', montants: { totalHt: -5, totalTva: 0, totalTtc: 0 } }), montantNegatif, 'avoir compensateur négatif');
-        await assert.rejects(avoirSql(libre.id, { taux: [[20, 6, 1.2], [10, -1, -0.2]] }), montantNegatif, 'ventilation négative sous des totaux positifs');
+        // Ventilations cohérentes avec leurs totaux, dont une ligne au seul HT, puis à la seule TVA,
+        // négatif : sans ce refus, une base négative à un taux y libérerait le plafond.
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 6, 1.2, 7.2], [10, -1, 1, 0]] }), montantNegatif, 'HT ventilé seul négatif');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 6, 1.2, 7.2], [10, 1, -0.5, 0.5]] }), montantNegatif, 'TVA ventilée seule négative');
         await assert.rejects(avoirSql(libre.id, { contenu: 'aucun', montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'avoir sans contenu');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 4, 1]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'HT ventilé différent des totaux');
         await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 0.5]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'TVA ventilée différente des totaux');
         await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 1]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6.01 } }), incoherent, 'TTC différent de HT + TVA');
         await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 1, 6.01]] }), incoherent, 'ligne de ventilation au TTC faux');
         assert.equal(await credite(libre.id), 0);
+        // Un avoir brouillon incohérent ne compte pas : un avoir valide émis ensuite passe.
+        await avoirSql(libre.id, { statut: 'BROUILLON', contenu: 'aucun', montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } });
+        await avoirSql(libre.id, { taux: [[20, 1, 0.2]] });
+        assert.equal(await credite(libre.id), 1.2);
 
         // Ventilation par taux. Facture de 10 € HT à 20 % et 10 € HT à 10 %, créditée de 5 € HT à 20 %
         // par l'API : il reste 5 € HT et 1 € de TVA à 20 %, 10 € HT et 1 € de TVA à 10 %. Chaque avoir
@@ -8808,9 +8825,10 @@ if (!TEST_DATABASE_URL) {
         await assert.rejects(avoirSql(mixte.id, { taux: [[10, 10.01, 1]], contenu: 'lignes' }), ventilationDepassee('10.00'), 'HT à 10 % dépassé (ventilation déduite des lignes)');
         await assert.rejects(avoirSql(mixte.id, { taux: [[20, 1, 1.01]] }), ventilationDepassee('20.00'), 'TVA à 20 % dépassée seule');
         await assert.rejects(avoirSql(mixte.id, { taux: [[5.5, 1, 0.06]] }), tauxAbsent, 'taux absent de la facture');
-        await avoirSql(mixte.id, { taux: [[10, 10, 1]] });
-        // Un avoir brouillon, même au-delà d'un taux, ne compte pas.
+        // Un avoir brouillon, même au-delà des totaux et d'un taux, ne compte pas : le reste exact du taux
+        // passe après lui.
         await avoirSql(mixte.id, { statut: 'BROUILLON', taux: [[10, 50, 5]] });
+        await avoirSql(mixte.id, { taux: [[10, 10, 1]] });
 
         // Factures historiques sans ventilation enregistrée : leur ventilation est déduite de leurs
         // lignes, TVA arrondie au centime le plus proche (0,10 € HT à 5,5 % : 0,0055 → 0,01).
@@ -8829,7 +8847,6 @@ if (!TEST_DATABASE_URL) {
         const brouillon = await creer('TEST plafond brouillon', [ligne(10, 20)]);
         purger.push(brouillon.id);
         await assert.rejects(avoirSql(brouillon.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’un brouillon');
-        await avoirSql(brouillon.id, { statut: 'BROUILLON', taux: [[20, 1, 0.2]] });
         await assert.rejects(avoirSql(avoirMixte.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’un avoir émis');
         const annulee = await emettre('TEST plafond annulée');
         purger.push(annulee.id);
@@ -8838,8 +8855,18 @@ if (!TEST_DATABASE_URL) {
         await purgerPieceJetable(annulation.body.avoir.id);
         await assert.rejects(avoirSql(annulee.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’une facture annulée');
 
-        // Annulation à côté d'un avoir partiel : l'avoir d'annulation, émis aux mêmes montants, satisfait
-        // les gardes de #227 ; le partiel la fait refuser.
+        // Un avoir partiel resté brouillon ne compte pas : la facture s'annule avec son avoir d'annulation.
+        const annulable = await emettre('TEST plafond annulation à côté d’un brouillon');
+        purger.push(annulable.id);
+        await avoirSql(annulable.id, { statut: 'BROUILLON', taux: [[20, 1, 0.2]] });
+        await transaction(async (tx) => {
+          await tx.facture.update({ where: { id: annulable.id }, data: { statut: 'ANNULEE' } });
+          await pieceSql(tx, { factureOrigineId: annulable.id, estAvoirAnnulation: true, taux: [[20, 10, 2]] });
+        });
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: annulable.id } })).statut, 'ANNULEE');
+
+        // Annulation à côté d'un avoir partiel émis : l'avoir d'annulation, émis aux mêmes montants,
+        // satisfait les gardes de #227 ; le partiel la fait refuser.
         const partielle = await emettre('TEST plafond annulation');
         purger.push(partielle.id);
         await avoirPartielApi(partielle, [ligne(1, 20)]);
@@ -8855,6 +8882,13 @@ if (!TEST_DATABASE_URL) {
         const disputee = await emettre('TEST plafond concurrent');
         purger.push(disputee.id);
         const tenir = () => { let liberer, pret; const attente = new Promise((resolve) => { liberer = resolve; }); const tenue = new Promise((resolve) => { pret = resolve; }); return { attente, tenue, liberer: () => liberer(), pret: () => pret() }; };
+        // La transaction qui doit tenir la facture peut échouer avant : le test s'arrête alors sur son
+        // erreur, au lieu d'attendre sans fin.
+        const tenueOuEchec = (tenir, transactionTenue, nom) => {
+          const echecAvant = transactionTenue.then((erreur) => { throw erreur ?? new Error(`${nom} terminée sans tenir la facture`); });
+          echecAvant.catch(() => {});
+          return Promise.race([tenir.tenue, echecAvant]);
+        };
         const attendreVerrou = async (filtre) => {
           let bloque = false;
           for (let tour = 0; tour < 150 && !bloque; tour += 1) {
@@ -8871,7 +8905,7 @@ if (!TEST_DATABASE_URL) {
           premiere.pret();
           await premiere.attente;
         }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
-        await premiere.tenue;
+        await tenueOuEchec(premiere, t1, 'T1');
         const t2 = avoirSql(disputee.id, { taux: [[20, 6, 1.2]] }).then(() => null, (erreur) => erreur);
         try {
           assert.equal(await attendreVerrou(() => prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%Facture%') AS attente`), true, 'le second avoir attend la facture tenue par le premier');
@@ -8897,7 +8931,7 @@ if (!TEST_DATABASE_URL) {
           detenteur.pret();
           await detenteur.attente;
         }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
-        await detenteur.tenue;
+        await tenueOuEchec(detenteur, t3, 'T3');
         let pidEmission = null;
         const t4 = transaction(async (tx) => {
           [{ pid: pidEmission }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
