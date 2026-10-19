@@ -28,8 +28,6 @@ export function refuseSuperAdminTarget(req: express.Request, targetRole: string 
   return 'Seul un super administrateur peut gérer un compte super administrateur.';
 }
 
-// Garde-fou : l'application doit toujours conserver au moins un compte superadmin, sinon
-// plus personne ne peut piloter les modules ni rendre la main à un autre superadmin.
 // Libellé figé d'un compte dans le journal des paramètres et des droits : il reste lisible après
 // la suppression ou le renommage du compte.
 export function libelleCompteJournal(compte: { name: string; email: string }): string {
@@ -74,12 +72,26 @@ export async function journaliserDroitsCompte(tx: any, req: express.Request, act
   });
 }
 
-async function isLastSuperAdmin(userId: string): Promise<boolean> {
-  const count = await prisma.user.count({ where: { role: ROLE_SUPERADMIN } });
-  if (count > 1) return false;
-  const target = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
-  return isSuperAdminRole(target?.role);
+// Garde-fou : les routes de comptes refusent de retirer le dernier super administrateur ACTIF
+// (suppression, autre type, désactivation), sans quoi plus personne ne piloterait les modules ni ne
+// rendrait la main à un autre : l'accès de secours en exige un actif, et le démarrage promeut sans
+// réactiver. Ces retraits se sérialisent par un verrou consultatif, pris en tête de leur transaction
+// avant tout verrou de ligne : qui l'attend ne tient rien, si bien que ce verrou ne peut entrer dans
+// aucun interblocage, et l'ordre des verrous de ligne qui suivent reste celui d'avant. Le compte visé
+// est ensuite relu sous son propre verrou, et les autres super administrateurs actifs sont comptés
+// par une simple lecture. Leur transaction est explicitement en READ COMMITTED (ISOLATION_RETRAIT),
+// quel que soit le réglage de la base : chaque lecture y voit tout retrait validé avant elle, et
+// aucun autre ne peut aboutir avant la fin de la transaction. En REPEATABLE READ, l'instantané pris
+// avant l'attente du verrou ignorerait le retrait qui vient d'aboutir. Une promotion validée pendant
+// ce temps peut ne pas être vue : le refus n'en est que plus prudent.
+const ISOLATION_RETRAIT = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted };
+const verrouillerRetraitsComptes = (tx: Prisma.TransactionClient) => tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`;
+async function estDernierSuperAdminActif(tx: Prisma.TransactionClient, compte: { id: string; role: string; actif: boolean }): Promise<boolean> {
+  if (!isSuperAdminRole(compte.role) || !compte.actif) return false;
+  return (await tx.user.count({ where: { role: ROLE_SUPERADMIN, actif: true, id: { not: compte.id } } })) === 0;
 }
+
+const erreurDernierSuperAdmin = () => Object.assign(new Error('Dernier super administrateur actif.'), { code: 'DERNIER_SUPERADMIN' });
 
 export function enregistrerRoutesComptes(app: Express): void {
   // Users (administration réservée aux admins)
@@ -181,9 +193,6 @@ export function enregistrerRoutesComptes(app: Express): void {
       if (refus) {
         return res.status(403).json({ error: refus });
       }
-      if (await isLastSuperAdmin(target.id)) {
-        return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
-      }
       // Les clés étrangères RESTRICT restent le verrou contre une course ; ce contrôle rend le refus
       // lisible à l’administrateur lorsqu’un compte porte une preuve de traçabilité métier.
       const [achatsCrees, achatsMisAJour, achatsArchives, pointagesCrees, pointagesMisAJour, pointagesArchives, journauxSaisie, journauxComptables, journauxRegles, coutsHeuresCrees, coutsAchatsCrees, coutsHeuresArchives, coutsAchatsArchives, reglements] = await Promise.all([
@@ -211,7 +220,8 @@ export function enregistrerRoutesComptes(app: Express): void {
         // administrateur ne doit pas voir, et chaque entrée qui touche un super administrateur
         // lui est fermée.
         // Fiches intervenant d'abord, dans le même ordre que la liaison : la suppression les délie
-        // (ON DELETE SET NULL), et le journal le dit.
+        // (ON DELETE SET NULL), et le journal le dit. Avant elles, le verrou des retraits.
+        await verrouillerRetraitsComptes(tx);
         await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE`);
         await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
         // Relues une fois le compte verrouillé : une fiche reliée entre-temps (la liaison valide en
@@ -226,6 +236,7 @@ export function enregistrerRoutesComptes(app: Express): void {
           },
         });
         if (!supprime) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
+        if (await estDernierSuperAdminActif(tx, supprime)) throw erreurDernierSuperAdmin();
         const chantiersResponsable = await tx.chantier.updateMany({ where: { responsableId: id }, data: { responsableId: null } });
         const chantiersCommercial = await tx.chantier.updateMany({ where: { commercialId: id }, data: { commercialId: null } });
         await tx.user.delete({ where: { id } });
@@ -251,9 +262,10 @@ export function enregistrerRoutesComptes(app: Express): void {
             detail: 'Responsable hiérarchique supprimé.',
           });
         }
-      });
+      }, ISOLATION_RETRAIT);
       res.json({ success: true });
     } catch (error) {
+      if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
       if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : ce compte vient d’être rattaché à des données métier.' });
       if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
       res.status(500).json({ error: 'Error deleting user' });
@@ -276,14 +288,14 @@ export function enregistrerRoutesComptes(app: Express): void {
       if (refus) {
         return res.status(403).json({ error: refus });
       }
-      if (!isSuperAdminRole(role) && (await isLastSuperAdmin(target.id))) {
-        return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
-      }
       const user = await transactionVerifiee(async (tx) => {
-        // Fiche intervenant verrouillée avant le compte, dans le même ordre que la route qui la relie.
+        // Un autre type peut retirer un super administrateur : verrou des retraits en tête. Puis la
+        // fiche intervenant, verrouillée avant le compte, dans le même ordre que la route qui la relie.
+        if (!isSuperAdminRole(role)) await verrouillerRetraitsComptes(tx);
         const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${target.id} FOR UPDATE`);
         const avant = await lireCompteVerrouille(tx, target.id);
         if (!avant) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
+        if (!isSuperAdminRole(role) && (await estDernierSuperAdminActif(tx, avant))) throw erreurDernierSuperAdmin();
         const apres = await tx.user.update({
         where: { id: target.id },
         // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN : on le retire si le
@@ -299,9 +311,10 @@ export function enregistrerRoutesComptes(app: Express): void {
         await journaliserDroitsCompte(tx, req, 'TYPE_COMPTE', avant, apres, ['role', 'estCommercial']);
         await delierFicheSiPlusTechnicien(tx, req as AuthRequest, avant, apres.role, fiches);
         return apres;
-      });
+      }, ISOLATION_RETRAIT);
       res.json(user);
     } catch (error) {
+      if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
       if ((error as { code?: string })?.code === 'FICHE_RELIEE') return res.status(409).json({ error: 'Ce compte vient d’être relié à une fiche intervenant : réessayez.' });
       if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
       res.status(500).json({ error: 'Error updating user role' });
@@ -477,15 +490,15 @@ export function enregistrerRoutesComptes(app: Express): void {
       }
       const actif = !!req.body.actif;
       // On ne se désactive pas soi-même (on se verrouillerait dehors), et on ne désactive pas
-      // le dernier superadmin : plus personne ne piloterait les modules ni les comptes.
+      // le dernier superadmin actif : plus personne ne piloterait les modules ni les comptes.
       if (!actif && target.id === authUser.id) {
         return res.status(400).json({ error: 'Vous ne pouvez pas désactiver votre propre compte.' });
       }
-      if (!actif && (await isLastSuperAdmin(target.id))) {
-        return res.status(400).json({ error: "Ce compte est le dernier super administrateur : il ne peut pas être désactivé." });
-      }
       const user = await transactionVerifiee(async (tx) => {
+        if (!actif) await verrouillerRetraitsComptes(tx);
         const avant = await lireCompteVerrouille(tx, target.id);
+        if (!avant) throw Object.assign(new Error('Utilisateur introuvable.'), { code: 'P2025' });
+        if (!actif && (await estDernierSuperAdminActif(tx, avant))) throw erreurDernierSuperAdmin();
         const apres = await tx.user.update({
           where: { id: target.id },
           data: { actif },
@@ -493,9 +506,11 @@ export function enregistrerRoutesComptes(app: Express): void {
         });
         await journaliserDroitsCompte(tx, req, actif ? 'ACTIVATION' : 'DESACTIVATION', avant, apres, ['actif']);
         return apres;
-      });
+      }, ISOLATION_RETRAIT);
       res.json(user);
     } catch (error) {
+      if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(400).json({ error: "Ce compte est le dernier super administrateur : il ne peut pas être désactivé." });
+      if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
       res.status(500).json({ error: "Impossible de modifier l'activation du compte." });
     }
   });
