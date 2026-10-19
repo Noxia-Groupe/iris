@@ -89,20 +89,22 @@ export async function journaliserDroitsCompte(tx: any, req: express.Request, act
 // aucun interblocage, et l'ordre des verrous de ligne qui suivent reste celui d'avant. Le compte visé
 // est ensuite relu sous son propre verrou, et les autres super administrateurs actifs sont comptés
 // par une simple lecture. Leur transaction est explicitement en READ COMMITTED (ISOLATION_RETRAIT,
-// comme les routes de comptes et de fiches qui relisent un compte sous verrou pour leur garde), quel que soit
-// le réglage de la base : chaque lecture y voit tout retrait validé avant elle, et aucun autre ne
-// peut aboutir avant la fin de la transaction. En REPEATABLE READ, l'instantané pris avant l'attente
-// du verrou ignorerait le retrait qui vient d'aboutir. Une promotion validée pendant ce temps peut ne
-// pas être vue : le refus n'en est que plus prudent.
+// comme toutes les transactions de comptes et de fiches qui relisent un compte sous verrou, pour un
+// garde ou pour l'état journalisé), quel que soit le réglage de la base : chaque lecture y voit tout
+// retrait validé avant elle, et aucun autre ne peut aboutir avant la fin de la transaction. En
+// REPEATABLE READ, l'instantané pris avant l'attente du verrou ignorerait le retrait qui vient
+// d'aboutir, et une écriture concurrente sur le compte ferait échouer la transaction (500). Une
+// promotion validée pendant ce temps peut ne pas être vue : le refus n'en est que plus prudent.
 export const ISOLATION_RETRAIT = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted };
-const verrouillerRetraitsComptes = (tx: Prisma.TransactionClient) => tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`;
+export const verrouillerRetraitsComptes = (tx: Prisma.TransactionClient) => tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`;
 async function estDernierSuperAdminActif(tx: Prisma.TransactionClient, compte: { id: string; role: string; actif: boolean }): Promise<boolean> {
   if (!isSuperAdminRole(compte.role) || !compte.actif) return false;
   return (await tx.user.count({ where: { role: ROLE_SUPERADMIN, actif: true, id: { not: compte.id } } })) === 0;
 }
 
 // Verrou refusé sans attente (FOR UPDATE NOWAIT) : code PostgreSQL 55P03, remonté par Prisma dans
-// l'erreur d'une requête brute (P2010).
+// l'erreur d'une requête brute (P2010). Un lock_timeout donnerait le même code : il n'est donc
+// reconnu qu'autour de la seule requête NOWAIT.
 const estVerrouIndisponible = (error: unknown) => {
   const erreur = error as { code?: string; meta?: { code?: string } };
   return erreur?.code === 'P2010' && erreur.meta?.code === '55P03';
@@ -243,10 +245,14 @@ export function enregistrerRoutesComptes(app: Express): void {
         await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${id} FOR UPDATE`;
         // Relues une fois le compte verrouillé : une fiche reliée entre-temps (la liaison valide en
         // tenant ce verrou) est déliée par la suppression, et doit donc figurer au journal. Elles sont
-        // verrouillées sans attendre (NOWAIT) : la cascade ON DELETE SET NULL les modifiera, et une
-        // fiche tenue par une autre transaction (sa suppression, qui attend ce compte) formerait un
-        // interblocage (#219). La suppression est alors refusée, à réessayer.
-        const fichesDeliees = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE NOWAIT`);
+        // verrouillées sans attendre (NOWAIT), car la cascade ON DELETE SET NULL les modifiera : une
+        // fiche reliée entre-temps et tenue par une autre transaction (sa suppression ou sa liaison à
+        // un autre compte, qui attendent ce compte, voire une simple écriture en cours) formerait un
+        // interblocage ou une attente inutile (#219). La suppression est alors refusée, à réessayer,
+        // comme le changement de type (FICHE_RELIEE). Les fiches verrouillées plus haut ne sont pas
+        // concernées : ce verrou est déjà le nôtre.
+        const fichesDeliees = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${id} FOR UPDATE NOWAIT`)
+          .catch((error: unknown) => { throw estVerrouIndisponible(error) ? Object.assign(new Error('Fiche intervenant reliée entre-temps.'), { code: 'FICHE_RELIEE' }) : error; });
         const supprime = await tx.user.findUnique({
           where: { id },
           select: {
@@ -288,7 +294,7 @@ export function enregistrerRoutesComptes(app: Express): void {
     } catch (error) {
       if (estRefusCibleSuperAdmin(error)) return res.status(403).json({ error: error.message });
       if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(409).json({ error: 'Impossible de révoquer le dernier compte super administrateur.' });
-      if (estVerrouIndisponible(error)) return res.status(409).json({ error: 'Ce compte vient d’être relié à une fiche intervenant : réessayez.' });
+      if ((error as { code?: string })?.code === 'FICHE_RELIEE') return res.status(409).json({ error: 'Ce compte vient d’être relié à une fiche intervenant : réessayez.' });
       if ((error as { code?: string })?.code === 'P2003') return res.status(409).json({ error: 'Suppression impossible : ce compte vient d’être rattaché à des données métier.' });
       if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
       res.status(500).json({ error: 'Error deleting user' });
@@ -476,12 +482,13 @@ export function enregistrerRoutesComptes(app: Express): void {
       if (interdites.length) {
         return void res.status(400).json({ error: `Ces droits ne s’accordent pas à un compte technicien : ${interdites.join(', ')}.` });
       }
+      // État « avant » relu sous verrou, en READ COMMITTED explicite : celui du moment (ISOLATION_RETRAIT).
       const user = await transactionVerifiee(async (tx) => {
         const avant = await lireCompteVerrouille(tx, target.id);
         const apres = await tx.user.update({ where: { id: target.id }, data: { permissions }, select: { id: true, name: true, email: true, role: true, permissions: true } });
         await journaliserDroitsCompte(tx, req, 'PERMISSIONS', avant, apres, ['permissions']);
         return apres;
-      });
+      }, ISOLATION_RETRAIT);
       res.json(user);
     } catch { res.status(500).json({ error: 'Impossible de modifier les permissions individuelles.' }); }
   });
@@ -499,6 +506,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       if (req.body.accesFinance && target.role === ROLE_TECHNICIEN) {
         return res.status(400).json({ error: 'L’accès financier ne s’accorde pas à un compte technicien.' });
       }
+      // État « avant » relu sous verrou, en READ COMMITTED explicite : celui du moment (ISOLATION_RETRAIT).
       const user = await transactionVerifiee(async (tx) => {
         const avant = await lireCompteVerrouille(tx, target.id);
         const apres = await tx.user.update({
@@ -508,7 +516,7 @@ export function enregistrerRoutesComptes(app: Express): void {
         });
         await journaliserDroitsCompte(tx, req, 'ACCES_FINANCE', avant, apres, ['accesFinance']);
         return apres;
-      });
+      }, ISOLATION_RETRAIT);
       res.json(user);
     } catch (error) {
       res.status(500).json({ error: "Impossible de modifier l'accès au suivi financier." });

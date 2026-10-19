@@ -6,7 +6,7 @@
 // Sans elle, la suite s'annonce ignorée : mieux vaut un « skip » visible qu'un vert obtenu
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import test, { after, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
 
@@ -259,7 +259,7 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
-      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test',
+      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
       'garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
@@ -4636,41 +4636,48 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    // #219 : une fiche reliée au compte pendant sa suppression, et supprimée au même moment. Une
-    // transaction de test tient le compte et y relie la fiche ; la suppression du compte attend le
-    // compte, celle de la fiche attend la fiche. Au relâchement, la suppression du compte ne doit pas
-    // attendre la fiche que tient l'autre (qui attend le compte) : elle refuse, à réessayer. Si
-    // l'autre n'a pas encore pris la fiche, elle la délie et aboutit. Jamais d'interblocage ni de 500.
-    test('la suppression d’un compte et celle de sa fiche, reliée au même moment, ne s’interbloquent pas', async () => {
-      const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage@iris.test', name: 'TEST Pilote3 interblocage', role: 'TECHNICIEN' } });
-      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage', role: 'Technicien', tauxHoraireCharge: 40 } });
-      const attentes = async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n;
-      const attendreAttentes = async (nombre) => {
-        for (let tour = 0; tour < 150; tour += 1) {
-          if (await attentes() >= nombre) return true;
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        return false;
-      };
+    // #219 : suppressions concurrentes d'un compte et de sa fiche. Aides communes : attentes de verrou
+    // de cette base (ligne ou consultatif), transaction de test tenue jusqu'à son relâchement, et
+    // entrées du journal d'un compte.
+    const attentesVerrou = async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n;
+    const attendreAttentesVerrou = async (nombre) => {
+      for (let tour = 0; tour < 150; tour += 1) {
+        if (await attentesVerrou() >= nombre) return true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return false;
+    };
+    const tenirTransaction = async (travail) => {
       let liberer, pret;
       const attente = new Promise((resolve) => { liberer = resolve; });
       const tenu = new Promise((resolve) => { pret = resolve; });
-      const verrou = prisma.$transaction(async (tx) => {
+      const fin = prisma.$transaction(async (tx) => { await travail(tx); pret(); await attente; }, { timeout: 20000 });
+      await tenu;
+      return async () => { liberer(); await fin; };
+    };
+    const journalCompte = (cibleId, action) => prisma.journalAdministration.findMany({ where: { cibleId, action }, orderBy: { createdAt: 'asc' } });
+    const ficheDeliee = (fiche) => `fiche intervenant « ${fiche.nom} » (${fiche.id}) déliée`;
+
+    // Une transaction de test tient le compte et y relie la fiche ; la suppression du compte attend le
+    // compte, celle de la fiche attend la fiche. Au relâchement, la suppression du compte ne doit pas
+    // attendre la fiche que tient l'autre (qui attend le compte) : elle refuse, à réessayer. Si
+    // l'autre n'a pas encore pris la fiche, elle la délie et aboutit. Jamais d'interblocage ni de 500,
+    // et le journal dit ce qui s'est passé.
+    test('la suppression d’un compte et celle de sa fiche, reliée au même moment, ne s’interbloquent pas', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage@iris.test', name: 'TEST Pilote3 interblocage', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const relacher = await tenirTransaction(async (tx) => {
         await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR UPDATE`;
         await tx.intervenant.update({ where: { id: fiche.id }, data: { userId: compte.id } });
-        pret();
-        await attente;
-      }, { timeout: 20000 });
-      await tenu;
+      });
       let suppressionCompte, suppressionFiche;
       try {
         suppressionCompte = request(app).delete(`/api/users/${compte.id}`).set(admin).then((reponse) => reponse);
-        assert.equal(await attendreAttentes(1), true, 'la suppression du compte attend le compte');
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression du compte attend le compte');
         suppressionFiche = request(app).delete(`/api/intervenants/${fiche.id}`).set(admin).then((reponse) => reponse);
-        assert.equal(await attendreAttentes(2), true, 'la suppression de la fiche attend la fiche');
+        assert.equal(await attendreAttentesVerrou(2), true, 'la suppression de la fiche attend la fiche');
       } finally {
-        liberer();
-        await verrou;
+        await relacher();
       }
       const [compteSupprime, ficheSupprimee] = await Promise.all([suppressionCompte, suppressionFiche]);
       assert.equal(ficheSupprimee.status, 200, JSON.stringify(ficheSupprimee.body));
@@ -4678,13 +4685,16 @@ if (!TEST_DATABASE_URL) {
       if (compteSupprime.status === 409) {
         assert.equal(compteSupprime.body.error, 'Ce compte vient d’être relié à une fiche intervenant : réessayez.');
         assert.equal(await prisma.user.count({ where: { id: compte.id } }), 1);
+        assert.equal((await journalCompte(compte.id, 'SUPPRESSION')).length, 0);
+        assert.equal((await journalFiche(compte.id)).at(-1)?.detail, `Fiche intervenant supprimée (${fiche.id}).`);
       } else {
         assert.equal(compteSupprime.status, 200, JSON.stringify(compteSupprime.body));
         assert.equal(await prisma.user.count({ where: { id: compte.id } }), 0);
+        assert.equal((await journalCompte(compte.id, 'SUPPRESSION')).at(-1)?.detail, ficheDeliee(fiche));
       }
     });
 
-    // #219, branche du refus rendue déterministe : la suppression du compte attend le compte (tenu en
+    // Branche du refus rendue déterministe : la suppression du compte attend le compte (tenu en
     // partage par le test) sans avoir verrouillé de fiche ; la fiche est alors reliée (la vérification
     // de clé étrangère n'attend pas un verrou partagé), puis la suppression de la fiche la verrouille et
     // attend le compte derrière elle. Au relâchement, la suppression du compte passe la première : la
@@ -4693,42 +4703,83 @@ if (!TEST_DATABASE_URL) {
     test('la suppression d’un compte refuse, sans l’attendre, la fiche reliée entre-temps et tenue par sa suppression', async () => {
       const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage.refus@iris.test', name: 'TEST Pilote3 interblocage refus', role: 'TECHNICIEN' } });
       const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage refus', role: 'Technicien', tauxHoraireCharge: 40 } });
-      const attentes = async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n;
-      const attendreAttentes = async (nombre) => {
-        for (let tour = 0; tour < 150; tour += 1) {
-          if (await attentes() >= nombre) return true;
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        return false;
-      };
-      let liberer, pret;
-      const attente = new Promise((resolve) => { liberer = resolve; });
-      const tenu = new Promise((resolve) => { pret = resolve; });
-      const verrou = prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`;
-        pret();
-        await attente;
-      }, { timeout: 20000 });
-      await tenu;
+      const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
       let suppressionCompte, suppressionFiche;
       try {
         suppressionCompte = request(app).delete(`/api/users/${compte.id}`).set(admin).then((reponse) => reponse);
-        assert.equal(await attendreAttentes(1), true, 'la suppression du compte attend le compte');
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression du compte attend le compte');
         await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: compte.id } });
         suppressionFiche = request(app).delete(`/api/intervenants/${fiche.id}`).set(admin).then((reponse) => reponse);
-        assert.equal(await attendreAttentes(2), true, 'la suppression de la fiche, qui la tient, attend le compte');
+        assert.equal(await attendreAttentesVerrou(2), true, 'la suppression de la fiche, qui la tient, attend le compte');
       } finally {
-        liberer();
-        await verrou;
+        await relacher();
       }
       const [compteSupprime, ficheSupprimee] = await Promise.all([suppressionCompte, suppressionFiche]);
       assert.deepEqual([compteSupprime.status, ficheSupprimee.status], [409, 200], JSON.stringify({ compte: compteSupprime.body, fiche: ficheSupprimee.body }));
       assert.equal(compteSupprime.body.error, 'Ce compte vient d’être relié à une fiche intervenant : réessayez.');
       assert.equal(await prisma.user.count({ where: { id: compte.id } }), 1);
       assert.equal(await prisma.intervenant.count({ where: { id: fiche.id } }), 0);
-      // Le compte refusé, désormais sans fiche, se supprime normalement.
+      // Journal : pas de suppression du compte, mais la fiche supprimée qui le déliait.
+      assert.equal((await journalCompte(compte.id, 'SUPPRESSION')).length, 0);
+      assert.equal((await journalFiche(compte.id)).at(-1)?.detail, `Fiche intervenant supprimée (${fiche.id}).`);
+      // Le compte refusé, désormais sans fiche, se supprime normalement, sans fiche à mentionner.
       const nouvelEssai = await request(app).delete(`/api/users/${compte.id}`).set(admin);
       assert.equal(nouvelEssai.status, 200, JSON.stringify(nouvelEssai.body));
+      const suppressions = await journalCompte(compte.id, 'SUPPRESSION');
+      assert.equal(suppressions.length, 1);
+      assert.equal(suppressions[0].detail, null);
+    });
+
+    // Une fiche reliée dès le départ est verrouillée par la suppression du compte avant le compte : sa
+    // suppression, qui l'attend, ne fait pas refuser celle du compte (le NOWAIT porte sur un verrou
+    // déjà tenu). Le compte est supprimé en déliant la fiche, mentionnée au journal, puis la fiche.
+    test('une fiche reliée dès le départ, dont la suppression attend celle du compte, est déliée sans refus', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage.reliee@iris.test', name: 'TEST Pilote3 interblocage reliée', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage reliée', role: 'Technicien', tauxHoraireCharge: 40, userId: compte.id } });
+      const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
+      let suppressionCompte, suppressionFiche;
+      try {
+        suppressionCompte = request(app).delete(`/api/users/${compte.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression du compte, qui tient la fiche, attend le compte');
+        suppressionFiche = request(app).delete(`/api/intervenants/${fiche.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(2), true, 'la suppression de la fiche attend la fiche');
+      } finally {
+        await relacher();
+      }
+      const [compteSupprime, ficheSupprimee] = await Promise.all([suppressionCompte, suppressionFiche]);
+      assert.deepEqual([compteSupprime.status, ficheSupprimee.status], [200, 200], JSON.stringify({ compte: compteSupprime.body, fiche: ficheSupprimee.body }));
+      assert.equal(await prisma.user.count({ where: { id: compte.id } }), 0);
+      assert.equal(await prisma.intervenant.count({ where: { id: fiche.id } }), 0);
+      assert.equal((await journalCompte(compte.id, 'SUPPRESSION')).at(-1)?.detail, ficheDeliee(fiche));
+      // La fiche, déjà déliée quand sa suppression la reprend, ne délie plus aucun compte.
+      assert.equal((await journalFiche(compte.id)).filter((entree) => entree.detail === `Fiche intervenant supprimée (${fiche.id}).`).length, 0);
+    });
+
+    // La liaison prend le verrou des retraits en tête : elle verrouille l'ancien compte de la fiche,
+    // ici le collaborateur du compte supprimé, dont l'identifiant précède le sien. Sans ce verrou, la
+    // cascade de la suppression (responsable mis à NULL) attendait ce collaborateur pendant que la
+    // liaison attendait le compte supprimé : interblocage, liaison en 500. Désormais la liaison attend
+    // la fin de la suppression, puis refuse le compte disparu (400).
+    test('la liaison d’une fiche au compte en cours de suppression attend la fin de celle-ci, sans interblocage', async () => {
+      const suffixe = randomUUID().slice(8);
+      const supprime = await prisma.user.create({ data: { id: `ffffffff${suffixe}`, email: 'pilote3.interblocage.responsable@iris.test', name: 'TEST Pilote3 interblocage responsable', role: 'TECHNICIEN' } });
+      const collaborateur = await prisma.user.create({ data: { id: `00000000${suffixe}`, email: 'pilote3.interblocage.collaborateur@iris.test', name: 'TEST Pilote3 interblocage collaborateur', role: 'TECHNICIEN', responsableHierarchiqueId: supprime.id } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage collaborateur', role: 'Technicien', tauxHoraireCharge: 40, userId: collaborateur.id } });
+      const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${supprime.id} FOR SHARE`);
+      let suppression, liaison;
+      try {
+        suppression = request(app).delete(`/api/users/${supprime.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression attend le compte');
+        liaison = request(app).put(`/api/intervenants/${fiche.id}/compte`).set(admin).send({ userId: supprime.id }).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(2), true, 'la liaison attend');
+      } finally {
+        await relacher();
+      }
+      const [suppressionFaite, liaisonRefusee] = await Promise.all([suppression, liaison]);
+      assert.deepEqual([suppressionFaite.status, liaisonRefusee.status], [200, 400], JSON.stringify({ suppression: suppressionFaite.body, liaison: liaisonRefusee.body }));
+      assert.equal(liaisonRefusee.body.error, 'Seul un compte technicien actif peut être relié à une fiche intervenant.');
+      assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, collaborateur.id);
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: collaborateur.id } })).responsableHierarchiqueId, null);
     });
 
     // #219, par l'API : liaison de la fiche, suppression de la fiche et suppression du compte lancées

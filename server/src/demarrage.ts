@@ -6,7 +6,7 @@ import { ROLE_SUPERADMIN } from './droits/roles';
 import { journaliserAdministration, purgerJournalAdministration } from './commun/journal-administration';
 import { upsertSingleton } from './domaines/parametres/metier';
 import { normalizeEmail } from './domaines/authentification/sso';
-import { libelleCompteJournal, delierFicheSiPlusTechnicien, journaliserDroitsCompte } from './domaines/utilisateurs/comptes';
+import { libelleCompteJournal, delierFicheSiPlusTechnicien, journaliserDroitsCompte, lireCompteVerrouille, ISOLATION_RETRAIT } from './domaines/utilisateurs/comptes';
 
 // --- Comptes super administrateurs de départ ---
 // La liste vient EXCLUSIVEMENT de SUPERADMIN_EMAILS (emails séparés par des virgules).
@@ -35,13 +35,19 @@ export const ensureSuperAdmins = async () => {
     // sans auteur (AUTEUR_JOURNAL_DEMARRAGE), et réservées au super administrateur.
     if (existing) {
       if (existing.role !== ROLE_SUPERADMIN) {
-        await transactionVerifiee(async (tx) => {
+        // Fiches puis compte verrouillés, comme le changement de type ; le compte est relu sous son
+        // verrou, en READ COMMITTED explicite (ISOLATION_RETRAIT) : le garde des fiches reliées
+        // entre-temps et l'état « avant » journalisé portent sur le compte du moment.
+        const promu = await transactionVerifiee(async (tx) => {
           const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${existing.id} FOR UPDATE`);
+          const avant = await lireCompteVerrouille(tx, existing.id);
+          if (!avant || avant.role === ROLE_SUPERADMIN) return false;
           const apres = await tx.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
-          await journaliserDroitsCompte(tx, { } as express.Request, 'TYPE_COMPTE', existing, apres, ['role']);
-          await delierFicheSiPlusTechnicien(tx, null, existing, ROLE_SUPERADMIN, fiches);
-        });
-        console.log(`Compte promu super administrateur : ${email}`);
+          await journaliserDroitsCompte(tx, { } as express.Request, 'TYPE_COMPTE', avant, apres, ['role']);
+          await delierFicheSiPlusTechnicien(tx, null, avant, ROLE_SUPERADMIN, fiches);
+          return true;
+        }, ISOLATION_RETRAIT);
+        if (promu) console.log(`Compte promu super administrateur : ${email}`);
       }
       continue;
     }
