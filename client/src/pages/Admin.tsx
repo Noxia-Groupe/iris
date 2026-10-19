@@ -343,7 +343,7 @@ const Admin = () => {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        alert(d.error || 'Erreur lors de la mise à jour.');
+        alert(d.error || 'Erreur lors de la mise à jour de la case Commercial.');
       }
     } catch {
       alert('Impossible de joindre le serveur.');
