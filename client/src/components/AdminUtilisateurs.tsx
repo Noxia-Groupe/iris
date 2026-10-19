@@ -188,6 +188,7 @@ export function AdminUtilisateurs({ user, isSuper, users, newUserRole, setNewUse
                         <label className="flex items-center gap-2 cursor-pointer w-fit">
                           <input
                             type="checkbox"
+                            aria-label={`Commercial — ${u.name}`}
                             checked={!!u.estCommercial}
                             disabled={!peutGererCompte(u)}
                             onChange={() => handleToggleEstCommercial(u.id, !!u.estCommercial)}

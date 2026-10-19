@@ -7,6 +7,7 @@
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { cpus } from 'node:os';
 import test, { after, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
 
@@ -4150,6 +4151,70 @@ if (!TEST_DATABASE_URL) {
       assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
     });
 
+    // #163 : la duplication lit le devis source sous son verrou, dans la transaction qui crée le
+    // duplicata, comme une révision. Une modification en cours du devis (lignes, puis totaux) est
+    // attendue, puis copiée en entier : le duplicata ne mêle jamais des lignes neuves et des totaux anciens.
+    test('la duplication attend une modification en cours du devis source et la copie en entier', async () => {
+      const cree = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Affaire dupliquée pendant sa modification', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const source = cree.body;
+      assert.equal(source.totalTtc, 240);
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const lignesModifiees = new Promise((resolve) => { pret = resolve; });
+      const modification = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Devis" WHERE "id" = ${source.id} FOR UPDATE`;
+        await tx.devisLigne.deleteMany({ where: { devisId: source.id } });
+        await tx.devisLigne.create({ data: { devisId: source.id, ordre: 0, designation: 'Pose révisée', nature: 'MAIN_OEUVRE', quantite: 3, prixUnitaireHt: 100, tauxTva: 20, totalHt: 300, totalTtc: 360 } });
+        pret();
+        await attente;
+        await tx.devis.update({ where: { id: source.id }, data: { totalHt: 300, totalTva: 60, totalTtc: 360 } });
+      }, { timeout: 15000 });
+      await lignesModifiees;
+      let duplication;
+      try {
+        duplication = request(app).post(`/api/devis/${source.id}/duplication`).set('Authorization', `Bearer ${session}`).timeout({ deadline: 12_000 }).then((reponse) => reponse, (erreur) => ({ status: 0, body: { error: String(erreur) } }));
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM "Devis"%FOR UPDATE%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'la duplication attend le verrou du devis source');
+      } finally {
+        liberer();
+        await modification;
+      }
+      const duplicata = await duplication;
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.deepEqual([duplicata.body.totalHt, duplicata.body.totalTva, duplicata.body.totalTtc], [300, 60, 360], 'les totaux validés par la modification');
+      assert.deepEqual(duplicata.body.lignes.map((ligne) => [ligne.designation, ligne.quantite, ligne.totalHt]), [['Pose révisée', 3, 300]], 'les lignes validées par la modification');
+      assert.equal(duplicata.body.origineDevisId, source.id);
+      // Un devis introuvable ne consomme pas de numéro d'affaire.
+      const numerosTires = async () => (await prisma.sequenceAffaire.aggregate({ _sum: { dernierNumero: true } }))._sum.dernierNumero ?? 0;
+      const numerosAvant = await numerosTires();
+      const introuvable = await request(app).post('/api/devis/00000000-0000-0000-0000-000000000000/duplication').set('Authorization', `Bearer ${session}`);
+      assert.equal(introuvable.status, 404, JSON.stringify(introuvable.body));
+      assert.equal(await numerosTires(), numerosAvant, 'un devis introuvable ne consomme pas de numéro d’affaire');
+    });
+
+    // Le taux et le numéro d'affaire de la duplication sont lus avant sa transaction. Lus pendant, ils
+    // réclamaient chacun une seconde connexion du pool en gardant la première : des duplications
+    // simultanées, plus nombreuses que les connexions, s'y bloquaient toutes jusqu'à expiration (500).
+    test('des duplications simultanées d’un même devis, plus nombreuses que le pool de connexions, aboutissent toutes', async () => {
+      const cree = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Affaire dupliquée en rafale', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      // Prisma ouvre au plus 2 × cœurs physiques + 1 connexions : ce nombre de requêtes le dépasse.
+      const nombre = 2 * cpus().length + 2;
+      const reponses = await Promise.all(Array.from({ length: nombre }, () => request(app).post(`/api/devis/${cree.body.id}/duplication`).set('Authorization', `Bearer ${session}`)));
+      assert.deepEqual(reponses.map((reponse) => reponse.status), Array(nombre).fill(201), JSON.stringify(reponses.map((reponse) => reponse.body.error).filter(Boolean)));
+      assert.equal(new Set(reponses.map((reponse) => reponse.body.numero)).size, nombre, 'chaque duplicata a son propre numéro d’affaire');
+    });
+
     // Ouverture du chantier d'une affaire depuis l'Administration (décision de Nelson du
     // 14-10-2026) : la conversion du devis signé fixe aussitôt titulaire, commercial, types et
     // date de début, et chaque affaire n'a qu'un chantier.
@@ -6944,6 +7009,8 @@ if (!TEST_DATABASE_URL) {
           dateEmission: new Date(`${jour}T00:00:00.000Z`), dateEcheance: new Date(`${jour}T00:00:00.000Z`),
           totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST chronologie',
           ecrituresScellees: false,
+          // Ventilation égale aux totaux : un avoir émis est une pièce cohérente (#230).
+          ventilationTva: { create: [{ tauxTva: 20, totalHt: 10, totalTva: 2, totalTtc: 12 }] },
         } });
         if (statut !== 'BROUILLON') await tx.ecritureFacture.createMany({ data: [
           { factureId: creee.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'Clients', debit: type === 'AVOIR' ? 0 : 12, credit: type === 'AVOIR' ? 12 : 0 },
@@ -6956,7 +7023,13 @@ if (!TEST_DATABASE_URL) {
       const creer = (type, statut, numero, jour, factureOrigineId = null) => prisma.$transaction(async tx => {
         // Une pièce ne naît jamais annulée (cycle des statuts, #221) : la facture naît émise, puis
         // s'annule avec son avoir d'annulation dans la même transaction, comme dans l'application.
-        if (statut !== 'ANNULEE') return piece(tx, type, statut, numero, jour, factureOrigineId);
+        // Les gardes différés sont vérifiés avant la fin : Prisma résoudrait une transaction dont le
+        // COMMIT échoue, et la pièce manquerait sans erreur.
+        if (statut !== 'ANNULEE') {
+          const creee = await piece(tx, type, statut, numero, jour, factureOrigineId);
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          return creee;
+        }
         const facture = await piece(tx, type, 'EMISE', numero, jour);
         await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
         const avoir = await piece(tx, 'AVOIR', 'EMISE', `${numero}-AV`, jour, facture.id, true);
@@ -6966,7 +7039,10 @@ if (!TEST_DATABASE_URL) {
       const ids = [];
       try {
         ids.push((await creer('FACTURE', 'BROUILLON', null, '2026-09-30')).id);
-        ids.push((await creer('AVOIR', 'EMISE', 'TEST-A-101', '2026-09-29', ids[0])).id);
+        // Un avoir partiel ne crédite qu'une facture émise ou réglée (#230) : celle-ci, émise sans numéro,
+        // ne compte pas non plus. L'avoir est purgé avant elle.
+        const origineAvoir = await creer('FACTURE', 'EMISE', null, '2026-09-30');
+        ids.push((await creer('AVOIR', 'EMISE', 'TEST-A-101', '2026-09-29', origineAvoir.id)).id, origineAvoir.id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: null });
         ids.push((await creer('FACTURE', 'EMISE', 'TEST-F-101', '2026-09-27')).id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-27T00:00:00.000Z' });
@@ -8627,9 +8703,10 @@ if (!TEST_DATABASE_URL) {
         ['TVA', { totalHt: 10, totalTva: 2.01, totalTtc: 12 }],
         ['TTC', { totalHt: 10, totalTva: 2, totalTtc: 12.01 }],
       ];
-      // Avoir d'annulation fabriqué en SQL : émis, il porte des écritures équilibrées et scellées.
+      // Avoir d'annulation fabriqué en SQL : émis, il porte des écritures équilibrées et scellées, et une
+      // ventilation égale à ses totaux (un avoir émis est une pièce cohérente, #230).
       const avoirAnnulation = async (tx, factureOrigineId, { statut = 'EMISE', t = totaux } = {}) => {
-        const avoir = await tx.facture.create({ data: piece('AVOIR', statut, { ...t, estAvoirAnnulation: true, factureOrigineId }) });
+        const avoir = await tx.facture.create({ data: piece('AVOIR', statut, { ...t, estAvoirAnnulation: true, factureOrigineId, ventilationTva: { create: [{ tauxTva: 20, ...t }] } }) });
         if (statut !== 'BROUILLON') {
           await tx.ecritureFacture.createMany({ data: ecritures(avoir.id, 'AVOIR', t) });
           await tx.facture.update({ where: { id: avoir.id }, data: { ecrituresScellees: true } });
@@ -8752,6 +8829,288 @@ if (!TEST_DATABASE_URL) {
         try {
           for (const id of purger) {
             for (const { id: avoirId } of await prisma.facture.findMany({ where: { factureOrigineId: id }, select: { id: true } })) await purgerPieceJetable(avoirId);
+            await purgerPieceJetable(id);
+          }
+        } catch (erreur) {
+          if (!echec) throw erreur;
+        }
+      }
+    });
+
+    // #230 : les règles de plafond des avoirs, que l'API appliquait seule, tiennent en base pour un
+    // avoir écrit directement en SQL. Un avoir partiel ne crédite qu'une facture émise ou réglée ;
+    // chaque avoir émis est cohérent (aucun montant négatif, totaux égaux à sa ventilation) ; les
+    // avoirs émis d'une facture ne dépassent ni ses montants, ni sa ventilation par taux. Chaque
+    // contrôle a un cas qu'il est seul à arrêter, ou dont le refus porte son message ; les parcours de
+    // l'API restent inchangés.
+    test('les avoirs émis d’une facture ne dépassent ni ses montants ni sa ventilation, même écrits en SQL', async () => {
+      const auth = `Bearer ${session}`;
+      const compteTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
+      await tvaFixture(10, compteTva.id);
+      const ligne = (prixUnitaireHt, tauxTva) => ({ designation: `TEST plafond ${tauxTva} %`, nature: 'PRESTATION', quantite: 1, prixUnitaireHt, tauxTva });
+      const creer = async (motif, lignes) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', auth).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        return brouillon.body;
+      };
+      const emettre = async (motif, lignes = [ligne(10, 20)]) => {
+        const facture = await creer(motif, lignes);
+        const emission = await request(app).post(`/api/factures/${facture.id}/emettre`).set('Authorization', auth);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return facture;
+      };
+      const avoirPartielApi = async (facture, lignes) => {
+        const reponse = await request(app).post(`/api/factures/${facture.id}/avoirs`).set('Authorization', auth).send({ lignes });
+        assert.equal(reponse.status, 201, JSON.stringify(reponse.body));
+        return reponse.body;
+      };
+      const montantTotal = /Les avoirs de la facture .* dépassent son montant total/;
+      const ventilationDepassee = (taux) => new RegExp(`Les avoirs de la facture .* dépassent sa ventilation à la TVA de ${taux.replace('.', '\\.')} %`);
+      const tauxAbsent = /porte un taux de TVA \(5\.50 %\) absent de la facture/;
+      const statutRefuse = /Un avoir partiel ne crédite qu'une facture émise ou réglée/;
+      const montantNegatif = /L'avoir .* de la facture .* porte un montant négatif/;
+      const incoherent = /L'avoir .* de la facture .* n'a pas des totaux égaux à sa ventilation de TVA/;
+      const centimes = (montant) => Math.round(montant * 100) / 100;
+      // Pièce écrite en SQL comme le ferait une création valide : par défaut, ses totaux sont ceux de sa
+      // ventilation (taux, HT, TVA, et TTC si on veut le fausser), ses lignes et sa ventilation sont
+      // enregistrées, puis, émise, elle porte des écritures équilibrées sur son TTC et elle est scellée.
+      // `contenu` : 'ventilation' (lignes et ventilation), 'lignes' (ventilation déduite des lignes) ou
+      // 'aucun' (montants seuls) ; `montants` remplace les totaux, pour une pièce incohérente.
+      const pieceSql = async (tx, { type = 'AVOIR', statut = 'EMISE', factureOrigineId = null, estAvoirAnnulation = false, taux = [], contenu = 'ventilation', montants = null }) => {
+        const totalHt = montants?.totalHt ?? centimes(taux.reduce((somme, [, ht]) => somme + ht, 0));
+        const totalTva = montants?.totalTva ?? centimes(taux.reduce((somme, [, , tva]) => somme + tva, 0));
+        const totalTtc = montants?.totalTtc ?? centimes(totalHt + totalTva);
+        const piece = await tx.facture.create({ data: {
+          clientId, clientRaisonSociale: 'TEST Client plafond', type, statut, factureOrigineId, estAvoirAnnulation,
+          dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
+          totalHt, totalTva, totalTtc, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST plafond SQL',
+        } });
+        if (contenu !== 'aucun') {
+          await tx.factureLigne.createMany({ data: taux.map(([t, ht, tva], ordre) => ({ factureId: piece.id, ordre, designation: `TEST plafond SQL ${t} %`, nature: 'PRESTATION', quantite: 1, prixUnitaireHt: Math.abs(ht), tauxTva: t, totalHt: ht, totalTtc: centimes(ht + tva) })) });
+        }
+        if (contenu === 'ventilation') {
+          await tx.factureVentilationTva.createMany({ data: taux.map(([t, ht, tva, ttc]) => ({ factureId: piece.id, tauxTva: t, totalHt: ht, totalTva: tva, totalTtc: ttc ?? centimes(ht + tva) })) });
+        }
+        if (statut !== 'BROUILLON') await sceller(tx, piece);
+        return piece;
+      };
+      // Écritures équilibrées sur le TTC de la pièce (seul montant que contrôle le garde d'équilibre).
+      const ecrire = (tx, piece) => {
+        const sens = (montant, debit) => (debit === (piece.type === 'FACTURE') ? { debit: montant, credit: 0 } : { debit: 0, credit: montant });
+        return tx.ecritureFacture.createMany({ data: [
+          { factureId: piece.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'TEST Clients', ...sens(Number(piece.totalTtc), true) },
+          { factureId: piece.id, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'TEST Ventes', ...sens(centimes(Number(piece.totalTtc) - Number(piece.totalTva)), false) },
+          { factureId: piece.id, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TEST TVA', ...sens(Number(piece.totalTva), false) },
+        ] });
+      };
+      const sceller = async (tx, piece) => {
+        await ecrire(tx, piece);
+        await tx.facture.update({ where: { id: piece.id }, data: { ecrituresScellees: true } });
+      };
+      // Les gardes différés sont vérifiés avant la fin : Prisma résoudrait une transaction dont le COMMIT échoue.
+      const transaction = (operations, options) => prisma.$transaction(async (tx) => {
+        const resultat = await operations(tx);
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        return resultat;
+      }, options);
+      const avoirSql = (factureOrigineId, options) => transaction((tx) => pieceSql(tx, { factureOrigineId, ...options }));
+      const credite = async (factureId) => Number((await prisma.facture.aggregate({ where: { factureOrigineId: factureId, statut: { not: 'BROUILLON' } }, _sum: { totalTtc: true } }))._sum.totalTtc ?? 0);
+      const purger = [];
+      let echec = null;
+      try {
+        // Montants totaux. Facture de 10 € HT à 20 %, créditée de 5 € HT par l'API : il reste 5 € HT, 1 €
+        // de TVA et 6 € TTC. Un avoir cohérent qui dépasse d'un centime le HT seul, ou la TVA seule, est
+        // refusé ; le reste exact passe, et la facture n'accepte plus rien.
+        const simple = await emettre('TEST plafond montants');
+        purger.push(simple.id);
+        await avoirPartielApi(simple, [ligne(5, 20)]);
+        await assert.rejects(avoirSql(simple.id, { taux: [[20, 5.01, 0.99]] }), montantTotal, 'dépassement du HT total seul');
+        await assert.rejects(avoirSql(simple.id, { taux: [[20, 4.99, 1.01]] }), montantTotal, 'dépassement de la TVA totale seule');
+        await avoirSql(simple.id, { taux: [[20, 5, 1]] });
+        await assert.rejects(avoirSql(simple.id, { taux: [[20, 0.01, 0]] }), montantTotal, 'facture entièrement créditée');
+        // Un avoir cohérent ne dépasse le TTC qu'avec le HT ou la TVA, sauf sur une facture incohérente,
+        // que la base ne refuse pas encore (#243) : TTC de 11,99 € pour 10 € HT et 2 € de TVA. Seul le
+        // contrôle du TTC total arrête alors l'avoir de 12 € ; et, sur une facture dont la ventilation
+        // porte ce TTC faux, seul celui du TTC du taux.
+        const ttcFaux = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2]], montants: { totalHt: 10, totalTva: 2, totalTtc: 11.99 } }));
+        purger.push(ttcFaux.id);
+        await assert.rejects(avoirSql(ttcFaux.id, { taux: [[20, 10, 2]] }), montantTotal, 'dépassement du TTC total seul');
+        const ttcTauxFaux = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2, 11.99]] }));
+        purger.push(ttcTauxFaux.id);
+        await assert.rejects(avoirSql(ttcTauxFaux.id, { taux: [[20, 10, 2]] }), ventilationDepassee('20.00'), 'dépassement du TTC d’un taux seul');
+        // Un avoir resté brouillon ne compte pas ; il est vérifié quand il est émis.
+        const brouillonAvoir = await avoirSql(simple.id, { statut: 'BROUILLON', taux: [[20, 1, 0.2]] });
+        await assert.rejects(transaction(async (tx) => {
+          const avoir = await tx.facture.update({ where: { id: brouillonAvoir.id }, data: { statut: 'EMISE' } });
+          await sceller(tx, avoir);
+        }), montantTotal, 'avoir brouillon émis au-delà du plafond');
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillonAvoir.id } })).statut, 'BROUILLON');
+
+        // Cohérence de chaque avoir émis, sur une facture de 10 € HT à 20 % encore libre de tout avoir :
+        // un avoir négatif compenserait le plafond, un avoir sans contenu ou mal ventilé échapperait au
+        // contrôle par taux. Le premier refus est celui des montants négatifs.
+        const libre = await emettre('TEST plafond cohérence');
+        purger.push(libre.id);
+        await assert.rejects(avoirSql(libre.id, { contenu: 'aucun', montants: { totalHt: -5, totalTva: 0, totalTtc: 0 } }), montantNegatif, 'avoir compensateur négatif');
+        // Ventilations cohérentes avec leurs totaux, dont une ligne au seul HT, puis à la seule TVA,
+        // négatif : sans ce refus, une base négative à un taux y libérerait le plafond.
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 6, 1.2, 7.2], [10, -1, 1, 0]] }), montantNegatif, 'HT ventilé seul négatif');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 6, 1.2, 7.2], [10, 1, -0.5, 0.5]] }), montantNegatif, 'TVA ventilée seule négative');
+        await assert.rejects(avoirSql(libre.id, { contenu: 'aucun', montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'avoir sans contenu');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 4, 1]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'HT ventilé différent des totaux');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 0.5]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'TVA ventilée différente des totaux');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 1]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6.01 } }), incoherent, 'TTC différent de HT + TVA');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 1, 6.01]] }), incoherent, 'ligne de ventilation au TTC faux');
+        assert.equal(await credite(libre.id), 0);
+        // Un avoir brouillon incohérent ne compte pas : un avoir valide émis ensuite passe.
+        await avoirSql(libre.id, { statut: 'BROUILLON', contenu: 'aucun', montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } });
+        await avoirSql(libre.id, { taux: [[20, 1, 0.2]] });
+        assert.equal(await credite(libre.id), 1.2);
+
+        // Ventilation par taux. Facture de 10 € HT à 20 % et 10 € HT à 10 %, créditée de 5 € HT à 20 %
+        // par l'API : il reste 5 € HT et 1 € de TVA à 20 %, 10 € HT et 1 € de TVA à 10 %. Chaque avoir
+        // ci-dessous reste sous les montants totaux de la facture : seul le contrôle par taux l'arrête,
+        // et seul son contrôle du HT pour le premier, de la TVA pour le troisième.
+        const mixte = await emettre('TEST plafond ventilation', [ligne(10, 20), ligne(10, 10)]);
+        purger.push(mixte.id);
+        const avoirMixte = await avoirPartielApi(mixte, [ligne(5, 20)]);
+        await assert.rejects(avoirSql(mixte.id, { taux: [[10, 10.01, 0.99]] }), ventilationDepassee('10.00'), 'HT à 10 % dépassé seul');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[10, 10.01, 1]], contenu: 'lignes' }), ventilationDepassee('10.00'), 'HT à 10 % dépassé (ventilation déduite des lignes)');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[20, 1, 1.01]] }), ventilationDepassee('20.00'), 'TVA à 20 % dépassée seule');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[5.5, 1, 0.06]] }), tauxAbsent, 'taux absent de la facture');
+        // Un avoir brouillon, même au-delà des totaux et d'un taux, ne compte pas : le reste exact du taux
+        // passe après lui.
+        await avoirSql(mixte.id, { statut: 'BROUILLON', taux: [[10, 50, 5]] });
+        await avoirSql(mixte.id, { taux: [[10, 10, 1]] });
+
+        // Factures historiques sans ventilation enregistrée : leur ventilation est déduite de leurs
+        // lignes, TVA arrondie au centime le plus proche (0,10 € HT à 5,5 % : 0,0055 → 0,01).
+        const historique = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2], [10, 10, 1]], contenu: 'lignes' }));
+        purger.push(historique.id);
+        await assert.rejects(avoirSql(historique.id, { taux: [[10, 10.01, 0.99]] }), ventilationDepassee('10.00'), 'HT à 10 % d’une facture historique dépassé');
+        await assert.rejects(avoirSql(historique.id, { taux: [[5.5, 1, 0.06]] }), tauxAbsent, 'taux absent d’une facture historique');
+        await avoirSql(historique.id, { taux: [[10, 10, 1]] });
+        const arrondie = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[5.5, 0.1, 0.01]], contenu: 'lignes' }));
+        purger.push(arrondie.id);
+        await avoirSql(arrondie.id, { taux: [[5.5, 0.1, 0.01]] });
+
+        // Statut de la pièce créditée, avec des avoirs partiels cohérents sous son plafond : facture
+        // brouillon, avoir émis, et facture annulée avant la migration de #227, sans avoir (simulée en
+        // retirant celui de l'API). Un avoir resté brouillon sur une facture brouillon ne compte pas.
+        const brouillon = await creer('TEST plafond brouillon', [ligne(10, 20)]);
+        purger.push(brouillon.id);
+        await assert.rejects(avoirSql(brouillon.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’un brouillon');
+        await assert.rejects(avoirSql(avoirMixte.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’un avoir émis');
+        const annulee = await emettre('TEST plafond annulée');
+        purger.push(annulee.id);
+        const annulation = await request(app).post(`/api/factures/${annulee.id}/annuler`).set('Authorization', auth);
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        await purgerPieceJetable(annulation.body.avoir.id);
+        await assert.rejects(avoirSql(annulee.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’une facture annulée');
+
+        // Un avoir partiel resté brouillon ne compte pas : la facture s'annule avec son avoir d'annulation.
+        const annulable = await emettre('TEST plafond annulation à côté d’un brouillon');
+        purger.push(annulable.id);
+        await avoirSql(annulable.id, { statut: 'BROUILLON', taux: [[20, 1, 0.2]] });
+        await transaction(async (tx) => {
+          await tx.facture.update({ where: { id: annulable.id }, data: { statut: 'ANNULEE' } });
+          await pieceSql(tx, { factureOrigineId: annulable.id, estAvoirAnnulation: true, taux: [[20, 10, 2]] });
+        });
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: annulable.id } })).statut, 'ANNULEE');
+
+        // Annulation à côté d'un avoir partiel émis : l'avoir d'annulation, émis aux mêmes montants,
+        // satisfait les gardes de #227 ; le partiel la fait refuser.
+        const partielle = await emettre('TEST plafond annulation');
+        purger.push(partielle.id);
+        await avoirPartielApi(partielle, [ligne(1, 20)]);
+        await assert.rejects(transaction(async (tx) => {
+          await tx.facture.update({ where: { id: partielle.id }, data: { statut: 'ANNULEE' } });
+          await pieceSql(tx, { factureOrigineId: partielle.id, estAvoirAnnulation: true, taux: [[20, 10, 2]] });
+        }), statutRefuse, 'annulation à côté d’un avoir partiel');
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: partielle.id } })).statut, 'EMISE');
+
+        // Deux transactions qui créditent chacune 7,20 € TTC sur une facture de 12 € : la seconde insère
+        // son avoir après le contrôle de la première, qui tient la facture verrouillée. Son insertion
+        // attend (contrôle de clé étrangère), puis elle relit les avoirs validés et est refusée.
+        const disputee = await emettre('TEST plafond concurrent');
+        purger.push(disputee.id);
+        const tenir = () => { let liberer, pret; const attente = new Promise((resolve) => { liberer = resolve; }); const tenue = new Promise((resolve) => { pret = resolve; }); return { attente, tenue, liberer: () => liberer(), pret: () => pret() }; };
+        // La transaction qui doit tenir la facture peut échouer avant : le test s'arrête alors sur son
+        // erreur, au lieu d'attendre sans fin.
+        const tenueOuEchec = (tenir, transactionTenue, nom) => {
+          const echecAvant = transactionTenue.then((erreur) => { throw erreur ?? new Error(`${nom} terminée sans tenir la facture`); });
+          echecAvant.catch(() => {});
+          return Promise.race([tenir.tenue, echecAvant]);
+        };
+        const attendreVerrou = async (filtre) => {
+          let bloque = false;
+          for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+            const [etat] = await filtre();
+            bloque = etat.attente;
+            if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          return bloque;
+        };
+        const premiere = tenir();
+        const t1 = transaction(async (tx) => {
+          await pieceSql(tx, { factureOrigineId: disputee.id, taux: [[20, 6, 1.2]] });
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          premiere.pret();
+          await premiere.attente;
+        }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+        await tenueOuEchec(premiere, t1, 'T1');
+        const t2 = avoirSql(disputee.id, { taux: [[20, 6, 1.2]] }).then(() => null, (erreur) => erreur);
+        try {
+          assert.equal(await attendreVerrou(() => prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%Facture%') AS attente`), true, 'le second avoir attend la facture tenue par le premier');
+        } finally {
+          premiere.liberer();
+        }
+        assert.equal(await t1, null, 'le premier avoir est validé');
+        assert.match(String((await t2)?.message), montantTotal, 'le second avoir est refusé');
+        assert.equal(await credite(disputee.id), 7.2);
+
+        // Le contrôle verrouille la facture avant de lire ses avoirs : un avoir brouillon émis pendant
+        // qu'une autre transaction tient la facture, avec un avoir déjà contrôlé, attend la fin de
+        // celle-ci, puis relit et est refusé. Sans ce verrou, il lirait avant celui du garde des
+        // règlements, et 14,40 € seraient crédités sur une facture de 12 €.
+        const relue = await emettre('TEST plafond verrou');
+        purger.push(relue.id);
+        const enAttente = await avoirSql(relue.id, { statut: 'BROUILLON', taux: [[20, 6, 1.2]] });
+        await transaction((tx) => ecrire(tx, enAttente));
+        const detenteur = tenir();
+        const t3 = transaction(async (tx) => {
+          await pieceSql(tx, { factureOrigineId: relue.id, taux: [[20, 6, 1.2]] });
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          detenteur.pret();
+          await detenteur.attente;
+        }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+        await tenueOuEchec(detenteur, t3, 'T3');
+        let pidEmission = null;
+        const t4 = transaction(async (tx) => {
+          [{ pid: pidEmission }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          await tx.facture.update({ where: { id: enAttente.id }, data: { statut: 'EMISE', ecrituresScellees: true } });
+        }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+        try {
+          assert.equal(await attendreVerrou(() => (pidEmission === null ? [{ attente: false }] : prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = ${pidEmission} AND datname = current_database() AND wait_event_type = 'Lock') AS attente`)), true, 'l’émission attend la facture tenue par l’autre avoir');
+        } finally {
+          detenteur.liberer();
+        }
+        assert.equal(await t3, null, 'l’avoir qui tenait la facture est validé');
+        assert.match(String((await t4)?.message), montantTotal, 'l’avoir émis ensuite est refusé');
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: enAttente.id } })).statut, 'BROUILLON');
+        assert.equal(await credite(relue.id), 7.2);
+      } catch (erreur) {
+        echec = erreur;
+        throw erreur;
+      } finally {
+        // Les avoirs d'abord (y compris un avoir accepté à tort, et l'avoir d'un avoir) ; une erreur de
+        // nettoyage ne masque pas l'échec d'origine.
+        try {
+          for (const id of purger) {
+            for (const { id: avoirId } of await prisma.facture.findMany({ where: { factureOrigineId: id }, select: { id: true } })) {
+              for (const { id: sousAvoirId } of await prisma.facture.findMany({ where: { factureOrigineId: avoirId }, select: { id: true } })) await purgerPieceJetable(sousAvoirId);
+              await purgerPieceJetable(avoirId);
+            }
             await purgerPieceJetable(id);
           }
         } catch (erreur) {

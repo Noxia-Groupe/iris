@@ -29,6 +29,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { REGLE_BASE_JETABLE, estNomBaseJetable } from '../base-jetable.mjs';
 import { JETON_SECOURS, JWT_SECRET } from './commun.mjs';
 import { preparerDonnees } from './donnees.mjs';
 import { relever } from './releve.mjs';
@@ -155,10 +156,9 @@ async function principal() {
   } catch {
     echec('RELEVE_DATABASE_URL n’est pas une URL PostgreSQL valide.');
   }
-  // L'outil crée comptes, clients, chantiers et saisies : jamais sur une base réelle. « e2e » ou
-  // « test » doit former un mot du nom (iris_releve_test, e2e-iris), pas une sous-chaîne
-  // (production_latest).
-  if (!/(^|[_-])(e2e|test)([_-]|$)/i.test(nomBase)) echec(`La base « ${nomBase} » ne porte ni « e2e » ni « test » comme mot de son nom : refus d’y écrire.`);
+  // L'outil crée comptes, clients, chantiers et saisies : jamais sur une base réelle (règle commune,
+  // base-jetable.mjs).
+  if (!estNomBaseJetable(nomBase)) echec(`La base « ${nomBase} » n’est pas une base jetable (${REGLE_BASE_JETABLE}) : refus d’y écrire.`);
   for (const dossier of [options.reference, options.candidat]) {
     if (!existsSync(path.join(dossier, 'vite.config.ts'))) echec(`${dossier} n’est pas un dossier client (vite.config.ts absent).`);
     if (!existsSync(path.join(dossier, 'node_modules', 'vite', 'bin', 'vite.js'))) echec(`${dossier} : dépendances absentes (npm ci dans ce dossier client).`);
