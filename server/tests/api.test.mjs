@@ -46,6 +46,9 @@ if (!TEST_DATABASE_URL) {
   const { PrismaClient } = await import('@prisma/client');
   const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
+  // Nombre de requêtes des tests de rafale : au-delà du pool de Prisma, qui ouvre au plus 2 × cœurs
+  // physiques + 1 connexions, ou le connection_limit de TEST_DATABASE_URL quand elle le fixe.
+  const auDelaDuPool = Math.max(2 * cpus().length + 2, (Number(new URL(TEST_DATABASE_URL).searchParams.get('connection_limit')) || 0) + 1);
   // Fixtures historiques : leurs transitions restent motivées, même hors HTTP.
   const auteurFixture = async tx => tx.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
   const regleFixture = async (cle, compteId, db = prisma) => {
@@ -3935,21 +3938,25 @@ if (!TEST_DATABASE_URL) {
       assert.equal(avant.tauxAcompte, 30);
       const maj = await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`)
         .send({ margeCommercialeActive: true, tauxAcompteDefaut: 50 });
-      assert.equal(maj.status, 200);
-      assert.equal(maj.body.tauxAcompteDefaut, 50);
+      // Le taux revient à 30 même si une assertion échoue : laissé à 50, il ferait échouer les tests suivants.
+      try {
+        assert.equal(maj.status, 200);
+        assert.equal(maj.body.tauxAcompteDefaut, 50);
 
-      const apres = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
-        clientId, objet: 'TEST Affaire taux neuf', acompteExige: true,
-        lignes: [{ designation: 'Pose', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
-      });
-      assert.equal(apres.body.tauxAcompte, 50, 'un devis neuf suit la politique du jour');
-      const inchange = await prisma.devis.findUnique({ where: { id: avant.id } });
-      assert.equal(Number(inchange.tauxAcompte), 30, 'le devis déjà émis garde son taux');
+        const apres = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+          clientId, objet: 'TEST Affaire taux neuf', acompteExige: true,
+          lignes: [{ designation: 'Pose', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }],
+        });
+        assert.equal(apres.body.tauxAcompte, 50, 'un devis neuf suit la politique du jour');
+        const inchange = await prisma.devis.findUnique({ where: { id: avant.id } });
+        assert.equal(Number(inchange.tauxAcompte), 30, 'le devis déjà émis garde son taux');
 
-      const hors_bornes = await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`)
-        .send({ margeCommercialeActive: true, tauxAcompteDefaut: 140 });
-      assert.equal(hors_bornes.status, 400);
-      await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`).send({ margeCommercialeActive: true, tauxAcompteDefaut: 30 });
+        const hors_bornes = await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`)
+          .send({ margeCommercialeActive: true, tauxAcompteDefaut: 140 });
+        assert.equal(hors_bornes.status, 400);
+      } finally {
+        await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`).send({ margeCommercialeActive: true, tauxAcompteDefaut: 30 });
+      }
     });
 
     test('une affaire commencée ne s’annule pas', async () => {
@@ -4120,8 +4127,7 @@ if (!TEST_DATABASE_URL) {
         clientId, objet: 'TEST Affaire dupliquée en rafale', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }],
       });
       assert.equal(cree.status, 201, JSON.stringify(cree.body));
-      // Prisma ouvre au plus 2 × cœurs physiques + 1 connexions : ce nombre de requêtes le dépasse.
-      const nombre = 2 * cpus().length + 2;
+      const nombre = auDelaDuPool;
       const reponses = await Promise.all(Array.from({ length: nombre }, () => request(app).post(`/api/devis/${cree.body.id}/duplication`).set('Authorization', `Bearer ${session}`)));
       assert.deepEqual(reponses.map((reponse) => reponse.status), Array(nombre).fill(201), JSON.stringify(reponses.map((reponse) => reponse.body.error).filter(Boolean)));
       assert.equal(new Set(reponses.map((reponse) => reponse.body.numero)).size, nombre, 'chaque duplicata a son propre numéro d’affaire');
@@ -4135,20 +4141,47 @@ if (!TEST_DATABASE_URL) {
         clientId, objet: 'TEST Affaire modifiée en rafale', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }],
       });
       assert.equal(cree.status, 201, JSON.stringify(cree.body));
-      const { tauxAcompteDefaut } = (await request(app).get('/api/parametres').set('Authorization', `Bearer ${session}`)).body;
-      const nombre = 2 * cpus().length + 2;
-      const objets = Array.from({ length: nombre }, (_, rang) => `TEST Affaire modifiée en rafale ${rang}`);
-      // Acompte exigé sans taux : chaque modification lit le taux par défaut.
-      const reponses = await Promise.all(objets.map((objet) => request(app).patch(`/api/devis/${cree.body.id}`).set('Authorization', `Bearer ${session}`).send({
-        clientId, objet, acompteExige: true, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }],
-      })));
-      assert.deepEqual(reponses.map((reponse) => reponse.status), Array(nombre).fill(200), JSON.stringify(reponses.map((reponse) => reponse.body.error).filter(Boolean)));
-      const relu = await prisma.devis.findUniqueOrThrow({ where: { id: cree.body.id }, include: { lignes: true } });
-      assert.ok(objets.includes(relu.objet), relu.objet);
-      assert.equal(relu.acompteExige, true);
-      assert.equal(Number(relu.tauxAcompte), Number(tauxAcompteDefaut));
-      assert.equal(Number(relu.totalHt), 200);
-      assert.equal(relu.lignes.length, 1, 'chaque modification remplace les lignes, sans doublon');
+      // Taux par défaut distinct de la valeur du schéma (30) : le devis relu prouve que la modification
+      // applique le taux lu avant sa transaction, et non une constante.
+      const { tauxAcompteDefaut: tauxInitial } = (await request(app).get('/api/parametres').set('Authorization', `Bearer ${session}`)).body;
+      const tauxAcompteDefaut = 37.5;
+      const reglage = await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`).send({ tauxAcompteDefaut });
+      assert.equal(reglage.status, 200, JSON.stringify(reglage.body));
+      try {
+        const nombre = auDelaDuPool;
+        const objets = Array.from({ length: nombre }, (_, rang) => `TEST Affaire modifiée en rafale ${rang}`);
+        // Acompte exigé sans taux : chaque modification lit le taux par défaut.
+        const reponses = await Promise.all(objets.map((objet) => request(app).patch(`/api/devis/${cree.body.id}`).set('Authorization', `Bearer ${session}`).send({
+          clientId, objet, acompteExige: true, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }],
+        })));
+        assert.deepEqual(reponses.map((reponse) => reponse.status), Array(nombre).fill(200), JSON.stringify(reponses.map((reponse) => reponse.body.error).filter(Boolean)));
+        const relu = await prisma.devis.findUniqueOrThrow({ where: { id: cree.body.id }, include: { lignes: true } });
+        assert.ok(objets.includes(relu.objet), relu.objet);
+        assert.equal(relu.acompteExige, true);
+        assert.equal(Number(relu.tauxAcompte), tauxAcompteDefaut, 'le taux par défaut lu avant la transaction');
+        assert.equal(Number(relu.totalHt), 200);
+        assert.equal(relu.lignes.length, 1, 'chaque modification remplace les lignes, sans doublon');
+      } finally {
+        await request(app).put('/api/parametres').set('Authorization', `Bearer ${session}`).send({ tauxAcompteDefaut: tauxInitial });
+      }
+    });
+
+    // Plafond du taux d'acompte d'un devis (règle d'acompteDevisPayload) : refusé au-delà de 100 %, à la
+    // création comme à la modification, sans rien écrire ; 100 % reste admis.
+    test('le taux d’acompte d’un devis ne dépasse jamais 100 %, à la création comme à la modification', async () => {
+      const lignes = [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }];
+      const creationRefusee = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({ clientId, objet: 'TEST Acompte plafonné', acompteExige: true, tauxAcompte: 100.01, lignes });
+      assert.equal(creationRefusee.status, 400, JSON.stringify(creationRefusee.body));
+      assert.match(creationRefusee.body.error, /100 %/);
+      const cree = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({ clientId, objet: 'TEST Acompte plafonné', acompteExige: true, tauxAcompte: 100, lignes });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      assert.equal(cree.body.tauxAcompte, 100);
+      const modificationRefusee = await request(app).patch(`/api/devis/${cree.body.id}`).set('Authorization', `Bearer ${session}`).send({ clientId, objet: 'TEST Acompte plafonné modifié', tauxAcompte: 150, lignes });
+      assert.equal(modificationRefusee.status, 400, JSON.stringify(modificationRefusee.body));
+      assert.match(modificationRefusee.body.error, /100 %/);
+      const relu = await prisma.devis.findUniqueOrThrow({ where: { id: cree.body.id } });
+      assert.equal(Number(relu.tauxAcompte), 100, 'le refus ne modifie pas le taux');
+      assert.equal(relu.objet, 'TEST Acompte plafonné', 'le refus ne modifie pas le devis');
     });
 
     // Ouverture du chantier d'une affaire depuis l'Administration (décision de Nelson du
