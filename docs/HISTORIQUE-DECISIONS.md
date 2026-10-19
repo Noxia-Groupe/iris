@@ -136,17 +136,20 @@ Les constats relevés pendant les audits et la CI de #123 à #129 sont devenus l
 
 ## Décisions et lots des 18 et 19-10-2026
 
+Les PR du découpage du serveur fusionnées le 18-10-2026 jusqu'à `dd92bf3` (#185 à #199, #201) sont décrites dans la [passation](ROADMAP-PASSATION.md) (chantier technique 2) ; cette section couvre la suite.
+
 *Rédigé le 19-10-2026. Tests, preuves et audits : voir le corps de chaque PR.*
 
 ### Décisions de Nelson
 
-- **Découpage des écrans (18-10-2026, #200).** « 1. Oui je valide le principe. Oui a plat comme aujourd'hui. Fait ce qui est le mieux a corriger apres ou en issu je te laisse le choix de la meulleur des facon. » Principe validé : déplacement pur, état laissé dans la page, fichiers à plat dans `components/`. Petites anomalies, seul point délégué : une issue chacune (#202 à #206), corrigées après les trois déplacements. L'ordre des PR (outil, Planning, Administration, fiche chantier) est un choix technique de Claude Code.
+- **Découpage des écrans (18-10-2026, #200).** « 1. Oui je valide le principe. Oui a plat comme aujourd'hui. Fait ce qui est le mieux a corriger apres ou en issu je te laisse le choix de la meulleur des facon. » Principe validé : déplacement pur, état laissé dans la page, fichiers à plat dans `components/`. Petites anomalies, seul point délégué : une issue chacune (#202 à #206), à corriger après les trois déplacements. L'ordre des PR (outil, Planning, Administration, fiche chantier) est un choix technique de Claude Code.
 - **Sommes en flottants (18-10-2026, #198).** « 3. Prend le meilleur choix possible et surtout ne pas laisser passer une erreur eventuel d'affichage de montant. » Choix retenu : correction à la source, sommes en décimal exact et arrondis d'affichage corrigés (#208). La PR change des montants affichés : sa fusion reste à Nelson.
 - **Propositions 3 et 4 (18-10-2026, #182, #183).** Nelson a délégué l'arbitrage de leurs questions ouvertes : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Quatorze décisions pour les droits et six pour le paramétrage sont consignées dans ces PR. Leur fusion, qui vaut validation des propositions, reste à Nelson.
-- **Délégation de fusion (rappel).** Les lots de cette section ont été fusionnés par Claude Code selon la délégation du 17-10-2026, consignée dans [CLAUDE.md](../CLAUDE.md) (« Mode de livraison », #176), que Nelson a rappelée ainsi : « Tu fusionnes si vert + audit ».
-  - Conditions, sur la même SHA : CI verte, et audit interne qui juge la PR fusionnable. Jamais par la fusion automatique de GitHub.
-  - Restent à Nelson : les changements de montants (#208), les propositions 3 et 4 (#182, #183) et la mise en production. Par prudence, Claude Code ne fusionne pas non plus une PR qui modifie CLAUDE.md (#207).
-- **Cycle des statuts des factures (19-10-2026, #221).** « #221 ok pour moi avec ta proposition ». Une pièce naît brouillon ou émise et passe de brouillon à émise ; une facture passe d'émise à réglée, et inversement, selon ses règlements ; elle ne passe à annulée qu'avec son avoir d'annulation, créé dans la même transaction ; « annulée » est définitif, et un avoir, né émis, le reste. Appliqué par #227.
+- **Délégation de fusion (rappel).** Les lots de cette section ont été fusionnés par Claude Code selon la délégation de Nelson du 17-10-2026, consignée dans [CLAUDE.md](../CLAUDE.md) (« Mode de livraison », #176) avec ses deux citations. Conditions, reprises de CLAUDE.md :
+  - Claude Code fusionne lui-même la PR qu'il a codée lorsque deux conditions portent sur la même SHA : la CI y est verte, et son sous-agent d'audit l'y juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 ; jamais par la fusion automatique de GitHub.
+  - La délégation ne couvre ni une PR qui change des montants (#208), ni une proposition soumise à la validation de Nelson (#182, #183), ni la mise en production.
+  - Choix de Claude Code, et non exclusion de Nelson : il ne fusionne pas lui-même une PR qui modifie CLAUDE.md (#200, #207).
+- **Cycle des statuts des factures (19-10-2026, #221).** « #221 ok pour moi avec ta proposition ». La proposition de #221 : brouillon → émise ; une facture passe d'émise à réglée, et inversement, selon ses règlements ; elle ne passe à annulée qu'avec son avoir d'annulation, créé dans la même transaction ; « annulée » est définitif. Appliqué par #227, qui l'étend, pour suivre le comportement actuel de l'application, à la création des pièces (une pièce naît brouillon ou émise ; un avoir, né émis, le reste) : choix de mise en œuvre relevé par l'audit interne, non décision de Nelson.
 
 ### Lots fusionnés
 
@@ -165,7 +168,7 @@ Les constats relevés pendant les audits et la CI de #123 à #129 sont devenus l
 
 **Factures** (règle 2, documents figés et écritures d'argent) :
 - #217 (#180) : une facture émise a ses lignes, sa ventilation de TVA, sa version des mentions légales et sa date d'émission figées en base. Son journal est en ajout seul, horodaté par la base. Le retour au brouillon et un statut inconnu sont refusés, comme le vidage (`TRUNCATE`) des lignes, de la ventilation, des écritures et du journal.
-- #227 (#221, #222) : le cycle des statuts décidé le 19-10-2026 est garanti en base dès la création. Une facture ne passe à annulée qu'avec un avoir d'annulation émis, aux mêmes montants HT, TVA et TTC, dans la même transaction ; les pièces annulées avant cette migration ne sont pas revérifiées. Le vidage est refusé sur les règlements, les affectations et trois journaux comptables. L'insertion d'une écriture verrouille la pièce en `FOR NO KEY UPDATE`, sans interblocage.
+- #227 (#221, #222) : le cycle des statuts décidé le 19-10-2026 est garanti en base, et étendu à la création des pièces (choix de mise en œuvre). Une facture ne passe à annulée qu'avec un avoir d'annulation émis, aux mêmes montants HT, TVA et TTC, dans la même transaction ; les pièces annulées avant cette migration ne sont pas revérifiées. Le vidage est refusé sur les règlements, les affectations et trois journaux comptables. L'insertion d'une écriture verrouille la pièce en `FOR NO KEY UPDATE`, sans interblocage.
 
 **Tests** :
 - #229 (#225, #211) : les attentes de verrou des tests serveur ne comptent plus que les requêtes de la base du test, hors de la session qui interroge ; la page Factures n'affiche ni liste vide, ni compte, ni « aucune » avant sa première réponse.
@@ -176,6 +179,6 @@ Les constats relevés pendant les audits et la CI de #123 à #129 sont devenus l
 
 ### En attente de Nelson au 19-10-2026
 
-- #208 (#198) : prête, audit interne fusionnable et CI 5/5 verte sur `0c6ef05` ; fusion réservée à Nelson (montants affichés).
+- #208 (#198) : prête sur sa base `778f9d5` (audit interne fusionnable et CI 5/5 verte sur `0c6ef05`) ; rafraîchissement sur `main` en cours, CI et audit à rejouer sur la nouvelle SHA avant sa fusion par Nelson (montants affichés).
 - #207 : état du découpage dans CLAUDE.md.
 - #182 et #183 : propositions 3 et 4, arbitrées par délégation, à valider par leur fusion.
