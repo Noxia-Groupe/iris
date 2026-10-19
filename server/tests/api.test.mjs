@@ -5367,7 +5367,7 @@ if (!TEST_DATABASE_URL) {
           .send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] }).then(result => result);
         let bloque = false;
         for (let tour = 0; tour < 150; tour++) {
-          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"ContratMaintenance"%FOR UPDATE%'`;
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"ContratMaintenance"%FOR UPDATE%'`;
           if (sessions.length) { bloque = true; break; }
           await new Promise(resolve => setTimeout(resolve, 20));
         }
@@ -5655,7 +5655,7 @@ if (!TEST_DATABASE_URL) {
         requete = request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-02', creneau: 'JOURNEE', intervenantIds: [second.id] }).then(result => result);
         let bloque = false;
         for (let tour = 0; tour < 150; tour++) {
-          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
           if (sessions.length) { bloque = true; break; }
           await new Promise(resolve => setTimeout(resolve, 20));
         }
@@ -5702,7 +5702,7 @@ if (!TEST_DATABASE_URL) {
             .send({ dateDebut: '2099-01-02', dateFin: '2099-01-02', intervenantIds: [second.id] }).then(result => result);
           let bloque = false;
           for (let tour = 0; tour < 150; tour++) {
-            const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+            const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
             if (sessions.length) { bloque = true; break; }
             await new Promise(resolve => setTimeout(resolve, 20));
           }
@@ -5745,7 +5745,7 @@ if (!TEST_DATABASE_URL) {
           .send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] }).then(result => result);
         let bloque = false;
         for (let tour = 0; tour < 150; tour++) {
-          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
           if (sessions.length) { bloque = true; break; }
           await new Promise(resolve => setTimeout(resolve, 20));
         }
@@ -6403,7 +6403,7 @@ if (!TEST_DATABASE_URL) {
       let bloquee = false;
       try {
         for (let i = 0; i < 60; i++) {
-          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
           if (etat.attente) { bloquee = true; break; }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -6511,7 +6511,7 @@ if (!TEST_DATABASE_URL) {
       let bloquee = false;
       try {
         for (let i = 0; i < 60; i++) {
-          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
           if (etat.attente) { bloquee = true; break; }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -6839,7 +6839,7 @@ if (!TEST_DATABASE_URL) {
         let attenteObservee = false;
         try {
           for (let tentative = 0; tentative < 60; tentative++) {
-            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
+            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
             if (etat.attente) { attenteObservee = true; break; }
             await new Promise(resolve => setTimeout(resolve, 50));
           }
@@ -6876,7 +6876,7 @@ if (!TEST_DATABASE_URL) {
         let attenteObservee = false;
         try {
           for (let tentative = 0; tentative < 60; tentative++) {
-            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
+            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
             if (etat.attente) { attenteObservee = true; break; }
             await new Promise(resolve => setTimeout(resolve, 50));
           }
@@ -7105,7 +7105,7 @@ if (!TEST_DATABASE_URL) {
       try {
         let attente = false;
         for (let i = 0; i < 30 && !attente; i++) {
-          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock%') AS attente`;
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock%') AS attente`;
           attente = etat.attente;
           if (!attente) await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -7440,7 +7440,7 @@ if (!TEST_DATABASE_URL) {
       let attenteObservee = false;
       try {
         for (let i = 0; i < 40; i++) {
-          const activites = await prisma.$queryRaw`SELECT "wait_event" FROM pg_stat_activity WHERE "wait_event" = 'advisory'`;
+          const activites = await prisma.$queryRaw`SELECT "wait_event" FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND "wait_event" = 'advisory'`;
           if (activites.length) { attenteObservee = true; break; }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -7473,7 +7473,7 @@ if (!TEST_DATABASE_URL) {
         const premier = ordre === 'creation' ? creer() : confirmer();
         const attendre = async (nombre) => {
           for (let i = 0; i < 80; i++) {
-            const activites = await prisma.$queryRaw`SELECT "pid" FROM pg_stat_activity WHERE "wait_event" = 'advisory'`;
+            const activites = await prisma.$queryRaw`SELECT "pid" FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND "wait_event" = 'advisory'`;
             if (activites.length >= nombre) return;
             await new Promise(resolve => setTimeout(resolve, 50));
           }
@@ -8858,7 +8858,7 @@ if (!TEST_DATABASE_URL) {
       const nouveau = await prisma.client.create({ data: { raisonSociale: 'TEST Course client nouveau' } });
       const attendreVerrou = async (motif) => {
         for (let tour = 0; tour < 150; tour++) {
-          const sessions = await prisma.$queryRawUnsafe(`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '${motif}'`);
+          const sessions = await prisma.$queryRawUnsafe(`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '${motif}'`);
           if (sessions.length) return true;
           await new Promise(resolve => setTimeout(resolve, 20));
         }
@@ -9446,7 +9446,7 @@ if (!TEST_DATABASE_URL) {
         requetes = lancer().map(requete => requete.then(resultat => resultat));
         let bloquees = 0;
         for (let tour = 0; tour < 200 && bloquees < n; tour++) {
-          [{ bloquees }] = await prisma.$queryRaw`SELECT count(*)::int AS bloquees FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Facture"%FOR UPDATE%'`;
+          [{ bloquees }] = await prisma.$queryRaw`SELECT count(*)::int AS bloquees FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Facture"%FOR UPDATE%'`;
           if (bloquees < n) await new Promise(resolve => setTimeout(resolve, 20));
         }
         assert.equal(bloquees, n, 'chaque requête doit attendre le verrou de la facture');
