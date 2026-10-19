@@ -80,10 +80,12 @@ En local, lancer les parcours Playwright avec `cd client && npm run test:e2e:loc
 
 - régénère le client Prisma et recompile le backend (`server/dist`), que Playwright démarre tel quel ;
 - applique les migrations sur `E2E_DATABASE_URL` ;
-- refuse une base dont le nom ne contient ni `e2e` ni `test` ;
+- refuse une base dont le nom ne porte ni `e2e` ni `test` comme mot, en bord de nom ou séparé par `_` ou `-`, ou s'écrit avec d'autres caractères que des lettres sans accent, des chiffres, `_` et `-` (`iris_e2e`, `iris-test`, `iris_e2e_2` oui ; `production_latest`, `iris_tests`, `iris_test2`, `iris.test`, `production/iris_e2e` non). C'est la règle commune avec l'outil de comparaison du rendu (`client/scripts/base-jetable.mjs`) ;
 - refuse de démarrer si un serveur écoute déjà sur les ports API ou frontend, car Playwright le réutiliserait hors CI.
 
 `npm run test:e2e` seul suppose que ces étapes ont déjà été faites, comme dans la CI.
+
+Si le Chromium installé ne correspond pas à la version attendue par `@playwright/test` (« Executable doesn't exist »), par exemple dans un conteneur fourni avec une autre révision, ne modifiez pas la configuration versionnée : utilisez une surcouche non versionnée qui importe `playwright.config.ts` et fixe `use.launchOptions.executablePath` vers le Chromium disponible. Les chemins de la configuration versionnée (`testDir`, `cwd` des serveurs web) se résolvent depuis le dossier du fichier de configuration chargé : placée hors de `client/`, la surcouche les redéfinit en chemins absolus. Après la préparation de `test:e2e:local` (`node scripts/preparer-e2e.mjs`), lancer `npx playwright test -c <surcouche>` depuis `client/`. Pour l'outil de comparaison du rendu, la variable `RELEVE_CHROMIUM` joue ce rôle.
 
 En CI, les travaux « Backend — tests » et « Frontend — parcours utilisateur » démarrent le PostgreSQL 16 préinstallé du runner Ubuntu 24.04, et non un conteneur tiré d'un registre public, dont les refus (`toomanyrequests`) faisaient échouer des jobs avant tout test. Le script `.github/scripts/postgresql-runner.sh` crée le rôle `iris` et la base jetable en UTF-8 et `C.UTF-8`. Il affiche puis vérifie la version majeure (16), le fuseau du serveur (UTC) ainsi que l'encodage et la collation de la base et de `template1`. En cas d'échec, le job affiche la fin du journal du serveur PostgreSQL.
 
@@ -93,7 +95,7 @@ Les PR qui découpent un gros écran du client ([docs/DECOUPAGE-ECRANS-CIBLE.md]
 
 **Préparer la référence** : un worktree complet de `main` (avec `server/`), et `npm ci` dans son dossier `client`. Le candidat est par défaut le client où l'on lance la commande (`--candidat` pour un autre). Avec `RELEVE_DATABASE_URL` pointant vers une base jetable, de préférence neuve, l'outil :
 
-- refuse une base dont le nom ne contient pas `e2e` ou `test` comme mot (`iris_releve_test` oui, `production_latest` non), des ports occupés, un `--sortie` non vide, un client sans dépendances, et deux arbres dont le code serveur diffère (sources, schéma, migrations, dépendances, `tsconfig.json`) : il compare deux clients servis par le même serveur ;
+- refuse une base dont le nom ne suit pas la règle commune des bases jetables, décrite plus haut (`iris_releve_test` oui, `production_latest` non ; `client/scripts/base-jetable.mjs`), des ports occupés, un `--sortie` non vide, un client sans dépendances, et deux arbres dont le code serveur diffère (sources, schéma, migrations, dépendances, `tsconfig.json`) : il compare deux clients servis par le même serveur ;
 - régénère le client Prisma et recompile le serveur **du candidat** (son `server/dist` est réécrit), migre la base, démarre le serveur, puis crée par l'API un jeu de données qui rend les sections que le découpage déplace ;
 - sert l'un après l'autre, sur le même port, le client de référence puis le candidat, et y relève les mêmes étapes sans aucune écriture (toute requête autre que GET est bloquée et relevée) :
   - **administration** : les neuf onglets, l'édition en ligne avec saisie, le formulaire d'autorisation et le choix d'un responsable hiérarchique ouvert, pour le super administrateur ; l'administrateur et le conducteur ;
