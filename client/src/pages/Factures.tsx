@@ -4,6 +4,7 @@ import { Ban, Download, FilePlus2, HandCoins, Plus, RefreshCw, Send, Trash2 } fr
 import { apiFetch } from '../api';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 import { situationReglement } from '../lib/reglements';
+import { totauxApercuAvoir, type AvoirPrecedent } from '../lib/apercuAvoir';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
@@ -25,7 +26,9 @@ type Facture = {
   statut: string;
   type: 'FACTURE' | 'AVOIR';
   factureOrigine?: { id: string; numero: string | null } | null;
-  avoirs?: { id: string; numero: string | null; estAvoirAnnulation: boolean }[];
+  // Avec leur ventilation HT (ou leurs lignes, pour un document historique) : l'aperçu d'un nouvel
+  // avoir en déduit sa TVA comme le serveur, d'après les bases déjà créditées (#236).
+  avoirs?: ({ id: string; numero: string | null; estAvoirAnnulation: boolean } & AvoirPrecedent)[];
   dateEmission: string;
   dateEcheance: string;
   totalHt: number;
@@ -45,17 +48,6 @@ const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', qua
 const nombreFr = (valeur: string): number | null => { const normalise = valeur.trim().replace(',', '.'); return /^\d+(\.\d+)?$/.test(normalise) ? Number(normalise) : null; };
 const formatDate = (date: string) => formatDateOnly(date);
 const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
-// Même arithmétique que le serveur : chaque ligne est arrondie au centime avant
-// agrégation, puis la TVA est calculée par taux. L’aperçu doit annoncer le document émis.
-const centimes = (montant: number) => Math.round((montant + Number.EPSILON) * 100) / 100;
-const entierDecimal = (valeur: string, decimales: number): bigint | null => {
-  const resultat = new RegExp(`^(\\d+)(?:[,.](\\d{1,${decimales}}))?$`).exec(valeur.trim());
-  return resultat ? BigInt(resultat[1]) * 10n ** BigInt(decimales) + BigInt((resultat[2] || '').padEnd(decimales, '0') || '0') : null;
-};
-const centimesLigne = (quantite: string, prixUnitaireHt: string): number => {
-  const milliemes = entierDecimal(quantite, 3), centimesPu = entierDecimal(prixUnitaireHt, 2);
-  return milliemes === null || centimesPu === null ? 0 : Number((milliemes * centimesPu + 500n) / 1000n) / 100;
-};
 const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoir) => !avoir.estAvoirAnnulation);
 
 export default function Factures() {
@@ -249,18 +241,9 @@ export default function Factures() {
       : lignesActuelles);
   };
 
-  const totauxAvoir = (() => {
-    const htParTaux = new Map<number, number>();
-    for (const ligne of lignesAvoir) {
-      const tauxTva = nombreFr(ligne.tauxTva) ?? 0;
-      // Le serveur arrondit chaque ligne avant de sommer : faire de même ici évite
-      // qu’un aperçu à côté d’un plafond annonce un montant différent du document.
-      htParTaux.set(tauxTva, centimes((htParTaux.get(tauxTva) || 0) + centimesLigne(ligne.quantite, ligne.prixUnitaireHt)));
-    }
-    const totalHt = centimes([...htParTaux.values()].reduce((somme, ht) => somme + ht, 0));
-    const totalTva = centimes([...htParTaux.entries()].reduce((somme, [taux, ht]) => somme + centimes(ht * taux / 100), 0));
-    return { totalHt, totalTva, totalTtc: centimes(totalHt + totalTva) };
-  })();
+  // Même arithmétique que le serveur, en entiers, y compris la TVA d'un avoir qui suit d'autres
+  // avoirs de la facture : l'aperçu annonce le document émis.
+  const totauxAvoir = totauxApercuAvoir(lignesAvoir, factureAvoir?.avoirs ?? []);
 
   const creerAvoirPartiel = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

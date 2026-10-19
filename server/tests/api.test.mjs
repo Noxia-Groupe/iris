@@ -9075,6 +9075,12 @@ if (!TEST_DATABASE_URL) {
       assert.equal(premier.status, 201, JSON.stringify(premier.body));
       assert.deepEqual([premier.body.totalHt, premier.body.totalTva, premier.body.totalTtc], [9, 0.5, 9.5]);
       assert.deepEqual(premier.body.ventilationTva.map(({ tauxTva, totalHt, totalTva, totalTtc }) => ({ tauxTva, totalHt, totalTva, totalTtc })), [{ tauxTva: 5.5, totalHt: 9, totalTva: 0.5, totalTtc: 9.5 }]);
+      // #236 : la liste des factures donne la base HT déjà créditée par chaque avoir (ventilation, et
+      // lignes pour un document historique) : l'écran en déduit l'aperçu du suivant, 0,49 € ci-dessous.
+      const liste = await request(app).get('/api/factures').set('Authorization', `Bearer ${session}`);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      const credite = liste.body.find((facture) => facture.id === emission.body.id);
+      assert.deepEqual(credite.avoirs.map(({ ventilationTva, lignes }) => ({ ventilationTva, lignes })), [{ ventilationTva: [{ tauxTva: 5.5, totalHt: 9 }], lignes: [{ tauxTva: 5.5, totalHt: 9 }] }]);
 
       const second = await creer();
       assert.equal(second.status, 201, JSON.stringify(second.body));

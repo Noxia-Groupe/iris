@@ -533,6 +533,37 @@ test.describe('Facturation — parcours utilisateur', () => {
     expect([avoir.totalHt, avoir.totalTva, avoir.totalTtc]).toEqual([2.14, 0.43, 2.57]);
   });
 
+  // #236 : la TVA de l'aperçu est celle du document émis. 21,35 × 10 % = 2,135 € : 2,13 € en
+  // flottant, 2,14 € émis. Un second avoir de 0,05 € à 10 % ne porte pas de TVA : la base cumulée de
+  // 21,40 € garde 2,14 € de TVA (en flottant, 0,005 € → 0,01 €).
+  test('l’aperçu d’avoir annonce la TVA émise, y compris après un premier avoir', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient('avoir-tva');
+    const page = await allerSurPageAdmin('/factures');
+    const facture = await emettreFactureSource(page, client, [['10', '21,35', '10']]);
+    const avoirsApi = async () => {
+      const factures = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string }; totalHt: number; totalTva: number; totalTtc: number }>;
+      return factures.filter((item) => item.type === 'AVOIR' && item.client.id === client.id).map((item) => [item.totalHt, item.totalTva, item.totalTtc]);
+    };
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await remplirLigneAvoir(page, 1, '1', '21,35', '10');
+    await expect(page.getByTestId('aperçu-avoir')).toContainText(/2,14\s*€/);
+    await expect(page.getByTestId('aperçu-avoir')).toContainText(/23,49\s*€/);
+    await expect(page.getByTestId('aperçu-avoir')).not.toContainText(/2,13\s*€/);
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/créé et émis/)).toBeVisible();
+    expect(await avoirsApi()).toEqual([[21.35, 2.14, 23.49]]);
+
+    await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toHaveCount(0);
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await remplirLigneAvoir(page, 1, '1', '0,05', '10');
+    const apercu = page.getByTestId('aperçu-avoir');
+    await expect(apercu.locator('span').nth(1)).toHaveText(/TVA\s*0,00\s*€/);
+    await expect(apercu.locator('span').nth(2)).toHaveText(/Total TTC\s*0,05\s*€/);
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/créé et émis/)).toBeVisible();
+    expect((await avoirsApi()).sort((a, b) => a[0] - b[0])).toEqual([[0.05, 0, 0.05], [21.35, 2.14, 23.49]]);
+  });
+
   // Deux lignes et deux taux exercent l'agrégation de l'aperçu, et vérifient que le
   // payload envoie bien toutes les lignes au serveur.
   test('crédite deux taux en un seul avoir et agrège l’aperçu par taux', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
