@@ -353,7 +353,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       if ((error as { code?: string })?.code === 'DERNIER_SUPERADMIN') return res.status(409).json({ error: 'Impossible de retirer le rôle du dernier compte super administrateur.' });
       if ((error as { code?: string })?.code === 'FICHE_RELIEE') return res.status(409).json({ error: 'Ce compte vient d’être relié à une fiche intervenant : réessayez.' });
       if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
-      res.status(500).json({ error: 'Error updating user role' });
+      res.status(500).json({ error: 'Impossible de modifier le type de compte.' });
     }
   });
 
@@ -463,7 +463,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       if (estRefusCibleSuperAdmin(error)) return res.status(403).json({ error: error.message });
       if ((error as { code?: string })?.code === 'TYPE_CHANGE') return res.status(400).json({ error: (error as Error).message });
       if ((error as { code?: string })?.code === 'P2025') return res.status(404).json({ error: 'Utilisateur introuvable.' });
-      res.status(500).json({ error: 'Error updating estCommercial' });
+      res.status(500).json({ error: 'Impossible de modifier la case Commercial.' });
     }
   });
 

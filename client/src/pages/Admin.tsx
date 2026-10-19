@@ -293,16 +293,24 @@ const Admin = () => {
     fetchData();
   };
 
+  // Changement de type de compte : le serveur peut le refuser (dernier super administrateur actif,
+  // compte devenu super administrateur entre-temps, fiche intervenant reliée au même moment) et
+  // renvoie la raison, affichée telle quelle. La liste est rechargée dans tous les cas : un refus
+  // vient souvent d'un compte modifié depuis son chargement.
   const handleRoleChange = async (userId: string, newRole: string) => {
     try {
-      await apiFetch(`/users/${userId}/role`, {
+      const res = await apiFetch(`/users/${userId}/role`, {
         method: 'PATCH',
         body: JSON.stringify({ role: newRole })
       });
-      fetchData(); // Rafraîchir la liste
-    } catch (e) {
-      alert("Erreur lors de la mise à jour du rôle");
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'Erreur lors de la mise à jour du rôle.');
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
     }
+    fetchData();
   };
 
   // Rattachement hiérarchique : le serveur refuse soi-même, un compte désactivé et une boucle,
@@ -325,16 +333,22 @@ const Admin = () => {
 
   // Bascule "estCommercial" sur un compte ADMIN : il reste administrateur à part entière,
   // mais apparaît en plus comme un choix de commercial rattaché et dans "Mes commerciaux".
+  // Un refus (compte qui n'est plus administrateur, ou devenu super administrateur) est affiché, et
+  // la liste rechargée comme pour le type de compte.
   const handleToggleEstCommercial = async (userId: string, current: boolean) => {
     try {
-      await apiFetch(`/users/${userId}/est-commercial`, {
+      const res = await apiFetch(`/users/${userId}/est-commercial`, {
         method: 'PATCH',
         body: JSON.stringify({ estCommercial: !current })
       });
-      fetchData();
-    } catch (e) {
-      alert("Erreur lors de la mise à jour.");
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'Erreur lors de la mise à jour de la case Commercial.');
+      }
+    } catch {
+      alert('Impossible de joindre le serveur.');
     }
+    fetchData();
   };
 
   // Bascule l'accès au Suivi financier. Réservé au superadmin côté serveur : ces données
