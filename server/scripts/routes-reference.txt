@@ -97,13 +97,13 @@ PATCH /api/chantiers/:id/statut requireAuth#76fb48c2d0f5 > blockCommercialSeulem
 PATCH /api/chantiers/:id/commercial requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c5b6f454900d
 GET /api/users requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0552dd3633a7
 POST /api/users requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d2a05dc6e5a0
-DELETE /api/users/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5d62f7e5ef7e
-PATCH /api/users/:id/role requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#7f8df50950e6
-PATCH /api/users/:id/responsable-hierarchique requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5ab4162ea8f3
-PATCH /api/users/:id/est-commercial requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5573fabcf502
+DELETE /api/users/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4f0805592971
+PATCH /api/users/:id/role requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4060c5d2dbe0
+PATCH /api/users/:id/responsable-hierarchique requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5f0a688ba720
+PATCH /api/users/:id/est-commercial requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#f990933032ab
 PUT /api/users/:id/permissions requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#5a99575093cc
 PATCH /api/users/:id/acces-finance requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#1644f06a9c66
-PATCH /api/users/:id/actif requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#891e2fcf05c9
+PATCH /api/users/:id/actif requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#76a3352c758f
 GET /api/commerciaux requireAuth#76fb48c2d0f5 > <anonymous>#bed7235de09c
 GET /api/conducteurs requireAuth#76fb48c2d0f5 > <anonymous>#73f7374f60c7
 GET /api/intervenants requireAuth#76fb48c2d0f5 > <anonymous>#7f11ac3852d4
