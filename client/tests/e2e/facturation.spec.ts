@@ -665,6 +665,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     // parcours montre aussi la suite).
     await expect.soft(bouton).toBeDisabled();
     await expect(page.getByText(/La création de l’avoir n’a pas pu être confirmée/)).toBeVisible();
+    // #236 : pendant la relecture, la facture affichée peut ignorer l'avoir émis : aucun montant annoncé.
+    await expect(page.getByTestId('aperçu-avoir')).not.toContainText('€');
     await expect.soft(consigne).toHaveCount(0);
     let echec = relectureEchouee();
     decision(0).decider(false);
@@ -808,6 +810,8 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: /Avoir/ })).toHaveCount(1);
     await expect(page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: /Facture/ })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toHaveCount(0);
+    // Le formulaire fermé, la consigne de l'issue inconnue reste affichée.
+    await expect(page.getByText(/La création de l’avoir n’a pas pu être confirmée : réponse inattendue du serveur \(502\)\. Vérifiez les avoirs de la facture dans la liste avant de réessayer\./)).toBeVisible();
     await page.unroute('**/api/**');
     expect(await avoirsApi()).toEqual([23.49]);
   });
