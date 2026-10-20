@@ -1,6 +1,6 @@
 # Modèle de droits cible : proposition
 
-> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 3). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 10 et priment sur le texte de la proposition là où il différait. La fusion de la proposition, qui vaut sa validation, reste à Nelson ([CLAUDE.md](../CLAUDE.md)). Rien de ce document n'est encore implémenté : chaque lot (section 9) fait sa PR. C'est un parcours de droits : exigence maximale (règle 2 de la méthode).
+> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 3). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 10 et priment sur le texte de la proposition là où il différait. La fusion de la proposition vaut sa validation ; elle revient à Claude Code depuis la décision de Nelson du 20-10-2026, « C’est toi qui fusionne TOUTES les PR » ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). Rien de ce document n'est encore implémenté : chaque lot (section 9) fait sa PR. Au lot D0, #178 et #180 sont corrigés depuis (#216, #217) ; #179 et #181 restent ouverts. C'est un parcours de droits : exigence maximale (règle 2 de la méthode).
 >
 > L'état décidé des droits est décrit par [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md) et par l'[historique des décisions](HISTORIQUE-DECISIONS.md). L'inventaire détaillé du code, règle par règle, avec ses références `fichier:ligne` au commit `84e27a1`, est en annexe : [`MODELE-DROITS-INVENTAIRE.md`](MODELE-DROITS-INVENTAIRE.md).
 
@@ -478,7 +478,7 @@ Chaque lot est une PR ou une petite série de PR, avec ses tests réels sur Post
 
 ## 10. Décisions sur les questions ouvertes (arbitrées le 18-10-2026 par délégation)
 
-Nelson a délégué ces arbitrages le 18-10-2026 : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Ce sont des arbitrages faits par délégation : la fusion de la proposition, qui vaut sa validation, reste à Nelson ([CLAUDE.md](../CLAUDE.md)).
+Nelson a délégué ces arbitrages le 18-10-2026 : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Ce sont des arbitrages faits par délégation. La fusion de la proposition vaut sa validation ; elle revient à Claude Code (décision de Nelson du 20-10-2026, [CLAUDE.md](../CLAUDE.md#mode-de-livraison)).
 
 Critères retenus :
 - simple pour une petite équipe, et flexible pour une plus grande ;
