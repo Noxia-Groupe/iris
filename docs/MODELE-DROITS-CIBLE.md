@@ -363,7 +363,7 @@ Chaque type de compte actuel devient le rôle prédéfini correspondant, au comp
 - un titulaire de chaque type ;
 - un commercial, et un administrateur « aussi commercial » ;
 - une branche de techniciens et une branche de conducteurs ;
-- des interventions avec et sans contrat, et une fiche intervenant reliée ;
+- des interventions avec et sans contrat, de chaque statut, annulée comprise, avec et sans projection au planning (dont une sur le jour lu par « Ma journée »), et une fiche intervenant reliée ;
 - un compte rendu signé, un compte rendu non signé et une clôture avec motif ;
 - des heures du technicien sur une intervention hors contrat ;
 - un client actif et un client désactivé ;
@@ -384,7 +384,7 @@ Chaque type de compte actuel devient le rôle prédéfini correspondant, au comp
 
 La colonne des routes vient du script `server/scripts/routes.mjs` du chantier 2 (PR #177, fusionnée).
 
-**Ordre.** La matrice est enregistrée **tôt**, comme un lot de tests seul, juste après les corrections du lot D0 (décision 6). Un lot qui change ensuite volontairement un droit met la matrice à jour dans sa propre PR, l'écart restant visible au diff, comme la liste des routes. Cela vaut pour les choix « à appliquer » de la passation, section 4, pour les décisions de Nelson encore à appliquer, comme le planning limité du technicien (note 11), et pour chaque harmonisation de D2.
+**Ordre.** La matrice est enregistrée comme un lot de tests seul, juste après les corrections du lot D0 et avant tout lot du moteur (décision 6) ; la section 9 en donne le placement par rapport au pilote. Un lot qui change ensuite volontairement un droit met la matrice à jour dans sa propre PR, l'écart restant visible au diff, comme la liste des routes. Cela vaut pour les choix « à appliquer » de la passation, section 4, pour les décisions de Nelson encore à appliquer, comme le planning limité du technicien (note 11), et pour chaque harmonisation de D2.
 
 **Écran.** D2 fait lire à l'écran les permissions effectives au lieu des types de compte. L'écran s'ouvrirait alors partout où il est plus restrictif que le serveur : annuaire du commercial, Performances du responsable, journaux d'achats du directeur. La décision 12 tranche : par défaut, le serveur se restreint à ce que l'écran montre, sauf si un écran que le rôle utilise a besoin de la donnée.
 
@@ -424,7 +424,7 @@ Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite 
 | L'aperçu « ce que voit ce compte » respecte la séparation : un administrateur ne prévisualise pas un compte super administrateur. | Même séparation qu'aujourd'hui dans la liste des comptes. |
 | Chaque changement de rôle, de permission ou d'attribution est journalisé dans la même transaction, en ajout seul. Une entrée qui concerne un compte super administrateur reste fermée à un simple administrateur ; les autres lui sont visibles, comme les changements de permissions aujourd'hui. Le choix « à appliquer » de la passation (section 4), qui ferme aussi à l'administrateur les entrées **écrites** par un super administrateur, lui fermerait toutes les modifications de rôles. | Décision du 13-10-2026 (#133) et règle 2. |
 | Les documents d'argent émis sont immuables (factures et avoirs émis, devis signés, règlements, écritures), quelle que soit la permission. | Obligation légale et d'intégrité. Depuis #217 (#180), les lignes, la ventilation de TVA, la version des mentions et la date d'émission d'une facture émise sont figées en base ; le cycle des statuts et le plafond des avoirs y sont garantis (#227, #235). |
-| Les comptes rendus d'intervention et les signatures sont en ajout seul, figés en base dès leur enregistrement, quelle que soit la permission (#255, #268). | Preuve de l'intervention (règle 2). |
+| Les comptes rendus d'intervention et les signatures sont figés en base, quelle que soit la permission (#255, #268). Le figement d'un compte rendu dès son enregistrement, une correction passant par un compte rendu complémentaire, est un choix par défaut de #253, à confirmer (passation, section 4). | Preuve de l'intervention (règle 2). |
 | La numérotation des factures reste continue et chronologique. | Obligation légale. |
 | Le rôle et le statut actif sont relus en base à chaque requête. | Un retrait de droit prend effet tout de suite. |
 | Les permissions s'appliquent côté serveur ; l'écran ne fait qu'afficher. | Une règle d'écran n'est pas une sécurité. |
@@ -473,7 +473,7 @@ L'écran des rôles **avertit** quand une permission en révèle une autre par d
 | Lot | Contenu | Placement proposé |
 |---|---|---|
 | **D0** | Défauts de la règle 2 relevés par l'inventaire, une PR chacun : dernier super administrateur (#178, corrigé par #216) ; lignes et mentions de facture figées en base (#180, corrigé par #217) ; réattributions et encaissement journalisés (#181, ouvert) ; directeur commercial, assistante et comptable refusés comme le commercial sur le planning et les écritures des référentiels (#179, décision 11, ouvert) | Selon la règle du pilote (décision de Nelson du 19-10-2026, `CLAUDE.md`) : #179 et #181 passent avant un lot du pilote seulement s'ils sont bloquants ou touchent un montant, sinon après le pilote. #178 et #180 sont corrigés (#216, #217) |
-| **D1a** | Matrice de non-régression enregistrée sur le code actuel, en tests seuls (section 7.1) | Après D0 : elle protège les lots suivants |
+| **D1a** | Matrice de non-régression enregistrée sur le code actuel, en tests seuls (section 7.1) | Après D0 : elle enregistre le comportement corrigé (section 4.1) et protège les lots suivants. Tant que #179 et #181 attendent la fin du pilote, D1a et D1 l'attendent aussi. Dans l'exception de D1, D1a, et donc #179 et #181, précèdent D1 : ces deux correctifs deviennent alors bloquants au sens de la règle du pilote et passent avant le premier jour |
 | **D1** | Moteur (`autorise`, `perimetre` par permission, règles historiques), tables `Role` et `RolePermission`, dix rôles prédéfinis identiques, droits individuels migrés selon leur effet en session, sans gain (décision 2), refus de modifier son propre rôle (changement assumé). Aucune autre route ne change de comportement. | Après le premier jour du pilote (décision 6). Exception : si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels, D1, D2 et D3 avancent avant ce premier jour |
 | **D2** | Bascule des routes sur le moteur, un ou deux domaines par PR, matrice verte à chaque fois ; l'écran lit les permissions effectives (section 7.1, Écran) | Après D1 |
 | **D3** | Écran : tableau rôles × permissions, en groupes ou en détail ; créer, dupliquer, renommer, supprimer ; avertissement des déductions ; aperçu « ce que voit ce compte » ; journal | Après D2 (voir D1 pour l'exception) |
@@ -530,7 +530,7 @@ La numérotation reprend celle des anciennes questions ; les sections précéden
    - l'écran avertit des déductions (section 8.3) et montre l'écart avant l'enregistrement (section 6.2) ;
    - chaque octroi est journalisé ;
    - les rôles prédéfinis gardent les réservations actuelles.
-6. **Placement.** Le lot D0 tout de suite, chaque défaut dans sa PR (#178, #179, #180, #181). D1a ensuite. D1 à D4 après le premier jour du pilote. Seule exception : si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels, D1, D2 et D3 avancent avant ce premier jour. Un rôle sur mesure se crée par l'écran D3, mais n'agit qu'une fois les routes basculées sur le moteur (D2). Mise à jour : depuis le 19-10-2026, la règle du pilote, décidée par Nelson, prime pour #179 et #181 (section 9).
+6. **Placement.** Le lot D0 tout de suite, chaque défaut dans sa PR (#178, #179, #180, #181). D1a ensuite. D1 à D4 après le premier jour du pilote. Seule exception : si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels, D1, D2 et D3 avancent avant ce premier jour. Un rôle sur mesure se crée par l'écran D3, mais n'agit qu'une fois les routes basculées sur le moteur (D2). Mise à jour : depuis le 19-10-2026, la règle du pilote, décidée par Nelson, prime pour #179 et #181 ; D1a et D1 les suivent (section 9).
 7. **« Aussi commercial »** : réservé aux rôles système au premier lot, au comportement identique. Si une société le demande, il deviendra un attribut de rôle.
 8. **Règles historiques.** En D1, elles sont reproduites telles quelles, et la matrice le prouve. En D2, elles sont harmonisées une à une, chacune dans sa PR avec la matrice mise à jour. La cible est la variante la plus cohérente, et à défaut la plus restrictive :
    - **titulaire** : une seule définition de « ses dossiers » par permission, la même pour la liste et pour la fiche. Un commercial titulaire verra donc aussi le chantier dans sa liste ;
