@@ -278,15 +278,28 @@ export default function Factures() {
     envoiAvoirEnCours.current = true;
     setEnvoiAvoir(true);
     let cree = false;
+    // Sans réponse de l'API, l'avoir a pu être émis : on ne l'affirme ni ne le nie, comme à l'ouverture
+    // d'un chantier. La liste est relue avant de libérer le formulaire, pour montrer un avoir émis avant
+    // toute nouvelle soumission (#247).
+    const issueInconnue = async (cause: string) => {
+      setErreur(`La création de l’avoir n’a pas pu être confirmée : ${cause}. Vérifiez les avoirs de la facture dans la liste avant de réessayer.`);
+      await charger();
+    };
     try {
       const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return setErreur(data.error || 'Création de l’avoir partiel impossible.');
+      if (!res.ok) {
+        // Un refus de l'API porte son message : l'avoir n'a pas été émis. Une réponse sans ce message,
+        // d'une passerelle (502, 504) par exemple, ne dit pas si le serveur l'a émis.
+        if (data.error) setErreur(data.error);
+        else await issueInconnue(`réponse inattendue du serveur (${res.status})`);
+        return;
+      }
       setFactureAvoir(null);
       setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
       cree = true;
     } catch {
-      setErreur('Impossible de joindre le serveur.');
+      await issueInconnue('impossible de joindre le serveur');
     } finally {
       envoiAvoirEnCours.current = false;
       setEnvoiAvoir(false);
