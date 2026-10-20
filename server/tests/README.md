@@ -8,6 +8,7 @@ Deux niveaux, lancés ensemble par `npm test` :
 | `securite.test.mjs` | Empreinte des clés API, comparaison à temps constant | non |
 | `serveur.test.mjs` | Délais de connexion du serveur HTTP, sur une vraie connexion TCP | non |
 | `api.test.mjs` | Requêtes HTTP réelles sur l'application montée en mémoire | **oui** |
+| `environnement.test.mjs` | Chaque variable d'environnement lue par le code est documentée dans un modèle `.env.example` et dans `docs/CONFIGURATION-ENVIRONNEMENT.md` | non |
 
 ## Pourquoi pas de test qui relit le code source
 
@@ -17,6 +18,13 @@ régulière que telle route y était écrite. Ces tests passaient au vert sur un
 
 Un test doit exécuter le code : appeler la fonction, ou envoyer la requête et lire la
 réponse. C'est la règle ici.
+
+Seule exception : `environnement.test.mjs` (consigne de Nelson du 20-10-2026). Il ne prétend
+rien prouver du comportement : la propriété qu'il vérifie porte sur le texte lui-même, à
+savoir que chaque variable d'environnement que le code lit figure dans un modèle et dans la
+documentation de configuration. Son premier test est un témoin du relevé : si un motif
+cassait, les variables connues (Microsoft 365, secret JWT, base…) n'y figureraient plus et
+le test échouerait, au lieu de laisser les autres passer à vide.
 
 ## Lancer les tests
 

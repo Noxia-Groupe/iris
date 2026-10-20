@@ -9,12 +9,20 @@ cp .env.example .env
 cp server/.env.example server/.env
 ```
 
-Les deux fichiers ont des rôles différents :
+Les deux fichiers sont obligatoires et ont des rôles différents :
 
-- `.env` : variables interpolées par `docker-compose.yml`, principalement la création de PostgreSQL ;
-- `server/.env` : variables applicatives chargées par le backend, dont Microsoft Entra ID et les secrets d’administration.
+- `.env` (fichier 1 sur 2) : variables interpolées par `docker-compose.yml`, c'est-à-dire les trois `POSTGRES_*`. Les autres lignes de `.env.example` documentent des variables d'outils à exporter dans le shell : ni Docker Compose ni Vite ne les lisent dans ce fichier.
+- `server/.env` (fichier 2 sur 2) : variables de l'application, dont la connexion Microsoft 365, les secrets et les comptes d'administration. Docker Compose le charge (`env_file`) et refuse de démarrer s'il n'existe pas. `.env.example` en rappelle la liste.
 
-En Docker, `docker-compose.yml` injecte l’URL de base du backend à partir de `POSTGRES_USER`, `POSTGRES_PASSWORD` et `POSTGRES_DB`. En développement local sans Docker, renseigner `DATABASE_URL` dans `server/.env`.
+En Docker, `docker-compose.yml` impose au backend `PORT=3001`, `NODE_ENV=production` et une `DATABASE_URL` construite à partir de `POSTGRES_USER`, `POSTGRES_PASSWORD` et `POSTGRES_DB`. Sa section `environment` l'emporte sur `server/.env` : ces trois variables y sont ignorées. En développement local sans Docker, renseigner `DATABASE_URL` dans `server/.env`.
+
+Après une modification de `server/.env` sur un serveur Docker, recréer le conteneur, car `docker compose restart` ne relit pas `env_file` :
+
+```bash
+docker compose up -d --force-recreate backend
+```
+
+Éviter le caractère `$` dans les valeurs, que Docker Compose peut interpréter, ou entourer la valeur d'apostrophes simples.
 
 ## Variables de la stack
 
@@ -25,7 +33,7 @@ En Docker, `docker-compose.yml` injecte l’URL de base du backend à partir de 
 | `POSTGRES_USER` | `.env` | oui, Docker | utilisateur créé à l’initialisation du volume PostgreSQL ; Compose refuse de démarrer s’il manque |
 | `POSTGRES_PASSWORD` | `.env` | oui, Docker | secret du compte PostgreSQL ; Compose refuse de démarrer s’il manque |
 | `POSTGRES_DB` | `.env` | oui, Docker | base créée à l’initialisation ; Compose refuse de démarrer s’il manque |
-| `DATABASE_URL` | `server/.env` hors Docker | oui hors Docker | connexion Prisma/backend |
+| `DATABASE_URL` | `server/.env` hors Docker | oui hors Docker | connexion Prisma/backend ; ignorée sous Docker Compose, qui la construit |
 
 Les trois variables `POSTGRES_*` ne reconfigurent pas une base déjà initialisée : pour une instance en développement, les choisir avant le premier démarrage. Ne jamais utiliser une URL de test pour une base de développement ou future production.
 
@@ -33,38 +41,58 @@ Les trois variables `POSTGRES_*` ne reconfigurent pas une base déjà initialis�
 
 | Variable | Requise | Défaut réel | Conséquence si absente |
 |---|---:|---|---|
-| `NODE_ENV` | non | `development` | Docker fixe `production`; le backend refuse un `JWT_SECRET` absent en production |
-| `PORT` | non | `3001` | port HTTP du backend local |
-| `JWT_SECRET` | oui en production | aucune clé sûre | démarrage refusé en production |
+| `NODE_ENV` | non | `development` | Docker fixe `production` (valeur de `server/.env` ignorée) ; le backend refuse un `JWT_SECRET` absent en production |
+| `PORT` | non | `3001` | port HTTP du backend local ; Docker fixe `3001`, que le nginx du frontend vise en dur |
+| `JWT_SECRET` | oui en production | aucune clé sûre | démarrage refusé en production, aussi pour une valeur `CHANGE_ME` ou commençant par `CHANGE_ME_` |
 | `SUPERADMIN_EMAILS` | oui sur base vierge | liste vide | aucun superadministrateur n’est créé |
 | `BREAK_GLASS_EMAIL` | non mais recommandé | vide | accès de secours inactif |
 | `BREAK_GLASS_TOKEN` | non mais recommandé | vide | accès de secours inactif; moins de 32 caractères le désactive |
 
-`SUPERADMIN_EMAILS` est une liste d’adresses séparées par des virgules. Les comptes doivent ensuite se connecter avec Microsoft Entra ID. Le jeton de secours a les droits d’un superadministrateur et doit être généré avec `openssl rand -base64 48`, conservé uniquement dans un gestionnaire de mots de passe et changé après usage réel.
+`JWT_SECRET` signe les sessions (JWT HS256, 7 jours pour Microsoft, 1 heure pour le secours) et les aperçus d'import du plan comptable. Le générer avec `openssl rand -base64 48`. Le changer déconnecte tout le monde et invalide les aperçus d'import en cours.
 
-### Microsoft Entra ID
+`SUPERADMIN_EMAILS` est une liste d’adresses séparées par des virgules. Ces comptes sont créés ou promus à chaque démarrage, et une liste vide ne retire personne. Chaque adresse doit être celle que Microsoft renvoie à la connexion : le claim `email` du jeton s'il existe, sinon l'identifiant de connexion (UPN), sans tenir compte des majuscules. Y ajouter `BREAK_GLASS_EMAIL`.
+
+Le jeton de secours a les droits d’un superadministrateur. Le générer avec `openssl rand -hex 32` : un jeton en base64 contenant `+` échoue dans le lien `#token=`, qui lit ce caractère comme une espace (#262). Le conserver uniquement dans `server/.env` et dans un gestionnaire de mots de passe, et le changer après usage réel. Le compte de `BREAK_GLASS_EMAIL` doit exister, être actif et avoir le rôle SUPERADMIN. La session dure une heure ; cinq essais manqués en quinze minutes bloquent l'accès. Derrière les proxys de production, ce blocage est aujourd'hui commun à tous les clients, faute de réglage `trust proxy` (#261).
+
+### Microsoft Entra ID (Microsoft 365)
 
 | Variable | Requise | Usage |
 |---|---:|---|
-| `AZURE_TENANT_ID` | oui pour la connexion Microsoft | tenant Entra ID de l’organisation |
-| `AZURE_CLIENT_ID` | oui pour la connexion Microsoft | identifiant de l’application SPA |
+| `AZURE_TENANT_ID` | oui pour la connexion Microsoft | « ID de l'annuaire (locataire) », un GUID : construit l'émetteur attendu (`https://login.microsoftonline.com/<GUID>/v2.0`) et l'adresse des clés de signature |
+| `AZURE_CLIENT_ID` | oui pour la connexion Microsoft | « ID d'application (client) », un GUID : audience attendue du jeton d'ID et identifiant de l'application pour MSAL |
 
-Créer une application **Single-page application (SPA)** dans Microsoft Entra ID et déclarer l’origine HTTPS exacte de l’instance dans les URI de redirection, par exemple `https://iris.votre-societe.fr`. Aucun secret client Microsoft ne doit être créé ni placé dans un fichier `.env` pour ce flux SPA. Sans les deux identifiants, la connexion Microsoft est indisponible; un accès de secours correctement configuré reste alors la seule porte d’administration.
+Ces deux valeurs se renseignent dans `server/.env` seulement. Elles sont publiques par nature pour une application monopage : le navigateur les reçoit par `GET /api/config`, et le frontend n'a aucune variable `VITE_` à renseigner pour Microsoft 365. Sans elles, la page de connexion affiche « La connexion Microsoft 365 n'est pas activée sur ce serveur » ; un accès de secours correctement configuré reste alors la seule porte d’administration. `AZURE_TENANT_ID` doit être le GUID, et non un nom de domaine, ni `common` ou `organizations` : l'émetteur du jeton est vérifié strictement contre lui, et un autre format renvoie une erreur `SSO_TOKEN_INVALID`.
+
+Inscription d'application à créer dans le portail Azure (Microsoft Entra ID > Inscriptions d'applications > Nouvelle inscription) :
+
+1. **Types de comptes** : « Comptes dans cet annuaire organisationnel uniquement ».
+2. **Plateforme** : « Application monopage (SPA) ». **URI de redirection exacte : `https://<domaine-de-l-instance>/auth/callback`.** Pas l'origine seule : Microsoft refuserait la connexion (erreur AADSTS50011). Déclarer une URI par nom d'hôte réellement utilisé. Une URI déclarée sur la plateforme « Web » ne fonctionne pas. En développement local, `http://localhost:5173/auth/callback` (port par défaut de Vite).
+3. **Aucun secret client ni certificat**, aucun « Exposer une API », aucune URI d'ID d'application. Octroi implicite : ne cocher ni « Jetons d'accès » ni « Jetons d'ID » (MSAL utilise le code d'autorisation avec PKCE).
+4. **Autorisations** : déléguées Microsoft Graph `openid`, `profile` et `email`, auxquelles la bibliothèque ajoute `offline_access`. Si le tenant restreint le consentement des utilisateurs, un administrateur doit l'accorder.
+5. **Facultatif** : ajouter le claim optionnel `email` au jeton d'ID (Configuration du jeton). Sans lui, Iris utilise l'identifiant de connexion (UPN).
+6. Recopier « ID de l'annuaire (locataire) » dans `AZURE_TENANT_ID` et « ID d'application (client) » dans `AZURE_CLIENT_ID`, puis recréer le conteneur du backend.
+
+Conditions de fonctionnement :
+
+- chaque utilisateur doit aussi exister, actif, dans Iris (Administration > Utilisateurs), sous l'adresse renvoyée par Microsoft (claim `email`, sinon UPN). Il n'y a pas de création automatique, hors `SUPERADMIN_EMAILS` ;
+- le backend doit joindre `https://login.microsoftonline.com` en HTTPS sortant pour lire les clés de signature, et son horloge doit être synchronisée (NTP) : l'expiration des jetons est vérifiée sans tolérance ;
+- les fenêtres surgissantes doivent être autorisées dans le navigateur, car la connexion s'ouvre dans une fenêtre Microsoft ;
+- vérification : `https://<domaine>/api/config` doit répondre `"ssoConfigured":true`.
 
 ### Frontend et développement
 
 | Variable | Requise | Défaut réel | Usage |
 |---|---:|---|---|
-| `VITE_API_URL` | non | `/api` | URL d’API compilée dans le frontend Vite |
-| `VITE_DEV_API_TARGET` | non | `http://localhost:3001` | cible du proxy Vite local |
+| `VITE_API_URL` | non | `/api` | URL d’API compilée dans le frontend Vite, au moment du build |
+| `VITE_DEV_API_TARGET` | non | `http://localhost:3001` | cible du proxy Vite local, lue au démarrage de `npm run dev` |
 
-Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigateur : elles ne doivent jamais contenir de secret. Dans la stack Docker, le frontend est construit avec `VITE_API_URL=/api`.
+Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigateur : elles ne doivent jamais contenir de secret. Dans la stack Docker, le frontend est construit avec `VITE_API_URL=/api` (`client/Dockerfile`). La ligne `VITE_API_URL=/api` de la section `environment` du service `frontend` de `docker-compose.yml` est sans effet, puisque la valeur est déjà compilée. Hors Docker, ces deux variables s'exportent dans le shell avant la commande : Vite ne lit pas `VITE_DEV_API_TARGET` dans un fichier `.env`, et le `.env` racine n'est lu par aucun des deux.
 
 ### Tests et CI
 
 | Variable | Requise | Usage |
 |---|---:|---|
-| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend |
+| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend, sur `localhost` ; les tests de migration y créent leurs propres bases (droit CREATEDB) |
 | `E2E_DATABASE_URL` | seulement E2E locaux | PostgreSQL jetable Playwright |
 | `E2E_BASE_URL` | non | URL frontend E2E, défaut `http://127.0.0.1:5199` |
 | `E2E_API_PORT` | non | port API E2E, défaut `3001` |
@@ -74,7 +102,7 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 | `RELEVE_SILENCE_MS` | non | durée de calme exigée avant chaque réponse libérée et chaque relevé, défaut `300` |
 | `RELEVE_CHROMIUM` | non | exécutable de Chromium à employer, à défaut celui de Playwright |
 
-Les bases de test sont destructibles. Elles ne doivent jamais viser un volume de développement, ni une instance de production.
+Les bases de test sont destructibles. Elles ne doivent jamais viser un volume de développement, ni une instance de production. Ces variables s'exportent dans le shell avant la commande de test ; `TEST_DATABASE_URL` peut aussi figurer dans `server/.env` pour les tests du backend lancés depuis `server/`.
 
 En local, lancer les parcours Playwright avec `cd client && npm run test:e2e:local`. Avant Playwright, cette commande :
 
@@ -112,6 +140,18 @@ L'horloge du serveur n'est pas figée : l'outil refuse une exécution à cheval 
 
 1. vérifier que les deux `.env` sont ignorés par Git : `git status --short` ne doit pas les afficher ;
 2. s’assurer que `POSTGRES_PASSWORD`, `JWT_SECRET` et `BREAK_GLASS_TOKEN` ne sont pas des valeurs d’exemple ;
-3. vérifier les URI de redirection Entra ID avant d’essayer la connexion ;
-4. lancer `docker compose config` pour vérifier l’interpolation des variables sans démarrer les conteneurs ;
-5. démarrer la stack avec `docker compose up -d --build`.
+3. vérifier que `AZURE_TENANT_ID` et `AZURE_CLIENT_ID` sont les deux GUID de l'inscription Entra ID, et que son URI de redirection est `https://<domaine>/auth/callback` sur la plateforme « Application monopage (SPA) » ;
+4. vérifier que `SUPERADMIN_EMAILS` contient l'adresse Microsoft d'au moins un administrateur, et `BREAK_GLASS_EMAIL` ;
+5. lancer `docker compose config` pour vérifier l’interpolation des variables sans démarrer les conteneurs ;
+6. démarrer la stack avec `docker compose up -d --build` ;
+7. vérifier que `https://<domaine>/api/config` répond `"ssoConfigured":true`, puis se connecter avec Microsoft.
+
+## Tenir les modèles à jour
+
+Consigne de Nelson du 20-10-2026 : toute variable d'environnement lue par le code figure dans un modèle versionné et dans ce document, au fil des lots.
+
+- Une PR qui lit une nouvelle variable, ou qui change le rôle, le format ou le caractère obligatoire d'une variable existante, met à jour dans le même commit le modèle concerné et ce document. Le modèle est `server/.env.example` pour le backend et ses tests, `.env.example` pour `docker-compose.yml`, le frontend et les outils du client. Elle indique pour chaque variable son rôle, si elle est obligatoire, un exemple sans secret réel et la conséquence d'une absence.
+- Une variable de l'application est aussi rappelée dans la liste en tête de `.env.example`, pour qu'une installation trouve tout à partir de ce fichier.
+- Un modèle ne garde aucune variable que plus rien ne lit.
+- `server/tests/environnement.test.mjs` vérifie ces règles à chaque `npm test` du backend, donc en CI. Il relève les lectures `process.env`, `import.meta.env`, `env()` de Prisma et les interpolations de `docker-compose.yml`. Seules exceptions : `PATH`, transmise par un outil, et les variables intégrées de Vite.
+- Aucune valeur `CHANGE_ME` non commentée ne doit être ajoutée à `server/.env.example`, hors `JWT_SECRET` : la CI refuse une configuration Docker Compose qui en contient (job « Docker Compose — gardes PostgreSQL »).

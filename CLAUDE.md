@@ -51,6 +51,10 @@ Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'ét
 2. **Des fichiers de taille raisonnable.** Aucun fichier de code applicatif ne dépasse environ 800 lignes ; au-delà, on le découpe, dans une PR sans changement de comportement.
    - Fichiers déjà trop longs : `server/index.ts` sera découpé par le chantier 2 de la [passation](docs/ROADMAP-PASSATION.md#chantiers-techniques-décision-de-nelson-du-17-10-2026) ; le découpage des écrans `client/src/pages/ChantierDetail.tsx`, `Admin.tsx` et `Planning.tsx` sera proposé ensuite.
    - Choix par défaut, à confirmer : les fichiers de tests, les migrations, les fichiers générés (lockfiles, client Prisma) et le schéma Prisma (`server/prisma/schema.prisma`, que Prisma 5 ne scinde qu'avec une fonction en préversion) ne sont pas concernés.
+3. **Des variables d'environnement toujours documentées** (consigne de Nelson du 20-10-2026 : « il ne faut absolument pas l'oublier de le mettre a jour au fur et a mesure que tu construit les differentes chose et pesner toujours a le mettre a jour sur le fichier .env.example »).
+   - Toute PR qui lit une nouvelle variable d'environnement, ou en change le rôle, le format ou le caractère obligatoire, met à jour dans la même PR le modèle concerné : `server/.env.example` pour le backend et ses tests, `.env.example` pour `docker-compose.yml`, le frontend et les outils du client.
+   - Une variable de l'application figure aussi dans la liste de rappel en tête de `.env.example`, et chaque variable est décrite dans [`docs/CONFIGURATION-ENVIRONNEMENT.md`](docs/CONFIGURATION-ENVIRONNEMENT.md) : rôle, obligatoire ou non, exemple sans secret réel, conséquence d'une absence. La connexion Microsoft 365 n'est jamais omise.
+   - `server/tests/environnement.test.mjs` le vérifie en CI. Le corps de la PR liste les variables ajoutées, modifiées ou retirées.
 
 ## Commandes du dépôt
 

@@ -221,7 +221,7 @@ messages du journal ; aucun sélecteur de date du navigateur ne subsiste.
   statiques et une route d'envoi de fichiers à sécuriser.
 
 ## Authentification
-Microsoft Entra ID uniquement — adaptée par client futur (tenant client). Pas de page d'inscription publique, de connexion locale ni de mot de passe applicatif. L'application SPA utilise MSAL ; le backend vérifie la signature Microsoft (JWKS/RS256), l'issuer et l'audience avant d'appliquer sa liste blanche locale. Utilisateurs créés par un admin du tenant.
+Microsoft Entra ID uniquement — adaptée par client futur (tenant client). Pas de page d'inscription publique, de connexion locale ni de mot de passe applicatif. L'application SPA utilise MSAL ; le backend vérifie la signature Microsoft (JWKS/RS256), l'issuer et l'audience avant d'appliquer sa liste blanche locale. Chaque utilisateur doit exister dans le tenant Microsoft et, actif, dans Iris (Administration > Utilisateurs), sous la même adresse.
 
 L'application n'a plus aucun mot de passe. Deux portes complètent Entra ID sans le
 remplacer — voir [`docs/ACCES-SANS-MICROSOFT.md`](docs/ACCES-SANS-MICROSOFT.md) :
@@ -234,8 +234,8 @@ remplacer — voir [`docs/ACCES-SANS-MICROSOFT.md`](docs/ACCES-SANS-MICROSOFT.md
 
 ### Configuration Entra ID à réaliser
 - Type d'application : **Single-page application (SPA)**.
-- URI de redirection : `https://iris.noxia-groupe.fr/auth/callback`.
-- Renseigner ensuite `AZURE_TENANT_ID` et `AZURE_CLIENT_ID` uniquement dans `server/.env` sur le VPS ; ces valeurs sont publiques par nature pour une SPA.
+- URI de redirection : `https://<domaine-de-l-instance>/auth/callback` (par exemple `https://iris.noxia-groupe.fr/auth/callback`), et non l'origine seule.
+- Renseigner ensuite `AZURE_TENANT_ID` (GUID de l'annuaire) et `AZURE_CLIENT_ID` (GUID de l'application) uniquement dans `server/.env` sur le VPS ; ces valeurs sont publiques par nature pour une SPA. Procédure complète : [`docs/CONFIGURATION-ENVIRONNEMENT.md`](docs/CONFIGURATION-ENVIRONNEMENT.md#microsoft-entra-id-microsoft-365).
 - Ne pas créer de secret client pour ce flux SPA. Aucun secret Microsoft ne doit être ajouté au dépôt.
 
 ## Stack technique
