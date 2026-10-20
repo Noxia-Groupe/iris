@@ -1,10 +1,8 @@
 # Iris — état et passation du développement
 
-> **État de `main` au commit `8d8b263` (20-10-2026), après la PR [#268](https://github.com/Noxia-Groupe/iris/pull/268).** Depuis le commit `9ab78aa` (19-10-2026) : comptes rendus et signatures d'intervention figés en base (lot 3b-1), heures du technicien sur une intervention hors contrat et leur coût visible de l'administration (lot 3b-2), compte rendu et signature dessinée au doigt dans la page, avec la règle de clôture (lot 3b-3), sommes des statistiques et du suivi des chantiers en décimal exact, aperçu de TVA d'un avoir partiel identique au document émis, double envoi du formulaire d'avoir partiel bloqué à l'écran, variables d'environnement documentées et vérifiées en CI, parcours E2E `entetes-mobile` mesuré dans une page neuve par route. État du code, pas attestation de conformité ni feu vert de production.
+> **État de `main` au commit `09be456` (20-10-2026), après la PR [#275](https://github.com/Noxia-Groupe/iris/pull/275).** Depuis le commit `9ab78aa` (19-10-2026) : comptes rendus et signatures d'intervention figés en base (lot 3b-1), heures du technicien sur une intervention hors contrat et leur coût visible de l'administration (lot 3b-2), compte rendu et signature dessinée au doigt dans la page, avec la règle de clôture (lot 3b-3), « Ma journée » et fiche intervention sur téléphone (lot 3b-4), planning du technicien limité à ce dont il est chargé, propositions de droits et de paramétrage validées par leur fusion (#182, #183), sommes des statistiques et du suivi des chantiers en décimal exact, aperçu de TVA d'un avoir partiel identique au document émis, double envoi du formulaire d'avoir partiel bloqué à l'écran, variables d'environnement documentées et vérifiées en CI, parcours E2E `entetes-mobile` mesuré dans une page neuve par route. État du code, pas attestation de conformité ni feu vert de production.
 >
 > Depuis le 20-10-2026, Nelson ne fusionne aucune PR : Claude Code fusionne toutes ses PR, montants et propositions compris, avec une CI verte et un audit interne fusionnable sur la même SHA ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). La mise en production reste à Nelson. PR ouvertes au 20-10-2026 :
-> - [#182](https://github.com/Noxia-Groupe/iris/pull/182) et [#183](https://github.com/Noxia-Groupe/iris/pull/183) (propositions 3 et 4, arbitrées par délégation le 18-10-2026) : rafraîchies sur `main`, réauditées, puis fusionnées par Claude Code aux conditions habituelles ; leur fusion vaut validation (« C’est toi qui fusionne TOUTES les PR », Nelson, 20-10-2026, consigné sur #182 et #183) ;
-> - [#272](https://github.com/Noxia-Groupe/iris/pull/272) (lot pilote 3b-4 : « Ma journée » et fiche intervention sur téléphone) : audit interne en cours ;
 > - [#250](https://github.com/Noxia-Groupe/iris/pull/250) (#240, pool de connexions de la modification d'un devis) : en brouillon, en pause jusqu'à la fin du pilote (règle du 19-10-2026).
 >
 > Le détail est tenu dans chaque PR, corps et commentaires.
@@ -87,7 +85,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - l'administration relie un compte technicien à sa fiche intervenant (journalisé) ;
     - la file « à planifier » du planning propose aussi les interventions curatives ;
     - le technicien ne modifie plus le planning ni les référentiels des achats, et n'a plus l'Administration.
-  - Livré par le lot pilote 3b, en partie ([#253](https://github.com/Noxia-Groupe/iris/issues/253)) :
+  - Livré par le lot pilote 3b ([#253](https://github.com/Noxia-Groupe/iris/issues/253)) :
     - comptes rendus en ajout seul et signatures figées en base, vidage refusé ; une intervention qui porte un compte rendu ne se supprime plus (3b-1, #255) ;
     - heures du technicien affecté sur une intervention hors contrat, saisies et corrigées comme sur un contrat actif, dans les coûts SAV ; l'administration voit leur coût de main-d'œuvre (« Main-d’œuvre cumulée »), le technicien ses heures sans taux ; une date d'heures future est refusée (choix par défaut, section 4 ; 3b-2, #257) ;
     - compte rendu et signature dans la page, sans fenêtre du navigateur (3b-3, #268) :
@@ -95,8 +93,11 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
       - la signature se dessine au doigt ; son tracé vectoriel est borné, figé en base et inclus dans l'empreinte, et le compte qui l'enregistre est conservé ;
       - terminer exige un compte rendu, signé ou accompagné d'un motif consigné au journal, pour tous les comptes ;
       - compte rendu, signature et clôture se font sous le verrou de l'intervention, périmètre relu ;
-      - horodatages imposés par la base.
-  - Absent : « Ma journée » et fiche intervention sur téléphone (3b-4). Le motif d'une clôture sans signature n'est affiché dans aucun écran : il est consigné au journal SAV, réservé à l'encadrement (#269). Le technicien voit encore tout le planning : décision de Nelson du 19-10-2026, le limiter à ce dont il est chargé, dans une PR séparée après le 3b.
+      - horodatages des comptes rendus et des signatures imposés par la base.
+    - « Ma journée » à l'accueil du technicien (3b-4, #272) : ses interventions du jour, au jour civil de la société, triées par créneau ; terminées à part ; celles restées ouvertes les jours précédents ; jour précédent et jour suivant ;
+    - fiche intervention sur téléphone (3b-4, #272) : adresse du site, à défaut de l'affaire, téléphone du contact en lien d'appel, et les actions de l'intervention ;
+  - Livré par la PR du planning limité (#275, décision de Nelson du 19-10-2026) : le technicien ne lit au planning que les affectations où figure sa fiche intervenant, et l'écran ne lui montre que sa ligne ; la liste des chantiers du planning lui est refusée. Choix par défaut, à confirmer, en section 4.
+  - Absent : le motif d'une clôture sans signature n'est affiché dans aucun écran ; il est consigné au journal SAV, réservé à l'encadrement (#269).
   - Ne pas qualifier « l'écran Travaux reste entièrement à créer » sans auditer la fiche actuelle.
   - Les issues [#16](https://github.com/Noxia-Groupe/iris/issues/16) et [#19](https://github.com/Noxia-Groupe/iris/issues/19) sont fermées depuis le 16-10-2026 ; leurs reliquats sont suivis dans [#135](https://github.com/Noxia-Groupe/iris/issues/135) et [#136](https://github.com/Noxia-Groupe/iris/issues/136), ouvertes : comparer leurs sous-points au code avant de les replanifier.
 - **Contrats de maintenance — partiel.**
@@ -170,7 +171,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 |---|---|---|
 | 1. Règlements (A3) | **Implémenté** (P1a). P1b, sur les commissions actuelles, est sans objet. | #155, garde en base renforcée par #158 ; commissions fermées par #159 |
 | 2. Catalogue dans les devis (A8) | **Implémenté** | #161 |
-| 3. Parcours technicien sur téléphone | **Partiel** : prérequis et droits (3a) implémentés ; parcours sur téléphone (3b) en cours, 3b-1 à 3b-3 implémentés, 3b-4 à faire. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3) |
+| 3. Parcours technicien sur téléphone | **Implémenté** : prérequis et droits (3a), parcours sur téléphone (3b-1 à 3b-4) et planning limité du technicien. Non validé pour mise en service. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3), #272 (3b-4), #275 (planning limité) |
 | 4. Conversion des devis (A7) | Décidé ; place avant ou après le premier jour à confirmer (proposé : avant) | — |
 | 5. Génération automatique des visites (A9) | Décidé ; place à confirmer (proposé : avant) | — |
 | 6. Envoi des documents (A10) | Décidé ; place à confirmer (proposé : avant) | — |
@@ -191,11 +192,11 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
    - Plus tard : connexion par API, ou autrement, aux catalogues des fournisseurs.
 3. **Parcours technicien sur téléphone** : planning du jour, intervention, rapport, signature, heures, qualifiés sur téléphone.
    - **3a, prérequis et droits, implémenté par #166** : lien entre le compte technicien et sa fiche intervenant, posé par l'administration et journalisé ; file « à planifier » ouverte aux interventions curatives ; écritures hors affaire retirées au technicien (planning, types d'événement, catégories, fournisseurs, placement de sa propre intervention), planning en consultation seule, Administration fermée.
-   - **3b, parcours sur téléphone, en cours** : interventions du jour, fiche intervention (adresse, téléphone), compte rendu et signature sans fenêtres du navigateur, heures, tests à 375 px avec de vraies données. Découpage en quatre PR ([#253](https://github.com/Noxia-Groupe/iris/issues/253)) :
+   - **3b, parcours sur téléphone, implémenté** : interventions du jour, fiche intervention (adresse, téléphone), compte rendu et signature sans fenêtres du navigateur, heures, tests à 375 px avec de vraies données. Découpage en quatre PR ([#253](https://github.com/Noxia-Groupe/iris/issues/253)) :
      - **3b-1, implémenté par #255** : comptes rendus en ajout seul et signatures figées en base (#223) ;
      - **3b-2, implémenté par #257** : heures du technicien sur une intervention hors contrat ;
      - **3b-3, implémenté par #268** : compte rendu et signature dessinée, sans fenêtres du navigateur ; tracé, enregistreur, verrous, journal, protection contre le double envoi ; règle de clôture ;
-     - **3b-4, à faire** : « Ma journée » et fiche intervention sur téléphone, E2E à 375 px avec de vraies données.
+     - **3b-4, implémenté par #272** : « Ma journée » et fiche intervention sur téléphone, E2E à 375 px avec de vraies données.
    - Décisions de Nelson du 17-10-2026 :
      - le technicien saisit aussi ses heures sur une intervention SAV hors contrat (**implémenté** par #257). Une telle intervention est payante ; elle peut passer par un devis, au forfait ou au temps passé. Au temps passé, une heure au moins est facturée, et toute heure commencée est due (règle de facturation, à appliquer avec le devis et la facture d'intervention ; placement proposé, à confirmer : lot 4 ou suivant) ;
      - la signature du client se dessine au doigt, en plus du nom et de l'acceptation explicite (**implémenté** par #268).
@@ -203,7 +204,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
      - terminer une intervention exige un compte rendu signé ; à défaut, un motif est choisi (client absent, refus de signer, signature impossible, autre) et consigné au journal. Précisé le 20-10-2026 : un compte rendu est toujours exigé, seule la signature peut être remplacée par le motif ; le motif « autre » exige une précision écrite courte ; la règle vaut pour le technicien comme pour l'encadrement. **Implémenté** par #268 ;
      - les heures du technicien hors contrat vont dans les coûts SAV, en durée brute sans arrondi, sans effet sur la marge des chantiers ; l'administration voit leur coût de main-d'œuvre (**implémenté** par #257, libellé « Main-d’œuvre cumulée » validé le 20-10-2026) ;
      - la signature dessinée est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé (**implémenté** par #268) ; durée de conservation à confirmer avec le cabinet ;
-     - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**à appliquer**).
+     - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**implémenté** par #275 ; périmètre retenu et choix par défaut en section 4, question en section 3).
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent.
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
@@ -315,6 +316,11 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 - **Arrondi du coût de main-d'œuvre** (montants, relevé par l'audit de #208) : la fiche chantier somme les produits exacts puis arrondit une fois, alors que l'écran Heures arrondit chaque ligne au centime et que le total SAV de #257 additionne des lignes arrondies. Quelle convention retenir partout ?
 - **Sécurité de la connexion (#261, #264)** : faut-il corriger avant la fin du pilote, malgré la règle du 19-10-2026, le blocage commun de l'accès de secours derrière les proxys (#261) et l'autorisation Microsoft 365 fondée sur l'adresse plutôt que sur `oid` et `tid` (#264) ? Les deux touchent la sécurité (règle 2).
 - **Signature dessinée** : durée de conservation du tracé, à confirmer avec le cabinet (décision du 19-10-2026).
+- **Planning du technicien (#275)** :
+  - « ce dont il est chargé » : ses seules affectations (appliqué), ou aussi celles des chantiers dont il est titulaire ? Ailleurs dans Iris, « chantiers dont il est chargé » désigne le titulaire ;
+  - lien public du planning : il montre tout le planning à qui en a l'adresse. Faut-il le restreindre, ou ne pas le communiquer aux techniciens qui ont un compte (voir aussi Q23 de l'inventaire du paramétrage) ?
+- **#179 et #181 avant la fin du pilote ?** Les deux défauts restants du lot D0 des droits (directeur commercial, assistante et comptable sur le planning et les référentiels ; réattributions et encaissement non journalisés) suivent la règle du 19-10-2026 : après le pilote, sauf s'ils sont jugés bloquants ou liés à un montant. Faut-il les corriger avant ?
+- **Lot P0 du paramétrage avant la fin du pilote ?** La page de connexion et le planning public affichent encore « NØXIA GROUPE », écrit dans le code. P0 suit la même règle : faut-il le traiter avant le premier jour ?
 - **Règle de clôture d'une intervention (règle permanente 1)** : la règle décidée les 19 et 20-10-2026 et ses quatre motifs restent dans le code (#268). Faut-il en faire des paramètres, avec cette décision pour valeur par défaut (par exemple une liste de motifs tenue par la société), ou les garder dans le code comme preuve de l'intervention ? Un compte rendu reste toujours exigé (proposition de paramétrage, section 3.2).
 - **Catalogue dans les devis (lot pilote 2, #161)** :
   - (montants) le prix d'achat prévu des lignes de devis doit-il alimenter le chantier ouvert (budget matériel prévu, marge estimée), à la place de la moyenne des chantiers terminés ?
@@ -352,14 +358,32 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 **Lot pilote 3b** (#253 ; la règle de clôture et le planning limité sont des décisions de Nelson, section 2)
 - Un compte rendu est figé dès son enregistrement : une correction passe par un compte rendu complémentaire. La signature est figée à sa création et reste possible après « Terminée ». **Appliqué** : figement en base par #255 ; signature après « Terminée » : état actuel de la route.
 - Une date d'heures postérieure au jour de la société est refusée (400), en saisie comme en correction, y compris sur les interventions de contrat. **Appliqué** (#257).
-- « Interventions du jour » : le jour civil de la société, calculé par le serveur ; planifiées et en cours triées par créneau, terminées du jour en bas, rubrique des interventions restées ouvertes les jours précédents, annulées exclues ; navigation jour précédent et jour suivant. **À appliquer** (3b-4).
+- « Interventions du jour » : le jour civil de la société, calculé par le serveur ; planifiées et en cours triées par créneau, terminées du jour en bas, rubrique des interventions restées ouvertes les jours précédents, annulées exclues ; navigation jour précédent et jour suivant. **Appliqué** (#272).
 - Le client signe le compte rendu seul ; l'attestation des heures se reverra avec la facturation au temps passé (lot 4 ou suivant). **Appliqué** (#268).
 - Tracé de la signature borné à 50 traits et 2 000 points, proportions de la zone entre 0,5 et 10 ; une signature ordinaire compte quelques centaines de points. **Appliqué** (#268).
 - Précision du motif « Autre » : 3 à 200 caractères, comptés en points de code. **Appliqué** (#268) par l'API ; le champ de l'écran limite encore la saisie à 200 unités UTF-16, soit 100 emoji (#269, N-f).
 - Une clôture avec au moins un compte rendu signé, même si un complément ne l'est pas, ne demande pas de motif, et un motif donné est refusé (409). **Appliqué** (#268).
 - L'encadrement ajoute un compte rendu et fait signer depuis l'écran, comme l'API le permettait déjà ; la règle de clôture vaut pour lui. **Appliqué** (#268).
 - Un compte rendu hors d'une intervention en cours est refusé par 409 avec un message, au lieu de 404. **Appliqué** (#268).
-- L'accueil du technicien mène à « Ma journée ». Adresse affichée : celle du site, à défaut celle du chantier ; téléphone : celui du contact. **À appliquer** (3b-4).
+- L'accueil du technicien mène à « Ma journée ». Adresse affichée : celle du site, à défaut celle du chantier ; téléphone : celui du contact. **Appliqué** (#272).
+- Ajoutés par #272 (« Ma journée ») :
+  - une intervention terminée « du jour » est une intervention terminée dont la projection couvre le jour ; l'instant de sa clôture n'est pas lu ;
+  - la rubrique des interventions restées ouvertes n'apparaît que pour aujourd'hui ;
+  - une intervention affectée sans projection au planning ne figure pas dans la journée ; elle reste dans « Mes interventions » ;
+  - la fiche d'une intervention annulée est introuvable, comme dans la liste ;
+  - ordre des créneaux : celui du planning ;
+  - la journée et le créneau de la liste se lisent même quand le module Planning est désactivé.
+
+  **Appliqués** (#272), à confirmer.
+- Ajoutés par #275 (planning limité) :
+  - « chargé » veut dire que sa fiche intervenant figure parmi les intervenants de l'affectation ; être titulaire du chantier d'une affectation ne suffit pas (question en section 3) ;
+  - une affectation partagée lui montre ses coéquipiers ;
+  - la liste des chantiers du planning lui est refusée (403), et non réduite à ses chantiers, puisqu'il ne crée pas d'affectation ;
+  - il garde la lecture des types d'événement ;
+  - le lien public du planning reste complet : il montre tout le planning à qui en a l'adresse (question en section 3) ;
+  - si la liste des intervenants ne se lit pas, l'écran le dit, au lieu d'annoncer une fiche non reliée.
+
+  **Appliqués** (#275), à confirmer.
 
 **Journal des paramètres et des droits** (lot (a), #133)
 - L'auteur de la création et de la publication des mentions légales, et la création des comptes comptables, sont journalisés. **À appliquer**.

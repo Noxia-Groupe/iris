@@ -47,12 +47,12 @@ Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'ét
 
 ## Règles permanentes de conception (décision de Nelson du 17-10-2026)
 
-1. **Un paramètre plutôt qu'une constante.** Toute nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée, et non une constante dans le code. Exemples : qui valide, clôture ou convertit ; délais et seuils ; statuts et listes de valeurs ; modules activés. Ce qui relève des droits suit la proposition `docs/MODELE-DROITS-CIBLE.md` (#182), à valider par sa fusion (voir « Fusion »).
+1. **Un paramètre plutôt qu'une constante.** Toute nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée, et non une constante dans le code. Exemples : qui valide, clôture ou convertit ; délais et seuils ; statuts et listes de valeurs ; modules activés. Ce qui relève des droits suit la proposition `docs/MODELE-DROITS-CIBLE.md` (#182), validée par sa fusion le 20-10-2026.
    - La valeur par défaut reprend le comportement actuel. Pour une règle nouvelle, c'est la valeur décidée par Nelson. Pour un micro-arbitrage de droits ou d'affichage, la règle 5 s'applique ; une autre valeur non décidée lui est posée en question. La valeur par défaut est écrite dans la PR et dans la passation.
    - Elle n'invente aucune valeur métier : pas de prix, de commission ni de compte comptable par défaut.
    - Un changement de paramètre est journalisé, comme les réglages existants.
    - Restent dans le code, avec leur raison écrite, les règles légales ou d'intégrité : continuité et chronologie de la numérotation, immutabilité des documents émis, règles fiscales, invariants de droits.
-   - Les règles déjà écrites en dur seront inventoriées par la proposition `docs/PARAMETRAGE-CIBLE.md` (#183), à valider par sa fusion ; elles ne sont pas converties avant cette validation.
+   - Les règles déjà écrites en dur sont inventoriées par la proposition `docs/PARAMETRAGE-CIBLE.md` (#183), validée par sa fusion le 20-10-2026 ; elles se convertissent par ses lots (P0 à P5), chacun dans sa PR.
 2. **Des fichiers de taille raisonnable.** Aucun fichier de code applicatif ne dépasse environ 800 lignes ; au-delà, on le découpe, dans une PR sans changement de comportement.
    - Fichiers déjà trop longs : le découpage de `server/index.ts` est terminé (chantier 2 de la [passation](docs/ROADMAP-PASSATION.md#chantiers-techniques-décision-de-nelson-du-17-10-2026)) ; celui des écrans suit [docs/DECOUPAGE-ECRANS-CIBLE.md](docs/DECOUPAGE-ECRANS-CIBLE.md) : `Planning.tsx` et `Admin.tsx` sont découpés, `client/src/pages/ChantierDetail.tsx` reste à découper (PR C).
    - Choix par défaut, à confirmer : les fichiers de tests, les migrations, les fichiers générés (lockfiles, client Prisma) et le schéma Prisma (`server/prisma/schema.prisma`, que Prisma 5 ne scinde qu'avec une fonction en préversion) ne sont pas concernés.
