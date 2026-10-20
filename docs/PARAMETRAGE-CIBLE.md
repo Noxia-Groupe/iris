@@ -1,6 +1,6 @@
 # Paramétrage cible : proposition
 
-> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 4). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 6 et priment sur le texte de la proposition là où il différait. La fusion de la proposition vaut sa validation ; elle revient à Claude Code depuis la décision de Nelson du 20-10-2026, « C’est toi qui fusionne TOUTES les PR » ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). Rien de ce document n'est encore implémenté : chaque lot (section 5) fait sa PR.
+> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 4). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 6 et priment sur le texte de la proposition là où il différait. La proposition est validée par sa fusion le 20-10-2026 (#183), faite par Claude Code selon la décision de Nelson du même jour, « C’est toi qui fusionne TOUTES les PR » ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). Rien de ce document n'est encore implémenté : chaque lot (section 5) fait sa PR.
 >
 > L'inventaire détaillé est en annexe : [`PARAMETRAGE-INVENTAIRE.md`](PARAMETRAGE-INVENTAIRE.md). Pour chaque règle, il donne sa référence `fichier:ligne`, sa valeur au commit `84e27a1` et la raison pour laquelle elle varie. Les identifiants A, B-01 à B-75 et C-01 à C-28 y renvoient. Les règles « qui fait quoi » relèvent de la proposition sœur [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md).
 
