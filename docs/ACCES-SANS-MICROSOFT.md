@@ -30,10 +30,15 @@ Dans `server/.env`, sur le VPS uniquement :
 
 ```env
 BREAK_GLASS_EMAIL="direction@votre-societe.fr"
-BREAK_GLASS_TOKEN="<le résultat de : openssl rand -base64 48>"
+BREAK_GLASS_TOKEN="<le résultat de : openssl rand -hex 32>"
 ```
 
-Puis redémarrer le backend. Au démarrage, il confirme dans ses journaux :
+Ajouter la même adresse à `SUPERADMIN_EMAILS`, pour que le compte existe avec le rôle `SUPERADMIN`.
+Générer le jeton en hexadécimal, et non en base64 : un `+` du jeton serait lu comme une espace
+dans le signet `#token=` ci-dessous (#262).
+
+Puis recréer le conteneur du backend (`docker compose up -d --force-recreate backend` ; un
+simple `restart` ne relit pas `server/.env`). Au démarrage, il confirme dans ses journaux :
 
 ```
 [SECOURS] Accès de secours actif pour direction@votre-societe.fr (session limitée à 1 h).
@@ -63,14 +68,18 @@ l'efface de la barre d'adresse dès qu'elle l'a lu.
   être `SUPERADMIN`. Un compte rétrogradé ou désactivé referme la porte, jeton valide ou non.
 - La comparaison se fait à temps constant, sur les empreintes SHA-256 des deux valeurs :
   ni la durée de la réponse ni la longueur du secret attendu ne fuient.
-- Cinq tentatives par quart d'heure et par adresse IP, puis blocage.
+- Cinq tentatives par quart d'heure et par adresse IP, puis blocage. Derrière les proxys de
+  production, l'adresse vue est aujourd'hui celle du conteneur nginx, si bien que le blocage
+  est commun à tous (#261).
 - La session dure **1 heure**, contre 7 jours pour une connexion Microsoft.
-- Chaque tentative, réussie ou non, est écrite dans les journaux du conteneur avec l'IP :
+- Chaque tentative, réussie ou non, est écrite dans les journaux du conteneur avec l'IP
+  (aujourd'hui l'adresse interne du proxy, #261) :
   `docker logs iris_backend | grep SECOURS`.
 
 ### Après usage
 
-Changer le jeton (`openssl rand -base64 48`), le remplacer dans `server/.env`, redémarrer.
+Changer le jeton (`openssl rand -hex 32`), le remplacer dans `server/.env`, recréer le conteneur
+du backend.
 Un jeton utilisé est un jeton qui a circulé.
 
 ---
