@@ -94,7 +94,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
       - terminer exige un compte rendu, signé ou accompagné d'un motif consigné au journal, pour tous les comptes ;
       - compte rendu, signature et clôture se font sous le verrou de l'intervention, périmètre relu ;
       - horodatages des comptes rendus et des signatures imposés par la base.
-    - « Ma journée » à l'accueil du technicien (3b-4, #272) : ses interventions du jour, au jour civil de la société, triées par créneau ; terminées à part ; celles restées ouvertes les jours précédents ; jour précédent et jour suivant ; « Ma journée » remplace pour lui le tableau de bord des chantiers, qu'il retrouve par « Liste des chantiers » ;
+    - « Ma journée » à l'accueil du technicien (3b-4, #272) : ses interventions du jour, au jour civil de la société, triées par créneau ; terminées à part ; celles restées ouvertes les jours précédents ; jour précédent et jour suivant ; « Ma journée » remplace pour lui le tableau de bord des chantiers ; il retrouve ses chantiers dans « Liste des chantiers » ;
     - fiche intervention sur téléphone (3b-4, #272) : adresse du site, à défaut de l'affaire, téléphone du contact en lien d'appel, et les actions de l'intervention.
   - Livré par la PR du planning limité (#275, décision de Nelson du 19-10-2026) : le technicien ne lit au planning que les affectations où figure sa fiche intervenant, et l'écran ne lui montre que sa ligne ; la liste des chantiers du planning lui est refusée ; si la liste des intervenants ne se lit pas, l'écran le dit. Choix par défaut, à confirmer, en section 4.
   - Absent : le motif d'une clôture sans signature n'est affiché dans aucun écran ; il est consigné au journal SAV, réservé à l'encadrement (#269).
