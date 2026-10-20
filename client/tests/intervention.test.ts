@@ -24,6 +24,11 @@ test('le lien d’appel ne garde que les chiffres et un « + » initial', () => 
   assert.equal(lienTelephone('01 23 45 67 89 poste 212'), 'tel:0123456789');
   assert.equal(lienTelephone('Standard : 01 23 45 67 89'), 'tel:0123456789');
   assert.equal(lienTelephone('0612345678 0712345678'), null, 'plus de 15 chiffres : pas de lien');
+  // Le « + » reste, même séparé de l'indicatif par un espace ou une parenthèse.
+  assert.equal(lienTelephone('+ 33 6 12 34 56 78'), 'tel:+33612345678');
+  assert.equal(lienTelephone('+(33) 6 12 34 56 78'), 'tel:+33612345678');
+  assert.equal(lienTelephone('(0)1 23 45 67 89'), 'tel:0123456789', 'un numéro national garde son 0');
+  assert.equal(lienTelephone('(01) 23 45 67 89'), 'tel:0123456789');
   assert.equal(nomContact({ prenom: ' Alice ', nom: 'Martin' }), 'Alice Martin');
   assert.equal(nomContact({ prenom: null, nom: 'Martin' }), 'Martin');
 });

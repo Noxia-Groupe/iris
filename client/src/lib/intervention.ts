@@ -23,14 +23,15 @@ export function nomContact(contact: ContactIntervention): string {
 }
 
 // Lien d'appel : le téléphone du contact est un texte libre. Seul son premier numéro (chiffres, espaces,
-// points, tirets, parenthèses, « + » initial) passe dans le lien, réduit à ses chiffres : un second numéro
-// ou un poste écrit après ne s'y ajoute pas. Le « (0) » d'un numéro international (+33 (0)6…) ne se compose
-// pas. Hors de 3 à 15 chiffres (E.164), aucun lien n'est proposé.
+// points, tirets, parenthèses, « + » initial, même suivi d'un espace ou d'une parenthèse) passe dans le lien,
+// réduit à ses chiffres : un second numéro ou un poste écrit après ne s'y ajoute pas. Le « (0) » d'un numéro
+// international (+33 (0)6…) ne se compose pas. Hors de 3 à 15 chiffres (E.164), aucun lien n'est proposé.
 export function lienTelephone(telephone?: string | null): string | null {
-  const numero = (/\+?\d[\d\s.()-]*/.exec(nettoyer(telephone))?.[0] ?? '').replace(/\(0\)/g, '');
-  const chiffres = numero.replace(/\D/g, '');
+  const numero = /\+?[\s(]*\d[\d\s.()-]*/.exec(nettoyer(telephone))?.[0] ?? '';
+  const international = numero.startsWith('+');
+  const chiffres = (international ? numero.replace(/\(0\)/g, '') : numero).replace(/\D/g, '');
   if (chiffres.length < 3 || chiffres.length > 15) return null;
-  return `tel:${numero.startsWith('+') ? '+' : ''}${chiffres}`;
+  return `tel:${international ? '+' : ''}${chiffres}`;
 }
 
 export function libelleCreneau(planification: Planification): string {
