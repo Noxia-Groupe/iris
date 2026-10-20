@@ -2,7 +2,7 @@
 
 **Proposition du 18-10-2026.** Le même jour, Nelson en a validé le principe et les fichiers à plat, et il a délégué le traitement des petites anomalies. Les autres choix, dont l'ordre des PR, sont des choix techniques de Claude Code (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
 
-Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 19-10-2026** : PR A (#213) et PR B (#214) implémentées ; PR C prévue après la fusion de #208, qui modifie aussi `ChantierDetail.tsx`. Les numéros de ligne de ce document se rapportent au relevé du 18-10-2026 : chaque PR de découpage revérifie ses plages sur son `main`.
+Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 20-10-2026** : PR A (#213) et PR B (#214) implémentées. PR C à faire : #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée (`b684fae`) ; la PR C vient après le lot pilote 3b, prochaine PR fonctionnelle selon la règle du pilote du 19-10-2026 (ordre choisi par Claude Code). Les numéros de ligne de ce document se rapportent au relevé du 18-10-2026 : chaque PR de découpage revérifie ses plages sur son `main`.
 
 | Écran | Lignes | Composants internes déjà séparés |
 |---|---|---|
@@ -41,7 +41,7 @@ Côté client, il n'existe pas d'équivalent de `server/scripts/verifier-deplace
    Limites : aucune action qui écrit (enregistrement, glisser-déposer, suppression) n'est relevée, ni l'état qui suivrait une écriture ; ces parcours restent couverts par les E2E. Les branches de l'onglet Utilisateurs qui affichent le message réservé aux comptes super administrateur ne se rendent pas : le serveur ne renvoie pas ces comptes à un administrateur. L'horloge du serveur n'est pas figée (exécution refusée à cheval sur minuit). L'outil ne compte que les requêtes API parties par `fetch` : une requête partie autrement l'arrêterait au bout de 120 s (code 2). Une PR de découpage qui touche une zone non couverte ajoute d'abord le scénario qui la rend.
 2. `npm run build` (`tsc -b`, dont `noUnusedLocals` et `verbatimModuleSyntax`) et `npm run lint`, avec un nombre d'avertissements égal ou inférieur au départ : Admin 10, ChantierDetail 8, Planning 0. Les directives `eslint-disable-next-line` positionnelles (Planning l.126, 137, 153 ; ChantierDetail l.135) restent attachées à leur ligne.
 3. `npm run test:unit`, puis les E2E deux fois sur la même base. 134 parcours, dont plus de trente touchent ces trois écrans. Plusieurs de leurs sélecteurs dépendent de la structure du DOM, ce qui en fait aussi une preuve de non-régression du rendu.
-4. Un audit indépendant par PR, puis la fusion selon la délégation habituelle (aucun montant ne change).
+4. Un audit indépendant par PR, puis la fusion par Claude Code dans les conditions de [CLAUDE.md](../CLAUDE.md#mode-de-livraison) (aucun montant ne change).
 
 ## Découpage proposé
 
@@ -79,7 +79,7 @@ Restent dans la page :
 
 L'onglet Utilisateurs recevra une vingtaine de props : c'est le prix d'un déplacement sans changement d'état.
 
-### PR C : fiche chantier (1 477 → environ 750 lignes) — prévue, après #208
+### PR C : fiche chantier (1 477 → environ 750 lignes) — à faire, après le lot pilote 3b (#208 fusionnée)
 
 | Nouveau fichier | Contenu déplacé (lignes de `ChantierDetail.tsx`) |
 |---|---|
