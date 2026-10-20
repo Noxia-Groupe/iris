@@ -4,6 +4,7 @@ import { SectionRepliable } from '../components/SectionRepliable';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 import { isAdminRole, useCurrentRole } from '../roles';
+import { sommeExacte, coutLigneHeures } from '../lib/montants';
 
 const Heures = () => {
   const companyTimezone = useCompanyTimezone();
@@ -48,7 +49,7 @@ const Heures = () => {
   const getHeuresRealisees = (chantierId: string) => {
     return heures
       .filter(h => h.chantierId === chantierId)
-      .reduce((acc, h) => acc + h.nbrHeures, 0);
+      .reduce((acc, h) => sommeExacte([acc, h.nbrHeures]), 0);
   };
 
 
@@ -191,7 +192,7 @@ const Heures = () => {
                   <td className="px-6 py-4 font-bold text-primary">{h.nbrHeures}h</td>
                   {coutVisible && (
                   <td className="px-6 py-4 text-sm font-semibold text-gray-500 text-right">
-                    {(h.nbrHeures * h.tauxHoraireApplique).toFixed(2)} €
+                    {coutLigneHeures(h.nbrHeures, h.tauxHoraireApplique).toFixed(2)} €
                   </td>
                   )}
                 </tr>

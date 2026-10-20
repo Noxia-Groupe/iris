@@ -18,6 +18,7 @@ import { archivagesRestaurables } from '../lib/archivesRestaurables';
 import { clientLisible, estChangementClient, titreEntreeJournal } from '../lib/journalChantier';
 import { AlertesChantier } from '../components/AlertesChantier';
 import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
+import { sommeExacte, differenceExacte, arrondiEuro, arrondiCentime } from '../lib/montants';
 
 // Date ISO (avec ou sans heure) -> format métier français JJ-MM-AAAA.
 const toDateFrancaise = (d: string | null | undefined) => {
@@ -27,7 +28,7 @@ const toDateFrancaise = (d: string | null | undefined) => {
 };
 
 const fmtDate = (d: string) => formatDateOnly(d);
-const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
+const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString('fr-FR')} €`;
 // Heures pointées : demi-heures possibles, mais pas de décimale inutile (8 h, 7,5 h).
 const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
 
@@ -478,7 +479,7 @@ const ChantierDetail = () => {
     const map = new Map<string, number>();
     for (const a of achats) {
       const key = a.categorie?.nom || 'Non catégorisé';
-      map.set(key, (map.get(key) || 0) + a.montantHT);
+      map.set(key, sommeExacte([map.get(key) || 0, a.montantHT]));
     }
     return Array.from(map, ([label, value]) => ({ label, value }));
   }, [achats]);
@@ -487,13 +488,13 @@ const ChantierDetail = () => {
     const map = new Map<string, number>();
     for (const a of achats) {
       const key = a.fournisseur?.nom || 'Non renseigné';
-      map.set(key, (map.get(key) || 0) + a.montantHT);
+      map.set(key, sommeExacte([map.get(key) || 0, a.montantHT]));
     }
     return Array.from(map, ([label, value]) => ({ label, value }));
   }, [achats]);
 
   // Total dépensé sur le chantier, tous achats confondus.
-  const achatsTotal = useMemo(() => achats.reduce((s, a) => s + a.montantHT, 0), [achats]);
+  const achatsTotal = useMemo(() => sommeExacte(achats.map((a) => a.montantHT)), [achats]);
 
   // Valeurs proposées dans les filtres : uniquement celles réellement présentes sur ce
   // chantier (inutile de proposer un fournisseur chez qui rien n'a été acheté ici).
@@ -530,7 +531,7 @@ const ChantierDetail = () => {
     });
   }, [achats, achatSearch, achatFournisseurFiltre, achatCategorieFiltre, achatTri]);
 
-  const achatsAffichesTotal = useMemo(() => achatsAffiches.reduce((s, a) => s + a.montantHT, 0), [achatsAffiches]);
+  const achatsAffichesTotal = useMemo(() => sommeExacte(achatsAffiches.map((a) => a.montantHT)), [achatsAffiches]);
 
   const resetAchatsFiltres = () => {
     setAchatSearch('');
@@ -539,7 +540,7 @@ const ChantierDetail = () => {
   };
 
   // Total des heures pointées sur le chantier.
-  const heuresTotal = useMemo(() => pointages.reduce((s, p) => s + p.nbrHeures, 0), [pointages]);
+  const heuresTotal = useMemo(() => sommeExacte(pointages.map((p) => p.nbrHeures)), [pointages]);
 
   const pointagesIntervenantsDispo = useMemo(() => (
     Array.from(new Set(pointages.map((p) => p.intervenant?.nom).filter(Boolean) as string[]))
@@ -573,7 +574,7 @@ const ChantierDetail = () => {
     });
   }, [pointages, pointageSearch, pointageIntervenantFiltre, pointageRoleFiltre, pointageTri]);
 
-  const pointagesAffichesTotal = useMemo(() => pointagesAffiches.reduce((s, p) => s + p.nbrHeures, 0), [pointagesAffiches]);
+  const pointagesAffichesTotal = useMemo(() => sommeExacte(pointagesAffiches.map((p) => p.nbrHeures)), [pointagesAffiches]);
 
   const resetPointagesFiltres = () => {
     setPointageSearch('');
@@ -586,7 +587,7 @@ const ChantierDetail = () => {
     for (const p of pointages) {
       const key = p.intervenant?.nom || 'Non renseigné';
       const cur = map.get(key) || { heures: 0, role: p.intervenant?.role || '' };
-      cur.heures += p.nbrHeures;
+      cur.heures = sommeExacte([cur.heures, p.nbrHeures]);
       map.set(key, cur);
     }
     return Array.from(map, ([label, v]) => ({ label, value: v.heures, sublabel: v.role }));
@@ -618,12 +619,13 @@ const ChantierDetail = () => {
   // au taux horaire moyen réellement appliqué sur ce chantier — pas la différence avec le
   // budget main d'œuvre vendu (qui peut s'écarter du taux horaire pour d'autres raisons,
   // ex: marge intégrée au devis, et fausserait alors le montant du dépassement lui-même).
-  const heuresDepassement = Math.max(0, heuresRealisees - chantier.heuresVendues);
+  const heuresDepassement = Math.max(0, differenceExacte(heuresRealisees, chantier.heuresVendues));
   const tauxHoraireMoyen = heuresRealisees > 0 ? coutMainOeuvreReel / heuresRealisees : 0;
   const manqueAGagnerMainOeuvre = heuresDepassement * tauxHoraireMoyen;
   const margeCommerciale: number | null = metrics.margeCommerciale ?? null;
   const showMarge = margeCommerciale !== null;
-  const margeAffichee = margeCommerciale ?? 0;
+  // Arrondie au centime : la couleur suit le montant affiché (0,004 € s'affiche 0 €).
+  const margeAffichee = arrondiCentime(margeCommerciale ?? 0);
   const showBudgetVendu = chantier.budgetGlobalVendu != null;
   const estimation: EstimationMarge | null = metrics.estimation ?? null;
 
@@ -889,7 +891,7 @@ const ChantierDetail = () => {
                 {metrics.totalDepenses != null && (
                 <div className="z-10 bg-white/60 backdrop-blur-sm p-4 rounded-lg text-right">
                   <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Dépenses Réelles Cumulées</div>
-                  <div className="font-bold text-2xl text-gray-800">{totalDepensesReelles.toLocaleString()} €</div>
+                  <div className="font-bold text-2xl text-gray-800">{arrondiCentime(totalDepensesReelles).toLocaleString()} €</div>
                 </div>
                 )}
               </div>
@@ -899,7 +901,7 @@ const ChantierDetail = () => {
                 <div className="z-10 bg-white/60 p-4 rounded-lg" data-estimation>
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <div className="text-xs text-gray-500 font-bold uppercase tracking-wider">Marge estimée en fin de chantier</div>
-                    <div className={`text-2xl font-black ${metrics.margeEstimee >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    <div className={`text-2xl font-black ${arrondiEuro(metrics.margeEstimee) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                       {fmtEuro(metrics.margeEstimee)}
                       <span className="text-sm font-bold ml-2">{(metrics.margeEstimeePct ?? 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %</span>
                     </div>
@@ -950,14 +952,14 @@ const ChantierDetail = () => {
                   <Wallet size={18} className="text-orange-500" /> Coût Main d'Œuvre
                 </h3>
                 <div className="text-right">
-                  <span className="text-xl font-black text-orange-600">{coutMainOeuvreReel.toLocaleString()} €</span>
+                  <span className="text-xl font-black text-orange-600">{arrondiCentime(coutMainOeuvreReel).toLocaleString()} €</span>
                   {chantier.budgetMainOeuvreVendu != null && <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.budgetMainOeuvreVendu.toLocaleString()} €</span>}
                 </div>
               </div>
               {chantier.budgetMainOeuvreVendu != null && <ProgressMeter value={coutMainOeuvreReel} max={chantier.budgetMainOeuvreVendu} color="orange" striped />}
               <div className="mt-2 flex justify-between items-center text-xs font-bold">
-                <span className={manqueAGagnerMainOeuvre > 0 ? 'text-red-600' : 'text-gray-300'}>
-                  {manqueAGagnerMainOeuvre > 0 ? `Manque à gagner : -${manqueAGagnerMainOeuvre.toLocaleString()} €` : ''}
+                <span className={arrondiCentime(manqueAGagnerMainOeuvre) > 0 ? 'text-red-600' : 'text-gray-300'}>
+                  {arrondiCentime(manqueAGagnerMainOeuvre) > 0 ? `Manque à gagner : -${arrondiCentime(manqueAGagnerMainOeuvre).toLocaleString()} €` : ''}
                 </span>
                 {chantier.budgetMainOeuvreVendu != null && (
                   <span className="text-gray-500">

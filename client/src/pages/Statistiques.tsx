@@ -4,6 +4,7 @@ import { apiFetch } from '../api';
 import { decalerReference, jourFrancais } from '../lib/dateFormatting';
 import { useReferencePeriode } from '../lib/referencePeriode';
 import { isAdminRole, roleLabel } from '../roles';
+import { arrondiEuro } from '../lib/montants';
 
 type Period = 'week' | 'month' | 'year';
 
@@ -191,7 +192,7 @@ function IntervenantsTab() {
               <div className="text-right w-28 shrink-0">
                 <div className="font-black text-purple-600">{iv.heures.toFixed(1)} h</div>
                 {/* Coût d'un intervenant : réservé à l'administration (le serveur envoie null aux autres). */}
-                {iv.cout != null && <div className="text-xs text-gray-400">{Math.round(iv.cout).toLocaleString()} €</div>}
+                {iv.cout != null && <div className="text-xs text-gray-400">{arrondiEuro(iv.cout).toLocaleString()} €</div>}
               </div>
             </div>
           ))}
@@ -242,7 +243,7 @@ function FournisseursTab() {
                 </div>
               </div>
               <div className="text-right w-28 shrink-0">
-                <div className="font-black text-orange-600">{Math.round(f.total).toLocaleString()} €</div>
+                <div className="font-black text-orange-600">{arrondiEuro(f.total).toLocaleString()} €</div>
               </div>
             </div>
           ))}

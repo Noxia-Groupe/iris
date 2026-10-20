@@ -88,7 +88,7 @@ GET /api/me requireAuth#76fb48c2d0f5 > <anonymous>#eefe8f938bf2
 PUT /api/me/theme requireAuth#76fb48c2d0f5 > <anonymous>#16df72f47e17
 GET /api/chantiers requireAuth#76fb48c2d0f5 > listerChantiers#01ec853057b9
 GET /api/v1/chantiers <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerChantiers#01ec853057b9
-GET /api/chantiers/:id requireAuth#76fb48c2d0f5 > <anonymous>#debf40788539
+GET /api/chantiers/:id requireAuth#76fb48c2d0f5 > <anonymous>#5b27a1bfd28f
 GET /api/chantiers/:id/journal-saisies requireAuth#76fb48c2d0f5 > <anonymous>#4373de266aea
 POST /api/chantiers requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
 PATCH /api/chantiers/:id requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#5709fb7b4be1
@@ -218,12 +218,12 @@ PUT /api/modules requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <an
 GET /api/journal-administration requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#38867022b71f
 GET /api/journal-administration/export.csv requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#72c377372775
 PUT /api/journal-administration/conservation requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#3483eb2d5d53
-GET /api/stats/global requireAuth#76fb48c2d0f5 > <anonymous>#c020bab12747
-GET /api/stats/conducteurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#7d0834176d5d
-GET /api/stats/conducteurs/assiduite requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#7637680a9994
-GET /api/stats/chantiers-repartition requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#e0f0fc72fde0
-GET /api/stats/intervenants requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#d5cbc872c2ea
-GET /api/stats/fournisseurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#d4a07f8438b1
+GET /api/stats/global requireAuth#76fb48c2d0f5 > <anonymous>#df5b32801d07
+GET /api/stats/conducteurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#c2aaff04fe92
+GET /api/stats/conducteurs/assiduite requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#a9e036d8d362
+GET /api/stats/chantiers-repartition requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#673eacee93bc
+GET /api/stats/intervenants requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#6930e6226651
+GET /api/stats/fournisseurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#0cad5c59e893
 GET /api/stats/types-chantiers requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#e403d98394dc
 GET /api/stats/commerciaux requireAuth#76fb48c2d0f5 > <anonymous>#3ec062c1a65f
 POST /api/chantiers/:id/analyze requireAuth#76fb48c2d0f5 > <anonymous>#0c1d287413d9

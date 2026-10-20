@@ -5,6 +5,7 @@ import { decalerReference } from '../lib/dateFormatting';
 import { useReferencePeriode } from '../lib/referencePeriode';
 import { AvisSansPlanCommercial } from '../components/AvisSansPlanCommercial';
 import { useModules } from '../modules';
+import { arrondiEuro } from '../lib/montants';
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé' };
@@ -18,7 +19,7 @@ const periodLabelComm = (period: CommPeriod, periodStart: string) => {
   return `${MOIS[m - 1]} ${y}`;
 };
 
-const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
+const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString()} €`;
 
 // Suivi des commerciaux (CA vendu, marge, commission) — page réservée aux administrateurs
 // (extraite de l'onglet « Mes Commerciaux » d'Administration pour être son propre menu,
@@ -140,7 +141,7 @@ const MesCommerciaux = () => {
                     </div>
                     <div className="text-right">
                       <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge validée</div>
-                      <div className={`font-bold ${c.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtEuro(c.margeTotal)}</div>
+                      <div className={`font-bold ${arrondiEuro(c.margeTotal) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtEuro(c.margeTotal)}</div>
                     </div>
                     <div className="text-right">
                       <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Rémunération variable</div>
@@ -180,7 +181,7 @@ const MesCommerciaux = () => {
                                     {STATUT_LABELS[ch.statut] || ch.statut}
                                   </span>
                                 </td>
-                                <td className={`py-2 pr-3 text-right font-bold ${(ch.margeCommerciale ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                <td className={`py-2 pr-3 text-right font-bold ${arrondiEuro(ch.margeCommerciale ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                   {ch.margeCommerciale != null ? fmtEuro(ch.margeCommerciale) : '—'}
                                 </td>
                                 <td className="py-2 pr-3 text-center">

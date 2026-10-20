@@ -274,6 +274,35 @@ describe('Métriques de chantier', () => {
     const vue = computeChantierMetrics(chantier, { margeCommercialeActive: false, planningActif: true }, true);
     assert.equal(vue.margeCommerciale, null);
   });
+
+  // #198 : en nombres à virgule, 0,1 + 0,2 + 0,3 vaut 0,6000000000000001, mais 0,3 + 0,2 + 0,1
+  // vaut 0,6. Un budget exactement consommé déclenchait ou non une alerte de dépassement
+  // selon l'ordre des lignes.
+  test('totaux au centime près, quel que soit l’ordre des lignes (#198)', () => {
+    const params = { margeCommercialeActive: true, planningActif: true };
+    for (const valeurs of [[0.1, 0.2, 0.3], [0.3, 0.2, 0.1], [0.2, 0.1, 0.3]]) {
+      const vue = computeChantierMetrics({
+        budgetGlobalVendu: 10, budgetMaterielVendu: 0.6, budgetMainOeuvreVendu: 0.6, heuresVendues: 0.6,
+        achats: valeurs.map((montantHT) => ({ montantHT })),
+        pointages: valeurs.map((nbrHeures) => ({ nbrHeures, tauxHoraireApplique: 1 })),
+      }, params, true);
+      assert.deepEqual(
+        [vue.materielReel, vue.heuresRealisees, vue.moReel, vue.totalDepenses, vue.diffHeures, vue.margeCommerciale],
+        [0.6, 0.6, 0.6, 1.2, 0, 8.8],
+        `ordre ${valeurs.join(', ')}`,
+      );
+      for (const alerte of ['MATERIEL_DEPASSE', 'HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE']) {
+        assert.ok(!vue.alertes.includes(alerte), `${alerte} à budget exactement consommé (ordre ${valeurs.join(', ')})`);
+      }
+    }
+    // Heures × taux : 1,1 h × 1,10 € = 1,21 € exactement (1,2100000000000002 en flottant).
+    const produit = computeChantierMetrics({
+      budgetGlobalVendu: 0, budgetMaterielVendu: 0, budgetMainOeuvreVendu: 1.21, heuresVendues: 1.1,
+      achats: [], pointages: [{ nbrHeures: 1.1, tauxHoraireApplique: 1.1 }],
+    }, params, true);
+    assert.equal(produit.moReel, 1.21);
+    assert.ok(!produit.alertes.includes('MAIN_OEUVRE_DEPASSEE'));
+  });
 });
 
 describe('Destinataires de la rentabilité d’un chantier', () => {
@@ -396,6 +425,18 @@ describe('Marge estimée en fin de chantier et alertes de suivi', () => {
     const perte = computeChantierMetrics(chantier({ achats: [{ montantHT: 9500, date: '2026-10-10T00:00:00.000Z' }] }), params, true, contexte());
     assert.ok(perte.alertes.includes('EN_PERTE'));
     assert.ok(!perte.alertes.includes('MARGE_FAIBLE'));
+  });
+
+  // #198 : 21 × (362,57 / 21) vaut 362,57000000000005 en flottant ; la marge estimée d'un chantier
+  // vendu exactement à son coût attendu tombait à -5e-14, avec une alerte de marge faible.
+  test('heures vendues faites au coût réel : marge estimée exactement nulle, sans alerte', () => {
+    const vue = computeChantierMetrics(chantier({
+      budgetGlobalVendu: 362.57, budgetMaterielVendu: 0, budgetMainOeuvreVendu: 362.57, heuresVendues: 21, achats: [],
+      pointages: [{ nbrHeures: 20, tauxHoraireApplique: 17.26, date: '2026-10-12T00:00:00.000Z' }, { nbrHeures: 1, tauxHoraireApplique: 17.37, date: '2026-10-12T00:00:00.000Z' }],
+    }), { ...params, seuilMargeFaible: null }, true, contexte());
+    assert.equal(vue.estimation.coutMainOeuvreAttendu, 362.57);
+    assert.ok(Object.is(vue.margeEstimee, 0), `marge estimée ${vue.margeEstimee}`);
+    assert.ok(!vue.alertes.includes('MARGE_FAIBLE'));
   });
 
   test('un chantier terminé n’a plus de reste à faire ni de délai sans saisie', () => {

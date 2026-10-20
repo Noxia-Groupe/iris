@@ -713,6 +713,94 @@ if (!TEST_DATABASE_URL) {
     }
   });
 
+  // #198 : les sommes de montants, d'heures et de coûts sont exactes, quel que soit l'ordre des
+  // lignes. En nombres à virgule, 0,10 + 0,20 + 0,30 vaut 0,6000000000000001 : un matériel
+  // égal au budget de 0,60 € passait « dépassé », et un total affiché pouvait s'écarter d'un
+  // centime, donc d'un euro une fois arrondi.
+  test('montants exacts : sommes au centime près dans la fiche chantier et les statistiques (#198)', async () => {
+    const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+    assert.equal(login.status, 200);
+    const auth = { Authorization: `Bearer ${login.body.token}` };
+    const ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+    const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true } });
+    let chantier = null, fournisseur = null, categorie = null, intervenant = null, conducteur = null;
+    try {
+      assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true })).status, 200);
+      fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur centimes ${suffixe}` } });
+      categorie = await prisma.categorie.create({ data: { nom: `TEST Catégorie centimes ${suffixe}` } });
+      intervenant = await prisma.intervenant.create({ data: { nom: `TEST Intervenant centimes ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 1 } });
+      conducteur = await prisma.user.create({ data: { email: `centimes.${suffixe}@iris.test`, name: `TEST Conducteur centimes ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' } });
+      // Vendu exactement ce qui est dépensé : 0,60 € de matériel, 0,60 h, 0,60 € de main-d'œuvre.
+      chantier = await prisma.chantier.create({ data: {
+        nom: `TEST Centimes ${suffixe}`, client: 'TEST Client centimes', dateDebut: new Date(), responsableId: conducteur.id,
+        budgetGlobalVendu: 10, budgetMaterielVendu: 0.6, budgetMainOeuvreVendu: 0.6, heuresVendues: 0.6,
+      } });
+      const date = new Date();
+      for (const valeur of [0.1, 0.2, 0.3]) {
+        await prisma.achatReel.create({ data: {
+          date, fournisseurId: fournisseur.id, categorieId: categorie.id, chantierId: chantier.id, description: `TEST achat ${valeur}`,
+          montantHT: valeur, createdById: auteur.id, updatedById: auteur.id,
+        } });
+        await prisma.pointageHeure.create({ data: {
+          date, intervenantId: intervenant.id, chantierId: chantier.id, nbrHeures: valeur, tauxHoraireApplique: 1,
+          createdById: auteur.id, updatedById: auteur.id,
+        } });
+      }
+
+      const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(auth);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      const m = fiche.body.metrics;
+      assert.deepEqual(
+        [m.materielReel, m.heuresRealisees, m.moReel, m.totalDepenses, m.diffHeures, m.margeCommerciale],
+        [0.6, 0.6, 0.6, 1.2, 0, 8.8],
+        'totaux exacts',
+      );
+      for (const alerte of ['MATERIEL_DEPASSE', 'HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE']) {
+        assert.ok(!m.alertes.includes(alerte), `aucune alerte ${alerte} à budget exactement consommé`);
+      }
+
+      const ref = jourCivilEntreprise(date);
+      const fournisseurs = await request(app).get('/api/stats/fournisseurs').query({ period: 'month', ref }).set(auth);
+      assert.equal(fournisseurs.status, 200, JSON.stringify(fournisseurs.body));
+      const ligneFournisseur = (fournisseurs.body.fournisseurs ?? fournisseurs.body).find((f) => f.id === fournisseur.id);
+      assert.deepEqual([ligneFournisseur.total, ligneFournisseur.nbAchats], [0.6, 3]);
+      const intervenants = await request(app).get('/api/stats/intervenants').query({ period: 'month', ref }).set(auth);
+      assert.equal(intervenants.status, 200, JSON.stringify(intervenants.body));
+      const ligneIntervenant = intervenants.body.intervenants.find((i) => i.id === intervenant.id);
+      assert.deepEqual([ligneIntervenant.heures, ligneIntervenant.cout], [0.6, 0.6]);
+      const conducteurs = await request(app).get('/api/stats/conducteurs').set(auth);
+      assert.equal(conducteurs.status, 200, JSON.stringify(conducteurs.body));
+      const ligneConducteur = conducteurs.body.find((c) => c.id === conducteur.id);
+      assert.ok(ligneConducteur, 'le titulaire figure dans les statistiques des conducteurs');
+      assert.equal(ligneConducteur.nbMaterielDepasse, 0, 'matériel dans le budget');
+      assert.equal(ligneConducteur.nbEnRetardHeures, 0, 'heures dans le budget');
+      // Terminé : objectifs respectés, aucune heure en trop ni manque à gagner.
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE' } });
+      const termines = await request(app).get('/api/stats/conducteurs').set(auth);
+      assert.equal(termines.status, 200, JSON.stringify(termines.body));
+      const ligneTermine = termines.body.find((c) => c.id === conducteur.id);
+      assert.deepEqual(
+        [ligneTermine.nbObjectifsRespectes, ligneTermine.nbTermineMaterielDepasse, ligneTermine.nbTermineEnRetardHeures,
+          ligneTermine.heuresRealiseesTermineTotal, ligneTermine.tauxDepassementHeures, ligneTermine.manqueAGagnerMainOeuvre,
+          ligneTermine.depensesTotal, ligneTermine.margeTotal],
+        [1, 0, 0, 0.6, 0, 0, 1.2, 8.8],
+      );
+    } finally {
+      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: { margeCommercialeActive: ancienParametres.margeCommercialeActive } });
+      if (chantier) {
+        await prisma.achatReel.deleteMany({ where: { chantierId: chantier.id } });
+        await prisma.pointageHeure.deleteMany({ where: { chantierId: chantier.id } });
+        await prisma.journalSaisieChantier.deleteMany({ where: { chantierId: chantier.id } });
+        await prisma.chantier.delete({ where: { id: chantier.id } });
+      }
+      if (fournisseur) await prisma.fournisseur.delete({ where: { id: fournisseur.id } });
+      if (categorie) await prisma.categorie.delete({ where: { id: categorie.id } });
+      if (intervenant) await prisma.intervenant.delete({ where: { id: intervenant.id } });
+      if (conducteur) await prisma.user.delete({ where: { id: conducteur.id } });
+    }
+  });
+
   // Cœur de la correction : ces journaux renvoyaient TOUS les achats et TOUTES les heures
   // de TOUS les chantiers, chacun avec son chantier complet — budgets vendus compris — à
   // n'importe quel compte connecté. Les tests ci-dessous vérifient les deux moitiés du
