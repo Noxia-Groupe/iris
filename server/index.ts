@@ -44,7 +44,7 @@ export { peutVoirFinance } from './src/domaines/chantiers/droits';
 import { computeChantierMetrics } from './src/domaines/chantiers/suivi';
 import { enregistrerRoutesChantiers, enregistrerRoutesAnalyseChantier } from './src/domaines/chantiers/routes';
 import { enregistrerRoutesSaisiesTravaux } from './src/domaines/chantiers/saisies';
-import { dateDemandeCurative } from './src/domaines/interventions/metier';
+import { dateDemandeCurative, dateHeuresIntervention } from './src/domaines/interventions/metier';
 import { enregistrerRoutesContrats } from './src/domaines/contrats/routes';
 import { enregistrerRoutesInterventions } from './src/domaines/interventions/routes';
 import { enregistrerRoutesPlanning } from './src/domaines/planning/routes';
@@ -187,6 +187,7 @@ export {
   companySettingsPayload,
   fuseauHoraireEntrepriseValide,
   dateDemandeCurative,
+  dateHeuresIntervention,
   jourCivilEntreprise,
   aujourdHuiEntreprise,
   anneeEntreprise,

@@ -95,6 +95,17 @@ export default function Factures() {
   const [fuseauHoraire, setFuseauHoraire] = useState<string | null>(null);
   const [factureAvoir, setFactureAvoir] = useState<Facture | null>(null);
   const [lignesAvoir, setLignesAvoir] = useState<Ligne[]>([nouvelleLigne()]);
+  // Un avoir émis est figé : un double clic ou une touche Entrée répétée ne doit pas en émettre deux
+  // (#247). L'indicateur synchrone arrête une seconde soumission du même instant, avant que l'état
+  // n'ait désactivé le bouton ; l'état garde ce bouton désactivé jusqu'à la réponse et, après une issue
+  // inconnue, jusqu'à la fin de la relecture de la liste.
+  const envoiAvoirEnCours = useRef(false);
+  const [envoiAvoir, setEnvoiAvoir] = useState(false);
+  // Après une issue inconnue, le bouton reste désactivé tant que la liste n'a pas été relue avec
+  // succès : si la relecture échoue aussi, la liste affichée est périmée et ne montrerait pas un
+  // avoir déjà émis (#247). Toute relecture réussie et non dépassée par une plus récente, dont
+  // « Actualiser », le libère.
+  const [relectureRequise, setRelectureRequise] = useState(false);
   const [factureTraceId, setFactureTraceId] = useState<string | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [traceErreur, setTraceErreur] = useState('');
@@ -154,6 +165,7 @@ export default function Factures() {
       setFactures(facturesData.items);
       setTotal(facturesData.total);
       setChargement(false);
+      setRelectureRequise(false);
       setClients(clientsData.clients || clientsData || []);
       setChantiers(Array.isArray(chantiersData) ? chantiersData : []);
       setInterventions(Array.isArray(interventionsData) ? interventionsData : []);
@@ -264,18 +276,45 @@ export default function Factures() {
 
   const creerAvoirPartiel = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!factureAvoir) return;
+    if (!factureAvoir || envoiAvoirEnCours.current) return;
     setErreur('');
     setSucces('');
     const lignesConverties = lignesAvoir.map((ligne) => ({ ...ligne, designation: ligne.designation.trim(), quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
     const fautive = lignesConverties.findIndex((ligne) => !ligne.designation || ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.prixUnitaireHt < 0 || ligne.tauxTva === null || ligne.tauxTva < 0 || ligne.tauxTva > 100);
     if (fautive >= 0) return setErreur(`Ligne d’avoir ${fautive + 1} : désignation obligatoire, quantité supérieure à zéro et montants numériques attendus (TVA entre 0 et 100).`);
-    const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
-    const data = await res.json();
-    if (!res.ok) return setErreur(data.error || 'Création de l’avoir partiel impossible.');
-    setFactureAvoir(null);
-    setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
-    await charger();
+    envoiAvoirEnCours.current = true;
+    setEnvoiAvoir(true);
+    let cree = false;
+    // Sans réponse exploitable de l'API (réponse perdue, erreur serveur, réponse sans message), l'avoir a
+    // pu être émis : on ne l'affirme ni ne le nie, comme pour une réponse perdue à l'ouverture d'un
+    // chantier. La liste est relue avant de libérer le formulaire, pour montrer un avoir émis avant toute
+    // nouvelle soumission ; si cette relecture échoue, `relectureRequise` garde le bouton désactivé (#247).
+    const issueInconnue = async (cause: string) => {
+      setErreur(`La création de l’avoir n’a pas pu être confirmée : ${cause}. Vérifiez les avoirs de la facture dans la liste avant de réessayer.`);
+      setRelectureRequise(true);
+      await charger();
+    };
+    try {
+      const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Un refus métier de l'API (4xx) porte son message : l'avoir n'a pas été émis. Une erreur serveur
+        // (5xx), même avec un message, ou une réponse sans message, d'une passerelle par exemple, ne dit
+        // pas si l'avoir a été émis.
+        if (data.error && res.status < 500) setErreur(data.error);
+        else await issueInconnue(`réponse inattendue du serveur (${res.status})`);
+        return;
+      }
+      setFactureAvoir(null);
+      setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
+      cree = true;
+    } catch {
+      await issueInconnue('impossible de joindre le serveur');
+    } finally {
+      envoiAvoirEnCours.current = false;
+      setEnvoiAvoir(false);
+    }
+    if (cree) await charger();
   };
 
   const creer = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -429,7 +468,8 @@ export default function Factures() {
             <span><strong>TVA</strong><br />{formatMontant(totauxAvoir.totalTva)}</span>
             <span><strong>Total TTC</strong><br />{formatMontant(totauxAvoir.totalTtc)}</span>
           </div>
-          <button className="btn btn-primary" type="submit"><Send size={16} /> Créer l’avoir partiel</button>
+          {relectureRequise && !envoiAvoir && <p role="status" className="text-sm text-amber-700">La liste n’a pas pu être relue : actualisez-la pour vérifier les avoirs de la facture avant de réessayer.</p>}
+          <button className="btn btn-primary" type="submit" disabled={envoiAvoir || relectureRequise}><Send size={16} /> Créer l’avoir partiel</button>
         </form>
       )}
 
