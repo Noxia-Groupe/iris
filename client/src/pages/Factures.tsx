@@ -97,12 +97,14 @@ export default function Factures() {
   const [lignesAvoir, setLignesAvoir] = useState<Ligne[]>([nouvelleLigne()]);
   // Un avoir émis est figé : un double clic ou une touche Entrée répétée ne doit pas en émettre deux
   // (#247). L'indicateur synchrone arrête une seconde soumission du même instant, avant que l'état
-  // n'ait désactivé le bouton ; l'état garde ce bouton désactivé jusqu'à la réponse.
+  // n'ait désactivé le bouton ; l'état garde ce bouton désactivé jusqu'à la réponse et, après une issue
+  // inconnue, jusqu'à la fin de la relecture de la liste.
   const envoiAvoirEnCours = useRef(false);
   const [envoiAvoir, setEnvoiAvoir] = useState(false);
   // Après une issue inconnue, le bouton reste désactivé tant que la liste n'a pas été relue avec
   // succès : si la relecture échoue aussi, la liste affichée est périmée et ne montrerait pas un
-  // avoir déjà émis (#247). Toute relecture réussie, dont « Actualiser », le libère.
+  // avoir déjà émis (#247). Toute relecture réussie et non dépassée par une plus récente, dont
+  // « Actualiser », le libère.
   const [relectureRequise, setRelectureRequise] = useState(false);
   const [factureTraceId, setFactureTraceId] = useState<string | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
@@ -283,9 +285,10 @@ export default function Factures() {
     envoiAvoirEnCours.current = true;
     setEnvoiAvoir(true);
     let cree = false;
-    // Sans réponse de l'API, l'avoir a pu être émis : on ne l'affirme ni ne le nie, comme à l'ouverture
-    // d'un chantier. La liste est relue avant de libérer le formulaire, pour montrer un avoir émis avant
-    // toute nouvelle soumission (#247).
+    // Sans réponse exploitable de l'API (réponse perdue, erreur serveur, réponse sans message), l'avoir a
+    // pu être émis : on ne l'affirme ni ne le nie, comme pour une réponse perdue à l'ouverture d'un
+    // chantier. La liste est relue avant de libérer le formulaire, pour montrer un avoir émis avant toute
+    // nouvelle soumission ; si cette relecture échoue, `relectureRequise` garde le bouton désactivé (#247).
     const issueInconnue = async (cause: string) => {
       setErreur(`La création de l’avoir n’a pas pu être confirmée : ${cause}. Vérifiez les avoirs de la facture dans la liste avant de réessayer.`);
       setRelectureRequise(true);

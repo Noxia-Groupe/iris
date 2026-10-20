@@ -615,9 +615,10 @@ test.describe('Facturation — parcours utilisateur', () => {
 
   // #247 : la liste est relue AVANT de libérer le formulaire. Si cette relecture échoue aussi (réseau
   // toujours coupé, serveur en redémarrage), la liste affichée est périmée : le bouton reste désactivé
-  // jusqu'à une actualisation réussie, qui montre l'avoir émis.
-  test('après une issue inconnue, l’avoir partiel attend une relecture réussie de la liste', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
-    const client = await creerClient('avoir-relecture-echouee');
+  // jusqu'à une actualisation réussie, qui montre l'avoir émis. Le blocage tient à la liste, pas au
+  // formulaire, quelle que soit la cause de l'issue inconnue.
+  for (const { cas, client: nomClient, perdre } of reponsesSansIssue.slice(0, 2)) test(`après ${cas}, l’avoir partiel attend une relecture réussie de la liste`, async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient(`${nomClient}-relecture`);
     const page = await allerSurPageAdmin('/factures');
     const facture = await emettreFactureSource(page, client, [['1', '100', '20']]);
     const avoirsDuClient = async () => {
@@ -626,42 +627,87 @@ test.describe('Facturation — parcours utilisateur', () => {
     };
     await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
     await remplirLigneAvoir(page, 1, '1', '10', '20');
-    // Le serveur émet l'avoir, la réponse se perd, puis la relecture de la liste est retenue et échoue.
+    // Le serveur émet l'avoir et sa réponse se perd. Chaque relecture de la liste qui suit attend ensuite
+    // la décision du test, rang par rang : succès (relayée au serveur) ou échec.
+    const decisions: Array<{ promesse: Promise<boolean>; decider: (succes: boolean) => void }> = [];
+    const decision = (rang: number) => {
+      while (decisions.length <= rang) {
+        let decider!: (succes: boolean) => void;
+        const promesse = new Promise<boolean>((resolve) => { decider = resolve; });
+        decisions.push({ promesse, decider });
+      }
+      return decisions[rang];
+    };
     let perdue = false;
-    let libererRelecture!: () => void;
-    const relecture = new Promise<void>((resolve) => { libererRelecture = resolve; });
-    let signalerRelecture!: () => void;
-    const relectureDemandee = new Promise<void>((resolve) => { signalerRelecture = resolve; });
+    let relectures = 0;
     await page.route('**/api/**', async (route) => {
       const requete = route.request();
       if (requete.method() === 'POST' && /\/api\/factures\/[^/]+\/avoirs$/.test(requete.url())) {
         await route.fetch();
         perdue = true;
-        return route.abort('connectionreset');
+        return perdre(route);
       }
       if (perdue && /\/api\/factures\?page=/.test(requete.url())) {
-        signalerRelecture();
-        await relecture;
-        return route.abort('internetdisconnected');
+        const succes = await decision(relectures++).promesse;
+        return succes ? route.continue() : route.abort('internetdisconnected');
       }
       return route.continue();
     });
+    const relectureDemandee = () => page.waitForRequest((requete) => /\/api\/factures\?page=/.test(requete.url()));
+    const relectureTerminee = () => page.waitForEvent('requestfinished', (requete) => /\/api\/factures\?page=/.test(requete.url()));
+    const relectureEchouee = () => page.waitForEvent('requestfailed', (requete) => /\/api\/factures\?page=/.test(requete.url()));
     const bouton = page.getByRole('button', { name: /Créer l’avoir partiel/ });
+    const consigne = page.getByText(/La liste n’a pas pu être relue : actualisez-la/);
+    const premiereRelecture = relectureDemandee();
     await bouton.click();
-    await relectureDemandee;
-    // Souple : sans attente de la relecture, le parcours montre aussi la suite.
+    await premiereRelecture;
+    // Pendant la relecture : bouton désactivé, et pas encore de consigne d'actualiser (souple : le
+    // parcours montre aussi la suite).
     await expect.soft(bouton).toBeDisabled();
-    libererRelecture();
     await expect(page.getByText(/La création de l’avoir n’a pas pu être confirmée/)).toBeVisible();
-    await expect(page.getByText(/La liste n’a pas pu être relue : actualisez-la/)).toBeVisible();
+    await expect.soft(consigne).toHaveCount(0);
+    let echec = relectureEchouee();
+    decision(0).decider(false);
+    await echec;
+    await expect(consigne).toBeVisible();
     await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toBeVisible();
+    await expect(bouton).toBeDisabled();
+    expect(await avoirsDuClient()).toEqual([12]);
+    // Fermer puis rouvrir le formulaire ne lève pas le blocage, pas plus qu'une actualisation elle-même
+    // en échec.
+    await page.locator('form').getByRole('button', { name: 'Annuler', exact: true }).click();
+    await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toHaveCount(0);
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await expect(consigne).toBeVisible();
+    await expect(bouton).toBeDisabled();
+    echec = relectureEchouee();
+    decision(1).decider(false);
+    await page.getByRole('button', { name: 'Actualiser', exact: true }).click();
+    await echec;
+    await expect(bouton).toBeDisabled();
+    // Une relecture réussie mais dépassée par une plus récente, en échec, ne lève pas non plus le blocage.
+    const relectureDepassee = relectureDemandee();
+    await page.getByRole('button', { name: 'Actualiser', exact: true }).click();
+    await relectureDepassee;
+    const relectureRecente = relectureDemandee();
+    await page.getByRole('button', { name: 'Actualiser', exact: true }).click();
+    await relectureRecente;
+    const terminee = relectureTerminee();
+    decision(2).decider(true);
+    await terminee;
+    echec = relectureEchouee();
+    decision(3).decider(false);
+    await echec;
+    // L'erreur de la relecture récente, effacée au lancement de chaque relecture, signale qu'elle est traitée.
+    await expect(page.getByText('Failed to fetch', { exact: true })).toBeVisible();
+    await expect(consigne).toBeVisible();
     await expect(bouton).toBeDisabled();
     expect(await avoirsDuClient()).toEqual([12]);
     await page.unroute('**/api/**');
 
     await page.getByRole('button', { name: 'Actualiser', exact: true }).click();
     await expect(facture).toContainText(/Annulation totale impossible : 1 avoir\(s\) partiel\(s\)/);
-    await expect(page.getByText(/La liste n’a pas pu être relue/)).toHaveCount(0);
+    await expect(consigne).toHaveCount(0);
     await expect(bouton).toBeEnabled();
   });
 
