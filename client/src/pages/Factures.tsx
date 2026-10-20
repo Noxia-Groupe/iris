@@ -155,8 +155,10 @@ export default function Factures() {
       }
       setFactures(facturesData.items);
       // Un avoir partiel en cours de saisie suit la facture rechargée : son aperçu compte alors les
-      // avoirs créés depuis l'ouverture du formulaire.
-      setFactureAvoir((ouverte) => ouverte && ((facturesData.items as Facture[]).find((facture) => facture.id === ouverte.id) ?? ouverte));
+      // avoirs créés depuis l'ouverture du formulaire. Une facture sortie de la page relue (poussée
+      // en page suivante par l'avoir qu'elle vient de recevoir, par exemple) n'a pas été relue : son
+      // formulaire se ferme plutôt que d'annoncer la TVA d'un instantané périmé.
+      setFactureAvoir((ouverte) => ouverte && ((facturesData.items as Facture[]).find((facture) => facture.id === ouverte.id) ?? null));
       setTotal(facturesData.total);
       setChargement(false);
       setRelectureRequise(false);
@@ -258,6 +260,9 @@ export default function Factures() {
   // Même arithmétique que le serveur, en entiers, y compris la TVA d'un avoir qui suit d'autres
   // avoirs de la facture : l'aperçu annonce le document émis.
   const totauxAvoir = totauxApercuAvoir(lignesAvoir, factureAvoir?.avoirs ?? []);
+  // Tant que la liste n'a pas été relue, la facture affichée peut ignorer un avoir déjà émis : l'aperçu
+  // ne donne aucun montant qu'il ne peut garantir.
+  const montantApercu = (montant: number) => (relectureRequise ? '—' : formatMontant(montant));
 
   const creerAvoirPartiel = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -292,6 +297,9 @@ export default function Factures() {
       }
       setFactureAvoir(null);
       setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
+      // La liste affichée ne porte pas encore cet avoir : un formulaire rouvert sur cette facture
+      // annoncerait la TVA sans lui. Le prochain envoi attend donc une relecture réussie (#236).
+      setRelectureRequise(true);
       cree = true;
     } catch {
       await issueInconnue('impossible de joindre le serveur');
@@ -449,9 +457,9 @@ export default function Factures() {
             ))}
           </section>
           <div data-testid="aperçu-avoir" className="grid gap-3 rounded-lg border bg-white p-3 text-sm sm:grid-cols-3">
-            <span><strong>Total HT</strong><br />{formatMontant(totauxAvoir.totalHt)}</span>
-            <span><strong>TVA</strong><br />{formatMontant(totauxAvoir.totalTva)}</span>
-            <span><strong>Total TTC</strong><br />{formatMontant(totauxAvoir.totalTtc)}</span>
+            <span><strong>Total HT</strong><br />{montantApercu(totauxAvoir.totalHt)}</span>
+            <span><strong>TVA</strong><br />{montantApercu(totauxAvoir.totalTva)}</span>
+            <span><strong>Total TTC</strong><br />{montantApercu(totauxAvoir.totalTtc)}</span>
           </div>
           {relectureRequise && !envoiAvoir && <p role="status" className="text-sm text-amber-700">La liste n’a pas pu être relue : actualisez-la pour vérifier les avoirs de la facture avant de réessayer.</p>}
           <button className="btn btn-primary" type="submit" disabled={envoiAvoir || relectureRequise}><Send size={16} /> Créer l’avoir partiel</button>

@@ -773,6 +773,88 @@ test.describe('Facturation — parcours utilisateur', () => {
     expect((await avoirsApi()).sort((a, b) => a[0] - b[0])).toEqual([[0.05, 0, 0.05], [21.35, 2.14, 23.49]]);
   });
 
+  // #236 et #247 : après une issue inconnue, la relecture peut ne plus porter la facture du formulaire,
+  // poussée en page suivante par l'avoir émis en tête de liste. Cet instantané n'a pas été relu : le
+  // formulaire se ferme au lieu d'annoncer, bouton actif, la TVA sans l'avoir émis (2,14 € au lieu de
+  // 2,13 € pour le même avoir). Le déplacement est simulé en retirant la facture de la page relue.
+  test('après une issue inconnue, l’avoir dont la facture a quitté la page relue se ferme', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient('avoir-tva-hors-page');
+    const page = await allerSurPageAdmin('/factures');
+    const facture = await emettreFactureSource(page, client, [['10', '21,35', '10']]);
+    const avoirsApi = async () => {
+      const factures = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string }; totalTtc: number }>;
+      return factures.filter((item) => item.type === 'AVOIR' && item.client.id === client.id).map((item) => item.totalTtc);
+    };
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await remplirLigneAvoir(page, 1, '1', '21,35', '10');
+    let perdue = false;
+    await page.route('**/api/**', async (route) => {
+      const requete = route.request();
+      if (requete.method() === 'POST' && /\/api\/factures\/[^/]+\/avoirs$/.test(requete.url())) {
+        await route.fetch();
+        perdue = true;
+        return route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' });
+      }
+      if (perdue && /\/api\/factures\?page=/.test(requete.url())) {
+        const reponse = await route.fetch();
+        const corps = await reponse.json() as { items: Array<{ type: string; client: { id: string } }> };
+        return route.fulfill({ response: reponse, json: { ...corps, items: corps.items.filter((item) => !(item.type === 'FACTURE' && item.client.id === client.id)) } });
+      }
+      return route.continue();
+    });
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/La création de l’avoir n’a pas pu être confirmée/)).toBeVisible();
+    // Relecture traitée : l'avoir émis est en tête, la facture n'est plus sur la page.
+    await expect(page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: /Avoir/ })).toHaveCount(1);
+    await expect(page.locator('tbody tr', { hasText: client.raisonSociale }).filter({ hasText: /Facture/ })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toHaveCount(0);
+    await page.unroute('**/api/**');
+    expect(await avoirsApi()).toEqual([23.49]);
+  });
+
+  // #236 : un avoir créé dont la liste n'a pas pu être relue ensuite laisse affichée une facture sans cet
+  // avoir. Un formulaire rouvert sur elle annoncerait la TVA sans lui (0,01 € au lieu de 0,00 € pour
+  // 0,05 € à 10 %, après 21,35 €) : son envoi attend une relecture réussie, qui corrige l'aperçu.
+  test('après un avoir créé et une relecture en échec, le suivant attend la liste relue', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient('avoir-tva-relecture');
+    const page = await allerSurPageAdmin('/factures');
+    const facture = await emettreFactureSource(page, client, [['10', '21,35', '10']]);
+    const avoirsApi = async () => {
+      const factures = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string }; totalHt: number; totalTva: number; totalTtc: number }>;
+      return factures.filter((item) => item.type === 'AVOIR' && item.client.id === client.id).map((item) => [item.totalHt, item.totalTva, item.totalTtc]);
+    };
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await remplirLigneAvoir(page, 1, '1', '21,35', '10');
+    let cree = false;
+    await page.route('**/api/**', async (route) => {
+      const requete = route.request();
+      if (requete.method() === 'POST' && /\/api\/factures\/[^/]+\/avoirs$/.test(requete.url())) cree = true;
+      else if (cree && /\/api\/factures\?page=/.test(requete.url())) return route.abort('internetdisconnected');
+      return route.continue();
+    });
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/créé et émis/)).toBeVisible();
+    await expect(page.getByText('Failed to fetch', { exact: true })).toBeVisible();
+    expect(await avoirsApi()).toEqual([[21.35, 2.14, 23.49]]);
+    // La ligne restée affichée ne porte pas l'avoir : le formulaire rouvert est bloqué.
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await remplirLigneAvoir(page, 1, '1', '0,05', '10');
+    const bouton = page.getByRole('button', { name: /Créer l’avoir partiel/ });
+    await expect(page.getByText(/La liste n’a pas pu être relue : actualisez-la/)).toBeVisible();
+    await expect(bouton).toBeDisabled();
+    // Aucun montant n'est annoncé tant que la liste n'est pas relue (la TVA sans l'avoir serait 0,01 €).
+    await expect(page.getByTestId('aperçu-avoir')).not.toContainText('€');
+    await page.unroute('**/api/**');
+    await page.getByRole('button', { name: 'Actualiser', exact: true }).click();
+    await expect(bouton).toBeEnabled();
+    const apercu = page.getByTestId('aperçu-avoir');
+    await expect(apercu.locator('span').nth(1)).toHaveText(/TVA\s*0,00\s*€/);
+    await expect(apercu.locator('span').nth(2)).toHaveText(/Total TTC\s*0,05\s*€/);
+    await bouton.click();
+    await expect(page.getByText(/créé et émis/)).toBeVisible();
+    expect((await avoirsApi()).sort((a, b) => a[0] - b[0])).toEqual([[0.05, 0, 0.05], [21.35, 2.14, 23.49]]);
+  });
+
   // Deux lignes et deux taux exercent l'agrégation de l'aperçu, et vérifient que le
   // payload envoie bien toutes les lignes au serveur.
   test('crédite deux taux en un seul avoir et agrège l’aperçu par taux', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
