@@ -279,8 +279,9 @@ model PointageHeure {
   @@index([chantierId])
 }
 
-// Écritures SAV contractuelles, séparées des coûts Chantier afin de ne jamais alimenter
-// les calculs de marge, de CA, de commission ou les flux d'intégration Travaux.
+// Heures SAV : celles d'une intervention de contrat et, depuis le lot pilote 3b, celles d'une
+// intervention hors contrat. Séparées des coûts Chantier afin de ne jamais alimenter les calculs
+// de marge, de CA, de commission ou les flux d'intégration Travaux.
 model CoutInterventionHeure {
   id                  String       @id @default(uuid())
   interventionId      String

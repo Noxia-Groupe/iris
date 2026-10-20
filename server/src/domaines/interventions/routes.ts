@@ -15,12 +15,14 @@ import { requirePlanningActif, PLANNING_EVENT_INCLUDE, validatePlanningEvent } f
 import { verrouillerContratMaintenance } from '../contrats/metier';
 import {
   CHANTIER_INTERVENTION_SELECT, chantierDuJournalReduit, journaliserIntervention, exposerIntervention, estEncadrementCoutIntervention,
-  chargerInterventionCout, interventionCoutEligible, estConflitTransactionCout, verrouillerContexteCout, heureOperationnelleTechnicien,
+  chargerInterventionCout, interventionCoutEligible, interventionHeuresEligible, dateHeuresIntervention, estConflitTransactionCout, verrouillerContexteCout, heureOperationnelleTechnicien,
   journaliserCoutIntervention, totalHeuresInterventionAuCentime, getInterventionFilterForUser, synchroniserAffectationsIntervention,
   dateDemandeCurative,
 } from './metier';
 
 class ChantierInterventionIntrouvable extends Error {}
+
+const HEURES_DATE_FUTURE = 'Des heures se déclarent une fois faites : la date ne peut pas dépasser aujourd’hui.';
 
 export function enregistrerRoutesInterventions(app: Express): void {
   app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, res, next) => {
@@ -104,15 +106,15 @@ export function enregistrerRoutesInterventions(app: Express): void {
     }
   });
 
-  // Coûts SAV contractuels : jamais exposés dans les flux Travaux ou /api/v1.
+  // Coûts SAV : jamais exposés dans les flux Travaux ou /api/v1. Hors contrat, une intervention ne
+  // porte que les heures du technicien (lot pilote 3b), sans matériel.
   app.get('/api/interventions/:id/couts', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       const intervention = await chargerInterventionCout(req);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       const encadrement = estEncadrementCoutIntervention(req.user!.role);
       if (!encadrement && req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Accès non autorisé.' });
-      if (!intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
-      if (!encadrement && !interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      if (!encadrement && !interventionHeuresEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
 
       if (!encadrement) {
         const heures = await prisma.coutInterventionHeure.findMany({
@@ -130,11 +132,16 @@ export function enregistrerRoutesInterventions(app: Express): void {
         prisma.coutInterventionAchat.findMany({ where: { interventionId: intervention.id }, include: { fournisseur: true }, orderBy: { date: 'desc' } }),
       ]);
       const totalMainOeuvreHT = totalHeuresInterventionAuCentime(heures.filter((heure) => !heure.archivedAt));
-      const totalMaterielHT = achats.filter((achat) => !achat.archivedAt).reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+      // Hors contrat, aucun matériel ne se saisit : pas de total matériel, et le coût réel se limite à
+      // la main-d'œuvre (décision de Nelson du 19-10-2026 : l'administration le voit).
+      const totalMaterielHT = intervention.contratMaintenanceId
+        ? achats.filter((achat) => !achat.archivedAt).reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+        : null;
       // Un conducteur garde les heures et le matériel, mais ni taux ni coût de main-d'œuvre, ni le
       // total qui l'inclut (cf. voitCoutMainOeuvre).
       if (!voitCoutMainOeuvre(req)) return res.json(decimalToNumber({ heures: heures.map(sansTauxHoraire), achats, totalMainOeuvreHT: null, totalMaterielHT, totalCoutsHT: null }));
-      res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT: totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP) }));
+      const totalCoutsHT = totalMaterielHT === null ? totalMainOeuvreHT : totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+      res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT }));
     } catch (error) { console.error('Erreur lecture coûts intervention', error); res.status(500).json({ error: 'Lecture des coûts impossible.' }); }
   });
 
@@ -143,16 +150,18 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const intervention = await chargerInterventionCout(req);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       if (req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Saisie d’heures réservée au technicien affecté.' });
-      if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
-      const date = dateIsoStricte(req.body?.date); const nbrHeures = nombreDecimalNonNegatif(req.body?.nbrHeures, 8, true);
+      if (!interventionHeuresEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      const dateSaisie = dateIsoStricte(req.body?.date); const nbrHeures = nombreDecimalNonNegatif(req.body?.nbrHeures, 8, true);
       const motif = motifCorrectionValide(req.body?.motif);
-      if (!date || nbrHeures === null) return res.status(400).json({ error: 'Date ou nombre d’heures invalide.' });
+      if (!dateSaisie || nbrHeures === null) return res.status(400).json({ error: 'Date ou nombre d’heures invalide.' });
+      const date = dateHeuresIntervention(dateSaisie, (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
+      if (!date) return res.status(400).json({ error: HEURES_DATE_FUTURE });
       if (nbrHeures === 0 && !motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères est obligatoire pour zéro heure.' });
       const intervenant = await prisma.intervenant.findFirst({ where: { userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
       if (!intervenant) return res.status(404).json({ error: 'Intervention introuvable.' });
       const cree = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, intervenant.id, req.user!.id);
-        if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
+        if (!interventionActuelle || !interventionHeuresEligible(interventionActuelle)) return null;
         const intervenantActuel = await tx.intervenant.findFirst({ where: { id: intervenant.id, userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
         if (!intervenantActuel) return null;
         const cout = await tx.coutInterventionHeure.create({ data: { interventionId: interventionActuelle.id, intervenantId: intervenantActuel.id, date, nbrHeures, tauxHoraireApplique: intervenantActuel.tauxHoraireCharge, commentaire: req.body?.commentaire ? String(req.body.commentaire).trim() : null, createdById: req.user!.id } });
@@ -200,13 +209,18 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const body = req.body ?? {};
       const motif = motifCorrectionValide(body.motifCorrection); if (!motif) return res.status(400).json({ error: 'Le motif de correction doit contenir entre 3 et 500 caractères.' });
       const data: Record<string, unknown> = {};
-      if ('date' in body) { const date = dateIsoStricte(body.date); if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' }); data.date = date; }
+      if ('date' in body) {
+        const date = dateIsoStricte(body.date); if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' });
+        if (heures && !dateHeuresIntervention(date, (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)) return res.status(400).json({ error: HEURES_DATE_FUTURE });
+        data.date = date;
+      }
       const cleMontant = heures ? 'nbrHeures' : 'montantHT';
       if (cleMontant in body) { const valeur = nombreDecimalNonNegatif(body[cleMontant], heures ? 8 : 10, true); if (valeur === null) return res.status(400).json({ error: 'Montant invalide.' }); data[cleMontant] = valeur; }
       if (heures && 'commentaire' in body) data.commentaire = body.commentaire ? String(body.commentaire).trim() : null;
       if (achats && 'description' in body) { const description = String(body.description || '').trim(); if (!description) return res.status(400).json({ error: 'Description obligatoire.' }); data.description = description; }
       if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Aucun champ à corriger.' });
-      if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      const eligible = heures ? interventionHeuresEligible : interventionCoutEligible;
+      if (!eligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat;
       const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
       if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
@@ -214,7 +228,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (cout.archivedAt) return res.status(409).json({ error: 'Un coût archivé ne peut pas être corrigé.' });
       const resultat = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, heures ? cout.intervenantId : undefined, heures ? req.user!.id : undefined);
-        if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
+        if (!interventionActuelle || !eligible(interventionActuelle)) return null;
         const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat;
         const coutActuel = await delegate.findFirst({ where: { id: cout.id, interventionId: interventionActuelle.id, archivedAt: null } });
         if (!coutActuel) return null;
@@ -241,9 +255,10 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const intervention = await chargerInterventionCout(req); const type = String(req.params.type); const action = String(req.params.action);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       // L'archivage et la restauration sont des actes de conservation : l'encadrement peut
-      // les accomplir après la clôture, sans jamais réautoriser une création ou correction.
-      if (!intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      // les accomplir après la clôture, sans jamais réautoriser une création ou correction. Hors
+      // contrat, seules des heures existent : aucun matériel à archiver ni à restaurer.
       const heures = type === 'heures'; const achats = type === 'achats';
+      if (achats && !intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       if ((!heures && !achats) || !['archiver', 'restaurer'].includes(action) || !estEncadrementCoutIntervention(req.user!.role)) return res.status(403).json({ error: 'Accès non autorisé.' });
       const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat; const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
       if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
