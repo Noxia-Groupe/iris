@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import type { Page, Route } from '@playwright/test';
+import type { Page, Request, Route } from '@playwright/test';
 import { test, expect, choisirClient, dateDuJour } from './fixtures';
 
 // Aucune route de connexion par mot de passe n'existe (SSO Microsoft ou accès de secours) :
@@ -576,9 +576,9 @@ test.describe('Facturation — parcours utilisateur', () => {
   // Même conduite pour une réponse perdue en chemin, une erreur de passerelle sans message et une
   // erreur serveur (5xx), même accompagnée d'un message.
   const reponsesSansIssue = [
-    { cas: 'une réponse perdue', client: 'avoir-reponse-perdue', cause: /impossible de joindre le serveur/, perdre: (route: Route) => route.abort('connectionreset') },
-    { cas: 'une erreur de passerelle sans message', client: 'avoir-reponse-passerelle', cause: /réponse inattendue du serveur \(502\)/, perdre: (route: Route) => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }) },
-    { cas: 'une erreur serveur avec message', client: 'avoir-reponse-erreur-serveur', cause: /réponse inattendue du serveur \(500\)/, perdre: (route: Route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Création de l’avoir impossible.' }) }) },
+    { cas: 'une réponse perdue', client: 'avoir-reponse-perdue', relectureEchouee: true, cause: /impossible de joindre le serveur/, perdre: (route: Route) => route.abort('connectionreset') },
+    { cas: 'une erreur de passerelle sans message', client: 'avoir-reponse-passerelle', relectureEchouee: true, cause: /réponse inattendue du serveur \(502\)/, perdre: (route: Route) => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }) },
+    { cas: 'une erreur serveur avec message', client: 'avoir-reponse-erreur-serveur', relectureEchouee: false, cause: /réponse inattendue du serveur \(500\)/, perdre: (route: Route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Création de l’avoir impossible.' }) }) },
   ];
   for (const { cas, client: nomClient, cause, perdre } of reponsesSansIssue) test(`${cas} à la création d’un avoir partiel relit la liste puis libère le formulaire`, async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
     const client = await creerClient(nomClient);
@@ -617,7 +617,7 @@ test.describe('Facturation — parcours utilisateur', () => {
   // toujours coupé, serveur en redémarrage), la liste affichée est périmée : le bouton reste désactivé
   // jusqu'à une actualisation réussie, qui montre l'avoir émis. Le blocage tient à la liste, pas au
   // formulaire, quelle que soit la cause de l'issue inconnue.
-  for (const { cas, client: nomClient, perdre } of reponsesSansIssue.slice(0, 2)) test(`après ${cas}, l’avoir partiel attend une relecture réussie de la liste`, async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+  for (const { cas, client: nomClient, perdre } of reponsesSansIssue.filter((reponse) => reponse.relectureEchouee)) test(`après ${cas}, l’avoir partiel attend une relecture réussie de la liste`, async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
     const client = await creerClient(`${nomClient}-relecture`);
     const page = await allerSurPageAdmin('/factures');
     const facture = await emettreFactureSource(page, client, [['1', '100', '20']]);
@@ -686,9 +686,20 @@ test.describe('Facturation — parcours utilisateur', () => {
     await echec;
     await expect(bouton).toBeDisabled();
     // Une relecture réussie mais dépassée par une plus récente, en échec, ne lève pas non plus le blocage.
+    // Ses six autres lectures sont terminées avant que la plus récente ne parte : seule sa liste, retenue,
+    // reste en attente, et son traitement précède l'échec de la plus récente. Sinon, une lecture lente le
+    // repousserait après les vérifications, et une baisse du drapeau sur réponse dépassée passerait.
+    const lecturesDepassees: Request[] = [];
+    const noterLecture = (requete: Request) => {
+      if (/^\/api\/(clients|chantiers|interventions|contrats-maintenance|company|factures\/chronologie)$/.test(new URL(requete.url()).pathname)) lecturesDepassees.push(requete);
+    };
+    page.on('request', noterLecture);
     const relectureDepassee = relectureDemandee();
     await page.getByRole('button', { name: 'Actualiser', exact: true }).click();
     await relectureDepassee;
+    await expect.poll(() => lecturesDepassees.length).toBeGreaterThanOrEqual(6);
+    page.off('request', noterLecture);
+    await Promise.all(lecturesDepassees.map(async (requete) => (await requete.response())?.finished()));
     const relectureRecente = relectureDemandee();
     await page.getByRole('button', { name: 'Actualiser', exact: true }).click();
     await relectureRecente;
