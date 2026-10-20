@@ -58,3 +58,21 @@ export function centimesTtcLigne(totalHt: number, tauxTva: unknown): number {
 }
 
 export const centimes = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+// Sommes exactes de montants et de quantités (#198). Additionner des nombres à virgule
+// dépend de l'ordre des termes et peut s'écarter de la somme exacte : 12,50 € devient
+// 12,4999…, s'affiche 12 € une fois arrondi à l'euro, ou déclenche à tort une alerte de
+// dépassement. Montants, heures et taux ont deux décimales en base ; l'écriture la plus
+// courte de leur nombre, que lit Prisma.Decimal, redonne exactement ces décimales. Le
+// calcul se fait donc en décimal exact. Un total partiel garde au plus quatre décimales et
+// bien moins de quinze chiffres : repassé en nombre, il se relit exactement, ce qui permet
+// de cumuler terme à terme (`total = sommeExacte(total, terme)`).
+export const sommeExacte = (...termes: unknown[]): number =>
+  termes.reduce<Prisma.Decimal>((somme, terme) => somme.plus(Number(terme)), new Prisma.Decimal(0)).toNumber();
+export const differenceExacte = (a: unknown, b: unknown): number => new Prisma.Decimal(Number(a)).minus(Number(b)).toNumber();
+// Heures × taux horaire : quatre décimales au plus, calculées exactement.
+export const produitExact = (a: unknown, b: unknown): number => new Prisma.Decimal(Number(a)).times(Number(b)).toNumber();
+// a × b ÷ c en décimal (précision 20), sans repasser par un nombre entre le produit et le
+// quotient : retombe exactement sur a quand b = c.
+export const regleDeTroisExacte = (a: unknown, b: unknown, c: unknown): number =>
+  new Prisma.Decimal(Number(a)).times(Number(b)).div(Number(c)).toNumber();

@@ -1,6 +1,45 @@
+import { createHmac } from 'node:crypto';
+import type { Dialog, Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+
+// Même procédé que les autres parcours : un jeton signé avec le secret du backend jetable
+// ouvre une session dans un autre rôle que celui de l'accès de secours.
+const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toString('base64url');
+function jetonPour(userId: string) {
+  const corps = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
+  return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
+}
+
+// Attente armée avant l'action qu'elle observe. Si le test échoue avant de l'attendre, elle est
+// rejetée à la fermeture de la page : ce rejet ne doit pas interrompre le test, ce qui ferait
+// échouer son nettoyage et masquerait l'erreur d'origine. Attendue, elle échoue comme avant.
+const armee = <T,>(attente: Promise<T>) => {
+  attente.catch(() => undefined);
+  return attente;
+};
+
+// Message de la prochaine alerte de la page, acceptée aussitôt. L'attente est bornée : sans alerte,
+// le test échoue ici plutôt qu'à l'expiration de son délai.
+const prochaineAlerte = (page: Page) => armee((async () => {
+  const alerte = await page.waitForEvent('dialog', { timeout: 15_000 });
+  const message = alerte.message();
+  await alerte.accept();
+  return message;
+})());
+
+// Prochain rechargement de la liste des comptes par la page, attente bornée comme celle des alertes.
+const rechargementListe = (page: Page) =>
+  armee(page.waitForResponse((r) => r.url().endsWith('/api/users') && r.request().method() === 'GET', { timeout: 15_000 }));
+
+// Note toutes les alertes de la page jusqu'à l'arrêt : un parcours accepté n'en affiche aucune.
+const noterAlertes = (page: Page) => {
+  const alertes: string[] = [];
+  const noter = (alerte: Dialog) => { alertes.push(alerte.message()); void alerte.accept(); };
+  page.on('dialog', noter);
+  return { alertes, arreter: () => page.off('dialog', noter) };
+};
 
 // L'écran Utilisateurs ne construit les listes de responsables qu'à la demande : au plus celle qui
 // a le focus et la dernière touchée. Proposer tous les comptes sur chaque ligne faisait croître la
@@ -105,4 +144,128 @@ test('Administration > Utilisateurs : listes de responsables construites à la d
   } finally {
     await request.patch(`${api}/users/${clavier.id}/responsable-hierarchique`, { headers, data: { responsableHierarchiqueId: null } }).catch(() => undefined);
   }
+});
+
+// #220 : un refus du serveur sur le type de compte ou la case « Commercial » est affiché, au lieu
+// d'un simple rechargement de la liste qui ramenait la valeur sans explication. Les deux refus
+// viennent d'une liste chargée avant une modification faite ailleurs ; un changement accepté
+// n'affiche rien, et un serveur injoignable est signalé.
+test('Administration > Utilisateurs : un refus du type de compte ou de la case Commercial est affiché', async ({ allerSurPageAdmin, request, session, browser }) => {
+  test.slow();
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const envoyer = async (methode: 'post' | 'patch', path: string, data: object) => {
+    const reponse = await request[methode](`${api}${path}`, { headers, data });
+    expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
+    return reponse.json();
+  };
+  const lire = async (id: string) => {
+    const comptes = await (await request.get(`${api}/users`, { headers })).json() as { id: string; role: string; estCommercial: boolean }[];
+    return comptes.find((compte) => compte.id === id);
+  };
+  const suffixe = Date.now();
+  type Compte = { id: string; name: string; email: string; role: string };
+  const creerCompte = (cle: string, role: string) => envoyer('post', '/users', { email: `refus.${cle}.${suffixe}@iris.test`, name: `Compte refus ${cle} ${suffixe}`, role }) as Promise<Compte>;
+  const changementDe = (page: Page, compte: Compte, route: 'role' | 'est-commercial') =>
+    armee(page.waitForResponse((r) => r.url().endsWith(`/api/users/${compte.id}/${route}`) && r.request().method() === 'PATCH', { timeout: 15_000 }));
+
+  // Type de compte, vu par un administrateur (non super administrateur).
+  const administrateur = await creerCompte('administrateur', 'ADMIN');
+  const promu = await creerCompte('promu', 'CONDUCTEUR_TRAVAUX');
+  const contexte = await browser.newContext();
+  try {
+    const vueAdministrateur = await contexte.newPage();
+    await vueAdministrateur.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token as string);
+      localStorage.setItem('user', user as string);
+    }, [jetonPour(administrateur.id), JSON.stringify({ ...administrateur, permissions: [] })]);
+    await vueAdministrateur.goto('/admin', { waitUntil: 'networkidle' });
+    await vueAdministrateur.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
+    const lignePromu = vueAdministrateur.locator('tr').filter({ hasText: promu.email });
+    const typePromu = lignePromu.locator('select').first();
+    await expect(typePromu).toHaveValue('CONDUCTEUR_TRAVAUX');
+
+    // Changement accepté : aucune alerte, et la liste rechargée montre le nouveau type.
+    const suivi = noterAlertes(vueAdministrateur);
+    const accepte = changementDe(vueAdministrateur, promu, 'role');
+    await typePromu.selectOption('COMPTABLE');
+    expect((await accepte).status()).toBe(200);
+    await expect(typePromu).toHaveValue('COMPTABLE');
+    suivi.arreter();
+    expect(suivi.alertes).toEqual([]);
+
+    // Serveur injoignable : signalé, puis la liste est rechargée ; le type reste celui de la base.
+    await vueAdministrateur.route(`**/api/users/${promu.id}/role`, (route) => (route.request().method() === 'PATCH' ? route.abort('failed') : route.continue()));
+    const rechargement = rechargementListe(vueAdministrateur);
+    const alerteReseau = prochaineAlerte(vueAdministrateur);
+    await typePromu.selectOption('COMMERCIAL');
+    expect(await alerteReseau).toBe('Impossible de joindre le serveur.');
+    expect((await rechargement).status()).toBe(200);
+    await expect(typePromu).toHaveValue('COMPTABLE');
+    expect((await lire(promu.id))?.role).toBe('COMPTABLE');
+    await vueAdministrateur.unroute(`**/api/users/${promu.id}/role`);
+
+    // Compte devenu super administrateur depuis le chargement de la liste : refus 403, affiché ; la
+    // liste rechargée ne montre plus ce compte, qui n'existe pas pour un administrateur, et son type
+    // reste inchangé.
+    await envoyer('patch', `/users/${promu.id}/role`, { role: 'SUPERADMIN' });
+    const alerte = prochaineAlerte(vueAdministrateur);
+    const refus = changementDe(vueAdministrateur, promu, 'role');
+    await typePromu.selectOption('COMMERCIAL');
+    expect((await refus).status()).toBe(403);
+    expect(await alerte).toBe('Seul un super administrateur peut gérer un compte super administrateur.');
+    await expect(lignePromu).toHaveCount(0);
+    expect((await lire(promu.id))?.role).toBe('SUPERADMIN');
+  } finally {
+    await contexte.close();
+    // La base E2E est conservée entre deux passages : le compte promu n'y reste pas super administrateur.
+    const retour = await request.patch(`${api}/users/${promu.id}/role`, { headers, data: { role: 'CONDUCTEUR_TRAVAUX' } });
+    expect.soft(retour.ok(), `retour du compte promu : ${await retour.text()}`).toBeTruthy();
+  }
+
+  // Case « Commercial », vue par l'accès de secours.
+  const commercial = await creerCompte('aussi-commercial', 'ADMIN');
+  const ancienAdministrateur = await creerCompte('ancien-administrateur', 'ADMIN');
+  const admin = await allerSurPageAdmin('/admin');
+  await admin.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
+  const caseCommercialDe = (compte: Compte) => admin.getByRole('checkbox', { name: `Commercial — ${compte.name}` });
+
+  // Cochée puis décochée : acceptées, sans alerte, et relues par l'API. Décocher rend l'état
+  // d'origine : un administrateur laissé « aussi commercial » serait proposé aux autres parcours.
+  const suivi = noterAlertes(admin);
+  for (const coche of [true, false]) {
+    const accepte = changementDe(admin, commercial, 'est-commercial');
+    await caseCommercialDe(commercial).click();
+    expect((await accepte).status()).toBe(200);
+    if (coche) await expect(caseCommercialDe(commercial)).toBeChecked();
+    else await expect(caseCommercialDe(commercial)).not.toBeChecked();
+    expect((await lire(commercial.id))?.estCommercial).toBe(coche);
+  }
+  suivi.arreter();
+  expect(suivi.alertes).toEqual([]);
+
+  // Serveur injoignable : signalé, puis la liste est rechargée ; la case reste celle de la base.
+  await admin.route(`**/api/users/${commercial.id}/est-commercial`, (route) => (route.request().method() === 'PATCH' ? route.abort('failed') : route.continue()));
+  const rechargement = rechargementListe(admin);
+  const alerteReseau = prochaineAlerte(admin);
+  await caseCommercialDe(commercial).click();
+  expect(await alerteReseau).toBe('Impossible de joindre le serveur.');
+  expect((await rechargement).status()).toBe(200);
+  await expect(caseCommercialDe(commercial)).not.toBeChecked();
+  expect((await lire(commercial.id))?.estCommercial).toBe(false);
+  await admin.unroute(`**/api/users/${commercial.id}/est-commercial`);
+
+  // Administrateur passé conducteur depuis le chargement de la liste : refus 400, affiché ; la liste
+  // rechargée montre le nouveau type, sans case.
+  const ligne = admin.locator('tr').filter({ hasText: ancienAdministrateur.email });
+  await expect(ligne.locator('select').first()).toHaveValue('ADMIN');
+  await expect(caseCommercialDe(ancienAdministrateur)).not.toBeChecked();
+  await envoyer('patch', `/users/${ancienAdministrateur.id}/role`, { role: 'CONDUCTEUR_TRAVAUX' });
+  const alerte = prochaineAlerte(admin);
+  const refus = changementDe(admin, ancienAdministrateur, 'est-commercial');
+  await caseCommercialDe(ancienAdministrateur).click();
+  expect((await refus).status()).toBe(400);
+  expect(await alerte).toBe('Seul un compte Administrateur peut être marqué "aussi commercial".');
+  await expect(ligne.locator('select').first()).toHaveValue('CONDUCTEUR_TRAVAUX');
+  await expect(caseCommercialDe(ancienAdministrateur)).toHaveCount(0);
+  expect((await lire(ancienAdministrateur.id))?.estCommercial).toBe(false);
 });

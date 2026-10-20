@@ -1,10 +1,17 @@
 # Iris — état et passation du développement
 
-> **État de `main` au commit `66dd476` (17-10-2026), après la PR [#161](https://github.com/Noxia-Groupe/iris/pull/161), complété par la PR [#166](https://github.com/Noxia-Groupe/iris/pull/166) (lot pilote 3a), puis par les chantiers techniques 1 et 2 jusqu'au commit `dd92bf3` (18-10-2026, découpage du serveur terminé).** État du code, pas attestation de conformité ni feu vert de production.
+> **État de `main` au commit `8d8b263` (20-10-2026), après la PR [#268](https://github.com/Noxia-Groupe/iris/pull/268).** Depuis le commit `9ab78aa` (19-10-2026) : comptes rendus et signatures d'intervention figés en base (lot 3b-1), heures du technicien sur une intervention hors contrat et leur coût visible de l'administration (lot 3b-2), compte rendu et signature dessinée au doigt dans la page, avec la règle de clôture (lot 3b-3), sommes des statistiques et du suivi des chantiers en décimal exact, aperçu de TVA d'un avoir partiel identique au document émis, double envoi du formulaire d'avoir partiel bloqué à l'écran, variables d'environnement documentées et vérifiées en CI, parcours E2E `entetes-mobile` mesuré dans une page neuve par route. État du code, pas attestation de conformité ni feu vert de production.
+>
+> Depuis le 20-10-2026, Nelson ne fusionne aucune PR : Claude Code fusionne toutes ses PR, montants et propositions compris, avec une CI verte et un audit interne fusionnable sur la même SHA ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). La mise en production reste à Nelson. PR ouvertes au 20-10-2026 :
+> - [#182](https://github.com/Noxia-Groupe/iris/pull/182) et [#183](https://github.com/Noxia-Groupe/iris/pull/183) (propositions 3 et 4, arbitrées par délégation le 18-10-2026) : rafraîchies sur `main`, réauditées, puis fusionnées par Claude Code aux conditions habituelles ; leur fusion vaut validation (« C’est toi qui fusionne TOUTES les PR », Nelson, 20-10-2026, consigné sur #182 et #183) ;
+> - [#272](https://github.com/Noxia-Groupe/iris/pull/272) (lot pilote 3b-4 : « Ma journée » et fiche intervention sur téléphone) : audit interne en cours ;
+> - [#250](https://github.com/Noxia-Groupe/iris/pull/250) (#240, pool de connexions de la modification d'un devis) : en brouillon, en pause jusqu'à la fin du pilote (règle du 19-10-2026).
+>
+> Le détail est tenu dans chaque PR, corps et commentaires.
 >
 > Avant chaque lot : relire ce document, puis vérifier le code, les tests, les issues **et leurs commentaires**. Une case non cochée ou une issue ancienne ne prouve pas une absence.
 >
-> Le détail des lots livrés (a) à (h), des décisions déjà appliquées et des constats corrigés se trouve dans [HISTORIQUE-DECISIONS.md](HISTORIQUE-DECISIONS.md).
+> Le détail des lots livrés (a) à (h), des décisions déjà appliquées et des constats corrigés se trouve dans [HISTORIQUE-DECISIONS.md](HISTORIQUE-DECISIONS.md), qui tient aussi les décisions et les lots des 18, 19 et 20-10-2026.
 
 Iris est un ERP français natif, simple pour les métiers techniques, déployé **par société sur une instance et une base propres**. Iris est la source de vérité pour clients, sites, catalogue, devis, affaires, interventions, contrats et factures. Microsoft 365, la banque et les plateformes de facturation électronique ne sont que des connecteurs. Voir la [vision produit](PRODUCT-VISION-ERP-TECHNIQUE.md), l'[architecture d'instance](ARCHITECTURE-INSTANCE-DEDIEE.md) et le [modèle de droits](MODELE-DROITS-COMPTES.md). Aucune instance n'est déclarée en production : le déploiement et la validation comptable restent des conditions de sortie, pas des tâches acquises.
 
@@ -21,7 +28,13 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - type Directeur et responsable hiérarchique (#121) ;
     - technicien sans montants ni devis (#123, #127, #128) ;
     - taux horaire et coût de main-d'œuvre réservés aux administrateurs (#134) ;
-    - journal des paramètres et des droits, onglet Administration > Journal (#133).
+    - journal des paramètres et des droits, onglet Administration > Journal (#133) ;
+    - garde-fous des comptes (règle 2), [détail](HISTORIQUE-DECISIONS.md#décisions-et-lots-des-18-et-19-10-2026) :
+      - au moins un super administrateur actif ; suppression, changement de type (hors promotion en super administrateur) et désactivation (non la réactivation) sérialisés par un verrou, en READ COMMITTED explicite (#216) ;
+      - garde des comptes super administrateurs refait sur le compte relu sous verrou ; rattachement hiérarchique sous le verrou des retraits (#224) ;
+      - suppression d'un compte et de sa fiche intervenant sans interblocage ; liaison d'une fiche sous le verrou des retraits ; READ COMMITTED explicite pour les fiches, le démarrage, les permissions et l'accès financier (#228) ;
+      - promotion `SUPERADMIN_EMAILS` du démarrage retentée une fois, échec signalé sans arrêter le serveur (#232) ;
+      - refus du changement de type de compte et de la case « Commercial » affichés dans Administration > Utilisateurs, liste rechargée (#234) ; les autres actions de l'écran restent à aligner (#239).
   - Pas encore appliqués (choix) :
     - les clés d'intégration voient encore taux et coût de main-d'œuvre ;
     - les clients désactivés restent lisibles par les comptes autres que le technicien et par les clés ;
@@ -48,6 +61,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
 - **Devis et affaire — partiel.**
   - Livré :
     - versions, signature avec empreinte, acompte constaté à la main, annulation, duplication, conversion en chantier ;
+    - duplication lue sous le verrou du devis source, dans la transaction du duplicata (#237) ;
     - lignes reprises du catalogue et copiées figées, prix d'achat prévu réservé à l'administration ;
     - devis signé figé en base (#161).
   - Absent :
@@ -58,7 +72,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
 - **Travaux : chantiers, heures, achats, rentabilité — livré, place dans le pilote en question.**
   - Livré :
     - fiche chantier, achats et heures avec journal, archivage et restauration ;
-    - suivi de rentabilité et alertes (#117), destinataires selon la hiérarchie (#121) ;
+    - suivi de rentabilité et alertes (#117), destinataires selon la hiérarchie (#121) ; sommes en décimal exact et arrondis d'affichage justes, comme dans les statistiques (#208) ;
     - ouverture depuis l'Administration et réattribution (#129), clôture par les directeurs (#128).
   - Le prix d'achat prévu des devis n'est pas repris par le chantier (question).
   - La case « Encaissé » d'un chantier reste cochée à la main par l'administration (voir Commissionnement).
@@ -73,9 +87,18 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - l'administration relie un compte technicien à sa fiche intervenant (journalisé) ;
     - la file « à planifier » du planning propose aussi les interventions curatives ;
     - le technicien ne modifie plus le planning ni les référentiels des achats, et n'a plus l'Administration.
-  - Absent : parcours technicien dédié sur téléphone (lot pilote 3b : journée, fiche intervention, compte rendu, signature au doigt, heures). Le technicien voit encore tout le planning ; choix : le limiter aux chantiers dont il est chargé (à appliquer, sans lot fixé).
+  - Livré par le lot pilote 3b, en partie ([#253](https://github.com/Noxia-Groupe/iris/issues/253)) :
+    - comptes rendus en ajout seul et signatures figées en base, vidage refusé ; une intervention qui porte un compte rendu ne se supprime plus (3b-1, #255) ;
+    - heures du technicien affecté sur une intervention hors contrat, saisies et corrigées comme sur un contrat actif, dans les coûts SAV ; l'administration voit leur coût de main-d'œuvre (« Main-d’œuvre cumulée »), le technicien ses heures sans taux ; une date d'heures future est refusée (choix par défaut, section 4 ; 3b-2, #257) ;
+    - compte rendu et signature dans la page, sans fenêtre du navigateur (3b-3, #268) :
+      - un compte rendu porte une clé d'envoi, si bien qu'un renvoi après une réponse perdue ne l'enregistre pas deux fois ;
+      - la signature se dessine au doigt ; son tracé vectoriel est borné, figé en base et inclus dans l'empreinte, et le compte qui l'enregistre est conservé ;
+      - terminer exige un compte rendu, signé ou accompagné d'un motif consigné au journal, pour tous les comptes ;
+      - compte rendu, signature et clôture se font sous le verrou de l'intervention, périmètre relu ;
+      - horodatages imposés par la base.
+  - Absent : « Ma journée » et fiche intervention sur téléphone (3b-4). Le motif d'une clôture sans signature n'est affiché dans aucun écran : il est consigné au journal SAV, réservé à l'encadrement (#269). Le technicien voit encore tout le planning : décision de Nelson du 19-10-2026, le limiter à ce dont il est chargé, dans une PR séparée après le 3b.
   - Ne pas qualifier « l'écran Travaux reste entièrement à créer » sans auditer la fiche actuelle.
-  - Les issues [#16](https://github.com/Noxia-Groupe/iris/issues/16) et [#19](https://github.com/Noxia-Groupe/iris/issues/19) restent ouvertes : comparer leurs sous-points au code avant de les replanifier.
+  - Les issues [#16](https://github.com/Noxia-Groupe/iris/issues/16) et [#19](https://github.com/Noxia-Groupe/iris/issues/19) sont fermées depuis le 16-10-2026 ; leurs reliquats sont suivis dans [#135](https://github.com/Noxia-Groupe/iris/issues/135) et [#136](https://github.com/Noxia-Groupe/iris/issues/136), ouvertes : comparer leurs sous-points au code avant de les replanifier.
 - **Contrats de maintenance — partiel.**
   - Livré : contrat cyclique, durée et couverture, avancement d'échéance, création idempotente d'une intervention à planifier par une action de l'écran (`POST`).
   - Absent : génération automatique quotidienne (lot pilote 5). Ne pas présenter la génération actuelle comme automatisée.
@@ -84,9 +107,13 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - factures numérotées et leur PDF, avoirs, écritures, ventilation de TVA ;
     - plan comptable paramétrable, import et export CSV, préparation à la facturation ;
     - règlements saisis à la main (#155) ;
-    - transactions vérifiées avant leur COMMIT (#158).
+    - transactions vérifiées avant leur COMMIT (#158) ;
+    - facture émise figée en base : lignes, ventilation de TVA, version des mentions légales, date d'émission et journal en ajout seul ; ni retour au brouillon, ni statut inconnu, ni vidage des lignes, de la ventilation, des écritures et du journal (#217) ;
+    - cycle des statuts garanti en base (décision de Nelson du 19-10-2026 ; extension à la création des pièces et aux avoirs, choix de mise en œuvre) : une facture ne s'annule qu'avec son avoir d'annulation, émis aux mêmes montants dans la même transaction ; vidage refusé sur règlements, affectations et trois journaux comptables ; insertion des écritures sans interblocage (#227) ;
+    - plafond des avoirs garanti en base : chaque avoir émis est cohérent et positif ; ensemble, les avoirs émis ne dépassent ni le HT, ni la TVA, ni le TTC de la facture, ni sa ventilation par taux ; un avoir partiel ne crédite qu'une facture émise ou réglée (#235).
+  - Pas encore garanti en base : la cohérence interne des factures émises (signes, TTC, ventilation, écritures de TVA), ni celle des lignes et des écritures des avoirs (#243).
   - Absent : facturation électronique, c'est-à-dire formats structurés, adaptateur de plateforme, statuts et e-reporting ([architecture cible](INTEGRATIONS-M365-COMPTABILITE-FACTURATION-FR.md)).
-  - Les issues [#31](https://github.com/Noxia-Groupe/iris/issues/31), [#33](https://github.com/Noxia-Groupe/iris/issues/33) et surtout [#35](https://github.com/Noxia-Groupe/iris/issues/35) mêlent des points désormais implémentés : les requalifier un par un avant toute PR.
+  - Les issues [#31](https://github.com/Noxia-Groupe/iris/issues/31) et [#33](https://github.com/Noxia-Groupe/iris/issues/33) sont fermées depuis le 16-10-2026, leur reliquat regroupé dans [#35](https://github.com/Noxia-Groupe/iris/issues/35). Celle-ci mêle des points désormais implémentés : la requalifier point par point avant toute PR.
   - Les montants et le paramétrage légal se valident par le cabinet et Nelson.
 - **Paiements, banque, télécom, financeurs — absent**, hors règlements saisis à la main (#155) et acompte constaté sur un devis.
   - Ne pas déduire une transaction bancaire d'un statut « réglée ».
@@ -121,6 +148,15 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
 - Dates du planning et de la demande curative, lues hors de `dateIsoStricte` (relevé par le huitième audit de #130, préexistant) : le planning est corrigé par #132 (lecture par `dateIsoStricte`). La demande curative n'accepte toujours que `JJ-MM-AAAA` et refuse une date-heure : choix par défaut, à confirmer, l'aligner sur les autres dates métier (lot (h)).
 - « Socket hang up » (lot (g)) : une occurrence en CI E2E de #123, puis une réinitialisation de connexion (`read ECONNRESET`, `facturation.spec.ts`) en CI E2E de #129, de cause probablement identique (non reproduite). Correctif probable livré par #131 (connexions inactives gardées 65 s par le serveur) ; à surveiller en CI.
 - Écrans `/admin` sur téléphone (#147) : pour le conducteur, `/admin` garde un bouton hors écran préexistant (suivi dans #150) ; le technicien n'a plus `/admin` depuis #166.
+- Deux conventions d'arrondi du coût de main-d'œuvre (relevé par l'audit de #208, question en section 3) : la fiche chantier somme les produits exacts puis arrondit une fois ; l'écran Heures arrondit chaque ligne au centime, et le total SAV de #257 additionne des lignes arrondies (deux lignes de 1,025 € : 1,03 € chacune et 2,06 € au total SAV, contre 2,05 € sur la fiche).
+- Périmètre des conducteurs et responsables par l'affaire ([#269](https://github.com/Noxia-Groupe/iris/issues/269), note N11 de l'audit de #268, préexistant) : depuis #268, compte rendu, signature et clôture relisent le périmètre sous le verrou de l'intervention, ce qui couvre un retrait d'affectation. Un changement du responsable de l'affaire ne prend pas ce verrou : il n'est pas sérialisé avec une écriture SAV en attente.
+- Cohérence interne des pièces émises ([#243](https://github.com/Noxia-Groupe/iris/issues/243), préexistant ; conséquence nouvelle depuis #235) : une facture écrite en SQL peut porter des montants négatifs, un TTC différent de HT + TVA ou une ventilation qui ne suit pas ses totaux, ce qui fausse le plafond des avoirs ; les lignes et les écritures d'un avoir ne sont pas comparées à sa ventilation. Depuis #235, l'annulation par l'API d'une telle facture est refusée par la base à la validation et répond 500, et non un refus métier ; aucune donnée réelle n'est concernée (règle 4). Correctif proposé dans l'issue. Nelson a tranché le 19-10-2026 : « #243 on ne refuse pas une piece a emise a montant nul » ; les contrôles de cohérence n'interdiront donc pas une facture ou un avoir émis à 0 / 0 / 0 €.
+- Parcours E2E `entetes-mobile` ([#152](https://github.com/Noxia-Groupe/iris/issues/152)) : en local, Chromium refusait les modules de Vite après une trentaine de navigations dans la même page. Depuis #249, chaque route est mesurée dans une page neuve et l'assertion nomme la route et la largeur ; les autres points de #152 restent ouverts.
+- Sécurité de la connexion, relevée par l'inventaire des variables d'environnement (#263), questions en section 3 : derrière les proxys, toutes les tentatives de l'accès de secours comptent pour une seule adresse IP, si bien qu'un tiers peut le bloquer pour tous ([#261](https://github.com/Noxia-Groupe/iris/issues/261), lié à #168 sur `proxy-addr` et `trust proxy`) ; l'autorisation Microsoft 365 repose sur l'adresse du jeton, modifiable, plutôt que sur les identifiants `oid` et `tid` ([#264](https://github.com/Noxia-Groupe/iris/issues/264)).
+- Autres suivis d'audit ouverts (étiquette `suivi-audit`) au 20-10-2026, hors ceux cités ailleurs dans ce document :
+  - règle 2 : #179 (directeur commercial, assistante commerciale et comptable écrivent dans le planning et les référentiels ; correctif attendu précisé d'après la proposition de droits, #182), #181 (réattribution du titulaire et du commercial, et case « Encaissé », non journalisées), #167 (périmètre SAV du Responsable : curatives sans chantier ouvertes par un conducteur de sa branche), #164 (montants du modèle d'un équipement du parc en chaîne, et non en nombre), #154 et #156 (règlements : avertir d'une double saisie probable ; règle du surplus connue du formulaire), #240 (`PATCH /api/devis/:id` lit les paramètres pendant sa transaction et peut épuiser le pool de connexions ; correctif #250 en pause), #247 (double envoi d'un avoir partiel : bloqué à l'écran par #251 ; reste la clé d'idempotence côté serveur, après le pilote), #252 (taux d'acompte invalide remplacé en silence), #256 (la suppression d'un compte ne compte pas ses comptes rendus d'intervention parmi les données tracées), #262 (un « + » du jeton de secours lu comme une espace dans le lien `#token=`) ;
+  - écrans : #202 à #206 (anomalies relevées en préparant le découpage, à corriger après les trois déplacements), #212 (« -0 % », « ±0 h » et couleur d'une marge nulle), #254 et #258 (formulaire d'avoir partiel : autre formulaire fermé pendant l'envoi, requête sans délai d'expiration, messages bruts du navigateur), #259 (heures affichées « 1.5 h »), #260 (cadre des coûts d'intervention retiré sur un conflit concurrent), #239 (autres actions de l'Administration : erreurs réseau et réponses non JSON mal signalées, refus sans rechargement ; le refus qui révèle un compte super administrateur relève d'un choix par défaut, section 4) ;
+  - outillage et tests : #157 (vérification des contraintes différées rendue structurelle), #162 (exception en construisant une requête de test qui bloque la suite), #160 (commentaires des commissions sans plan restés au présent), #244 (jeton de session E2E recopié dans 16 parcours), #248 (préparation des E2E : port frontend sans numéro, URL invalide ; aucune garde sur le nom de `TEST_DATABASE_URL`), #265 (test des variables d'environnement : formes indirectes restantes).
 
 ## 2. Pilote
 
@@ -134,7 +170,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 |---|---|---|
 | 1. Règlements (A3) | **Implémenté** (P1a). P1b, sur les commissions actuelles, est sans objet. | #155, garde en base renforcée par #158 ; commissions fermées par #159 |
 | 2. Catalogue dans les devis (A8) | **Implémenté** | #161 |
-| 3. Parcours technicien sur téléphone | **Partiel** : prérequis et droits (3a) implémentés ; parcours sur téléphone (3b) à faire. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a) |
+| 3. Parcours technicien sur téléphone | **Partiel** : prérequis et droits (3a) implémentés ; parcours sur téléphone (3b) en cours, 3b-1 à 3b-3 implémentés, 3b-4 à faire. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3) |
 | 4. Conversion des devis (A7) | Décidé ; place avant ou après le premier jour à confirmer (proposé : avant) | — |
 | 5. Génération automatique des visites (A9) | Décidé ; place à confirmer (proposé : avant) | — |
 | 6. Envoi des documents (A10) | Décidé ; place à confirmer (proposé : avant) | — |
@@ -155,10 +191,19 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
    - Plus tard : connexion par API, ou autrement, aux catalogues des fournisseurs.
 3. **Parcours technicien sur téléphone** : planning du jour, intervention, rapport, signature, heures, qualifiés sur téléphone.
    - **3a, prérequis et droits, implémenté par #166** : lien entre le compte technicien et sa fiche intervenant, posé par l'administration et journalisé ; file « à planifier » ouverte aux interventions curatives ; écritures hors affaire retirées au technicien (planning, types d'événement, catégories, fournisseurs, placement de sa propre intervention), planning en consultation seule, Administration fermée.
-   - **3b, parcours sur téléphone, à faire** : interventions du jour, fiche intervention (adresse, téléphone), compte rendu et signature sans fenêtres du navigateur, heures, tests à 375 px avec de vraies données.
+   - **3b, parcours sur téléphone, en cours** : interventions du jour, fiche intervention (adresse, téléphone), compte rendu et signature sans fenêtres du navigateur, heures, tests à 375 px avec de vraies données. Découpage en quatre PR ([#253](https://github.com/Noxia-Groupe/iris/issues/253)) :
+     - **3b-1, implémenté par #255** : comptes rendus en ajout seul et signatures figées en base (#223) ;
+     - **3b-2, implémenté par #257** : heures du technicien sur une intervention hors contrat ;
+     - **3b-3, implémenté par #268** : compte rendu et signature dessinée, sans fenêtres du navigateur ; tracé, enregistreur, verrous, journal, protection contre le double envoi ; règle de clôture ;
+     - **3b-4, à faire** : « Ma journée » et fiche intervention sur téléphone, E2E à 375 px avec de vraies données.
    - Décisions de Nelson du 17-10-2026 :
-     - le technicien saisit aussi ses heures sur une intervention SAV hors contrat. Une telle intervention est payante ; elle peut passer par un devis, au forfait ou au temps passé. Au temps passé, une heure au moins est facturée, et toute heure commencée est due (règle de facturation, à appliquer avec le devis et la facture d'intervention ; placement proposé, à confirmer : lot 4 ou suivant) ;
-     - la signature du client se dessine au doigt, en plus du nom et de l'acceptation explicite.
+     - le technicien saisit aussi ses heures sur une intervention SAV hors contrat (**implémenté** par #257). Une telle intervention est payante ; elle peut passer par un devis, au forfait ou au temps passé. Au temps passé, une heure au moins est facturée, et toute heure commencée est due (règle de facturation, à appliquer avec le devis et la facture d'intervention ; placement proposé, à confirmer : lot 4 ou suivant) ;
+     - la signature du client se dessine au doigt, en plus du nom et de l'acceptation explicite (**implémenté** par #268).
+   - Décisions de Nelson du 19-10-2026 (#253), chaque fois sur l'option recommandée :
+     - terminer une intervention exige un compte rendu signé ; à défaut, un motif est choisi (client absent, refus de signer, signature impossible, autre) et consigné au journal. Précisé le 20-10-2026 : un compte rendu est toujours exigé, seule la signature peut être remplacée par le motif ; le motif « autre » exige une précision écrite courte ; la règle vaut pour le technicien comme pour l'encadrement. **Implémenté** par #268 ;
+     - les heures du technicien hors contrat vont dans les coûts SAV, en durée brute sans arrondi, sans effet sur la marge des chantiers ; l'administration voit leur coût de main-d'œuvre (**implémenté** par #257, libellé « Main-d’œuvre cumulée » validé le 20-10-2026) ;
+     - la signature dessinée est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé (**implémenté** par #268) ; durée de conservation à confirmer avec le cabinet ;
+     - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**à appliquer**).
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent.
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
@@ -231,18 +276,23 @@ Depuis le 16-10-2026, l'ordre suit le pilote : voir le tableau des lots ci-dessu
 Quatre chantiers techniques, chacun dans sa ou ses PR, selon les règles habituelles, dans l'ordre décidé : 1, puis 2, puis 3 et 4 en proposition seulement.
 1. **Dépendance `xlsx`** : déclarée par le serveur sans être utilisée, et visée par des avis de sécurité. **Implémenté** : retirée par #175. Les autres failles relevées par `npm audit` font chacune l'objet d'une issue, de #168 à #174 (ouvertes).
 2. **Découpage de `server/index.ts` par domaine**, sans aucun changement de comportement : mêmes routes, réponses, codes et messages d'erreur, transactions, verrous et contraintes différées.
-   - **Serveur : implémenté**, en 14 PR fusionnées : #177 (socle), #184 (outils de preuve), puis #185, #187, #189 à #197 et #199. `server/index.ts`, qui comptait environ 8 000 lignes et enregistrait les 198 routes, n'est plus que le point d'entrée (204 lignes) : bibliothèques et `.env`, réglages et middlewares globaux, appels des fonctions d'enregistrement dans l'ordre d'origine, démarrage, exports lus par les tests. Les routes et la logique sont dans `server/src/`, rangées par domaine ([server/src/README.md](../server/src/README.md)). Le plus gros fichier de code applicatif du serveur compte 502 lignes.
+   - **Serveur : implémenté**, en 14 PR fusionnées : #177 (socle), #184 (outils de preuve), puis #185, #187, #189 à #197 et #199. `server/index.ts`, qui comptait environ 8 000 lignes et enregistrait les 198 routes, n'est plus que le point d'entrée (204 lignes à la fin du découpage) : bibliothèques et `.env`, réglages et middlewares globaux, appels des fonctions d'enregistrement dans l'ordre d'origine, démarrage, exports lus par les tests. Les routes et la logique sont dans `server/src/`, rangées par domaine ([server/src/README.md](../server/src/README.md)). Le plus gros fichier de code applicatif du serveur comptait alors 502 lignes ; `server/src/domaines/utilisateurs/comptes.ts` en compte 576 depuis les garde-fous des comptes (#216, #224, #228).
    - Preuves :
      - le vérificateur par instruction (`server/scripts/verifier-deplacement.mjs`), rejoué par la CI, s'applique depuis #184 aux PR qui déplacent du code : il retrouve chaque instruction de la base à l'identique et dans l'ordre. Pour #177, une première version, ligne à ligne, a été complétée par un contrôle octet pour octet de l'audit ;
      - `server/scripts/routes.mjs --verifier` compare les routes, gardes, middlewares, exports et lectures de l'environnement à une référence écrite avant le découpage ;
      - les suites API et E2E ont été passées deux fois pour #177 et pour #185 à #199, sans aucun test modifié ;
      - chaque PR a eu un audit indépendant, avec une comparaison entre la base et la PR à l'exécution : droits (#185), journal (#187), différentiel HTTP de #189 à #199 ; au niveau de rigueur maximal pour #195 à #199 (factures, règlements, comptabilité, commissions, démarrage).
-   - Suivi : #186 et #188 (renforcer les outils de preuve, label suivi-audit) ; #198 (sommes en flottants des statistiques, question plus bas).
-   - **Écrans du client : prévu.** `ChantierDetail.tsx`, `Admin.tsx` et `Planning.tsx` dépassent encore 800 lignes. La proposition de découpage, par déplacement pur avec un outil de comparaison du rendu, est soumise à Nelson (#200), à valider avant tout code.
-3. **Droits flexibles et simples à paramétrer** : proposition [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), avec son [inventaire](MODELE-DROITS-INVENTAIRE.md) (permissions élémentaires, périmètres, rôles paramétrables, hiérarchie facultative, modèles « petite équipe » et « équipe avec hiérarchie », migration rôle par rôle à comportement identique). Questions ouvertes arbitrées le 18-10-2026 par délégation de Nelson (section 10 du document). Parcours de droits : règle 2. **Prévu** : rien n'est implémenté. Lot D0 en premier : défauts relevés par l'inventaire, #178 à #181, chacun dans sa PR.
-4. **Paramétrage plutôt que règles en dur** : proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md), avec son [inventaire](PARAMETRAGE-INVENTAIRE.md) (inventaire des règles classées en déjà paramétrables, à rendre paramétrables, ou à garder dans le code ; assistant de démarrage dans Paramètres). Aucune valeur métier inventée. Questions ouvertes arbitrées le 18-10-2026 par délégation de Nelson (section 6 du document). **Prévu** : rien n'est implémenté. Lot P0 au plus tôt.
+   - Suivi : #186 et #188 (renforcer les outils de preuve, étiquette `suivi-audit`) ; #198 (sommes en flottants des statistiques), tranchée par Nelson le 18-10-2026, corrigée par #208.
+   - **Écrans du client : partiel.** Proposition [DECOUPAGE-ECRANS-CIBLE.md](DECOUPAGE-ECRANS-CIBLE.md) (#200) : déplacement pur, état laissé dans la page, fichiers à plat dans `components/` ; principe validé par Nelson le 18-10-2026.
+     - Outil de comparaison du rendu : implémenté (#209, `npm run comparer:rendu`, 79 étapes) ; il n'est pas lancé par la CI, chaque PR de découpage joint son relevé.
+     - PR A, Planning : implémentée (#213), `Planning.tsx` passe de 873 à 406 lignes.
+     - PR B, Administration : implémentée (#214), `Admin.tsx` passe de 1 477 à 684 lignes (698 depuis #234).
+     - PR C, fiche chantier : à faire. #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée ; l'écran compte 1 479 lignes et reste le seul au-delà de 800. La PR C vient après le lot pilote 3b (règle du pilote du 19-10-2026, ordre choisi par Claude Code).
+     - Anomalies relevées, une issue chacune (#202 à #206) : à corriger après les trois déplacements, chacune dans sa PR.
+3. **Droits flexibles et simples à paramétrer** : proposition [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), avec son [inventaire](MODELE-DROITS-INVENTAIRE.md) (permissions élémentaires, périmètres, rôles paramétrables, hiérarchie facultative, modèles « petite équipe » et « équipe avec hiérarchie », migration rôle par rôle à comportement identique). Questions ouvertes arbitrées le 18-10-2026 par délégation de Nelson (section 10 du document). Proposition validée par sa fusion (#182), selon la décision de Nelson du 20-10-2026 (« C’est toi qui fusionne TOUTES les PR »). Parcours de droits : règle 2. Modèle cible (D1 à D4) **prévu**, rien n'en est implémenté. Lot D0 **partiel**, une PR par défaut relevé par l'inventaire : #178 et #180 corrigés (#216, #217), #179 et #181 ouverts, placés selon la règle du pilote du 19-10-2026.
+4. **Paramétrage plutôt que règles en dur** : proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md), avec son [inventaire](PARAMETRAGE-INVENTAIRE.md) (inventaire des règles classées en déjà paramétrables, à rendre paramétrables, ou à garder dans le code ; assistant de démarrage dans Paramètres). Aucune valeur métier inventée. Questions ouvertes arbitrées le 18-10-2026 par délégation de Nelson (section 6 du document). Proposition validée par sa fusion (#183), selon la décision de Nelson du 20-10-2026 (« C’est toi qui fusionne TOUTES les PR »). **Prévu** : rien n'est implémenté. Lot P0 placé selon la règle du pilote du 19-10-2026.
 
-Deux règles permanentes de conception sont ajoutées le même jour à [CLAUDE.md](../CLAUDE.md#règles-permanentes-de-conception-décision-de-nelson-du-17-10-2026) et à [AGENTS.md](../.agents/AGENTS.md) : une nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée ; aucun fichier de code applicatif ne dépasse environ 800 lignes.
+Deux règles permanentes de conception sont ajoutées le même jour à [CLAUDE.md](../CLAUDE.md#règles-permanentes-de-conception-décision-de-nelson-du-17-10-2026) et à [AGENTS.md](../.agents/AGENTS.md) : une nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée ; aucun fichier de code applicatif ne dépasse environ 800 lignes. Une troisième, sur les variables d'environnement toujours documentées, s'y ajoute le 20-10-2026 (consigne de Nelson : CLAUDE.md par #263, AGENTS.md par la PR documentaire du 20-10-2026).
 
 ## 3. Questions ouvertes pour Nelson
 
@@ -255,7 +305,6 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 - **Lot (i), changement de plan** (montants) : la date qui compte pour une affaire est-elle celle de la commande ou celle du fait générateur ? Si le fait générateur est la commande, le commercial doit-il être connu dès le devis (il ne se fixe aujourd'hui que sur le chantier) ?
 - **Acompte et encaissé** (montants, lot pilote 1) : l'acompte constaté sur un devis (`Devis.acompteMontant`, `acompteRecuLe`), rattaché à aucune facture, entre-t-il dans le reste dû des factures de l'affaire ? À quel moment une affaire devient-elle « encaissée » pour la commission : toutes ses factures réglées, ou un autre seuil ?
 - **Commissions récurrentes** (montants, lots (i) et (k)) : le mode décidé le 14-10-2026 (activable, « en développé » ou à la prise de commande, en nombre de mois ou en pourcentage du montant mensuel) se règle-t-il dans le plan ou dans les paramètres généraux ?
-- **Statistiques, sommes en flottants** (#198, montants) : certaines sommes des tableaux de bord et du résultat commercial dépendent, au dernier chiffre, de l'ordre dans lequel PostgreSQL rend les lignes. Le comportement existait avant le découpage. Faut-il le traiter (ordre déterministe ou calcul en centimes), sachant que les derniers chiffres de montants affichés pourraient changer ?
 - **Lot (d), marge du commercial** (montants) : sans être destinataire de la rentabilité, le commercial retrouve le coût de main-d'œuvre de ses affaires par la marge de chaque chantier de ses statistiques, qui sert de base à sa commission. L'accepter, ou réserver cette marge par chantier aux administrateurs ?
 - **Lot (d), approche par essais successifs** (montants) : l'alerte de dépassement de main-d'œuvre, avec le droit de corriger des heures, permet d'approcher le coût de main-d'œuvre d'un chantier par essais successifs, tracés au journal. Elle reste affichée à un titulaire, ou à un compte Responsable de sa branche, à qui la société a retiré la rentabilité (réglage des destinataires de la rentabilité). L'accepter, ou réserver cette alerte aux destinataires de la rentabilité ? Limite relevée par #134, restée à arbitrer.
 - **Augmentation automatique des abonnements et locations (lot (k))** : quel calcul « habituel » proposer par défaut (indice de révision, et lequel, ou pourcentage fixe) ? Il touche les montants : Iris n'en invente pas.
@@ -263,6 +312,9 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 - **API des financeurs (lot (k))** : périmètre de l'intégration Grenke (simulations seules, ou aussi les dossiers), à préciser quand le lot démarre.
 - **Sélection des clients (#139)** : Factures et Devis doivent-ils passer au sélecteur commun `SelecteurClient` (leur liste initiale est tronquée à 200 sans le dire), et les sélecteurs recevoir une réponse allégée, sans contacts ni sites ? Points restés à arbitrer depuis #139 ; s'il s'agit d'un micro-arbitrage d'affichage (règle 5), il sera tranché dans la PR qui les traite.
 - **Mentions légales, date de republication** : republier une ancienne version des mentions ne lui donne pas de nouvelle date de publication (`publieeLe` n'est fixé qu'à la première publication). Faut-il la dater ? L'auteur de la création et de la publication fait déjà l'objet d'un choix par défaut (section 4) ; ce trou-ci n'en a pas.
+- **Arrondi du coût de main-d'œuvre** (montants, relevé par l'audit de #208) : la fiche chantier somme les produits exacts puis arrondit une fois, alors que l'écran Heures arrondit chaque ligne au centime et que le total SAV de #257 additionne des lignes arrondies. Quelle convention retenir partout ?
+- **Sécurité de la connexion (#261, #264)** : faut-il corriger avant la fin du pilote, malgré la règle du 19-10-2026, le blocage commun de l'accès de secours derrière les proxys (#261) et l'autorisation Microsoft 365 fondée sur l'adresse plutôt que sur `oid` et `tid` (#264) ? Les deux touchent la sécurité (règle 2).
+- **Signature dessinée** : durée de conservation du tracé, à confirmer avec le cabinet (décision du 19-10-2026).
 - **Catalogue dans les devis (lot pilote 2, #161)** :
   - (montants) le prix d'achat prévu des lignes de devis doit-il alimenter le chantier ouvert (budget matériel prévu, marge estimée), à la place de la moyenne des chantiers terminés ?
   - (montants) les heures vendues d'un chantier additionnent la quantité des lignes de main-d'œuvre, quelle que soit leur unité : une prestation au forfait y compte pour une heure. Convertir par la durée indicative de la fiche, ne compter que les lignes à l'heure, ou garder ce calcul ?
@@ -281,6 +333,7 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
   - Les règlements, réservés à l'administration (lot pilote 1), restent possibles pour un client désactivé.
   - **À appliquer**, sauf pour le technicien (#128) et pour les règlements (#155).
 - Clé d'intégration : elle expire au début du jour civil indiqué. **À appliquer** : l'échéance est lue telle quelle.
+- Compte devenu super administrateur entre-temps : un simple administrateur qui agit dessus reçoit aujourd'hui « Seul un super administrateur peut gérer un compte super administrateur. », qui lui révèle un compte masqué dans sa liste. Option la plus restrictive : lui répondre « Utilisateur introuvable. », comme la liste. **À appliquer** (#239).
 - Clôture : un conducteur ne clôture pas l'affaire d'un technicien ; un Responsable ne clôture pas les chantiers des conducteurs de sa branche. **Appliqué** (#123, #128). C'est aussi la lecture retenue, à confirmer par Nelson, de sa réponse du 14-10-2026 : l'affaire d'un technicien est clôturée par l'administration, les comptes Responsable dont la branche contient le technicien et les directeurs ; dans une chaîne technicien → conducteur sans compte Responsable, seuls les directeurs et l'administration la clôturent.
 
 **Technicien**
@@ -289,13 +342,23 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Son affaire n'est modifiable que par l'administration. **Appliqué** (#123).
 - Aucun accès financier : déduction de #123 (aucun montant), à confirmer. **Appliqué** (#123).
 - Ses écritures hors affaire (planning, catégories, fournisseurs) lui sont retirées au lot du parcours technicien. **Appliqué** (#166), y compris le placement de sa propre intervention : il ne replanifie pas et ne change pas les intervenants de son dossier. Il garde la lecture du planning et des référentiels, et n'a plus l'Administration.
-- Seul un compte technicien actif, relié à aucune autre fiche, se relie à une fiche intervenant. Un compte qui quitte ensuite le type technicien perd sa fiche (déliée et journalisée dans la même transaction) : par ses affectations, elle lui ouvrirait les interventions avec les écritures de son nouveau type. Un changement de type simultané à une liaison de ce compte est refusé (409), à refaire. Un compte désactivé garde sa fiche, sans pouvoir se connecter. Un simple administrateur ne touche pas à la fiche d'un compte super administrateur. **Appliqué** (#166).
+- Seul un compte technicien actif, relié à aucune autre fiche, se relie à une fiche intervenant. Un compte qui quitte ensuite le type technicien perd sa fiche (déliée et journalisée dans la même transaction) : par ses affectations, elle lui ouvrirait les interventions avec les écritures de son nouveau type. La liaison se sérialise avec le changement de type et la suppression du compte (#228) ; seule une promotion super administrateur simultanée à une liaison est refusée (409), à refaire. Un compte désactivé garde sa fiche, sans pouvoir se connecter. Un simple administrateur ne touche pas à la fiche d'un compte super administrateur. **Appliqué** (#166, #228).
 - Une intervention curative placée depuis la file reçoit une durée proposée de 60 minutes, modifiable avant de confirmer. **Appliqué** (#166).
-- Terminer une intervention reste possible sans compte rendu signé (client absent, par exemple). **Appliqué** (état actuel), à revoir au lot 3b.
 - Le mode hors ligne (zone sans réseau) reste hors du lot pilote 3.
-- Son planning est limité aux chantiers dont il est chargé. **À appliquer**.
 - Sur une intervention qui lui est affectée, il garde le nom du client, l'adresse du site et le téléphone du contact, même désactivés : sans eux, il ne peut pas réaliser l'intervention qu'on lui confie. C'est une exception justifiée à l'option la plus restrictive ; la fiche du client désactivé lui reste fermée. **Appliqué** (état actuel).
 - Un compte qui quitte le type technicien perd son droit individuel de lecture des clients. **À appliquer**.
+
+**Lot pilote 3b** (#253 ; la règle de clôture et le planning limité sont des décisions de Nelson, section 2)
+- Un compte rendu est figé dès son enregistrement : une correction passe par un compte rendu complémentaire. La signature est figée à sa création et reste possible après « Terminée ». **Appliqué** : figement en base par #255 ; signature après « Terminée » : état actuel de la route.
+- Une date d'heures postérieure au jour de la société est refusée (400), en saisie comme en correction, y compris sur les interventions de contrat. **Appliqué** (#257).
+- « Interventions du jour » : le jour civil de la société, calculé par le serveur ; planifiées et en cours triées par créneau, terminées du jour en bas, rubrique des interventions restées ouvertes les jours précédents, annulées exclues ; navigation jour précédent et jour suivant. **À appliquer** (3b-4).
+- Le client signe le compte rendu seul ; l'attestation des heures se reverra avec la facturation au temps passé (lot 4 ou suivant). **Appliqué** (#268).
+- Tracé de la signature borné à 50 traits et 2 000 points, proportions de la zone entre 0,5 et 10 ; une signature ordinaire compte quelques centaines de points. **Appliqué** (#268).
+- Précision du motif « Autre » : 3 à 200 caractères, comptés en points de code. **Appliqué** (#268) par l'API ; le champ de l'écran limite encore la saisie à 200 unités UTF-16, soit 100 emoji (#269, N-f).
+- Une clôture avec au moins un compte rendu signé, même si un complément ne l'est pas, ne demande pas de motif, et un motif donné est refusé (409). **Appliqué** (#268).
+- L'encadrement ajoute un compte rendu et fait signer depuis l'écran, comme l'API le permettait déjà ; la règle de clôture vaut pour lui. **Appliqué** (#268).
+- Un compte rendu hors d'une intervention en cours est refusé par 409 avec un message, au lieu de 404. **Appliqué** (#268).
+- L'accueil du technicien mène à « Ma journée ». Adresse affichée : celle du site, à défaut celle du chantier ; téléphone : celui du contact. **À appliquer** (3b-4).
 
 **Journal des paramètres et des droits** (lot (a), #133)
 - L'auteur de la création et de la publication des mentions légales, et la création des comptes comptables, sont journalisés. **À appliquer**.
@@ -352,6 +415,10 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 
 **Règles permanentes de conception** (décision du 17-10-2026), **appliqué** par #176 : la limite d'environ 800 lignes ne s'applique ni aux fichiers de tests, ni aux migrations, ni aux fichiers générés (lockfiles, client Prisma), ni au schéma Prisma, que Prisma 5 ne scinde qu'avec une fonction en préversion.
 
+**Avoir partiel** (#251) : après une issue inconnue de la création (réponse perdue, erreur serveur), l'écran relit la liste des factures ; si cette relecture échoue aussi, le bouton reste désactivé avec la consigne d'actualiser la liste, jusqu'à une relecture réussie (option la plus restrictive). **Appliqué** (#251).
+
+**Variables d'environnement** (#263) : `server/tests/environnement.test.mjs` relève dans le texte des sources les variables lues, exception documentée à la règle « un test appelle le code » de `server/tests/README.md`. **Appliqué** (#263).
+
 **Envoi des documents** (lot pilote 6) : journal des envois, choix par défaut, à confirmer, à préciser dans la PR du lot.
 
 ## 5. Préalables à la mise en service et contrat d'une PR
@@ -359,6 +426,8 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 ### Contrat d'une PR et critères de sortie
 
 Une PR doit annoncer : besoin et acteur, état du système avant/après, dépendances, périmètre/hors périmètre, droits API et UI, effets sur les montants et documents figés, migrations éventuelles et retour arrière, critères d'acceptation vérifiables. Les remarques d'audit suivent la méthode du 16-10-2026 ([CLAUDE.md](../CLAUDE.md#méthode-de-travail-décision-de-nelson-du-16-10-2026)) : une remarque bloquante, ou qui touche un parcours de la règle 2 (droits et périmètres, montants, factures et documents figés, journaux d'audit, sécurité), est corrigée et retestée avant fusion ; une remarque non bloquante ailleurs devient une issue `suivi-audit` ; si le périmètre métier change, demander l'arbitrage de Nelson. Les tests doivent échouer quand la protection visée est neutralisée ; faire tourner la vraie API/PostgreSQL et le navigateur pour les parcours critiques. Voir [CLAUDE.md](../CLAUDE.md) et [les règles Git](../.agents/AGENTS.md).
+
+Fusion : décision de Nelson du 20-10-2026 ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)), qui remplace la délégation du 17-10-2026. Nelson ne fusionne aucune PR : Claude Code fusionne toute PR de Claude Code, y compris celles qui changent des montants ou modifient CLAUDE.md, lorsque, sur la même SHA, la CI est verte et son sous-agent d'audit la juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 ; par commit de fusion sur la SHA de tête attendue, jamais par la fusion automatique de GitHub. Elle couvre aussi les propositions 3 et 4 (#182, #183), dont la fusion vaut validation : « C’est toi qui fusionne TOUTES les PR » (Nelson, 20-10-2026, consigné sur #182 et #183). Une fusion, quelle qu'elle soit, ne vaut ni validation comptable des montants, qui reste un préalable à la mise en service, ni mise en production, que seul Nelson décide. Lots fusionnés : [historique](HISTORIQUE-DECISIONS.md).
 
 La phase est **livrée techniquement** lorsque ses sous-lots définis sont fusionnés, migrables depuis une base jetable vierge, testés, documentés et validés par leur CI/revue sur la SHA finale. Elle n'est **prête à être activée chez un client** qu'après validation de ses paramètres propres à l'instance, de la sécurité, des documents légaux/comptables et de la recette avec les acteurs concernés. Elle n'est **en production** qu'après décision explicite de Nelson et preuve du déploiement, de la sauvegarde/restauration et de la surveillance opérationnelle.
 

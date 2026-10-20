@@ -6,7 +6,8 @@
 // Sans elle, la suite s'annonce ignorée : mieux vaut un « skip » visible qu'un vert obtenu
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { cpus } from 'node:os';
 import test, { after, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
 
@@ -45,6 +46,17 @@ if (!TEST_DATABASE_URL) {
   const { PrismaClient } = await import('@prisma/client');
   const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
+  // Lot 3b-3 : terminer une intervention exige un compte rendu, signé par le client ou accompagné
+  // d'un motif. Les tests qui ne portent pas sur cette règle terminent avec un compte rendu et le
+  // motif « client absent ».
+  const TRACE_SIGNATURE_TEST = { ratio: 2, traits: [[[0.1, 0.6], [0.25, 0.3], [0.4, 0.7], [0.6, 0.35]]] };
+  const ajouterCompteRendu = (interventionId, jeton, contenu = 'TEST Compte rendu de clôture.') => request(app)
+    .post(`/api/interventions/${interventionId}/rapports`).set('Authorization', `Bearer ${jeton}`).send({ contenu, cleEnvoi: randomUUID() });
+  const terminerIntervention = async (interventionId, jeton) => {
+    const compteRendu = await ajouterCompteRendu(interventionId, jeton);
+    assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+    return request(app).patch(`/api/interventions/${interventionId}/statut`).set('Authorization', `Bearer ${jeton}`).send({ statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+  };
   // Fixtures historiques : leurs transitions restent motivées, même hors HTTP.
   const auteurFixture = async tx => tx.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
   const regleFixture = async (cle, compteId, db = prisma) => {
@@ -110,18 +122,22 @@ if (!TEST_DATABASE_URL) {
     const compte = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
     await tvaFixture(5.5, compte.id);
   };
-  const purgerEcrituresJetables = async id => {
-    try {
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_immutable"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre_immediat"');
-      await prisma.ecritureFacture.deleteMany({ where: { factureId: id } });
-    } finally {
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre_immediat"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_immutable"');
-    }
-  };
+
+  // Lignes, journal et écritures d'une pièce émise sont figés en base : seul le nettoyage de la base
+  // jetable les purge, gardes suspendus le temps d'une transaction (un arrêt en cours de route ne
+  // peut pas les laisser désactivés).
+  const GARDES_PIECE = [['FactureLigne', 'facture_ligne_figee'], ['JournalFacture', 'journal_facture_ajout_seul'], ['EcritureFacture', 'ecriture_facture_immutable'], ['EcritureFacture', 'ecriture_facture_equilibre'], ['EcritureFacture', 'ecriture_facture_equilibre_immediat']];
+  const sansGardesPiece = (operations) => prisma.$transaction([
+    ...GARDES_PIECE.map(([table, garde]) => prisma.$executeRawUnsafe(`ALTER TABLE "${table}" DISABLE TRIGGER "${garde}"`)),
+    ...operations,
+    ...GARDES_PIECE.map(([table, garde]) => prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ENABLE TRIGGER "${garde}"`)),
+  ]);
+  const purgerPieceJetable = (id) => sansGardesPiece([
+    prisma.journalFacture.deleteMany({ where: { factureId: id } }),
+    prisma.factureLigne.deleteMany({ where: { factureId: id } }),
+    prisma.ecritureFacture.deleteMany({ where: { factureId: id } }),
+    prisma.facture.deleteMany({ where: { id } }),
+  ]);
 
   let cleApi = '';
 
@@ -141,23 +157,27 @@ if (!TEST_DATABASE_URL) {
     await prisma.devis.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Le parc dépend à la fois du client/site et du catalogue : il part donc en premier.
     await prisma.equipementInstalle.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
-    // Les attestations dépendent des rapports ; elles partent avant les interventions.
-    await prisma.interventionSignature.deleteMany({ where: { rapport: { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } } } });
+    // Comptes rendus et attestations d'intervention sont figés en base (#223) et retiennent leur
+    // intervention : la base jetable les purge avant les interventions, gardes suspendus le temps
+    // d'une transaction (un arrêt en cours de route ne peut pas les laisser désactivés).
+    const rapportsDeTest = { intervention: { client: { raisonSociale: { startsWith: 'TEST ' } } } };
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe('ALTER TABLE "InterventionSignature" DISABLE TRIGGER "intervention_signature_figee"'),
+      prisma.$executeRawUnsafe('ALTER TABLE "InterventionRapport" DISABLE TRIGGER "intervention_rapport_ajout_seul"'),
+      prisma.interventionSignature.deleteMany({ where: { rapport: rapportsDeTest } }),
+      prisma.interventionRapport.deleteMany({ where: rapportsDeTest }),
+      prisma.$executeRawUnsafe('ALTER TABLE "InterventionRapport" ENABLE TRIGGER "intervention_rapport_ajout_seul"'),
+      prisma.$executeRawUnsafe('ALTER TABLE "InterventionSignature" ENABLE TRIGGER "intervention_signature_figee"'),
+    ]);
     // Les interventions SAV portent éventuellement un site/contact : elles partent avant
     // ces fiches afin de respecter les clés étrangères RESTRICT.
-    // Les snapshots ont une FK RESTRICT et sont append-only : purge uniquement sur la base jetable.
-    try {
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_immutable"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" DISABLE TRIGGER "ecriture_facture_equilibre_immediat"');
-      await prisma.ecritureFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
-    } finally {
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre_immediat"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_equilibre"');
-      await prisma.$executeRawUnsafe('ALTER TABLE "EcritureFacture" ENABLE TRIGGER "ecriture_facture_immutable"');
-    }
-    await prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
-    await prisma.journalFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } });
+    // Les snapshots ont une FK RESTRICT et sont append-only, comme les lignes et le journal des
+    // pièces émises : purge uniquement sur la base jetable.
+    await sansGardesPiece([
+      prisma.ecritureFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } }),
+      prisma.factureLigne.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } }),
+      prisma.journalFacture.deleteMany({ where: { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } } }),
+    ]);
     // Les règlements sont immuables par trigger : seul ce nettoyage de base jetable les purge,
     // avant leurs factures et leurs clients de test.
     try {
@@ -252,7 +272,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.course.cle@iris.test', 'sav.verrou.annulation@iris.test', 'sav.verrou.affectation@iris.test', 'sav.journee@iris.test', 'sav.journee.collegue@iris.test', 'sav.journee.fuseau@iris.test', 'sav.journee.conducteur@iris.test', 'sav.journee.responsable@iris.test', 'sav.journee.tiers@iris.test', 'sav.journee.directeur@iris.test', 'sav.journee.equipe@iris.test', 'sav.fiche@iris.test', 'sav.fiche.collegue@iris.test', 'sav.fiche.commercial@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
@@ -261,8 +281,11 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
-      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test',
+      'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
+      'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
+      'garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
+      ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
       ...Array.from({ length: 15 }, (_, i) => `pilote3.supprtype.${i}@iris.test`),
     ];
@@ -275,6 +298,9 @@ if (!TEST_DATABASE_URL) {
   before(async () => {
     await initDb();
     await ensureSuperAdmins();
+    // Le test du dernier super administrateur désactive le compte de secours le temps d'un test :
+    // une exécution interrompue ne doit pas le laisser désactivé (le démarrage promeut sans réactiver).
+    await prisma.user.update({ where: { email: 'secours@iris.test' }, data: { actif: true } });
     // Une exécution précédente interrompue a pu laisser des enregistrements : on part
     // toujours d'un état propre, sinon la suite n'est rejouable qu'une fois.
     await nettoyer();
@@ -695,6 +721,94 @@ if (!TEST_DATABASE_URL) {
         await prisma.chantier.deleteMany({ where: { id: { in: chantierIds } } });
         await prisma.user.delete({ where: { id: commercial.id } });
       }
+    }
+  });
+
+  // #198 : les sommes de montants, d'heures et de coûts sont exactes, quel que soit l'ordre des
+  // lignes. En nombres à virgule, 0,10 + 0,20 + 0,30 vaut 0,6000000000000001 : un matériel
+  // égal au budget de 0,60 € passait « dépassé », et un total affiché pouvait s'écarter d'un
+  // centime, donc d'un euro une fois arrondi.
+  test('montants exacts : sommes au centime près dans la fiche chantier et les statistiques (#198)', async () => {
+    const login = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+    assert.equal(login.status, 200);
+    const auth = { Authorization: `Bearer ${login.body.token}` };
+    const ancienParametres = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+    const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true } });
+    let chantier = null, fournisseur = null, categorie = null, intervenant = null, conducteur = null;
+    try {
+      assert.equal((await request(app).put('/api/parametres').set(auth).send({ margeCommercialeActive: true })).status, 200);
+      fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur centimes ${suffixe}` } });
+      categorie = await prisma.categorie.create({ data: { nom: `TEST Catégorie centimes ${suffixe}` } });
+      intervenant = await prisma.intervenant.create({ data: { nom: `TEST Intervenant centimes ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 1 } });
+      conducteur = await prisma.user.create({ data: { email: `centimes.${suffixe}@iris.test`, name: `TEST Conducteur centimes ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' } });
+      // Vendu exactement ce qui est dépensé : 0,60 € de matériel, 0,60 h, 0,60 € de main-d'œuvre.
+      chantier = await prisma.chantier.create({ data: {
+        nom: `TEST Centimes ${suffixe}`, client: 'TEST Client centimes', dateDebut: new Date(), responsableId: conducteur.id,
+        budgetGlobalVendu: 10, budgetMaterielVendu: 0.6, budgetMainOeuvreVendu: 0.6, heuresVendues: 0.6,
+      } });
+      const date = new Date();
+      for (const valeur of [0.1, 0.2, 0.3]) {
+        await prisma.achatReel.create({ data: {
+          date, fournisseurId: fournisseur.id, categorieId: categorie.id, chantierId: chantier.id, description: `TEST achat ${valeur}`,
+          montantHT: valeur, createdById: auteur.id, updatedById: auteur.id,
+        } });
+        await prisma.pointageHeure.create({ data: {
+          date, intervenantId: intervenant.id, chantierId: chantier.id, nbrHeures: valeur, tauxHoraireApplique: 1,
+          createdById: auteur.id, updatedById: auteur.id,
+        } });
+      }
+
+      const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(auth);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      const m = fiche.body.metrics;
+      assert.deepEqual(
+        [m.materielReel, m.heuresRealisees, m.moReel, m.totalDepenses, m.diffHeures, m.margeCommerciale],
+        [0.6, 0.6, 0.6, 1.2, 0, 8.8],
+        'totaux exacts',
+      );
+      for (const alerte of ['MATERIEL_DEPASSE', 'HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE']) {
+        assert.ok(!m.alertes.includes(alerte), `aucune alerte ${alerte} à budget exactement consommé`);
+      }
+
+      const ref = jourCivilEntreprise(date);
+      const fournisseurs = await request(app).get('/api/stats/fournisseurs').query({ period: 'month', ref }).set(auth);
+      assert.equal(fournisseurs.status, 200, JSON.stringify(fournisseurs.body));
+      const ligneFournisseur = (fournisseurs.body.fournisseurs ?? fournisseurs.body).find((f) => f.id === fournisseur.id);
+      assert.deepEqual([ligneFournisseur.total, ligneFournisseur.nbAchats], [0.6, 3]);
+      const intervenants = await request(app).get('/api/stats/intervenants').query({ period: 'month', ref }).set(auth);
+      assert.equal(intervenants.status, 200, JSON.stringify(intervenants.body));
+      const ligneIntervenant = intervenants.body.intervenants.find((i) => i.id === intervenant.id);
+      assert.deepEqual([ligneIntervenant.heures, ligneIntervenant.cout], [0.6, 0.6]);
+      const conducteurs = await request(app).get('/api/stats/conducteurs').set(auth);
+      assert.equal(conducteurs.status, 200, JSON.stringify(conducteurs.body));
+      const ligneConducteur = conducteurs.body.find((c) => c.id === conducteur.id);
+      assert.ok(ligneConducteur, 'le titulaire figure dans les statistiques des conducteurs');
+      assert.equal(ligneConducteur.nbMaterielDepasse, 0, 'matériel dans le budget');
+      assert.equal(ligneConducteur.nbEnRetardHeures, 0, 'heures dans le budget');
+      // Terminé : objectifs respectés, aucune heure en trop ni manque à gagner.
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE' } });
+      const termines = await request(app).get('/api/stats/conducteurs').set(auth);
+      assert.equal(termines.status, 200, JSON.stringify(termines.body));
+      const ligneTermine = termines.body.find((c) => c.id === conducteur.id);
+      assert.deepEqual(
+        [ligneTermine.nbObjectifsRespectes, ligneTermine.nbTermineMaterielDepasse, ligneTermine.nbTermineEnRetardHeures,
+          ligneTermine.heuresRealiseesTermineTotal, ligneTermine.tauxDepassementHeures, ligneTermine.manqueAGagnerMainOeuvre,
+          ligneTermine.depensesTotal, ligneTermine.margeTotal],
+        [1, 0, 0, 0.6, 0, 0, 1.2, 8.8],
+      );
+    } finally {
+      if (ancienParametres) await prisma.parametres.update({ where: { id: 'singleton' }, data: { margeCommercialeActive: ancienParametres.margeCommercialeActive } });
+      if (chantier) {
+        await prisma.achatReel.deleteMany({ where: { chantierId: chantier.id } });
+        await prisma.pointageHeure.deleteMany({ where: { chantierId: chantier.id } });
+        await prisma.journalSaisieChantier.deleteMany({ where: { chantierId: chantier.id } });
+        await prisma.chantier.delete({ where: { id: chantier.id } });
+      }
+      if (fournisseur) await prisma.fournisseur.delete({ where: { id: fournisseur.id } });
+      if (categorie) await prisma.categorie.delete({ where: { id: categorie.id } });
+      if (intervenant) await prisma.intervenant.delete({ where: { id: intervenant.id } });
+      if (conducteur) await prisma.user.delete({ where: { id: conducteur.id } });
     }
   });
 
@@ -3530,6 +3644,325 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
+  // Garde-fou du dernier super administrateur (#178) : seuls les comptes actifs comptent, et les
+  // retraits (suppression, autre type, désactivation) se sérialisent par un verrou consultatif.
+  describe('Dernier super administrateur actif', () => {
+    const comptes = {};
+    const EMAILS = ['dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test'];
+    const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, enTete, corps) => {
+      const requete = request(app)[methode](chemin).set(enTete);
+      return corps === undefined ? requete : requete.send(corps);
+    };
+    const superAdminsActifs = async () => (await prisma.user.findMany({ where: { role: 'SUPERADMIN', actif: true }, select: { id: true } })).map((compte) => compte.id).sort();
+    const entreesJournal = (cibleId) => prisma.journalAdministration.count({ where: { cibleId } });
+    const attendre = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    // Sessions en attente d'un verrou de ligne, ou du verrou consultatif des retraits.
+    const attentes = async (consultatif) => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND (wait_event = 'advisory') = ${consultatif}`)[0].n;
+    const attendreAttente = async (consultatif, nombre = 1) => {
+      for (let tour = 0; tour < 150; tour += 1) {
+        if (await attentes(consultatif) >= nombre) return true;
+        await attendre(20);
+      }
+      return false;
+    };
+    const ROUTES = [
+      ['suppression', 'delete', (id) => `/api/users/${id}`, undefined, 409, 'Impossible de révoquer le dernier compte super administrateur.'],
+      ['rétrogradation', 'patch', (id) => `/api/users/${id}/role`, { role: 'ADMIN' }, 409, 'Impossible de retirer le rôle du dernier compte super administrateur.'],
+      ['désactivation', 'patch', (id) => `/api/users/${id}/actif`, { actif: false }, 400, 'Ce compte est le dernier super administrateur : il ne peut pas être désactivé.'],
+    ];
+    const preparer = async () => {
+      for (const cle of ['a', 'b']) {
+        const email = `dernier.super.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role: 'SUPERADMIN', actif: true }, create: { email, name: `TEST Dernier super ${cle.toUpperCase()}`, role: 'SUPERADMIN' } });
+      }
+    };
+    // A et B sont les seuls super administrateurs actifs le temps du test : les autres, dont le compte
+    // de secours, sont désactivés puis réactivés (le before() général réactive aussi le secours).
+    const isoler = async (corps) => {
+      await preparer();
+      const suspendus = (await prisma.user.findMany({ where: { role: 'SUPERADMIN', actif: true, id: { notIn: [comptes.a.id, comptes.b.id] } }, select: { id: true } })).map((compte) => compte.id);
+      await prisma.user.updateMany({ where: { id: { in: suspendus } }, data: { actif: false } });
+      try {
+        await corps();
+      } finally {
+        await prisma.user.updateMany({ where: { id: { in: suspendus } }, data: { actif: true } });
+      }
+    };
+    // Une transaction de test tient un chantier : la suppression de son titulaire s'y arrête, après
+    // son contrôle et en tenant le verrou des retraits. La seconde requête part alors ; le chantier
+    // n'est libéré que lorsqu'elle attend un verrou ou a répondu.
+    const pendantSuppressionArretee = async (titulaire, auteur, seconde) => {
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Dernier super chantier', client: 'TEST Dernier super', dateDebut: new Date('2026-09-01T00:00:00.000Z'), budgetGlobalVendu: 0, responsableId: titulaire.id } });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const tenu = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Chantier" WHERE "id" = ${chantier.id} FOR UPDATE`;
+        pret();
+        await attente;
+      }, { timeout: 20000 });
+      await tenu;
+      try {
+        const suppression = envoyer('delete', `/api/users/${titulaire.id}`, jeton(auteur)).then((reponse) => reponse);
+        assert.equal(await attendreAttente(false), true, 'la suppression attend le chantier, après son contrôle');
+        let repondu = false;
+        const autre = seconde().then((reponse) => { repondu = true; return reponse; });
+        for (let tour = 0; tour < 150 && !repondu && await attentes(false) + await attentes(true) < 2; tour += 1) await attendre(20);
+        const attendaitLesRetraits = await attentes(true) > 0;
+        liberer();
+        await verrou;
+        return { suppression: await suppression, autre: await autre, attendaitLesRetraits };
+      } finally {
+        liberer();
+        await prisma.chantier.deleteMany({ where: { id: chantier.id } });
+      }
+    };
+
+    after(async () => {
+      await prisma.user.updateMany({ where: { email: { in: EMAILS } }, data: { responsableHierarchiqueId: null } });
+      await prisma.user.deleteMany({ where: { email: { in: EMAILS } } });
+    });
+
+    test('la rétrogradation de soi est refusée quand l’autre super administrateur est désactivé', () => isoler(async () => {
+      await prisma.user.update({ where: { id: comptes.b.id }, data: { actif: false } });
+      const entrees = await entreesJournal(comptes.a.id);
+      const refus = await envoyer('patch', `/api/users/${comptes.a.id}/role`, jeton(comptes.a), { role: 'ADMIN' });
+      assert.deepEqual([refus.status, refus.body.error], [409, 'Impossible de retirer le rôle du dernier compte super administrateur.']);
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: comptes.a.id } })).role, 'SUPERADMIN');
+      assert.equal(await entreesJournal(comptes.a.id), entrees, 'aucune entrée de journal');
+      // B réactivé, A peut se rétrograder : un super administrateur actif demeure.
+      assert.equal((await envoyer('patch', `/api/users/${comptes.b.id}/actif`, jeton(comptes.a), { actif: true })).status, 200);
+      const retrait = await envoyer('patch', `/api/users/${comptes.a.id}/role`, jeton(comptes.a), { role: 'ADMIN' });
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      assert.deepEqual(await superAdminsActifs(), [comptes.b.id]);
+    }));
+
+    test('un super administrateur désactivé se rétrograde ou se supprime sans compter comme le dernier', () => isoler(async () => {
+      await prisma.user.update({ where: { id: comptes.b.id }, data: { actif: false } });
+      const retrait = await envoyer('patch', `/api/users/${comptes.b.id}/role`, jeton(comptes.a), { role: 'ADMIN' });
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      await prisma.user.update({ where: { id: comptes.b.id }, data: { role: 'SUPERADMIN' } });
+      const suppression = await envoyer('delete', `/api/users/${comptes.b.id}`, jeton(comptes.a));
+      assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+      assert.deepEqual(await superAdminsActifs(), [comptes.a.id]);
+    }));
+
+    // B agit sur A pendant qu'un autre retrait, simulé par une transaction de test qui tient le verrou
+    // des retraits, désactive B. La requête de B a passé l'authentification et attend ce verrou ; à
+    // sa reprise, elle voit le retrait validé : A est le dernier actif, et l'opération est refusée.
+    for (const [nom, methode, chemin, corps, statut, message] of ROUTES) test(`${nom} : contrôle fait après l’attente des autres retraits, sur l’état validé`, () => isoler(async () => {
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`;
+        pret();
+        await attente;
+        await tx.user.update({ where: { id: comptes.b.id }, data: { actif: false } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      const entrees = await entreesJournal(comptes.a.id);
+      let reponse;
+      try {
+        reponse = envoyer(methode, chemin(comptes.a.id), jeton(comptes.b), corps).then((resultat) => resultat);
+        assert.equal(await attendreAttente(true), true, 'la requête attend le verrou des retraits');
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const refus = await reponse;
+      assert.deepEqual([refus.status, refus.body.error], [statut, message]);
+      const a = await prisma.user.findUniqueOrThrow({ where: { id: comptes.a.id } });
+      assert.deepEqual([a.role, a.actif], ['SUPERADMIN', true]);
+      assert.deepEqual(await superAdminsActifs(), [comptes.a.id]);
+      assert.equal(await entreesJournal(comptes.a.id), entrees, 'aucune entrée de journal');
+    }));
+
+    // Le verrou est tenu jusqu'à l'écriture : A supprime B, et sa suppression est arrêtée après son
+    // contrôle (B n'était pas le dernier). B agit alors sur A : il attend, puis voit B supprimé.
+    for (const [nom, methode, chemin, corps, statut, message] of ROUTES) test(`${nom} croisée avec une suppression en cours : le verrou est tenu jusqu’à l’écriture`, () => isoler(async () => {
+      const entrees = await entreesJournal(comptes.a.id);
+      const { suppression, autre, attendaitLesRetraits } = await pendantSuppressionArretee(comptes.b, comptes.a, () => envoyer(methode, chemin(comptes.a.id), jeton(comptes.b), corps));
+      assert.equal(attendaitLesRetraits, true, 'la seconde requête attend le verrou des retraits');
+      assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+      assert.deepEqual([autre.status, autre.body.error], [statut, message]);
+      assert.deepEqual(await superAdminsActifs(), [comptes.a.id]);
+      assert.equal(await entreesJournal(comptes.a.id), entrees, 'aucune entrée de journal pour A');
+    }));
+
+    // Un compte supprimé pendant sa désactivation ou sa réactivation : 404, comme pour les autres
+    // routes de comptes, et non une erreur 500.
+    for (const actif of [false, true]) test(`${actif ? 'réactivation' : 'désactivation'} d’un compte supprimé au même moment : 404`, () => isoler(async () => {
+      await prisma.user.deleteMany({ where: { email: EMAILS[3] } });
+      const compte = await prisma.user.create({ data: { email: EMAILS[3], name: 'TEST Dernier super responsable', role: 'CONDUCTEUR_TRAVAUX', actif: !actif } });
+      const { suppression, autre } = await pendantSuppressionArretee(compte, comptes.a, () => envoyer('patch', `/api/users/${compte.id}/actif`, jeton(comptes.a), { actif }));
+      assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+      assert.deepEqual([autre.status, autre.body.error], [404, 'Utilisateur introuvable.']);
+    }));
+
+    // Non-régression : le verrou des retraits n'introduit aucun interblocage avec les autres routes
+    // de comptes. La suppression d'un responsable, arrêtée en cours, croise une désactivation, un
+    // changement de type ou un rattachement de son collaborateur (vers un super administrateur) :
+    // les deux aboutissent. Le collaborateur a un identifiant trié avant tous les autres.
+    for (const [nom, seconde] of [
+      ['la désactivation', (f) => envoyer('patch', `/api/users/${f.collaborateur.id}/actif`, jeton(f.admin), { actif: false })],
+      ['le changement de type', (f) => envoyer('patch', `/api/users/${f.collaborateur.id}/role`, jeton(f.admin), { role: 'COMMERCIAL' })],
+      ['le rattachement à un super administrateur', (f) => envoyer('patch', `/api/users/${f.collaborateur.id}/responsable-hierarchique`, jeton(comptes.b), { responsableHierarchiqueId: comptes.a.id })],
+    ]) test(`suppression d’un responsable pendant ${nom} de son collaborateur : aucun interblocage`, () => isoler(async () => {
+      await prisma.user.updateMany({ where: { email: { in: EMAILS.slice(2) } }, data: { responsableHierarchiqueId: null } });
+      await prisma.user.deleteMany({ where: { email: { in: EMAILS.slice(2) } } });
+      const admin = await prisma.user.create({ data: { email: EMAILS[2], name: 'TEST Dernier super admin', role: 'ADMIN' } });
+      const responsable = await prisma.user.create({ data: { email: EMAILS[3], name: 'TEST Dernier super responsable', role: 'CONDUCTEUR_TRAVAUX' } });
+      const collaborateur = await prisma.user.create({ data: { id: '00000000-0000-4000-8000-000000000178', email: EMAILS[4], name: 'TEST Dernier super collaborateur', role: 'CONDUCTEUR_TRAVAUX', responsableHierarchiqueId: responsable.id } });
+      const { suppression, autre } = await pendantSuppressionArretee(responsable, comptes.a, () => seconde({ admin, collaborateur }));
+      assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+      assert.equal(autre.status, 200, JSON.stringify(autre.body));
+      assert.equal(await prisma.user.count({ where: { id: responsable.id } }), 0);
+    }));
+
+    test('deux retraits croisés simultanés laissent toujours un super administrateur actif', () => isoler(async () => {
+      // Le second refus vient de la transaction (409, 400) ou, s'il arrive après la validation du
+      // premier retrait, de l'authentification ou du garde des comptes super administrateurs.
+      for (const [nom, methode, chemin, corps, refus] of [
+        ['rétrogradations', 'patch', (id) => `/api/users/${id}/role`, { role: 'ADMIN' }, [403, 409]],
+        ['désactivations', 'patch', (id) => `/api/users/${id}/actif`, { actif: false }, [400, 401]],
+        ['suppressions', 'delete', (id) => `/api/users/${id}`, undefined, [401, 409]],
+      ]) {
+        for (let essai = 0; essai < 10; essai += 1) {
+          await preparer();
+          const entrees = [await entreesJournal(comptes.b.id), await entreesJournal(comptes.a.id)];
+          const reponses = await Promise.all([
+            envoyer(methode, chemin(comptes.b.id), jeton(comptes.a), corps),
+            envoyer(methode, chemin(comptes.a.id), jeton(comptes.b), corps),
+          ]);
+          const statuts = reponses.map((reponse) => reponse.status);
+          const detail = `${nom}, essai ${essai} : ${JSON.stringify(reponses.map((reponse) => [reponse.status, reponse.body]))}`;
+          assert.equal(statuts.filter((s) => s === 200).length, 1, detail);
+          assert.ok(statuts.every((s) => s === 200 || refus.includes(s)), detail);
+          assert.equal((await superAdminsActifs()).length, 1, detail);
+          // Aucune entrée de journal pour le compte dont le retrait est refusé.
+          const refuse = statuts[0] === 200 ? 1 : 0;
+          assert.equal(await entreesJournal([comptes.b.id, comptes.a.id][refuse]), entrees[refuse], detail);
+        }
+      }
+    }));
+
+    // #215 : le garde « un simple administrateur ne touche pas un compte super administrateur » est
+    // refait sur le compte relu sous son verrou. #218 : le rattachement attend les retraits en cours.
+    describe('Garde des comptes super administrateurs relu sous verrou', () => {
+      const CIBLES = ['garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test'];
+      const preparerComptes = async () => {
+        await preparer();
+        await prisma.user.updateMany({ where: { email: { in: CIBLES } }, data: { responsableHierarchiqueId: null } });
+        await prisma.user.deleteMany({ where: { email: { in: CIBLES } } });
+        const admin = await prisma.user.upsert({ where: { email: EMAILS[2] }, update: { role: 'ADMIN', actif: true }, create: { email: EMAILS[2], name: 'TEST Dernier super admin', role: 'ADMIN' } });
+        const cible = await prisma.user.create({ data: { email: CIBLES[0], name: 'TEST Garde verrou cible', role: 'ADMIN' } });
+        const responsable = await prisma.user.create({ data: { email: CIBLES[1], name: 'TEST Garde verrou responsable', role: 'CONDUCTEUR_TRAVAUX' } });
+        const ancien = await prisma.user.create({ data: { email: CIBLES[2], name: 'TEST Garde verrou ancien responsable', role: 'CONDUCTEUR_TRAVAUX' } });
+        return { admin, cible, responsable, ancien };
+      };
+      // Une transaction de test tient un compte, puis le modifie (promotion, autre type) : la requête
+      // envoyée pendant ce temps a passé ses contrôles préalables et attend le verrou de ce compte.
+      const pendantChangement = async (compteId, donnees, envoi) => {
+        let liberer, pret;
+        const attente = new Promise((resolve) => { liberer = resolve; });
+        const tenu = new Promise((resolve) => { pret = resolve; });
+        const changement = prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compteId} FOR UPDATE`;
+          pret();
+          await attente;
+          await tx.user.update({ where: { id: compteId }, data: donnees });
+        }, { timeout: 15000 });
+        await tenu;
+        let reponse;
+        try {
+          reponse = envoi().then((resultat) => resultat);
+          assert.equal(await attendreAttente(false), true, 'la requête attend le verrou du compte');
+        } finally {
+          liberer();
+          await changement;
+        }
+        return reponse;
+      };
+      const dernierRattachement = (cibleId) => prisma.journalAdministration.findFirst({ where: { action: 'RATTACHEMENT', cibleId }, orderBy: { createdAt: 'desc' } });
+      after(async () => {
+        await prisma.user.updateMany({ where: { email: { in: CIBLES } }, data: { responsableHierarchiqueId: null } });
+        await prisma.user.deleteMany({ where: { email: { in: CIBLES } } });
+      });
+
+      // Un super administrateur promeut la cible pendant qu'un simple administrateur la modifie : la
+      // requête passe le contrôle préalable, attend le verrou du compte, puis voit la promotion.
+      for (const [nom, methode, chemin, corps, verifier] of [
+        ['suppression', 'delete', (f) => `/api/users/${f.cible.id}`, undefined, async (f) => assert.equal(await prisma.user.count({ where: { id: f.cible.id } }), 1)],
+        ['changement de type', 'patch', (f) => `/api/users/${f.cible.id}/role`, { role: 'COMPTABLE' }, async (f) => assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).role, 'SUPERADMIN')],
+        ['« aussi commercial »', 'patch', (f) => `/api/users/${f.cible.id}/est-commercial`, { estCommercial: true }, async (f) => assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).estCommercial, false)],
+        ['désactivation', 'patch', (f) => `/api/users/${f.cible.id}/actif`, { actif: false }, async (f) => assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).actif, true)],
+        ['rattachement', 'patch', (f) => `/api/users/${f.cible.id}/responsable-hierarchique`, (f) => ({ responsableHierarchiqueId: f.responsable.id }), async (f) => assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).responsableHierarchiqueId, null)],
+      ]) test(`${nom} par un simple administrateur pendant la promotion de la cible : refusé sous verrou`, async () => {
+        const f = await preparerComptes();
+        const entrees = await entreesJournal(f.cible.id);
+        const refus = await pendantChangement(f.cible.id, { role: 'SUPERADMIN' }, () => envoyer(methode, chemin(f), jeton(f.admin), typeof corps === 'function' ? corps(f) : corps));
+        assert.deepEqual([refus.status, refus.body.error], [403, 'Seul un super administrateur peut gérer un compte super administrateur.']);
+        await verifier(f);
+        assert.equal(await entreesJournal(f.cible.id), entrees, 'aucune entrée de journal');
+      });
+
+      // Même relecture pour le type : une cible qui quitte l'administration pendant la requête ne
+      // reçoit pas un « aussi commercial » orphelin.
+      test('« aussi commercial » pendant que la cible quitte l’administration : refusé sous verrou', async () => {
+        const f = await preparerComptes();
+        const refus = await pendantChangement(f.cible.id, { role: 'COMPTABLE', estCommercial: false }, () => envoyer('patch', `/api/users/${f.cible.id}/est-commercial`, jeton(f.admin), { estCommercial: true }));
+        assert.deepEqual([refus.status, refus.body.error], [400, 'Seul un compte Administrateur peut être marqué "aussi commercial".']);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).estCommercial, false);
+      });
+
+      test('« aussi commercial » d’un compte supprimé au même moment : 404', async () => {
+        const f = await preparerComptes();
+        const { suppression, autre } = await pendantSuppressionArretee(f.cible, comptes.a, () => envoyer('patch', `/api/users/${f.cible.id}/est-commercial`, jeton(f.admin), { estCommercial: true }));
+        assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+        assert.deepEqual([autre.status, autre.body.error], [404, 'Utilisateur introuvable.']);
+      });
+
+      // Le responsable choisi et l'ancien sont relus sous verrou : un responsable promu pendant la
+      // requête n'est pas proposé à un simple administrateur, et l'entrée de journal d'un
+      // rattachement qui touche un super administrateur lui reste fermée.
+      test('rattachement par un simple administrateur à un responsable promu au même moment : refusé', async () => {
+        const f = await preparerComptes();
+        const entrees = await entreesJournal(f.cible.id);
+        const refus = await pendantChangement(f.responsable.id, { role: 'SUPERADMIN' }, () => envoyer('patch', `/api/users/${f.cible.id}/responsable-hierarchique`, jeton(f.admin), { responsableHierarchiqueId: f.responsable.id }));
+        assert.deepEqual([refus.status, refus.body.error], [400, 'Responsable hiérarchique introuvable ou désactivé.']);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: f.cible.id } })).responsableHierarchiqueId, null);
+        assert.equal(await entreesJournal(f.cible.id), entrees, 'aucune entrée de journal');
+      });
+
+      for (const [nom, promu, avant] of [
+        ['du responsable choisi', (f) => f.responsable, null],
+        ['de l’ancien responsable', (f) => f.ancien, (f) => f.ancien.id],
+      ]) test(`rattachement par un super administrateur pendant la promotion ${nom} : entrée fermée au simple administrateur`, async () => {
+        const f = await preparerComptes();
+        if (avant) await prisma.user.update({ where: { id: f.cible.id }, data: { responsableHierarchiqueId: avant(f) } });
+        const reponse = await pendantChangement(promu(f).id, { role: 'SUPERADMIN' }, () => envoyer('patch', `/api/users/${f.cible.id}/responsable-hierarchique`, jeton(comptes.a), { responsableHierarchiqueId: f.responsable.id }));
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+        const entree = await dernierRattachement(f.cible.id);
+        assert.equal(entree?.concerneSuperAdmin, true, JSON.stringify(entree));
+      });
+
+      // #218 : un rattachement croisant la suppression du compte ou de son responsable attend la fin
+      // de cette suppression, puis répond comme si elle avait précédé, et jamais 500.
+      for (const [nom, supprime, statut, message] of [
+        ['du responsable choisi', (f) => f.responsable, 400, 'Responsable hiérarchique introuvable ou désactivé.'],
+        ['du compte rattaché', (f) => f.cible, 404, 'Utilisateur introuvable.'],
+      ]) test(`rattachement pendant la suppression ${nom} : ${statut}, jamais 500`, async () => {
+        const f = await preparerComptes();
+        const { suppression, autre, attendaitLesRetraits } = await pendantSuppressionArretee(supprime(f), comptes.a, () => envoyer('patch', `/api/users/${f.cible.id}/responsable-hierarchique`, jeton(f.admin), { responsableHierarchiqueId: f.responsable.id }));
+        assert.equal(suppression.status, 200, JSON.stringify(suppression.body));
+        assert.deepEqual([autre.status, autre.body.error], [statut, message]);
+        assert.equal(attendaitLesRetraits, true, 'le rattachement attend le verrou des retraits');
+      });
+    });
+  });
+
   // Cycle de vie d'une affaire : c'est la conversion d'un devis accepté qui ouvre le
   // chantier, et l'annulation du devis qui revient dessus. Un chantier ne se supprime plus.
   describe('Cycle de vie du devis : acompte, annulation, duplication', () => {
@@ -3737,6 +4170,70 @@ if (!TEST_DATABASE_URL) {
       // La duplication, elle, relève du droit devis et non de l'administration.
       const duplicata = await request(app).post(`/api/devis/${devis.id}/duplication`).set('Authorization', `Bearer ${sessionConducteur}`);
       assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+    });
+
+    // #163 : la duplication lit le devis source sous son verrou, dans la transaction qui crée le
+    // duplicata, comme une révision. Une modification en cours du devis (lignes, puis totaux) est
+    // attendue, puis copiée en entier : le duplicata ne mêle jamais des lignes neuves et des totaux anciens.
+    test('la duplication attend une modification en cours du devis source et la copie en entier', async () => {
+      const cree = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Affaire dupliquée pendant sa modification', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const source = cree.body;
+      assert.equal(source.totalTtc, 240);
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const lignesModifiees = new Promise((resolve) => { pret = resolve; });
+      const modification = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Devis" WHERE "id" = ${source.id} FOR UPDATE`;
+        await tx.devisLigne.deleteMany({ where: { devisId: source.id } });
+        await tx.devisLigne.create({ data: { devisId: source.id, ordre: 0, designation: 'Pose révisée', nature: 'MAIN_OEUVRE', quantite: 3, prixUnitaireHt: 100, tauxTva: 20, totalHt: 300, totalTtc: 360 } });
+        pret();
+        await attente;
+        await tx.devis.update({ where: { id: source.id }, data: { totalHt: 300, totalTva: 60, totalTtc: 360 } });
+      }, { timeout: 15000 });
+      await lignesModifiees;
+      let duplication;
+      try {
+        duplication = request(app).post(`/api/devis/${source.id}/duplication`).set('Authorization', `Bearer ${session}`).timeout({ deadline: 12_000 }).then((reponse) => reponse, (erreur) => ({ status: 0, body: { error: String(erreur) } }));
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM "Devis"%FOR UPDATE%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'la duplication attend le verrou du devis source');
+      } finally {
+        liberer();
+        await modification;
+      }
+      const duplicata = await duplication;
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.deepEqual([duplicata.body.totalHt, duplicata.body.totalTva, duplicata.body.totalTtc], [300, 60, 360], 'les totaux validés par la modification');
+      assert.deepEqual(duplicata.body.lignes.map((ligne) => [ligne.designation, ligne.quantite, ligne.totalHt]), [['Pose révisée', 3, 300]], 'les lignes validées par la modification');
+      assert.equal(duplicata.body.origineDevisId, source.id);
+      // Un devis introuvable ne consomme pas de numéro d'affaire.
+      const numerosTires = async () => (await prisma.sequenceAffaire.aggregate({ _sum: { dernierNumero: true } }))._sum.dernierNumero ?? 0;
+      const numerosAvant = await numerosTires();
+      const introuvable = await request(app).post('/api/devis/00000000-0000-0000-0000-000000000000/duplication').set('Authorization', `Bearer ${session}`);
+      assert.equal(introuvable.status, 404, JSON.stringify(introuvable.body));
+      assert.equal(await numerosTires(), numerosAvant, 'un devis introuvable ne consomme pas de numéro d’affaire');
+    });
+
+    // Le taux et le numéro d'affaire de la duplication sont lus avant sa transaction. Lus pendant, ils
+    // réclamaient chacun une seconde connexion du pool en gardant la première : des duplications
+    // simultanées, plus nombreuses que les connexions, s'y bloquaient toutes jusqu'à expiration (500).
+    test('des duplications simultanées d’un même devis, plus nombreuses que le pool de connexions, aboutissent toutes', async () => {
+      const cree = await request(app).post('/api/devis').set('Authorization', `Bearer ${session}`).send({
+        clientId, objet: 'TEST Affaire dupliquée en rafale', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }],
+      });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      // Prisma ouvre au plus 2 × cœurs physiques + 1 connexions : ce nombre de requêtes le dépasse.
+      const nombre = 2 * cpus().length + 2;
+      const reponses = await Promise.all(Array.from({ length: nombre }, () => request(app).post(`/api/devis/${cree.body.id}/duplication`).set('Authorization', `Bearer ${session}`)));
+      assert.deepEqual(reponses.map((reponse) => reponse.status), Array(nombre).fill(201), JSON.stringify(reponses.map((reponse) => reponse.body.error).filter(Boolean)));
+      assert.equal(new Set(reponses.map((reponse) => reponse.body.numero)).size, nombre, 'chaque duplicata a son propre numéro d’affaire');
     });
 
     // Ouverture du chantier d'une affaire depuis l'Administration (décision de Nelson du
@@ -4313,6 +4810,323 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // #219 : suppressions concurrentes d'un compte et de sa fiche. Aides communes : attentes de verrou
+    // de cette base (ligne ou consultatif), transaction de test tenue jusqu'à son relâchement, et
+    // entrées du journal d'un compte.
+    const attentesVerrou = async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n;
+    const attendreAttentesVerrou = async (nombre) => {
+      for (let tour = 0; tour < 150; tour += 1) {
+        if (await attentesVerrou() >= nombre) return true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return false;
+    };
+    const tenirTransaction = async (travail) => {
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const tenu = new Promise((resolve) => { pret = resolve; });
+      const fin = prisma.$transaction(async (tx) => { await travail(tx); pret(); await attente; }, { timeout: 20000 });
+      await tenu;
+      return async () => { liberer(); await fin; };
+    };
+    const journalCompte = (cibleId, action) => prisma.journalAdministration.findMany({ where: { cibleId, action }, orderBy: { createdAt: 'asc' } });
+    const ficheDeliee = (fiche) => `fiche intervenant « ${fiche.nom} » (${fiche.id}) déliée`;
+
+    // Une transaction de test tient le compte et y relie la fiche, comme un écrivain qui ne prend pas
+    // le verrou des retraits (la liaison de l'API, elle, attendrait la fin de la suppression) ; la
+    // suppression du compte attend le compte, celle de la fiche attend la fiche. Au relâchement, la
+    // suppression du compte ne doit pas attendre la fiche que tient l'autre (qui attend le compte) :
+    // elle refuse, à réessayer. Sinon, l'une ou l'autre passe la première, et une seule journalise la
+    // fiche. Jamais d'interblocage ni de 500, et le journal dit ce qui s'est passé.
+    test('la suppression d’un compte et celle de sa fiche, reliée au même moment, ne s’interbloquent pas', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage@iris.test', name: 'TEST Pilote3 interblocage', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const relacher = await tenirTransaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR UPDATE`;
+        await tx.intervenant.update({ where: { id: fiche.id }, data: { userId: compte.id } });
+      });
+      let suppressionCompte, suppressionFiche;
+      try {
+        suppressionCompte = request(app).delete(`/api/users/${compte.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression du compte attend le compte');
+        suppressionFiche = request(app).delete(`/api/intervenants/${fiche.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(2), true, 'la suppression de la fiche attend la fiche');
+      } finally {
+        await relacher();
+      }
+      const [compteSupprime, ficheSupprimee] = await Promise.all([suppressionCompte, suppressionFiche]);
+      assert.equal(ficheSupprimee.status, 200, JSON.stringify(ficheSupprimee.body));
+      assert.equal(await prisma.intervenant.count({ where: { id: fiche.id } }), 0);
+      if (compteSupprime.status === 409) {
+        assert.equal(compteSupprime.body.error, 'Ce compte vient d’être relié à une fiche intervenant : réessayez.');
+        assert.equal(await prisma.user.count({ where: { id: compte.id } }), 1);
+        assert.equal((await journalCompte(compte.id, 'SUPPRESSION')).length, 0);
+        assert.equal((await journalFiche(compte.id)).at(-1)?.detail, `Fiche intervenant supprimée (${fiche.id}).`);
+      } else {
+        assert.equal(compteSupprime.status, 200, JSON.stringify(compteSupprime.body));
+        assert.equal(await prisma.user.count({ where: { id: compte.id } }), 0);
+        // Deux ordres possibles : la suppression du compte délie la fiche (mentionnée à SUPPRESSION),
+        // ou celle de la fiche passe la première (« Fiche intervenant supprimée »). Une seule le dit.
+        const detail = (await journalCompte(compte.id, 'SUPPRESSION')).at(-1)?.detail;
+        const parFiche = (await journalFiche(compte.id)).some((entree) => entree.detail === `Fiche intervenant supprimée (${fiche.id}).`);
+        assert.equal(detail, parFiche ? null : ficheDeliee(fiche));
+      }
+    });
+
+    // Branche du refus rendue déterministe : la suppression du compte attend le compte (tenu en
+    // partage par le test) sans avoir verrouillé de fiche ; la fiche est alors reliée par écriture
+    // directe, comme un écrivain qui ne prend pas le verrou des retraits (la vérification de clé
+    // étrangère n'attend pas un verrou partagé), puis la suppression de la fiche la verrouille et
+    // attend le compte derrière elle. Au relâchement, la suppression du compte passe la première : la
+    // fiche qu'elle délierait est tenue, elle refuse aussitôt (409) au lieu de l'attendre, et celle de
+    // la fiche aboutit. Avant la correction, l'une des deux finissait en interblocage (500).
+    test('la suppression d’un compte refuse, sans l’attendre, la fiche reliée entre-temps et tenue par sa suppression', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage.refus@iris.test', name: 'TEST Pilote3 interblocage refus', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage refus', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
+      let suppressionCompte, suppressionFiche;
+      try {
+        suppressionCompte = request(app).delete(`/api/users/${compte.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression du compte attend le compte');
+        await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: compte.id } });
+        suppressionFiche = request(app).delete(`/api/intervenants/${fiche.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(2), true, 'la suppression de la fiche, qui la tient, attend le compte');
+      } finally {
+        await relacher();
+      }
+      const [compteSupprime, ficheSupprimee] = await Promise.all([suppressionCompte, suppressionFiche]);
+      assert.deepEqual([compteSupprime.status, ficheSupprimee.status], [409, 200], JSON.stringify({ compte: compteSupprime.body, fiche: ficheSupprimee.body }));
+      assert.equal(compteSupprime.body.error, 'Ce compte vient d’être relié à une fiche intervenant : réessayez.');
+      assert.equal(await prisma.user.count({ where: { id: compte.id } }), 1);
+      assert.equal(await prisma.intervenant.count({ where: { id: fiche.id } }), 0);
+      // Journal : pas de suppression du compte, mais la fiche supprimée qui le déliait.
+      assert.equal((await journalCompte(compte.id, 'SUPPRESSION')).length, 0);
+      assert.equal((await journalFiche(compte.id)).at(-1)?.detail, `Fiche intervenant supprimée (${fiche.id}).`);
+      // Le compte refusé, désormais sans fiche, se supprime normalement, sans fiche à mentionner.
+      const nouvelEssai = await request(app).delete(`/api/users/${compte.id}`).set(admin);
+      assert.equal(nouvelEssai.status, 200, JSON.stringify(nouvelEssai.body));
+      const suppressions = await journalCompte(compte.id, 'SUPPRESSION');
+      assert.equal(suppressions.length, 1);
+      assert.equal(suppressions[0].detail, null);
+    });
+
+    // Une fiche reliée dès le départ est verrouillée par la suppression du compte avant le compte : sa
+    // suppression, qui l'attend, ne fait pas refuser celle du compte (le NOWAIT porte sur un verrou
+    // déjà tenu). Le compte est supprimé en déliant la fiche, mentionnée au journal, puis la fiche.
+    test('une fiche reliée dès le départ, dont la suppression attend celle du compte, est déliée sans refus', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage.reliee@iris.test', name: 'TEST Pilote3 interblocage reliée', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage reliée', role: 'Technicien', tauxHoraireCharge: 40, userId: compte.id } });
+      const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
+      let suppressionCompte, suppressionFiche;
+      try {
+        suppressionCompte = request(app).delete(`/api/users/${compte.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression du compte, qui tient la fiche, attend le compte');
+        suppressionFiche = request(app).delete(`/api/intervenants/${fiche.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(2), true, 'la suppression de la fiche attend la fiche');
+      } finally {
+        await relacher();
+      }
+      const [compteSupprime, ficheSupprimee] = await Promise.all([suppressionCompte, suppressionFiche]);
+      assert.deepEqual([compteSupprime.status, ficheSupprimee.status], [200, 200], JSON.stringify({ compte: compteSupprime.body, fiche: ficheSupprimee.body }));
+      assert.equal(await prisma.user.count({ where: { id: compte.id } }), 0);
+      assert.equal(await prisma.intervenant.count({ where: { id: fiche.id } }), 0);
+      assert.equal((await journalCompte(compte.id, 'SUPPRESSION')).at(-1)?.detail, ficheDeliee(fiche));
+      // La fiche, déjà déliée quand sa suppression la reprend, ne délie plus aucun compte.
+      assert.equal((await journalFiche(compte.id)).filter((entree) => entree.detail === `Fiche intervenant supprimée (${fiche.id}).`).length, 0);
+    });
+
+    // La liaison prend le verrou des retraits en tête : elle verrouille l'ancien compte de la fiche,
+    // ici le collaborateur du compte supprimé, dont l'identifiant précède le sien. Sans ce verrou, la
+    // cascade de la suppression (responsable mis à NULL) attendait ce collaborateur pendant que la
+    // liaison attendait le compte supprimé : interblocage, liaison en 500. Désormais la liaison attend
+    // la fin de la suppression, puis refuse le compte disparu (400).
+    test('la liaison d’une fiche au compte en cours de suppression attend la fin de celle-ci, sans interblocage', async () => {
+      const suffixe = randomUUID().slice(8);
+      const supprime = await prisma.user.create({ data: { id: `ffffffff${suffixe}`, email: 'pilote3.interblocage.responsable@iris.test', name: 'TEST Pilote3 interblocage responsable', role: 'TECHNICIEN' } });
+      const collaborateur = await prisma.user.create({ data: { id: `00000000${suffixe}`, email: 'pilote3.interblocage.collaborateur@iris.test', name: 'TEST Pilote3 interblocage collaborateur', role: 'TECHNICIEN', responsableHierarchiqueId: supprime.id } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage collaborateur', role: 'Technicien', tauxHoraireCharge: 40, userId: collaborateur.id } });
+      const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${supprime.id} FOR SHARE`);
+      let suppression, liaison;
+      try {
+        suppression = request(app).delete(`/api/users/${supprime.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression attend le compte');
+        liaison = request(app).put(`/api/intervenants/${fiche.id}/compte`).set(admin).send({ userId: supprime.id }).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(2), true, 'la liaison attend');
+      } finally {
+        await relacher();
+      }
+      const [suppressionFaite, liaisonRefusee] = await Promise.all([suppression, liaison]);
+      assert.deepEqual([suppressionFaite.status, liaisonRefusee.status], [200, 400], JSON.stringify({ suppression: suppressionFaite.body, liaison: liaisonRefusee.body }));
+      assert.equal(liaisonRefusee.body.error, 'Seul un compte technicien actif peut être relié à une fiche intervenant.');
+      assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, collaborateur.id);
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: collaborateur.id } })).responsableHierarchiqueId, null);
+    });
+
+    // Le verrou des retraits est pris en tête de la liaison, avant celui de la fiche : une suppression
+    // de compte qui l'attend la première, puis tient la fiche (reliée dès le départ) et attend que la
+    // liaison la libère, ne trouve pas la liaison assise sur la fiche à attendre ce même verrou. Les
+    // deux attendent ici le verrou tenu par le test, et aboutissent l'une après l'autre.
+    test('la liaison attend le verrou des retraits avant de prendre la fiche : aucun interblocage avec la suppression du compte', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage.ordre@iris.test', name: 'TEST Pilote3 interblocage ordre', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage ordre', role: 'Technicien', tauxHoraireCharge: 40, userId: compte.id } });
+      const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT pg_advisory_xact_lock(814091)::text AS verrou`);
+      let suppression, deliaison;
+      try {
+        suppression = request(app).delete(`/api/users/${compte.id}`).set(admin).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(1), true, 'la suppression attend le verrou des retraits');
+        deliaison = request(app).put(`/api/intervenants/${fiche.id}/compte`).set(admin).send({ userId: null }).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(2), true, 'la liaison attend le verrou des retraits');
+      } finally {
+        await relacher();
+      }
+      const [suppressionFaite, deliaisonFaite] = await Promise.all([suppression, deliaison]);
+      assert.deepEqual([suppressionFaite.status, deliaisonFaite.status], [200, 200], JSON.stringify({ suppression: suppressionFaite.body, liaison: deliaisonFaite.body }));
+      assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, null);
+      assert.equal((await journalCompte(compte.id, 'SUPPRESSION')).at(-1)?.detail, ficheDeliee(fiche));
+    });
+
+    // La promotion super administrateur ne prend pas le verrou des retraits : une fiche reliée au
+    // compte pendant qu'elle attend le compte (ici par écriture directe) est relue sous verrou, et la
+    // promotion refusée (409), plutôt que de laisser la fiche reliée à un compte non technicien.
+    test('une promotion super administrateur refuse la fiche reliée pendant qu’elle attendait le compte', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.interblocage.promotion@iris.test', name: 'TEST Pilote3 interblocage promotion', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 interblocage promotion', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
+      let promotion;
+      try {
+        promotion = request(app).patch(`/api/users/${compte.id}/role`).set(admin).send({ role: 'SUPERADMIN' }).then((reponse) => reponse);
+        assert.equal(await attendreAttentesVerrou(1), true, 'la promotion attend le compte');
+        await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: compte.id } });
+      } finally {
+        await relacher();
+      }
+      const refus = await promotion;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Ce compte vient d’être relié à une fiche intervenant : réessayez.');
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role, 'TECHNICIEN');
+      assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, compte.id);
+      // Refus annulé avec sa transaction : aucun changement de type au journal.
+      assert.equal((await journalCompte(compte.id, 'TYPE_COMPTE')).length, 0);
+    });
+
+    // #219, par l'API : liaison de la fiche, suppression de la fiche et suppression du compte lancées
+    // ensemble, à répétition. Chacune aboutit ou refuse proprement, sans interblocage ni 500. La
+    // liaison et la suppression du compte se sérialisent (verrou des retraits), et la suppression de
+    // la fiche précède ou suit celle du compte sans la bloquer : la suppression du compte aboutit
+    // toujours.
+    test('liaison, suppression de la fiche et suppression du compte simultanées : jamais de 500', async () => {
+      for (let essai = 0; essai < 12; essai += 1) {
+        const compte = await prisma.user.create({ data: { email: `pilote3.trio.${essai}@iris.test`, name: `TEST Pilote3 trio ${essai}`, role: 'TECHNICIEN' } });
+        const fiche = await prisma.intervenant.create({ data: { nom: `TEST Pilote3 trio ${essai}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+        const [liaison, suppressionFiche, suppressionCompte] = await Promise.all([
+          request(app).put(`/api/intervenants/${fiche.id}/compte`).set(admin).send({ userId: compte.id }),
+          request(app).delete(`/api/intervenants/${fiche.id}`).set(admin),
+          request(app).delete(`/api/users/${compte.id}`).set(admin),
+        ]);
+        const contexte = JSON.stringify({ essai, liaison: [liaison.status, liaison.body], fiche: [suppressionFiche.status, suppressionFiche.body], compte: [suppressionCompte.status, suppressionCompte.body] });
+        assert.ok([200, 400, 404].includes(liaison.status), contexte);
+        assert.ok([200, 404].includes(suppressionFiche.status), contexte);
+        assert.equal(suppressionCompte.status, 200, contexte);
+        assert.equal(await prisma.intervenant.count({ where: { id: fiche.id } }), 0, contexte);
+        assert.equal(await prisma.user.count({ where: { id: compte.id } }), 0, contexte);
+      }
+    });
+
+    // #231 : la promotion du démarrage, refusée une fois parce qu'une fiche est reliée au compte
+    // pendant qu'elle attend son verrou (FICHE_RELIEE), est retentée : elle délie alors la fiche et
+    // aboutit, sans rejet qui arrêterait le serveur.
+    test('la promotion du démarrage refusée une fois (fiche reliée au même moment) est retentée et aboutit', async () => {
+      const compte = await prisma.user.create({ data: { email: 'pilote3.demarrage.course@iris.test', name: 'TEST Pilote3 démarrage course', role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Pilote3 démarrage course', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const emails = process.env.SUPERADMIN_EMAILS;
+      const erreurs = mock.method(console, 'error', () => {});
+      const avertissements = mock.method(console, 'warn', () => {});
+      let appelsErreur = [];
+      let appelsAvertissement = [];
+      process.env.SUPERADMIN_EMAILS = `${emails},${compte.email}`;
+      try {
+        let demarrage;
+        const relacher = await tenirTransaction((tx) => tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${compte.id} FOR SHARE`);
+        try {
+          demarrage = ensureSuperAdmins().then(() => null, (erreur) => erreur);
+          assert.equal(await attendreAttentesVerrou(1), true, 'la promotion attend le compte');
+          await prisma.intervenant.update({ where: { id: fiche.id }, data: { userId: compte.id } });
+        } finally {
+          await relacher();
+        }
+        assert.equal(await demarrage, null);
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+        appelsErreur = [...erreurs.mock.calls];
+        appelsAvertissement = [...avertissements.mock.calls];
+        erreurs.mock.restore();
+        avertissements.mock.restore();
+      }
+      // Le premier essai est signalé comme tel ; le second aboutit, sans signalement d'échec.
+      assert.deepEqual(appelsErreur.map((appel) => String(appel.arguments[0])), [], 'aucun signalement quand le second essai aboutit');
+      assert.equal(appelsAvertissement.length, 1);
+      assert.match(String(appelsAvertissement[0].arguments[0]), new RegExp(`${compte.email.replace(/\./g, '\\.')} : essai 1 en échec, nouvel essai`));
+      assert.equal(appelsAvertissement[0].arguments[1]?.code, 'FICHE_RELIEE');
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: compte.id } })).role, 'SUPERADMIN');
+      assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, null);
+      // Le premier essai, annulé, n'a rien journalisé : une promotion et une fiche déliée.
+      assert.equal((await journalCompte(compte.id, 'TYPE_COMPTE')).length, 1);
+      assert.equal((await journalFiche(compte.id)).length, 1);
+    });
+
+    // #231 : un compte de départ dont la promotion échoue à chaque essai (ici, refusée par un trigger
+    // de test) est signalé, sans rejet ; les comptes suivants sont traités.
+    test('un compte de départ impossible à promouvoir est signalé sans arrêter le démarrage, et les suivants sont traités', async () => {
+      const bloque = await prisma.user.create({ data: { email: 'pilote3.demarrage.bloque@iris.test', name: 'TEST Pilote3 démarrage bloqué', role: 'CONDUCTEUR_TRAVAUX' } });
+      const nouveau = 'pilote3.demarrage.nouveau@iris.test';
+      const emails = process.env.SUPERADMIN_EMAILS;
+      // Rejouable après une exécution interrompue : fonction remplacée, trigger recréé.
+      await prisma.$executeRawUnsafe('CREATE OR REPLACE FUNCTION test_refuser_promotion_demarrage() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION \'Promotion refusée par le test\'; END $$');
+      const erreurs = mock.method(console, 'error', () => {});
+      const avertissements = mock.method(console, 'warn', () => {});
+      let appels = [];
+      let appelsAvertissement = [];
+      process.env.SUPERADMIN_EMAILS = `${emails},${bloque.email},${nouveau}`;
+      try {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_refuser_promotion_demarrage ON "User"');
+        await prisma.$executeRawUnsafe(`CREATE TRIGGER test_refuser_promotion_demarrage BEFORE UPDATE ON "User" FOR EACH ROW WHEN (OLD."id" = '${bloque.id}') EXECUTE FUNCTION test_refuser_promotion_demarrage()`);
+        await ensureSuperAdmins();
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+        appels = [...erreurs.mock.calls];
+        appelsAvertissement = [...avertissements.mock.calls];
+        erreurs.mock.restore();
+        avertissements.mock.restore();
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_refuser_promotion_demarrage ON "User"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_refuser_promotion_demarrage()');
+      }
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: bloque.id } })).role, 'CONDUCTEUR_TRAVAUX');
+      assert.equal((await prisma.user.findUniqueOrThrow({ where: { email: nouveau } })).role, 'SUPERADMIN');
+      const signalements = appels.filter((appel) => String(appel.arguments[0]).includes(bloque.email));
+      assert.equal(signalements.length, 1, JSON.stringify(appels.map((appel) => String(appel.arguments[0]))));
+      assert.match(String(signalements[0].arguments[0]), /ni promu ni créé après 2 essais : nouvel essai au prochain démarrage/);
+      assert.match(String(signalements[0].arguments[1]?.message), /Promotion refusée par le test/);
+      assert.equal(appelsAvertissement.filter((appel) => String(appel.arguments[0]).includes(bloque.email)).length, 1);
+    });
+
+    // #231 : le décompte final des super administrateurs, s'il échoue, est signalé sans rejet.
+    test('un décompte des super administrateurs impossible au démarrage est signalé sans rejet', async () => {
+      const decompte = appPrisma.user.count;
+      const erreurs = mock.method(console, 'error', () => {});
+      let appels = [];
+      appPrisma.user.count = async () => { throw new Error('Décompte refusé par le test'); };
+      try {
+        await ensureSuperAdmins();
+      } finally {
+        appPrisma.user.count = decompte;
+        appels = [...erreurs.mock.calls];
+        erreurs.mock.restore();
+      }
+      assert.equal(appels.length, 1, JSON.stringify(appels.map((appel) => String(appel.arguments[0]))));
+      assert.match(String(appels[0].arguments[0]), /\[DÉMARRAGE\] Décompte des super administrateurs impossible/);
+      assert.match(String(appels[0].arguments[1]?.message), /Décompte refusé par le test/);
+    });
+
     test('un changement de type pendant la suppression du compte répond 404, jamais 500', async () => {
       for (let essai = 0; essai < 15; essai += 1) {
         const compte = await prisma.user.create({ data: { email: `pilote3.supprtype.${essai}@iris.test`, name: `TEST Pilote3 suppression type ${essai}`, role: 'TECHNICIEN' } });
@@ -4562,26 +5376,484 @@ if (!TEST_DATABASE_URL) {
       await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'PLANIFIEE' });
       await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'EN_COURS' });
       const rapport = await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`)
-        .send({ contenu: 'TEST Intervention réalisée : détecteur repositionné et essai concluant.' });
+        .send({ contenu: 'TEST Intervention réalisée : détecteur repositionné et essai concluant.', cleEnvoi: randomUUID() });
       assert.equal(rapport.status, 201, JSON.stringify(rapport.body));
       assert.equal(rapport.body.auteurId, undefined); // l’API n’expose pas l’identifiant interne de l’auteur
       assert.equal(rapport.body.contenu, 'TEST Intervention réalisée : détecteur repositionné et essai concluant.');
       const intrus = await compteTechnicienSav('sav.intrus@iris.test', 'TEST Intervenant SAV intrus');
       assert.equal(await voitLeDossier(intrus.jeton, dossier.body.id), false);
-      assert.equal((await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${intrus.jeton}`).send({ contenu: 'TEST Rapport hors périmètre.' })).status, 404);
-      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${intrus.jeton}`).send({ signataire: 'TEST Usurpation', confirme: true })).status, 404);
-      // La signature demeure possible après clôture : le client peut signer après le départ du technicien.
-      assert.equal((await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${technicien.jeton}`).send({ statut: 'TERMINEE' })).status, 200);
+      assert.equal((await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${intrus.jeton}`).send({ contenu: 'TEST Rapport hors périmètre.', cleEnvoi: randomUUID() })).status, 404);
+      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${intrus.jeton}`).send({ signataire: 'TEST Usurpation', confirme: true, trace: TRACE_SIGNATURE_TEST })).status, 404);
+      // La signature demeure possible après clôture : le client peut signer après le départ du
+      // technicien, qui a terminé avec un motif faute de signature.
+      const cloture = await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${technicien.jeton}`).send({ statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
       const signature = await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
-        .send({ signataire: 'TEST Client signataire', confirme: true });
+        .send({ signataire: 'TEST Client signataire', confirme: true, trace: TRACE_SIGNATURE_TEST });
       assert.equal(signature.status, 201, JSON.stringify(signature.body));
       assert.match(signature.body.empreinte, /^[a-f0-9]{64}$/);
-      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`).send({ signataire: 'TEST Client signataire', confirme: true })).status, 409);
+      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`).send({ signataire: 'TEST Client signataire', confirme: true, trace: TRACE_SIGNATURE_TEST })).status, 409);
       const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`);
       const relu = liste.body.find((item) => item.id === dossier.body.id);
       assert.equal(relu.rapports.length, 1);
       assert.equal(relu.rapports[0].contenu, rapport.body.contenu);
       assert.equal(relu.rapports[0].signature.signataire, 'TEST Client signataire');
+    });
+
+    // #223 : un compte rendu est en ajout seul dès son enregistrement et la signature qui l'atteste est
+    // figée, en base et non plus seulement faute de route. Chaque vidage est tenté dans une transaction
+    // annulée : si le garde régressait, la base de test ne serait pas réellement vidée.
+    test('comptes rendus et signatures d’intervention sont figés en base : ni modification, ni suppression, ni vidage', async () => {
+      const technicien = await compteTechnicienSav('sav.fige@iris.test', 'TEST Intervenant SAV figé');
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Comptes rendus figés SAV' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      await prisma.interventionAffectation.create({ data: { interventionId: dossier.body.id, intervenantId: technicien.intervenantId } });
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) {
+        const transition = await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      }
+      const consigner = (contenu) => ajouterCompteRendu(dossier.body.id, technicien.jeton, contenu);
+      const signe = await consigner('TEST Compte rendu signé : sirène remplacée et essai concluant.');
+      const libre = await consigner('TEST Compte rendu non signé : essai de la ligne à refaire.');
+      assert.equal(signe.status, 201, JSON.stringify(signe.body));
+      assert.equal(libre.status, 201, JSON.stringify(libre.body));
+      const signature = await request(app).post(`/api/interventions/rapports/${signe.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
+        .send({ signataire: 'TEST Client signataire figé', confirme: true, trace: TRACE_SIGNATURE_TEST });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      const rapportsEnBase = () => prisma.interventionRapport.findMany({ where: { interventionId: dossier.body.id }, include: { signature: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+      const avant = await rapportsEnBase();
+      assert.equal(avant.length, 2);
+
+      // Signé ou non, un compte rendu ne se réécrit ni ne se supprime, par Prisma comme en SQL.
+      for (const rapport of [signe.body, libre.body]) {
+        await assert.rejects(prisma.interventionRapport.update({ where: { id: rapport.id }, data: { contenu: 'TEST Compte rendu réécrit.' } }), /Compte rendu d'intervention figé/);
+        await assert.rejects(prisma.interventionRapport.delete({ where: { id: rapport.id } }), /Compte rendu d'intervention figé/);
+        await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionRapport" SET "createdAt" = $1 WHERE "id" = $2', new Date('2020-01-01T00:00:00.000Z'), rapport.id), /Compte rendu d'intervention figé/);
+      }
+      // La signature ne se réécrit pas et ne se supprime pas : la retirer pour en enregistrer une
+      // autre effacerait l'attestation d'origine.
+      await assert.rejects(prisma.interventionSignature.update({ where: { id: signature.body.id }, data: { signataire: 'TEST Signataire usurpé' } }), /Signature d'intervention figée/);
+      await assert.rejects(prisma.interventionSignature.delete({ where: { id: signature.body.id } }), /Signature d'intervention figée/);
+      await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionSignature" SET "empreinte" = $1 WHERE "id" = $2', '0'.repeat(64), signature.body.id), /Signature d'intervention figée/);
+      const vidageAnnule = (table) => prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`TRUNCATE "${table}" CASCADE`);
+        throw new Error(`vidage de ${table} accepté`);
+      });
+      for (const table of ['InterventionRapport', 'InterventionSignature']) {
+        await assert.rejects(vidageAnnule(table), new RegExp(`Vidage de « ${table} » interdit`), table);
+      }
+
+      // Une intervention qui porte un compte rendu ne se supprime pas, et ses comptes rendus ne partent
+      // pas en cascade. Le dossier témoin, créé sans journal ni affectation, n'est retenu que par eux.
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true } });
+      const temoin = await prisma.intervention.create({ data: { reference: `TEST-SAV-FIGE-${randomUUID()}`, clientId, titre: 'TEST Dossier témoin figé', statut: 'EN_COURS' } });
+      await prisma.interventionRapport.create({ data: { interventionId: temoin.id, auteurId: auteur.id, contenu: 'TEST Compte rendu du dossier témoin.' } });
+      await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "Intervention" WHERE "id" = $1', temoin.id), /InterventionRapport_interventionId_fkey/);
+      // Le garde porte sur toute la ligne, pas seulement sur le texte et la date : un compte rendu ne
+      // se rattache pas à un autre dossier, une signature ne passe pas à un autre compte rendu, et la
+      // suppression est aussi refusée en SQL brut.
+      await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionRapport" SET "interventionId" = $1 WHERE "id" = $2', temoin.id, libre.body.id), /Compte rendu d'intervention figé/);
+      await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionSignature" SET "rapportId" = $1 WHERE "id" = $2', libre.body.id, signature.body.id), /Signature d'intervention figée/);
+      await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "InterventionRapport" WHERE "id" = $1', libre.body.id), /Compte rendu d'intervention figé/);
+      await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "InterventionSignature" WHERE "id" = $1', signature.body.id), /Signature d'intervention figée/);
+      // Colonne par colonne, y compris celles qu'ajouteront les lots suivants : un garde restreint à
+      // une liste de colonnes (UPDATE OF …) laisserait passer l'auteur, l'horodatage ou l'identifiant.
+      // Les colonnes sont lues dans pg_attribute, qui les voit toutes quels que soient les droits du
+      // rôle, et celles du modèle doivent y figurer (notes N15 et N16 de l'audit de #255, lot 3b-3).
+      const colonnesDuModele = {
+        InterventionRapport: ['id', 'interventionId', 'auteurId', 'contenu', 'cleEnvoi', 'createdAt'],
+        InterventionSignature: ['id', 'rapportId', 'signataire', 'trace', 'enregistreParId', 'empreinte', 'accepteLe', 'createdAt'],
+      };
+      for (const [table, id, refus] of [['InterventionRapport', libre.body.id, /Compte rendu d'intervention figé/], ['InterventionSignature', signature.body.id, /Signature d'intervention figée/]]) {
+        const colonnes = await prisma.$queryRawUnsafe('SELECT attname::text AS nom, attgenerated::text AS generee, attidentity::text AS identite FROM pg_attribute WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum', `"${table}"`);
+        for (const attendue of colonnesDuModele[table]) assert.ok(colonnes.some(({ nom }) => nom === attendue), `${table}.${attendue} absente de pg_attribute`);
+        for (const { nom, generee, identite } of colonnes) {
+          // Une colonne générée ou identity, ou un nom contenant un guillemet, ferait échouer
+          // « SET x = x » avant le garde : le test rougirait sans rien prouver.
+          assert.equal(generee, '', `${table}.${nom} est générée`);
+          assert.equal(identite, '', `${table}.${nom} est une colonne identity`);
+          assert.ok(!nom.includes('"'), `${table} : nom de colonne ${nom}`);
+          await assert.rejects(prisma.$executeRawUnsafe(`UPDATE "${table}" SET "${nom}" = "${nom}" WHERE "id" = $1`, id), refus, `${table}.${nom}`);
+          // Un vrai changement de valeur est refusé lui aussi, par le garde et avant même le contrôle
+          // NOT NULL (note N14) : un garde qui ne comparerait que certaines colonnes ne passe pas.
+          await assert.rejects(prisma.$executeRawUnsafe(`UPDATE "${table}" SET "${nom}" = NULL WHERE "id" = $1`, id), refus, `${table}.${nom} = NULL`);
+        }
+      }
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: temoin.id } }), 1);
+
+      // L'ajout reste ouvert : une correction passe par un nouveau compte rendu, sans toucher aux autres.
+      const complement = await consigner('TEST Complément : ligne essayée de nouveau, transmission correcte.');
+      assert.equal(complement.status, 201, JSON.stringify(complement.body));
+      const apres = await rapportsEnBase();
+      assert.equal(apres.length, 3);
+      assert.deepEqual(apres.filter((rapport) => rapport.id !== complement.body.id), avant, 'comptes rendus et signature intacts');
+    });
+
+    // Lot 3b-3 : dossier en cours, technicien affecté, pour les règles du compte rendu, de la
+    // signature dessinée et de la clôture.
+    const dossierEnCours = async (email, titre) => {
+      const technicien = await compteTechnicienSav(email, `TEST Intervenant ${titre}`);
+      const userId = (await prisma.intervenant.findUniqueOrThrow({ where: { id: technicien.intervenantId }, select: { userId: true } })).userId;
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: `TEST ${titre}` });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      await prisma.interventionAffectation.create({ data: { interventionId: dossier.body.id, intervenantId: technicien.intervenantId } });
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) {
+        const transition = await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      }
+      return { id: dossier.body.id, technicien: { ...technicien, userId } };
+    };
+    const statutSav = (id, jeton, corps) => request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${jeton}`).send(corps);
+    const signerSav = (rapportId, jeton, corps) => request(app).post(`/api/interventions/rapports/${rapportId}/signature`).set('Authorization', `Bearer ${jeton}`).send(corps);
+    const attentesVerrouSav = async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n;
+    const attendreVerrouSav = async () => {
+      for (let tour = 0; tour < 250; tour += 1) {
+        if (await attentesVerrouSav() >= 1) return true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return false;
+    };
+    // Transaction de test tenue jusqu'à son relâchement : elle joue une clôture ou une signature en
+    // cours pendant que l'API attend le verrou de l'intervention.
+    const tenirTransactionSav = async (travail) => {
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const tenu = new Promise((resolve) => { pret = resolve; });
+      const fin = prisma.$transaction(async (tx) => { await travail(tx); pret(); await attente; }, { timeout: 20000 });
+      await tenu;
+      return async () => { liberer(); await fin; };
+    };
+
+    test('compte rendu : clé d’envoi obligatoire, envoi répété relu sans second compte rendu, ajout pendant l’intervention en cours, journalisé', async () => {
+      const technicien = await compteTechnicienSav('sav.cle.envoi@iris.test', 'TEST Intervenant SAV clé d’envoi');
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Clé d’envoi SAV' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      const id = dossier.body.id;
+      await prisma.interventionAffectation.create({ data: { interventionId: id, intervenantId: technicien.intervenantId } });
+      const envoyer = (corps, jeton = technicien.jeton) => request(app).post(`/api/interventions/${id}/rapports`).set('Authorization', `Bearer ${jeton}`).send(corps);
+      const contenu = 'TEST Compte rendu : clapet remplacé, essai concluant.';
+      // Avant le démarrage, comme après la clôture, aucun compte rendu ne s'ajoute.
+      assert.equal((await statutSav(id, session, { statut: 'PLANIFIEE' })).status, 200);
+      const avantDemarrage = await envoyer({ contenu, cleEnvoi: randomUUID() });
+      assert.equal(avantDemarrage.status, 409, JSON.stringify(avantDemarrage.body));
+      assert.match(avantDemarrage.body.error, /en cours/);
+      assert.equal((await statutSav(id, session, { statut: 'EN_COURS' })).status, 200);
+      for (const cleEnvoi of [undefined, '', 'pas-une-cle', 42]) {
+        const refus = await envoyer({ contenu, cleEnvoi });
+        assert.equal(refus.status, 400, `${cleEnvoi} : ${JSON.stringify(refus.body)}`);
+      }
+      // Caractère nul et demi-paire de substitution isolée (haute ou basse) : refusés avant PostgreSQL.
+      for (const invalide of ['TEST Compte rendu\u0000 tronqué.', 'TEST Compte rendu \ud83d isolé.', 'TEST Compte rendu \ude42 isolé.']) {
+        const refus = await envoyer({ contenu: invalide, cleEnvoi: randomUUID() });
+        assert.equal(refus.status, 400, `${JSON.stringify(invalide)} : ${JSON.stringify(refus.body)}`);
+      }
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: id } }), 0);
+
+      const cleEnvoi = randomUUID();
+      const premier = await envoyer({ contenu, cleEnvoi });
+      assert.equal(premier.status, 201, JSON.stringify(premier.body));
+      // La réponse perdue, le formulaire renvoie la même clé : le compte rendu enregistré est relu.
+      const repete = await envoyer({ contenu, cleEnvoi: cleEnvoi.toUpperCase() });
+      assert.equal(repete.status, 200, JSON.stringify(repete.body));
+      assert.equal(repete.body.id, premier.body.id);
+      assert.equal(repete.body.dejaEnregistre, true);
+      // Une clé déjà servie ne couvre ni un autre texte, ni un autre auteur.
+      assert.equal((await envoyer({ contenu: 'TEST Autre compte rendu.', cleEnvoi })).status, 409);
+      assert.equal((await envoyer({ contenu, cleEnvoi }, session)).status, 409);
+      // Ni un autre dossier, même pour le même auteur et le même texte : rien n'est relu ni divulgué.
+      const autreDossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Clé d’envoi SAV, autre dossier' });
+      await prisma.interventionAffectation.create({ data: { interventionId: autreDossier.body.id, intervenantId: technicien.intervenantId } });
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) assert.equal((await statutSav(autreDossier.body.id, session, { statut })).status, 200);
+      const autreDossierMemeCle = await request(app).post(`/api/interventions/${autreDossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`).send({ contenu, cleEnvoi });
+      assert.equal(autreDossierMemeCle.status, 409, JSON.stringify(autreDossierMemeCle.body));
+      assert.deepEqual(Object.keys(autreDossierMemeCle.body), ['error']);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: autreDossier.body.id } }), 0);
+      // Deux envois simultanés d'une même clé n'enregistrent qu'un compte rendu.
+      const cleSimultanee = randomUUID();
+      const simultanes = await Promise.all([1, 2].map(() => envoyer({ contenu: 'TEST Envoi double.', cleEnvoi: cleSimultanee })));
+      assert.deepEqual(simultanes.map((reponse) => reponse.status).sort(), [200, 201], JSON.stringify(simultanes.map((reponse) => reponse.body)));
+      assert.equal(simultanes[0].body.id, simultanes[1].body.id);
+
+      const rapports = await prisma.interventionRapport.findMany({ where: { interventionId: id }, orderBy: { createdAt: 'asc' } });
+      assert.deepEqual(rapports.map((rapport) => rapport.contenu), [contenu, 'TEST Envoi double.']);
+      assert.equal(rapports[0].cleEnvoi, cleEnvoi);
+      // Une entrée de journal par compte rendu enregistré, aucune pour un envoi relu ou refusé.
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, cible: 'INTERVENTION_RAPPORT' }, orderBy: { createdAt: 'asc' } });
+      assert.deepEqual(journal.map((entree) => [entree.cibleId, entree.action, entree.apres.contenu, entree.auteurNom]), rapports.map((rapport) => [rapport.id, 'CREATION', rapport.contenu, 'TEST Intervenant SAV clé d’envoi']));
+
+      // Après la clôture, plus d'ajout ; la même clé relit encore le compte rendu enregistré.
+      assert.equal((await statutSav(id, technicien.jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).status, 200);
+      assert.equal((await envoyer({ contenu: 'TEST Après clôture.', cleEnvoi: randomUUID() })).status, 409);
+      assert.equal((await envoyer({ contenu, cleEnvoi })).status, 200);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: id } }), 2);
+    });
+
+    test('comptes rendus et signatures reçoivent leur horodatage de la base', async () => {
+      const { id, technicien } = await dossierEnCours('sav.horodatage@iris.test', 'SAV horodatage');
+      const passe = new Date('2020-01-01T00:00:00.000Z');
+      const debut = new Date(Date.now() - 60_000);
+      // Même écrit directement, sans l'API, l'horodatage fourni est remplacé par celui de la base.
+      const rapport = await prisma.interventionRapport.create({ data: { interventionId: id, auteurId: technicien.userId, contenu: 'TEST Compte rendu antidaté.', createdAt: passe } });
+      const signature = await prisma.interventionSignature.create({ data: {
+        rapportId: rapport.id, signataire: 'TEST Signataire antidaté', trace: TRACE_SIGNATURE_TEST, enregistreParId: technicien.userId, empreinte: '0'.repeat(64), accepteLe: passe, createdAt: passe,
+      } });
+      for (const [nom, valeur] of [['rapport.createdAt', rapport.createdAt], ['signature.createdAt', signature.createdAt], ['signature.accepteLe', signature.accepteLe]]) {
+        assert.ok(valeur > debut, `${nom} = ${valeur.toISOString()}`);
+      }
+      assert.equal(signature.accepteLe.getTime(), signature.createdAt.getTime());
+      // La base refuse elle-même un tracé qui n'est pas un objet, ou démesuré.
+      const nonSigne = await prisma.interventionRapport.create({ data: { interventionId: id, auteurId: technicien.userId, contenu: 'TEST Compte rendu au tracé refusé par la base.' } });
+      for (const trace of ['[]', `{"x": "${'a'.repeat(70000)}"}`]) {
+        await assert.rejects(prisma.$executeRawUnsafe('INSERT INTO "InterventionSignature" ("id", "rapportId", "signataire", "trace", "enregistreParId", "empreinte") VALUES ($1, $2, $3, $4::jsonb, $5, $6)', randomUUID(), nonSigne.id, 'TEST Signataire', trace, technicien.userId, '0'.repeat(64)), /InterventionSignature_trace_objet/);
+      }
+    });
+
+    test('signature : tracé dessiné obligatoire, canonique et borné ; empreinte du texte, du signataire et du tracé ; enregistreur conservé', async () => {
+      const { id, technicien } = await dossierEnCours('sav.trace@iris.test', 'SAV tracé');
+      const compteRendu = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu à signer au doigt.');
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      const base = { signataire: 'TEST Client tracé', confirme: true };
+      const traitDe = (n) => Array.from({ length: n }, (_, i) => [((i % 100) / 100), (i % 2) / 2]);
+      const invalides = {
+        absent: undefined,
+        'non objet': [[0.1, 0.2]],
+        'sans trait': { ratio: 2, traits: [] },
+        'point isolé': { ratio: 2, traits: [[[0.4, 0.4], [0.4, 0.4]]] },
+        'coordonnée hors cadre': { ratio: 2, traits: [[[0.1, 0.2], [1.5, 0.3]]] },
+        'coordonnée négative': { ratio: 2, traits: [[[0.1, 0.2], [-0.01, 0.3]]] },
+        'coordonnée absente': { ratio: 2, traits: [[[0.1, 0.2], [null, 0.3]]] },
+        'point à trois valeurs': { ratio: 2, traits: [[[0.1, 0.2, 0.3], [0.2, 0.3]]] },
+        'proportions absurdes': { ratio: 0.1, traits: [[[0.1, 0.2], [0.3, 0.4]]] },
+        'proportions trop larges': { ratio: 10.001, traits: [[[0.1, 0.2], [0.3, 0.4]]] },
+        'trop de traits': { ratio: 2, traits: Array.from({ length: 51 }, () => [[0.1, 0.2], [0.3, 0.4]]) },
+        'trop de points': { ratio: 2, traits: [traitDe(1000), traitDe(1001)] },
+      };
+      for (const [cas, trace] of Object.entries(invalides)) {
+        const refus = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace });
+        assert.equal(refus.status, 400, `${cas} : ${JSON.stringify(refus.body)}`);
+      }
+      for (const signataire of ['TEST\u0000 Client', 'TEST \ud83d Client', 'TEST \ude42 Client']) {
+        const refus = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, signataire, trace: TRACE_SIGNATURE_TEST });
+        assert.equal(refus.status, 400, `${JSON.stringify(signataire)} : ${JSON.stringify(refus.body)}`);
+      }
+      // Les bornes elles-mêmes sont admises : 50 traits, 2 000 points. Une paire de substitution complète
+      // (un emoji) reste un caractère valide, dans le compte rendu comme dans le nom du signataire.
+      const limite = { ratio: 10, traits: [traitDe(1000), ...Array.from({ length: 48 }, () => [[0.1, 0.2]]), traitDe(952)] };
+      assert.equal(limite.traits.length, 50);
+      assert.equal(limite.traits.flat().length, 2000);
+      const autre = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu au tracé maximal 🔧.');
+      assert.equal(autre.status, 201, JSON.stringify(autre.body));
+      const signeLimite = await signerSav(autre.body.id, technicien.jeton, { ...base, signataire: 'TEST Client 🙂', trace: limite });
+      assert.equal(signeLimite.status, 201, JSON.stringify(signeLimite.body));
+      assert.equal(signeLimite.body.signataire, 'TEST Client 🙂');
+      assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
+
+      // Le tracé est enregistré sous sa forme canonique (arrondi au dix-millième, clés fixes), qui entre
+      // dans l'empreinte ; le compte qui enregistre est conservé.
+      const dessin = { traits: [[[0.123456, 0.654321], [0.5, 0.25], [0.99999, 0.00001]], [[0.2, 0.8], [0.3, 0.7]]], ratio: 2.66666, inutile: 'ignoré' };
+      const canonique = { ratio: 2.667, traits: [[[0.1235, 0.6543], [0.5, 0.25], [1, 0]], [[0.2, 0.8], [0.3, 0.7]]] };
+      const signature = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace: dessin });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.deepEqual(signature.body.trace, canonique);
+      assert.equal(signature.body.enregistrePar.name, 'TEST Intervenant SAV tracé');
+      const attendue = createHash('sha256').update(`${compteRendu.body.id}\nTEST Compte rendu à signer au doigt.\nTEST Client tracé\n${JSON.stringify(canonique)}`, 'utf8').digest('hex');
+      assert.equal(signature.body.empreinte, attendue);
+      const enBase = await prisma.interventionSignature.findUniqueOrThrow({ where: { id: signature.body.id } });
+      assert.deepEqual(enBase.trace, canonique);
+      assert.equal(enBase.enregistreParId, technicien.userId);
+      // La liste des interventions rend le tracé et l'enregistreur, pour réafficher la signature.
+      const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${session}`);
+      const relue = liste.body.find((item) => item.id === id).rapports.find((rapport) => rapport.id === compteRendu.body.id).signature;
+      assert.deepEqual(relue.trace, canonique);
+      assert.equal(relue.enregistrePar.name, 'TEST Intervenant SAV tracé');
+      // Le journal garde l'empreinte, sans le tracé.
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, cible: 'INTERVENTION_SIGNATURE', cibleId: signature.body.id } });
+      assert.equal(journal.length, 1);
+      assert.equal(journal[0].apres.empreinte, attendue);
+      assert.equal(journal[0].apres.signataire, 'TEST Client tracé');
+      assert.equal(journal[0].apres.trace, undefined);
+      // L'enregistreur est le compte qui enregistre la signature, pas l'auteur du compte rendu.
+      const secours = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
+      const rapportTechnicien = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu signé devant l’encadrement.');
+      const parEncadrement = await signerSav(rapportTechnicien.body.id, session, { ...base, trace: dessin });
+      assert.equal(parEncadrement.status, 201, JSON.stringify(parEncadrement.body));
+      assert.equal(parEncadrement.body.enregistrePar.name, secours.name);
+      assert.equal((await prisma.interventionSignature.findUniqueOrThrow({ where: { id: parEncadrement.body.id } })).enregistreParId, secours.id);
+      const journalEncadrement = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { cible: 'INTERVENTION_SIGNATURE', cibleId: parEncadrement.body.id } });
+      assert.equal(journalEncadrement.apres.enregistrePar, secours.name);
+      assert.equal(journalEncadrement.auteurId, secours.id);
+      // Une seule signature par compte rendu, et aucune sur une intervention annulée.
+      assert.equal((await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace: dessin })).status, 409);
+      const annulee = await dossierEnCours('sav.trace.annule@iris.test', 'SAV tracé annulé');
+      const rapportAnnule = await ajouterCompteRendu(annulee.id, annulee.technicien.jeton);
+      assert.equal((await statutSav(annulee.id, session, { statut: 'ANNULEE' })).status, 200);
+      const refusAnnulee = await signerSav(rapportAnnule.body.id, annulee.technicien.jeton, { ...base, trace: dessin });
+      assert.equal(refusAnnulee.status, 409, JSON.stringify(refusAnnulee.body));
+      assert.equal(await prisma.interventionSignature.count({ where: { rapportId: rapportAnnule.body.id } }), 0);
+    });
+
+    test('terminer exige un compte rendu, signé ou accompagné d’un motif, pour le technicien comme pour l’encadrement', async () => {
+      const { id, technicien } = await dossierEnCours('sav.cloture@iris.test', 'SAV clôture');
+      for (const jeton of [technicien.jeton, session]) {
+        const refus = await statutSav(id, jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /compte rendu est obligatoire/);
+      }
+      assert.equal((await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu non signé.')).status, 201);
+      for (const jeton of [technicien.jeton, session]) {
+        const refus = await statutSav(id, jeton, { statut: 'TERMINEE' });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /choisissez un motif/);
+      }
+      const motifsInvalides = [
+        { motifSansSignature: 'INCONNU' },
+        { motifSansSignature: 'AUTRE' },
+        { motifSansSignature: 'AUTRE', precisionMotif: '  a ' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'x'.repeat(201) },
+        { motifSansSignature: 'AUTRE', precisionMotif: 42 },
+        // Longueur comptée en caractères (points de code), comme les autres motifs : deux emoji n'en
+        // font pas quatre. Un caractère nul ou une demi-paire isolée est refusé avant PostgreSQL.
+        { motifSansSignature: 'AUTRE', precisionMotif: '🙂🙂' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client\u0000 absent' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client \ud83d absent' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client \ude42 absent' },
+        { motifSansSignature: 'CLIENT_ABSENT', precisionMotif: 'Une précision sans « Autre ».' },
+        { precisionMotif: 'Une précision sans motif.' },
+      ];
+      for (const corps of motifsInvalides) {
+        const refus = await statutSav(id, technicien.jeton, { statut: 'TERMINEE', ...corps });
+        assert.equal(refus.status, 400, `${JSON.stringify(corps)} : ${JSON.stringify(refus.body)}`);
+      }
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'EN_COURS');
+      const termine = await statutSav(id, technicien.jeton, { statut: 'TERMINEE', motifSansSignature: 'AUTRE', precisionMotif: '  Client parti avant la fin  ' });
+      assert.equal(termine.status, 200, JSON.stringify(termine.body));
+      const cloture = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: id, cible: 'INTERVENTION', action: 'CHANGEMENT_STATUT', apres: { path: ['statut'], equals: 'TERMINEE' } } });
+      assert.equal(cloture.motif, 'Clôture sans signature du client : Autre — Client parti avant la fin');
+      assert.equal(cloture.avant.statut, 'EN_COURS');
+      assert.equal(cloture.auteurNom, 'TEST Intervenant SAV clôture');
+
+      // Chacun des autres motifs, pour l'encadrement ; un motif ne s'indique qu'en terminant.
+      const libelles = { CLIENT_ABSENT: 'Client absent', REFUS_SIGNATURE: 'Refus de signer', SIGNATURE_IMPOSSIBLE: 'Signature impossible' };
+      for (const [code, libelle] of Object.entries(libelles)) {
+        const dossier = await dossierEnCours(`sav.cloture.${code.toLowerCase()}@iris.test`, `SAV clôture ${code}`);
+        assert.equal((await ajouterCompteRendu(dossier.id, session)).status, 201);
+        assert.equal((await statutSav(dossier.id, session, { statut: 'TERMINEE', motifSansSignature: code })).status, 200);
+        const entree = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: dossier.id, action: 'CHANGEMENT_STATUT', apres: { path: ['statut'], equals: 'TERMINEE' } } });
+        assert.equal(entree.motif, `Clôture sans signature du client : ${libelle}`);
+      }
+      const aPlanifier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Motif hors clôture' });
+      const horsCloture = await statutSav(aPlanifier.body.id, session, { statut: 'PLANIFIEE', motifSansSignature: 'CLIENT_ABSENT' });
+      assert.equal(horsCloture.status, 400, JSON.stringify(horsCloture.body));
+
+      // Un compte rendu signé suffit, et aucun motif ne s'y ajoute.
+      const signe = await dossierEnCours('sav.cloture.signe@iris.test', 'SAV clôture signée');
+      const compteRendu = await ajouterCompteRendu(signe.id, signe.technicien.jeton, 'TEST Compte rendu signé.');
+      assert.equal((await ajouterCompteRendu(signe.id, signe.technicien.jeton, 'TEST Complément non signé.')).status, 201);
+      assert.equal((await signerSav(compteRendu.body.id, signe.technicien.jeton, { signataire: 'TEST Client clôture', confirme: true, trace: TRACE_SIGNATURE_TEST })).status, 201);
+      const motifInutile = await statutSav(signe.id, session, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+      assert.equal(motifInutile.status, 409, JSON.stringify(motifInutile.body));
+      assert.match(motifInutile.body.error, /aucun motif/);
+      const termineSigne = await statutSav(signe.id, session, { statut: 'TERMINEE' });
+      assert.equal(termineSigne.status, 200, JSON.stringify(termineSigne.body));
+      const entreeSignee = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: signe.id, action: 'CHANGEMENT_STATUT', apres: { path: ['statut'], equals: 'TERMINEE' } } });
+      assert.equal(entreeSignee.motif, null);
+    });
+
+    // La clôture prend le verrou exclusif de l'intervention ; compte rendu et signature, le verrou
+    // partagé. Une transaction de test joue l'acte concurrent et le tient pendant que l'API attend.
+    test('une clôture en cours fait attendre puis refuser un compte rendu ; une signature en cours est comptée par la clôture', async () => {
+      const premier = await dossierEnCours('sav.verrou.cloture@iris.test', 'SAV verrou clôture');
+      assert.equal((await ajouterCompteRendu(premier.id, premier.technicien.jeton, 'TEST Compte rendu avant clôture.')).status, 201);
+      const relacherCloture = await tenirTransactionSav(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${premier.id} FOR UPDATE`;
+        await tx.intervention.update({ where: { id: premier.id }, data: { statut: 'TERMINEE' } });
+      });
+      // supertest n'envoie la requête qu'à la première lecture de sa promesse : then la lance.
+      const ajout = ajouterCompteRendu(premier.id, premier.technicien.jeton, 'TEST Compte rendu pendant la clôture.').then((reponse) => reponse);
+      assert.equal(await attendreVerrouSav(), true, 'le compte rendu attend la clôture');
+      await relacherCloture();
+      const refus = await ajout;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: premier.id } }), 1);
+
+      const second = await dossierEnCours('sav.verrou.signature@iris.test', 'SAV verrou signature');
+      const compteRendu = await ajouterCompteRendu(second.id, second.technicien.jeton, 'TEST Compte rendu signé pendant la clôture.');
+      const relacherSignature = await tenirTransactionSav(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${second.id} FOR SHARE`;
+        await tx.interventionSignature.create({ data: { rapportId: compteRendu.body.id, signataire: 'TEST Client concurrent', trace: TRACE_SIGNATURE_TEST, enregistreParId: second.technicien.userId, empreinte: 'a'.repeat(64) } });
+      });
+      const clotureSansMotif = statutSav(second.id, second.technicien.jeton, { statut: 'TERMINEE' }).then((reponse) => reponse);
+      assert.equal(await attendreVerrouSav(), true, 'la clôture attend la signature');
+      await relacherSignature();
+      const termine = await clotureSansMotif;
+      assert.equal(termine.status, 200, JSON.stringify(termine.body));
+    });
+
+    // Course réelle sur la clé d'envoi : les deux envois attendent le même verrou, le relâchement les
+    // lance ensemble ; le second bute sur l'index unique (P2002) et relit le premier.
+    test('deux envois simultanés d’une même clé : l’index unique tranche, le second relit le premier', async () => {
+      const course = await dossierEnCours('sav.course.cle@iris.test', 'SAV course clé');
+      const relacher = await tenirTransactionSav(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${course.id} FOR UPDATE`; });
+      const cleEnvoi = randomUUID();
+      const envois = [1, 2].map(() => request(app).post(`/api/interventions/${course.id}/rapports`).set('Authorization', `Bearer ${course.technicien.jeton}`).send({ contenu: 'TEST Envoi en course.', cleEnvoi }).then((reponse) => reponse));
+      for (let tour = 0; tour < 250 && await attentesVerrouSav() < 2; tour += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(await attentesVerrouSav(), 2, 'les deux envois attendent le verrou');
+      await relacher();
+      const reponses = await Promise.all(envois);
+      assert.deepEqual(reponses.map((reponse) => reponse.status).sort(), [200, 201], JSON.stringify(reponses.map((reponse) => reponse.body)));
+      assert.equal(reponses[0].body.id, reponses[1].body.id);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: course.id } }), 1);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: course.id, cible: 'INTERVENTION_RAPPORT' } }), 1);
+    });
+
+    // Le périmètre se relit sous le verrou : un retrait d'affectation (qui prend le verrou exclusif de
+    // l'intervention) fait refuser l'écriture du technicien retiré, au lieu de l'enregistrer après lui.
+    test('un retrait d’affectation en cours fait refuser compte rendu, signature et clôture du technicien retiré', async () => {
+      const dossier = await dossierEnCours('sav.verrou.affectation@iris.test', 'SAV verrou affectation');
+      const compteRendu = await ajouterCompteRendu(dossier.id, dossier.technicien.jeton, 'TEST Compte rendu avant le retrait.');
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      for (const acte of ['compte rendu', 'signature', 'cloture']) {
+        const relacher = await tenirTransactionSav(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${dossier.id} FOR UPDATE`;
+          await tx.interventionAffectation.deleteMany({ where: { interventionId: dossier.id } });
+        });
+        const jeton = dossier.technicien.jeton;
+        const reponse = (acte === 'compte rendu' ? ajouterCompteRendu(dossier.id, jeton, 'TEST Compte rendu après le retrait.')
+          : acte === 'signature' ? signerSav(compteRendu.body.id, jeton, { signataire: 'TEST Client', confirme: true, trace: TRACE_SIGNATURE_TEST })
+            : statutSav(dossier.id, jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).then((r) => r);
+        assert.equal(await attendreVerrouSav(), true, `${acte} attend le retrait`);
+        await relacher();
+        const refus = await reponse;
+        assert.equal(refus.status, 404, `${acte} : ${JSON.stringify(refus.body)}`);
+        await prisma.interventionAffectation.create({ data: { interventionId: dossier.id, intervenantId: dossier.technicien.intervenantId } });
+      }
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: dossier.id } }), 1);
+      assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: dossier.id } })).statut, 'EN_COURS');
+    });
+
+    test('une annulation en cours fait attendre puis refuser une signature et une clôture', async () => {
+      const dossier = await dossierEnCours('sav.verrou.annulation@iris.test', 'SAV verrou annulation');
+      const compteRendu = await ajouterCompteRendu(dossier.id, dossier.technicien.jeton, 'TEST Compte rendu avant annulation.');
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      for (const acte of ['signature', 'cloture']) {
+        const relacher = await tenirTransactionSav(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${dossier.id} FOR UPDATE`;
+          await tx.intervention.update({ where: { id: dossier.id }, data: { statut: 'ANNULEE' } });
+        });
+        const reponse = (acte === 'signature'
+          ? signerSav(compteRendu.body.id, dossier.technicien.jeton, { signataire: 'TEST Client', confirme: true, trace: TRACE_SIGNATURE_TEST })
+          : statutSav(dossier.id, dossier.technicien.jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).then((r) => r);
+        assert.equal(await attendreVerrouSav(), true, `${acte} attend l’annulation`);
+        await relacher();
+        const refus = await reponse;
+        assert.equal(refus.status, 409, `${acte} : ${JSON.stringify(refus.body)}`);
+        if (acte === 'cloture') assert.match(refus.body.error, /ANNULEE vers TERMINEE/);
+        assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: dossier.id } })).statut, 'ANNULEE');
+        // Retour au statut en cours, en SQL de test, pour rejouer l'acte suivant sur le même dossier.
+        await prisma.intervention.update({ where: { id: dossier.id }, data: { statut: 'EN_COURS' } });
+      }
     });
 
     test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {
@@ -4620,6 +5892,240 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await voitLeDossier(second.jeton, dossier.body.id), true);
       const suppressionIntervenant = await request(app).delete(`/api/intervenants/${second.intervenantId}`).set('Authorization', `Bearer ${session}`);
       assert.equal(suppressionIntervenant.status, 409, JSON.stringify(suppressionIntervenant.body));
+    });
+
+    // Lot pilote 3b-4 : « Ma journée » et fiche d'une intervention. Les règles de la journée sont des
+    // choix par défaut de #253, à confirmer.
+    describe('Ma journée et fiche intervention (lot pilote 3b-4)', () => {
+      const decaler = (jour, n) => new Date(Date.parse(`${jour}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+      const enFrancais = (jour) => jour.split('-').reverse().join('-');
+      const journee = (jeton, jour) => {
+        const requete = request(app).get('/api/interventions/journee').set('Authorization', `Bearer ${jeton}`);
+        return jour === undefined ? requete : requete.query({ jour });
+      };
+      const dossier = async (titre, donnees = {}) => {
+        const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre, ...donnees });
+        assert.equal(creation.status, 201, JSON.stringify(creation.body));
+        return creation.body;
+      };
+      const planifier = async (id, intervenantId, corps) => {
+        const reponse = await request(app).put(`/api/interventions/${id}/planning`).set('Authorization', `Bearer ${session}`).send({ intervenantIds: [intervenantId], ...corps });
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      };
+      const statut = async (id, valeur) => {
+        const reponse = await request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: valeur });
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      };
+      const titres = (liste) => liste.map((item) => item.titre);
+
+      test('le technicien voit ses interventions du jour par créneau, les terminées à part et, aujourd’hui seulement, celles restées ouvertes', async () => {
+        const technicien = await compteTechnicienSav('sav.journee@iris.test', 'TEST Intervenant journée');
+        const collegue = await compteTechnicienSav('sav.journee.collegue@iris.test', 'TEST Intervenant journée collègue');
+        const aujourdhui = (await journee(technicien.jeton)).body.aujourdhui;
+        assert.match(aujourdhui, /^\d{4}-\d{2}-\d{2}$/);
+        const hier = decaler(aujourdhui, -1);
+        const avantHier = decaler(aujourdhui, -2);
+        const demain = decaler(aujourdhui, 1);
+
+        const apresMidi = await dossier('TEST Journée après-midi');
+        await planifier(apresMidi.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'APRES_MIDI' });
+        const quatorze = await dossier('TEST Journée 14 h');
+        await planifier(quatorze.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'HEURES', heureDebut: '14:00', heureFin: '15:00' });
+        const matin = await dossier('TEST Journée matin');
+        await planifier(matin.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        const huitHeures = await dossier('TEST Journée 8 h 30');
+        await planifier(huitHeures.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'HEURES', heureDebut: '08:30', heureFin: '09:30' });
+        const entiere = await dossier('TEST Journée entière');
+        await planifier(entiere.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'JOURNEE' });
+        await statut(entiere.id, 'EN_COURS');
+        // Une projection de plusieurs jours compte pour chacun d'eux.
+        const plusieursJours = await dossier('TEST Journée sur trois jours');
+        await planifier(plusieursJours.id, technicien.intervenantId, { dateDebut: hier, dateFin: demain, creneau: 'JOURNEE' });
+        const terminee = await dossier('TEST Journée terminée');
+        await planifier(terminee.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        await statut(terminee.id, 'EN_COURS');
+        assert.equal((await terminerIntervention(terminee.id, session)).status, 200);
+        const annulee = await dossier('TEST Journée annulée');
+        await planifier(annulee.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        await statut(annulee.id, 'ANNULEE');
+        // Créée avant celle d'avant-hier, et d'un créneau plus tôt : seul le tri par dernier jour prévu
+        // la range après elle (ni la référence ni le créneau).
+        const nonCommencee = await dossier('TEST Journée prévue hier');
+        await planifier(nonCommencee.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
+        const enRetard = await dossier('TEST Journée en cours depuis avant-hier');
+        await planifier(enRetard.id, technicien.intervenantId, { dateDebut: avantHier, creneau: 'JOURNEE' });
+        await statut(enRetard.id, 'EN_COURS');
+        // Annulée après son jour prévu : absente de la rubrique des restées ouvertes.
+        const annuleeHier = await dossier('TEST Journée annulée hier');
+        await planifier(annuleeHier.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
+        await statut(annuleeHier.id, 'ANNULEE');
+        const termineeHier = await dossier('TEST Journée terminée hier');
+        await planifier(termineeHier.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
+        await statut(termineeHier.id, 'EN_COURS');
+        assert.equal((await terminerIntervention(termineeHier.id, session)).status, 200);
+        // Affectée sans projection : visible dans la liste, absente de la journée.
+        const sansProjection = await dossier('TEST Journée sans projection');
+        await prisma.interventionAffectation.create({ data: { interventionId: sansProjection.id, intervenantId: technicien.intervenantId } });
+        assert.equal(await voitLeDossier(technicien.jeton, sansProjection.id), true);
+        const duCollegue = await dossier('TEST Journée du collègue');
+        await planifier(duCollegue.id, collegue.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+
+        const jour = await journee(technicien.jeton);
+        assert.equal(jour.status, 200, JSON.stringify(jour.body));
+        assert.equal(jour.body.jour, aujourdhui);
+        // À créneau égal, l'ordre suit la référence, donc l'ordre de création.
+        assert.deepEqual(titres(jour.body.aFaire), ['TEST Journée matin', 'TEST Journée entière', 'TEST Journée sur trois jours', 'TEST Journée 8 h 30', 'TEST Journée 14 h', 'TEST Journée après-midi'],
+          'matin, journée, heures dans l’ordre, après-midi');
+        assert.deepEqual(titres(jour.body.terminees), ['TEST Journée terminée']);
+        assert.deepEqual(titres(jour.body.resteesOuvertes), ['TEST Journée en cours depuis avant-hier', 'TEST Journée prévue hier'], 'par dernier jour prévu, sans les terminées');
+        assert.equal(jour.body.aFaire[0].planningEvent.creneau, 'MATIN');
+        assert.equal(jour.body.aFaire[3].planningEvent.heureDebut, '08:30');
+        // Jamais de montant ni de taux.
+        assert.doesNotMatch(JSON.stringify(jour.body), /taux|montant/i);
+
+        const duCollegueJour = await journee(collegue.jeton);
+        assert.deepEqual(titres(duCollegueJour.body.aFaire), ['TEST Journée du collègue'], 'chacun ne voit que ses affectations');
+
+        // Un autre jour : ni rubrique « restées ouvertes », ni terminées d'un autre jour ; format JJ-MM-AAAA admis.
+        const lendemain = await journee(technicien.jeton, enFrancais(demain));
+        assert.equal(lendemain.status, 200, JSON.stringify(lendemain.body));
+        assert.deepEqual([lendemain.body.jour, lendemain.body.aujourdhui], [demain, aujourdhui]);
+        assert.deepEqual(titres(lendemain.body.aFaire), ['TEST Journée sur trois jours']);
+        assert.deepEqual([lendemain.body.resteesOuvertes, lendemain.body.terminees], [[], []]);
+        const veille = await journee(technicien.jeton, hier);
+        assert.deepEqual(titres(veille.body.aFaire), ['TEST Journée prévue hier', 'TEST Journée sur trois jours']);
+        assert.deepEqual(titres(veille.body.terminees), ['TEST Journée terminée hier']);
+        assert.deepEqual(veille.body.resteesOuvertes, []);
+
+        for (const invalide of ['2026-13-01', '31-02-2026', 'demain', '']) {
+          const refus = await journee(technicien.jeton, invalide);
+          assert.equal(refus.status, 400, `${invalide} : ${JSON.stringify(refus.body)}`);
+        }
+        const double = await request(app).get('/api/interventions/journee?jour=2026-10-20&jour=2026-10-21').set('Authorization', `Bearer ${technicien.jeton}`);
+        assert.equal(double.status, 400, JSON.stringify(double.body));
+      });
+
+      test('la journée suit le jour civil de la société, et non celui d’UTC', async () => {
+        const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        const fuseau = 'Pacific/Wallis';
+        const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+        const technicien = await compteTechnicienSav('sav.journee.fuseau@iris.test', 'TEST Intervenant journée fuseau');
+        try {
+          figerHorlogeA21hUtc();
+          assert.notEqual(jourDans(fuseau), jourDans('UTC'), 'le jour de la société diffère de celui d’UTC');
+          assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
+          const deLaSociete = await dossier('TEST Journée au jour de la société');
+          await planifier(deLaSociete.id, technicien.intervenantId, { dateDebut: jourDans(fuseau), creneau: 'JOURNEE' });
+          const deUtc = await dossier('TEST Journée au jour UTC');
+          await planifier(deUtc.id, technicien.intervenantId, { dateDebut: jourDans('UTC'), creneau: 'JOURNEE' });
+          const reponse = await journee(technicien.jeton);
+          assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+          assert.deepEqual([reponse.body.jour, reponse.body.aujourdhui, reponse.body.fuseauHoraire], [jourDans(fuseau), jourDans(fuseau), fuseau]);
+          assert.deepEqual(titres(reponse.body.aFaire), ['TEST Journée au jour de la société']);
+          // Le jour UTC est la veille de celui de Wallis : son intervention y est restée ouverte.
+          assert.deepEqual(titres(reponse.body.resteesOuvertes), ['TEST Journée au jour UTC']);
+        } finally {
+          mock.timers.reset();
+          await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        }
+      });
+
+      test('la fiche suit le périmètre de la liste et garde adresse et téléphone, même pour un client désactivé', async () => {
+        const technicien = await compteTechnicienSav('sav.fiche@iris.test', 'TEST Intervenant fiche');
+        const collegue = await compteTechnicienSav('sav.fiche.collegue@iris.test', 'TEST Intervenant fiche collègue');
+        const commercial = await prisma.user.create({ data: { email: 'sav.fiche.commercial@iris.test', name: 'TEST Commercial fiche', role: 'COMMERCIAL' } });
+        const jetonCommercial = jwt.sign({ id: commercial.id }, process.env.JWT_SECRET);
+        const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client fiche désactivé' });
+        assert.equal(client.status, 201, JSON.stringify(client.body));
+        const site = await prisma.clientSite.create({ data: { clientId: client.body.id, nom: 'Chaufferie', adresse: '2 rue du Parcours', complementAdresse: 'Bâtiment B', codePostal: '14000', ville: 'Caen' } });
+        const contact = await prisma.clientContact.create({ data: { clientId: client.body.id, prenom: 'Alice', nom: 'Martin', telephone: '06 12 34 56 78', email: 'alice.martin@exemple.test' } });
+        const fiche = await dossier('TEST Fiche intervention', { clientId: client.body.id, siteId: site.id, contactId: contact.id });
+        const aujourdhui = (await journee(technicien.jeton)).body.aujourdhui;
+        await planifier(fiche.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'HEURES', heureDebut: '10:00', heureFin: '11:00' });
+        const lire = (jeton, id = fiche.id) => request(app).get(`/api/interventions/${id}`).set('Authorization', `Bearer ${jeton}`);
+
+        const lue = await lire(technicien.jeton);
+        assert.equal(lue.status, 200, JSON.stringify(lue.body));
+        assert.equal(lue.body.reference, fiche.reference);
+        assert.deepEqual([lue.body.site.adresse, lue.body.site.complementAdresse, lue.body.site.codePostal, lue.body.site.ville], ['2 rue du Parcours', 'Bâtiment B', '14000', 'Caen']);
+        assert.equal(lue.body.contact.telephone, '06 12 34 56 78');
+        assert.deepEqual([lue.body.planningEvent.creneau, lue.body.planningEvent.heureDebut, lue.body.planningEvent.heureFin], ['HEURES', '10:00', '11:00']);
+        assert.doesNotMatch(JSON.stringify(lue.body), /taux|montant/i);
+        const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`);
+        assert.equal(liste.body.find((item) => item.id === fiche.id).planningEvent.creneau, 'HEURES', 'la liste porte aussi le créneau');
+
+        assert.equal((await lire(collegue.jeton)).status, 404, 'hors périmètre : introuvable');
+        assert.equal((await lire(technicien.jeton, randomUUID())).status, 404);
+        assert.equal((await lire(jetonCommercial)).status, 403);
+        assert.equal((await journee(jetonCommercial)).status, 403);
+
+        // Client désactivé : sa fiche est fermée au technicien, mais l'intervention affectée garde le
+        // nom du client, l'adresse du site et le téléphone du contact (état actuel, section 4 de la passation).
+        assert.equal((await request(app).delete(`/api/clients/${client.body.id}`).set('Authorization', `Bearer ${session}`)).status, 200);
+        assert.equal((await request(app).get(`/api/clients/${client.body.id}`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 404);
+        const desactive = await lire(technicien.jeton);
+        assert.equal(desactive.status, 200, JSON.stringify(desactive.body));
+        assert.deepEqual([desactive.body.client.raisonSociale, desactive.body.site.adresse, desactive.body.contact.telephone], ['TEST Client fiche désactivé', '2 rue du Parcours', '06 12 34 56 78']);
+        const dansLaJournee = (await journee(technicien.jeton)).body.aFaire.find((item) => item.id === fiche.id);
+        assert.deepEqual([dansLaJournee?.client.raisonSociale, dansLaJournee?.contact.telephone], ['TEST Client fiche désactivé', '06 12 34 56 78']);
+
+        // Annulée : introuvable, pour le technicien comme pour l'administration.
+        await statut(fiche.id, 'ANNULEE');
+        assert.equal((await lire(technicien.jeton)).status, 404);
+        assert.equal((await lire(session)).status, 404);
+      });
+
+      // Règle 2 : la journée et la fiche reprennent, pour chaque rôle, le périmètre de la liste.
+      test('journée et fiche suivent le périmètre hiérarchique de la liste ; le directeur est refusé', async () => {
+        const jetonDe = (compte) => jwt.sign({ id: compte.id }, process.env.JWT_SECRET);
+        const conducteur = await prisma.user.create({ data: { email: 'sav.journee.conducteur@iris.test', name: 'TEST Conducteur journée', role: 'CONDUCTEUR_TRAVAUX' } });
+        const responsable = await prisma.user.create({ data: { email: 'sav.journee.responsable@iris.test', name: 'TEST Responsable journée', role: 'RESPONSABLE' } });
+        const tiers = await prisma.user.create({ data: { email: 'sav.journee.tiers@iris.test', name: 'TEST Conducteur journée tiers', role: 'CONDUCTEUR_TRAVAUX' } });
+        const directeur = await prisma.user.create({ data: { email: 'sav.journee.directeur@iris.test', name: 'TEST Directeur journée', role: 'DIRECTEUR' } });
+        await prisma.user.update({ where: { id: conducteur.id }, data: { responsableHierarchiqueId: responsable.id } });
+        const technicien = await compteTechnicienSav('sav.journee.equipe@iris.test', 'TEST Intervenant journée équipe');
+        const { raisonSociale } = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
+        const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier journée équipe', client: raisonSociale, clientId, dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
+        const aujourdhui = (await journee(technicien.jeton)).body.aujourdhui;
+        // Rattachée à l'affaire du conducteur ; ouverte par le conducteur, sans affaire ; hors de leur équipe.
+        const rattachee = await dossier('TEST Journée équipe rattachée', { chantierId: chantier.id });
+        await planifier(rattachee.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${jetonDe(conducteur)}`).send({ clientId, titre: 'TEST Journée ouverte par le conducteur' });
+        assert.equal(creation.status, 201, JSON.stringify(creation.body));
+        const ouverteParLui = creation.body;
+        await planifier(ouverteParLui.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'JOURNEE' });
+        const horsEquipe = await dossier('TEST Journée hors équipe');
+        await planifier(horsEquipe.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        const lire = (jeton, id) => request(app).get(`/api/interventions/${id}`).set('Authorization', `Bearer ${jeton}`);
+        const idsDuJour = async (jeton) => {
+          const reponse = await journee(jeton);
+          assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+          return reponse.body.aFaire.map((item) => item.id);
+        };
+
+        const attendus = [
+          [conducteur, 'conducteur', [rattachee, ouverteParLui], [horsEquipe]],
+          [responsable, 'responsable', [rattachee], [ouverteParLui, horsEquipe]],
+          [tiers, 'conducteur tiers', [], [rattachee, ouverteParLui, horsEquipe]],
+        ];
+        for (const [compte, role, visibles, fermees] of attendus) {
+          const jeton = jetonDe(compte);
+          const ids = await idsDuJour(jeton);
+          for (const item of visibles) {
+            assert.equal((await lire(jeton, item.id)).status, 200, `${role} : fiche ${item.titre}`);
+            assert.equal(ids.includes(item.id), true, `${role} : journée ${item.titre}`);
+          }
+          for (const item of fermees) {
+            assert.equal((await lire(jeton, item.id)).status, 404, `${role} : fiche ${item.titre}`);
+            assert.equal(ids.includes(item.id), false, `${role} : journée ${item.titre}`);
+          }
+        }
+        // L'administration voit tout ; le directeur, comme le commercial, n'a ni journée ni fiche.
+        assert.equal((await lire(session, horsEquipe.id)).status, 200);
+        assert.equal((await idsDuJour(session)).includes(horsEquipe.id), true);
+        assert.equal((await lire(jetonDe(directeur), rattachee.id)).status, 403);
+        assert.equal((await journee(jetonDe(directeur))).status, 403);
+      });
     });
 
     test('liste les interventions sans exposer les dossiers annulés par défaut', async () => {
@@ -4688,6 +6194,200 @@ if (!TEST_DATABASE_URL) {
       assert.equal(saisie.body.interventionId, undefined);
     });
 
+    // Lot pilote 3b (décision de Nelson du 17-10-2026) : le technicien saisit aussi ses heures sur une
+    // intervention hors contrat. Le matériel reste réservé aux contrats ; l'administration voit le coût
+    // de main-d'œuvre (décision du 19-10-2026), le conducteur les heures sans taux ni coût.
+    test('le technicien affecté saisit et corrige ses heures sur une intervention hors contrat, sans matériel', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.curative@iris.test', 'TEST Technicien heures curative');
+      const collegue = await compteTechnicienSav('sav.cout.curative.collegue@iris.test', 'TEST Collègue heures curative');
+      const conducteur = await prisma.user.create({ data: { email: 'sav.cout.curative.conducteur@iris.test', name: 'TEST Conducteur heures curative', role: 'CONDUCTEUR_TRAVAUX' } });
+      const jetonConducteur = jwt.sign({ id: conducteur.id }, process.env.JWT_SECRET);
+      const curative = await request(app).post('/api/interventions').set('Authorization', `Bearer ${jetonConducteur}`).send({ clientId, titre: 'TEST Curative heures hors contrat' });
+      assert.equal(curative.status, 201, JSON.stringify(curative.body));
+      const id = curative.body.id;
+      await prisma.interventionAffectation.createMany({ data: [{ interventionId: id, intervenantId: technicien.intervenantId }, { interventionId: id, intervenantId: collegue.intervenantId }] });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur curative ${Date.now()}` } });
+      // Jours civils de la société : la date future se juge au fuseau de l'entreprise, pas en UTC.
+      const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+      const enJJMMAAAA = (jourIso) => jourIso.split('-').reverse().join('-');
+      const jourIso = jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris');
+      const aujourdhui = enJJMMAAAA(jourIso);
+      // Lendemain calendaire, et non « maintenant + 24 h » : le jour du passage à l'heure d'hiver dure 25 h.
+      const lendemain = new Date(`${jourIso}T12:00:00.000Z`); lendemain.setUTCDate(lendemain.getUTCDate() + 1);
+      const demain = enJJMMAAAA(lendemain.toISOString().slice(0, 10));
+      const heuresDe = (jeton) => request(app).post(`/api/interventions/${id}/couts/heures`).set('Authorization', `Bearer ${jeton}`);
+      const corriger = (jeton, corps) => request(app).patch(`/api/interventions/${id}/couts/heures/${saisie.body.id}`).set('Authorization', `Bearer ${jeton}`).send(corps);
+
+      const saisie = await heuresDe(technicien.jeton).send({ date: aujourdhui, nbrHeures: 1.25, commentaire: 'TEST Dépannage' });
+      assert.equal(saisie.status, 201, JSON.stringify(saisie.body));
+      assert.equal(saisie.body.tauxHoraireApplique, undefined, 'aucun taux renvoyé au technicien');
+      assert.equal(saisie.body.intervenantId, undefined);
+      const lectureTechnicien = await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`);
+      assert.equal(lectureTechnicien.status, 200, JSON.stringify(lectureTechnicien.body));
+      assert.deepEqual(lectureTechnicien.body.heures.map((heure) => [heure.nbrHeures, heure.commentaire, heure.tauxHoraireApplique]), [[1.25, 'TEST Dépannage', undefined]]);
+
+      // Refus : date future, encadrement, collègue sur l'heure d'un autre, matériel hors contrat.
+      const future = await heuresDe(technicien.jeton).send({ date: demain, nbrHeures: 1 });
+      assert.equal(future.status, 400, JSON.stringify(future.body));
+      assert.match(future.body.error, /une fois faites/);
+      assert.equal((await heuresDe(session).send({ date: aujourdhui, nbrHeures: 1 })).status, 403, 'l’encadrement ne saisit pas les heures');
+      assert.equal((await corriger(collegue.jeton, { nbrHeures: 3, motifCorrection: 'Correction usurpée' })).status, 404, 'un collègue ne corrige pas l’heure d’un autre');
+      const achat = await request(app).post(`/api/interventions/${id}/couts/achats`).set('Authorization', `Bearer ${session}`).send({ date: aujourdhui, fournisseurId: fournisseur.id, description: 'TEST Pièce hors contrat', montantHT: 10 });
+      assert.equal(achat.status, 409, 'le matériel reste réservé aux interventions de contrat');
+      assert.equal(await prisma.coutInterventionAchat.count({ where: { interventionId: id } }), 0);
+
+      // Correction par le technicien, avec motif ; une date future est refusée aussi en correction.
+      const correctionFuture = await corriger(technicien.jeton, { date: demain, motifCorrection: 'Date décalée' });
+      assert.equal(correctionFuture.status, 400, JSON.stringify(correctionFuture.body));
+      assert.match(correctionFuture.body.error, /une fois faites/);
+      const correction = await corriger(technicien.jeton, { nbrHeures: 2, motifCorrection: 'Durée réelle relevée' });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      assert.equal(correction.body.nbrHeures, 2);
+
+      // L'administration voit le coût de main-d'œuvre (2 h × 42 €), sans total matériel ; le conducteur,
+      // les heures sans taux ni coût.
+      const lectureAdmin = await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${session}`);
+      assert.equal(lectureAdmin.status, 200, JSON.stringify(lectureAdmin.body));
+      assert.deepEqual([lectureAdmin.body.heures.length, lectureAdmin.body.heures[0].tauxHoraireApplique, lectureAdmin.body.totalMainOeuvreHT, lectureAdmin.body.totalMaterielHT, lectureAdmin.body.totalCoutsHT, lectureAdmin.body.achats], [1, 42, 84, null, 84, []]);
+      const lectureConducteur = await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${jetonConducteur}`);
+      assert.equal(lectureConducteur.status, 200, JSON.stringify(lectureConducteur.body));
+      assert.deepEqual([lectureConducteur.body.heures[0].nbrHeures, 'tauxHoraireApplique' in lectureConducteur.body.heures[0], lectureConducteur.body.totalMainOeuvreHT, lectureConducteur.body.totalMaterielHT, lectureConducteur.body.totalCoutsHT], [2, false, null, null, null]);
+
+      // Archivage et restauration par l'encadrement, puis plus aucune saisie une fois le dossier annulé.
+      assert.equal((await request(app).post(`/api/interventions/${id}/couts/heures/${saisie.body.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Saisie à revoir' })).status, 200);
+      assert.equal((await request(app).post(`/api/interventions/${id}/couts/heures/${saisie.body.id}/restaurer`).set('Authorization', `Bearer ${session}`).send({ motif: 'Saisie confirmée' })).status, 200);
+      assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ANNULEE' })).status, 200);
+      assert.equal((await heuresDe(technicien.jeton).send({ date: aujourdhui, nbrHeures: 1 })).status, 409, 'un dossier annulé ne reçoit plus d’heures');
+      assert.equal((await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 409);
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, cible: 'COUT_INTERVENTION_HEURE' }, select: { action: true }, orderBy: { createdAt: 'asc' } });
+      assert.deepEqual(journal.map((entree) => entree.action), ['CREATION', 'CORRECTION', 'ARCHIVAGE', 'RESTAURATION']);
+    });
+
+    // Hors contrat, le verrou de l'intervention reste le premier pris : une saisie engagée pendant
+    // une annulation l'attend, puis est refusée sans rien écrire.
+    test('une saisie d’heures hors contrat attend l’annulation concurrente puis est refusée', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.curative.course@iris.test', 'TEST Technicien curative course');
+      const curative = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Curative course annulation' });
+      assert.equal(curative.status, 201, JSON.stringify(curative.body));
+      const id = curative.body.id;
+      await prisma.interventionAffectation.create({ data: { interventionId: id, intervenantId: technicien.intervenantId } });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`;
+        pret();
+        await attente;
+        await tx.intervention.update({ where: { id }, data: { statut: 'ANNULEE' } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      let requete; let bloque = false;
+      try {
+        requete = request(app).post(`/api/interventions/${id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '01-10-2026', nbrHeures: 1 }).then((r) => r);
+        for (let tour = 0; tour < 150; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+          if (sessions.length) { bloque = true; break; }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const reponse = await requete;
+      assert.equal(bloque, true, 'la saisie attend le verrou de l’intervention');
+      assert.equal(reponse.status, 409, `${JSON.stringify(reponse.body)}`);
+      assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: id } }), 0, 'aucune heure');
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: id, cible: 'COUT_INTERVENTION_HEURE' } }), 0, 'aucune trace');
+    });
+
+    // Le contrat terminé ferme les heures comme le contrat suspendu, sans que l'intervention soit annulée.
+    test('une intervention d’un contrat terminé ne reçoit plus d’heures', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.contrat.termine@iris.test', 'TEST Technicien contrat terminé');
+      const contrat = await prisma.contratMaintenance.create({ data: { clientId, titre: 'TEST Contrat terminé heures', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z') } });
+      const intervention = await prisma.intervention.create({ data: { reference: `I26-TERMINE-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance, titre: 'TEST Visite contrat terminé' } });
+      await prisma.interventionAffectation.create({ data: { interventionId: intervention.id, intervenantId: technicien.intervenantId } });
+      const saisir = () => request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '01-10-2026', nbrHeures: 1 });
+      assert.equal((await saisir()).status, 201);
+      await prisma.contratMaintenance.update({ where: { id: contrat.id }, data: { statut: 'TERMINE' } });
+      assert.equal((await saisir()).status, 409, 'contrat terminé : saisie refusée');
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 409, 'contrat terminé : lecture technicien refusée');
+      assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: intervention.id } }), 1);
+    });
+
+    // Sous Serializable, une annulation validée pendant l'attente du verrou fait échouer la saisie
+    // (40001). Validée juste avant l'ouverture de la transaction, elle n'est vue que par la relecture
+    // d'éligibilité sous verrou : la saisie est retenue entre sa première lecture et sa transaction.
+    test('une annulation validée avant la transaction de saisie est relue sous verrou : heures refusées', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.curative.relecture@iris.test', 'TEST Technicien curative relecture');
+      const curative = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Curative relecture sous verrou' });
+      assert.equal(curative.status, 201, JSON.stringify(curative.body));
+      const id = curative.body.id;
+      await prisma.interventionAffectation.create({ data: { interventionId: id, intervenantId: technicien.intervenantId } });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      // La saisie lit les réglages de la société (fuseau de la date) après l'intervention et avant sa
+      // transaction : c'est là qu'on la retient. Si la route ne lisait plus ces réglages à cet endroit,
+      // le test échouerait sur « bloque » ; s'il les lisait avant l'intervention, il resterait vert
+      // sans plus atteindre la relecture : à revoir avec tout déplacement de cette lecture.
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe('LOCK TABLE "CompanySettings" IN ACCESS EXCLUSIVE MODE');
+        pret();
+        await attente;
+      }, { timeout: 15000 });
+      await verrouPris;
+      let requete; let bloque = false;
+      try {
+        requete = request(app).post(`/api/interventions/${id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '01-10-2026', nbrHeures: 1 }).then((r) => r);
+        for (let tour = 0; tour < 250; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"CompanySettings"%'`;
+          if (sessions.length) { bloque = true; break; }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        await prisma.intervention.update({ where: { id }, data: { statut: 'ANNULEE' } });
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const reponse = await requete;
+      assert.equal(bloque, true, 'la saisie est retenue après sa première lecture de l’intervention');
+      assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
+      assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: id } }), 0, 'aucune heure sur le dossier annulé');
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: id, cible: 'COUT_INTERVENTION_HEURE' } }), 0, 'aucune trace');
+    });
+
+    // Le câblage de la route : la date future se juge au fuseau réglé, en saisie comme en correction.
+    // Wallis (UTC+12) et Tahiti (UTC-10) diffèrent du jour UTC, sauf entre 10 h et 12 h UTC où aucun
+    // fuseau français n'en diffère : le test reste vert à toute heure, mais ne distingue alors plus
+    // un jour pris en UTC (le test unitaire de dateHeuresIntervention couvre la fonction elle-même).
+    test('la date des heures se juge au fuseau réglé de la société, en saisie et en correction', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.curative.fuseau@iris.test', 'TEST Technicien curative fuseau');
+      const curative = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Curative fuseau société' });
+      assert.equal(curative.status, 201, JSON.stringify(curative.body));
+      const id = curative.body.id;
+      await prisma.interventionAffectation.create({ data: { interventionId: id, intervenantId: technicien.intervenantId } });
+      const enJJMMAAAA = (jourIso) => jourIso.split('-').reverse().join('-');
+      const lendemainDe = (jourIso) => { const date = new Date(`${jourIso}T12:00:00.000Z`); date.setUTCDate(date.getUTCDate() + 1); return date.toISOString().slice(0, 10); };
+      const fuseauInitial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire;
+      const saisir = (date) => request(app).post(`/api/interventions/${id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date, nbrHeures: 1 });
+      const resultats = [];
+      try {
+        for (const fuseau of ['Pacific/Wallis', 'Pacific/Tahiti']) {
+          assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
+          const jour = jourCivilEntreprise(new Date(), fuseau);
+          const admise = await saisir(enJJMMAAAA(jour));
+          const refusee = await saisir(enJJMMAAAA(lendemainDe(jour)));
+          const corriger = (date) => request(app).patch(`/api/interventions/${id}/couts/heures/${admise.body.id}`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date, motifCorrection: 'Date relevée' });
+          const correctionRefusee = await corriger(enJJMMAAAA(lendemainDe(jour)));
+          const correctionAdmise = await corriger(enJJMMAAAA(jour));
+          resultats.push([fuseau, admise.status, refusee.status, correctionRefusee.status, correctionAdmise.status]);
+        }
+      } finally {
+        await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+      }
+      assert.deepEqual(resultats, [['Pacific/Wallis', 201, 400, 400, 200], ['Pacific/Tahiti', 201, 400, 400, 200]]);
+    });
+
     test('réserve les coûts à un technicien et fige son taux à la saisie', async () => {
       const technicien = await compteTechnicienSav('sav.cout.garde.taux@iris.test', 'TEST Garde taux technicien');
       const responsable = await prisma.user.create({ data: { email: 'sav.cout.garde.responsable@iris.test', name: 'TEST Garde taux responsable', role: 'RESPONSABLE' } });
@@ -4740,7 +6440,9 @@ if (!TEST_DATABASE_URL) {
       await prisma.interventionAffectation.create({ data: { interventionId: intervention.id, intervenantId: (await prisma.intervenant.create({ data: { nom: 'TEST Garde commercial', role: 'Commercial', tauxHoraireCharge: 0, userId: commercial.id } })).id } });
 
       assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set('Authorization', `Bearer ${jetonCommercial}`)).status, 403, 'un rôle affecté non autorisé ne lit pas les coûts');
-      assert.equal((await request(app).get(`/api/interventions/${sansContrat.id}/couts`).set('Authorization', `Bearer ${session}`)).status, 409, 'sans contrat, la lecture des coûts est refusée');
+      const lectureSansContrat = await request(app).get(`/api/interventions/${sansContrat.id}/couts`).set('Authorization', `Bearer ${session}`);
+      assert.equal(lectureSansContrat.status, 200, 'sans contrat, l’encadrement lit les heures (lot 3b)');
+      assert.deepEqual([lectureSansContrat.body.heures, lectureSansContrat.body.achats, lectureSansContrat.body.totalMaterielHT], [[], [], null], 'sans contrat, ni matériel ni total matériel');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${session}`).send({ date: '06-09-2026', nbrHeures: 1 })).status, 403, 'l’encadrement ne saisit pas les heures');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', nbrHeures: 0 })).status, 400, 'zéro heure exige un motif');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', fournisseurId: fournisseur.id, description: 'TEST', montantHT: 1 })).status, 403, 'un technicien ne saisit pas un achat');
@@ -4757,7 +6459,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({})).status, 400, 'un archivage exige un motif');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Archivage justifié' })).status, 200);
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Double archivage' })).status, 409);
-      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/heures/${heure.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Hors contrat' })).status, 409);
+      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Hors contrat' })).status, 409, 'hors contrat, aucun matériel à archiver');
+      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/heures/${heure.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Heure d’un autre dossier' })).status, 404, 'une heure se rattache à son propre dossier');
       assert.equal((await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 403, 'le journal financier reste fermé au technicien');
       assert.equal((await request(app).post('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`).send({ clientId, titre: 'TEST Création technicien refusée' })).status, 403, 'la création est réservée à l’encadrement');
       const creationConducteur = await request(app).post('/api/interventions').set('Authorization', `Bearer ${jetonConducteur}`).send({ clientId, titre: 'TEST Création conducteur visible' });
@@ -5045,7 +6748,7 @@ if (!TEST_DATABASE_URL) {
           .send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] }).then(result => result);
         let bloque = false;
         for (let tour = 0; tour < 150; tour++) {
-          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"ContratMaintenance"%FOR UPDATE%'`;
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"ContratMaintenance"%FOR UPDATE%'`;
           if (sessions.length) { bloque = true; break; }
           await new Promise(resolve => setTimeout(resolve, 20));
         }
@@ -5251,8 +6954,9 @@ if (!TEST_DATABASE_URL) {
         const dossier = await request(app).post('/api/interventions').set(auth).send({ clientId, titre: `TEST Terminal sans projection ${statut}` });
         assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
         const id = dossier.body.id;
-        const transitions = statut === 'TERMINEE' ? ['PLANIFIEE', 'EN_COURS', 'TERMINEE'] : ['ANNULEE'];
+        const transitions = statut === 'TERMINEE' ? ['PLANIFIEE', 'EN_COURS'] : ['ANNULEE'];
         for (const etape of transitions) assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: etape })).status, 200);
+        if (statut === 'TERMINEE') assert.equal((await terminerIntervention(id, session)).status, 200);
         const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
         const refus = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
         assert.equal(refus.status, 409, JSON.stringify(refus.body));
@@ -5279,7 +6983,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(placed.status, 200, JSON.stringify(placed.body));
         const url = `/api/planning/events/${placed.body.id}`;
         for (const next of statut === 'TERMINEE' ? ['EN_COURS', 'TERMINEE'] : [statut]) {
-          const transition = await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: next });
+          const transition = next === 'TERMINEE' ? await terminerIntervention(id, session) : await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: next });
           assert.equal(transition.status, 200, JSON.stringify(transition.body));
         }
         const avant = await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id }, include: { intervenants: { select: { id: true } } } });
@@ -5333,7 +7037,7 @@ if (!TEST_DATABASE_URL) {
         requete = request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-02', creneau: 'JOURNEE', intervenantIds: [second.id] }).then(result => result);
         let bloque = false;
         for (let tour = 0; tour < 150; tour++) {
-          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
           if (sessions.length) { bloque = true; break; }
           await new Promise(resolve => setTimeout(resolve, 20));
         }
@@ -5380,7 +7084,7 @@ if (!TEST_DATABASE_URL) {
             .send({ dateDebut: '2099-01-02', dateFin: '2099-01-02', intervenantIds: [second.id] }).then(result => result);
           let bloque = false;
           for (let tour = 0; tour < 150; tour++) {
-            const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+            const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
             if (sessions.length) { bloque = true; break; }
             await new Promise(resolve => setTimeout(resolve, 20));
           }
@@ -5423,7 +7127,7 @@ if (!TEST_DATABASE_URL) {
           .send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] }).then(result => result);
         let bloque = false;
         for (let tour = 0; tour < 150; tour++) {
-          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
           if (sessions.length) { bloque = true; break; }
           await new Promise(resolve => setTimeout(resolve, 20));
         }
@@ -5685,7 +7389,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).post(url).set('Authorization', `Bearer ${session}`)).status, 409);
       assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } }), journalAvant);
       for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
-        const transition = await request(app).patch(`/api/interventions/${generation.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        const transition = statut === 'TERMINEE' ? await terminerIntervention(generation.body.id, session) : await request(app).patch(`/api/interventions/${generation.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
         assert.equal(transition.status, 200, JSON.stringify(transition.body));
       }
       const avance = await request(app).post(url).set('Authorization', `Bearer ${session}`);
@@ -6081,7 +7785,7 @@ if (!TEST_DATABASE_URL) {
       let bloquee = false;
       try {
         for (let i = 0; i < 60; i++) {
-          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
           if (etat.attente) { bloquee = true; break; }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -6189,7 +7893,7 @@ if (!TEST_DATABASE_URL) {
       let bloquee = false;
       try {
         for (let i = 0; i < 60; i++) {
-          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock(814086)%') AS attente`;
           if (etat.attente) { bloquee = true; break; }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -6210,45 +7914,68 @@ if (!TEST_DATABASE_URL) {
       const initial = await request(app).get(url).set('Authorization', auth);
       assert.equal(initial.status, 200, JSON.stringify(initial.body));
       assert.deepEqual(initial.body, { derniereDateEmission: null });
-      const creer = (type, statut, numero, jour, factureOrigineId = null) => prisma.$transaction(async tx => {
-        const piece = await tx.facture.create({ data: {
-          clientId, clientRaisonSociale: 'TEST Client contrat maintenance', type, statut, numero, factureOrigineId,
+      const piece = async (tx, type, statut, numero, jour, factureOrigineId = null, estAvoirAnnulation = false) => {
+        const creee = await tx.facture.create({ data: {
+          clientId, clientRaisonSociale: 'TEST Client contrat maintenance', type, statut, numero, factureOrigineId, estAvoirAnnulation,
           dateEmission: new Date(`${jour}T00:00:00.000Z`), dateEcheance: new Date(`${jour}T00:00:00.000Z`),
           totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST chronologie',
           ecrituresScellees: false,
+          // Ventilation égale aux totaux : un avoir émis est une pièce cohérente (#230).
+          ventilationTva: { create: [{ tauxTva: 20, totalHt: 10, totalTva: 2, totalTtc: 12 }] },
         } });
         if (statut !== 'BROUILLON') await tx.ecritureFacture.createMany({ data: [
-          { factureId: piece.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'Clients', debit: type === 'AVOIR' ? 0 : 12, credit: type === 'AVOIR' ? 12 : 0 },
-          { factureId: piece.id, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'Ventes', debit: type === 'AVOIR' ? 10 : 0, credit: type === 'AVOIR' ? 0 : 10 },
-          { factureId: piece.id, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TVA', debit: type === 'AVOIR' ? 2 : 0, credit: type === 'AVOIR' ? 0 : 2 },
+          { factureId: creee.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'Clients', debit: type === 'AVOIR' ? 0 : 12, credit: type === 'AVOIR' ? 12 : 0 },
+          { factureId: creee.id, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'Ventes', debit: type === 'AVOIR' ? 10 : 0, credit: type === 'AVOIR' ? 0 : 10 },
+          { factureId: creee.id, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TVA', debit: type === 'AVOIR' ? 2 : 0, credit: type === 'AVOIR' ? 0 : 2 },
         ] });
-        if (statut !== 'BROUILLON') await tx.facture.update({ where: { id: piece.id }, data: { ecrituresScellees: true } });
-        return piece;
+        if (statut !== 'BROUILLON') await tx.facture.update({ where: { id: creee.id }, data: { ecrituresScellees: true } });
+        return creee;
+      };
+      const creer = (type, statut, numero, jour, factureOrigineId = null) => prisma.$transaction(async tx => {
+        // Une pièce ne naît jamais annulée (cycle des statuts, #221) : la facture naît émise, puis
+        // s'annule avec son avoir d'annulation dans la même transaction, comme dans l'application.
+        // Les gardes différés sont vérifiés avant la fin : Prisma résoudrait une transaction dont le
+        // COMMIT échoue, et la pièce manquerait sans erreur.
+        if (statut !== 'ANNULEE') {
+          const creee = await piece(tx, type, statut, numero, jour, factureOrigineId);
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          return creee;
+        }
+        const facture = await piece(tx, type, 'EMISE', numero, jour);
+        await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
+        const avoir = await piece(tx, 'AVOIR', 'EMISE', `${numero}-AV`, jour, facture.id, true);
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        return { ...facture, avoirId: avoir.id };
       });
       const ids = [];
       try {
         ids.push((await creer('FACTURE', 'BROUILLON', null, '2026-09-30')).id);
-        ids.push((await creer('AVOIR', 'EMISE', 'TEST-A-101', '2026-09-29', ids[0])).id);
+        // Un avoir partiel ne crédite qu'une facture émise ou réglée (#230) : celle-ci, émise sans numéro,
+        // ne compte pas non plus. L'avoir est purgé avant elle.
+        const origineAvoir = await creer('FACTURE', 'EMISE', null, '2026-09-30');
+        ids.push((await creer('AVOIR', 'EMISE', 'TEST-A-101', '2026-09-29', origineAvoir.id)).id, origineAvoir.id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: null });
         ids.push((await creer('FACTURE', 'EMISE', 'TEST-F-101', '2026-09-27')).id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-27T00:00:00.000Z' });
-        ids.push((await creer('FACTURE', 'ANNULEE', 'TEST-F-102', '2026-09-28')).id);
+        const annulee = await creer('FACTURE', 'ANNULEE', 'TEST-F-102', '2026-09-28');
+        ids.push(annulee.avoirId, annulee.id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-28T00:00:00.000Z' });
-        // Une facture ne naît jamais « réglée » (gardes des règlements, immédiate et différée) : ce
-        // test de chronologie fabrique la pièce brute en suspendant ces seuls gardes, le temps de
-        // l'insertion.
-        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglements"');
-        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "facture_statut_reglement_differe"');
-        try {
-          ids.push((await creer('FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29')).id);
-        } finally {
-          await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglement_differe"');
-          await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "facture_statut_reglements"');
-        }
+        // Une facture ne naît jamais « réglée » (gardes des règlements, immédiate et différée, et
+        // cycle des statuts) : ce test de chronologie fabrique la pièce brute en suspendant ces seuls
+        // gardes, dans une seule transaction (un échec en cours de route les rétablit avec elle). Les
+        // autres gardes différés sont vérifiés avant de réactiver les triggers, qui ne le seraient
+        // pas avec des événements en attente.
+        const gardesReglee = ['facture_statut_reglements', 'facture_statut_reglement_differe', 'facture_statut_transitions'];
+        ids.push((await prisma.$transaction(async tx => {
+          for (const garde of gardesReglee) await tx.$executeRawUnsafe(`ALTER TABLE "Facture" DISABLE TRIGGER "${garde}"`);
+          const reglee = await piece(tx, 'FACTURE', 'REGLEE', 'TEST-F-103', '2026-09-29');
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          for (const garde of gardesReglee) await tx.$executeRawUnsafe(`ALTER TABLE "Facture" ENABLE TRIGGER "${garde}"`);
+          return reglee;
+        })).id);
         assert.deepEqual((await request(app).get(url).set('Authorization', auth)).body, { derniereDateEmission: '2026-09-29T00:00:00.000Z' });
       } finally {
-        for (const id of ids.slice(1)) await purgerEcrituresJetables(id);
-        await prisma.facture.deleteMany({ where: { id: { in: ids.slice(1) } } });
+        for (const id of ids.slice(1)) await purgerPieceJetable(id);
         await prisma.facture.deleteMany({ where: { id: ids[0] } });
       }
     });
@@ -6518,7 +8245,7 @@ if (!TEST_DATABASE_URL) {
         let attenteObservee = false;
         try {
           for (let tentative = 0; tentative < 60; tentative++) {
-            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
+            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
             if (etat.attente) { attenteObservee = true; break; }
             await new Promise(resolve => setTimeout(resolve, 50));
           }
@@ -6555,7 +8282,7 @@ if (!TEST_DATABASE_URL) {
         let attenteObservee = false;
         try {
           for (let tentative = 0; tentative < 60; tentative++) {
-            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
+            const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%CompteComptable%' AND query LIKE '%FOR UPDATE%') AS attente`;
             if (etat.attente) { attenteObservee = true; break; }
             await new Promise(resolve => setTimeout(resolve, 50));
           }
@@ -6784,7 +8511,7 @@ if (!TEST_DATABASE_URL) {
       try {
         let attente = false;
         for (let i = 0; i < 30 && !attente; i++) {
-          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock%') AS attente`;
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock%') AS attente`;
           attente = etat.attente;
           if (!attente) await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -7119,7 +8846,7 @@ if (!TEST_DATABASE_URL) {
       let attenteObservee = false;
       try {
         for (let i = 0; i < 40; i++) {
-          const activites = await prisma.$queryRaw`SELECT "wait_event" FROM pg_stat_activity WHERE "wait_event" = 'advisory'`;
+          const activites = await prisma.$queryRaw`SELECT "wait_event" FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND "wait_event" = 'advisory'`;
           if (activites.length) { attenteObservee = true; break; }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -7152,7 +8879,7 @@ if (!TEST_DATABASE_URL) {
         const premier = ordre === 'creation' ? creer() : confirmer();
         const attendre = async (nombre) => {
           for (let i = 0; i < 80; i++) {
-            const activites = await prisma.$queryRaw`SELECT "pid" FROM pg_stat_activity WHERE "wait_event" = 'advisory'`;
+            const activites = await prisma.$queryRaw`SELECT "pid" FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND "wait_event" = 'advisory'`;
             if (activites.length >= nombre) return;
             await new Promise(resolve => setTimeout(resolve, 50));
           }
@@ -7696,6 +9423,652 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(() => prisma.ecritureFacture.update({ where: { id: ecriture.id }, data: { credit: 1 } }));
     });
 
+    // #180 : comme ses totaux et ses écritures, les lignes, la ventilation, les mentions légales et
+    // le journal d'une facture émise sont figés en base, sans retour au brouillon ; un brouillon
+    // reste modifiable.
+    test('la base fige les lignes, la ventilation, les mentions et le journal d’une facture émise, sans retour au brouillon ; pas ceux d’un brouillon', async () => {
+      const creer = async (motif) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST figement', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        return brouillon.body;
+      };
+      const ligneLibre = (factureId, ordre) => ({ factureId, ordre, designation: 'TEST ligne ajoutée', quantite: 1, prixUnitaireHt: 0, tauxTva: 20, totalHt: 0, totalTtc: 0 });
+      const brouillon = await creer('TEST figement brouillon');
+      const [ligneBrouillon] = await prisma.factureLigne.findMany({ where: { factureId: brouillon.id } });
+      await prisma.factureLigne.update({ where: { id: ligneBrouillon.id }, data: { designation: 'TEST brouillon corrigé' } });
+      await prisma.factureLigne.delete({ where: { id: (await prisma.factureLigne.create({ data: ligneLibre(brouillon.id, 9) })).id } });
+      const facture = await creer('TEST figement émise');
+      const emission = await request(app).post(`/api/factures/${facture.id}/emettre`).set('Authorization', `Bearer ${session}`);
+      assert.equal(emission.status, 200, JSON.stringify(emission.body));
+      const lignes = await prisma.factureLigne.findMany({ where: { factureId: facture.id } });
+      const figee = /lignes d’une facture émise sont immuables/;
+      await assert.rejects(prisma.factureLigne.update({ where: { id: lignes[0].id }, data: { prixUnitaireHt: 1 } }), figee);
+      await assert.rejects(prisma.factureLigne.delete({ where: { id: lignes[0].id } }), figee);
+      await assert.rejects(prisma.factureLigne.create({ data: ligneLibre(facture.id, 9) }), figee);
+      await assert.rejects(prisma.factureLigne.update({ where: { id: ligneBrouillon.id }, data: { factureId: facture.id, ordre: 9 } }), figee, 'une ligne de brouillon ne passe pas sur une pièce émise');
+      assert.deepEqual(await prisma.factureLigne.findMany({ where: { factureId: facture.id } }), lignes);
+      // Dès l'émission, avant même le scellement de la même transaction, la ligne est figée.
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE' } });
+        await tx.factureLigne.update({ where: { id: ligneBrouillon.id }, data: { designation: 'TEST après émission' } });
+      }), figee);
+      // La suppression ne passe que par le contrôle de la pièce d'origine : il porte aussi sur le statut.
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE' } });
+        await tx.factureLigne.delete({ where: { id: ligneBrouillon.id } });
+      }), figee);
+      // Ventilation de TVA : ni ajout, ni modification, ni suppression.
+      const ventilation = await prisma.factureVentilationTva.findMany({ where: { factureId: facture.id } });
+      const ventilationFigee = /ventilation TVA d’une facture émise est immuable/;
+      await assert.rejects(prisma.factureVentilationTva.create({ data: { factureId: facture.id, tauxTva: 5.5, totalHt: 100, totalTva: 5.5, totalTtc: 105.5 } }), ventilationFigee);
+      await assert.rejects(prisma.factureVentilationTva.update({ where: { id: ventilation[0].id }, data: { totalHt: 1 } }), ventilationFigee);
+      await assert.rejects(prisma.factureVentilationTva.delete({ where: { id: ventilation[0].id } }), ventilationFigee);
+      assert.deepEqual(await prisma.factureVentilationTva.findMany({ where: { factureId: facture.id } }), ventilation);
+      // Mentions légales imprimées et instant d'émission : figés. Le retour au brouillon, qui
+      // rouvrirait tous les gardes, est refusé.
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { mentionsLegalesVersionId: null } }), /immuables/);
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { emisLe: new Date() } }), /immuables/);
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'BROUILLON' } }), /ne redevient jamais brouillon/);
+      // Un statut hors du cycle documenté rouvrirait les gardes écrits pour des statuts nommés : refusé
+      // par le garde des transitions (#221), avant même la contrainte de valeurs.
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'ARCHIVEE' } }), /hors du cycle des pièces/);
+      const enBase = await prisma.facture.findUniqueOrThrow({ where: { id: facture.id } });
+      assert.deepEqual([enBase.statut, enBase.mentionsLegalesVersionId, enBase.emisLe.toISOString()], ['EMISE', emission.body.mentionsLegalesVersionId, emission.body.emisLe]);
+      // Journal en ajout seul, émise ou brouillon.
+      for (const id of [facture.id, brouillon.id]) {
+        const entree = await prisma.journalFacture.findFirstOrThrow({ where: { factureId: id } });
+        await assert.rejects(prisma.journalFacture.update({ where: { id: entree.id }, data: { detail: 'TEST réécrit' } }), /Journal des factures immuable/);
+        await assert.rejects(prisma.journalFacture.delete({ where: { id: entree.id } }), /Journal des factures immuable/);
+        assert.deepEqual(await prisma.journalFacture.findUnique({ where: { id: entree.id } }), entree);
+      }
+      // L'horodatage d'une entrée est celui de la base, pas celui qu'on lui fournit.
+      const avantAjout = new Date();
+      const ajout = await prisma.journalFacture.create({ data: { factureId: facture.id, action: 'TEST', detail: 'TEST horodatage', createdAt: new Date('2020-01-01T00:00:00.000Z') } });
+      assert.ok(ajout.createdAt.getTime() >= avantAjout.getTime() - 5000, `horodatage imposé : ${ajout.createdAt.toISOString()}`);
+      // Vidages tentés dans une transaction annulée : si le garde régressait, la base de test ne
+      // serait pas réellement vidée sous les tests suivants.
+      const vidageAnnule = (table) => prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`TRUNCATE "${table}" CASCADE`);
+        throw new Error(`vidage de ${table} accepté`);
+      });
+      for (const table of ['FactureLigne', 'FactureVentilationTva', 'EcritureFacture', 'JournalFacture']) await assert.rejects(vidageAnnule(table), /vidage interdit/, table);
+      assert.equal(await prisma.factureLigne.count({ where: { factureId: facture.id } }), lignes.length);
+    });
+
+    // Deux ajouts concurrents dans un même brouillon, chacun suivi d'une mise à jour de la pièce, se
+    // sérialisent sans interblocage : un verrou partagé (FOR SHARE) dans le garde s'y interbloquerait.
+    // Prisma résout une transaction dont le COMMIT échoue : le nombre de lignes fait foi.
+    test('deux ajouts concurrents de lignes dans un brouillon ne s’interbloquent pas', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST interblocage', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST interblocage', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const id = brouillon.body.id;
+      const ligne = (ordre) => ({ factureId: id, ordre, designation: `TEST concurrente ${ordre}`, quantite: 1, prixUnitaireHt: 0, tauxTva: 20, totalHt: 0, totalTtc: 0 });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const premierAjout = new Promise((resolve) => { pret = resolve; });
+      const premiere = prisma.$transaction(async (tx) => {
+        await tx.factureLigne.create({ data: ligne(7) });
+        pret();
+        await attente;
+        await tx.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST interblocage 1' } });
+      }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+      await premierAjout;
+      const seconde = prisma.$transaction(async (tx) => {
+        await tx.factureLigne.create({ data: ligne(8) });
+        await tx.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST interblocage 2' } });
+      }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+      try {
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%FactureLigne%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'l’ajout de la seconde transaction attend la première');
+      } finally {
+        liberer();
+      }
+      const [erreurPremiere, erreurSeconde] = await Promise.all([premiere, seconde]);
+      assert.equal(erreurPremiere, null, String(erreurPremiere?.message));
+      assert.equal(erreurSeconde, null, String(erreurSeconde?.message));
+      assert.equal(await prisma.factureLigne.count({ where: { factureId: id } }), 3);
+    });
+
+    // Le garde des lignes verrouille la pièce : un ajout concurrent de son scellement attend, puis
+    // voit la pièce scellée et est refusé.
+    test('un ajout de ligne pendant le scellement de la pièce attend, puis est refusé', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST figement concurrent', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST figement', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${brouillon.body.id} FOR UPDATE`;
+        pret();
+        await attente;
+        await tx.facture.update({ where: { id: brouillon.body.id }, data: { ecrituresScellees: true } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      let ajout;
+      try {
+        ajout = prisma.factureLigne.create({ data: { factureId: brouillon.body.id, ordre: 9, designation: 'TEST ajout concurrent', quantite: 1, prixUnitaireHt: 0, tauxTva: 20, totalHt: 0, totalTtc: 0 } }).then(() => null, (erreur) => erreur);
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%FactureLigne%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'l’ajout attend le verrou de la pièce');
+      } finally {
+        liberer();
+        await verrou;
+      }
+      assert.match(String((await ajout)?.message), /lignes d’une facture émise sont immuables/);
+      assert.equal(await prisma.factureLigne.count({ where: { factureId: brouillon.body.id } }), 1);
+    });
+
+    // #221 (décision du 19-10-2026) : le statut d'une pièce ne suit que son cycle. Une pièce naît
+    // brouillon ou émise ; brouillon → émise ; pour une facture, émise ⇄ réglée et émise → annulée avec
+    // son avoir d'annulation, émis aux mêmes montants dans la même transaction ; « annulée » est
+    // définitif, et un avoir né émis le reste. Chaque refus est prouvé par un cas que seul son garde arrête.
+    test('le statut d’une pièce ne suit que son cycle, et une facture ne s’annule qu’avec son avoir', async () => {
+      const auth = `Bearer ${session}`;
+      const creer = async (motif) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', auth).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST cycle', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        return brouillon.body;
+      };
+      const emettre = async (motif) => {
+        const facture = await creer(motif);
+        const emission = await request(app).post(`/api/factures/${facture.id}/emettre`).set('Authorization', auth);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return facture;
+      };
+      const annulerParApi = async (facture) => {
+        const annulation = await request(app).post(`/api/factures/${facture.id}/annuler`).set('Authorization', auth);
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        return annulation.body.avoir;
+      };
+      const horsCycle = /hors du cycle des pièces/;
+      const creationHorsCycle = /Création hors du cycle des pièces/;
+      const sansAvoir = /ne s'annule qu'avec son avoir d'annulation/;
+      const avoirSansFacture = /n'existe qu'avec sa facture annulée/;
+      const totaux = { totalHt: 10, totalTva: 2, totalTtc: 12 };
+      const piece = (type, statut, extra = {}) => ({
+        clientId, clientRaisonSociale: 'TEST Client cycle', type, statut, dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
+        ...totaux, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST cycle SQL', ...extra,
+      });
+      // Écritures équilibrées sur le TTC de la pièce (seul montant que contrôle le garde d'équilibre) :
+      // une pièce peut ainsi ne différer d'une autre que par une seule de ses colonnes de montant.
+      const ecritures = (factureId, type, t = totaux) => {
+        const sens = (montant, auDebit) => (auDebit === (type === 'FACTURE') ? { debit: montant, credit: 0 } : { debit: 0, credit: montant });
+        return [
+          { factureId, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'TEST Clients', ...sens(t.totalTtc, true) },
+          { factureId, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'TEST Ventes', ...sens(Math.round((t.totalTtc - t.totalTva) * 100) / 100, false) },
+          { factureId, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TEST TVA', ...sens(t.totalTva, false) },
+        ];
+      };
+      // Montants qui ne diffèrent de ceux de la facture que par une colonne.
+      const autresMontants = [
+        ['HT', { totalHt: 10.01, totalTva: 2, totalTtc: 12 }],
+        ['TVA', { totalHt: 10, totalTva: 2.01, totalTtc: 12 }],
+        ['TTC', { totalHt: 10, totalTva: 2, totalTtc: 12.01 }],
+      ];
+      // Avoir d'annulation fabriqué en SQL : émis, il porte des écritures équilibrées et scellées, et une
+      // ventilation égale à ses totaux (un avoir émis est une pièce cohérente, #230).
+      const avoirAnnulation = async (tx, factureOrigineId, { statut = 'EMISE', t = totaux } = {}) => {
+        const avoir = await tx.facture.create({ data: piece('AVOIR', statut, { ...t, estAvoirAnnulation: true, factureOrigineId, ventilationTva: { create: [{ tauxTva: 20, ...t }] } }) });
+        if (statut !== 'BROUILLON') {
+          await tx.ecritureFacture.createMany({ data: ecritures(avoir.id, 'AVOIR', t) });
+          await tx.facture.update({ where: { id: avoir.id }, data: { ecrituresScellees: true } });
+        }
+        return avoir;
+      };
+      // Les gardes différés sont vérifiés avant la fin : Prisma résoudrait une transaction dont le COMMIT échoue.
+      const transaction = (operations) => prisma.$transaction(async (tx) => {
+        const resultat = await operations(tx);
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        return resultat;
+      });
+      const statut = async (id) => (await prisma.facture.findUniqueOrThrow({ where: { id } })).statut;
+      // Pièce insérée non scellée, puis dotée d'écritures équilibrées et scellée, comme le ferait une
+      // création valide : seul le garde du cycle peut alors la refuser.
+      const naissance = (type, statutPiece, extra = {}) => transaction(async (tx) => {
+        const creee = await tx.facture.create({ data: piece(type, statutPiece, extra) });
+        await tx.ecritureFacture.createMany({ data: ecritures(creee.id, type) });
+        await tx.facture.update({ where: { id: creee.id }, data: { ecrituresScellees: true } });
+      });
+      const purger = [];
+      let echec = null;
+      try {
+        // Création : une pièce ne naît ni réglée ni annulée, même scellée avec des écritures équilibrées ;
+        // un statut inconnu reste refusé par la contrainte.
+        await assert.rejects(naissance('FACTURE', 'ANNULEE'), creationHorsCycle, 'facture née annulée');
+        // L'avoir porte sa facture d'origine, émise : sans elle, Facture_avoir_origine_check le refuserait.
+        const origine = await emettre('TEST cycle origine des avoirs');
+        for (const statutAvoir of ['REGLEE', 'ANNULEE']) await assert.rejects(naissance('AVOIR', statutAvoir, { factureOrigineId: origine.id }), creationHorsCycle, `avoir né ${statutAvoir}`);
+        await assert.rejects(prisma.facture.create({ data: piece('FACTURE', 'ARCHIVEE') }), /Facture_statut_check/);
+
+        // Brouillon → annulée, même scellé avec des écritures équilibrées dans la même mise à jour.
+        const brouillon = await creer('TEST cycle brouillon');
+        purger.push(brouillon.id);
+        await prisma.ecritureFacture.createMany({ data: ecritures(brouillon.id, 'FACTURE') });
+        await assert.rejects(prisma.facture.update({ where: { id: brouillon.id }, data: { statut: 'ANNULEE', ecrituresScellees: true } }), horsCycle, 'brouillon → annulée');
+
+        // Une autre facture déjà annulée par l'API : son avoir ne vaut pas pour celle-ci.
+        const autre = await emettre('TEST cycle autre');
+        const avoirAutre = await annulerParApi(autre);
+        const facture = await emettre('TEST cycle facture');
+        await assert.rejects(transaction((tx) => tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } })), sansAvoir, 'annulée sans avoir');
+        // Avoir d'annulation resté brouillon, ou d'un autre montant : refusés.
+        await assert.rejects(transaction(async (tx) => {
+          await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
+          await avoirAnnulation(tx, facture.id, { statut: 'BROUILLON' });
+        }), sansAvoir, 'avoir d’annulation brouillon');
+        for (const [colonne, t] of autresMontants) {
+          await assert.rejects(transaction(async (tx) => {
+            await tx.facture.update({ where: { id: facture.id }, data: { statut: 'ANNULEE' } });
+            await avoirAnnulation(tx, facture.id, { t });
+          }), sansAvoir, `avoir d’annulation d’un autre ${colonne}`);
+        }
+        // Avoir d'annulation créé sans annuler sa facture, ou avoir brouillon qui le devient : refusés
+        // (il naîtrait avant l'annulation).
+        await assert.rejects(transaction((tx) => avoirAnnulation(tx, facture.id)), avoirSansFacture, 'avoir d’annulation d’une facture émise');
+        await assert.rejects(transaction(async (tx) => {
+          const avoirBrouillon = await tx.facture.create({ data: piece('AVOIR', 'BROUILLON', { factureOrigineId: facture.id }) });
+          await tx.facture.update({ where: { id: avoirBrouillon.id }, data: { estAvoirAnnulation: true } });
+        }), avoirSansFacture, 'avoir devenu avoir d’annulation d’une facture émise');
+        assert.equal(await statut(facture.id), 'EMISE');
+        assert.equal(await prisma.facture.count({ where: { factureOrigineId: facture.id } }), 0);
+
+        // Un avoir partiel, même du montant total, n'est pas un avoir d'annulation.
+        const partielle = await emettre('TEST cycle partielle');
+        const partiel = await request(app).post(`/api/factures/${partielle.id}/avoirs`).set('Authorization', auth).send({ lignes: [{ designation: 'TEST cycle avoir partiel total', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(partiel.status, 201, JSON.stringify(partiel.body));
+        assert.deepEqual([Number(partiel.body.totalHt), Number(partiel.body.totalTva), Number(partiel.body.totalTtc), partiel.body.estAvoirAnnulation], [10, 2, 12, false]);
+        await assert.rejects(transaction((tx) => tx.facture.update({ where: { id: partielle.id }, data: { statut: 'ANNULEE' } })), sansAvoir, 'annulée avec un avoir partiel');
+        assert.equal(await statut(partielle.id), 'EMISE');
+        // Le garde réciproque relit la ligne à la validation : un avoir brouillon marqué avoir
+        // d'annulation puis démarqué dans la même transaction n'en est plus un, et passe.
+        const avoirDemarque = await transaction(async (tx) => {
+          const avoirBrouillon = await tx.facture.create({ data: piece('AVOIR', 'BROUILLON', { factureOrigineId: partielle.id }) });
+          await tx.facture.update({ where: { id: avoirBrouillon.id }, data: { estAvoirAnnulation: true } });
+          return tx.facture.update({ where: { id: avoirBrouillon.id }, data: { estAvoirAnnulation: false } });
+        });
+        purger.push(avoirDemarque.id);
+
+        // L'annulation de l'API, avec son avoir, passe ; « annulée » est ensuite définitif.
+        const avoir = await annulerParApi(facture);
+        await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE' } }), horsCycle, 'annulée → émise');
+        // Annulée → réglée : le garde des règlements, nommé pour passer le premier, refuse avec son message.
+        await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { statut: 'REGLEE' } }), /soldée par ses règlements/, 'annulée → réglée');
+        // Un avoir, né émis, ne se règle ni ne s'annule.
+        for (const statutAvoir of ['REGLEE', 'ANNULEE']) await assert.rejects(prisma.facture.update({ where: { id: avoir.id }, data: { statut: statutAvoir } }), horsCycle, `avoir → ${statutAvoir}`);
+        assert.deepEqual([await statut(facture.id), await statut(avoir.id)], ['ANNULEE', 'EMISE']);
+
+        // Facture annulée avant la migration, sans avoir (simulée en retirant celui de « autre ») :
+        // elle se modifie hors statut sans revérification, et ne reçoit qu'un vrai avoir d'annulation.
+        await purgerPieceJetable(avoirAutre.id);
+        purger.push(autre.id);
+        await transaction((tx) => tx.$executeRaw`UPDATE "Facture" SET "updatedAt" = now() WHERE "id" = ${autre.id}`);
+        for (const [colonne, t] of autresMontants) await assert.rejects(transaction((tx) => avoirAnnulation(tx, autre.id, { t })), avoirSansFacture, `avoir d’annulation historique d’un autre ${colonne}`);
+        await assert.rejects(transaction((tx) => avoirAnnulation(tx, autre.id, { statut: 'BROUILLON' })), avoirSansFacture, 'avoir d’annulation historique resté brouillon');
+        // Le vrai passe, même créé brouillon puis émis et scellé dans la même transaction : le garde
+        // réciproque juge la ligne telle qu'à la validation, pas telle qu'à sa création.
+        await transaction(async (tx) => {
+          const avoir = await avoirAnnulation(tx, autre.id, { statut: 'BROUILLON' });
+          await tx.ecritureFacture.createMany({ data: ecritures(avoir.id, 'AVOIR') });
+          await tx.facture.update({ where: { id: avoir.id }, data: { statut: 'EMISE', ecrituresScellees: true } });
+        });
+        assert.equal(await prisma.facture.count({ where: { factureOrigineId: autre.id, estAvoirAnnulation: true } }), 1);
+
+        // #222 : règlements, affectations et journaux comptables en ajout seul ne se vident pas ; le
+        // refus nomme la table, tenté dans une transaction annulée.
+        const vidageAnnule = (table) => prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(`TRUNCATE "${table}" CASCADE`);
+          throw new Error(`vidage de ${table} accepté`);
+        });
+        for (const table of ['Reglement', 'AffectationReglement', 'JournalCompteComptable', 'JournalRegleComptable', 'TransitionRegleComptable']) {
+          await assert.rejects(vidageAnnule(table), new RegExp(`Vidage de « ${table} » interdit`), table);
+        }
+      } catch (erreur) {
+        echec = erreur;
+        throw erreur;
+      } finally {
+        // Les avoirs d'abord (y compris un avoir accepté à tort) ; une erreur de nettoyage ne masque
+        // pas l'échec d'origine.
+        try {
+          for (const id of purger) {
+            for (const { id: avoirId } of await prisma.facture.findMany({ where: { factureOrigineId: id }, select: { id: true } })) await purgerPieceJetable(avoirId);
+            await purgerPieceJetable(id);
+          }
+        } catch (erreur) {
+          if (!echec) throw erreur;
+        }
+      }
+    });
+
+    // #230 : les règles de plafond des avoirs, que l'API appliquait seule, tiennent en base pour un
+    // avoir écrit directement en SQL. Un avoir partiel ne crédite qu'une facture émise ou réglée ;
+    // chaque avoir émis est cohérent (aucun montant négatif, totaux égaux à sa ventilation) ; les
+    // avoirs émis d'une facture ne dépassent ni ses montants, ni sa ventilation par taux. Chaque
+    // contrôle a un cas qu'il est seul à arrêter, ou dont le refus porte son message ; les parcours de
+    // l'API restent inchangés.
+    test('les avoirs émis d’une facture ne dépassent ni ses montants ni sa ventilation, même écrits en SQL', async () => {
+      const auth = `Bearer ${session}`;
+      const compteTva = await prisma.compteComptable.findUniqueOrThrow({ where: { code: '445710' } });
+      await tvaFixture(10, compteTva.id);
+      const ligne = (prixUnitaireHt, tauxTva) => ({ designation: `TEST plafond ${tauxTva} %`, nature: 'PRESTATION', quantite: 1, prixUnitaireHt, tauxTva });
+      const creer = async (motif, lignes) => {
+        const brouillon = await request(app).post('/api/factures').set('Authorization', auth).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: motif, dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        return brouillon.body;
+      };
+      const emettre = async (motif, lignes = [ligne(10, 20)]) => {
+        const facture = await creer(motif, lignes);
+        const emission = await request(app).post(`/api/factures/${facture.id}/emettre`).set('Authorization', auth);
+        assert.equal(emission.status, 200, JSON.stringify(emission.body));
+        return facture;
+      };
+      const avoirPartielApi = async (facture, lignes) => {
+        const reponse = await request(app).post(`/api/factures/${facture.id}/avoirs`).set('Authorization', auth).send({ lignes });
+        assert.equal(reponse.status, 201, JSON.stringify(reponse.body));
+        return reponse.body;
+      };
+      const montantTotal = /Les avoirs de la facture .* dépassent son montant total/;
+      const ventilationDepassee = (taux) => new RegExp(`Les avoirs de la facture .* dépassent sa ventilation à la TVA de ${taux.replace('.', '\\.')} %`);
+      const tauxAbsent = /porte un taux de TVA \(5\.50 %\) absent de la facture/;
+      const statutRefuse = /Un avoir partiel ne crédite qu'une facture émise ou réglée/;
+      const montantNegatif = /L'avoir .* de la facture .* porte un montant négatif/;
+      const incoherent = /L'avoir .* de la facture .* n'a pas des totaux égaux à sa ventilation de TVA/;
+      const centimes = (montant) => Math.round(montant * 100) / 100;
+      // Pièce écrite en SQL comme le ferait une création valide : par défaut, ses totaux sont ceux de sa
+      // ventilation (taux, HT, TVA, et TTC si on veut le fausser), ses lignes et sa ventilation sont
+      // enregistrées, puis, émise, elle porte des écritures équilibrées sur son TTC et elle est scellée.
+      // `contenu` : 'ventilation' (lignes et ventilation), 'lignes' (ventilation déduite des lignes) ou
+      // 'aucun' (montants seuls) ; `montants` remplace les totaux, pour une pièce incohérente.
+      const pieceSql = async (tx, { type = 'AVOIR', statut = 'EMISE', factureOrigineId = null, estAvoirAnnulation = false, taux = [], contenu = 'ventilation', montants = null }) => {
+        const totalHt = montants?.totalHt ?? centimes(taux.reduce((somme, [, ht]) => somme + ht, 0));
+        const totalTva = montants?.totalTva ?? centimes(taux.reduce((somme, [, , tva]) => somme + tva, 0));
+        const totalTtc = montants?.totalTtc ?? centimes(totalHt + totalTva);
+        const piece = await tx.facture.create({ data: {
+          clientId, clientRaisonSociale: 'TEST Client plafond', type, statut, factureOrigineId, estAvoirAnnulation,
+          dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
+          totalHt, totalTva, totalTtc, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST plafond SQL',
+        } });
+        if (contenu !== 'aucun') {
+          await tx.factureLigne.createMany({ data: taux.map(([t, ht, tva], ordre) => ({ factureId: piece.id, ordre, designation: `TEST plafond SQL ${t} %`, nature: 'PRESTATION', quantite: 1, prixUnitaireHt: Math.abs(ht), tauxTva: t, totalHt: ht, totalTtc: centimes(ht + tva) })) });
+        }
+        if (contenu === 'ventilation') {
+          await tx.factureVentilationTva.createMany({ data: taux.map(([t, ht, tva, ttc]) => ({ factureId: piece.id, tauxTva: t, totalHt: ht, totalTva: tva, totalTtc: ttc ?? centimes(ht + tva) })) });
+        }
+        if (statut !== 'BROUILLON') await sceller(tx, piece);
+        return piece;
+      };
+      // Écritures équilibrées sur le TTC de la pièce (seul montant que contrôle le garde d'équilibre).
+      const ecrire = (tx, piece) => {
+        const sens = (montant, debit) => (debit === (piece.type === 'FACTURE') ? { debit: montant, credit: 0 } : { debit: 0, credit: montant });
+        return tx.ecritureFacture.createMany({ data: [
+          { factureId: piece.id, ordre: 0, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'TEST Clients', ...sens(Number(piece.totalTtc), true) },
+          { factureId: piece.id, ordre: 1, cle: 'VENTE_PRESTATION', journalCode: 'VE', compteNum: '706000', compteLib: 'TEST Ventes', ...sens(centimes(Number(piece.totalTtc) - Number(piece.totalTva)), false) },
+          { factureId: piece.id, ordre: 2, cle: 'TVA', journalCode: 'VE', compteNum: '445710', compteLib: 'TEST TVA', ...sens(Number(piece.totalTva), false) },
+        ] });
+      };
+      const sceller = async (tx, piece) => {
+        await ecrire(tx, piece);
+        await tx.facture.update({ where: { id: piece.id }, data: { ecrituresScellees: true } });
+      };
+      // Les gardes différés sont vérifiés avant la fin : Prisma résoudrait une transaction dont le COMMIT échoue.
+      const transaction = (operations, options) => prisma.$transaction(async (tx) => {
+        const resultat = await operations(tx);
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+        return resultat;
+      }, options);
+      const avoirSql = (factureOrigineId, options) => transaction((tx) => pieceSql(tx, { factureOrigineId, ...options }));
+      const credite = async (factureId) => Number((await prisma.facture.aggregate({ where: { factureOrigineId: factureId, statut: { not: 'BROUILLON' } }, _sum: { totalTtc: true } }))._sum.totalTtc ?? 0);
+      const purger = [];
+      let echec = null;
+      try {
+        // Montants totaux. Facture de 10 € HT à 20 %, créditée de 5 € HT par l'API : il reste 5 € HT, 1 €
+        // de TVA et 6 € TTC. Un avoir cohérent qui dépasse d'un centime le HT seul, ou la TVA seule, est
+        // refusé ; le reste exact passe, et la facture n'accepte plus rien.
+        const simple = await emettre('TEST plafond montants');
+        purger.push(simple.id);
+        await avoirPartielApi(simple, [ligne(5, 20)]);
+        await assert.rejects(avoirSql(simple.id, { taux: [[20, 5.01, 0.99]] }), montantTotal, 'dépassement du HT total seul');
+        await assert.rejects(avoirSql(simple.id, { taux: [[20, 4.99, 1.01]] }), montantTotal, 'dépassement de la TVA totale seule');
+        await avoirSql(simple.id, { taux: [[20, 5, 1]] });
+        await assert.rejects(avoirSql(simple.id, { taux: [[20, 0.01, 0]] }), montantTotal, 'facture entièrement créditée');
+        // Un avoir cohérent ne dépasse le TTC qu'avec le HT ou la TVA, sauf sur une facture incohérente,
+        // que la base ne refuse pas encore (#243) : TTC de 11,99 € pour 10 € HT et 2 € de TVA. Seul le
+        // contrôle du TTC total arrête alors l'avoir de 12 € ; et, sur une facture dont la ventilation
+        // porte ce TTC faux, seul celui du TTC du taux.
+        const ttcFaux = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2]], montants: { totalHt: 10, totalTva: 2, totalTtc: 11.99 } }));
+        purger.push(ttcFaux.id);
+        await assert.rejects(avoirSql(ttcFaux.id, { taux: [[20, 10, 2]] }), montantTotal, 'dépassement du TTC total seul');
+        const ttcTauxFaux = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2, 11.99]] }));
+        purger.push(ttcTauxFaux.id);
+        await assert.rejects(avoirSql(ttcTauxFaux.id, { taux: [[20, 10, 2]] }), ventilationDepassee('20.00'), 'dépassement du TTC d’un taux seul');
+        // Un avoir resté brouillon ne compte pas ; il est vérifié quand il est émis.
+        const brouillonAvoir = await avoirSql(simple.id, { statut: 'BROUILLON', taux: [[20, 1, 0.2]] });
+        await assert.rejects(transaction(async (tx) => {
+          const avoir = await tx.facture.update({ where: { id: brouillonAvoir.id }, data: { statut: 'EMISE' } });
+          await sceller(tx, avoir);
+        }), montantTotal, 'avoir brouillon émis au-delà du plafond');
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillonAvoir.id } })).statut, 'BROUILLON');
+
+        // Cohérence de chaque avoir émis, sur une facture de 10 € HT à 20 % encore libre de tout avoir :
+        // un avoir négatif compenserait le plafond, un avoir sans contenu ou mal ventilé échapperait au
+        // contrôle par taux. Le premier refus est celui des montants négatifs.
+        const libre = await emettre('TEST plafond cohérence');
+        purger.push(libre.id);
+        await assert.rejects(avoirSql(libre.id, { contenu: 'aucun', montants: { totalHt: -5, totalTva: 0, totalTtc: 0 } }), montantNegatif, 'avoir compensateur négatif');
+        // Ventilations cohérentes avec leurs totaux, dont une ligne au seul HT, puis à la seule TVA,
+        // négatif : sans ce refus, une base négative à un taux y libérerait le plafond.
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 6, 1.2, 7.2], [10, -1, 1, 0]] }), montantNegatif, 'HT ventilé seul négatif');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 6, 1.2, 7.2], [10, 1, -0.5, 0.5]] }), montantNegatif, 'TVA ventilée seule négative');
+        await assert.rejects(avoirSql(libre.id, { contenu: 'aucun', montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'avoir sans contenu');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 4, 1]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'HT ventilé différent des totaux');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 0.5]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } }), incoherent, 'TVA ventilée différente des totaux');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 1]], montants: { totalHt: 5, totalTva: 1, totalTtc: 6.01 } }), incoherent, 'TTC différent de HT + TVA');
+        await assert.rejects(avoirSql(libre.id, { taux: [[20, 5, 1, 6.01]] }), incoherent, 'ligne de ventilation au TTC faux');
+        assert.equal(await credite(libre.id), 0);
+        // Un avoir brouillon incohérent ne compte pas : un avoir valide émis ensuite passe.
+        await avoirSql(libre.id, { statut: 'BROUILLON', contenu: 'aucun', montants: { totalHt: 5, totalTva: 1, totalTtc: 6 } });
+        await avoirSql(libre.id, { taux: [[20, 1, 0.2]] });
+        assert.equal(await credite(libre.id), 1.2);
+
+        // Ventilation par taux. Facture de 10 € HT à 20 % et 10 € HT à 10 %, créditée de 5 € HT à 20 %
+        // par l'API : il reste 5 € HT et 1 € de TVA à 20 %, 10 € HT et 1 € de TVA à 10 %. Chaque avoir
+        // ci-dessous reste sous les montants totaux de la facture : seul le contrôle par taux l'arrête,
+        // et seul son contrôle du HT pour le premier, de la TVA pour le troisième.
+        const mixte = await emettre('TEST plafond ventilation', [ligne(10, 20), ligne(10, 10)]);
+        purger.push(mixte.id);
+        const avoirMixte = await avoirPartielApi(mixte, [ligne(5, 20)]);
+        await assert.rejects(avoirSql(mixte.id, { taux: [[10, 10.01, 0.99]] }), ventilationDepassee('10.00'), 'HT à 10 % dépassé seul');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[10, 10.01, 1]], contenu: 'lignes' }), ventilationDepassee('10.00'), 'HT à 10 % dépassé (ventilation déduite des lignes)');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[20, 1, 1.01]] }), ventilationDepassee('20.00'), 'TVA à 20 % dépassée seule');
+        await assert.rejects(avoirSql(mixte.id, { taux: [[5.5, 1, 0.06]] }), tauxAbsent, 'taux absent de la facture');
+        // Un avoir brouillon, même au-delà des totaux et d'un taux, ne compte pas : le reste exact du taux
+        // passe après lui.
+        await avoirSql(mixte.id, { statut: 'BROUILLON', taux: [[10, 50, 5]] });
+        await avoirSql(mixte.id, { taux: [[10, 10, 1]] });
+
+        // Factures historiques sans ventilation enregistrée : leur ventilation est déduite de leurs
+        // lignes, TVA arrondie au centime le plus proche (0,10 € HT à 5,5 % : 0,0055 → 0,01).
+        const historique = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[20, 10, 2], [10, 10, 1]], contenu: 'lignes' }));
+        purger.push(historique.id);
+        await assert.rejects(avoirSql(historique.id, { taux: [[10, 10.01, 0.99]] }), ventilationDepassee('10.00'), 'HT à 10 % d’une facture historique dépassé');
+        await assert.rejects(avoirSql(historique.id, { taux: [[5.5, 1, 0.06]] }), tauxAbsent, 'taux absent d’une facture historique');
+        await avoirSql(historique.id, { taux: [[10, 10, 1]] });
+        const arrondie = await transaction((tx) => pieceSql(tx, { type: 'FACTURE', taux: [[5.5, 0.1, 0.01]], contenu: 'lignes' }));
+        purger.push(arrondie.id);
+        await avoirSql(arrondie.id, { taux: [[5.5, 0.1, 0.01]] });
+
+        // Statut de la pièce créditée, avec des avoirs partiels cohérents sous son plafond : facture
+        // brouillon, avoir émis, et facture annulée avant la migration de #227, sans avoir (simulée en
+        // retirant celui de l'API). Un avoir resté brouillon sur une facture brouillon ne compte pas.
+        const brouillon = await creer('TEST plafond brouillon', [ligne(10, 20)]);
+        purger.push(brouillon.id);
+        await assert.rejects(avoirSql(brouillon.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’un brouillon');
+        await assert.rejects(avoirSql(avoirMixte.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’un avoir émis');
+        const annulee = await emettre('TEST plafond annulée');
+        purger.push(annulee.id);
+        const annulation = await request(app).post(`/api/factures/${annulee.id}/annuler`).set('Authorization', auth);
+        assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+        await purgerPieceJetable(annulation.body.avoir.id);
+        await assert.rejects(avoirSql(annulee.id, { taux: [[20, 1, 0.2]] }), statutRefuse, 'avoir partiel d’une facture annulée');
+
+        // Un avoir partiel resté brouillon ne compte pas : la facture s'annule avec son avoir d'annulation.
+        const annulable = await emettre('TEST plafond annulation à côté d’un brouillon');
+        purger.push(annulable.id);
+        await avoirSql(annulable.id, { statut: 'BROUILLON', taux: [[20, 1, 0.2]] });
+        await transaction(async (tx) => {
+          await tx.facture.update({ where: { id: annulable.id }, data: { statut: 'ANNULEE' } });
+          await pieceSql(tx, { factureOrigineId: annulable.id, estAvoirAnnulation: true, taux: [[20, 10, 2]] });
+        });
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: annulable.id } })).statut, 'ANNULEE');
+
+        // Annulation à côté d'un avoir partiel émis : l'avoir d'annulation, émis aux mêmes montants,
+        // satisfait les gardes de #227 ; le partiel la fait refuser.
+        const partielle = await emettre('TEST plafond annulation');
+        purger.push(partielle.id);
+        await avoirPartielApi(partielle, [ligne(1, 20)]);
+        await assert.rejects(transaction(async (tx) => {
+          await tx.facture.update({ where: { id: partielle.id }, data: { statut: 'ANNULEE' } });
+          await pieceSql(tx, { factureOrigineId: partielle.id, estAvoirAnnulation: true, taux: [[20, 10, 2]] });
+        }), statutRefuse, 'annulation à côté d’un avoir partiel');
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: partielle.id } })).statut, 'EMISE');
+
+        // Deux transactions qui créditent chacune 7,20 € TTC sur une facture de 12 € : la seconde insère
+        // son avoir après le contrôle de la première, qui tient la facture verrouillée. Son insertion
+        // attend (contrôle de clé étrangère), puis elle relit les avoirs validés et est refusée.
+        const disputee = await emettre('TEST plafond concurrent');
+        purger.push(disputee.id);
+        const tenir = () => { let liberer, pret; const attente = new Promise((resolve) => { liberer = resolve; }); const tenue = new Promise((resolve) => { pret = resolve; }); return { attente, tenue, liberer: () => liberer(), pret: () => pret() }; };
+        // La transaction qui doit tenir la facture peut échouer avant : le test s'arrête alors sur son
+        // erreur, au lieu d'attendre sans fin.
+        const tenueOuEchec = (tenir, transactionTenue, nom) => {
+          const echecAvant = transactionTenue.then((erreur) => { throw erreur ?? new Error(`${nom} terminée sans tenir la facture`); });
+          echecAvant.catch(() => {});
+          return Promise.race([tenir.tenue, echecAvant]);
+        };
+        const attendreVerrou = async (filtre) => {
+          let bloque = false;
+          for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+            const [etat] = await filtre();
+            bloque = etat.attente;
+            if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          return bloque;
+        };
+        const premiere = tenir();
+        const t1 = transaction(async (tx) => {
+          await pieceSql(tx, { factureOrigineId: disputee.id, taux: [[20, 6, 1.2]] });
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          premiere.pret();
+          await premiere.attente;
+        }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+        await tenueOuEchec(premiere, t1, 'T1');
+        const t2 = avoirSql(disputee.id, { taux: [[20, 6, 1.2]] }).then(() => null, (erreur) => erreur);
+        try {
+          assert.equal(await attendreVerrou(() => prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%Facture%') AS attente`), true, 'le second avoir attend la facture tenue par le premier');
+        } finally {
+          premiere.liberer();
+        }
+        assert.equal(await t1, null, 'le premier avoir est validé');
+        assert.match(String((await t2)?.message), montantTotal, 'le second avoir est refusé');
+        assert.equal(await credite(disputee.id), 7.2);
+
+        // Le contrôle verrouille la facture avant de lire ses avoirs : un avoir brouillon émis pendant
+        // qu'une autre transaction tient la facture, avec un avoir déjà contrôlé, attend la fin de
+        // celle-ci, puis relit et est refusé. Sans ce verrou, il lirait avant celui du garde des
+        // règlements, et 14,40 € seraient crédités sur une facture de 12 €.
+        const relue = await emettre('TEST plafond verrou');
+        purger.push(relue.id);
+        const enAttente = await avoirSql(relue.id, { statut: 'BROUILLON', taux: [[20, 6, 1.2]] });
+        await transaction((tx) => ecrire(tx, enAttente));
+        const detenteur = tenir();
+        const t3 = transaction(async (tx) => {
+          await pieceSql(tx, { factureOrigineId: relue.id, taux: [[20, 6, 1.2]] });
+          await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+          detenteur.pret();
+          await detenteur.attente;
+        }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+        await tenueOuEchec(detenteur, t3, 'T3');
+        let pidEmission = null;
+        const t4 = transaction(async (tx) => {
+          [{ pid: pidEmission }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          await tx.facture.update({ where: { id: enAttente.id }, data: { statut: 'EMISE', ecrituresScellees: true } });
+        }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+        try {
+          assert.equal(await attendreVerrou(() => (pidEmission === null ? [{ attente: false }] : prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = ${pidEmission} AND datname = current_database() AND wait_event_type = 'Lock') AS attente`)), true, 'l’émission attend la facture tenue par l’autre avoir');
+        } finally {
+          detenteur.liberer();
+        }
+        assert.equal(await t3, null, 'l’avoir qui tenait la facture est validé');
+        assert.match(String((await t4)?.message), montantTotal, 'l’avoir émis ensuite est refusé');
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: enAttente.id } })).statut, 'BROUILLON');
+        assert.equal(await credite(relue.id), 7.2);
+      } catch (erreur) {
+        echec = erreur;
+        throw erreur;
+      } finally {
+        // Les avoirs d'abord (y compris un avoir accepté à tort, et l'avoir d'un avoir) ; une erreur de
+        // nettoyage ne masque pas l'échec d'origine.
+        try {
+          for (const id of purger) {
+            for (const { id: avoirId } of await prisma.facture.findMany({ where: { factureOrigineId: id }, select: { id: true } })) {
+              for (const { id: sousAvoirId } of await prisma.facture.findMany({ where: { factureOrigineId: avoirId }, select: { id: true } })) await purgerPieceJetable(sousAvoirId);
+              await purgerPieceJetable(avoirId);
+            }
+            await purgerPieceJetable(id);
+          }
+        } catch (erreur) {
+          if (!echec) throw erreur;
+        }
+      }
+    });
+
+    // #222 : deux insertions concurrentes d'écritures dans une même pièce non scellée, chacune suivie
+    // d'une mise à jour de la pièce, se sérialisent sans interblocage (le verrou partagé d'origine s'y
+    // interbloquait). Prisma résout une transaction dont le COMMIT échoue : le nombre d'écritures fait foi.
+    test('deux insertions concurrentes d’écritures dans une pièce non scellée ne s’interbloquent pas', async () => {
+      const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST écritures concurrentes', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST écritures', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      const id = brouillon.body.id;
+      const ecriture = (ordre) => ({ factureId: id, ordre, cle: 'CLIENT', journalCode: 'VE', compteNum: '411000', compteLib: 'TEST Clients', debit: 0, credit: 0 });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const premiereInsertion = new Promise((resolve) => { pret = resolve; });
+      const premiere = prisma.$transaction(async (tx) => {
+        await tx.ecritureFacture.create({ data: ecriture(70) });
+        pret();
+        await attente;
+        await tx.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST écritures 1' } });
+      }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+      await premiereInsertion;
+      const seconde = prisma.$transaction(async (tx) => {
+        await tx.ecritureFacture.create({ data: ecriture(71) });
+        await tx.facture.update({ where: { id }, data: { motifHorsAffaire: 'TEST écritures 2' } });
+      }, { timeout: 15000 }).then(() => null, (erreur) => erreur);
+      try {
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO%EcritureFacture%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'l’insertion de la seconde transaction attend la première');
+      } finally {
+        liberer();
+      }
+      const [erreurPremiere, erreurSeconde] = await Promise.all([premiere, seconde]);
+      assert.equal(erreurPremiere, null, String(erreurPremiere?.message));
+      assert.equal(erreurSeconde, null, String(erreurSeconde?.message));
+      assert.equal(await prisma.ecritureFacture.count({ where: { factureId: id } }), 2);
+    });
+
     test('émet et exporte une facture entièrement offerte sans écriture déséquilibrée', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST remise totale', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST offerte', quantite: 1, prixUnitaireHt: 0, tauxTva: 0 }] });
       assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
@@ -7821,10 +10194,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(rang(avoirSecond.numero), rang(avoirPremier.numero) + 1, 'la séquence des avoirs progresse indépendamment');
       } finally {
         for (const id of [avoirPremier.id, avoirSecond.id, premiere.id, seconde.id]) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
-          await purgerEcrituresJetables(id);
-          await prisma.facture.delete({ where: { id } });
+          await purgerPieceJetable(id);
         }
       }
     });
@@ -7872,15 +10242,9 @@ if (!TEST_DATABASE_URL) {
       } finally {
         const avoirs = await prisma.facture.findMany({ where: { factureOrigineId: facture.id }, select: { id: true } });
         for (const { id } of avoirs) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
-          await purgerEcrituresJetables(id);
-          await prisma.facture.delete({ where: { id } });
+          await purgerPieceJetable(id);
         }
-        await prisma.journalFacture.deleteMany({ where: { factureId: facture.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: facture.id } });
-        await purgerEcrituresJetables(facture.id);
-        await prisma.facture.deleteMany({ where: { id: facture.id } });
+        await purgerPieceJetable(facture.id);
       }
     });
 
@@ -7925,15 +10289,9 @@ if (!TEST_DATABASE_URL) {
       } finally {
         const avoirs = await prisma.facture.findMany({ where: { factureOrigineId: facture.id }, select: { id: true } });
         for (const { id } of avoirs) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: id } });
-          await purgerEcrituresJetables(id);
-          await prisma.facture.delete({ where: { id } });
+          await purgerPieceJetable(id);
         }
-        await prisma.journalFacture.deleteMany({ where: { factureId: facture.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: facture.id } });
-        await purgerEcrituresJetables(facture.id);
-        await prisma.facture.deleteMany({ where: { id: facture.id } });
+        await purgerPieceJetable(facture.id);
       }
     });
 
@@ -8075,6 +10433,12 @@ if (!TEST_DATABASE_URL) {
       assert.equal(premier.status, 201, JSON.stringify(premier.body));
       assert.deepEqual([premier.body.totalHt, premier.body.totalTva, premier.body.totalTtc], [9, 0.5, 9.5]);
       assert.deepEqual(premier.body.ventilationTva.map(({ tauxTva, totalHt, totalTva, totalTtc }) => ({ tauxTva, totalHt, totalTva, totalTtc })), [{ tauxTva: 5.5, totalHt: 9, totalTva: 0.5, totalTtc: 9.5 }]);
+      // #236 : la liste des factures donne la base HT déjà créditée par chaque avoir (ventilation, et
+      // lignes pour un document historique) : l'écran en déduit l'aperçu du suivant, 0,49 € ci-dessous.
+      const liste = await request(app).get('/api/factures').set('Authorization', `Bearer ${session}`);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      const credite = liste.body.find((facture) => facture.id === emission.body.id);
+      assert.deepEqual(credite.avoirs.map(({ ventilationTva, lignes }) => ({ ventilationTva, lignes })), [{ ventilationTva: [{ tauxTva: 5.5, totalHt: 9 }], lignes: [{ tauxTva: 5.5, totalHt: 9 }] }]);
 
       const second = await creer();
       assert.equal(second.status, 201, JSON.stringify(second.body));
@@ -8145,15 +10509,9 @@ if (!TEST_DATABASE_URL) {
       } finally {
         const avoir = await prisma.facture.findFirst({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
         if (avoir) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
-          await purgerEcrituresJetables(avoir.id);
-          await prisma.facture.delete({ where: { id: avoir.id } });
+          await purgerPieceJetable(avoir.id);
         }
-        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
-        await purgerEcrituresJetables(emission.body.id);
-        await prisma.facture.delete({ where: { id: emission.body.id } });
+        await purgerPieceJetable(emission.body.id);
       }
     });
 
@@ -8196,14 +10554,8 @@ if (!TEST_DATABASE_URL) {
         }
       } finally {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
-        await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
-        await purgerEcrituresJetables(avoir.id);
-        await prisma.facture.delete({ where: { id: avoir.id } });
-        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
-        await purgerEcrituresJetables(emission.body.id);
-        await prisma.facture.delete({ where: { id: emission.body.id } });
+        await purgerPieceJetable(avoir.id);
+        await purgerPieceJetable(emission.body.id);
       }
     });
 
@@ -8223,11 +10575,8 @@ if (!TEST_DATABASE_URL) {
       // Retire l'avoir pour exercer le chemin historique de contre-passation, pas son
       // remplacement moderne. L'instant est volontairement à cheval sur le nouvel an.
       const avoir = annulation.body.avoir;
-      await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
-      await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
-      await purgerEcrituresJetables(avoir.id);
-      await prisma.facture.delete({ where: { id: avoir.id } });
-      await prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2027-01-01T00:30:00.000Z') } });
+      await purgerPieceJetable(avoir.id);
+      await sansGardesPiece([prisma.journalFacture.updateMany({ where: { factureId: emission.body.id, action: 'ANNULATION' }, data: { createdAt: new Date('2027-01-01T00:30:00.000Z') } })]);
       const jourComptable = async () => {
         const csv = await request(app).get('/api/factures/export-comptable.csv').set('Authorization', `Bearer ${session}`);
         assert.equal(csv.status, 200, csv.text);
@@ -8245,15 +10594,9 @@ if (!TEST_DATABASE_URL) {
         await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
         const avoir = await prisma.facture.findFirst({ where: { factureOrigineId: emission.body.id }, select: { id: true } });
         if (avoir) {
-          await prisma.journalFacture.deleteMany({ where: { factureId: avoir.id } });
-          await prisma.factureLigne.deleteMany({ where: { factureId: avoir.id } });
-          await purgerEcrituresJetables(avoir.id);
-          await prisma.facture.delete({ where: { id: avoir.id } });
+          await purgerPieceJetable(avoir.id);
         }
-        await prisma.journalFacture.deleteMany({ where: { factureId: emission.body.id } });
-        await prisma.factureLigne.deleteMany({ where: { factureId: emission.body.id } });
-        await purgerEcrituresJetables(emission.body.id);
-        await prisma.facture.delete({ where: { id: emission.body.id } });
+        await purgerPieceJetable(emission.body.id);
       }
     });
 
@@ -8430,7 +10773,7 @@ if (!TEST_DATABASE_URL) {
       const nouveau = await prisma.client.create({ data: { raisonSociale: 'TEST Course client nouveau' } });
       const attendreVerrou = async (motif) => {
         for (let tour = 0; tour < 150; tour++) {
-          const sessions = await prisma.$queryRawUnsafe(`SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '${motif}'`);
+          const sessions = await prisma.$queryRawUnsafe(`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '${motif}'`);
           if (sessions.length) return true;
           await new Promise(resolve => setTimeout(resolve, 20));
         }
@@ -8730,7 +11073,17 @@ if (!TEST_DATABASE_URL) {
     test('refuse le document d’une facture émise sans mentions figées', async () => {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST document sans mentions', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST document sans mentions', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal((await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`)).status, 200);
-      await prisma.facture.update({ where: { id: brouillon.body.id }, data: { mentionsLegalesVersionId: null } });
+      // Les mentions d'une facture émise sont figées en base (#180) : la pièce sans mentions, que
+      // l'API doit toujours refuser d'imprimer, est fabriquée en suspendant ce seul garde.
+      await assert.rejects(prisma.facture.update({ where: { id: brouillon.body.id }, data: { mentionsLegalesVersionId: null } }), /immuables/);
+      await prisma.$transaction([
+        prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "Facture_immutabilite_origine_emise"'),
+        prisma.facture.update({ where: { id: brouillon.body.id }, data: { mentionsLegalesVersionId: null } }),
+        // Les gardes différés de la pièce sont vérifiés avant de réactiver le trigger (PostgreSQL
+        // refuse un ALTER TABLE tant que des événements différés sont en attente).
+        prisma.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE'),
+        prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "Facture_immutabilite_origine_emise"'),
+      ]);
       const document = await request(app).get(`/api/factures/${brouillon.body.id}/document.pdf`).set('Authorization', `Bearer ${session}`);
       assert.equal(document.status, 409, JSON.stringify(document.body)); assert.match(document.body.error, /mentions légales/i);
     });
@@ -8902,7 +11255,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(avancementPremature.status, 409, JSON.stringify(avancementPremature.body));
       const tracesInitiales = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: contratId } });
       for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
-        const transition = await request(app).patch(`/api/interventions/${intervention.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        const transition = statut === 'TERMINEE' ? await terminerIntervention(intervention.body.id, session) : await request(app).patch(`/api/interventions/${intervention.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
         assert.equal(transition.status, 200, JSON.stringify(transition.body));
       }
       const avance = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
@@ -9008,7 +11361,7 @@ if (!TEST_DATABASE_URL) {
         requetes = lancer().map(requete => requete.then(resultat => resultat));
         let bloquees = 0;
         for (let tour = 0; tour < 200 && bloquees < n; tour++) {
-          [{ bloquees }] = await prisma.$queryRaw`SELECT count(*)::int AS bloquees FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Facture"%FOR UPDATE%'`;
+          [{ bloquees }] = await prisma.$queryRaw`SELECT count(*)::int AS bloquees FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Facture"%FOR UPDATE%'`;
           if (bloquees < n) await new Promise(resolve => setTimeout(resolve, 20));
         }
         assert.equal(bloquees, n, 'chaque requête doit attendre le verrou de la facture');

@@ -6,7 +6,7 @@ import { ROLE_SUPERADMIN } from './droits/roles';
 import { journaliserAdministration, purgerJournalAdministration } from './commun/journal-administration';
 import { upsertSingleton } from './domaines/parametres/metier';
 import { normalizeEmail } from './domaines/authentification/sso';
-import { libelleCompteJournal, delierFicheSiPlusTechnicien, journaliserDroitsCompte } from './domaines/utilisateurs/comptes';
+import { libelleCompteJournal, delierFicheSiPlusTechnicien, journaliserDroitsCompte, lireCompteVerrouille, ISOLATION_RETRAIT } from './domaines/utilisateurs/comptes';
 
 // --- Comptes super administrateurs de départ ---
 // La liste vient EXCLUSIVEMENT de SUPERADMIN_EMAILS (emails séparés par des virgules).
@@ -23,6 +23,14 @@ function nameFromEmail(email: string): string {
   return local.replace(/\b\w/g, (c) => c.toUpperCase()) || email;
 }
 
+// Un compte de départ dont la promotion ou la création échoue n'arrête pas le serveur : appelée
+// depuis le rappel de listen, cette fonction ne rejette jamais, sans quoi le processus
+// s'arrêterait sur un rejet non géré (#231). L'opération est retentée une fois, aussitôt : ce
+// second essai vise les refus de concurrence (fiche intervenant reliée au même moment, compte créé
+// au même moment par ailleurs) ; une base indisponible le fait échouer aussi. L'échec est alors
+// signalé, le démarrage continue avec les comptes suivants, et le prochain démarrage réessaiera.
+const ESSAIS_COMPTE_DE_DEPART = 2;
+
 export const ensureSuperAdmins = async () => {
   const emails = (process.env.SUPERADMIN_EMAILS || '')
     .split(',')
@@ -30,42 +38,66 @@ export const ensureSuperAdmins = async () => {
     .filter(Boolean);
 
   for (const email of emails) {
-    const existing = await prisma.user.findUnique({ where: { email } });
-    // Promotions et créations du démarrage : journalisées comme les autres changements de droits,
-    // sans auteur (AUTEUR_JOURNAL_DEMARRAGE), et réservées au super administrateur.
-    if (existing) {
-      if (existing.role !== ROLE_SUPERADMIN) {
-        await transactionVerifiee(async (tx) => {
-          const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${existing.id} FOR UPDATE`);
-          const apres = await tx.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
-          await journaliserDroitsCompte(tx, { } as express.Request, 'TYPE_COMPTE', existing, apres, ['role']);
-          await delierFicheSiPlusTechnicien(tx, null, existing, ROLE_SUPERADMIN, fiches);
-        });
-        console.log(`Compte promu super administrateur : ${email}`);
+    for (let essai = 1; essai <= ESSAIS_COMPTE_DE_DEPART; essai += 1) {
+      try {
+        await assurerSuperAdmin(email);
+        break;
+      } catch (error) {
+        if (essai < ESSAIS_COMPTE_DE_DEPART) {
+          console.warn(`[DÉMARRAGE] Compte super administrateur ${email} : essai ${essai} en échec, nouvel essai.`, error);
+        } else {
+          console.error(`[DÉMARRAGE] Compte super administrateur ${email} ni promu ni créé après ${ESSAIS_COMPTE_DE_DEPART} essais : nouvel essai au prochain démarrage.`, error);
+        }
       }
-      continue;
     }
-    await transactionVerifiee(async (tx) => {
-      const cree = await tx.user.create({
-        data: {
-          email,
-          name: nameFromEmail(email),
-          role: ROLE_SUPERADMIN,
-        },
-      });
-      await journaliserAdministration(tx, null, {
-        domaine: 'DROITS', type: 'COMPTE', action: 'CREATION', cibleId: cree.id, cibleLibelle: libelleCompteJournal(cree), concerneSuperAdmin: true,
-        apres: { role: cree.role, estCommercial: cree.estCommercial, accesFinance: cree.accesFinance, permissions: cree.permissions, actif: cree.actif },
-      });
-    });
-    console.log(`Compte super administrateur créé : ${email} (connexion Microsoft Entra ID)`);
   }
 
-  const total = await prisma.user.count({ where: { role: ROLE_SUPERADMIN } });
-  if (total === 0) {
-    console.warn('[AVERTISSEMENT] Aucun compte super administrateur : les modules de l\'application ne peuvent pas être pilotés.');
+  try {
+    const total = await prisma.user.count({ where: { role: ROLE_SUPERADMIN } });
+    if (total === 0) {
+      console.warn('[AVERTISSEMENT] Aucun compte super administrateur : les modules de l\'application ne peuvent pas être pilotés.');
+    }
+  } catch (error) {
+    console.error('[DÉMARRAGE] Décompte des super administrateurs impossible :', error);
   }
 };
+
+async function assurerSuperAdmin(email: string) {
+  const existing = await prisma.user.findUnique({ where: { email } });
+  // Promotions et créations du démarrage : journalisées comme les autres changements de droits,
+  // sans auteur (AUTEUR_JOURNAL_DEMARRAGE), et réservées au super administrateur.
+  if (existing) {
+    if (existing.role === ROLE_SUPERADMIN) return;
+    // Fiches puis compte verrouillés, comme le changement de type ; le compte est relu sous son
+    // verrou, en READ COMMITTED explicite (ISOLATION_RETRAIT) : le garde des fiches reliées
+    // entre-temps et l'état « avant » journalisé portent sur le compte du moment.
+    const promu = await transactionVerifiee(async (tx) => {
+      const fiches = await tx.$queryRaw<Array<{ id: string; nom: string }>>(Prisma.sql`SELECT "id", "nom" FROM "Intervenant" WHERE "userId" = ${existing.id} FOR UPDATE`);
+      const avant = await lireCompteVerrouille(tx, existing.id);
+      if (!avant || avant.role === ROLE_SUPERADMIN) return false;
+      const apres = await tx.user.update({ where: { id: existing.id }, data: { role: ROLE_SUPERADMIN } });
+      await journaliserDroitsCompte(tx, { } as express.Request, 'TYPE_COMPTE', avant, apres, ['role']);
+      await delierFicheSiPlusTechnicien(tx, null, avant, ROLE_SUPERADMIN, fiches);
+      return true;
+    }, ISOLATION_RETRAIT);
+    if (promu) console.log(`Compte promu super administrateur : ${email}`);
+    return;
+  }
+  await transactionVerifiee(async (tx) => {
+    const cree = await tx.user.create({
+      data: {
+        email,
+        name: nameFromEmail(email),
+        role: ROLE_SUPERADMIN,
+      },
+    });
+    await journaliserAdministration(tx, null, {
+      domaine: 'DROITS', type: 'COMPTE', action: 'CREATION', cibleId: cree.id, cibleLibelle: libelleCompteJournal(cree), concerneSuperAdmin: true,
+      apres: { role: cree.role, estCommercial: cree.estCommercial, accesFinance: cree.accesFinance, permissions: cree.permissions, actif: cree.actif },
+    });
+  });
+  console.log(`Compte super administrateur créé : ${email} (connexion Microsoft Entra ID)`);
+}
 
 // Initialisation BDD (Seeding)
 export const initDb = async () => {

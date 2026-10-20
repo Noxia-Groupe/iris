@@ -87,6 +87,12 @@ test('le technicien garde le planning en consultation, sans l’administration (
   assert.equal(peutOuvrirAdministration('COMMERCIAL'), false);
 });
 
+test('l’accueil du technicien s’intitule « Ma journée », celui des autres « Tableau de bord » (lot pilote 3b-4)', () => {
+  const accueil = (role: string) => sectionsMenu({ role, permissions: [] }, true)[0].entrees.map((e) => [e.to, e.libelle]);
+  assert.deepEqual(accueil('TECHNICIEN'), [['/', 'Ma journée']]);
+  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'COMMERCIAL', 'DIRECTEUR']) assert.deepEqual(accueil(role), [['/', 'Tableau de bord']], role);
+});
+
 test('l’accès financier ne vaut jamais pour un technicien, même enregistré', () => {
   assert.equal(peutVoirFinance({ role: 'TECHNICIEN', permissions: [], accesFinance: true }), false);
   assert.equal(peutVoirFinance({ role: 'CONDUCTEUR_TRAVAUX', permissions: [], accesFinance: true }), true);

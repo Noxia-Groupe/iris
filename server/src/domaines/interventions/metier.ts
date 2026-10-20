@@ -48,19 +48,38 @@ export async function chargerInterventionCout(req: AuthRequest) {
     include: { contratMaintenance: { select: { statut: true } } },
   });
 }
-export function interventionCoutEligible(intervention: { statut: string; contratMaintenanceId: string | null; contratMaintenance: { statut: string } | null }) {
+type InterventionCout = { statut: string; contratMaintenanceId: string | null; contratMaintenance: { statut: string } | null };
+// Matériel : réservé aux interventions d'un contrat actif.
+export function interventionCoutEligible(intervention: InterventionCout) {
   return !!intervention.contratMaintenanceId && intervention.contratMaintenance?.statut === 'ACTIF' && STATUTS_COUT_INTERVENTION.includes(intervention.statut);
 }
+// Heures du technicien : sur une intervention d'un contrat actif, et aussi hors contrat (décision de
+// Nelson du 17-10-2026, lot pilote 3b). Une intervention d'un contrat suspendu ou terminé reste fermée.
+export function interventionHeuresEligible(intervention: InterventionCout) {
+  if (!STATUTS_COUT_INTERVENTION.includes(intervention.statut)) return false;
+  return !intervention.contratMaintenanceId || intervention.contratMaintenance?.statut === 'ACTIF';
+}
+// Des heures se déclarent une fois faites : une date postérieure au jour de la société est refusée
+// (choix par défaut, à confirmer, #253 ; il vaut aussi pour les interventions de contrat).
+export function dateHeuresIntervention(value: unknown, fuseauHoraire: string, instant = new Date()): string | null {
+  const date = dateIsoStricte(value);
+  return date && dateSeuleEnJourCivil(date) <= aujourdHuiEntreprise(fuseauHoraire, instant) ? date : null;
+}
 export function estConflitTransactionCout(error: unknown) {
-  return ['P2034', 'P2003'].includes((error as { code?: string })?.code || '');
+  const erreur = error as { code?: string; meta?: { code?: string } } | null;
+  // Un refus de sérialisation ou un interblocage remonte en P2034, sauf sur une requête brute (les
+  // verrous FOR UPDATE de verrouillerContexteCout), que Prisma rapporte en P2010 avec le code SQL.
+  if (erreur?.code === 'P2010') return ['40001', '40P01'].includes(erreur.meta?.code || '');
+  return ['P2034', 'P2003'].includes(erreur?.code || '');
 }
 // Toutes les mutations de coût prennent ces verrous dans cet ordre afin que la relecture
-// d'éligibilité soit atomique avec les changements de contrat, statut et affectation.
+// d'éligibilité soit atomique avec les changements de contrat, statut et affectation. Hors contrat,
+// le verrou du contrat est sans objet ; l'ordre des autres est inchangé.
 export async function verrouillerContexteCout(tx: Prisma.TransactionClient, interventionId: string, intervenantId?: string, userId?: string) {
   const interventions = await tx.$queryRaw<Array<{ id: string; contratMaintenanceId: string | null }>>(Prisma.sql`SELECT "id", "contratMaintenanceId" FROM "Intervention" WHERE "id" = ${interventionId} FOR UPDATE`);
   const intervention = interventions[0];
-  if (!intervention?.contratMaintenanceId) return null;
-  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${intervention.contratMaintenanceId} FOR UPDATE`);
+  if (!intervention) return null;
+  if (intervention.contratMaintenanceId) await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${intervention.contratMaintenanceId} FOR UPDATE`);
   if (intervenantId && userId) {
     await tx.$queryRaw(Prisma.sql`SELECT "interventionId", "intervenantId" FROM "InterventionAffectation" WHERE "interventionId" = ${interventionId} AND "intervenantId" = ${intervenantId} FOR UPDATE`);
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervenant" WHERE "id" = ${intervenantId} AND "userId" = ${userId} FOR UPDATE`);

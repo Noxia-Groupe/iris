@@ -44,7 +44,7 @@ export { peutVoirFinance } from './src/domaines/chantiers/droits';
 import { computeChantierMetrics } from './src/domaines/chantiers/suivi';
 import { enregistrerRoutesChantiers, enregistrerRoutesAnalyseChantier } from './src/domaines/chantiers/routes';
 import { enregistrerRoutesSaisiesTravaux } from './src/domaines/chantiers/saisies';
-import { dateDemandeCurative } from './src/domaines/interventions/metier';
+import { dateDemandeCurative, dateHeuresIntervention } from './src/domaines/interventions/metier';
 import { enregistrerRoutesContrats } from './src/domaines/contrats/routes';
 import { enregistrerRoutesInterventions } from './src/domaines/interventions/routes';
 import { enregistrerRoutesPlanning } from './src/domaines/planning/routes';
@@ -157,9 +157,17 @@ enregistrerRoutesAnalyseChantier(app);
 // fermer un serveur derrière lui.
 if (require.main === module) {
   reglerDelaisConnexion(app.listen(port, async () => {
-    await initDb();
-    await ensureSuperAdmins();
-    console.log(`Server running on port ${port}`);
+    // Une initialisation impossible (base injoignable, par exemple) est signalée explicitement et
+    // arrête le processus, au lieu d'un rejet non géré sans contexte (#231). Les comptes de départ,
+    // eux, ne l'arrêtent jamais : ensureSuperAdmins signale ses échecs sans rejeter.
+    try {
+      await initDb();
+      await ensureSuperAdmins();
+      console.log(`Server running on port ${port}`);
+    } catch (error) {
+      console.error('[DÉMARRAGE] Initialisation impossible :', error);
+      process.exit(1);
+    }
   }));
 }
 
@@ -179,6 +187,7 @@ export {
   companySettingsPayload,
   fuseauHoraireEntrepriseValide,
   dateDemandeCurative,
+  dateHeuresIntervention,
   jourCivilEntreprise,
   aujourdHuiEntreprise,
   anneeEntreprise,
