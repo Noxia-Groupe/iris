@@ -231,8 +231,15 @@ Fusionnés par Claude Code : #246 sur autorisation de Nelson, #249 et #255 par l
 **Lot pilote 3b** (#253) :
 - #255, 3b-1 (#223, règle 2) : comptes rendus d'intervention en ajout seul et signatures figées en base (modification et suppression refusées), vidage refusé sur les deux tables. Une intervention qui porte un compte rendu ne se supprime plus (clé étrangère en RESTRICT). Routes, droits et écrans inchangés. Le figement dès l'enregistrement est un choix par défaut de #253, à confirmer.
 - #257, 3b-2 (montant affiché nouveau) : le technicien affecté saisit et corrige ses heures sur une intervention hors contrat, comme sur un contrat actif ; un contrat suspendu ou terminé reste fermé, et le matériel reste réservé aux contrats actifs. Les coûts d'une intervention hors contrat sont lisibles : l'administration voit le taux figé et le coût de main-d'œuvre (« Main-d’œuvre cumulée »), le technicien ses heures sans taux, le conducteur les heures sans taux ni coût. Une date d'heures future est refusée (choix par défaut, à confirmer), y compris sur un contrat. Un conflit de sérialisation répond 409 au lieu de 500.
+- #268, 3b-3 (règle 2 : documents figés, journal, périmètres) : compte rendu et signature dans la page, sans fenêtre du navigateur.
+  - Un compte rendu porte une clé d'envoi tirée à l'ouverture du formulaire : un renvoi après une réponse perdue relit le compte rendu enregistré au lieu d'en figer un second.
+  - La signature exige un tracé dessiné au doigt, vectoriel et borné (50 traits, 2 000 points), figé en base et inclus dans l'empreinte SHA-256 ; le compte qui l'enregistre est conservé ; la migration est refusée s'il existe déjà des signatures sans tracé.
+  - Terminer exige un compte rendu, signé ou accompagné d'un motif parmi quatre, consigné au journal, pour le technicien comme pour l'encadrement ; « Autre » exige une précision de 3 à 200 caractères.
+  - Compte rendu, signature et clôture se font sous le verrou de l'intervention, périmètre relu ; les horodatages sont imposés par la base.
+  - Trois passages d'audit interne : périmètre relu sous verrou (C2), signature sur écran large (C3), formulaires remis à jour après un refus ou une issue inconnue (C4, C5).
 
 **Montants** (règle 2) :
+- #242 (#236) : l'aperçu de TVA d'un avoir partiel reprend le calcul du serveur, en entiers et en tenant compte des avoirs déjà émis ; il annonçait parfois un autre montant que le document émis (2,13 € pour 2,14 € sur 21,35 € HT à 10 %).
 - #208 (#198) : sommes du suivi des chantiers, du total facturé et du reste à facturer, des commissions et des statistiques en décimal exact ; plus de fausse alerte à budget exactement consommé. L'affichage arrondit moitié vers l'extérieur sans « -0 » (2,50 € n'est plus affiché 2 €, -12,50 € s'affiche -13 €), signe et couleur suivent la valeur affichée, et les alertes de moins d'un euro sont chiffrées au centime. Montants stockés et documents émis inchangés. L'audit relève deux conventions d'arrondi du coût de main-d'œuvre (question de la passation).
 
 **Factures** :
@@ -244,15 +251,14 @@ Fusionnés par Claude Code : #246 sur autorisation de Nelson, #249 et #255 par l
 **Tests et documentation** :
 - #249 (#152, point 5) : le parcours `entetes-mobile` mesure chaque route dans une page neuve ; en local, Chromium refusait les modules de Vite après une trentaine de navigations dans la même page.
 - #246 (#241) : CLAUDE.md décrit la règle du nom de base jetable des E2E.
+- #266 : passation du 20-10-2026, décision de fusion reportée dans CLAUDE.md, règle du pilote, lots 3b-1 et 3b-2 ; #207 fermée, sa ligne reprise.
 
 ### Suivis ouverts pendant ces lots
 
-Étiquette `suivi-audit`, tous ouverts au 20-10-2026 : #252 (taux d'acompte invalide remplacé en silence, audit de #250), #254 et #258 (formulaire d'avoir partiel, audit de #251), #256 (suppression d'un compte et comptes rendus, audit de #255), #259 et #260 (affichage des heures, cadre des coûts sur un conflit, audit de #257), #261, #262, #264 et #265 (accès de secours derrière les proxys, `+` du jeton de secours, autorisation sur `oid` et `tid`, formes restantes du test des variables, inventaire et audit de #263).
+Étiquette `suivi-audit`, tous ouverts au 20-10-2026 : #252 (taux d'acompte invalide remplacé en silence, audit de #250), #254 et #258 (formulaire d'avoir partiel, audit de #251), #256 (suppression d'un compte et comptes rendus, audit de #255), #259 et #260 (affichage des heures, cadre des coûts sur un conflit, audit de #257), #261, #262, #264 et #265 (accès de secours derrière les proxys, `+` du jeton de secours, autorisation sur `oid` et `tid`, formes restantes du test des variables, inventaire et audit de #263), #269 (notes non bloquantes des audits de #268 : journal relu sous verrou, refus de migrer, motif de clôture affiché, périmètre par l'affaire, fin de pointeur manquée, longueur du champ de précision). #267 (deux formulations de la règle de fusion, audit de #266) est reprise et fermée par la passation qui suit #268.
 
 ### En cours au 20-10-2026
 
-- #242 (#236), aperçu de TVA d'un avoir partiel : audit interne sur `83379e7`, fusion par Claude Code selon la décision du 20-10-2026.
 - #182 et #183, propositions 3 et 4 : à rafraîchir sur `main` et à réauditer ; leur fusion, qui vaut validation, attend la confirmation de Nelson (question de la passation, section 3).
-- #207, état du découpage dans CLAUDE.md : ligne reprise et actualisée par la PR documentaire du 20-10-2026, à fermer à sa fusion.
 - #250 (#240) : en pause, en brouillon, jusqu'à la fin du pilote.
-- Lot 3b : 3b-3, puis 3b-4, puis le planning du technicien limité.
+- Lot 3b : 3b-4 (« Ma journée » et fiche intervention sur téléphone), puis le planning du technicien limité.
