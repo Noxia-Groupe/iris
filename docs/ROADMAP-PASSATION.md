@@ -354,8 +354,8 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - « Interventions du jour » : le jour civil de la société, calculé par le serveur ; planifiées et en cours triées par créneau, terminées du jour en bas, rubrique des interventions restées ouvertes les jours précédents, annulées exclues ; navigation jour précédent et jour suivant. **À appliquer** (3b-4).
 - Le client signe le compte rendu seul ; l'attestation des heures se reverra avec la facturation au temps passé (lot 4 ou suivant). **Appliqué** (#268).
 - Tracé de la signature borné à 50 traits et 2 000 points, proportions de la zone entre 0,5 et 10 ; une signature ordinaire compte quelques centaines de points. **Appliqué** (#268).
-- Précision du motif « Autre » : 3 à 200 caractères, comptés en points de code. **Appliqué** (#268).
-- Une clôture avec au moins un compte rendu signé, même si un complément ne l'est pas, ne demande pas de motif. **Appliqué** (#268).
+- Précision du motif « Autre » : 3 à 200 caractères, comptés en points de code. **Appliqué** (#268) par l'API ; le champ de l'écran limite encore la saisie à 200 unités UTF-16, soit 100 emoji (#269, N-f).
+- Une clôture avec au moins un compte rendu signé, même si un complément ne l'est pas, ne demande pas de motif, et un motif donné est refusé (409). **Appliqué** (#268).
 - L'encadrement ajoute un compte rendu et fait signer depuis l'écran, comme l'API le permettait déjà ; la règle de clôture vaut pour lui. **Appliqué** (#268).
 - Un compte rendu hors d'une intervention en cours est refusé par 409 avec un message, au lieu de 404. **Appliqué** (#268).
 - L'accueil du technicien mène à « Ma journée ». Adresse affichée : celle du site, à défaut celle du chantier ; téléphone : celui du contact. **À appliquer** (3b-4).
