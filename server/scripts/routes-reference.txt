@@ -68,11 +68,11 @@ POST /api/contrats-maintenance/:id/avancer-echeance requireAuth#76fb48c2d0f5 > r
 POST /api/contrats-maintenance/:id/generer-intervention requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#1239714635db
 POST /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#051bd6c57c60 > <anonymous>#2d7ec5d97b9a
 GET /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#ae7c5bebc847
-GET /api/interventions/:id/couts requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#d2dceb7567af
-POST /api/interventions/:id/couts/heures requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c8d30a48fd35
+GET /api/interventions/:id/couts requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#3bbada459c05
+POST /api/interventions/:id/couts/heures requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#971650f71db2
 POST /api/interventions/:id/couts/achats requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#aaaf5b8c9ae8
-PATCH /api/interventions/:id/couts/:type/:coutId requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#49bd69d139cd
-POST /api/interventions/:id/couts/:type/:coutId/:action requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c0aecef2a317
+PATCH /api/interventions/:id/couts/:type/:coutId requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#b6e1b61bab0d
+POST /api/interventions/:id/couts/:type/:coutId/:action requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#60eb271babe0
 GET /api/interventions/:id/journal-saisies requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#6d9623c26cdd
 POST /api/interventions/:id/rapports requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#88afc1363903
 POST /api/interventions/rapports/:rapportId/signature requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#bdcd5b9ac4f1
@@ -88,7 +88,7 @@ GET /api/me requireAuth#76fb48c2d0f5 > <anonymous>#eefe8f938bf2
 PUT /api/me/theme requireAuth#76fb48c2d0f5 > <anonymous>#16df72f47e17
 GET /api/chantiers requireAuth#76fb48c2d0f5 > listerChantiers#01ec853057b9
 GET /api/v1/chantiers <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerChantiers#01ec853057b9
-GET /api/chantiers/:id requireAuth#76fb48c2d0f5 > <anonymous>#debf40788539
+GET /api/chantiers/:id requireAuth#76fb48c2d0f5 > <anonymous>#5b27a1bfd28f
 GET /api/chantiers/:id/journal-saisies requireAuth#76fb48c2d0f5 > <anonymous>#4373de266aea
 POST /api/chantiers requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
 PATCH /api/chantiers/:id requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#5709fb7b4be1
@@ -98,9 +98,9 @@ PATCH /api/chantiers/:id/commercial requireAuth#76fb48c2d0f5 > blockCommercial#e
 GET /api/users requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0552dd3633a7
 POST /api/users requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d2a05dc6e5a0
 DELETE /api/users/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#74803f5b5389
-PATCH /api/users/:id/role requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4060c5d2dbe0
+PATCH /api/users/:id/role requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#8cded3afe1bd
 PATCH /api/users/:id/responsable-hierarchique requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5a6000b3b5b1
-PATCH /api/users/:id/est-commercial requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0d3026b18794
+PATCH /api/users/:id/est-commercial requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4450aa149024
 PUT /api/users/:id/permissions requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#af6a696dea18
 PATCH /api/users/:id/acces-finance requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#72b545dfd957
 PATCH /api/users/:id/actif requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#76a3352c758f
@@ -218,12 +218,12 @@ PUT /api/modules requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <an
 GET /api/journal-administration requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#38867022b71f
 GET /api/journal-administration/export.csv requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#72c377372775
 PUT /api/journal-administration/conservation requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#3483eb2d5d53
-GET /api/stats/global requireAuth#76fb48c2d0f5 > <anonymous>#c020bab12747
-GET /api/stats/conducteurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#7d0834176d5d
-GET /api/stats/conducteurs/assiduite requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#7637680a9994
-GET /api/stats/chantiers-repartition requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#e0f0fc72fde0
-GET /api/stats/intervenants requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#d5cbc872c2ea
-GET /api/stats/fournisseurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#d4a07f8438b1
+GET /api/stats/global requireAuth#76fb48c2d0f5 > <anonymous>#df5b32801d07
+GET /api/stats/conducteurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#c2aaff04fe92
+GET /api/stats/conducteurs/assiduite requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#a9e036d8d362
+GET /api/stats/chantiers-repartition requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#673eacee93bc
+GET /api/stats/intervenants requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#6930e6226651
+GET /api/stats/fournisseurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#0cad5c59e893
 GET /api/stats/types-chantiers requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#e403d98394dc
 GET /api/stats/commerciaux requireAuth#76fb48c2d0f5 > <anonymous>#3ec062c1a65f
 POST /api/chantiers/:id/analyze requireAuth#76fb48c2d0f5 > <anonymous>#0c1d287413d9
@@ -243,6 +243,7 @@ EXPORT computeChantierMetrics
 EXPORT contactPayload
 EXPORT dateDemandeCurative
 EXPORT dateEmissionEstFuture
+EXPORT dateHeuresIntervention
 EXPORT decimalToNumber
 EXPORT devisPayload
 EXPORT ensureSuperAdmins

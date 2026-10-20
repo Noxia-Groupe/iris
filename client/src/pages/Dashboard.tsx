@@ -10,6 +10,7 @@ import { isAdminRole, peutAccederAuxDevis, roleLabel, useCurrentUser } from '../
 import { estASurveiller, trierChantiers } from '../lib/suiviChantiers';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { companyDateInputValue, jourCivilChantier } from '../lib/dateFormatting';
+import { sommeExacte, arrondiEuro } from '../lib/montants';
 
 type Period = 'month' | 'quarter' | 'year';
 
@@ -77,14 +78,14 @@ const Dashboard = () => {
   // Rentabilité du portefeuille en cours : la marge estimée n'arrive que pour qui voit la
   // marge (serveur), l'encart n'existe donc que pour ces profils.
   const portefeuille = enCours.filter(c => c.metrics?.margeEstimee != null);
-  const venduEnCours = portefeuille.reduce((s, c) => s + (c.budgetGlobalVendu ?? 0), 0);
+  const venduEnCours = sommeExacte(portefeuille.map(c => c.budgetGlobalVendu ?? 0));
   // Dépenses (main-d'œuvre comprise) : réservées à l'administration ; le serveur envoie null aux
   // autres destinataires de la rentabilité, qui gardent le vendu et la marge estimée.
   const depensesVisibles = portefeuille.every(c => c.metrics?.totalDepenses != null);
-  const depenseEnCours = portefeuille.reduce((s, c) => s + (c.metrics?.totalDepenses ?? 0), 0);
-  const margeEstimeeEnCours = portefeuille.reduce((s, c) => s + c.metrics.margeEstimee, 0);
+  const depenseEnCours = sommeExacte(portefeuille.map(c => c.metrics?.totalDepenses ?? 0), 4);
+  const margeEstimeeEnCours = sommeExacte(portefeuille.map(c => c.metrics.margeEstimee), 4);
   const margeEstimeeEnCoursPct = venduEnCours > 0 ? (margeEstimeeEnCours / venduEnCours) * 100 : 0;
-  const euros = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} €`;
+  const euros = (n: number) => `${arrondiEuro(n).toLocaleString('fr-FR')} €`;
 
   // Un chantier archivé n'a pas toujours de date de fin renseignée : on retombe
   // sur sa dernière modification (le passage au statut archivé la met à jour).
@@ -182,7 +183,7 @@ const Dashboard = () => {
               <div className="p-2 rounded-lg bg-orange-50 text-orange-600"><ShoppingCart size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total des achats</div>
-                <div className="text-2xl font-black text-orange-600 mt-0.5">{Math.round(globalStats.achatsTotal).toLocaleString()} €</div>
+                <div className="text-2xl font-black text-orange-600 mt-0.5">{arrondiEuro(globalStats.achatsTotal).toLocaleString()} €</div>
                 <div className="text-xs text-gray-400">{periodLabel}</div>
               </div>
             </div>
@@ -204,7 +205,7 @@ const Dashboard = () => {
               <div className="p-2 rounded-lg bg-blue-50 text-accent"><Wallet size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">CA Vendu</div>
-                <div className="text-2xl font-black text-primary-dark mt-0.5">{Math.round(globalStats.caTotal).toLocaleString()} €</div>
+                <div className="text-2xl font-black text-primary-dark mt-0.5">{arrondiEuro(globalStats.caTotal).toLocaleString()} €</div>
                 <div className="text-xs text-gray-400">{periodLabel}</div>
               </div>
             </div>
@@ -212,11 +213,11 @@ const Dashboard = () => {
 
           {globalStats.margeTotal != null && (
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-              <div className={`p-2 rounded-lg ${globalStats.margeTotal >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}><TrendingUp size={18} /></div>
+              <div className={`p-2 rounded-lg ${arrondiEuro(globalStats.margeTotal) >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}><TrendingUp size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge totale</div>
-                <div className={`text-2xl font-black mt-0.5 ${globalStats.margeTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {Math.round(globalStats.margeTotal).toLocaleString()} €
+                <div className={`text-2xl font-black mt-0.5 ${arrondiEuro(globalStats.margeTotal) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {arrondiEuro(globalStats.margeTotal).toLocaleString()} €
                 </div>
                 <div className="text-xs text-gray-400">
                   {globalStats.margePct != null ? `${globalStats.margePct.toFixed(1)}% · ` : ''}{periodLabel}
@@ -234,7 +235,7 @@ const Dashboard = () => {
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
                   {isAdminRole(userRole) ? 'Commission commerciale' : 'Ma commission'}
                 </div>
-                <div className="text-2xl font-black text-emerald-600 mt-0.5">{Math.round(commissionCommerciale).toLocaleString()} €</div>
+                <div className="text-2xl font-black text-emerald-600 mt-0.5">{arrondiEuro(commissionCommerciale).toLocaleString()} €</div>
                 <div className="text-xs text-gray-400">{globalStats.sansPlanCommercial ? MESSAGE_SANS_PLAN_COMMERCIAL : periodLabel}</div>
               </div>
             </div>
@@ -277,10 +278,10 @@ const Dashboard = () => {
                 )}
                 <div>
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge estimée en fin de chantier</div>
-                  <div className={`text-2xl font-black mt-0.5 ${margeEstimeeEnCours >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-marge-portefeuille>
+                  <div className={`text-2xl font-black mt-0.5 ${arrondiEuro(margeEstimeeEnCours) >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-marge-portefeuille>
                     {euros(margeEstimeeEnCours)}
                   </div>
-                  <div className={`text-xs font-semibold ${margeEstimeeEnCours >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  <div className={`text-xs font-semibold ${arrondiEuro(margeEstimeeEnCours) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                     {margeEstimeeEnCoursPct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % du vendu
                   </div>
                 </div>

@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import type { Page } from '@playwright/test';
+import type { Browser, Page } from '@playwright/test';
 import { test, expect, dateDuJour } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
@@ -10,6 +10,24 @@ const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toStri
 function jetonPour(userId: string) {
   const corps = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
   return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
+}
+
+// Chaque route est mesurée dans une page neuve, avec son propre contexte. Une même page réutilisée
+// pour une centaine de navigations finissait, en local, par épuiser les ressources réseau de Chromium
+// (`net::ERR_INSUFFICIENT_RESOURCES` sur les modules servis par Vite) : la page restait vide, et
+// l'échec ne disait rien de l'écran mesuré (#152).
+async function dansUnePageNeuve(browser: Browser, token: string, user: string, mesurer: (page: Page) => Promise<void>) {
+  const contexte = await browser.newContext({ viewport: { width: 375, height: 800 } });
+  try {
+    const page = await contexte.newPage();
+    await page.addInitScript(([jeton, compte]) => {
+      localStorage.setItem('token', jeton as string);
+      localStorage.setItem('user', compte as string);
+    }, [token, user]);
+    await mesurer(page);
+  } finally {
+    await contexte.close();
+  }
 }
 
 // Sur téléphone et tablette, rien ne doit sortir de l'écran ni être rogné par son cadre, et aucun
@@ -81,7 +99,7 @@ async function defautsAffichage(page: Page) {
 test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
   test.use({ viewport: { width: 375, height: 800 } });
 
-  test('rien de coupé hors de l’écran ni rogné par son cadre, aucun titre recouvert', async ({ allerSurPageAdmin, request, session, creerClient }) => {
+  test('rien de coupé hors de l’écran ni rogné par son cadre, aucun titre recouvert', async ({ browser, request, session, creerClient }) => {
     test.setTimeout(360_000);
     const headers = { Authorization: `Bearer ${session.token}` };
     const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
@@ -126,17 +144,18 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
       '/prete-a-facturer', '/mentions-legales', '/comptabilite', '/clients', `/clients/${client.id}`, '/societe', '/catalogue',
       '/administration/api', '/achats', '/heures', '/planning', '/admin', '/performances', '/commerciaux', '/statistiques', '/resultat-commercial',
       '/reglements', `/reglements?facture=${emise.id}`];
-    const page = await allerSurPageAdmin('/');
     const defauts: Record<string, { coupes: string[]; recouverts: string[] }> = {};
-    // Téléphones étroit et courant, tablette en portrait et en paysage (le menu latéral apparaît à 1024 px).
-    for (const largeur of [320, 375, 768, 1024]) {
-      await page.setViewportSize({ width: largeur, height: 800 });
-      for (const route of routes) {
-        await page.goto(route, { waitUntil: 'networkidle' });
-        await expect(page.locator('main h1, main h2').first()).toBeVisible();
-        const constat = await defautsAffichage(page);
-        if (constat.coupes.length || constat.recouverts.length) defauts[`${largeur} px ${route}`] = constat;
-      }
+    for (const route of routes) {
+      await dansUnePageNeuve(browser, session.token, JSON.stringify(session.user), async (page) => {
+        // Téléphones étroit et courant, tablette en portrait et en paysage (le menu latéral apparaît à 1024 px).
+        for (const largeur of [320, 375, 768, 1024]) {
+          await page.setViewportSize({ width: largeur, height: 800 });
+          await page.goto(route, { waitUntil: 'networkidle' });
+          await expect(page.locator('main h1, main h2').first(), `${largeur} px ${route}`).toBeVisible();
+          const constat = await defautsAffichage(page);
+          if (constat.coupes.length || constat.recouverts.length) defauts[`${largeur} px ${route}`] = constat;
+        }
+      });
     }
     expect(defauts).toEqual({});
   });
@@ -193,25 +212,17 @@ test('écrans du technicien et du conducteur sur téléphone : rien de coupé, r
   ];
   const defauts: Record<string, { coupes: string[]; recouverts: string[] }> = {};
   for (const [compte, routes] of parcours) {
-    const contexte = await browser.newContext({ viewport: { width: 375, height: 800 } });
-    try {
-      const page = await contexte.newPage();
-      await page.addInitScript(([token, user]) => {
-        localStorage.setItem('token', token as string);
-        localStorage.setItem('user', user as string);
-      }, [jetonPour(compte.id), JSON.stringify({ ...compte, permissions: [] })]);
-      for (const largeur of [320, 375]) {
-        await page.setViewportSize({ width: largeur, height: 800 });
-        for (const route of routes) {
+    for (const route of routes) {
+      await dansUnePageNeuve(browser, jetonPour(compte.id), JSON.stringify({ ...compte, permissions: [] }), async (page) => {
+        for (const largeur of [320, 375]) {
+          await page.setViewportSize({ width: largeur, height: 800 });
           await page.goto(route, { waitUntil: 'networkidle' });
           await expect(page, `${compte.role} ${route}`).not.toHaveURL(/acces-refuse/);
-          await expect(page.locator('main h1, main h2').first()).toBeVisible();
+          await expect(page.locator('main h1, main h2').first(), `${compte.role} ${largeur} px ${route}`).toBeVisible();
           const constat = await defautsAffichage(page);
           if (constat.coupes.length || constat.recouverts.length) defauts[`${compte.role} ${largeur} px ${route}`] = constat;
         }
-      }
-    } finally {
-      await contexte.close();
+      });
     }
   }
   expect(defauts).toEqual({});

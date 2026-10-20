@@ -1,4 +1,6 @@
-const fmtEuro = (n: number) => `${Math.round(n).toLocaleString()} €`;
+import { arrondiEuro } from '../lib/montants';
+
+const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString()} €`;
 
 // Éditeur d'un barème progressif. Une tranche = un plafond et un taux ; la DERNIÈRE peut
 // avoir un plafond vide, ce qui signifie « au-delà, sans borne » (JSON ne représente pas
