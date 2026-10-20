@@ -17,7 +17,8 @@ const lire = (chemin) => readFileSync(join(racine, chemin), 'utf8');
 // Variables du système, que personne ne renseigne : le relevé des routes transmet PATH à
 // son processus enfant.
 const VARIABLES_DU_SYSTEME = new Set(['PATH']);
-// Variables intégrées de Vite, toujours définies.
+// Variables intégrées de Vite, toujours définies : exclues des seules lectures de Vite
+// (import.meta.env, %X% d'index.html). process.env.BASE_URL reste une variable à documenter.
 const VARIABLES_DE_VITE = new Set(['MODE', 'DEV', 'PROD', 'SSR', 'BASE_URL']);
 const EXTENSIONS_DE_CODE = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs'];
 
@@ -37,14 +38,23 @@ const NOM = '[A-Z_][A-Z0-9_]*';
 // process.env.X, process.env?.X, process.env['X'], process.env?.['X'], et de même pour
 // import.meta.env.
 const SOURCE = '(?:process\\.env|import\\.meta\\.env)';
+// Chaque motif capture la source (premier groupe), puis le nom ou la liste déstructurée.
 const LECTURES_DU_CODE = [
-  new RegExp(`${SOURCE}\\??\\.(${NOM})`, 'g'),
-  new RegExp(`${SOURCE}(?:\\?\\.)?\\[\\s*['"\`](${NOM})['"\`]\\s*\\]`, 'g'),
+  new RegExp(`(${SOURCE})\\??\\.(${NOM})`, 'g'),
+  new RegExp(`(${SOURCE})(?:\\?\\.)?\\[\\s*['"\`](${NOM})['"\`]\\s*\\]`, 'g'),
 ];
 // Déstructuration : const { A, B: b, C = 'x' } = process.env (ou import.meta.env)
-const DESTRUCTURATION = new RegExp(`\\{([^{}]*)\\}\\s*=\\s*${SOURCE}\\b`, 'g');
-// Alias qui masquerait les lectures suivantes : const env = process.env;
-const ALIAS = new RegExp(`\\b(?:const|let|var)\\s+[A-Za-z_$][\\w$]*\\s*=\\s*${SOURCE}\\s*(?:;|$)`, 'gm');
+const DESTRUCTURATION = new RegExp(`\\{([^{}]*)\\}\\s*=\\s*(${SOURCE})\\b`, 'g');
+const lueParVite = (source) => source.startsWith('import');
+// Accès indirects, qui masqueraient les lectures suivantes au relevé :
+//   const env = process.env;   const env: NodeJS.ProcessEnv = process.env;   … = process.env as …;
+//   const { env } = process;   process['env']   import.meta['env']
+const ACCES_INDIRECTS = [
+  new RegExp(`\\b(?:const|let|var)\\s+[A-Za-z_$][\\w$]*\\s*(?::[^=;\\n]+)?=\\s*\\(?\\s*${SOURCE}\\s*\\)?\\s*(?:(?:as|satisfies)\\b[^;\\n]*)?(?:;|$)`, 'gm'),
+  /\{[^{}]*\benv\b[^{}]*\}\s*=\s*(?:globalThis\.)?process\b(?!\s*\.)/g,
+  /\b(?:process|import\.meta)\s*\[\s*['"`]env['"`]\s*\]/g,
+];
+const accesIndirects = (texte) => ACCES_INDIRECTS.flatMap((motif) => [...texte.matchAll(motif)].map(([extrait]) => extrait.trim()));
 
 // Variables lues par un texte, selon le type du fichier.
 function variablesDuTexte(texte, fichier) {
@@ -57,17 +67,19 @@ function variablesDuTexte(texte, fichier) {
     for (const [, nom] of texte.matchAll(new RegExp(`(?<!\\$)\\$(${NOM})`, 'g'))) noms.push(nom);
   } else if (fichier.endsWith('.html')) {
     // Remplacement de Vite dans index.html : %VITE_X%
-    for (const [, nom] of texte.matchAll(new RegExp(`%(${NOM})%`, 'g'))) noms.push(nom);
+    for (const [, nom] of texte.matchAll(new RegExp(`%(${NOM})%`, 'g'))) if (!VARIABLES_DE_VITE.has(nom)) noms.push(nom);
   } else {
-    for (const motif of LECTURES_DU_CODE) for (const [, nom] of texte.matchAll(motif)) noms.push(nom);
-    for (const [, liste] of texte.matchAll(DESTRUCTURATION)) {
+    for (const motif of LECTURES_DU_CODE) {
+      for (const [, source, nom] of texte.matchAll(motif)) if (!(lueParVite(source) && VARIABLES_DE_VITE.has(nom))) noms.push(nom);
+    }
+    for (const [, liste, source] of texte.matchAll(DESTRUCTURATION)) {
       for (const morceau of liste.split(',')) {
         const nom = morceau.split(/[:=]/)[0].trim();
-        if (new RegExp(`^${NOM}$`).test(nom)) noms.push(nom);
+        if (new RegExp(`^${NOM}$`).test(nom) && !(lueParVite(source) && VARIABLES_DE_VITE.has(nom))) noms.push(nom);
       }
     }
   }
-  return noms.filter((nom) => !VARIABLES_DU_SYSTEME.has(nom) && !VARIABLES_DE_VITE.has(nom));
+  return noms.filter((nom) => !VARIABLES_DU_SYSTEME.has(nom));
 }
 
 // Variables lues par un groupe de fichiers, chacune avec le premier fichier qui la lit.
@@ -111,14 +123,23 @@ describe('Variables d’environnement documentées', () => {
       'process.env.A_POINTEE', 'process.env?.B_OPTIONNELLE', "process.env['C_CROCHETS']", 'process.env?.["D_CROCHETS"]',
       'import.meta.env.VITE_E', "import.meta.env['VITE_F']",
       'const { G_DESTR, H_DESTR: h, I_DESTR = "x" } = process.env;', 'const { VITE_J } = import.meta.env;',
-      'process.env.PATH', 'import.meta.env.DEV',
+      'process.env.PATH', 'import.meta.env.DEV', 'const { MODE } = import.meta.env;',
+      // Les noms intégrés de Vite ne sont exclus que des lectures de Vite.
+      'process.env.BASE_URL', 'const { MODE: m } = process.env;',
     ].join('\n');
     assert.deepEqual(variablesDuTexte(code, 'x.ts').sort(), [
-      'A_POINTEE', 'B_OPTIONNELLE', 'C_CROCHETS', 'D_CROCHETS', 'G_DESTR', 'H_DESTR', 'I_DESTR', 'VITE_E', 'VITE_F', 'VITE_J',
+      'A_POINTEE', 'BASE_URL', 'B_OPTIONNELLE', 'C_CROCHETS', 'D_CROCHETS', 'G_DESTR', 'H_DESTR', 'I_DESTR', 'MODE', 'VITE_E', 'VITE_F', 'VITE_J',
     ]);
     assert.deepEqual(variablesDuTexte('url: ${K_GARDE:?k} ${L_REPLI:-l} $M_NUE $$N_LITTERALE', 'x.yml').sort(), ['K_GARDE', 'L_REPLI', 'M_NUE']);
     assert.deepEqual(variablesDuTexte('url = env("O_PRISMA")', 'x.prisma'), ['O_PRISMA']);
-    assert.deepEqual(variablesDuTexte('<title>%VITE_P%</title>', 'x.html'), ['VITE_P']);
+    assert.deepEqual(variablesDuTexte('<title>%VITE_P% %MODE%</title>', 'x.html'), ['VITE_P']);
+    // Le garde des accès indirects est éprouvé de même, motif par motif.
+    const indirects = [
+      'const a = process.env;', 'let b: NodeJS.ProcessEnv = process.env;', 'const c = process.env as Record<string, string>;',
+      'const { env } = process;', "process['env'].X", 'import.meta["env"].VITE_X',
+    ];
+    assert.deepEqual(indirects.map((ligne) => accesIndirects(ligne).length), indirects.map(() => 1), 'accès indirects');
+    assert.deepEqual(accesIndirects('const x = process.env.X; const { Y } = process.env; f(env = process.env); const e = { ...process.env };'), []);
 
     assert.ok(groupes.application.has('AZURE_TENANT_ID') && groupes.application.has('AZURE_CLIENT_ID'), 'Microsoft 365');
     assert.ok(groupes.application.has('JWT_SECRET') && groupes.application.has('DATABASE_URL'), 'secret et base');
@@ -128,11 +149,11 @@ describe('Variables d’environnement documentées', () => {
     assert.ok(groupes.compose.has('POSTGRES_PASSWORD'), 'docker-compose');
   });
 
-  test('aucun alias de process.env ou import.meta.env ne masque une lecture', () => {
-    const alias = Object.values(fichiersDesGroupes).flat()
+  test('aucun accès indirect à process.env ou import.meta.env ne masque une lecture', () => {
+    const indirects = Object.values(fichiersDesGroupes).flat()
       .filter((fichier) => join(racine, fichier) !== ici && !/\.(prisma|ya?ml|html)$/.test(fichier))
-      .flatMap((fichier) => [...lire(fichier).matchAll(ALIAS)].map(([extrait]) => `${fichier} : ${extrait.trim()}`));
-    assert.deepEqual(alias, [], 'lire chaque variable par process.env.X, pour que le relevé la voie');
+      .flatMap((fichier) => accesIndirects(lire(fichier)).map((extrait) => `${fichier} : ${extrait}`));
+    assert.deepEqual(indirects, [], 'lire chaque variable par process.env.X, pour que le relevé la voie');
   });
 
   test('chaque variable du backend et de ses outils figure dans server/.env.example', () => {

@@ -27,8 +27,11 @@ configuration. Son premier test est un témoin du relevé : il éprouve chaque m
 échantillon, puis vérifie que les variables connues (Microsoft 365, secret JWT, base…) sont
 trouvées dans chaque groupe ; un motif cassé fait donc échouer le test au lieu de laisser les
 autres passer à vide. Le relevé ne voit que les formes écrites en toutes lettres : une lecture
-par un nom calculé (`process.env[nom]`) lui échappe, et un alias (`const env = process.env`)
-est refusé.
+par un nom calculé (`process.env[nom]`) lui échappe, et un accès indirect est refusé : alias
+(`const env = process.env`, typé ou converti par `as`), `const { env } = process`,
+`process['env']`. Le relevé lit aussi les commentaires et les chaînes : une lecture citée en
+exemple y compte comme une vraie lecture. Pour qu'elle ne compte pas, la citer sous une autre
+forme, par exemple « la variable X de process.env ».
 
 ## Lancer les tests
 
