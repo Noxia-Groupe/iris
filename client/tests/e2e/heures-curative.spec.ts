@@ -63,10 +63,12 @@ test('le technicien saisit ses heures sur une curative hors contrat ; l’admini
     await vue.context().close();
   }
 
-  // 2. L'administration voit le coût de main-d'œuvre (1,5 h × 40 €), sans formulaire de matériel.
+  // 2. L'administration voit le coût de main-d'œuvre (1,5 h × 40 €), sous ce nom puisque le total
+  // ne contient pas de matériel (décision du 20-10-2026), et sans formulaire de matériel.
   const admin = await allerSurPageAdmin('/interventions');
   const carteAdmin = admin.locator('article', { hasText: titre });
-  await expect(carteAdmin.getByText(/Coût réel cumulé : 60,00\s€ HT/)).toBeVisible();
+  await expect(carteAdmin.getByText(/Main-d’œuvre cumulée : 60,00\s€ HT/)).toBeVisible();
+  await expect(carteAdmin.getByText(/Coût réel cumulé/)).toHaveCount(0);
   await expect(carteAdmin.getByRole('button', { name: 'Enregistrer l’achat matériel' })).toHaveCount(0);
 
   // 3. Un conducteur ne reçoit aucun total hors contrat : pas de cadre de coûts vide sur sa curative.

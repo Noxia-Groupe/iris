@@ -214,7 +214,7 @@ export default function Interventions() {
       {item.couvertureContrat && <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">Couverture contractuelle figée : main-d’œuvre {item.couvertureContrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {item.couvertureContrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{item.couvertureContrat.noteCouverture ? ` · ${item.couvertureContrat.noteCouverture}` : ''}</p>}
       {/* Un conducteur ne reçoit aucun total hors contrat, où le matériel ne se saisit pas : pas de cadre vide (lot 3b). */}
       {couts[item.id] && (estTechnicien || (estEncadrement && (resumeCoutsIntervention(couts[item.id]) || (fournisseurs !== null && item.contratMaintenanceId)))) && <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-        {/* Coût réel, main-d'œuvre comprise, pour l'administration ; matériel seul pour un conducteur (lot (d)). */}
+        {/* Coût réel, main-d'œuvre comprise, pour l'administration (main-d'œuvre seule hors contrat) ; matériel seul pour un conducteur (lot (d)). */}
         {estEncadrement && (() => { const resume = resumeCoutsIntervention(couts[item.id]); return resume && <p className="font-medium text-slate-800">{resume.libelle} : {montantEuros(resume.montant)} HT</p>; })()}
         {estTechnicien && <>
           {(couts[item.id].heures || []).length > 0 && <ul className="mb-3 space-y-1 text-slate-700">{couts[item.id].heures!.map((heure) => <li key={heure.id}>{formatDateOnlyOrEmpty(heure.date)} — {heure.nbrHeures} h{heure.commentaire ? ` — ${heure.commentaire}` : ''}</li>)}</ul>}
