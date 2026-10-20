@@ -1,6 +1,6 @@
 # Modèle de droits cible : proposition
 
-> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 3). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 10 et priment sur le texte de la proposition là où il différait. La fusion de la proposition vaut sa validation ; elle revient à Claude Code depuis la décision de Nelson du 20-10-2026, « C’est toi qui fusionne TOUTES les PR » ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). Le modèle cible (lots D1 à D4) n'est pas implémenté : chaque lot (section 9) fait sa PR. Le lot D0 est partiel : #178 et #180 sont corrigés (#216, #217), #179 et #181 restent ouverts. C'est un parcours de droits : exigence maximale (règle 2 de la méthode).
+> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 3). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 10 et priment sur le texte de la proposition là où il différait. La proposition est validée par sa fusion le 20-10-2026 (#182), faite par Claude Code selon la décision de Nelson du même jour, « C’est toi qui fusionne TOUTES les PR » ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). Le modèle cible (lots D1 à D4) n'est pas implémenté : chaque lot (section 9) fait sa PR. Le lot D0 est partiel : #178 et #180 sont corrigés (#216, #217), #179 et #181 restent ouverts. C'est un parcours de droits : exigence maximale (règle 2 de la méthode).
 >
 > L'état décidé des droits est décrit par [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md) et par l'[historique des décisions](HISTORIQUE-DECISIONS.md). L'inventaire détaillé du code, règle par règle, avec ses références `fichier:ligne` au commit `84e27a1`, est en annexe : [`MODELE-DROITS-INVENTAIRE.md`](MODELE-DROITS-INVENTAIRE.md).
 
@@ -477,7 +477,7 @@ L'écran des rôles **avertit** quand une permission en révèle une autre par d
 | **D1** | Moteur (`autorise`, `perimetre` par permission, règles historiques), tables `Role` et `RolePermission`, dix rôles prédéfinis identiques, droits individuels migrés selon leur effet en session, sans gain (décision 2), refus de modifier son propre rôle (changement assumé). Aucune autre route ne change de comportement. | Après le premier jour du pilote (décision 6). Exception : si l'organisation de l'entreprise pilote ne tient pas dans les dix types actuels, D1, D2 et D3 avancent avant ce premier jour |
 | **D2** | Bascule des routes sur le moteur, un ou deux domaines par PR, matrice verte à chaque fois ; l'écran lit les permissions effectives (section 7.1, Écran) | Après D1 |
 | **D3** | Écran : tableau rôles × permissions, en groupes ou en détail ; créer, dupliquer, renommer, supprimer ; avertissement des déductions ; aperçu « ce que voit ce compte » ; journal | Après D2 (voir D1 pour l'exception) |
-| **D4** | Modèles « petite équipe » et « équipe avec hiérarchie », appliqués depuis l'assistant de démarrage du paramétrage (proposition `PARAMETRAGE-CIBLE.md`) | Avec l'assistant |
+| **D4** | Modèles « petite équipe » et « équipe avec hiérarchie », appliqués depuis l'assistant de démarrage du paramétrage (proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md)) | Avec l'assistant |
 
 Chaque lot est une PR ou une petite série de PR, avec ses tests réels sur PostgreSQL et dans le navigateur.
 
@@ -493,7 +493,7 @@ Critères retenus :
 
 La numérotation reprend celle des anciennes questions ; les sections précédentes y renvoient par « décision N ». La décision 14 tranche un point que le texte laissait ouvert (section 5.2).
 
-1. **Équipe et branche.** « Son équipe » désigne les collaborateurs directs. « Sa branche » désigne tous les niveaux, comme pour le responsable aujourd'hui. Une agence ou un établissement n'est pas un périmètre hiérarchique : si une société en a besoin, un lot dédié ajoutera cette notion (`PARAMETRAGE-CIBLE.md`, section 4.4).
+1. **Équipe et branche.** « Son équipe » désigne les collaborateurs directs. « Sa branche » désigne tous les niveaux, comme pour le responsable aujourd'hui. Une agence ou un établissement n'est pas un périmètre hiérarchique : si une société en a besoin, un lot dédié ajoutera cette notion ([`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md), section 4.4).
 2. **Un rôle par compte, avec des ajouts individuels.** Les deux étages de `MODELE-DROITS-COMPTES.md` sont gardés : un rôle, plus des permissions individuelles **en ajout seulement**, sans retrait individuel.
    - Raisons : une petite équipe coche une case au lieu de dupliquer un rôle.
    - Les droits individuels enregistrés migrent sans multiplier les rôles. Chacun migre vers **ce qu'il fait aujourd'hui en session, avec le même périmètre, ni plus ni moins** (vérifié sur `main` `4ad324b`) :

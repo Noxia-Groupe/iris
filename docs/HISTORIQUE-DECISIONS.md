@@ -193,7 +193,7 @@ Puis, pendant les lots suivants : #236 (aperçu de TVA d'un avoir partiel, corri
 
 ### En attente de Nelson au 19-10-2026
 
-*Suites au 20-10-2026 : #246 et #208 sont fusionnées ; #242 est fusionnée selon la décision du 20-10-2026 ; la fusion de #182 et #183, qui vaut validation, revient à Claude Code (confirmation du 20-10-2026) ; la ligne de #207 est reprise par la PR documentaire du 20-10-2026. Voir la section suivante.*
+*Suites au 20-10-2026 : #246 et #208 sont fusionnées ; #242 est fusionnée selon la décision du 20-10-2026 ; la fusion de #182 et #183, qui vaut validation, revient à Claude Code (confirmation du 20-10-2026) : elles sont fusionnées le soir même ; la ligne de #207 est reprise par la PR documentaire du 20-10-2026. Voir la section suivante.*
 
 - #208 (#198) et #242 (#236) : elles changent des montants affichés : leur fusion revient donc à Nelson. #208, en conflit avec `main` depuis #238, est à rafraîchir puis à réauditer ; #242 est prête (audit interne fusionnable et CI 5/5 sur `5f8426d`) ; #247 porte sur le même formulaire, à arbitrer en la fusionnant. L'état est tenu dans chaque PR, corps et commentaires.
 - #207 : état du découpage dans CLAUDE.md.
@@ -238,6 +238,18 @@ Fusionnés par Claude Code : #246 sur autorisation de Nelson, #249 et #255 par l
   - Terminer exige un compte rendu, signé ou accompagné d'un motif parmi quatre, consigné au journal, pour le technicien comme pour l'encadrement ; « Autre » exige une précision écrite courte, de 3 à 200 caractères (choix par défaut, à confirmer).
   - Compte rendu, signature et clôture se font sous le verrou de l'intervention, périmètre relu ; les horodatages des comptes rendus et des signatures sont imposés par la base.
   - Trois passages d'audit interne : tests renforcés contre des mutants survivants (C1), périmètre relu sous verrou (C2), signature sur écran large (C3), formulaires remis à jour après un refus ou une issue inconnue (C4, C5).
+- #272, 3b-4 (règle 2 : périmètres) : « Ma journée » à l'accueil du technicien et fiche intervention sur téléphone.
+  - `GET /api/interventions/journee` : interventions du jour au jour civil de la société, triées par créneau ; terminées à part ; restées ouvertes les jours précédents, pour aujourd'hui seulement ; annulées exclues ; même périmètre que la liste.
+  - `GET /api/interventions/:id` : fiche d'une intervention, même périmètre ; annulée, inconnue ou hors périmètre : 404.
+  - Cartes : créneau, adresse du site à défaut de l'affaire, téléphone du contact en lien d'appel (premier numéro, « + » et « (0) » traités).
+  - Six choix par défaut, à confirmer (passation, section 4). Trois passages d'audit interne : périmètre hiérarchique prouvé (C1), tri des restées ouvertes (C2), panne distinguée d'une fiche introuvable (C3), lien d'appel (C4, C5).
+
+**Planning du technicien** (décision de Nelson du 19-10-2026) :
+- #275 (règle 2) : le technicien ne lit au planning que les affectations où figure sa fiche intervenant, événements libres comme projections, avec leurs coéquipiers ; sans fiche reliée, aucune. La liste des chantiers du planning lui est refusée (403). L'écran ne lui montre que sa ligne. Choix par défaut, à confirmer, dont le sens de « chargé » et le lien public (passation, sections 3 et 4). `MODELE-DROITS-CIBLE.md` : case « D af ¹¹ ».
+
+**Propositions** :
+- #182 (proposition 3, modèle de droits cible) : validée par sa fusion le 20-10-2026, après trois passages de revalidation (planning limité du technicien, règle du pilote pour le lot D0, état de D0, corrections de #216, #217 et #268 reportées ; placement de D1a et D1, invariant des comptes rendus, données de la matrice).
+- #183 (proposition 4, paramétrage cible) : validée par sa fusion le 20-10-2026, après deux passages de revalidation (factures figées depuis #217, règle de clôture de #268 et question à Nelson, P0 selon la règle du pilote).
 
 **Montants** (règle 2) :
 - #242 (#236) : l'aperçu de TVA d'un avoir partiel reprend le calcul du serveur, en entiers et en tenant compte des avoirs déjà émis ; il annonçait parfois un autre montant que le document émis (2,13 € pour 2,14 € sur 21,35 € HT à 10 %). Montants enregistrés et documents émis inchangés ; après un avoir créé, l'aperçu n'annonce aucun montant tant que la liste n'est pas relue.
@@ -253,14 +265,15 @@ Fusionnés par Claude Code : #246 sur autorisation de Nelson, #249 et #255 par l
 - #249 (#152, point 5) : le parcours `entetes-mobile` mesure chaque route dans une page neuve ; en local, Chromium refusait les modules de Vite après une trentaine de navigations dans la même page.
 - #246 (#241) : CLAUDE.md décrit la règle du nom de base jetable des E2E.
 - #266 : passation du 20-10-2026, décision de fusion reportée dans CLAUDE.md, règle du pilote, lots 3b-1 et 3b-2 ; #207 fermée, sa ligne reprise.
+- #270 : passation après #242 et #268 ; #267 fermée.
+- #274 : décision « TOUTES les PR » reportée dans CLAUDE.md, la passation et cet historique.
 
 ### Suivis ouverts pendant ces lots
 
-Étiquette `suivi-audit`, tous ouverts au 20-10-2026 : #252 (taux d'acompte invalide remplacé en silence, audit de #250), #254 et #258 (formulaire d'avoir partiel, audit de #251), #256 (suppression d'un compte et comptes rendus, audit de #255), #259 et #260 (affichage des heures, cadre des coûts sur un conflit, audit de #257), #261, #262, #264 et #265 (accès de secours derrière les proxys, `+` du jeton de secours, autorisation sur `oid` et `tid`, formes restantes du test des variables, inventaire et audit de #263), #269 (notes non bloquantes des audits de #268 : instantané du journal et refus de migrer sans test, motif de clôture non affiché, périmètre par l'affaire, fin de pointeur manquée, longueur du champ de précision ; règle de clôture et motifs écrits dans le code tant que #183 n'est pas validée). #267 (deux formulations de la règle de fusion, audit de #266) est reprise et fermée par la passation qui suit #268.
+Étiquette `suivi-audit`, tous ouverts au 20-10-2026 : #252 (taux d'acompte invalide remplacé en silence, audit de #250), #254 et #258 (formulaire d'avoir partiel, audit de #251), #256 (suppression d'un compte et comptes rendus, audit de #255), #259 et #260 (affichage des heures, cadre des coûts sur un conflit, audit de #257), #261, #262, #264 et #265 (accès de secours derrière les proxys, `+` du jeton de secours, autorisation sur `oid` et `tid`, formes restantes du test des variables, inventaire et audit de #263), #269 (notes non bloquantes des audits de #268 : instantané du journal et refus de migrer sans test, motif de clôture non affiché, périmètre par l'affaire, fin de pointeur manquée, longueur du champ de précision ; règle de clôture et motifs écrits dans le code ; les paramétrer est une question à Nelson depuis la validation de #183). #267 (deux formulations de la règle de fusion, audit de #266) est reprise et fermée par la passation qui suit #268. Ouvertes ensuite : #271 (deux libellés, audit de #270 : N-b reprise par #272, N-a par la passation qui suit #275, qui la ferme), #273 (notes non bloquantes des audits de #272) et #276 (affichage de l'équipe illisible au planning, audit de #275).
 
-### En cours au 20-10-2026
+### En cours au 20-10-2026 (soir)
 
-- #182 et #183, propositions 3 et 4 : à rafraîchir sur `main` et à réauditer, puis fusionnées par Claude Code aux conditions habituelles ; leur fusion vaut validation (confirmation de Nelson du 20-10-2026).
-- #272, lot pilote 3b-4 (« Ma journée » et fiche intervention sur téléphone) : audit interne en cours.
+- Lot pilote 3 implémenté, non validé pour mise en service : 3a, 3b-1 à 3b-4 et planning limité (#166, #255, #257, #268, #272, #275). #253 est fermée.
 - #250 (#240) : en pause, en brouillon, jusqu'à la fin du pilote.
-- Lot 3b : 3b-4 (« Ma journée » et fiche intervention sur téléphone), puis le planning du technicien limité.
+- Questions à Nelson (passation, section 3) : place des lots 4 à 6 avant le premier jour ; planning du technicien (sens de « chargé », lien public) ; #179, #181 et le lot P0 avant la fin du pilote.
