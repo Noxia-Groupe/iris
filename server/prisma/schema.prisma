@@ -69,6 +69,7 @@ model User {
   coutsInterventionHeuresArchives CoutInterventionHeure[] @relation("CoutInterventionHeureArchivePar")
   coutsInterventionAchatsArchives CoutInterventionAchat[] @relation("CoutInterventionAchatArchivePar")
   signaturesDevisEnregistrees DevisSignature[]        @relation("DevisSignatureEnregistreePar")
+  signaturesInterventionEnregistrees InterventionSignature[] @relation("InterventionSignatureEnregistreePar")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -217,7 +218,7 @@ model JournalSaisieChantier {
   chantierId     String?
   interventionId String?
   contratMaintenanceId String?
-  cible          String   // ACHAT | HEURE | INTERVENTION | CONTRAT | CHANTIER (changement de client de l’affaire)
+  cible          String   // ACHAT | HEURE | INTERVENTION | INTERVENTION_RAPPORT | INTERVENTION_SIGNATURE | CONTRAT | CHANTIER (changement de client de l’affaire)
   cibleId        String
   action         String   // CREATION | CORRECTION | ARCHIVAGE | RESTAURATION | CHANGEMENT_STATUT | CREATION_CONTRAT | SUSPENSION | REACTIVATION | CLOTURE | CHANGEMENT_CLIENT
   auteurId       String
@@ -945,26 +946,38 @@ model InterventionRapport {
   auteurId       String
   auteur         User         @relation(fields: [auteurId], references: [id], onDelete: Restrict)
   contenu        String
+  // Clé d'envoi tirée par le formulaire à son ouverture (lot 3b-3) : un envoi répété après une
+  // réponse perdue retrouve le compte rendu déjà enregistré au lieu d'en figer un second. Absente
+  // des comptes rendus antérieurs.
+  cleEnvoi       String?      @unique @db.Uuid
   signature      InterventionSignature?
+  // Horodatage imposé par la base à l'insertion (lot 3b-3).
   createdAt      DateTime     @default(now())
 
   @@index([interventionId, createdAt])
   @@index([auteurId])
 }
 
-// Attestation électronique client d'un compte rendu : consentement explicite, signataire,
-// horodatage et empreinte SHA-256 du contenu figé. Aucun dessin ou fichier n'est requis. Figée en
-// base dès sa création (#223) : ni modification, ni suppression, ni vidage.
+// Attestation électronique client d'un compte rendu : consentement explicite, signataire, tracé
+// dessiné au doigt, compte qui l'enregistre, horodatage et empreinte SHA-256 du contenu figé et du
+// tracé. Figée en base dès sa création (#223) : ni modification, ni suppression, ni vidage.
 model InterventionSignature {
-  id          String              @id @default(uuid())
-  rapportId   String              @unique
-  rapport     InterventionRapport @relation(fields: [rapportId], references: [id], onDelete: Restrict)
-  signataire  String
-  empreinte   String
-  accepteLe   DateTime            @default(now())
-  createdAt   DateTime            @default(now())
+  id              String              @id @default(uuid())
+  rapportId       String              @unique
+  rapport         InterventionRapport @relation(fields: [rapportId], references: [id], onDelete: Restrict)
+  signataire      String
+  // Tracé vectoriel (décision de Nelson du 19-10-2026) : { ratio, traits: [[[x, y], …], …] },
+  // coordonnées normalisées entre 0 et 1, sans horodatage ni pression ; borné par l'API.
+  trace           Json
+  enregistreParId String
+  enregistrePar   User                @relation("InterventionSignatureEnregistreePar", fields: [enregistreParId], references: [id], onDelete: Restrict)
+  empreinte       String
+  // Horodatages imposés par la base à l'insertion (lot 3b-3).
+  accepteLe       DateTime            @default(now())
+  createdAt       DateTime            @default(now())
 
   @@index([accepteLe])
+  @@index([enregistreParId])
 }
 
 // Compteur annuel atomique des références d'affaires : A26-0001, A26-0002…

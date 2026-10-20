@@ -46,6 +46,17 @@ if (!TEST_DATABASE_URL) {
   const { PrismaClient } = await import('@prisma/client');
   const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
+  // Lot 3b-3 : terminer une intervention exige un compte rendu, signé par le client ou accompagné
+  // d'un motif. Les tests qui ne portent pas sur cette règle terminent avec un compte rendu et le
+  // motif « client absent ».
+  const TRACE_SIGNATURE_TEST = { ratio: 2, traits: [[[0.1, 0.6], [0.25, 0.3], [0.4, 0.7], [0.6, 0.35]]] };
+  const ajouterCompteRendu = (interventionId, jeton, contenu = 'TEST Compte rendu de clôture.') => request(app)
+    .post(`/api/interventions/${interventionId}/rapports`).set('Authorization', `Bearer ${jeton}`).send({ contenu, cleEnvoi: randomUUID() });
+  const terminerIntervention = async (interventionId, jeton) => {
+    const compteRendu = await ajouterCompteRendu(interventionId, jeton);
+    assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+    return request(app).patch(`/api/interventions/${interventionId}/statut`).set('Authorization', `Bearer ${jeton}`).send({ statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+  };
   // Fixtures historiques : leurs transitions restent motivées, même hors HTTP.
   const auteurFixture = async tx => tx.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
   const regleFixture = async (cle, compteId, db = prisma) => {
@@ -261,7 +272,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.course.cle@iris.test', 'sav.verrou.annulation@iris.test', 'sav.verrou.affectation@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
@@ -5365,21 +5376,23 @@ if (!TEST_DATABASE_URL) {
       await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'PLANIFIEE' });
       await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'EN_COURS' });
       const rapport = await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`)
-        .send({ contenu: 'TEST Intervention réalisée : détecteur repositionné et essai concluant.' });
+        .send({ contenu: 'TEST Intervention réalisée : détecteur repositionné et essai concluant.', cleEnvoi: randomUUID() });
       assert.equal(rapport.status, 201, JSON.stringify(rapport.body));
       assert.equal(rapport.body.auteurId, undefined); // l’API n’expose pas l’identifiant interne de l’auteur
       assert.equal(rapport.body.contenu, 'TEST Intervention réalisée : détecteur repositionné et essai concluant.');
       const intrus = await compteTechnicienSav('sav.intrus@iris.test', 'TEST Intervenant SAV intrus');
       assert.equal(await voitLeDossier(intrus.jeton, dossier.body.id), false);
-      assert.equal((await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${intrus.jeton}`).send({ contenu: 'TEST Rapport hors périmètre.' })).status, 404);
-      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${intrus.jeton}`).send({ signataire: 'TEST Usurpation', confirme: true })).status, 404);
-      // La signature demeure possible après clôture : le client peut signer après le départ du technicien.
-      assert.equal((await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${technicien.jeton}`).send({ statut: 'TERMINEE' })).status, 200);
+      assert.equal((await request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${intrus.jeton}`).send({ contenu: 'TEST Rapport hors périmètre.', cleEnvoi: randomUUID() })).status, 404);
+      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${intrus.jeton}`).send({ signataire: 'TEST Usurpation', confirme: true, trace: TRACE_SIGNATURE_TEST })).status, 404);
+      // La signature demeure possible après clôture : le client peut signer après le départ du
+      // technicien, qui a terminé avec un motif faute de signature.
+      const cloture = await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${technicien.jeton}`).send({ statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
       const signature = await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
-        .send({ signataire: 'TEST Client signataire', confirme: true });
+        .send({ signataire: 'TEST Client signataire', confirme: true, trace: TRACE_SIGNATURE_TEST });
       assert.equal(signature.status, 201, JSON.stringify(signature.body));
       assert.match(signature.body.empreinte, /^[a-f0-9]{64}$/);
-      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`).send({ signataire: 'TEST Client signataire', confirme: true })).status, 409);
+      assert.equal((await request(app).post(`/api/interventions/rapports/${rapport.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`).send({ signataire: 'TEST Client signataire', confirme: true, trace: TRACE_SIGNATURE_TEST })).status, 409);
       const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`);
       const relu = liste.body.find((item) => item.id === dossier.body.id);
       assert.equal(relu.rapports.length, 1);
@@ -5399,13 +5412,13 @@ if (!TEST_DATABASE_URL) {
         const transition = await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
         assert.equal(transition.status, 200, JSON.stringify(transition.body));
       }
-      const consigner = (contenu) => request(app).post(`/api/interventions/${dossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`).send({ contenu });
+      const consigner = (contenu) => ajouterCompteRendu(dossier.body.id, technicien.jeton, contenu);
       const signe = await consigner('TEST Compte rendu signé : sirène remplacée et essai concluant.');
       const libre = await consigner('TEST Compte rendu non signé : essai de la ligne à refaire.');
       assert.equal(signe.status, 201, JSON.stringify(signe.body));
       assert.equal(libre.status, 201, JSON.stringify(libre.body));
       const signature = await request(app).post(`/api/interventions/rapports/${signe.body.id}/signature`).set('Authorization', `Bearer ${technicien.jeton}`)
-        .send({ signataire: 'TEST Client signataire figé', confirme: true });
+        .send({ signataire: 'TEST Client signataire figé', confirme: true, trace: TRACE_SIGNATURE_TEST });
       assert.equal(signature.status, 201, JSON.stringify(signature.body));
       const rapportsEnBase = () => prisma.interventionRapport.findMany({ where: { interventionId: dossier.body.id }, include: { signature: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
       const avant = await rapportsEnBase();
@@ -5445,11 +5458,25 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "InterventionSignature" WHERE "id" = $1', signature.body.id), /Signature d'intervention figée/);
       // Colonne par colonne, y compris celles qu'ajouteront les lots suivants : un garde restreint à
       // une liste de colonnes (UPDATE OF …) laisserait passer l'auteur, l'horodatage ou l'identifiant.
+      // Les colonnes sont lues dans pg_attribute, qui les voit toutes quels que soient les droits du
+      // rôle, et celles du modèle doivent y figurer (notes N15 et N16 de l'audit de #255, lot 3b-3).
+      const colonnesDuModele = {
+        InterventionRapport: ['id', 'interventionId', 'auteurId', 'contenu', 'cleEnvoi', 'createdAt'],
+        InterventionSignature: ['id', 'rapportId', 'signataire', 'trace', 'enregistreParId', 'empreinte', 'accepteLe', 'createdAt'],
+      };
       for (const [table, id, refus] of [['InterventionRapport', libre.body.id, /Compte rendu d'intervention figé/], ['InterventionSignature', signature.body.id, /Signature d'intervention figée/]]) {
-        const colonnes = await prisma.$queryRawUnsafe('SELECT column_name::text AS nom FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position', table);
-        assert.ok(colonnes.length >= 5, `${table} : ${colonnes.length} colonnes lues`);
-        for (const { nom } of colonnes) {
+        const colonnes = await prisma.$queryRawUnsafe('SELECT attname::text AS nom, attgenerated::text AS generee, attidentity::text AS identite FROM pg_attribute WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum', `"${table}"`);
+        for (const attendue of colonnesDuModele[table]) assert.ok(colonnes.some(({ nom }) => nom === attendue), `${table}.${attendue} absente de pg_attribute`);
+        for (const { nom, generee, identite } of colonnes) {
+          // Une colonne générée ou identity, ou un nom contenant un guillemet, ferait échouer
+          // « SET x = x » avant le garde : le test rougirait sans rien prouver.
+          assert.equal(generee, '', `${table}.${nom} est générée`);
+          assert.equal(identite, '', `${table}.${nom} est une colonne identity`);
+          assert.ok(!nom.includes('"'), `${table} : nom de colonne ${nom}`);
           await assert.rejects(prisma.$executeRawUnsafe(`UPDATE "${table}" SET "${nom}" = "${nom}" WHERE "id" = $1`, id), refus, `${table}.${nom}`);
+          // Un vrai changement de valeur est refusé lui aussi, par le garde et avant même le contrôle
+          // NOT NULL (note N14) : un garde qui ne comparerait que certaines colonnes ne passe pas.
+          await assert.rejects(prisma.$executeRawUnsafe(`UPDATE "${table}" SET "${nom}" = NULL WHERE "id" = $1`, id), refus, `${table}.${nom} = NULL`);
         }
       }
       assert.equal(await prisma.interventionRapport.count({ where: { interventionId: temoin.id } }), 1);
@@ -5460,6 +5487,373 @@ if (!TEST_DATABASE_URL) {
       const apres = await rapportsEnBase();
       assert.equal(apres.length, 3);
       assert.deepEqual(apres.filter((rapport) => rapport.id !== complement.body.id), avant, 'comptes rendus et signature intacts');
+    });
+
+    // Lot 3b-3 : dossier en cours, technicien affecté, pour les règles du compte rendu, de la
+    // signature dessinée et de la clôture.
+    const dossierEnCours = async (email, titre) => {
+      const technicien = await compteTechnicienSav(email, `TEST Intervenant ${titre}`);
+      const userId = (await prisma.intervenant.findUniqueOrThrow({ where: { id: technicien.intervenantId }, select: { userId: true } })).userId;
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: `TEST ${titre}` });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      await prisma.interventionAffectation.create({ data: { interventionId: dossier.body.id, intervenantId: technicien.intervenantId } });
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) {
+        const transition = await request(app).patch(`/api/interventions/${dossier.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        assert.equal(transition.status, 200, JSON.stringify(transition.body));
+      }
+      return { id: dossier.body.id, technicien: { ...technicien, userId } };
+    };
+    const statutSav = (id, jeton, corps) => request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${jeton}`).send(corps);
+    const signerSav = (rapportId, jeton, corps) => request(app).post(`/api/interventions/rapports/${rapportId}/signature`).set('Authorization', `Bearer ${jeton}`).send(corps);
+    const attentesVerrouSav = async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n;
+    const attendreVerrouSav = async () => {
+      for (let tour = 0; tour < 250; tour += 1) {
+        if (await attentesVerrouSav() >= 1) return true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return false;
+    };
+    // Transaction de test tenue jusqu'à son relâchement : elle joue une clôture ou une signature en
+    // cours pendant que l'API attend le verrou de l'intervention.
+    const tenirTransactionSav = async (travail) => {
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const tenu = new Promise((resolve) => { pret = resolve; });
+      const fin = prisma.$transaction(async (tx) => { await travail(tx); pret(); await attente; }, { timeout: 20000 });
+      await tenu;
+      return async () => { liberer(); await fin; };
+    };
+
+    test('compte rendu : clé d’envoi obligatoire, envoi répété relu sans second compte rendu, ajout pendant l’intervention en cours, journalisé', async () => {
+      const technicien = await compteTechnicienSav('sav.cle.envoi@iris.test', 'TEST Intervenant SAV clé d’envoi');
+      const dossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Clé d’envoi SAV' });
+      assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+      const id = dossier.body.id;
+      await prisma.interventionAffectation.create({ data: { interventionId: id, intervenantId: technicien.intervenantId } });
+      const envoyer = (corps, jeton = technicien.jeton) => request(app).post(`/api/interventions/${id}/rapports`).set('Authorization', `Bearer ${jeton}`).send(corps);
+      const contenu = 'TEST Compte rendu : clapet remplacé, essai concluant.';
+      // Avant le démarrage, comme après la clôture, aucun compte rendu ne s'ajoute.
+      assert.equal((await statutSav(id, session, { statut: 'PLANIFIEE' })).status, 200);
+      const avantDemarrage = await envoyer({ contenu, cleEnvoi: randomUUID() });
+      assert.equal(avantDemarrage.status, 409, JSON.stringify(avantDemarrage.body));
+      assert.match(avantDemarrage.body.error, /en cours/);
+      assert.equal((await statutSav(id, session, { statut: 'EN_COURS' })).status, 200);
+      for (const cleEnvoi of [undefined, '', 'pas-une-cle', 42]) {
+        const refus = await envoyer({ contenu, cleEnvoi });
+        assert.equal(refus.status, 400, `${cleEnvoi} : ${JSON.stringify(refus.body)}`);
+      }
+      // Caractère nul et demi-paire de substitution isolée (haute ou basse) : refusés avant PostgreSQL.
+      for (const invalide of ['TEST Compte rendu\u0000 tronqué.', 'TEST Compte rendu \ud83d isolé.', 'TEST Compte rendu \ude42 isolé.']) {
+        const refus = await envoyer({ contenu: invalide, cleEnvoi: randomUUID() });
+        assert.equal(refus.status, 400, `${JSON.stringify(invalide)} : ${JSON.stringify(refus.body)}`);
+      }
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: id } }), 0);
+
+      const cleEnvoi = randomUUID();
+      const premier = await envoyer({ contenu, cleEnvoi });
+      assert.equal(premier.status, 201, JSON.stringify(premier.body));
+      // La réponse perdue, le formulaire renvoie la même clé : le compte rendu enregistré est relu.
+      const repete = await envoyer({ contenu, cleEnvoi: cleEnvoi.toUpperCase() });
+      assert.equal(repete.status, 200, JSON.stringify(repete.body));
+      assert.equal(repete.body.id, premier.body.id);
+      assert.equal(repete.body.dejaEnregistre, true);
+      // Une clé déjà servie ne couvre ni un autre texte, ni un autre auteur.
+      assert.equal((await envoyer({ contenu: 'TEST Autre compte rendu.', cleEnvoi })).status, 409);
+      assert.equal((await envoyer({ contenu, cleEnvoi }, session)).status, 409);
+      // Ni un autre dossier, même pour le même auteur et le même texte : rien n'est relu ni divulgué.
+      const autreDossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Clé d’envoi SAV, autre dossier' });
+      await prisma.interventionAffectation.create({ data: { interventionId: autreDossier.body.id, intervenantId: technicien.intervenantId } });
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) assert.equal((await statutSav(autreDossier.body.id, session, { statut })).status, 200);
+      const autreDossierMemeCle = await request(app).post(`/api/interventions/${autreDossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`).send({ contenu, cleEnvoi });
+      assert.equal(autreDossierMemeCle.status, 409, JSON.stringify(autreDossierMemeCle.body));
+      assert.deepEqual(Object.keys(autreDossierMemeCle.body), ['error']);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: autreDossier.body.id } }), 0);
+      // Deux envois simultanés d'une même clé n'enregistrent qu'un compte rendu.
+      const cleSimultanee = randomUUID();
+      const simultanes = await Promise.all([1, 2].map(() => envoyer({ contenu: 'TEST Envoi double.', cleEnvoi: cleSimultanee })));
+      assert.deepEqual(simultanes.map((reponse) => reponse.status).sort(), [200, 201], JSON.stringify(simultanes.map((reponse) => reponse.body)));
+      assert.equal(simultanes[0].body.id, simultanes[1].body.id);
+
+      const rapports = await prisma.interventionRapport.findMany({ where: { interventionId: id }, orderBy: { createdAt: 'asc' } });
+      assert.deepEqual(rapports.map((rapport) => rapport.contenu), [contenu, 'TEST Envoi double.']);
+      assert.equal(rapports[0].cleEnvoi, cleEnvoi);
+      // Une entrée de journal par compte rendu enregistré, aucune pour un envoi relu ou refusé.
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, cible: 'INTERVENTION_RAPPORT' }, orderBy: { createdAt: 'asc' } });
+      assert.deepEqual(journal.map((entree) => [entree.cibleId, entree.action, entree.apres.contenu, entree.auteurNom]), rapports.map((rapport) => [rapport.id, 'CREATION', rapport.contenu, 'TEST Intervenant SAV clé d’envoi']));
+
+      // Après la clôture, plus d'ajout ; la même clé relit encore le compte rendu enregistré.
+      assert.equal((await statutSav(id, technicien.jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).status, 200);
+      assert.equal((await envoyer({ contenu: 'TEST Après clôture.', cleEnvoi: randomUUID() })).status, 409);
+      assert.equal((await envoyer({ contenu, cleEnvoi })).status, 200);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: id } }), 2);
+    });
+
+    test('comptes rendus et signatures reçoivent leur horodatage de la base', async () => {
+      const { id, technicien } = await dossierEnCours('sav.horodatage@iris.test', 'SAV horodatage');
+      const passe = new Date('2020-01-01T00:00:00.000Z');
+      const debut = new Date(Date.now() - 60_000);
+      // Même écrit directement, sans l'API, l'horodatage fourni est remplacé par celui de la base.
+      const rapport = await prisma.interventionRapport.create({ data: { interventionId: id, auteurId: technicien.userId, contenu: 'TEST Compte rendu antidaté.', createdAt: passe } });
+      const signature = await prisma.interventionSignature.create({ data: {
+        rapportId: rapport.id, signataire: 'TEST Signataire antidaté', trace: TRACE_SIGNATURE_TEST, enregistreParId: technicien.userId, empreinte: '0'.repeat(64), accepteLe: passe, createdAt: passe,
+      } });
+      for (const [nom, valeur] of [['rapport.createdAt', rapport.createdAt], ['signature.createdAt', signature.createdAt], ['signature.accepteLe', signature.accepteLe]]) {
+        assert.ok(valeur > debut, `${nom} = ${valeur.toISOString()}`);
+      }
+      assert.equal(signature.accepteLe.getTime(), signature.createdAt.getTime());
+      // La base refuse elle-même un tracé qui n'est pas un objet, ou démesuré.
+      const nonSigne = await prisma.interventionRapport.create({ data: { interventionId: id, auteurId: technicien.userId, contenu: 'TEST Compte rendu au tracé refusé par la base.' } });
+      for (const trace of ['[]', `{"x": "${'a'.repeat(70000)}"}`]) {
+        await assert.rejects(prisma.$executeRawUnsafe('INSERT INTO "InterventionSignature" ("id", "rapportId", "signataire", "trace", "enregistreParId", "empreinte") VALUES ($1, $2, $3, $4::jsonb, $5, $6)', randomUUID(), nonSigne.id, 'TEST Signataire', trace, technicien.userId, '0'.repeat(64)), /InterventionSignature_trace_objet/);
+      }
+    });
+
+    test('signature : tracé dessiné obligatoire, canonique et borné ; empreinte du texte, du signataire et du tracé ; enregistreur conservé', async () => {
+      const { id, technicien } = await dossierEnCours('sav.trace@iris.test', 'SAV tracé');
+      const compteRendu = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu à signer au doigt.');
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      const base = { signataire: 'TEST Client tracé', confirme: true };
+      const traitDe = (n) => Array.from({ length: n }, (_, i) => [((i % 100) / 100), (i % 2) / 2]);
+      const invalides = {
+        absent: undefined,
+        'non objet': [[0.1, 0.2]],
+        'sans trait': { ratio: 2, traits: [] },
+        'point isolé': { ratio: 2, traits: [[[0.4, 0.4], [0.4, 0.4]]] },
+        'coordonnée hors cadre': { ratio: 2, traits: [[[0.1, 0.2], [1.5, 0.3]]] },
+        'coordonnée négative': { ratio: 2, traits: [[[0.1, 0.2], [-0.01, 0.3]]] },
+        'coordonnée absente': { ratio: 2, traits: [[[0.1, 0.2], [null, 0.3]]] },
+        'point à trois valeurs': { ratio: 2, traits: [[[0.1, 0.2, 0.3], [0.2, 0.3]]] },
+        'proportions absurdes': { ratio: 0.1, traits: [[[0.1, 0.2], [0.3, 0.4]]] },
+        'proportions trop larges': { ratio: 10.001, traits: [[[0.1, 0.2], [0.3, 0.4]]] },
+        'trop de traits': { ratio: 2, traits: Array.from({ length: 51 }, () => [[0.1, 0.2], [0.3, 0.4]]) },
+        'trop de points': { ratio: 2, traits: [traitDe(1000), traitDe(1001)] },
+      };
+      for (const [cas, trace] of Object.entries(invalides)) {
+        const refus = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace });
+        assert.equal(refus.status, 400, `${cas} : ${JSON.stringify(refus.body)}`);
+      }
+      for (const signataire of ['TEST\u0000 Client', 'TEST \ud83d Client', 'TEST \ude42 Client']) {
+        const refus = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, signataire, trace: TRACE_SIGNATURE_TEST });
+        assert.equal(refus.status, 400, `${JSON.stringify(signataire)} : ${JSON.stringify(refus.body)}`);
+      }
+      // Les bornes elles-mêmes sont admises : 50 traits, 2 000 points. Une paire de substitution complète
+      // (un emoji) reste un caractère valide, dans le compte rendu comme dans le nom du signataire.
+      const limite = { ratio: 10, traits: [traitDe(1000), ...Array.from({ length: 48 }, () => [[0.1, 0.2]]), traitDe(952)] };
+      assert.equal(limite.traits.length, 50);
+      assert.equal(limite.traits.flat().length, 2000);
+      const autre = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu au tracé maximal 🔧.');
+      assert.equal(autre.status, 201, JSON.stringify(autre.body));
+      const signeLimite = await signerSav(autre.body.id, technicien.jeton, { ...base, signataire: 'TEST Client 🙂', trace: limite });
+      assert.equal(signeLimite.status, 201, JSON.stringify(signeLimite.body));
+      assert.equal(signeLimite.body.signataire, 'TEST Client 🙂');
+      assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
+
+      // Le tracé est enregistré sous sa forme canonique (arrondi au dix-millième, clés fixes), qui entre
+      // dans l'empreinte ; le compte qui enregistre est conservé.
+      const dessin = { traits: [[[0.123456, 0.654321], [0.5, 0.25], [0.99999, 0.00001]], [[0.2, 0.8], [0.3, 0.7]]], ratio: 2.66666, inutile: 'ignoré' };
+      const canonique = { ratio: 2.667, traits: [[[0.1235, 0.6543], [0.5, 0.25], [1, 0]], [[0.2, 0.8], [0.3, 0.7]]] };
+      const signature = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace: dessin });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.deepEqual(signature.body.trace, canonique);
+      assert.equal(signature.body.enregistrePar.name, 'TEST Intervenant SAV tracé');
+      const attendue = createHash('sha256').update(`${compteRendu.body.id}\nTEST Compte rendu à signer au doigt.\nTEST Client tracé\n${JSON.stringify(canonique)}`, 'utf8').digest('hex');
+      assert.equal(signature.body.empreinte, attendue);
+      const enBase = await prisma.interventionSignature.findUniqueOrThrow({ where: { id: signature.body.id } });
+      assert.deepEqual(enBase.trace, canonique);
+      assert.equal(enBase.enregistreParId, technicien.userId);
+      // La liste des interventions rend le tracé et l'enregistreur, pour réafficher la signature.
+      const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${session}`);
+      const relue = liste.body.find((item) => item.id === id).rapports.find((rapport) => rapport.id === compteRendu.body.id).signature;
+      assert.deepEqual(relue.trace, canonique);
+      assert.equal(relue.enregistrePar.name, 'TEST Intervenant SAV tracé');
+      // Le journal garde l'empreinte, sans le tracé.
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, cible: 'INTERVENTION_SIGNATURE', cibleId: signature.body.id } });
+      assert.equal(journal.length, 1);
+      assert.equal(journal[0].apres.empreinte, attendue);
+      assert.equal(journal[0].apres.signataire, 'TEST Client tracé');
+      assert.equal(journal[0].apres.trace, undefined);
+      // L'enregistreur est le compte qui enregistre la signature, pas l'auteur du compte rendu.
+      const secours = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
+      const rapportTechnicien = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu signé devant l’encadrement.');
+      const parEncadrement = await signerSav(rapportTechnicien.body.id, session, { ...base, trace: dessin });
+      assert.equal(parEncadrement.status, 201, JSON.stringify(parEncadrement.body));
+      assert.equal(parEncadrement.body.enregistrePar.name, secours.name);
+      assert.equal((await prisma.interventionSignature.findUniqueOrThrow({ where: { id: parEncadrement.body.id } })).enregistreParId, secours.id);
+      const journalEncadrement = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { cible: 'INTERVENTION_SIGNATURE', cibleId: parEncadrement.body.id } });
+      assert.equal(journalEncadrement.apres.enregistrePar, secours.name);
+      assert.equal(journalEncadrement.auteurId, secours.id);
+      // Une seule signature par compte rendu, et aucune sur une intervention annulée.
+      assert.equal((await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace: dessin })).status, 409);
+      const annulee = await dossierEnCours('sav.trace.annule@iris.test', 'SAV tracé annulé');
+      const rapportAnnule = await ajouterCompteRendu(annulee.id, annulee.technicien.jeton);
+      assert.equal((await statutSav(annulee.id, session, { statut: 'ANNULEE' })).status, 200);
+      const refusAnnulee = await signerSav(rapportAnnule.body.id, annulee.technicien.jeton, { ...base, trace: dessin });
+      assert.equal(refusAnnulee.status, 409, JSON.stringify(refusAnnulee.body));
+      assert.equal(await prisma.interventionSignature.count({ where: { rapportId: rapportAnnule.body.id } }), 0);
+    });
+
+    test('terminer exige un compte rendu, signé ou accompagné d’un motif, pour le technicien comme pour l’encadrement', async () => {
+      const { id, technicien } = await dossierEnCours('sav.cloture@iris.test', 'SAV clôture');
+      for (const jeton of [technicien.jeton, session]) {
+        const refus = await statutSav(id, jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /compte rendu est obligatoire/);
+      }
+      assert.equal((await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu non signé.')).status, 201);
+      for (const jeton of [technicien.jeton, session]) {
+        const refus = await statutSav(id, jeton, { statut: 'TERMINEE' });
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /choisissez un motif/);
+      }
+      const motifsInvalides = [
+        { motifSansSignature: 'INCONNU' },
+        { motifSansSignature: 'AUTRE' },
+        { motifSansSignature: 'AUTRE', precisionMotif: '  a ' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'x'.repeat(201) },
+        { motifSansSignature: 'AUTRE', precisionMotif: 42 },
+        // Longueur comptée en caractères (points de code), comme les autres motifs : deux emoji n'en
+        // font pas quatre. Un caractère nul ou une demi-paire isolée est refusé avant PostgreSQL.
+        { motifSansSignature: 'AUTRE', precisionMotif: '🙂🙂' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client\u0000 absent' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client \ud83d absent' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client \ude42 absent' },
+        { motifSansSignature: 'CLIENT_ABSENT', precisionMotif: 'Une précision sans « Autre ».' },
+        { precisionMotif: 'Une précision sans motif.' },
+      ];
+      for (const corps of motifsInvalides) {
+        const refus = await statutSav(id, technicien.jeton, { statut: 'TERMINEE', ...corps });
+        assert.equal(refus.status, 400, `${JSON.stringify(corps)} : ${JSON.stringify(refus.body)}`);
+      }
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, 'EN_COURS');
+      const termine = await statutSav(id, technicien.jeton, { statut: 'TERMINEE', motifSansSignature: 'AUTRE', precisionMotif: '  Client parti avant la fin  ' });
+      assert.equal(termine.status, 200, JSON.stringify(termine.body));
+      const cloture = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: id, cible: 'INTERVENTION', action: 'CHANGEMENT_STATUT', apres: { path: ['statut'], equals: 'TERMINEE' } } });
+      assert.equal(cloture.motif, 'Clôture sans signature du client : Autre — Client parti avant la fin');
+      assert.equal(cloture.avant.statut, 'EN_COURS');
+      assert.equal(cloture.auteurNom, 'TEST Intervenant SAV clôture');
+
+      // Chacun des autres motifs, pour l'encadrement ; un motif ne s'indique qu'en terminant.
+      const libelles = { CLIENT_ABSENT: 'Client absent', REFUS_SIGNATURE: 'Refus de signer', SIGNATURE_IMPOSSIBLE: 'Signature impossible' };
+      for (const [code, libelle] of Object.entries(libelles)) {
+        const dossier = await dossierEnCours(`sav.cloture.${code.toLowerCase()}@iris.test`, `SAV clôture ${code}`);
+        assert.equal((await ajouterCompteRendu(dossier.id, session)).status, 201);
+        assert.equal((await statutSav(dossier.id, session, { statut: 'TERMINEE', motifSansSignature: code })).status, 200);
+        const entree = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: dossier.id, action: 'CHANGEMENT_STATUT', apres: { path: ['statut'], equals: 'TERMINEE' } } });
+        assert.equal(entree.motif, `Clôture sans signature du client : ${libelle}`);
+      }
+      const aPlanifier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Motif hors clôture' });
+      const horsCloture = await statutSav(aPlanifier.body.id, session, { statut: 'PLANIFIEE', motifSansSignature: 'CLIENT_ABSENT' });
+      assert.equal(horsCloture.status, 400, JSON.stringify(horsCloture.body));
+
+      // Un compte rendu signé suffit, et aucun motif ne s'y ajoute.
+      const signe = await dossierEnCours('sav.cloture.signe@iris.test', 'SAV clôture signée');
+      const compteRendu = await ajouterCompteRendu(signe.id, signe.technicien.jeton, 'TEST Compte rendu signé.');
+      assert.equal((await ajouterCompteRendu(signe.id, signe.technicien.jeton, 'TEST Complément non signé.')).status, 201);
+      assert.equal((await signerSav(compteRendu.body.id, signe.technicien.jeton, { signataire: 'TEST Client clôture', confirme: true, trace: TRACE_SIGNATURE_TEST })).status, 201);
+      const motifInutile = await statutSav(signe.id, session, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+      assert.equal(motifInutile.status, 409, JSON.stringify(motifInutile.body));
+      assert.match(motifInutile.body.error, /aucun motif/);
+      const termineSigne = await statutSav(signe.id, session, { statut: 'TERMINEE' });
+      assert.equal(termineSigne.status, 200, JSON.stringify(termineSigne.body));
+      const entreeSignee = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: signe.id, action: 'CHANGEMENT_STATUT', apres: { path: ['statut'], equals: 'TERMINEE' } } });
+      assert.equal(entreeSignee.motif, null);
+    });
+
+    // La clôture prend le verrou exclusif de l'intervention ; compte rendu et signature, le verrou
+    // partagé. Une transaction de test joue l'acte concurrent et le tient pendant que l'API attend.
+    test('une clôture en cours fait attendre puis refuser un compte rendu ; une signature en cours est comptée par la clôture', async () => {
+      const premier = await dossierEnCours('sav.verrou.cloture@iris.test', 'SAV verrou clôture');
+      assert.equal((await ajouterCompteRendu(premier.id, premier.technicien.jeton, 'TEST Compte rendu avant clôture.')).status, 201);
+      const relacherCloture = await tenirTransactionSav(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${premier.id} FOR UPDATE`;
+        await tx.intervention.update({ where: { id: premier.id }, data: { statut: 'TERMINEE' } });
+      });
+      // supertest n'envoie la requête qu'à la première lecture de sa promesse : then la lance.
+      const ajout = ajouterCompteRendu(premier.id, premier.technicien.jeton, 'TEST Compte rendu pendant la clôture.').then((reponse) => reponse);
+      assert.equal(await attendreVerrouSav(), true, 'le compte rendu attend la clôture');
+      await relacherCloture();
+      const refus = await ajout;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: premier.id } }), 1);
+
+      const second = await dossierEnCours('sav.verrou.signature@iris.test', 'SAV verrou signature');
+      const compteRendu = await ajouterCompteRendu(second.id, second.technicien.jeton, 'TEST Compte rendu signé pendant la clôture.');
+      const relacherSignature = await tenirTransactionSav(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${second.id} FOR SHARE`;
+        await tx.interventionSignature.create({ data: { rapportId: compteRendu.body.id, signataire: 'TEST Client concurrent', trace: TRACE_SIGNATURE_TEST, enregistreParId: second.technicien.userId, empreinte: 'a'.repeat(64) } });
+      });
+      const clotureSansMotif = statutSav(second.id, second.technicien.jeton, { statut: 'TERMINEE' }).then((reponse) => reponse);
+      assert.equal(await attendreVerrouSav(), true, 'la clôture attend la signature');
+      await relacherSignature();
+      const termine = await clotureSansMotif;
+      assert.equal(termine.status, 200, JSON.stringify(termine.body));
+    });
+
+    // Course réelle sur la clé d'envoi : les deux envois attendent le même verrou, le relâchement les
+    // lance ensemble ; le second bute sur l'index unique (P2002) et relit le premier.
+    test('deux envois simultanés d’une même clé : l’index unique tranche, le second relit le premier', async () => {
+      const course = await dossierEnCours('sav.course.cle@iris.test', 'SAV course clé');
+      const relacher = await tenirTransactionSav(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${course.id} FOR UPDATE`; });
+      const cleEnvoi = randomUUID();
+      const envois = [1, 2].map(() => request(app).post(`/api/interventions/${course.id}/rapports`).set('Authorization', `Bearer ${course.technicien.jeton}`).send({ contenu: 'TEST Envoi en course.', cleEnvoi }).then((reponse) => reponse));
+      for (let tour = 0; tour < 250 && await attentesVerrouSav() < 2; tour += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(await attentesVerrouSav(), 2, 'les deux envois attendent le verrou');
+      await relacher();
+      const reponses = await Promise.all(envois);
+      assert.deepEqual(reponses.map((reponse) => reponse.status).sort(), [200, 201], JSON.stringify(reponses.map((reponse) => reponse.body)));
+      assert.equal(reponses[0].body.id, reponses[1].body.id);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: course.id } }), 1);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: course.id, cible: 'INTERVENTION_RAPPORT' } }), 1);
+    });
+
+    // Le périmètre se relit sous le verrou : un retrait d'affectation (qui prend le verrou exclusif de
+    // l'intervention) fait refuser l'écriture du technicien retiré, au lieu de l'enregistrer après lui.
+    test('un retrait d’affectation en cours fait refuser compte rendu, signature et clôture du technicien retiré', async () => {
+      const dossier = await dossierEnCours('sav.verrou.affectation@iris.test', 'SAV verrou affectation');
+      const compteRendu = await ajouterCompteRendu(dossier.id, dossier.technicien.jeton, 'TEST Compte rendu avant le retrait.');
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      for (const acte of ['compte rendu', 'signature', 'cloture']) {
+        const relacher = await tenirTransactionSav(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${dossier.id} FOR UPDATE`;
+          await tx.interventionAffectation.deleteMany({ where: { interventionId: dossier.id } });
+        });
+        const jeton = dossier.technicien.jeton;
+        const reponse = (acte === 'compte rendu' ? ajouterCompteRendu(dossier.id, jeton, 'TEST Compte rendu après le retrait.')
+          : acte === 'signature' ? signerSav(compteRendu.body.id, jeton, { signataire: 'TEST Client', confirme: true, trace: TRACE_SIGNATURE_TEST })
+            : statutSav(dossier.id, jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).then((r) => r);
+        assert.equal(await attendreVerrouSav(), true, `${acte} attend le retrait`);
+        await relacher();
+        const refus = await reponse;
+        assert.equal(refus.status, 404, `${acte} : ${JSON.stringify(refus.body)}`);
+        await prisma.interventionAffectation.create({ data: { interventionId: dossier.id, intervenantId: dossier.technicien.intervenantId } });
+      }
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: dossier.id } }), 1);
+      assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: dossier.id } })).statut, 'EN_COURS');
+    });
+
+    test('une annulation en cours fait attendre puis refuser une signature et une clôture', async () => {
+      const dossier = await dossierEnCours('sav.verrou.annulation@iris.test', 'SAV verrou annulation');
+      const compteRendu = await ajouterCompteRendu(dossier.id, dossier.technicien.jeton, 'TEST Compte rendu avant annulation.');
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      for (const acte of ['signature', 'cloture']) {
+        const relacher = await tenirTransactionSav(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${dossier.id} FOR UPDATE`;
+          await tx.intervention.update({ where: { id: dossier.id }, data: { statut: 'ANNULEE' } });
+        });
+        const reponse = (acte === 'signature'
+          ? signerSav(compteRendu.body.id, dossier.technicien.jeton, { signataire: 'TEST Client', confirme: true, trace: TRACE_SIGNATURE_TEST })
+          : statutSav(dossier.id, dossier.technicien.jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).then((r) => r);
+        assert.equal(await attendreVerrouSav(), true, `${acte} attend l’annulation`);
+        await relacher();
+        const refus = await reponse;
+        assert.equal(refus.status, 409, `${acte} : ${JSON.stringify(refus.body)}`);
+        if (acte === 'cloture') assert.match(refus.body.error, /ANNULEE vers TERMINEE/);
+        assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: dossier.id } })).statut, 'ANNULEE');
+        // Retour au statut en cours, en SQL de test, pour rejouer l'acte suivant sur le même dossier.
+        await prisma.intervention.update({ where: { id: dossier.id }, data: { statut: 'EN_COURS' } });
+      }
     });
 
     test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {
@@ -6326,8 +6720,9 @@ if (!TEST_DATABASE_URL) {
         const dossier = await request(app).post('/api/interventions').set(auth).send({ clientId, titre: `TEST Terminal sans projection ${statut}` });
         assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
         const id = dossier.body.id;
-        const transitions = statut === 'TERMINEE' ? ['PLANIFIEE', 'EN_COURS', 'TERMINEE'] : ['ANNULEE'];
+        const transitions = statut === 'TERMINEE' ? ['PLANIFIEE', 'EN_COURS'] : ['ANNULEE'];
         for (const etape of transitions) assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: etape })).status, 200);
+        if (statut === 'TERMINEE') assert.equal((await terminerIntervention(id, session)).status, 200);
         const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
         const refus = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
         assert.equal(refus.status, 409, JSON.stringify(refus.body));
@@ -6354,7 +6749,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(placed.status, 200, JSON.stringify(placed.body));
         const url = `/api/planning/events/${placed.body.id}`;
         for (const next of statut === 'TERMINEE' ? ['EN_COURS', 'TERMINEE'] : [statut]) {
-          const transition = await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: next });
+          const transition = next === 'TERMINEE' ? await terminerIntervention(id, session) : await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: next });
           assert.equal(transition.status, 200, JSON.stringify(transition.body));
         }
         const avant = await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id }, include: { intervenants: { select: { id: true } } } });
@@ -6760,7 +7155,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).post(url).set('Authorization', `Bearer ${session}`)).status, 409);
       assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: id } }), journalAvant);
       for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
-        const transition = await request(app).patch(`/api/interventions/${generation.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        const transition = statut === 'TERMINEE' ? await terminerIntervention(generation.body.id, session) : await request(app).patch(`/api/interventions/${generation.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
         assert.equal(transition.status, 200, JSON.stringify(transition.body));
       }
       const avance = await request(app).post(url).set('Authorization', `Bearer ${session}`);
@@ -10626,7 +11021,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(avancementPremature.status, 409, JSON.stringify(avancementPremature.body));
       const tracesInitiales = await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: contratId } });
       for (const statut of ['PLANIFIEE', 'EN_COURS', 'TERMINEE']) {
-        const transition = await request(app).patch(`/api/interventions/${intervention.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
+        const transition = statut === 'TERMINEE' ? await terminerIntervention(intervention.body.id, session) : await request(app).patch(`/api/interventions/${intervention.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut });
         assert.equal(transition.status, 200, JSON.stringify(transition.body));
       }
       const avance = await request(app).post(`/api/contrats-maintenance/${contratId}/avancer-echeance`).set('Authorization', `Bearer ${session}`);
