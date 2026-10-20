@@ -74,13 +74,16 @@ nano server/.env
 
 - Remplacer `JWT_SECRET` par une valeur aléatoire longue ; il est obligatoire en production.
 - Renseigner `SUPERADMIN_EMAILS` **avant le premier démarrage d'une base vierge**. Aucune adresse administrateur par défaut n'est créée lorsque la liste est vide.
-- Renseigner `AZURE_TENANT_ID` et `AZURE_CLIENT_ID` pour la connexion normale Microsoft Entra ID ; configurer la SPA et son URI de redirection propre à l'instance. Aucun mot de passe local `ADMIN_PASSWORD` ni `ADMIN_EMAIL` n'est utilisé pour créer un compte.
-- Prévoir `BREAK_GLASS_EMAIL` (compte `SUPERADMIN` actif) et `BREAK_GLASS_TOKEN` (secret aléatoire d'au moins 32 caractères) pour le secours, conservés hors Git. Ce secours est propre à l'instance, **pas** un accès plateforme universel.
+- Renseigner `AZURE_TENANT_ID` (« ID de l'annuaire (locataire) ») et `AZURE_CLIENT_ID` (« ID d'application (client) »), deux GUID, pour la connexion normale Microsoft 365. Dans Entra ID, l'application est de type « Application monopage (SPA) » et son URI de redirection est exactement `https://<domaine-de-l-instance>/auth/callback` ; pas de secret client. Procédure complète : [guide de configuration](docs/CONFIGURATION-ENVIRONNEMENT.md#microsoft-entra-id-microsoft-365). Aucun mot de passe local `ADMIN_PASSWORD` ni `ADMIN_EMAIL` n'est utilisé pour créer un compte.
+- Prévoir `BREAK_GLASS_EMAIL` (compte `SUPERADMIN` actif, aussi présent dans `SUPERADMIN_EMAILS`) et `BREAK_GLASS_TOKEN` (`openssl rand -hex 32`) pour le secours, conservés hors Git. Ce secours est propre à l'instance, **pas** un accès plateforme universel.
 
 Utiliser [`server/.env.example`](server/.env.example) et le [guide de configuration](docs/CONFIGURATION-ENVIRONNEMENT.md) comme références détaillées. Ne jamais recopier les valeurs d'exemple dans une instance réelle.
 
 > Note : en Docker, `DATABASE_URL` est construite et injectée **automatiquement** par
-> docker-compose à partir du service `db` — inutile de la définir vous-même ici.
+> docker-compose à partir du service `db` — inutile de la définir vous-même ici ; `PORT` et
+> `NODE_ENV` sont aussi imposés par docker-compose. `server/.env` doit exister avant toute
+> commande `docker compose` (il est chargé par `env_file`). Après une modification, recréer
+> le conteneur : `docker compose up -d --force-recreate backend`.
 
 ## 3. Lancement avec Docker Compose
 

@@ -8,6 +8,7 @@ Deux niveaux, lancés ensemble par `npm test` :
 | `securite.test.mjs` | Empreinte des clés API, comparaison à temps constant | non |
 | `serveur.test.mjs` | Délais de connexion du serveur HTTP, sur une vraie connexion TCP | non |
 | `api.test.mjs` | Requêtes HTTP réelles sur l'application montée en mémoire | **oui** |
+| `environnement.test.mjs` | Chaque variable d'environnement lue par le code est documentée dans un modèle `.env.example` et dans `docs/CONFIGURATION-ENVIRONNEMENT.md` | non |
 
 ## Pourquoi pas de test qui relit le code source
 
@@ -17,6 +18,20 @@ régulière que telle route y était écrite. Ces tests passaient au vert sur un
 
 Un test doit exécuter le code : appeler la fonction, ou envoyer la requête et lire la
 réponse. C'est la règle ici.
+
+Seule exception : `environnement.test.mjs`, qui met en œuvre la consigne de Nelson du
+20-10-2026 (choix par défaut, à confirmer). Il ne prétend rien prouver du comportement : la
+propriété qu'il vérifie porte sur le texte lui-même, à savoir que chaque variable
+d'environnement que le code lit figure dans un modèle et dans la documentation de
+configuration. Son premier test est un témoin du relevé : il éprouve chaque motif sur un
+échantillon, puis vérifie que les variables connues (Microsoft 365, secret JWT, base…) sont
+trouvées dans chaque groupe ; un motif cassé fait donc échouer le test au lieu de laisser les
+autres passer à vide. Le relevé ne voit que les formes écrites en toutes lettres : une lecture
+par un nom calculé (`process.env[nom]`) lui échappe, et un accès indirect est refusé : alias
+(`const env = process.env`, typé ou converti par `as`), `const { env } = process`,
+`process['env']`. Le relevé lit aussi les commentaires et les chaînes : une lecture citée en
+exemple y compte comme une vraie lecture. Pour qu'elle ne compte pas, la citer sous une autre
+forme, par exemple « la variable X de process.env ».
 
 ## Lancer les tests
 
