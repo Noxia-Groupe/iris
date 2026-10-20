@@ -2,7 +2,7 @@
 
 **Proposition du 18-10-2026.** Le même jour, Nelson en a validé le principe et les fichiers à plat, et il a délégué le traitement des petites anomalies. Les autres choix, dont l'ordre des PR, sont des choix techniques de Claude Code (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
 
-Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 19-10-2026** : PR A (#213) et PR B (#214) implémentées ; PR C prévue après la fusion de #208, qui modifie aussi `ChantierDetail.tsx`. Les numéros de ligne de ce document se rapportent au relevé du 18-10-2026 : chaque PR de découpage revérifie ses plages sur son `main`.
+Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 20-10-2026** : PR A (#213) et PR B (#214) implémentées. PR C à faire : #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée (`b684fae`) ; elle vient après le lot pilote 3b, prochaine PR fonctionnelle selon la règle du pilote du 19-10-2026 (ordre choisi par Claude Code). Les numéros de ligne de ce document se rapportent au relevé du 18-10-2026 : chaque PR de découpage revérifie ses plages sur son `main`.
 
 | Écran | Lignes | Composants internes déjà séparés |
 |---|---|---|

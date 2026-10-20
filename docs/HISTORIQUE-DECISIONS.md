@@ -143,9 +143,9 @@ Les PR du découpage du serveur fusionnées le 18-10-2026 jusqu'à `dd92bf3` (#1
 ### Décisions de Nelson
 
 - **Découpage des écrans (18-10-2026, #200).** « 1. Oui je valide le principe. Oui a plat comme aujourd'hui. Fait ce qui est le mieux a corriger apres ou en issu je te laisse le choix de la meulleur des facon. » Principe validé : déplacement pur, état laissé dans la page, fichiers à plat dans `components/`. Petites anomalies, seul point délégué : une issue chacune (#202 à #206), à corriger après les trois déplacements. L'ordre des PR (outil, Planning, Administration, fiche chantier) est un choix technique de Claude Code.
-- **Sommes en flottants (18-10-2026, #198).** « 3. Prend le meilleur choix possible et surtout ne pas laisser passer une erreur eventuel d'affichage de montant. » Choix retenu : correction à la source, sommes en décimal exact et arrondis d'affichage corrigés (#208). La PR change des montants affichés : sa fusion reste à Nelson.
-- **Propositions 3 et 4 (18-10-2026, #182, #183).** Nelson a délégué l'arbitrage de leurs questions ouvertes : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Quatorze décisions pour les droits et six pour le paramétrage sont consignées dans ces PR. Leur fusion, qui vaut validation des propositions, reste à Nelson.
-- **Délégation de fusion (rappel).** Les lots de cette section ont été fusionnés par Claude Code (#200 après validation de son principe par Nelson) selon la délégation de Nelson du 17-10-2026, consignée dans [CLAUDE.md](../CLAUDE.md) (« Mode de livraison », #176) avec ses deux citations. Conditions, reprises de CLAUDE.md :
+- **Sommes en flottants (18-10-2026, #198).** « 3. Prend le meilleur choix possible et surtout ne pas laisser passer une erreur eventuel d'affichage de montant. » Choix retenu : correction à la source, sommes en décimal exact et arrondis d'affichage corrigés (#208). La PR changeait des montants affichés : sa fusion est restée réservée à Nelson jusqu'à sa décision du 20-10-2026 ; Claude Code l'a fusionnée ce jour-là (`b684fae`).
+- **Propositions 3 et 4 (18-10-2026, #182, #183).** Nelson a délégué l'arbitrage de leurs questions ouvertes : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Quatorze décisions pour les droits et six pour le paramétrage sont consignées dans ces PR. Leur fusion vaut validation des propositions ; depuis la décision du 20-10-2026 (section suivante), elle revient à Claude Code, après rafraîchissement sur `main` et nouvel audit.
+- **Délégation de fusion (rappel ; remplacée par la décision du 20-10-2026, section suivante).** Les lots de cette section ont été fusionnés par Claude Code (#200 après validation de son principe par Nelson) selon la délégation de Nelson du 17-10-2026, consignée alors dans [CLAUDE.md](../CLAUDE.md) (« Mode de livraison », #176). Nelson avait écrit d'abord : « C'est moi qui fusionne, qui valide les montants et qui valide les propositions 3 et 4 », puis précisé : « Sauf pour la validation pardon tu fait comme maintenant. Ton agent specialisé dans l'audit et si tout est ok tu fusionne directement ». Conditions, reprises de CLAUDE.md d'alors :
   - Claude Code fusionne lui-même la PR qu'il a codée lorsque deux conditions portent sur la même SHA : la CI y est verte, et son sous-agent d'audit l'y juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 ; jamais par la fusion automatique de GitHub.
   - La délégation ne couvre ni une PR qui change des montants (#208), ni une proposition soumise à la validation de Nelson (#182, #183), ni la mise en production.
   - Choix de Claude Code, et non exclusion de Nelson : il ne fusionne pas lui-même une PR qui modifie CLAUDE.md (#200, #207).
@@ -159,7 +159,7 @@ Les PR du découpage du serveur fusionnées le 18-10-2026 jusqu'à `dd92bf3` (#1
 - #209 : outil de comparaison du rendu (`npm run comparer:rendu`). Il relève, pour chaque étape, le HTML, l'état des champs et la liste ordonnée des requêtes API des clients de `main` et de la branche, servis avec le même serveur et la même base jetable. Aucun code applicatif.
 - #213 (PR A) : les trois modales du planning et la file à planifier dans leurs fichiers ; `Planning.tsx` passe de 873 à 406 lignes.
 - #214 (PR B) : barème, choix du responsable et onglets Utilisateurs, Marges, référentiels et Modules dans leurs fichiers ; `Admin.tsx` passe de 1 477 à 684 lignes. L'outil passe de 77 à 79 étapes.
-- La PR C (fiche chantier) attend la fusion de #208, qui modifie aussi `ChantierDetail.tsx`.
+- La PR C (fiche chantier) attendait la fusion de #208, qui modifiait aussi `ChantierDetail.tsx` ; #208 est fusionnée le 20-10-2026.
 
 **Comptes** (règle 2, droits) :
 - #216 (#178) : les routes de comptes refusent de retirer le dernier super administrateur **actif** ; un compte désactivé ne compte plus. Suppression, changement de type (hors promotion en super administrateur) et désactivation (non la réactivation), qui peuvent retirer un super administrateur actif, prennent un verrou consultatif en tête de transaction, comptent les autres super administrateurs actifs dans cette transaction et se sérialisent, en READ COMMITTED explicite. Refus inchangés : 409 pour la suppression et le changement de type, 400 pour la désactivation.
@@ -187,13 +187,70 @@ Les PR du découpage du serveur fusionnées le 18-10-2026 jusqu'à `dd92bf3` (#1
 
 ### Suivis ouverts pendant ces lots
 
-Suivis cités par la passation précédente (#233) ; ceux corrigés depuis sont signalés. Les suivis ouverts puis corrigés avant elle (#211, #215, #218, #219, #221, #222, #225, #226, #231) figurent avec leur lot correctif dans « Lots fusionnés ». #202 à #206 (anomalies des écrans), #210 (nom de base jetable des E2E, corrigé par #238), #212 (affichages à zéro), #220 (refus silencieux du changement de type, corrigé par #234), #223 (comptes rendus et signatures SAV non figés en base, lot 3b) et #230 (plafond des avoirs non garanti en base, corrigé par #235).
+Suivis cités par la passation précédente (#233) ; ceux corrigés depuis sont signalés. Les suivis ouverts puis corrigés avant elle (#211, #215, #218, #219, #221, #222, #225, #226, #231) figurent avec leur lot correctif dans « Lots fusionnés ». #202 à #206 (anomalies des écrans), #210 (nom de base jetable des E2E, corrigé par #238), #212 (affichages à zéro), #220 (refus silencieux du changement de type, corrigé par #234), #223 (comptes rendus et signatures SAV non figés en base, corrigé par #255) et #230 (plafond des avoirs non garanti en base, corrigé par #235).
 
-Puis, pendant les lots suivants : #236 (aperçu de TVA d'un avoir partiel, correctif #242), #239 (autres actions de l'Administration), #240 (pool de connexions de `PATCH /api/devis/:id`), #241 (CLAUDE.md, règle du nom de base jetable), #243 (cohérence interne des pièces émises), #244 (jeton de session E2E recopié dans 16 parcours), #247 (double envoi du formulaire d'avoir partiel) et #248 (gardes des bases et ports de test). #152 (parcours `entetes-mobile`) reçoit un nouveau constat : un échec intermittent au premier passage complet local.
+Puis, pendant les lots suivants : #236 (aperçu de TVA d'un avoir partiel, correctif #242), #239 (autres actions de l'Administration), #240 (pool de connexions de `PATCH /api/devis/:id`), #241 (CLAUDE.md, règle du nom de base jetable, corrigé par #246), #243 (cohérence interne des pièces émises), #244 (jeton de session E2E recopié dans 16 parcours), #247 (double envoi du formulaire d'avoir partiel, bloqué à l'écran par #251) et #248 (gardes des bases et ports de test). #152 (parcours `entetes-mobile`) reçoit un nouveau constat : un échec intermittent au premier passage complet local, diagnostiqué et corrigé par #249.
 
 ### En attente de Nelson au 19-10-2026
+
+*Suites au 20-10-2026 : #246 et #208 sont fusionnées ; #242, #182 et #183 relèvent de la décision de fusion du 20-10-2026 ; la ligne de #207 est reprise par la PR documentaire du 20-10-2026. Voir la section suivante.*
 
 - #208 (#198) et #242 (#236) : elles changent des montants affichés : leur fusion revient donc à Nelson. #208, en conflit avec `main` depuis #238, est à rafraîchir puis à réauditer ; #242 est prête (audit interne fusionnable et CI 5/5 sur `5f8426d`) ; #247 porte sur le même formulaire, à arbitrer en la fusionnant. L'état est tenu dans chaque PR, corps et commentaires.
 - #207 : état du découpage dans CLAUDE.md.
 - #246 (#241) : règle du nom de base jetable dans CLAUDE.md ; audit interne en cours à la rédaction de cette passation, fusion réservée à Nelson par choix de Claude Code.
 - #182 et #183 : propositions 3 et 4, arbitrées par délégation, à valider par leur fusion.
+
+## Décisions et lots des 19 (soir) et 20-10-2026
+
+Suite de la section précédente, depuis la passation #245 (`246d833`). *Rédigé le 20-10-2026. Tests, preuves et audits : voir le corps et les commentaires de chaque PR.*
+
+### Décisions de Nelson
+
+- **Pièce émise à montant nul (19-10-2026, #243).** « #243 on ne refuse pas une piece a emise a montant nul ». Le correctif de #243 (cohérence interne des pièces émises) n'interdira donc pas une facture ou un avoir émis à 0 / 0 / 0 € ; le reste du correctif proposé ne change pas.
+- **Fusion de #246 (19-10-2026).** « #246 je te donne l'autorisation pour fusionner cet PR » : PR qui modifiait CLAUDE.md, fusionnée par Claude Code sur cette autorisation.
+- **Double envoi de l'avoir partiel (19-10-2026, #247).** « Suivi #247 oui corrige avant. » : corrigé côté écran par #251 avant le lot 3b ; la clé d'idempotence côté serveur reste suivie dans #247, après le pilote.
+- **Ordre pendant le pilote (19-10-2026).** « La prochaine PR fonctionnelle est le lot 3b. Jusqu'à la fin du pilote, un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant. Tout le reste devient une issue, traitée après le pilote. » Reportée dans [CLAUDE.md](../CLAUDE.md#méthode-de-travail-décision-de-nelson-du-16-10-2026). En application, #250 (#240, pool de connexions de la modification d'un devis) est mise en pause, en brouillon.
+- **Lot pilote 3b (19-10-2026, #253).** Réponses aux questions du jour, chaque fois sur l'option recommandée :
+  1. terminer une intervention exige un compte rendu signé ; à défaut, un motif (client absent, refus de signer, signature impossible, autre) est consigné au journal ;
+  2. les heures du technicien sur une intervention SAV hors contrat vont dans les coûts SAV, en durée brute sans arrondi, sans effet sur la marge des chantiers ; l'administration voit leur coût de main-d'œuvre ;
+  3. la signature dessinée au doigt est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé ; durée de conservation à confirmer avec le cabinet ;
+  4. le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b.
+- **Fusion des PR (20-10-2026, #253).** « Je ne fusionne aucune PR, c’est toi apres verification zt si tout est ok que tu peux fusionner les pr ». Elle remplace la délégation du 17-10-2026 : Claude Code fusionne toute PR, montants compris, avec une CI verte et un audit interne fusionnable sur la même SHA, par commit de fusion sur la SHA exacte, jamais par fusion automatique. La mise en production reste à Nelson. Reportée dans [CLAUDE.md](../CLAUDE.md#mode-de-livraison).
+- **Libellé du coût cumulé d'une intervention (20-10-2026, #257).** « Je suis ok pour le libellé main d’oeuvre cumulée » : sans achat ni matériel, le total s'intitule « Main-d’œuvre cumulée » ; « Coût réel cumulé » est gardé quand le matériel est connu.
+- **Clôture d'une intervention (20-10-2026, #253).** « je te confirme tes 3 choix, je valide tes recommandations » :
+  1. un compte rendu est toujours exigé pour terminer ; seule la signature peut manquer, remplacée par un motif consigné au journal ;
+  2. le motif « autre » exige une précision écrite courte, consignée au journal ;
+  3. la règle vaut pour tous : technicien comme encadrement.
+- **Variables d'environnement (20-10-2026, #253).** « avec un sous agent, verifie les variable a remplir necessairepour l'application, la j'ai regardé sur le VPS sur lequel j'ai fait un git pull origin main et sur le fichier .env.example je n'ai pas toutes les variable a mettre, nottement tout ce qui concernera le login avec Microsoft 365. il ne faut absolument pas l'oublier de le mettre a jour au fur et a mesure que tu construit les differentes chose et pesner toujours a le mettre a jour sur le fichier .env.example ». Appliquée par #263, qui ajoute la règle permanente 3 de [CLAUDE.md](../CLAUDE.md#règles-permanentes-de-conception-décision-de-nelson-du-17-10-2026).
+
+### Lots fusionnés
+
+Fusionnés par Claude Code : #246 sur autorisation de Nelson, #249 et #255 par la délégation du 17-10-2026, les suivants selon la décision du 20-10-2026.
+
+**Lot pilote 3b** (#253) :
+- #255, 3b-1 (#223, règle 2) : comptes rendus d'intervention en ajout seul et signatures figées en base (modification et suppression refusées), vidage refusé sur les deux tables. Une intervention qui porte un compte rendu ne se supprime plus (clé étrangère en RESTRICT). Routes, droits et écrans inchangés. Le figement dès l'enregistrement est un choix par défaut de #253, à confirmer.
+- #257, 3b-2 (montant affiché nouveau) : le technicien affecté saisit et corrige ses heures sur une intervention hors contrat, comme sur un contrat actif ; un contrat suspendu ou terminé reste fermé, et le matériel reste réservé aux contrats actifs. Les coûts d'une intervention hors contrat sont lisibles : l'administration voit le taux figé et le coût de main-d'œuvre (« Main-d'œuvre cumulée »), le technicien ses heures sans taux, le conducteur les heures sans taux ni coût. Une date d'heures future est refusée (choix par défaut, à confirmer), y compris sur un contrat. Un conflit de sérialisation répond 409 au lieu de 500.
+
+**Montants** (règle 2) :
+- #208 (#198) : sommes du suivi des chantiers, du total facturé et du reste à facturer, des commissions et des statistiques en décimal exact ; plus de fausse alerte à budget exactement consommé. L'affichage arrondit moitié vers l'extérieur sans « -0 » (2,50 € n'est plus affiché 2 €, -12,50 € s'affiche -13 €), signe et couleur suivent la valeur affichée, et les alertes de moins d'un euro sont chiffrées au centime. Montants stockés et documents émis inchangés. L'audit relève deux conventions d'arrondi du coût de main-d'œuvre (question de la passation).
+
+**Factures** :
+- #251 (#247) : le formulaire d'avoir partiel n'envoie qu'une requête. Sur une issue inconnue (réponse perdue, erreur serveur), l'écran le dit, relit la liste puis libère le formulaire ; si la relecture échoue, le bouton reste bloqué jusqu'à une relecture réussie (choix par défaut, à confirmer). Un refus est affiché tel quel. Rien ne change côté serveur.
+
+**Configuration** :
+- #263 : `.env.example` et `server/.env.example` listent toutes les variables lues, connexion Microsoft 365 comprise ; l'URI de redirection est `https://<domaine>/auth/callback`, et non l'origine seule ; `docs/CONFIGURATION-ENVIRONNEMENT.md` décrit l'inscription Entra ID pas à pas. Règle permanente 3 de CLAUDE.md, vérifiée en CI par `server/tests/environnement.test.mjs`.
+
+**Tests et documentation** :
+- #249 (#152, point 5) : le parcours `entetes-mobile` mesure chaque route dans une page neuve ; en local, Chromium refusait les modules de Vite après une trentaine de navigations dans la même page.
+- #246 (#241) : CLAUDE.md décrit la règle du nom de base jetable des E2E.
+
+### Suivis ouverts pendant ces lots
+
+Étiquette `suivi-audit`, tous ouverts au 20-10-2026 : #252 (taux d'acompte invalide remplacé en silence, audit de #250), #254 et #258 (formulaire d'avoir partiel, audit de #251), #256 (suppression d'un compte et comptes rendus, audit de #255), #259 et #260 (affichage des heures, cadre des coûts sur un conflit, audit de #257), #261, #262, #264 et #265 (accès de secours derrière les proxys, `+` du jeton de secours, autorisation sur `oid` et `tid`, formes restantes du test des variables, inventaire et audit de #263).
+
+### En cours au 20-10-2026
+
+- #242 (#236), aperçu de TVA d'un avoir partiel : audit interne sur `83379e7`, fusion par Claude Code selon la décision du 20-10-2026.
+- #182 et #183, propositions 3 et 4 : à rafraîchir sur `main`, à réauditer, puis à fusionner.
+- #250 (#240) : en pause, en brouillon, jusqu'à la fin du pilote.
+- Lot 3b : 3b-3, puis 3b-4, puis le planning du technicien limité.
