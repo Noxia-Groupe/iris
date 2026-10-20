@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { blockCommercial, blockTechnicien, requireAdmin } from '../../http/gardes';
+import { ROLE_TECHNICIEN } from '../../droits/roles';
 import { paramId } from '../../http/requete';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, aujourdHuiEntreprise, ajouterJoursCivils } from '../../commun/dates';
 import { journaliserAdministration, verrouillerReglage } from '../../commun/journal-administration';
@@ -44,7 +45,10 @@ export function enregistrerRoutesPlanning(app: Express): void {
   // technicien sur n'importe quel chantier en cours, pas seulement les siens. N'affecte en rien
   // la visibilité des chantiers ailleurs dans l'application (Liste des Chantiers, Tableau de
   // bord...), qui reste strictement scoped par responsable pour un conducteur.
-  app.get('/api/planning/chantiers', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+  // Le technicien ne crée pas d'affectation : cette liste, qui ne sert qu'au formulaire d'affectation,
+  // lui est fermée (planning limité à ce dont il est chargé, décision de Nelson du 19-10-2026).
+  app.get('/api/planning/chantiers', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+    if (req.user!.role === ROLE_TECHNICIEN) return res.status(403).json({ error: 'La liste des chantiers du planning sert à créer une affectation : elle n’est pas ouverte au technicien.' });
     try {
       const chantiers = await prisma.chantier.findMany({
         select: { id: true, nom: true, client: true, statut: true },
@@ -62,10 +66,13 @@ export function enregistrerRoutesPlanning(app: Express): void {
       const start = parsePlanningJour(req.query.start);
       const end = parsePlanningJour(req.query.end);
       if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, au format JJ-MM-AAAA ou AAAA-MM-JJ).' });
+      // Le technicien ne lit que les affectations dont il est chargé (décision de Nelson du 19-10-2026) :
+      // événements libres comme projections, par la fiche intervenant reliée à son compte. Sans fiche, rien.
+      const chargeDe = req.user!.role === ROLE_TECHNICIEN ? [{ intervenants: { some: { userId: req.user!.id } } }] : [];
       const events = await prisma.planningEvent.findMany({
         where: { dateDebut: { lte: end }, dateFin: { gte: start }, OR: [
           { interventionId: null }, { intervention: { is: getInterventionFilterForUser(req.user!) } },
-        ] },
+        ], AND: chargeDe },
         include: PLANNING_EVENT_INCLUDE,
         orderBy: [{ dateDebut: 'asc' }, { createdAt: 'asc' }],
       });

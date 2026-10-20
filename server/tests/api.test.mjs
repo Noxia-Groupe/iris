@@ -280,6 +280,7 @@ if (!TEST_DATABASE_URL) {
       'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
+      'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
@@ -5239,6 +5240,110 @@ if (!TEST_DATABASE_URL) {
       } finally {
         await prisma.planningEvent.deleteMany({ where: { id: libre.body.id } });
         await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
+      }
+    });
+  });
+
+  describe('Planning du technicien limité à ce dont il est chargé (décision de Nelson du 19-10-2026)', () => {
+    let admin = {};
+    let clientId = '';
+    const comptes = {};
+    const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, enTete, corps) => request(app)[methode](chemin).set(enTete).send(corps);
+    const SEMAINE = '/api/planning/events?start=02-03-2098&end=08-03-2098';
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      for (const [cle, email, role] of [
+        ['technicien', 'planning.limite.technicien@iris.test', 'TECHNICIEN'],
+        ['collegue', 'planning.limite.collegue@iris.test', 'TECHNICIEN'],
+        ['sansFiche', 'planning.limite.sansfiche@iris.test', 'TECHNICIEN'],
+        ['relie', 'planning.limite.relie@iris.test', 'TECHNICIEN'],
+        ['conducteur', 'planning.limite.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX'],
+      ]) comptes[cle] = await prisma.user.create({ data: { email, name: `TEST Planning limité ${cle}`, role, actif: true } });
+      const client = await request(app).post('/api/clients').set(admin).send({ raisonSociale: 'TEST Client planning limité' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      clientId = client.body.id;
+    });
+
+    test('le technicien ne lit que les affectations dont il est chargé ; l’encadrement garde tout le planning', async () => {
+      const ficheTechnicien = await prisma.intervenant.create({ data: { nom: 'TEST Planning limité fiche technicien', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const ficheCollegue = await prisma.intervenant.create({ data: { nom: 'TEST Planning limité fiche collègue', role: 'Technicien', tauxHoraireCharge: 40 } });
+      for (const [fiche, compte] of [[ficheTechnicien, comptes.technicien], [ficheCollegue, comptes.collegue]]) {
+        assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: compte.id })).status, 200);
+      }
+      const type = await prisma.planningEventType.create({ data: { nom: `TEST Planning limité type ${Date.now()}`, couleur: '#336699' } });
+      const libres = [];
+      try {
+        const creerLibre = async (corps) => {
+          const res = await envoyer('post', '/api/planning/events', admin, corps);
+          assert.equal(res.status, 201, JSON.stringify(res.body));
+          libres.push(res.body.id);
+          return res.body.id;
+        };
+        const libreTechnicien = await creerLibre({ categorie: 'HORS_CHANTIER', titre: 'TEST Planning limité du technicien', dateDebut: '2098-03-02', intervenantIds: [ficheTechnicien.id] });
+        const libreCollegue = await creerLibre({ categorie: 'HORS_CHANTIER', titre: 'TEST Planning limité du collègue', dateDebut: '2098-03-03', intervenantIds: [ficheCollegue.id] });
+        const librePartage = await creerLibre({ categorie: 'HORS_CHANTIER', titre: 'TEST Planning limité partagé', dateDebut: '2098-03-04', dateFin: '2098-03-05', intervenantIds: [ficheCollegue.id, ficheTechnicien.id] });
+        const evenementCollegue = await creerLibre({ categorie: 'EVENEMENT', typeEventId: type.id, dateDebut: '2098-03-06', intervenantIds: [ficheCollegue.id] });
+        const placer = async (titre, fiche, jour) => {
+          const dossier = await envoyer('post', '/api/interventions', admin, { clientId, titre });
+          assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+          const placement = await envoyer('put', `/api/interventions/${dossier.body.id}/planning`, admin, { dateDebut: jour, creneau: 'JOURNEE', intervenantIds: [fiche.id] });
+          assert.equal(placement.status, 200, JSON.stringify(placement.body));
+          return placement.body.id;
+        };
+        const projectionTechnicien = await placer('TEST Planning limité dossier du technicien', ficheTechnicien, '2098-03-07');
+        const projectionCollegue = await placer('TEST Planning limité dossier du collègue', ficheCollegue, '2098-03-08');
+        const tous = [libreTechnicien, libreCollegue, librePartage, evenementCollegue, projectionTechnicien, projectionCollegue];
+        const lire = async (enTete) => {
+          const res = await request(app).get(SEMAINE).set(enTete);
+          assert.equal(res.status, 200, JSON.stringify(res.body));
+          return res.body;
+        };
+        const nosEvenements = (evenements) => evenements.map((ev) => ev.id).filter((id) => tous.includes(id)).sort();
+
+        // Le technicien : ses affectations seulement, libres comme projections, et rien d'autre de la semaine.
+        const duTechnicien = await lire(jeton(comptes.technicien));
+        assert.deepEqual(nosEvenements(duTechnicien), [libreTechnicien, librePartage, projectionTechnicien].sort());
+        assert.ok(duTechnicien.every((ev) => ev.intervenants.some((i) => i.id === ficheTechnicien.id)), 'aucune affectation d’un autre technicien');
+        // Une affectation partagée garde ses coéquipiers.
+        assert.deepEqual(duTechnicien.find((ev) => ev.id === librePartage).intervenants.map((i) => i.nom).sort(), [ficheCollegue.nom, ficheTechnicien.nom].sort());
+
+        const duCollegue = await lire(jeton(comptes.collegue));
+        assert.deepEqual(nosEvenements(duCollegue), [libreCollegue, librePartage, evenementCollegue, projectionCollegue].sort());
+        assert.ok(duCollegue.every((ev) => ev.intervenants.some((i) => i.id === ficheCollegue.id)), 'aucune affectation d’un autre technicien');
+
+        // Sans fiche reliée, le technicien ne voit rien.
+        assert.deepEqual(await lire(jeton(comptes.sansFiche)), []);
+
+        // L'encadrement garde tous les événements libres, et les projections de son périmètre SAV.
+        assert.deepEqual(nosEvenements(await lire(jeton(comptes.conducteur))), [libreTechnicien, libreCollegue, librePartage, evenementCollegue].sort());
+        assert.deepEqual(nosEvenements(await lire(admin)), [...tous].sort());
+
+        // Délié de sa fiche, le technicien ne voit plus rien.
+        assert.equal((await envoyer('put', `/api/intervenants/${ficheTechnicien.id}/compte`, admin, { userId: null })).status, 200);
+        assert.deepEqual(await lire(jeton(comptes.technicien)), []);
+      } finally {
+        await prisma.planningEvent.deleteMany({ where: { id: { in: libres } } });
+        await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
+      }
+    });
+
+    test('la liste des chantiers du planning est fermée au technicien, qui garde les types d’événement', async () => {
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Planning limité fiche chantiers', role: 'Technicien', tauxHoraireCharge: 40 } });
+      assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: comptes.relie.id })).status, 200);
+      for (const compte of [comptes.relie, comptes.sansFiche]) {
+        const refus = await request(app).get('/api/planning/chantiers').set(jeton(compte));
+        assert.equal(refus.status, 403, JSON.stringify(refus.body));
+        assert.equal(Array.isArray(refus.body), false);
+        assert.equal((await request(app).get('/api/planning/types').set(jeton(compte))).status, 200);
+      }
+      // Témoins : l'encadrement garde la liste.
+      for (const enTete of [jeton(comptes.conducteur), admin]) {
+        const liste = await request(app).get('/api/planning/chantiers').set(enTete);
+        assert.equal(liste.status, 200, JSON.stringify(liste.body));
+        assert.ok(Array.isArray(liste.body));
       }
     });
   });
