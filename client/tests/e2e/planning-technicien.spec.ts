@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { Browser } from '@playwright/test';
-import { test, expect, dateDuJour } from './fixtures';
+import { test, expect } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
@@ -27,7 +27,7 @@ async function pageTelephone(browser: Browser, compte: Compte) {
 // Planning limité à ce dont le technicien est chargé (décision de Nelson du 19-10-2026) : sur
 // téléphone, il ne voit que sa ligne et ses affectations ; sans fiche reliée, un message le lui dit.
 // L'encadrement garde toute l'équipe.
-test('sur téléphone, le technicien ne voit au planning que sa ligne et les affectations dont il est chargé', async ({ session, request, creerClient, browser, allerSurPageAdmin }) => {
+test('sur téléphone, le technicien ne voit au planning que sa ligne et les affectations dont il est chargé', async ({ session, request, creerClient, browser, allerSurPageAdmin, page: pageAdmin }) => {
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'get' | 'post' | 'put', path: string, data?: object) => {
     const response = await request[methode](`${api}${path}`, { headers, data });
@@ -35,7 +35,11 @@ test('sur téléphone, le technicien ne voit au planning que sa ligne et les aff
     return response.json();
   };
   const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
-  const aujourdhui = dateDuJour().split('-').reverse().join('-');
+  // « Aujourd'hui » au fuseau de la société, que l'écran du planning prend pour la semaine affichée.
+  const { fuseauHoraire } = await envoyer('get', '/company') as { fuseauHoraire?: string | null };
+  const parties = new Intl.DateTimeFormat('en-GB', { timeZone: fuseauHoraire || 'Europe/Paris', day: '2-digit', month: '2-digit', year: 'numeric' }).formatToParts(new Date());
+  const partie = (type: string) => parties.find((p) => p.type === type)!.value;
+  const aujourdhui = `${partie('year')}-${partie('month')}-${partie('day')}`;
   const compte = (cle: string): Promise<Compte> => envoyer('post', '/users', { email: `planning-t.${cle}.${suffixe}@iris.test`, name: `Technicien PT ${cle} ${suffixe}`, role: 'TECHNICIEN' });
   const technicien = await compte('relie');
   const collegue = await compte('collegue');
@@ -58,7 +62,12 @@ test('sur téléphone, le technicien ne voit au planning que sa ligne et les aff
   page.on('dialog', (dialogue) => { fenetres.push(`${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
   page.on('request', (requete) => requetes.push(requete.url()));
   try {
+    const reponseEvenements = page.waitForResponse((reponse) => reponse.url().includes('/api/planning/events?'));
     await page.goto('/planning', { waitUntil: 'networkidle' });
+    // Le serveur ne lui envoie que ses affectations : l'écran n'a rien à masquer.
+    const evenements = await (await reponseEvenements).json() as Array<{ intervenants: Array<{ id: string }> }>;
+    expect(evenements.length).toBeGreaterThan(0);
+    expect(evenements.every((ev) => ev.intervenants.some((i) => i.id === fiche.id)), 'aucune affectation sans sa fiche').toBe(true);
     await expect(page.getByText('Consultation seule')).toBeVisible();
     await expect(page.getByText('Vous ne voyez que les affectations dont vous êtes chargé.')).toBeVisible();
     // Sa seule ligne, avec ses affectations, y compris celle qu'il partage.
@@ -79,15 +88,31 @@ test('sur téléphone, le technicien ne voit au planning que sa ligne et les aff
     const vueSansFiche = await pageTelephone(browser, sansFiche);
     try {
       vueSansFiche.on('dialog', (dialogue) => { fenetres.push(`${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
+      vueSansFiche.on('request', (requete) => requetes.push(requete.url()));
       await vueSansFiche.goto('/planning', { waitUntil: 'networkidle' });
       await expect(vueSansFiche.getByText('Aucune fiche intervenant n\'est reliée à votre compte.')).toBeVisible();
       await expect(vueSansFiche.locator('table')).toHaveCount(0);
       await expect(vueSansFiche.getByText('Aucun technicien enregistré.')).toHaveCount(0);
+      expect(requetes.filter((url) => url.includes('/api/planning/chantiers'))).toEqual([]);
     } finally {
       await vueSansFiche.context().close();
     }
 
+    // Équipe illisible (panne du serveur) : l'écran le dit, sans prétendre que la fiche n'est pas reliée.
+    const vuePanne = await pageTelephone(browser, technicien);
+    try {
+      vuePanne.on('dialog', (dialogue) => { fenetres.push(`${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
+      await vuePanne.route('**/api/intervenants', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'panne' }) }));
+      await vuePanne.goto('/planning', { waitUntil: 'networkidle' });
+      await expect(vuePanne.getByRole('alert').filter({ hasText: 'Lecture de l\'équipe impossible pour le moment.' })).toBeVisible();
+      await expect(vuePanne.getByText('Aucune fiche intervenant n\'est reliée à votre compte.')).toHaveCount(0);
+      await expect(vuePanne.locator('table')).toHaveCount(0);
+    } finally {
+      await vuePanne.context().close();
+    }
+
     // Témoin : l'administration garde toute l'équipe et toutes les affectations.
+    pageAdmin.on('dialog', (dialogue) => { fenetres.push(`${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
     const vueAdmin = await allerSurPageAdmin('/planning');
     await expect(vueAdmin.getByText(`Fiche PT collègue ${suffixe}`, { exact: true })).toBeVisible();
     await expect(vueAdmin.getByText(`Fiche PT ${suffixe}`, { exact: true })).toBeVisible();

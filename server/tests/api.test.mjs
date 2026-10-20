@@ -280,7 +280,7 @@ if (!TEST_DATABASE_URL) {
       'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
-      'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test',
+      'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test', 'planning.limite.responsable@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
@@ -5261,6 +5261,7 @@ if (!TEST_DATABASE_URL) {
         ['sansFiche', 'planning.limite.sansfiche@iris.test', 'TECHNICIEN'],
         ['relie', 'planning.limite.relie@iris.test', 'TECHNICIEN'],
         ['conducteur', 'planning.limite.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX'],
+        ['responsable', 'planning.limite.responsable@iris.test', 'RESPONSABLE'],
       ]) comptes[cle] = await prisma.user.create({ data: { email, name: `TEST Planning limité ${cle}`, role, actif: true } });
       const client = await request(app).post('/api/clients').set(admin).send({ raisonSociale: 'TEST Client planning limité' });
       assert.equal(client.status, 201, JSON.stringify(client.body));
@@ -5318,8 +5319,16 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual(await lire(jeton(comptes.sansFiche)), []);
 
         // L'encadrement garde tous les événements libres, et les projections de son périmètre SAV.
-        assert.deepEqual(nosEvenements(await lire(jeton(comptes.conducteur))), [libreTechnicien, libreCollegue, librePartage, evenementCollegue].sort());
+        for (const encadrant of [comptes.conducteur, comptes.responsable]) {
+          assert.deepEqual(nosEvenements(await lire(jeton(encadrant))), [libreTechnicien, libreCollegue, librePartage, evenementCollegue].sort(), encadrant.role);
+        }
         assert.deepEqual(nosEvenements(await lire(admin)), [...tous].sort());
+
+        // Défense en profondeur : une affectation SAV sans sa fiche dans la projection, état que l'application
+        // n'écrit jamais (synchroniserAffectationsIntervention), ne lui montre pas la projection.
+        const dossierCollegue = (await prisma.planningEvent.findUniqueOrThrow({ where: { id: projectionCollegue } })).interventionId;
+        await prisma.interventionAffectation.create({ data: { interventionId: dossierCollegue, intervenantId: ficheTechnicien.id } });
+        assert.equal((await lire(jeton(comptes.technicien))).some((ev) => ev.id === projectionCollegue), false);
 
         // Délié de sa fiche, le technicien ne voit plus rien.
         assert.equal((await envoyer('put', `/api/intervenants/${ficheTechnicien.id}/compte`, admin, { userId: null })).status, 200);
@@ -5340,7 +5349,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await request(app).get('/api/planning/types').set(jeton(compte))).status, 200);
       }
       // Témoins : l'encadrement garde la liste.
-      for (const enTete of [jeton(comptes.conducteur), admin]) {
+      for (const enTete of [jeton(comptes.conducteur), jeton(comptes.responsable), admin]) {
         const liste = await request(app).get('/api/planning/chantiers').set(enTete);
         assert.equal(liste.status, 200, JSON.stringify(liste.body));
         assert.ok(Array.isArray(liste.body));

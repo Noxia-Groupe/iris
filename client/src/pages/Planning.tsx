@@ -51,6 +51,8 @@ const Planning = () => {
   const [contractQueue, setContractQueue] = useState<ContractQueueItem[]>([]);
   const [toPlace, setToPlace] = useState<ContractQueueItem | null>(null);
   const [loading, setLoading] = useState(true);
+  // Équipe illisible (panne, refus) : l'écran le dit, au lieu d'annoncer une équipe vide ou une fiche non reliée.
+  const [equipeIllisible, setEquipeIllisible] = useState(false);
   // Semaine choisie (son lundi) ; tant qu'on n'a pas navigué, celle du jour de la société.
   const [semaineChoisie, setSemaineChoisie] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState | null>(null);
@@ -74,6 +76,7 @@ const Planning = () => {
 
   useEffect(() => {
     (async () => {
+      let equipeLue = false;
       try {
         const [intervRes, chantiersRes, typesRes] = await Promise.all([
           apiFetch('/intervenants'),
@@ -82,9 +85,11 @@ const Planning = () => {
           apiFetch('/planning/types'),
         ]);
         const interv = await intervRes.json();
+        equipeLue = intervRes.ok && Array.isArray(interv);
+        if (equipeLue) setIntervenants(interv.sort((a: Intervenant, b: Intervenant) => a.nom.localeCompare(b.nom)));
+        else setEquipeIllisible(true);
         const chant = chantiersRes ? await chantiersRes.json() : [];
         const t = await typesRes.json();
-        if (Array.isArray(interv)) setIntervenants(interv.sort((a: Intervenant, b: Intervenant) => a.nom.localeCompare(b.nom)));
         if (Array.isArray(chant)) setChantiers(chant);
         if (Array.isArray(t)) setTypes(t);
         // Le partage public reste réservé aux admins : pas la peine d'appeler une route
@@ -95,6 +100,7 @@ const Planning = () => {
         }
       } catch (e) {
         console.error(e);
+        if (!equipeLue) setEquipeIllisible(true);
       } finally {
         setLoading(false);
       }
@@ -291,7 +297,12 @@ const Planning = () => {
         <h2 className="text-base font-bold text-gray-800 m-0 text-right">{labelSemaine}</h2>
       </div>
 
-      {lectureSeule && lignes.length === 0 ? (
+      {equipeIllisible ? (
+        <div className="card text-center py-12" role="alert">
+          <p className="text-gray-500 font-semibold mb-2">Lecture de l'équipe impossible pour le moment.</p>
+          <p className="text-sm text-gray-400">Rechargez la page dans un instant.</p>
+        </div>
+      ) : lectureSeule && lignes.length === 0 ? (
         <div className="card text-center py-12">
           <p className="text-gray-500 font-semibold mb-2">Aucune fiche intervenant n'est reliée à votre compte.</p>
           <p className="text-sm text-gray-400">Votre planning s'affichera dès que l'administration l'aura reliée.</p>
