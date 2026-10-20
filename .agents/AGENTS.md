@@ -38,6 +38,8 @@ Mêmes règles que dans [`CLAUDE.md`](../CLAUDE.md#méthode-de-travail-décision
 
 Ce qui ne change pas : une PR par lot, jamais de push direct sur `main`, l'audit interne, et l'audit indépendant à la demande de Nelson ; une CI verte seule n'autorise aucune fusion : Nelson a confié les fusions à Claude Code, dans les conditions de sa décision du 20-10-2026 ([`CLAUDE.md`](../CLAUDE.md#mode-de-livraison)) ; Nelson valide les montants avec le cabinet et décide de la mise en production ; Iris reste sa propre source de vérité, et aucune règle de prix, de commission ou de conformité n'est inventée.
 
+**Ordre pendant le pilote** (décision de Nelson du 19-10-2026) : « La prochaine PR fonctionnelle est le lot 3b. Jusqu'à la fin du pilote, un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant. Tout le reste devient une issue, traitée après le pilote. »
+
 Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'étiquette s'appelle `suivi-audit` ; l'issue reprend le constat, sa preuve et le correctif proposé, et la PR la cite.
 
 ## Règles permanentes de conception (décision du 17-10-2026)
@@ -46,5 +48,6 @@ Mêmes règles que dans [`CLAUDE.md`](../CLAUDE.md#règles-permanentes-de-concep
 
 1. **Un paramètre plutôt qu'une constante.** Toute nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée, et non une constante dans le code. La valeur par défaut n'invente aucune valeur métier (ni prix, ni commission, ni compte comptable). Les règles légales ou d'intégrité restent dans le code, avec leur raison écrite.
 2. **Des fichiers de taille raisonnable.** Aucun fichier de code applicatif ne dépasse environ 800 lignes ; au-delà, on le découpe, dans une PR sans changement de comportement. Les fichiers de tests, les migrations, les fichiers générés et le schéma Prisma ne sont pas concernés (choix par défaut, à confirmer).
+3. **Des variables d'environnement toujours documentées** (consigne de Nelson du 20-10-2026). Toute PR qui lit une nouvelle variable, ou en change le rôle, le format ou le caractère obligatoire, met à jour dans la même PR `server/.env.example` ou `.env.example` et `docs/CONFIGURATION-ENVIRONNEMENT.md` ; `server/tests/environnement.test.mjs` le vérifie en CI.
 
 Une revue signale tout nouveau seuil, délai, statut ou circuit de validation écrit en dur. Elle signale aussi tout fichier applicatif qui dépasse cette taille, ou qui la dépassait déjà et grossit encore. Ces remarques suivent la règle 3 de la méthode.

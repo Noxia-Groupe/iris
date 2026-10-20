@@ -281,7 +281,8 @@ Un test qui relit le code source en texte n'en est pas un : il reste vert sur un
 qui ne compile même pas. Cette règle est la seule qui compte ici, avec une exception documentée
 dans [`server/tests/README.md`](server/tests/README.md) : `environnement.test.mjs` relève dans le
 texte les variables d'environnement lues, pour vérifier qu'elles sont documentées (consigne de
-Nelson du 20-10-2026) ; il ne prouve aucun comportement.
+Nelson du 20-10-2026 ; l'exception est un choix par défaut, à confirmer) ; il ne prouve aucun
+comportement.
 
 Parcours navigateur (Playwright, base PostgreSQL jetable) :
 
