@@ -21,6 +21,7 @@ import {
 import {
   RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereInvalide, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
 } from './comptesRendus';
+import { enregistrerLecturesInterventions } from './lectures';
 
 class ChantierInterventionIntrouvable extends Error {}
 // Refus métier relevé sous verrou, dans la transaction : il l'annule et devient un 409.
@@ -89,28 +90,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
     }
   });
 
-  // Les annulations sont historiques : elles n'encombrent pas l'exploitation courante, mais
-  // restent explicitement consultables avec ?inclureAnnulees=true (administration/contrôle).
-  app.get('/api/interventions', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
-    try {
-      const inclureAnnulees = req.query.inclureAnnulees === 'true';
-      const filtre = getInterventionFilterForUser(req.user!);
-      const interventions = await prisma.intervention.findMany({
-        where: {
-          AND: [
-            filtre,
-            inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
-          ],
-        },
-        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT, rapports: { select: { ...RAPPORT_SELECT, signature: { select: SIGNATURE_SELECT } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
-        orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
-      });
-      res.json(decimalToNumber(interventions.map(exposerIntervention)));
-    } catch (error) {
-      console.error('Erreur liste interventions SAV', error);
-      res.status(500).json({ error: 'Erreur lors de la lecture des interventions.' });
-    }
-  });
+  enregistrerLecturesInterventions(app);
 
   // Coûts SAV : jamais exposés dans les flux Travaux ou /api/v1. Hors contrat, une intervention ne
   // porte que les heures du technicien (lot pilote 3b), sans matériel.

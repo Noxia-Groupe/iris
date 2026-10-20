@@ -5,7 +5,7 @@
 // (User.role est obligatoire en base : seul un stockage local altéré y conduit).
 import type { LucideIcon } from 'lucide-react';
 import {
-  Activity, Award, BookOpen, Briefcase, Building2, CalendarDays, CheckCircle2, Clock, FileText, FolderOpen,
+  Activity, Award, BookOpen, Briefcase, Building2, CalendarCheck, CalendarDays, CheckCircle2, Clock, FileText, FolderOpen,
   HandCoins, KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
 } from 'lucide-react';
 import {
@@ -37,7 +37,8 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
 
   const sections: { titre?: string; entrees: (EntreeMenu & { visible: boolean })[] }[] = [
     { entrees: [
-      { to: '/', libelle: 'Tableau de bord', icone: LayoutDashboard, exact: true, visible: true },
+      // L'accueil du technicien est « Ma journée » (lot pilote 3b-4).
+      { to: '/', libelle: role === ROLE_TECHNICIEN ? 'Ma journée' : 'Tableau de bord', icone: role === ROLE_TECHNICIEN ? CalendarCheck : LayoutDashboard, exact: true, visible: true },
     ] },
     { titre: 'Chantiers', entrees: [
       { to: '/chantiers', libelle: 'Liste des chantiers', icone: FolderOpen, exact: true, visible: true },

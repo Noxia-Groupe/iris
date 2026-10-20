@@ -23,9 +23,9 @@ test('#103 : date française, refus local invalide, échec serveur visible puis 
   await ligne.getByRole('button', { name: 'Placer' }).click();
   const dialogue = page.getByRole('dialog', { name: /Planifier/ });
   await expect(dialogue.getByLabel('Durée (minutes)')).toHaveValue('90');
-  await expect(dialogue.getByLabel('Jour')).toHaveValue(echeanceFr);
+  await expect(dialogue.getByLabel('Jour', { exact: true })).toHaveValue(echeanceFr);
   await dialogue.getByLabel('Durée (minutes)').fill('120');
-  await dialogue.getByLabel('Jour').fill('31-02-2099');
+  await dialogue.getByLabel('Jour', { exact: true }).fill('31-02-2099');
   await dialogue.getByLabel('Heure de début').fill('09:00');
   await dialogue.getByLabel('Technicien').selectOption(techniciens[0].id);
   let requests = 0;
@@ -35,7 +35,7 @@ test('#103 : date française, refus local invalide, échec serveur visible puis 
   expect(requests).toBe(0);
   await expect(ligne).toBeVisible();
 
-  await dialogue.getByLabel('Jour').fill('02-01-2099');
+  await dialogue.getByLabel('Jour', { exact: true }).fill('02-01-2099');
   let rejected = false;
   const planningPath = `**/api/interventions/${intervention.id}/planning`;
   await page.route(planningPath, async route => {
@@ -47,7 +47,7 @@ test('#103 : date française, refus local invalide, échec serveur visible puis 
   await expect(dialogue.getByRole('alert')).toHaveText('Conflit de planification, réessayez.');
   expect(rejected).toBe(true);
   await expect(ligne).toBeVisible();
-  await expect(dialogue.getByLabel('Jour')).toHaveValue('02-01-2099');
+  await expect(dialogue.getByLabel('Jour', { exact: true })).toHaveValue('02-01-2099');
   await expect(dialogue.getByLabel('Durée (minutes)')).toHaveValue('120');
 
   const suspension = await request.patch(`${api}/contrats-maintenance/${(await contrat.json()).id}/statut`, { headers, data: { statut: 'SUSPENDU', motif: 'Suspension E2E avant placement' } });

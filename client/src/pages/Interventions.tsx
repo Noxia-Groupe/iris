@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
 import { SelecteurClient } from '../components/SelecteurClient';
+import { CoordonneesIntervention } from '../components/CoordonneesIntervention';
 import { FormulaireCloture, FormulaireCompteRendu, FormulaireSignature } from '../components/FormulairesIntervention';
 import { TraceSignature } from '../components/TraceSignature';
 import type { TraceSignature as Trace } from '../lib/traceSignature';
@@ -10,6 +12,7 @@ import { isAdminRole, useCurrentUser } from '../roles';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
 import { chantiersDuClient } from '../lib/chantiersDuClient';
+import type { ContactIntervention, Planification, SiteIntervention } from '../lib/intervention';
 
 type Client = { id: string; raisonSociale: string };
 type ClientDetail = Client & { sites: { id: string; nom: string; ville: string }[]; contacts: { id: string; prenom?: string | null; nom: string }[] };
@@ -19,7 +22,8 @@ type CoutsIntervention = { totalMainOeuvreHT?: number | null; totalMaterielHT?: 
 type Intervention = {
   id: string; reference: string; titre: string; description?: string | null; priorite: string; statut: string;
   dateSouhaitee?: string | null; dateDemande?: string | null; client: Client; contratMaintenanceId?: string | null;
-  site?: { nom: string; ville?: string | null } | null; contact?: { prenom?: string | null; nom: string } | null; chantier?: { nom: string; numeroDevis?: string | null } | null;
+  site?: (SiteIntervention & { nom: string }) | null; contact?: ContactIntervention | null; chantier?: { nom: string; numeroDevis?: string | null; adresse?: string | null } | null;
+  planningEvent?: Planification | null;
   couvertureContrat?: { politiqueMainOeuvre: 'INCLUSE' | 'HORS_FORFAIT'; politiqueMateriel: 'INCLUS' | 'HORS_FORFAIT'; noteCouverture?: string | null };
   rapports?: { id: string; contenu: string; createdAt: string; auteur: { name: string }; signature?: { id: string; signataire: string; accepteLe: string; empreinte: string; trace?: Trace | null; enregistrePar?: { name: string } | null } | null }[];
 };
@@ -37,7 +41,8 @@ const transitions: Record<string, { statut: string; libelle: string }[]> = {
 
 const montantEuros = (montant: number) => Number(montant || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 
-export default function Interventions() {
+// Sans identifiant, la liste ; avec, la fiche d'une seule intervention (lot pilote 3b-4), mêmes actions.
+export default function Interventions({ interventionId }: { interventionId?: string } = {}) {
   const companyTimezone = useCompanyTimezone();
   const formatDateOnlyOrEmpty = (value?: string | null) => value ? formatDateOnly(value) : 'Non renseignée';
   const formatCompanyDateOrEmpty = (value?: string | null) => value ? formatCompanyDate(value, companyTimezone) : 'Non renseignée';
@@ -75,10 +80,12 @@ export default function Interventions() {
   const load = useCallback(async (silencieuse = false) => {
     if (!silencieuse) setLoading(true);
     try {
-      const interventionsRes = await apiFetch('/interventions');
+      const interventionsRes = await apiFetch(interventionId ? `/interventions/${interventionId}` : '/interventions');
       const interventionData = await interventionsRes.json();
-      if (!interventionsRes.ok) throw new Error(interventionData.error || 'Impossible de charger les interventions.');
-      const items = Array.isArray(interventionData) ? interventionData : [];
+      // Fiche hors périmètre, annulée ou supprimée : introuvable, la page le dit.
+      const introuvable = !!interventionId && interventionsRes.status === 404;
+      if (!interventionsRes.ok && !introuvable) throw new Error(interventionData.error || 'Impossible de charger les interventions.');
+      const items = introuvable ? [] : interventionId ? [interventionData] : Array.isArray(interventionData) ? interventionData : [];
       setInterventions(items);
       void chargerCouts(items);
       if (estEncadrement) {
@@ -99,7 +106,7 @@ export default function Interventions() {
     } finally {
       setLoading(false);
     }
-  }, [chargerCouts, estEncadrement]);
+  }, [chargerCouts, estEncadrement, interventionId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -203,8 +210,9 @@ export default function Interventions() {
 
   return <div className="space-y-6">
     <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
-      <div><h1 className="text-2xl font-bold text-gray-900">{estTechnicien ? 'Mes interventions' : 'Interventions SAV'}</h1><p className="text-gray-500">{estTechnicien ? 'Uniquement les dossiers qui vous sont explicitement affectés.' : 'Demandes clients et interventions en cours. Le planning reste une projection prévisionnelle.'}</p></div>
-      {estEncadrement && <button className="btn btn-primary flex items-center gap-2" onClick={() => setFormOpen(true)}><Plus size={18} /> Nouvelle intervention</button>}
+      {interventionId ? <div><h1 className="text-2xl font-bold text-gray-900">Fiche intervention</h1><Link to={estTechnicien ? '/' : '/interventions'} className="text-sm font-medium text-blue-700">{estTechnicien ? '← Ma journée' : '← Toutes les interventions'}</Link></div>
+        : <div><h1 className="text-2xl font-bold text-gray-900">{estTechnicien ? 'Mes interventions' : 'Interventions SAV'}</h1><p className="text-gray-500">{estTechnicien ? 'Uniquement les dossiers qui vous sont explicitement affectés.' : 'Demandes clients et interventions en cours. Le planning reste une projection prévisionnelle.'}</p></div>}
+      {estEncadrement && !interventionId && <button className="btn btn-primary flex items-center gap-2" onClick={() => setFormOpen(true)}><Plus size={18} /> Nouvelle intervention</button>}
     </div>
     {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{error}</div>}
     {formOpen && <form onSubmit={create} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
@@ -216,8 +224,9 @@ export default function Interventions() {
       <div className="grid gap-3 sm:grid-cols-2"><select name="priorite" className="form-input" defaultValue="NORMALE">{Object.entries(libellePriorite).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input name="dateDemande" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date de demande (JJ-MM-AAAA)" aria-label="Date de demande (JJ-MM-AAAA)" className="form-input" /><input name="dateSouhaitee" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date souhaitée (JJ-MM-AAAA)" className="form-input" /></div>
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer</button><button className="btn btn-secondary" type="button" onClick={fermerFormulaire}>Annuler</button></div>
     </form>}
-    {loading ? <p className="text-gray-500">Chargement…</p> : interventions.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucune intervention active.</div> : <div className="grid gap-3">{interventions.map((item) => <article key={item.id} className="rounded-xl border bg-white p-5 shadow-sm">
-      <div className="flex justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">{item.reference}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale}{item.dateDemande && ` · Demandée le ${formatDateOnlyOrEmpty(item.dateDemande)}`} · Souhaitée le {formatDateOnlyOrEmpty(item.dateSouhaitee)}</p>{(item.site || item.contact || item.chantier) && <p className="text-sm text-gray-500">{item.site && `Site : ${item.site.nom}${item.site.ville ? ` (${item.site.ville})` : ''}`}{item.contact && `${item.site ? ' · ' : ''}Contact : ${[item.contact.prenom, item.contact.nom].filter(Boolean).join(' ')}`}{item.chantier && `${item.site || item.contact ? ' · ' : ''}Affaire : ${item.chantier.numeroDevis ? `${item.chantier.numeroDevis} — ` : ''}${item.chantier.nom}`}</p>}</div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>
+    {loading ? <p className="text-gray-500">Chargement…</p> : interventions.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />{interventionId ? 'Intervention introuvable : annulée, ou retirée de vos dossiers.' : 'Aucune intervention active.'}</div> : <div className="grid gap-3">{interventions.map((item) => <article key={item.id} className="rounded-xl border bg-white p-5 shadow-sm">
+      <div className="flex justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">{item.reference}{!interventionId && <> · <Link to={`/interventions/${item.id}`} className="underline">Ouvrir la fiche</Link></>}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale}{item.dateDemande && ` · Demandée le ${formatDateOnlyOrEmpty(item.dateDemande)}`} · Souhaitée le {formatDateOnlyOrEmpty(item.dateSouhaitee)}</p>{(item.site || item.contact || item.chantier) && <p className="text-sm text-gray-500">{item.site && `Site : ${item.site.nom}${item.site.ville ? ` (${item.site.ville})` : ''}`}{item.contact && `${item.site ? ' · ' : ''}Contact : ${[item.contact.prenom, item.contact.nom].filter(Boolean).join(' ')}`}{item.chantier && `${item.site || item.contact ? ' · ' : ''}Affaire : ${item.chantier.numeroDevis ? `${item.chantier.numeroDevis} — ` : ''}${item.chantier.nom}`}</p>}</div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>
+      <CoordonneesIntervention intervention={item} />
       {item.description && <p className="mt-3 text-sm text-gray-600">{item.description}</p>}
       {item.couvertureContrat && <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">Couverture contractuelle figée : main-d’œuvre {item.couvertureContrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {item.couvertureContrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{item.couvertureContrat.noteCouverture ? ` · ${item.couvertureContrat.noteCouverture}` : ''}</p>}
       {/* Un conducteur ne reçoit aucun total hors contrat, où le matériel ne se saisit pas : pas de cadre vide (lot 3b). */}

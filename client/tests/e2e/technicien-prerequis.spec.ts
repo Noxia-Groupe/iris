@@ -58,7 +58,7 @@ test('le technicien relié à sa fiche reçoit une curative placée depuis la fi
   await expect(ligne.getByRole('cell').first()).toHaveText('15-12-2099');
   await ligne.getByRole('button', { name: 'Placer' }).click();
   const dialogue = admin.getByRole('dialog', { name: new RegExp(curative.reference) });
-  await expect(dialogue.getByLabel('Jour')).toHaveValue('15-12-2099');
+  await expect(dialogue.getByLabel('Jour', { exact: true })).toHaveValue('15-12-2099');
   await expect(dialogue.getByLabel('Durée (minutes)')).toHaveValue('60');
   await dialogue.getByLabel('Technicien').selectOption(fiche.id);
   await dialogue.getByLabel('Heure de début').fill('08:30');
