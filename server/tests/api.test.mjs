@@ -272,7 +272,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.course.cle@iris.test', 'sav.verrou.annulation@iris.test', 'sav.verrou.affectation@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.course.cle@iris.test', 'sav.verrou.annulation@iris.test', 'sav.verrou.affectation@iris.test', 'sav.journee@iris.test', 'sav.journee.collegue@iris.test', 'sav.journee.fuseau@iris.test', 'sav.journee.conducteur@iris.test', 'sav.journee.responsable@iris.test', 'sav.journee.tiers@iris.test', 'sav.journee.directeur@iris.test', 'sav.journee.equipe@iris.test', 'sav.fiche@iris.test', 'sav.fiche.collegue@iris.test', 'sav.fiche.commercial@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
@@ -5892,6 +5892,240 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await voitLeDossier(second.jeton, dossier.body.id), true);
       const suppressionIntervenant = await request(app).delete(`/api/intervenants/${second.intervenantId}`).set('Authorization', `Bearer ${session}`);
       assert.equal(suppressionIntervenant.status, 409, JSON.stringify(suppressionIntervenant.body));
+    });
+
+    // Lot pilote 3b-4 : « Ma journée » et fiche d'une intervention. Les règles de la journée sont des
+    // choix par défaut de #253, à confirmer.
+    describe('Ma journée et fiche intervention (lot pilote 3b-4)', () => {
+      const decaler = (jour, n) => new Date(Date.parse(`${jour}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+      const enFrancais = (jour) => jour.split('-').reverse().join('-');
+      const journee = (jeton, jour) => {
+        const requete = request(app).get('/api/interventions/journee').set('Authorization', `Bearer ${jeton}`);
+        return jour === undefined ? requete : requete.query({ jour });
+      };
+      const dossier = async (titre, donnees = {}) => {
+        const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre, ...donnees });
+        assert.equal(creation.status, 201, JSON.stringify(creation.body));
+        return creation.body;
+      };
+      const planifier = async (id, intervenantId, corps) => {
+        const reponse = await request(app).put(`/api/interventions/${id}/planning`).set('Authorization', `Bearer ${session}`).send({ intervenantIds: [intervenantId], ...corps });
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      };
+      const statut = async (id, valeur) => {
+        const reponse = await request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: valeur });
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+      };
+      const titres = (liste) => liste.map((item) => item.titre);
+
+      test('le technicien voit ses interventions du jour par créneau, les terminées à part et, aujourd’hui seulement, celles restées ouvertes', async () => {
+        const technicien = await compteTechnicienSav('sav.journee@iris.test', 'TEST Intervenant journée');
+        const collegue = await compteTechnicienSav('sav.journee.collegue@iris.test', 'TEST Intervenant journée collègue');
+        const aujourdhui = (await journee(technicien.jeton)).body.aujourdhui;
+        assert.match(aujourdhui, /^\d{4}-\d{2}-\d{2}$/);
+        const hier = decaler(aujourdhui, -1);
+        const avantHier = decaler(aujourdhui, -2);
+        const demain = decaler(aujourdhui, 1);
+
+        const apresMidi = await dossier('TEST Journée après-midi');
+        await planifier(apresMidi.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'APRES_MIDI' });
+        const quatorze = await dossier('TEST Journée 14 h');
+        await planifier(quatorze.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'HEURES', heureDebut: '14:00', heureFin: '15:00' });
+        const matin = await dossier('TEST Journée matin');
+        await planifier(matin.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        const huitHeures = await dossier('TEST Journée 8 h 30');
+        await planifier(huitHeures.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'HEURES', heureDebut: '08:30', heureFin: '09:30' });
+        const entiere = await dossier('TEST Journée entière');
+        await planifier(entiere.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'JOURNEE' });
+        await statut(entiere.id, 'EN_COURS');
+        // Une projection de plusieurs jours compte pour chacun d'eux.
+        const plusieursJours = await dossier('TEST Journée sur trois jours');
+        await planifier(plusieursJours.id, technicien.intervenantId, { dateDebut: hier, dateFin: demain, creneau: 'JOURNEE' });
+        const terminee = await dossier('TEST Journée terminée');
+        await planifier(terminee.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        await statut(terminee.id, 'EN_COURS');
+        assert.equal((await terminerIntervention(terminee.id, session)).status, 200);
+        const annulee = await dossier('TEST Journée annulée');
+        await planifier(annulee.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        await statut(annulee.id, 'ANNULEE');
+        // Créée avant celle d'avant-hier, et d'un créneau plus tôt : seul le tri par dernier jour prévu
+        // la range après elle (ni la référence ni le créneau).
+        const nonCommencee = await dossier('TEST Journée prévue hier');
+        await planifier(nonCommencee.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
+        const enRetard = await dossier('TEST Journée en cours depuis avant-hier');
+        await planifier(enRetard.id, technicien.intervenantId, { dateDebut: avantHier, creneau: 'JOURNEE' });
+        await statut(enRetard.id, 'EN_COURS');
+        // Annulée après son jour prévu : absente de la rubrique des restées ouvertes.
+        const annuleeHier = await dossier('TEST Journée annulée hier');
+        await planifier(annuleeHier.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
+        await statut(annuleeHier.id, 'ANNULEE');
+        const termineeHier = await dossier('TEST Journée terminée hier');
+        await planifier(termineeHier.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
+        await statut(termineeHier.id, 'EN_COURS');
+        assert.equal((await terminerIntervention(termineeHier.id, session)).status, 200);
+        // Affectée sans projection : visible dans la liste, absente de la journée.
+        const sansProjection = await dossier('TEST Journée sans projection');
+        await prisma.interventionAffectation.create({ data: { interventionId: sansProjection.id, intervenantId: technicien.intervenantId } });
+        assert.equal(await voitLeDossier(technicien.jeton, sansProjection.id), true);
+        const duCollegue = await dossier('TEST Journée du collègue');
+        await planifier(duCollegue.id, collegue.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+
+        const jour = await journee(technicien.jeton);
+        assert.equal(jour.status, 200, JSON.stringify(jour.body));
+        assert.equal(jour.body.jour, aujourdhui);
+        // À créneau égal, l'ordre suit la référence, donc l'ordre de création.
+        assert.deepEqual(titres(jour.body.aFaire), ['TEST Journée matin', 'TEST Journée entière', 'TEST Journée sur trois jours', 'TEST Journée 8 h 30', 'TEST Journée 14 h', 'TEST Journée après-midi'],
+          'matin, journée, heures dans l’ordre, après-midi');
+        assert.deepEqual(titres(jour.body.terminees), ['TEST Journée terminée']);
+        assert.deepEqual(titres(jour.body.resteesOuvertes), ['TEST Journée en cours depuis avant-hier', 'TEST Journée prévue hier'], 'par dernier jour prévu, sans les terminées');
+        assert.equal(jour.body.aFaire[0].planningEvent.creneau, 'MATIN');
+        assert.equal(jour.body.aFaire[3].planningEvent.heureDebut, '08:30');
+        // Jamais de montant ni de taux.
+        assert.doesNotMatch(JSON.stringify(jour.body), /taux|montant/i);
+
+        const duCollegueJour = await journee(collegue.jeton);
+        assert.deepEqual(titres(duCollegueJour.body.aFaire), ['TEST Journée du collègue'], 'chacun ne voit que ses affectations');
+
+        // Un autre jour : ni rubrique « restées ouvertes », ni terminées d'un autre jour ; format JJ-MM-AAAA admis.
+        const lendemain = await journee(technicien.jeton, enFrancais(demain));
+        assert.equal(lendemain.status, 200, JSON.stringify(lendemain.body));
+        assert.deepEqual([lendemain.body.jour, lendemain.body.aujourdhui], [demain, aujourdhui]);
+        assert.deepEqual(titres(lendemain.body.aFaire), ['TEST Journée sur trois jours']);
+        assert.deepEqual([lendemain.body.resteesOuvertes, lendemain.body.terminees], [[], []]);
+        const veille = await journee(technicien.jeton, hier);
+        assert.deepEqual(titres(veille.body.aFaire), ['TEST Journée prévue hier', 'TEST Journée sur trois jours']);
+        assert.deepEqual(titres(veille.body.terminees), ['TEST Journée terminée hier']);
+        assert.deepEqual(veille.body.resteesOuvertes, []);
+
+        for (const invalide of ['2026-13-01', '31-02-2026', 'demain', '']) {
+          const refus = await journee(technicien.jeton, invalide);
+          assert.equal(refus.status, 400, `${invalide} : ${JSON.stringify(refus.body)}`);
+        }
+        const double = await request(app).get('/api/interventions/journee?jour=2026-10-20&jour=2026-10-21').set('Authorization', `Bearer ${technicien.jeton}`);
+        assert.equal(double.status, 400, JSON.stringify(double.body));
+      });
+
+      test('la journée suit le jour civil de la société, et non celui d’UTC', async () => {
+        const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        const fuseau = 'Pacific/Wallis';
+        const fuseauInitial = (await request(app).get('/api/company').set('Authorization', `Bearer ${session}`)).body.fuseauHoraire;
+        const technicien = await compteTechnicienSav('sav.journee.fuseau@iris.test', 'TEST Intervenant journée fuseau');
+        try {
+          figerHorlogeA21hUtc();
+          assert.notEqual(jourDans(fuseau), jourDans('UTC'), 'le jour de la société diffère de celui d’UTC');
+          assert.equal((await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseau })).status, 200);
+          const deLaSociete = await dossier('TEST Journée au jour de la société');
+          await planifier(deLaSociete.id, technicien.intervenantId, { dateDebut: jourDans(fuseau), creneau: 'JOURNEE' });
+          const deUtc = await dossier('TEST Journée au jour UTC');
+          await planifier(deUtc.id, technicien.intervenantId, { dateDebut: jourDans('UTC'), creneau: 'JOURNEE' });
+          const reponse = await journee(technicien.jeton);
+          assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+          assert.deepEqual([reponse.body.jour, reponse.body.aujourdhui, reponse.body.fuseauHoraire], [jourDans(fuseau), jourDans(fuseau), fuseau]);
+          assert.deepEqual(titres(reponse.body.aFaire), ['TEST Journée au jour de la société']);
+          // Le jour UTC est la veille de celui de Wallis : son intervention y est restée ouverte.
+          assert.deepEqual(titres(reponse.body.resteesOuvertes), ['TEST Journée au jour UTC']);
+        } finally {
+          mock.timers.reset();
+          await request(app).put('/api/company').set('Authorization', `Bearer ${session}`).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+        }
+      });
+
+      test('la fiche suit le périmètre de la liste et garde adresse et téléphone, même pour un client désactivé', async () => {
+        const technicien = await compteTechnicienSav('sav.fiche@iris.test', 'TEST Intervenant fiche');
+        const collegue = await compteTechnicienSav('sav.fiche.collegue@iris.test', 'TEST Intervenant fiche collègue');
+        const commercial = await prisma.user.create({ data: { email: 'sav.fiche.commercial@iris.test', name: 'TEST Commercial fiche', role: 'COMMERCIAL' } });
+        const jetonCommercial = jwt.sign({ id: commercial.id }, process.env.JWT_SECRET);
+        const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client fiche désactivé' });
+        assert.equal(client.status, 201, JSON.stringify(client.body));
+        const site = await prisma.clientSite.create({ data: { clientId: client.body.id, nom: 'Chaufferie', adresse: '2 rue du Parcours', complementAdresse: 'Bâtiment B', codePostal: '14000', ville: 'Caen' } });
+        const contact = await prisma.clientContact.create({ data: { clientId: client.body.id, prenom: 'Alice', nom: 'Martin', telephone: '06 12 34 56 78', email: 'alice.martin@exemple.test' } });
+        const fiche = await dossier('TEST Fiche intervention', { clientId: client.body.id, siteId: site.id, contactId: contact.id });
+        const aujourdhui = (await journee(technicien.jeton)).body.aujourdhui;
+        await planifier(fiche.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'HEURES', heureDebut: '10:00', heureFin: '11:00' });
+        const lire = (jeton, id = fiche.id) => request(app).get(`/api/interventions/${id}`).set('Authorization', `Bearer ${jeton}`);
+
+        const lue = await lire(technicien.jeton);
+        assert.equal(lue.status, 200, JSON.stringify(lue.body));
+        assert.equal(lue.body.reference, fiche.reference);
+        assert.deepEqual([lue.body.site.adresse, lue.body.site.complementAdresse, lue.body.site.codePostal, lue.body.site.ville], ['2 rue du Parcours', 'Bâtiment B', '14000', 'Caen']);
+        assert.equal(lue.body.contact.telephone, '06 12 34 56 78');
+        assert.deepEqual([lue.body.planningEvent.creneau, lue.body.planningEvent.heureDebut, lue.body.planningEvent.heureFin], ['HEURES', '10:00', '11:00']);
+        assert.doesNotMatch(JSON.stringify(lue.body), /taux|montant/i);
+        const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`);
+        assert.equal(liste.body.find((item) => item.id === fiche.id).planningEvent.creneau, 'HEURES', 'la liste porte aussi le créneau');
+
+        assert.equal((await lire(collegue.jeton)).status, 404, 'hors périmètre : introuvable');
+        assert.equal((await lire(technicien.jeton, randomUUID())).status, 404);
+        assert.equal((await lire(jetonCommercial)).status, 403);
+        assert.equal((await journee(jetonCommercial)).status, 403);
+
+        // Client désactivé : sa fiche est fermée au technicien, mais l'intervention affectée garde le
+        // nom du client, l'adresse du site et le téléphone du contact (état actuel, section 4 de la passation).
+        assert.equal((await request(app).delete(`/api/clients/${client.body.id}`).set('Authorization', `Bearer ${session}`)).status, 200);
+        assert.equal((await request(app).get(`/api/clients/${client.body.id}`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 404);
+        const desactive = await lire(technicien.jeton);
+        assert.equal(desactive.status, 200, JSON.stringify(desactive.body));
+        assert.deepEqual([desactive.body.client.raisonSociale, desactive.body.site.adresse, desactive.body.contact.telephone], ['TEST Client fiche désactivé', '2 rue du Parcours', '06 12 34 56 78']);
+        const dansLaJournee = (await journee(technicien.jeton)).body.aFaire.find((item) => item.id === fiche.id);
+        assert.deepEqual([dansLaJournee?.client.raisonSociale, dansLaJournee?.contact.telephone], ['TEST Client fiche désactivé', '06 12 34 56 78']);
+
+        // Annulée : introuvable, pour le technicien comme pour l'administration.
+        await statut(fiche.id, 'ANNULEE');
+        assert.equal((await lire(technicien.jeton)).status, 404);
+        assert.equal((await lire(session)).status, 404);
+      });
+
+      // Règle 2 : la journée et la fiche reprennent, pour chaque rôle, le périmètre de la liste.
+      test('journée et fiche suivent le périmètre hiérarchique de la liste ; le directeur est refusé', async () => {
+        const jetonDe = (compte) => jwt.sign({ id: compte.id }, process.env.JWT_SECRET);
+        const conducteur = await prisma.user.create({ data: { email: 'sav.journee.conducteur@iris.test', name: 'TEST Conducteur journée', role: 'CONDUCTEUR_TRAVAUX' } });
+        const responsable = await prisma.user.create({ data: { email: 'sav.journee.responsable@iris.test', name: 'TEST Responsable journée', role: 'RESPONSABLE' } });
+        const tiers = await prisma.user.create({ data: { email: 'sav.journee.tiers@iris.test', name: 'TEST Conducteur journée tiers', role: 'CONDUCTEUR_TRAVAUX' } });
+        const directeur = await prisma.user.create({ data: { email: 'sav.journee.directeur@iris.test', name: 'TEST Directeur journée', role: 'DIRECTEUR' } });
+        await prisma.user.update({ where: { id: conducteur.id }, data: { responsableHierarchiqueId: responsable.id } });
+        const technicien = await compteTechnicienSav('sav.journee.equipe@iris.test', 'TEST Intervenant journée équipe');
+        const { raisonSociale } = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
+        const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier journée équipe', client: raisonSociale, clientId, dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
+        const aujourdhui = (await journee(technicien.jeton)).body.aujourdhui;
+        // Rattachée à l'affaire du conducteur ; ouverte par le conducteur, sans affaire ; hors de leur équipe.
+        const rattachee = await dossier('TEST Journée équipe rattachée', { chantierId: chantier.id });
+        await planifier(rattachee.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${jetonDe(conducteur)}`).send({ clientId, titre: 'TEST Journée ouverte par le conducteur' });
+        assert.equal(creation.status, 201, JSON.stringify(creation.body));
+        const ouverteParLui = creation.body;
+        await planifier(ouverteParLui.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'JOURNEE' });
+        const horsEquipe = await dossier('TEST Journée hors équipe');
+        await planifier(horsEquipe.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        const lire = (jeton, id) => request(app).get(`/api/interventions/${id}`).set('Authorization', `Bearer ${jeton}`);
+        const idsDuJour = async (jeton) => {
+          const reponse = await journee(jeton);
+          assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+          return reponse.body.aFaire.map((item) => item.id);
+        };
+
+        const attendus = [
+          [conducteur, 'conducteur', [rattachee, ouverteParLui], [horsEquipe]],
+          [responsable, 'responsable', [rattachee], [ouverteParLui, horsEquipe]],
+          [tiers, 'conducteur tiers', [], [rattachee, ouverteParLui, horsEquipe]],
+        ];
+        for (const [compte, role, visibles, fermees] of attendus) {
+          const jeton = jetonDe(compte);
+          const ids = await idsDuJour(jeton);
+          for (const item of visibles) {
+            assert.equal((await lire(jeton, item.id)).status, 200, `${role} : fiche ${item.titre}`);
+            assert.equal(ids.includes(item.id), true, `${role} : journée ${item.titre}`);
+          }
+          for (const item of fermees) {
+            assert.equal((await lire(jeton, item.id)).status, 404, `${role} : fiche ${item.titre}`);
+            assert.equal(ids.includes(item.id), false, `${role} : journée ${item.titre}`);
+          }
+        }
+        // L'administration voit tout ; le directeur, comme le commercial, n'a ni journée ni fiche.
+        assert.equal((await lire(session, horsEquipe.id)).status, 200);
+        assert.equal((await idsDuJour(session)).includes(horsEquipe.id), true);
+        assert.equal((await lire(jetonDe(directeur), rattachee.id)).status, 403);
+        assert.equal((await journee(jetonDe(directeur))).status, 403);
+      });
     });
 
     test('liste les interventions sans exposer les dossiers annulés par défaut', async () => {

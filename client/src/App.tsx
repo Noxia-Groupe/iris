@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AppLayout } from './components/AppLayout';
 import Dashboard from './pages/Dashboard';
 import ChantierDetail from './pages/ChantierDetail';
@@ -24,6 +24,7 @@ import Catalogue from './pages/Catalogue';
 import Secours from './pages/Secours';
 import Devis from './pages/Devis';
 import Interventions from './pages/Interventions';
+import MaJournee from './pages/MaJournee';
 import ContratsMaintenance from './pages/ContratsMaintenance';
 import Factures from './pages/Factures';
 import Reglements from './pages/Reglements';
@@ -86,6 +87,19 @@ const RouteDevis = () => {
   return peutAccederAuxDevis(utilisateur) ? <Devis /> : <Navigate to="/" replace />;
 };
 
+// L'accueil du technicien est « Ma journée » (lot pilote 3b-4, choix par défaut de #253, à confirmer) ;
+// les autres comptes gardent le tableau de bord.
+const RouteAccueil = () => {
+  const utilisateur = useCurrentUser();
+  return utilisateur?.role === ROLE_TECHNICIEN ? <MaJournee /> : <Dashboard />;
+};
+
+// Fiche d'une intervention : l'écran Interventions, réduit à elle seule.
+const RouteFicheIntervention = () => {
+  const { id } = useParams<{ id: string }>();
+  return <Interventions key={id} interventionId={id} />;
+};
+
 // Identité de la société : consultable par un administrateur, modifiable par le seul
 // super administrateur — c'est aussi ce qu'applique le serveur (PUT /api/company).
 const RouteSociete = () => {
@@ -111,7 +125,7 @@ function App() {
         
         <Route path="/" element={
           <PrivateRoute>
-            <Dashboard />
+            <RouteAccueil />
           </PrivateRoute>
         } />
 
@@ -135,6 +149,11 @@ function App() {
         <Route path="/interventions" element={
           <PrivateRoute requiredRoles={ROLES_INTERVENTIONS}>
             <Interventions />
+          </PrivateRoute>
+        } />
+        <Route path="/interventions/:id" element={
+          <PrivateRoute requiredRoles={ROLES_INTERVENTIONS}>
+            <RouteFicheIntervention />
           </PrivateRoute>
         } />
         <Route path="/contrats-maintenance" element={

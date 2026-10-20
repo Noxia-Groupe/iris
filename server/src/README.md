@@ -52,7 +52,8 @@ server/
                               (indicateurs et sérialisation), droits.ts (rentabilité, montants,
                               clôture), metier.ts (types, titulaire, commercial)
     domaines/interventions/   routes.ts (SAV, coûts, comptes rendus, placement), metier.ts,
-                              comptesRendus.ts (tracé, empreinte, motifs de clôture, verrou)
+                              lectures.ts (liste, « Ma journée », fiche), comptesRendus.ts (tracé,
+                              empreinte, clé d'envoi, motifs de clôture, verrou et périmètre relu, journal)
     domaines/contrats/        routes.ts, metier.ts (couverture, échéances, verrou)
     domaines/planning/        routes.ts (événements, types, partage, lien public), metier.ts
                               (module actif, validation des événements)
