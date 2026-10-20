@@ -51,7 +51,8 @@ server/
     domaines/chantiers/       routes.ts, saisies.ts (achats, heures, encaissé), suivi.ts
                               (indicateurs et sérialisation), droits.ts (rentabilité, montants,
                               clôture), metier.ts (types, titulaire, commercial)
-    domaines/interventions/   routes.ts (SAV, coûts, comptes rendus, placement), metier.ts
+    domaines/interventions/   routes.ts (SAV, coûts, comptes rendus, placement), metier.ts,
+                              comptesRendus.ts (tracé, empreinte, motifs de clôture, verrou)
     domaines/contrats/        routes.ts, metier.ts (couverture, échéances, verrou)
     domaines/planning/        routes.ts (événements, types, partage, lien public), metier.ts
                               (module actif, validation des événements)
