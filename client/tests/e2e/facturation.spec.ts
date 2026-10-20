@@ -573,10 +573,12 @@ test.describe('Facturation — parcours utilisateur', () => {
 
   // #247 : sans réponse de l'API, l'avoir a pu être émis. L'écran ne l'affirme ni ne le nie, relit la
   // liste, puis libère le formulaire : une nouvelle soumission reste possible, en connaissance de cause.
-  // Même conduite pour une réponse perdue en chemin et pour une erreur de passerelle sans message.
+  // Même conduite pour une réponse perdue en chemin, une erreur de passerelle sans message et une
+  // erreur serveur (5xx), même accompagnée d'un message.
   const reponsesSansIssue = [
     { cas: 'une réponse perdue', client: 'avoir-reponse-perdue', cause: /impossible de joindre le serveur/, perdre: (route: Route) => route.abort('connectionreset') },
     { cas: 'une erreur de passerelle sans message', client: 'avoir-reponse-passerelle', cause: /réponse inattendue du serveur \(502\)/, perdre: (route: Route) => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }) },
+    { cas: 'une erreur serveur avec message', client: 'avoir-reponse-erreur-serveur', cause: /réponse inattendue du serveur \(500\)/, perdre: (route: Route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Création de l’avoir impossible.' }) }) },
   ];
   for (const { cas, client: nomClient, cause, perdre } of reponsesSansIssue) test(`${cas} à la création d’un avoir partiel relit la liste puis libère le formulaire`, async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
     const client = await creerClient(nomClient);
@@ -599,6 +601,7 @@ test.describe('Facturation — parcours utilisateur', () => {
     const message = page.getByText(/La création de l’avoir n’a pas pu être confirmée/);
     await expect(message).toBeVisible();
     await expect(message).toContainText(cause);
+    await expect(message).toContainText('Vérifiez les avoirs de la facture dans la liste avant de réessayer.');
     await expect(facture).toContainText(/Annulation totale impossible : 1 avoir\(s\) partiel\(s\)/);
     await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toBeVisible();
     await expect(bouton).toBeEnabled();
@@ -608,6 +611,58 @@ test.describe('Facturation — parcours utilisateur', () => {
     await bouton.click();
     await expect(page.getByText(/Avoir .* créé et émis/)).toBeVisible();
     expect(await avoirsDuClient()).toEqual([12, 12]);
+  });
+
+  // #247 : la liste est relue AVANT de libérer le formulaire. Si cette relecture échoue aussi (réseau
+  // toujours coupé, serveur en redémarrage), la liste affichée est périmée : le bouton reste désactivé
+  // jusqu'à une actualisation réussie, qui montre l'avoir émis.
+  test('après une issue inconnue, l’avoir partiel attend une relecture réussie de la liste', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {
+    const client = await creerClient('avoir-relecture-echouee');
+    const page = await allerSurPageAdmin('/factures');
+    const facture = await emettreFactureSource(page, client, [['1', '100', '20']]);
+    const avoirsDuClient = async () => {
+      const factures = await (await apiAdmin.get('/factures')).json() as Array<{ type: string; client: { id: string }; totalTtc: number }>;
+      return factures.filter((item) => item.type === 'AVOIR' && item.client.id === client.id).map((avoir) => avoir.totalTtc);
+    };
+    await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    await remplirLigneAvoir(page, 1, '1', '10', '20');
+    // Le serveur émet l'avoir, la réponse se perd, puis la relecture de la liste est retenue et échoue.
+    let perdue = false;
+    let libererRelecture!: () => void;
+    const relecture = new Promise<void>((resolve) => { libererRelecture = resolve; });
+    let signalerRelecture!: () => void;
+    const relectureDemandee = new Promise<void>((resolve) => { signalerRelecture = resolve; });
+    await page.route('**/api/**', async (route) => {
+      const requete = route.request();
+      if (requete.method() === 'POST' && /\/api\/factures\/[^/]+\/avoirs$/.test(requete.url())) {
+        await route.fetch();
+        perdue = true;
+        return route.abort('connectionreset');
+      }
+      if (perdue && /\/api\/factures\?page=/.test(requete.url())) {
+        signalerRelecture();
+        await relecture;
+        return route.abort('internetdisconnected');
+      }
+      return route.continue();
+    });
+    const bouton = page.getByRole('button', { name: /Créer l’avoir partiel/ });
+    await bouton.click();
+    await relectureDemandee;
+    // Souple : sans attente de la relecture, le parcours montre aussi la suite.
+    await expect.soft(bouton).toBeDisabled();
+    libererRelecture();
+    await expect(page.getByText(/La création de l’avoir n’a pas pu être confirmée/)).toBeVisible();
+    await expect(page.getByText(/La liste n’a pas pu être relue : actualisez-la/)).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Nouvel avoir partiel/ })).toBeVisible();
+    await expect(bouton).toBeDisabled();
+    expect(await avoirsDuClient()).toEqual([12]);
+    await page.unroute('**/api/**');
+
+    await page.getByRole('button', { name: 'Actualiser', exact: true }).click();
+    await expect(facture).toContainText(/Annulation totale impossible : 1 avoir\(s\) partiel\(s\)/);
+    await expect(page.getByText(/La liste n’a pas pu être relue/)).toHaveCount(0);
+    await expect(bouton).toBeEnabled();
   });
 
   // 0,5 × 4,27 = 2,135 € : l'aperçu doit annoncer le montant réellement émis,
@@ -657,6 +712,11 @@ test.describe('Facturation — parcours utilisateur', () => {
     const page = await allerSurPageAdmin('/factures');
     const facture = await emettreFactureSource(page, client, [['10', '100', '20']]);
     await facture.getByRole('button', { name: /Créer un avoir partiel/ }).click();
+    // Un refus de saisie, avant tout envoi, ne verrouille pas le formulaire (#247).
+    await remplirLigneAvoir(page, 1, '0', '100', '20');
+    await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
+    await expect(page.getByText(/Ligne d’avoir 1 : désignation obligatoire, quantité supérieure à zéro/)).toBeVisible();
+    await expect(page.getByRole('button', { name: /Créer l’avoir partiel/ })).toBeEnabled();
     await remplirLigneAvoir(page, 1, '20', '100', '20');
     await page.getByRole('button', { name: /Créer l’avoir partiel/ }).click();
     await expect(page.getByText(/Cet avoir dépasse le montant total restant à créditer/)).toBeVisible();

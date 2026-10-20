@@ -100,6 +100,10 @@ export default function Factures() {
   // n'ait désactivé le bouton ; l'état garde ce bouton désactivé jusqu'à la réponse.
   const envoiAvoirEnCours = useRef(false);
   const [envoiAvoir, setEnvoiAvoir] = useState(false);
+  // Après une issue inconnue, le bouton reste désactivé tant que la liste n'a pas été relue avec
+  // succès : si la relecture échoue aussi, la liste affichée est périmée et ne montrerait pas un
+  // avoir déjà émis (#247). Toute relecture réussie, dont « Actualiser », le libère.
+  const [relectureRequise, setRelectureRequise] = useState(false);
   const [factureTraceId, setFactureTraceId] = useState<string | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [traceErreur, setTraceErreur] = useState('');
@@ -159,6 +163,7 @@ export default function Factures() {
       setFactures(facturesData.items);
       setTotal(facturesData.total);
       setChargement(false);
+      setRelectureRequise(false);
       setClients(clientsData.clients || clientsData || []);
       setChantiers(Array.isArray(chantiersData) ? chantiersData : []);
       setInterventions(Array.isArray(interventionsData) ? interventionsData : []);
@@ -283,15 +288,17 @@ export default function Factures() {
     // toute nouvelle soumission (#247).
     const issueInconnue = async (cause: string) => {
       setErreur(`La création de l’avoir n’a pas pu être confirmée : ${cause}. Vérifiez les avoirs de la facture dans la liste avant de réessayer.`);
+      setRelectureRequise(true);
       await charger();
     };
     try {
       const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        // Un refus de l'API porte son message : l'avoir n'a pas été émis. Une réponse sans ce message,
-        // d'une passerelle (502, 504) par exemple, ne dit pas si le serveur l'a émis.
-        if (data.error) setErreur(data.error);
+        // Un refus métier de l'API (4xx) porte son message : l'avoir n'a pas été émis. Une erreur serveur
+        // (5xx), même avec un message, ou une réponse sans message, d'une passerelle par exemple, ne dit
+        // pas si l'avoir a été émis.
+        if (data.error && res.status < 500) setErreur(data.error);
         else await issueInconnue(`réponse inattendue du serveur (${res.status})`);
         return;
       }
@@ -458,7 +465,8 @@ export default function Factures() {
             <span><strong>TVA</strong><br />{formatMontant(totauxAvoir.totalTva)}</span>
             <span><strong>Total TTC</strong><br />{formatMontant(totauxAvoir.totalTtc)}</span>
           </div>
-          <button className="btn btn-primary" type="submit" disabled={envoiAvoir}><Send size={16} /> Créer l’avoir partiel</button>
+          {relectureRequise && !envoiAvoir && <p role="status" className="text-sm text-amber-700">La liste n’a pas pu être relue : actualisez-la pour vérifier les avoirs de la facture avant de réessayer.</p>}
+          <button className="btn btn-primary" type="submit" disabled={envoiAvoir || relectureRequise}><Send size={16} /> Créer l’avoir partiel</button>
         </form>
       )}
 
