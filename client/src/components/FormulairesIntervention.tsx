@@ -115,7 +115,7 @@ export function FormulaireSignature({ rapport, enregistrePar, onEnregistre, onRe
     <div><h3 className="font-semibold">Signature du client</h3><p className="text-sm text-gray-600">Le client relit le compte rendu, confirme et signe au doigt. La signature ne se modifie plus.</p></div>
     <blockquote className="rounded border border-gray-200 bg-white p-3 text-sm text-gray-700">{rapport.contenu}</blockquote>
     <label className="block text-sm font-medium">Enregistré par<input aria-label="Enregistré par" readOnly className="form-input mt-1 w-full bg-gray-100" value={enregistrePar} /></label>
-    <label className="block text-sm font-medium">Nom du signataire client<input aria-label="Nom du signataire client" autoFocus className="form-input mt-1 w-full" maxLength={200} value={signataire} onChange={(event) => setSignataire(event.target.value)} disabled={envoi} placeholder="Prénom et nom" /></label>
+    <label className="block text-sm font-medium">Nom du signataire client<input aria-label="Nom du signataire client" className="form-input mt-1 w-full" maxLength={200} value={signataire} onChange={(event) => setSignataire(event.target.value)} disabled={envoi} placeholder="Prénom et nom" /></label>
     <ZoneSignature onChange={setTrace} desactivee={envoi} />
     <label className="flex items-start gap-2 text-sm"><input aria-label="Confirmation du client" type="checkbox" className="mt-1" checked={confirme} onChange={(event) => setConfirme(event.target.checked)} disabled={envoi} /><span>Le client confirme avoir lu et accepté ce compte rendu.</span></label>
     {erreur && <p role="alert" className="text-sm text-red-700">{erreur}</p>}
@@ -139,7 +139,9 @@ export function FormulaireCloture({ interventionId, nombreComptesRendus, signe, 
   const [precision, setPrecision] = useState('');
   const [erreur, setErreur] = useState('');
   const { envoi, executer } = useEnvoiUnique();
-  const valide = signe || (motif !== '' && (motif !== 'AUTRE' || (precision.trim().length >= 3 && precision.trim().length <= 200)));
+  // Longueur en caractères (points de code), comme le serveur : deux emoji n'en font pas quatre.
+  const longueurPrecision = [...precision.trim()].length;
+  const valide = signe || (motif !== '' && (motif !== 'AUTRE' || (longueurPrecision >= 3 && longueurPrecision <= 200)));
 
   const soumettre = (event: React.FormEvent) => {
     event.preventDefault();

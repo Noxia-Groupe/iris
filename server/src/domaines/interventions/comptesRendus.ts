@@ -57,9 +57,10 @@ export function empreinteSignature(rapport: { id: string; contenu: string }, sig
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-// PostgreSQL refuse le caractère nul dans un texte : il est refusé en amont (400) plutôt qu'en erreur
-// serveur.
-export const contientCaractereNul = (texte: string) => texte.includes('\u0000');
+// PostgreSQL refuse le caractère nul dans un texte, et l'UTF-8 une demi-paire de substitution isolée :
+// ils sont refusés en amont (400) plutôt qu'en erreur serveur. Avec le drapeau u, une paire complète
+// (un emoji) forme un seul point de code et ne correspond pas à \p{Cs}.
+export const contientCaractereInvalide = (texte: string) => texte.includes('\u0000') || /\p{Cs}/u.test(texte);
 
 export function cleEnvoiValide(valeur: unknown): string | null {
   return typeof valeur === 'string' && UUID.test(valeur) ? valeur.toLowerCase() : null;
@@ -83,7 +84,7 @@ export type MotifCloture = { texte: string | null } | { erreur: string };
 // ensuite, sous verrou, s'il en fallait un.
 export function motifClotureValide(motif: unknown, precision: unknown): MotifCloture {
   const precisionTexte = typeof precision === 'string' ? precision.trim() : '';
-  if (precisionTexte.includes('\u0000')) return { erreur: 'La précision du motif contient un caractère invalide.' };
+  if (contientCaractereInvalide(precisionTexte)) return { erreur: 'La précision du motif contient un caractère invalide.' };
   // Même métrique Unicode que PostgreSQL et que les autres motifs : un emoji compte pour un caractère.
   const longueur = [...precisionTexte].length;
   if (motif === undefined || motif === null || motif === '') {

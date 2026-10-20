@@ -275,3 +275,93 @@ test('une clôture sur un état périmé se remet d’elle-même à jour', async
   await cloture.getByRole('button', { name: 'Confirmer la fin de l’intervention' }).click();
   await expect(carte.getByText('Terminée', { exact: true })).toBeVisible();
 });
+
+// Un formulaire de clôture dont l'intervention change entre-temps se ferme à la relecture : les autres
+// cartes gardent leurs actions (constaté à l'audit : toutes disparaissaient jusqu'au rechargement). Une
+// clôture en échec, elle, garde son formulaire ouvert pour être renvoyée.
+test('après une clôture à l’issue inconnue ou refusée, les autres cartes gardent leurs actions', async ({ session, request, creerClient, allerSurPageAdmin }) => {
+  const dossiers = [];
+  for (const libelle of ['cloture-inconnue', 'cloture-annulee', 'cloture-temoin']) {
+    const dossier = await preparer(request, session.token, creerClient, libelle);
+    expect((await request.post(`${api}/interventions/${dossier.intervention.id}/rapports`, { headers: dossier.headers, data: { contenu: `Compte rendu ${libelle}.`, cleEnvoi: randomUUID() } })).status()).toBe(201);
+    dossiers.push(dossier);
+  }
+  const [inconnue, annulee, temoin] = dossiers;
+  const page = await allerSurPageAdmin('/interventions');
+  const carte = (dossier: { titre: string }) => page.locator('article', { hasText: dossier.titre });
+  const terminerSansSignature = async (dossier: { titre: string }) => {
+    await carte(dossier).getByRole('button', { name: 'Terminer' }).click();
+    const cloture = carte(dossier).getByRole('dialog', { name: 'Terminer l’intervention' });
+    await cloture.getByRole('radio', { name: 'Client absent' }).check();
+    await cloture.getByRole('button', { name: 'Terminer sans signature' }).click();
+  };
+  // 1. La clôture est enregistrée, mais sa réponse est perdue.
+  await page.route(`**/api/interventions/${inconnue.intervention.id}/statut`, async (route: Route) => {
+    const reponse = await route.fetch();
+    expect(reponse.status()).toBe(200);
+    await route.abort('failed');
+  });
+  await terminerSansSignature(inconnue);
+  await expect(carte(inconnue).getByText('Terminée', { exact: true })).toBeVisible();
+  await expect(carte(inconnue).getByRole('dialog')).toHaveCount(0);
+  await expect(carte(temoin).getByRole('button', { name: 'Terminer' })).toBeVisible();
+  // 2. L'intervention est annulée ailleurs pendant que le formulaire est ouvert.
+  await carte(annulee).getByRole('button', { name: 'Terminer' }).click();
+  expect((await request.patch(`${api}/interventions/${annulee.intervention.id}/statut`, { headers: annulee.headers, data: { statut: 'ANNULEE' } })).ok()).toBeTruthy();
+  const cloture = carte(annulee).getByRole('dialog', { name: 'Terminer l’intervention' });
+  await cloture.getByRole('radio', { name: 'Client absent' }).check();
+  await cloture.getByRole('button', { name: 'Terminer sans signature' }).click();
+  await expect(carte(annulee)).toHaveCount(0);
+  await expect(page.getByText('Cette intervention a changé entre-temps')).toBeVisible();
+  await expect(carte(temoin).getByRole('button', { name: 'Terminer' })).toBeVisible();
+  await expect(carte(temoin).getByRole('button', { name: 'Ajouter un compte rendu' })).toBeVisible();
+  // 3. La clôture échoue sans être enregistrée : le formulaire reste ouvert avec son message et sa
+  // saisie, et un nouvel envoi termine l'intervention.
+  const routeTemoin = `**/api/interventions/${temoin.intervention.id}/statut`;
+  await page.route(routeTemoin, (route: Route) => route.fulfill({ status: 502, body: '' }));
+  await terminerSansSignature(temoin);
+  const clotureTemoin = carte(temoin).getByRole('dialog', { name: 'Terminer l’intervention' });
+  await expect(clotureTemoin.getByRole('alert')).toContainText('n’a pas pu être confirmée');
+  await expect(clotureTemoin.getByRole('radio', { name: 'Client absent' })).toBeChecked();
+  await expect(carte(temoin).getByText('En cours', { exact: true })).toBeVisible();
+  await page.unroute(routeTemoin);
+  await clotureTemoin.getByRole('button', { name: 'Terminer sans signature' }).click();
+  await expect(carte(temoin).getByText('Terminée', { exact: true })).toBeVisible();
+  await expect(carte(temoin).getByRole('dialog')).toHaveCount(0);
+});
+
+// Un seul doigt trace : un second doigt posé dans la zone n'ajoute aucun point.
+test('sur téléphone tactile, un second doigt dans la zone de signature est ignoré', async ({ session, request, creerClient, browser }) => {
+  const { intervention, titre, headers } = await preparer(request, session.token, creerClient, 'signature-deux-doigts');
+  expect((await request.post(`${api}/interventions/${intervention.id}/rapports`, { headers, data: { contenu: 'Compte rendu signé à deux doigts.', cleEnvoi: randomUUID() } })).status()).toBe(201);
+  const contexte = await browser.newContext({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true });
+  const page = await contexte.newPage();
+  await page.addInitScript(([token, user]) => { localStorage.setItem('token', token as string); localStorage.setItem('user', user as string); }, [session.token, JSON.stringify(session.user)]);
+  try {
+    await page.goto('/interventions', { waitUntil: 'networkidle' });
+    const carte = page.locator('article', { hasText: titre });
+    await carte.getByRole('button', { name: 'Faire signer ce compte rendu' }).click();
+    const signature = carte.getByRole('dialog', { name: 'Signature du client' });
+    const zone = signature.getByRole('img', { name: 'Zone de signature du client' });
+    await zone.scrollIntoViewIfNeeded();
+    const cadre = (await zone.boundingBox())!;
+    const doigt = (x: number, y: number, id: number) => ({ x: cadre.x + cadre.width * x, y: cadre.y + cadre.height * y, id });
+    const cdp = await contexte.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [doigt(0.1, 0.2, 1)] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [doigt(0.1, 0.2, 1), doigt(0.9, 0.9, 2)] });
+    for (let i = 1; i <= 10; i += 1) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [doigt(0.1 + i * 0.03, 0.2, 1), doigt(0.9, 0.9 - i * 0.05, 2)] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [doigt(0.4, 0.2, 1)] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await signature.getByLabel('Nom du signataire client').fill('Client Deux Doigts');
+    await signature.getByLabel('Confirmation du client').check();
+    const signe = page.waitForResponse((reponse) => reponse.request().method() === 'POST' && reponse.url().endsWith('/signature'));
+    await signature.getByRole('button', { name: 'Enregistrer la signature' }).click();
+    const reponse = await signe;
+    expect(reponse.status()).toBe(201);
+    const points = (reponse.request().postDataJSON() as { trace: { traits: number[][][] } }).trace.traits.flat();
+    expect(points.length).toBeGreaterThan(5);
+    expect(points.every(([, y]) => y < 0.5), 'aucun point du second doigt').toBe(true);
+  } finally {
+    await contexte.close();
+  }
+});

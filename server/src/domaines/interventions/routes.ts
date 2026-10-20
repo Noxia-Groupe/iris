@@ -19,7 +19,7 @@ import {
   dateDemandeCurative,
 } from './metier';
 import {
-  RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereNul, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
+  RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereInvalide, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
 } from './comptesRendus';
 
 class ChantierInterventionIntrouvable extends Error {}
@@ -310,7 +310,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
     let interventionId = '';
     try {
       if (contenu.length < 3 || contenu.length > 5000) return res.status(400).json({ error: 'Le compte rendu doit contenir entre 3 et 5 000 caractères.' });
-      if (contientCaractereNul(contenu)) return res.status(400).json({ error: 'Le compte rendu contient un caractère invalide.' });
+      if (contientCaractereInvalide(contenu)) return res.status(400).json({ error: 'Le compte rendu contient un caractère invalide.' });
       if (!cleEnvoi) return res.status(400).json({ error: 'Clé d’envoi du compte rendu absente ou invalide : rechargez la page.' });
       const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
@@ -349,7 +349,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
     try {
       const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
       if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) return res.status(400).json({ error: 'Le signataire et sa confirmation explicite sont obligatoires.' });
-      if (contientCaractereNul(signataire)) return res.status(400).json({ error: 'Le nom du signataire contient un caractère invalide.' });
+      if (contientCaractereInvalide(signataire)) return res.status(400).json({ error: 'Le nom du signataire contient un caractère invalide.' });
       const trace = traceSignatureValide(req.body?.trace);
       if (!trace) return res.status(400).json({ error: 'La signature dessinée du client est absente ou invalide.' });
       const rapport = await prisma.interventionRapport.findFirst({ where: { id: String(req.params.rapportId), intervention: getInterventionFilterForUser(req.user!) }, select: { id: true, interventionId: true } });

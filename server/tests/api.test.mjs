@@ -5542,8 +5542,11 @@ if (!TEST_DATABASE_URL) {
         const refus = await envoyer({ contenu, cleEnvoi });
         assert.equal(refus.status, 400, `${cleEnvoi} : ${JSON.stringify(refus.body)}`);
       }
-      const caractereNul = await envoyer({ contenu: 'TEST Compte rendu\u0000 tronqué.', cleEnvoi: randomUUID() });
-      assert.equal(caractereNul.status, 400, JSON.stringify(caractereNul.body));
+      // Caractère nul et demi-paire de substitution isolée (haute ou basse) : refusés avant PostgreSQL.
+      for (const invalide of ['TEST Compte rendu\u0000 tronqué.', 'TEST Compte rendu \ud83d isolé.', 'TEST Compte rendu \ude42 isolé.']) {
+        const refus = await envoyer({ contenu: invalide, cleEnvoi: randomUUID() });
+        assert.equal(refus.status, 400, `${JSON.stringify(invalide)} : ${JSON.stringify(refus.body)}`);
+      }
       assert.equal(await prisma.interventionRapport.count({ where: { interventionId: id } }), 0);
 
       const cleEnvoi = randomUUID();
@@ -5629,14 +5632,20 @@ if (!TEST_DATABASE_URL) {
         const refus = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace });
         assert.equal(refus.status, 400, `${cas} : ${JSON.stringify(refus.body)}`);
       }
-      const signataireNul = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, signataire: 'TEST\u0000 Client', trace: TRACE_SIGNATURE_TEST });
-      assert.equal(signataireNul.status, 400, JSON.stringify(signataireNul.body));
-      // Les bornes elles-mêmes sont admises : 50 traits, 2 000 points.
+      for (const signataire of ['TEST\u0000 Client', 'TEST \ud83d Client', 'TEST \ude42 Client']) {
+        const refus = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, signataire, trace: TRACE_SIGNATURE_TEST });
+        assert.equal(refus.status, 400, `${JSON.stringify(signataire)} : ${JSON.stringify(refus.body)}`);
+      }
+      // Les bornes elles-mêmes sont admises : 50 traits, 2 000 points. Une paire de substitution complète
+      // (un emoji) reste un caractère valide, dans le compte rendu comme dans le nom du signataire.
       const limite = { ratio: 10, traits: [traitDe(1000), ...Array.from({ length: 48 }, () => [[0.1, 0.2]]), traitDe(952)] };
       assert.equal(limite.traits.length, 50);
       assert.equal(limite.traits.flat().length, 2000);
-      const autre = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu au tracé maximal.');
-      assert.equal((await signerSav(autre.body.id, technicien.jeton, { ...base, trace: limite })).status, 201);
+      const autre = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu au tracé maximal 🔧.');
+      assert.equal(autre.status, 201, JSON.stringify(autre.body));
+      const signeLimite = await signerSav(autre.body.id, technicien.jeton, { ...base, signataire: 'TEST Client 🙂', trace: limite });
+      assert.equal(signeLimite.status, 201, JSON.stringify(signeLimite.body));
+      assert.equal(signeLimite.body.signataire, 'TEST Client 🙂');
       assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
 
       // Le tracé est enregistré sous sa forme canonique (arrondi au dix-millième, clés fixes), qui entre
@@ -5703,9 +5712,11 @@ if (!TEST_DATABASE_URL) {
         { motifSansSignature: 'AUTRE', precisionMotif: 'x'.repeat(201) },
         { motifSansSignature: 'AUTRE', precisionMotif: 42 },
         // Longueur comptée en caractères (points de code), comme les autres motifs : deux emoji n'en
-        // font pas quatre. Un caractère nul est refusé avant PostgreSQL.
+        // font pas quatre. Un caractère nul ou une demi-paire isolée est refusé avant PostgreSQL.
         { motifSansSignature: 'AUTRE', precisionMotif: '🙂🙂' },
         { motifSansSignature: 'AUTRE', precisionMotif: 'Client\u0000 absent' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client \ud83d absent' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client \ude42 absent' },
         { motifSansSignature: 'CLIENT_ABSENT', precisionMotif: 'Une précision sans « Autre ».' },
         { precisionMotif: 'Une précision sans motif.' },
       ];

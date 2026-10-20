@@ -103,6 +103,20 @@ export default function Interventions() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Après une relecture, un formulaire dont l'intervention a quitté la liste (annulée ailleurs, sortie du
+  // périmètre) ou n'est plus en cours (clôture) se ferme : resté ouvert mais invisible, il masquerait les
+  // actions de toutes les cartes.
+  useEffect(() => {
+    if (!formulaire || loading) return;
+    const item = interventions.find((candidat) => candidat.id === formulaire.interventionId);
+    if (!item) {
+      setFormulaire(null);
+      setError('Cette intervention a changé entre-temps (annulée ou retirée de vos dossiers) : la liste a été relue.');
+    } else if (formulaire.type === 'cloture' && item.statut !== 'EN_COURS') {
+      setFormulaire(null);
+    }
+  }, [formulaire, interventions, loading]);
+
   const choisirClient = async (clientId: string) => {
     clientDemande.current = clientId;
     setClientFormulaire(null);
