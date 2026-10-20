@@ -934,12 +934,14 @@ model InterventionAffectation {
   @@index([intervenantId])
 }
 
-// Compte rendu terrain append-only : une intervention garde ses constats tels qu'ils ont été
-// saisis, avec leur auteur et leur date. Les corrections futures créent une nouvelle trace.
+// Compte rendu terrain en ajout seul : une intervention garde ses constats tels qu'ils ont été
+// saisis, avec leur auteur et leur date. Les corrections futures créent une nouvelle trace. Figé en
+// base (#223) : ni modification, ni suppression, ni vidage ; une intervention qui en porte un ne se
+// supprime pas.
 model InterventionRapport {
   id             String       @id @default(uuid())
   interventionId String
-  intervention   Intervention @relation(fields: [interventionId], references: [id], onDelete: Cascade)
+  intervention   Intervention @relation(fields: [interventionId], references: [id], onDelete: Restrict)
   auteurId       String
   auteur         User         @relation(fields: [auteurId], references: [id], onDelete: Restrict)
   contenu        String
@@ -951,7 +953,8 @@ model InterventionRapport {
 }
 
 // Attestation électronique client d'un compte rendu : consentement explicite, signataire,
-// horodatage et empreinte SHA-256 du contenu figé. Aucun dessin ou fichier n'est requis.
+// horodatage et empreinte SHA-256 du contenu figé. Aucun dessin ou fichier n'est requis. Figée en
+// base dès sa création (#223) : ni modification, ni suppression, ni vidage.
 model InterventionSignature {
   id          String              @id @default(uuid())
   rapportId   String              @unique
