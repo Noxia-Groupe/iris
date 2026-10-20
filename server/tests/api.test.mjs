@@ -272,7 +272,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.course.cle@iris.test', 'sav.verrou.annulation@iris.test', 'sav.verrou.affectation@iris.test', 'sav.journee@iris.test', 'sav.journee.collegue@iris.test', 'sav.journee.fuseau@iris.test', 'sav.fiche@iris.test', 'sav.fiche.collegue@iris.test', 'sav.fiche.commercial@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.course.cle@iris.test', 'sav.verrou.annulation@iris.test', 'sav.verrou.affectation@iris.test', 'sav.journee@iris.test', 'sav.journee.collegue@iris.test', 'sav.journee.fuseau@iris.test', 'sav.journee.conducteur@iris.test', 'sav.journee.responsable@iris.test', 'sav.journee.tiers@iris.test', 'sav.journee.directeur@iris.test', 'sav.journee.equipe@iris.test', 'sav.fiche@iris.test', 'sav.fiche.collegue@iris.test', 'sav.fiche.commercial@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
@@ -5948,11 +5948,17 @@ if (!TEST_DATABASE_URL) {
         const annulee = await dossier('TEST Journée annulée');
         await planifier(annulee.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
         await statut(annulee.id, 'ANNULEE');
+        // Créée avant celle d'avant-hier, et d'un créneau plus tôt : seul le tri par dernier jour prévu
+        // la range après elle (ni la référence ni le créneau).
+        const nonCommencee = await dossier('TEST Journée prévue hier');
+        await planifier(nonCommencee.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
         const enRetard = await dossier('TEST Journée en cours depuis avant-hier');
         await planifier(enRetard.id, technicien.intervenantId, { dateDebut: avantHier, creneau: 'JOURNEE' });
         await statut(enRetard.id, 'EN_COURS');
-        const nonCommencee = await dossier('TEST Journée prévue hier');
-        await planifier(nonCommencee.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
+        // Annulée après son jour prévu : absente de la rubrique des restées ouvertes.
+        const annuleeHier = await dossier('TEST Journée annulée hier');
+        await planifier(annuleeHier.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
+        await statut(annuleeHier.id, 'ANNULEE');
         const termineeHier = await dossier('TEST Journée terminée hier');
         await planifier(termineeHier.id, technicien.intervenantId, { dateDebut: hier, creneau: 'MATIN' });
         await statut(termineeHier.id, 'EN_COURS');
@@ -6067,6 +6073,58 @@ if (!TEST_DATABASE_URL) {
         await statut(fiche.id, 'ANNULEE');
         assert.equal((await lire(technicien.jeton)).status, 404);
         assert.equal((await lire(session)).status, 404);
+      });
+
+      // Règle 2 : la journée et la fiche reprennent, pour chaque rôle, le périmètre de la liste.
+      test('journée et fiche suivent le périmètre hiérarchique de la liste ; le directeur est refusé', async () => {
+        const jetonDe = (compte) => jwt.sign({ id: compte.id }, process.env.JWT_SECRET);
+        const conducteur = await prisma.user.create({ data: { email: 'sav.journee.conducteur@iris.test', name: 'TEST Conducteur journée', role: 'CONDUCTEUR_TRAVAUX' } });
+        const responsable = await prisma.user.create({ data: { email: 'sav.journee.responsable@iris.test', name: 'TEST Responsable journée', role: 'RESPONSABLE' } });
+        const tiers = await prisma.user.create({ data: { email: 'sav.journee.tiers@iris.test', name: 'TEST Conducteur journée tiers', role: 'CONDUCTEUR_TRAVAUX' } });
+        const directeur = await prisma.user.create({ data: { email: 'sav.journee.directeur@iris.test', name: 'TEST Directeur journée', role: 'DIRECTEUR' } });
+        await prisma.user.update({ where: { id: conducteur.id }, data: { responsableHierarchiqueId: responsable.id } });
+        const technicien = await compteTechnicienSav('sav.journee.equipe@iris.test', 'TEST Intervenant journée équipe');
+        const { raisonSociale } = await prisma.client.findUnique({ where: { id: clientId }, select: { raisonSociale: true } });
+        const chantier = await prisma.chantier.create({ data: { nom: 'TEST Chantier journée équipe', client: raisonSociale, clientId, dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: conducteur.id } });
+        const aujourdhui = (await journee(technicien.jeton)).body.aujourdhui;
+        // Rattachée à l'affaire du conducteur ; ouverte par le conducteur, sans affaire ; hors de leur équipe.
+        const rattachee = await dossier('TEST Journée équipe rattachée', { chantierId: chantier.id });
+        await planifier(rattachee.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        const creation = await request(app).post('/api/interventions').set('Authorization', `Bearer ${jetonDe(conducteur)}`).send({ clientId, titre: 'TEST Journée ouverte par le conducteur' });
+        assert.equal(creation.status, 201, JSON.stringify(creation.body));
+        const ouverteParLui = creation.body;
+        await planifier(ouverteParLui.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'JOURNEE' });
+        const horsEquipe = await dossier('TEST Journée hors équipe');
+        await planifier(horsEquipe.id, technicien.intervenantId, { dateDebut: aujourdhui, creneau: 'MATIN' });
+        const lire = (jeton, id) => request(app).get(`/api/interventions/${id}`).set('Authorization', `Bearer ${jeton}`);
+        const idsDuJour = async (jeton) => {
+          const reponse = await journee(jeton);
+          assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+          return reponse.body.aFaire.map((item) => item.id);
+        };
+
+        const attendus = [
+          [conducteur, 'conducteur', [rattachee, ouverteParLui], [horsEquipe]],
+          [responsable, 'responsable', [rattachee], [ouverteParLui, horsEquipe]],
+          [tiers, 'conducteur tiers', [], [rattachee, ouverteParLui, horsEquipe]],
+        ];
+        for (const [compte, role, visibles, fermees] of attendus) {
+          const jeton = jetonDe(compte);
+          const ids = await idsDuJour(jeton);
+          for (const item of visibles) {
+            assert.equal((await lire(jeton, item.id)).status, 200, `${role} : fiche ${item.titre}`);
+            assert.equal(ids.includes(item.id), true, `${role} : journée ${item.titre}`);
+          }
+          for (const item of fermees) {
+            assert.equal((await lire(jeton, item.id)).status, 404, `${role} : fiche ${item.titre}`);
+            assert.equal(ids.includes(item.id), false, `${role} : journée ${item.titre}`);
+          }
+        }
+        // L'administration voit tout ; le directeur, comme le commercial, n'a ni journée ni fiche.
+        assert.equal((await lire(session, horsEquipe.id)).status, 200);
+        assert.equal((await idsDuJour(session)).includes(horsEquipe.id), true);
+        assert.equal((await lire(jetonDe(directeur), rattachee.id)).status, 403);
+        assert.equal((await journee(jetonDe(directeur))).status, 403);
       });
     });
 

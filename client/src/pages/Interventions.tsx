@@ -57,6 +57,8 @@ export default function Interventions({ interventionId }: { interventionId?: str
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [error, setError] = useState('');
+  // Fiche : seule une réponse 404 dit l'intervention introuvable ; une panne n'en dit rien.
+  const [introuvable, setIntrouvable] = useState(false);
   const [formulaire, setFormulaire] = useState<FormulaireOuvert | null>(null);
   const user = useCurrentUser();
   const estEncadrement = isAdminRole(user?.role) || user?.role === 'CONDUCTEUR_TRAVAUX';
@@ -83,9 +85,10 @@ export default function Interventions({ interventionId }: { interventionId?: str
       const interventionsRes = await apiFetch(interventionId ? `/interventions/${interventionId}` : '/interventions');
       const interventionData = await interventionsRes.json();
       // Fiche hors périmètre, annulée ou supprimée : introuvable, la page le dit.
-      const introuvable = !!interventionId && interventionsRes.status === 404;
-      if (!interventionsRes.ok && !introuvable) throw new Error(interventionData.error || 'Impossible de charger les interventions.');
-      const items = introuvable ? [] : interventionId ? [interventionData] : Array.isArray(interventionData) ? interventionData : [];
+      const absente = !!interventionId && interventionsRes.status === 404;
+      if (!interventionsRes.ok && !absente) throw new Error(interventionData.error || 'Impossible de charger les interventions.');
+      setIntrouvable(absente);
+      const items = absente ? [] : interventionId ? [interventionData] : Array.isArray(interventionData) ? interventionData : [];
       setInterventions(items);
       void chargerCouts(items);
       if (estEncadrement) {
@@ -224,7 +227,7 @@ export default function Interventions({ interventionId }: { interventionId?: str
       <div className="grid gap-3 sm:grid-cols-2"><select name="priorite" className="form-input" defaultValue="NORMALE">{Object.entries(libellePriorite).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input name="dateDemande" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date de demande (JJ-MM-AAAA)" aria-label="Date de demande (JJ-MM-AAAA)" className="form-input" /><input name="dateSouhaitee" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date souhaitée (JJ-MM-AAAA)" className="form-input" /></div>
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer</button><button className="btn btn-secondary" type="button" onClick={fermerFormulaire}>Annuler</button></div>
     </form>}
-    {loading ? <p className="text-gray-500">Chargement…</p> : interventions.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />{interventionId ? 'Intervention introuvable : annulée, ou retirée de vos dossiers.' : 'Aucune intervention active.'}</div> : <div className="grid gap-3">{interventions.map((item) => <article key={item.id} className="rounded-xl border bg-white p-5 shadow-sm">
+    {loading ? <p className="text-gray-500">Chargement…</p> : interventions.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />{interventionId ? (introuvable ? 'Intervention introuvable : annulée, ou retirée de vos dossiers.' : 'Fiche indisponible pour le moment.') : 'Aucune intervention active.'}</div> : <div className="grid gap-3">{interventions.map((item) => <article key={item.id} className="rounded-xl border bg-white p-5 shadow-sm">
       <div className="flex justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">{item.reference}{!interventionId && <> · <Link to={`/interventions/${item.id}`} className="underline">Ouvrir la fiche</Link></>}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale}{item.dateDemande && ` · Demandée le ${formatDateOnlyOrEmpty(item.dateDemande)}`} · Souhaitée le {formatDateOnlyOrEmpty(item.dateSouhaitee)}</p>{(item.site || item.contact || item.chantier) && <p className="text-sm text-gray-500">{item.site && `Site : ${item.site.nom}${item.site.ville ? ` (${item.site.ville})` : ''}`}{item.contact && `${item.site ? ' · ' : ''}Contact : ${[item.contact.prenom, item.contact.nom].filter(Boolean).join(' ')}`}{item.chantier && `${item.site || item.contact ? ' · ' : ''}Affaire : ${item.chantier.numeroDevis ? `${item.chantier.numeroDevis} — ` : ''}${item.chantier.nom}`}</p>}</div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>
       <CoordonneesIntervention intervention={item} />
       {item.description && <p className="mt-3 text-sm text-gray-600">{item.description}</p>}

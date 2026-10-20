@@ -98,6 +98,11 @@ test('sur téléphone, le technicien suit sa journée, appelle le contact et mè
     await expect(page.getByRole('region', { name: 'Restées ouvertes les jours précédents' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Aujourd’hui' }).click();
     await expect(duJour.locator('article h3')).toHaveText([matin.titre, principale.titre]);
+    await page.getByRole('button', { name: 'Jour précédent' }).click();
+    await expect(duJour.locator('article h3')).toHaveText([hier.titre]);
+    await expect(page.getByRole('region', { name: 'Restées ouvertes les jours précédents' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Aujourd’hui' }).click();
+    await expect(duJour.locator('article h3')).toHaveText([matin.titre, principale.titre]);
 
     await carte.getByRole('link', { name: 'Ouvrir la fiche' }).click();
     await expect(page).toHaveURL(new RegExp(`/interventions/${principale.id}$`));
@@ -156,6 +161,10 @@ test('la fiche d’une intervention qui n’est pas affectée au technicien est 
     await expect(page.getByRole('heading', { level: 1, name: 'Fiche intervention' })).toBeVisible();
     await expect(page.getByText('Intervention introuvable : annulée, ou retirée de vos dossiers.')).toBeVisible();
     await expect(page.getByText(etrangere.titre)).toHaveCount(0);
+    await page.route(`**/api/interventions/${etrangere.id}`, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Erreur lors de la lecture de l’intervention.' }) }));
+    await page.reload({ waitUntil: 'networkidle' });
+    await expect(page.getByText('Erreur lors de la lecture de l’intervention.')).toBeVisible();
+    await expect(page.getByText('Intervention introuvable : annulée, ou retirée de vos dossiers.')).toHaveCount(0);
   } finally {
     await page.context().close();
   }

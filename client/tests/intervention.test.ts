@@ -14,11 +14,16 @@ test('l’adresse affichée est celle du site, à défaut celle de l’affaire',
 
 test('le lien d’appel ne garde que les chiffres et un « + » initial', () => {
   assert.equal(lienTelephone('06 12 34 56 78'), 'tel:0612345678');
-  assert.equal(lienTelephone(' +33 (0)6.12.34.56.78 '), 'tel:+330612345678');
+  assert.equal(lienTelephone(' +33 (0)6.12.34.56.78 '), 'tel:+33612345678', 'le « (0) » ne se compose pas depuis l’international');
   assert.equal(lienTelephone('poste 12'), null, 'moins de trois chiffres : pas de lien');
   assert.equal(lienTelephone('javascript:alert(1)'), null);
   assert.equal(lienTelephone(''), null);
   assert.equal(lienTelephone(null), null);
+  // Texte libre : seul le premier numéro est appelé, sans poste ni second numéro accolés.
+  assert.equal(lienTelephone('06 12 34 56 78 / 01 23 45 67 89'), 'tel:0612345678');
+  assert.equal(lienTelephone('01 23 45 67 89 poste 212'), 'tel:0123456789');
+  assert.equal(lienTelephone('Standard : 01 23 45 67 89'), 'tel:0123456789');
+  assert.equal(lienTelephone('0612345678 0712345678'), null, 'plus de 15 chiffres : pas de lien');
   assert.equal(nomContact({ prenom: ' Alice ', nom: 'Martin' }), 'Alice Martin');
   assert.equal(nomContact({ prenom: null, nom: 'Martin' }), 'Martin');
 });
