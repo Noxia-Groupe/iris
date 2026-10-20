@@ -5348,6 +5348,13 @@ if (!TEST_DATABASE_URL) {
       const temoin = await prisma.intervention.create({ data: { reference: `TEST-SAV-FIGE-${randomUUID()}`, clientId, titre: 'TEST Dossier témoin figé', statut: 'EN_COURS' } });
       await prisma.interventionRapport.create({ data: { interventionId: temoin.id, auteurId: auteur.id, contenu: 'TEST Compte rendu du dossier témoin.' } });
       await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "Intervention" WHERE "id" = $1', temoin.id), /InterventionRapport_interventionId_fkey/);
+      // Le garde porte sur toute la ligne, pas seulement sur le texte et la date : un compte rendu ne
+      // se rattache pas à un autre dossier, une signature ne passe pas à un autre compte rendu, et la
+      // suppression est aussi refusée en SQL brut.
+      await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionRapport" SET "interventionId" = $1 WHERE "id" = $2', temoin.id, libre.body.id), /Compte rendu d'intervention figé/);
+      await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionSignature" SET "rapportId" = $1 WHERE "id" = $2', libre.body.id, signature.body.id), /Signature d'intervention figée/);
+      await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "InterventionRapport" WHERE "id" = $1', libre.body.id), /Compte rendu d'intervention figé/);
+      await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "InterventionSignature" WHERE "id" = $1', signature.body.id), /Signature d'intervention figée/);
       assert.equal(await prisma.interventionRapport.count({ where: { interventionId: temoin.id } }), 1);
 
       // L'ajout reste ouvert : une correction passe par un nouveau compte rendu, sans toucher aux autres.
