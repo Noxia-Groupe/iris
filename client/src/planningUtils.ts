@@ -2,7 +2,7 @@
 // lecture seule (PlanningPublic.tsx) : mêmes affectations, mêmes règles d'affichage
 // (libellé, couleur, badge de créneau) des deux côtés — un seul endroit à maintenir.
 
-export interface Intervenant { id: string; nom: string; role?: string }
+export interface Intervenant { id: string; nom: string; role?: string; userId?: string | null }
 export interface ChantierLite { id?: string; nom: string; client: string; statut?: string; adresse?: string | null }
 export interface PlanningType { id: string; nom: string; couleur: string }
 export interface PlanningEvent {
@@ -25,6 +25,14 @@ export interface PlanningEvent {
   typeEvent: PlanningType | null;
   commentaire: string | null;
   intervenants: Intervenant[];
+}
+
+// Lignes de la grille : le technicien ne voit que la sienne, celle de la fiche intervenant reliée à
+// son compte (planning limité à ce dont il est chargé, décision de Nelson du 19-10-2026). Sans fiche
+// reliée, aucune ligne. Les autres comptes voient toute l'équipe.
+export function lignesDuPlanning(intervenants: Intervenant[], technicien: { id?: string } | null): Intervenant[] {
+  if (!technicien) return intervenants;
+  return technicien.id ? intervenants.filter((intervenant) => intervenant.userId === technicien.id) : [];
 }
 
 // --- Aides dates (le planning raisonne en jours "YYYY-MM-DD", jamais en heures) ---

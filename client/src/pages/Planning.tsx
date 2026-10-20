@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Plus, Tags, Users, Info, Share2, AlertTriang
 import { apiFetch } from '../api';
 import {
   type Intervenant, type ChantierLite, type PlanningType, type PlanningEvent,
-  lundiDe, joursDeLaSemaine, estWeekEnd, numeroSemaineIso, shiftDateStr, diffJours,
+  lundiDe, joursDeLaSemaine, estWeekEnd, numeroSemaineIso, shiftDateStr, diffJours, lignesDuPlanning,
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, tooltipEvent,
 } from '../planningUtils';
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
@@ -36,6 +36,8 @@ const Planning = () => {
   const isAdmin = isAdminRole(userRole);
   // Le technicien consulte le planning sans le modifier (lot pilote 3, choix par défaut) : ni
   // affectation, ni type d'événement, ni placement. Le serveur le refuse aussi (blockTechnicien).
+  // Il n'y voit que ce dont il est chargé (décision de Nelson du 19-10-2026) : sa ligne, et les
+  // seules affectations que le serveur lui envoie.
   const lectureSeule = userRole === ROLE_TECHNICIEN;
   // Module désactivé par un super administrateur : la page n'est plus atteignable que par
   // lui (cf. App.tsx), d'où l'avertissement ci-dessous — il doit savoir que ce qu'il
@@ -49,6 +51,8 @@ const Planning = () => {
   const [contractQueue, setContractQueue] = useState<ContractQueueItem[]>([]);
   const [toPlace, setToPlace] = useState<ContractQueueItem | null>(null);
   const [loading, setLoading] = useState(true);
+  // Équipe illisible (panne, refus) : l'écran le dit, au lieu d'annoncer une équipe vide ou une fiche non reliée.
+  const [equipeIllisible, setEquipeIllisible] = useState(false);
   // Semaine choisie (son lundi) ; tant qu'on n'a pas navigué, celle du jour de la société.
   const [semaineChoisie, setSemaineChoisie] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState | null>(null);
@@ -72,16 +76,20 @@ const Planning = () => {
 
   useEffect(() => {
     (async () => {
+      let equipeLue = false;
       try {
         const [intervRes, chantiersRes, typesRes] = await Promise.all([
           apiFetch('/intervenants'),
-          apiFetch('/planning/chantiers'),
+          // La liste des chantiers ne sert qu'au formulaire d'affectation, fermé au technicien (403).
+          lectureSeule ? null : apiFetch('/planning/chantiers'),
           apiFetch('/planning/types'),
         ]);
         const interv = await intervRes.json();
-        const chant = await chantiersRes.json();
+        equipeLue = intervRes.ok && Array.isArray(interv);
+        if (equipeLue) setIntervenants(interv.sort((a: Intervenant, b: Intervenant) => a.nom.localeCompare(b.nom)));
+        else setEquipeIllisible(true);
+        const chant = chantiersRes ? await chantiersRes.json() : [];
         const t = await typesRes.json();
-        if (Array.isArray(interv)) setIntervenants(interv.sort((a: Intervenant, b: Intervenant) => a.nom.localeCompare(b.nom)));
         if (Array.isArray(chant)) setChantiers(chant);
         if (Array.isArray(t)) setTypes(t);
         // Le partage public reste réservé aux admins : pas la peine d'appeler une route
@@ -92,6 +100,7 @@ const Planning = () => {
         }
       } catch (e) {
         console.error(e);
+        if (!equipeLue) setEquipeIllisible(true);
       } finally {
         setLoading(false);
       }
@@ -204,6 +213,7 @@ const Planning = () => {
   );
 
   const labelSemaine = `Semaine du ${jourFrancais(weekStartStr)} au ${jourFrancais(weekEndStr)}`;
+  const lignes = lignesDuPlanning(intervenants, lectureSeule ? { id: user?.id } : null);
 
   return (
     <div className="flex flex-col h-full">
@@ -215,6 +225,7 @@ const Planning = () => {
             <Info size={14} className="shrink-0" />
             Prévisionnel uniquement : n'alimente jamais les heures des chantiers (saisie manuelle dans le Journal des Heures).
           </p>
+          {lectureSeule && <p className="text-sm text-muted mt-1">Vous ne voyez que les affectations dont vous êtes chargé.</p>}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {isAdmin && (
@@ -286,7 +297,17 @@ const Planning = () => {
         <h2 className="text-base font-bold text-gray-800 m-0 text-right">{labelSemaine}</h2>
       </div>
 
-      {intervenants.length === 0 ? (
+      {equipeIllisible ? (
+        <div className="card text-center py-12" role="alert">
+          <p className="text-gray-500 font-semibold mb-2">Lecture de l'équipe impossible pour le moment.</p>
+          <p className="text-sm text-gray-400">Rechargez la page dans un instant.</p>
+        </div>
+      ) : lectureSeule && lignes.length === 0 ? (
+        <div className="card text-center py-12">
+          <p className="text-gray-500 font-semibold mb-2">Aucune fiche intervenant n'est reliée à votre compte.</p>
+          <p className="text-sm text-gray-400">Votre planning s'affichera dès que l'administration l'aura reliée.</p>
+        </div>
+      ) : intervenants.length === 0 ? (
         <div className="card text-center py-12">
           <p className="text-gray-500 font-semibold mb-2">Aucun technicien enregistré.</p>
           <p className="text-sm text-gray-400">
@@ -312,7 +333,7 @@ const Planning = () => {
               </tr>
             </thead>
             <tbody>
-              {intervenants.map((interv) => (
+              {lignes.map((interv) => (
                 <tr key={interv.id}>
                   <th className="sticky left-0 z-10 bg-white border border-gray-100 px-3 py-2 text-left align-top">
                     <div className="flex items-center gap-2">
