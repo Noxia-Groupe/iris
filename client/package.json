@@ -11,7 +11,7 @@
     "test:e2e": "playwright test",
     "test:e2e:local": "node scripts/preparer-e2e.mjs && playwright test",
     "comparer:rendu": "node scripts/comparer-rendu/index.mjs",
-    "test:unit": "TZ=Pacific/Gambier tsx --test tests/dateDuJour.test.ts tests/dateFormatting.test.ts tests/archivesRestaurables.test.ts tests/planComptableCsv.test.ts tests/contractPlanningDate.test.ts tests/suiviChantiers.test.ts tests/menu.test.ts tests/planningUtils.test.ts tests/coutsIntervention.test.ts tests/droitDevis.test.ts tests/chantiersDuClient.test.ts tests/journalChantier.test.ts tests/reglements.test.ts tests/catalogueDevis.test.ts tests/baseJetable.test.ts tests/montants.test.ts"
+    "test:unit": "TZ=Pacific/Gambier tsx --test tests/dateDuJour.test.ts tests/dateFormatting.test.ts tests/archivesRestaurables.test.ts tests/planComptableCsv.test.ts tests/contractPlanningDate.test.ts tests/suiviChantiers.test.ts tests/menu.test.ts tests/planningUtils.test.ts tests/coutsIntervention.test.ts tests/droitDevis.test.ts tests/chantiersDuClient.test.ts tests/journalChantier.test.ts tests/reglements.test.ts tests/catalogueDevis.test.ts tests/baseJetable.test.ts tests/montants.test.ts tests/traceSignature.test.ts"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.16.0",

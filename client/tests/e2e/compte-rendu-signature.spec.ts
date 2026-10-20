@@ -1,0 +1,197 @@
+import { createHmac } from 'node:crypto';
+import type { APIRequestContext, Browser, Locator, Page, Route } from '@playwright/test';
+import { test, expect, dateDuJour } from './fixtures';
+
+const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+
+// Même procédé que les autres parcours : un jeton signé avec le secret du backend jetable
+// ouvre une session dans un rôle non administrateur.
+const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toString('base64url');
+function jetonPour(userId: string) {
+  const corps = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
+  return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
+}
+
+type Compte = { id: string; name: string; email: string; role: string };
+
+// Téléphone (375 px) : le technicien remplit le compte rendu et fait signer sur place.
+async function pageTelephone(browser: Browser, compte: Compte) {
+  const contexte = await browser.newContext({ viewport: { width: 375, height: 812 } });
+  const page = await contexte.newPage();
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [jetonPour(compte.id), JSON.stringify({ ...compte, permissions: ['chantiers:read', 'clients:read'] })]);
+  return page;
+}
+
+// Aucune fenêtre du navigateur (prompt, confirm, alert) ne doit s'ouvrir dans ces parcours.
+function interdireFenetres(page: Page) {
+  const fenetres: string[] = [];
+  page.on('dialog', (dialogue) => { fenetres.push(`${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
+  return fenetres;
+}
+
+// Dessine au pointeur une signature en zigzag dans la zone prévue.
+async function dessinerSignature(page: Page, zone: Locator) {
+  await zone.scrollIntoViewIfNeeded();
+  const cadre = await zone.boundingBox();
+  if (!cadre) throw new Error('zone de signature invisible');
+  const points = [[0.1, 0.6], [0.22, 0.3], [0.34, 0.7], [0.48, 0.35], [0.62, 0.65], [0.8, 0.4]];
+  const position = ([x, y]: number[]) => [cadre.x + cadre.width * x, cadre.y + cadre.height * y] as const;
+  await page.mouse.move(...position(points[0]));
+  await page.mouse.down();
+  for (const point of points.slice(1)) await page.mouse.move(...position(point), { steps: 6 });
+  await page.mouse.up();
+}
+
+async function preparer(request: APIRequestContext, token: string, creerClient: (libelle: string) => Promise<{ id: string }>, libelle: string) {
+  const headers = { Authorization: `Bearer ${token}` };
+  const envoyer = async (methode: 'post' | 'put' | 'patch', path: string, data: object) => {
+    const response = await request[methode](`${api}${path}`, { headers, data });
+    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+    return response.json();
+  };
+  const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+  const technicien: Compte = await envoyer('post', '/users', { email: `${libelle}.${suffixe}@iris.test`, name: `Technicien ${libelle} ${suffixe}`, role: 'TECHNICIEN' });
+  const fiche = await envoyer('post', '/intervenants', { nom: `Fiche ${libelle} ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 });
+  await envoyer('put', `/intervenants/${fiche.id}/compte`, { userId: technicien.id });
+  const client = await creerClient(libelle);
+  const titre = `Intervention ${libelle} ${suffixe}`;
+  const intervention = await envoyer('post', '/interventions', { clientId: client.id, titre });
+  const jour = dateDuJour().split('-').reverse().join('-');
+  await envoyer('put', `/interventions/${intervention.id}/planning`, { dateDebut: jour, creneau: 'HEURES', heureDebut: '08:30', heureFin: '09:30', intervenantIds: [fiche.id] });
+  await envoyer('patch', `/interventions/${intervention.id}/statut`, { statut: 'EN_COURS' });
+  return { technicien, intervention, titre, headers };
+}
+
+// Lot pilote 3b-3 : compte rendu et signature dessinée au doigt, sans fenêtre du navigateur ; un
+// envoi répété après une réponse perdue n'enregistre pas un second compte rendu ; terminer exige un
+// compte rendu signé (décisions de Nelson des 19 et 20-10-2026).
+test('sur téléphone, le technicien rédige le compte rendu, le fait signer au doigt, puis termine', async ({ session, request, creerClient, browser }) => {
+  const { technicien, intervention, titre, headers } = await preparer(request, session.token, creerClient, 'signature-doigt');
+  const page = await pageTelephone(browser, technicien);
+  const fenetres = interdireFenetres(page);
+  try {
+    await page.goto('/interventions', { waitUntil: 'networkidle' });
+    const carte = page.locator('article', { hasText: titre });
+
+    // 1. Terminer sans compte rendu : le formulaire de clôture le demande d'abord.
+    await carte.getByRole('button', { name: 'Terminer' }).click();
+    const cloture = carte.getByRole('dialog', { name: 'Terminer l’intervention' });
+    await expect(cloture.getByText('Un compte rendu est obligatoire pour terminer l’intervention.')).toBeVisible();
+    await cloture.getByRole('button', { name: 'Rédiger le compte rendu' }).click();
+
+    // 2. Compte rendu : une seule requête malgré deux soumissions ; la réponse de la première est
+    // perdue après son enregistrement ; le nouvel envoi relit le compte rendu, sans doublon.
+    const formulaire = carte.getByRole('dialog', { name: 'Compte rendu d’intervention' });
+    const texte = `Détecteur remplacé, essai concluant ${Date.now()}.`;
+    await formulaire.getByLabel('Texte du compte rendu').fill(texte);
+    const cheminRapports = `/api/interventions/${intervention.id}/rapports`;
+    const envois: string[] = [];
+    page.on('request', (requete) => { if (requete.method() === 'POST' && new URL(requete.url()).pathname === cheminRapports) envois.push(requete.postData() || ''); });
+    let liberer!: () => void;
+    const relache = new Promise<void>((resolve) => { liberer = resolve; });
+    let rang = 0;
+    await page.route(`**${cheminRapports}`, async (route: Route) => {
+      rang += 1;
+      if (rang > 1) return route.continue();
+      await relache;
+      const reponse = await route.fetch();
+      expect(reponse.status(), 'le premier envoi est bien enregistré par le serveur').toBe(201);
+      await route.abort('failed');
+    });
+    await formulaire.evaluate((element) => { (element as HTMLFormElement).requestSubmit(); (element as HTMLFormElement).requestSubmit(); });
+    await expect(formulaire.getByRole('button', { name: 'Enregistrement…' })).toBeDisabled();
+    await expect.poll(() => envois.length).toBe(1);
+    liberer();
+    await expect(formulaire.getByRole('alert')).toContainText('n’a pas pu être confirmé');
+    expect(envois.length, 'aucun second envoi pendant le premier').toBe(1);
+    const renvoi = page.waitForResponse((reponse) => reponse.request().method() === 'POST' && new URL(reponse.url()).pathname === cheminRapports);
+    await formulaire.getByRole('button', { name: 'Enregistrer le compte rendu' }).click();
+    expect((await renvoi).status(), 'compte rendu relu par sa clé d’envoi').toBe(200);
+    await expect(formulaire).toHaveCount(0);
+    expect(new Set(envois.map((corps) => JSON.parse(corps).cleEnvoi)).size, 'même clé d’envoi pour le renvoi').toBe(1);
+    await expect(carte.getByText(texte)).toHaveCount(1);
+    const liste = await (await request.get(`${api}/interventions`, { headers })).json() as { id: string; rapports: { contenu: string }[] }[];
+    expect(liste.find((item) => item.id === intervention.id)!.rapports.map((rapport) => rapport.contenu)).toEqual([texte]);
+
+    // 3. Signature : nom, confirmation et tracé sont exigés ; le tracé se dessine au doigt.
+    await carte.getByRole('button', { name: 'Faire signer ce compte rendu' }).click();
+    const signature = carte.getByRole('dialog', { name: 'Signature du client' });
+    const enregistrerSignature = signature.getByRole('button', { name: 'Enregistrer la signature' });
+    await expect(signature.getByLabel('Enregistré par')).toHaveValue(technicien.name);
+    await signature.getByLabel('Nom du signataire client').fill('Marie Client');
+    await signature.getByLabel('Confirmation du client').check();
+    await expect(enregistrerSignature, 'sans tracé, pas de signature').toBeDisabled();
+    const zone = signature.getByRole('img', { name: 'Zone de signature du client' });
+    await dessinerSignature(page, zone);
+    await expect(signature.getByText('Signature dessinée.')).toBeVisible();
+    // Le formulaire se ferme à l'enregistrement : les dimensions de la zone se relèvent avant.
+    const cadre = (await zone.boundingBox())!;
+    const signe = page.waitForResponse((reponse) => reponse.request().method() === 'POST' && reponse.url().endsWith('/signature'));
+    await enregistrerSignature.click();
+    const reponseSignature = await signe;
+    expect(reponseSignature.status()).toBe(201);
+    const corps = reponseSignature.request().postDataJSON() as { trace: { ratio: number; traits: number[][][] } };
+    expect(corps.trace.ratio).toBeCloseTo(cadre.width / cadre.height, 1);
+    expect(corps.trace.traits).toHaveLength(1);
+    expect(corps.trace.traits[0].length, 'le trait garde ses points intermédiaires').toBeGreaterThan(6);
+    for (const [x, y] of corps.trace.traits[0]) {
+      expect(x).toBeGreaterThanOrEqual(0); expect(x).toBeLessThanOrEqual(1);
+      expect(y).toBeGreaterThanOrEqual(0); expect(y).toBeLessThanOrEqual(1);
+    }
+    await expect(signature).toHaveCount(0);
+    await expect(carte.getByText(/Signé par Marie Client le .* enregistré par /)).toBeVisible();
+    await expect(carte.getByRole('img', { name: 'Signature de Marie Client' })).toBeVisible();
+
+    // 4. Compte rendu signé : la clôture ne demande pas de motif.
+    await carte.getByRole('button', { name: 'Terminer' }).click();
+    await expect(cloture.getByText('Le compte rendu est signé par le client.')).toBeVisible();
+    await expect(cloture.getByRole('radio')).toHaveCount(0);
+    const fin = page.waitForResponse((reponse) => reponse.request().method() === 'PATCH' && reponse.url().endsWith(`/interventions/${intervention.id}/statut`));
+    await cloture.getByRole('button', { name: 'Confirmer la fin de l’intervention' }).click();
+    expect((await fin).status()).toBe(200);
+    await expect(carte.getByText('Terminée', { exact: true })).toBeVisible();
+    await expect(carte.getByRole('button', { name: 'Terminer' })).toHaveCount(0);
+    expect(fenetres, 'aucune fenêtre du navigateur').toEqual([]);
+  } finally {
+    await page.context().close();
+  }
+});
+
+test('l’encadrement termine sans signature avec un motif, « Autre » exigeant une précision consignée au journal', async ({ allerSurPageAdmin, session, request, creerClient }) => {
+  const { intervention, titre, headers } = await preparer(request, session.token, creerClient, 'motif-cloture');
+  const page = await allerSurPageAdmin('/interventions');
+  const fenetres = interdireFenetres(page);
+  const carte = page.locator('article', { hasText: titre });
+
+  await carte.getByRole('button', { name: 'Ajouter un compte rendu' }).click();
+  const formulaire = carte.getByRole('dialog', { name: 'Compte rendu d’intervention' });
+  await formulaire.getByLabel('Texte du compte rendu').fill('Accès impossible au local technique, à reprogrammer.');
+  await formulaire.getByRole('button', { name: 'Enregistrer le compte rendu' }).click();
+  await expect(formulaire).toHaveCount(0);
+  await expect(carte.getByText('Accès impossible au local technique, à reprogrammer.')).toBeVisible();
+
+  await carte.getByRole('button', { name: 'Terminer' }).click();
+  const cloture = carte.getByRole('dialog', { name: 'Terminer l’intervention' });
+  const terminer = cloture.getByRole('button', { name: 'Terminer sans signature' });
+  await expect(cloture.getByText('Aucun compte rendu n’est signé.', { exact: false })).toBeVisible();
+  await expect(terminer, 'un motif est exigé').toBeDisabled();
+  for (const libelle of ['Client absent', 'Refus de signer', 'Signature impossible', 'Autre']) await expect(cloture.getByRole('radio', { name: libelle })).toBeVisible();
+  await cloture.getByRole('radio', { name: 'Autre' }).check();
+  const precision = cloture.getByLabel('Précision du motif');
+  await precision.fill('ab');
+  await expect(terminer, 'précision trop courte').toBeDisabled();
+  await precision.fill('Client parti avant la fin');
+  const fin = page.waitForResponse((reponse) => reponse.request().method() === 'PATCH' && reponse.url().endsWith(`/interventions/${intervention.id}/statut`));
+  await terminer.click();
+  const reponse = await fin;
+  expect(reponse.status()).toBe(200);
+  expect(reponse.request().postDataJSON()).toEqual({ statut: 'TERMINEE', motifSansSignature: 'AUTRE', precisionMotif: 'Client parti avant la fin' });
+  await expect(carte.getByText('Terminée', { exact: true })).toBeVisible();
+
+  const journal = await (await request.get(`${api}/interventions/${intervention.id}/journal-saisies`, { headers })).json() as { action: string; motif: string | null; apres: { statut?: string } }[];
+  expect(journal.find((entree) => entree.action === 'CHANGEMENT_STATUT' && entree.apres.statut === 'TERMINEE')?.motif).toBe('Clôture sans signature du client : Autre — Client parti avant la fin');
+  expect(fenetres, 'aucune fenêtre du navigateur').toEqual([]);
+});
