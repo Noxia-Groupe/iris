@@ -1,6 +1,6 @@
 # Paramétrage cible : proposition
 
-> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 4). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 6 et priment sur le texte de la proposition là où il différait. La fusion de la proposition, qui vaut sa validation, reste à Nelson ([CLAUDE.md](../CLAUDE.md)). Rien de ce document n'est encore implémenté : chaque lot (section 5) fait sa PR.
+> **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 4). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 6 et priment sur le texte de la proposition là où il différait. La fusion de la proposition vaut sa validation ; elle revient à Claude Code depuis la décision de Nelson du 20-10-2026, « C’est toi qui fusionne TOUTES les PR » ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). Rien de ce document n'est encore implémenté : chaque lot (section 5) fait sa PR.
 >
 > L'inventaire détaillé est en annexe : [`PARAMETRAGE-INVENTAIRE.md`](PARAMETRAGE-INVENTAIRE.md). Pour chaque règle, il donne sa référence `fichier:ligne`, sa valeur actuelle et la raison pour laquelle elle varie. Les identifiants A, B-01 à B-75 et C-01 à C-28 y renvoient. Les règles « qui fait quoi » relèvent de la proposition sœur [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md).
 
@@ -175,7 +175,7 @@ Elles n'existent pas dans le code. Elles sont posées ici sans valeur :
 
 | Lot | Contenu | Placement proposé |
 |---|---|---|
-| **P0** | Retirer les valeurs de société écrites en dur (B-72, B-74) : « NØXIA GROUPE », icônes et couleur de l'interface, barèmes et primes insérés par migration. Pour ces derniers, une nouvelle migration les vide, sans effet sur aucun montant depuis #159. Passer le rapport de chantier en A4 (B-61). | Au plus tôt, petite PR. La page de connexion et le planning public sont ouverts sans connexion : ils affichent « Iris » (décision 4). |
+| **P0** | Retirer les valeurs de société écrites en dur (B-72, B-74) : « NØXIA GROUPE », icônes et couleur de l'interface, barèmes et primes insérés par migration. Pour ces derniers, une nouvelle migration les vide, sans effet sur aucun montant depuis #159. Passer le rapport de chantier en A4 (B-61). | Petite PR, placée selon la règle du pilote (décision de Nelson du 19-10-2026, `CLAUDE.md`) : elle passe avant un lot du pilote seulement si elle est bloquante ou touche un montant, sinon après le pilote. La page de connexion et le planning public sont ouverts sans connexion : ils affichent « Iris » (décision 4). |
 | **P1** | Socle : stockage des nouveaux paramètres, écran Paramètres regroupé par thème, journal, doublon des écrans « Société » résorbé. Premier groupe : durée d'une curative (B-25), contrats (B-30, B-31), obligations de saisie (B-22, B-23), dates automatiques (B-33), échéance proposée (B-34). | Après le premier jour du pilote, sauf si l'entreprise pilote a besoin d'un de ses paramètres avant (décision 5). Le découpage du serveur, qui devait le précéder, est terminé. |
 | — | Paramètres des lots 5 et 6 (anticipation de la génération des visites, mode d'envoi) | Avec ces lots, dans la table `Parametres` actuelle, sans attendre P1 |
 | **P2** | Modules activables (B-75) | Après P1 |
@@ -189,7 +189,7 @@ Elles n'existent pas dans le code. Elles sont posées ici sans valeur :
 
 ## 6. Décisions sur les questions ouvertes (arbitrées le 18-10-2026 par délégation)
 
-Nelson a délégué ces arbitrages le 18-10-2026 : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Ce sont des arbitrages faits par délégation : la fusion de la proposition, qui vaut sa validation, reste à Nelson ([CLAUDE.md](../CLAUDE.md)).
+Nelson a délégué ces arbitrages le 18-10-2026 : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Ce sont des arbitrages faits par délégation : la fusion de la proposition vaut sa validation, et revient à Claude Code depuis la décision de Nelson du 20-10-2026 ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)).
 
 Les principes de la section 2 s'appliquent : aucune valeur métier inventée, montants et mentions légales sous validation, et avis du cabinet pour ce qui touche la loi. La numérotation reprend celle des anciennes questions ; les sections précédentes y renvoient par « décision N ».
 
@@ -209,7 +209,7 @@ Les principes de la section 2 s'appliquent : aucune valeur métier inventée, mo
    - Le planning public, ouvert par son lien sans connexion, affiche lui aussi « Iris ». Y montrer le nom de la société serait un choix séparé.
    - « NØXIA GROUPE » et les autres valeurs de société écrites en dur sont retirées au lot P0. Après la connexion, l'application lit l'identité de la société dans `CompanySettings`.
    - Le nom de l'éditeur reste dans le README et dans les informations du dépôt, mais pas dans l'application.
-5. **Placement.** Le lot P0 au plus tôt. Le lot P1 après le premier jour du pilote, sauf si l'entreprise pilote a besoin d'un de ses paramètres avant : le périmètre du pilote reste la boussole.
+5. **Placement.** Le lot P0 au plus tôt ; mise à jour : depuis le 19-10-2026, la règle du pilote, décidée par Nelson, prime (section 5). Le lot P1 après le premier jour du pilote, sauf si l'entreprise pilote a besoin d'un de ses paramètres avant : le périmètre du pilote reste la boussole.
 6. **Identité de l'émetteur sur la facture : copiée et figée à l'émission (option 1).**
    - À l'émission, les coordonnées structurées de `CompanySettings` (raison sociale, SIREN et SIRET, TVA intracommunautaire, adresse) sont copiées avec la facture, puis imprimées depuis cette copie.
    - Le texte des mentions légales garde les autres mentions, sans répéter l'identité.
