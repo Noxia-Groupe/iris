@@ -67,7 +67,9 @@ PATCH /api/contrats-maintenance/:id/statut requireAuth#76fb48c2d0f5 > requireAdm
 POST /api/contrats-maintenance/:id/avancer-echeance requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#85afc458f0c2
 POST /api/contrats-maintenance/:id/generer-intervention requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#1239714635db
 POST /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#051bd6c57c60 > <anonymous>#2d7ec5d97b9a
-GET /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c1e757b04de4
+GET /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#174bd48a1244
+GET /api/interventions/journee requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
+GET /api/interventions/:id requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#68266b8fd47c
 GET /api/interventions/:id/couts requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#3bbada459c05
 POST /api/interventions/:id/couts/heures requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#971650f71db2
 POST /api/interventions/:id/couts/achats requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#aaaf5b8c9ae8
