@@ -50,7 +50,7 @@ Les trois variables `POSTGRES_*` ne reconfigurent pas une base déjà initialis�
 
 `JWT_SECRET` signe les sessions (JWT HS256, 7 jours pour Microsoft, 1 heure pour le secours) et les aperçus d'import du plan comptable. Le générer avec `openssl rand -base64 48`. Le changer déconnecte tout le monde et invalide les aperçus d'import en cours.
 
-`SUPERADMIN_EMAILS` est une liste d’adresses séparées par des virgules. Ces comptes sont créés ou promus à chaque démarrage, et une liste vide ne retire personne. Chaque adresse doit être celle que Microsoft renvoie à la connexion : le claim `email` du jeton s'il existe, sinon l'identifiant de connexion (UPN), sans tenir compte des majuscules. Y ajouter `BREAK_GLASS_EMAIL`.
+`SUPERADMIN_EMAILS` est une liste d’adresses séparées par des virgules. Ces comptes sont créés ou promus à chaque démarrage, et une liste vide ne retire personne. Chaque adresse doit être celle que Microsoft renvoie à la connexion, sans tenir compte des majuscules : le claim `email` du jeton, c'est-à-dire l'adresse de messagerie de l'utilisateur dès qu'il en a une, sinon `preferred_username`, en pratique l'UPN. Si l'adresse de messagerie diffère de l'UPN, c'est elle qui compte. Y ajouter `BREAK_GLASS_EMAIL`.
 
 Le jeton de secours a les droits d’un superadministrateur. Le générer avec `openssl rand -hex 32` : un jeton en base64 contenant `+` échoue dans le lien `#token=`, qui lit ce caractère comme une espace (#262). Le conserver uniquement dans `server/.env` et dans un gestionnaire de mots de passe, et le changer après usage réel. Le compte de `BREAK_GLASS_EMAIL` doit exister, être actif et avoir le rôle SUPERADMIN. La session dure une heure ; cinq essais manqués en quinze minutes bloquent l'accès. Derrière les proxys de production, ce blocage est aujourd'hui commun à tous les clients, faute de réglage `trust proxy` (#261).
 
@@ -61,7 +61,7 @@ Le jeton de secours a les droits d’un superadministrateur. Le générer avec `
 | `AZURE_TENANT_ID` | oui pour la connexion Microsoft | « ID de l'annuaire (locataire) », un GUID : construit l'émetteur attendu (`https://login.microsoftonline.com/<GUID>/v2.0`) et l'adresse des clés de signature |
 | `AZURE_CLIENT_ID` | oui pour la connexion Microsoft | « ID d'application (client) », un GUID : audience attendue du jeton d'ID et identifiant de l'application pour MSAL |
 
-Ces deux valeurs se renseignent dans `server/.env` seulement. Elles sont publiques par nature pour une application monopage : le navigateur les reçoit par `GET /api/config`, et le frontend n'a aucune variable `VITE_` à renseigner pour Microsoft 365. Sans elles, la page de connexion affiche « La connexion Microsoft 365 n'est pas activée sur ce serveur » ; un accès de secours correctement configuré reste alors la seule porte d’administration. `AZURE_TENANT_ID` doit être le GUID, et non un nom de domaine, ni `common` ou `organizations` : l'émetteur du jeton est vérifié strictement contre lui, et un autre format renvoie une erreur `SSO_TOKEN_INVALID`.
+Ces deux valeurs se renseignent dans `server/.env` seulement. Elles sont publiques par nature pour une application monopage : le navigateur les reçoit par `GET /api/config`, et le frontend n'a aucune variable `VITE_` à renseigner pour Microsoft 365. Sans elles, la page de connexion affiche « La connexion Microsoft 365 n'est pas activée sur ce serveur » ; un accès de secours correctement configuré reste alors la seule porte d’administration. `AZURE_TENANT_ID` doit être le GUID, et non un nom de domaine, ni `common` ou `organizations` : l'émetteur du jeton est vérifié strictement contre lui. Avec un nom de domaine, Microsoft connecte l'utilisateur, puis Iris refuse le jeton : l'API répond `SSO_TOKEN_INVALID` et la page affiche « Jeton Microsoft invalide ou non vérifié. ». Avec `common`, Microsoft refuse dès sa fenêtre une application à locataire unique (AADSTS50194). Le même message « Jeton Microsoft invalide ou non vérifié. » apparaît aussi quand le backend ne joint pas `login.microsoftonline.com` ou que son horloge dérive.
 
 Inscription d'application à créer dans le portail Azure (Microsoft Entra ID > Inscriptions d'applications > Nouvelle inscription) :
 
@@ -69,13 +69,13 @@ Inscription d'application à créer dans le portail Azure (Microsoft Entra ID > 
 2. **Plateforme** : « Application monopage (SPA) ». **URI de redirection exacte : `https://<domaine-de-l-instance>/auth/callback`.** Pas l'origine seule : Microsoft refuserait la connexion (erreur AADSTS50011). Déclarer une URI par nom d'hôte réellement utilisé. Une URI déclarée sur la plateforme « Web » ne fonctionne pas. En développement local, `http://localhost:5173/auth/callback` (port par défaut de Vite).
 3. **Aucun secret client ni certificat**, aucun « Exposer une API », aucune URI d'ID d'application. Octroi implicite : ne cocher ni « Jetons d'accès » ni « Jetons d'ID » (MSAL utilise le code d'autorisation avec PKCE).
 4. **Autorisations** : déléguées Microsoft Graph `openid`, `profile` et `email`, auxquelles la bibliothèque ajoute `offline_access`. Si le tenant restreint le consentement des utilisateurs, un administrateur doit l'accorder.
-5. **Facultatif** : ajouter le claim optionnel `email` au jeton d'ID (Configuration du jeton). Sans lui, Iris utilise l'identifiant de connexion (UPN).
+5. **Claim `email` : rien à configurer.** La portée `email` demandée par Iris suffit pour que le jeton d'ID porte le claim `email`, l'adresse de messagerie de l'utilisateur, dès qu'il en a une ; le claim optionnel `email` de « Configuration du jeton » n'y ajoute rien. À défaut d'adresse de messagerie, Iris prend `preferred_username`, en pratique l'UPN.
 6. Recopier « ID de l'annuaire (locataire) » dans `AZURE_TENANT_ID` et « ID d'application (client) » dans `AZURE_CLIENT_ID`, puis recréer le conteneur du backend.
 
 Conditions de fonctionnement :
 
-- chaque utilisateur doit aussi exister, actif, dans Iris (Administration > Utilisateurs), sous l'adresse renvoyée par Microsoft (claim `email`, sinon UPN). Il n'y a pas de création automatique, hors `SUPERADMIN_EMAILS` ;
-- le backend doit joindre `https://login.microsoftonline.com` en HTTPS sortant pour lire les clés de signature, et son horloge doit être synchronisée (NTP) : l'expiration des jetons est vérifiée sans tolérance ;
+- chaque utilisateur doit aussi exister, actif, dans Iris (Administration > Utilisateurs), sous l'adresse renvoyée par Microsoft (claim `email`, c'est-à-dire l'adresse de messagerie, sinon UPN). Il n'y a pas de création automatique, hors `SUPERADMIN_EMAILS` ;
+- le backend doit joindre `https://login.microsoftonline.com` en HTTPS sortant direct pour lire les clés de signature (le `fetch` de Node 20 ignore `HTTPS_PROXY`), et son horloge doit être synchronisée (NTP) : l'expiration des jetons est vérifiée sans tolérance ;
 - les fenêtres surgissantes doivent être autorisées dans le navigateur, car la connexion s'ouvre dans une fenêtre Microsoft ;
 - vérification : `https://<domaine>/api/config` doit répondre `"ssoConfigured":true`.
 
@@ -92,7 +92,7 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 
 | Variable | Requise | Usage |
 |---|---:|---|
-| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend, sur `localhost` ; les tests de migration y créent leurs propres bases (droit CREATEDB) |
+| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend, sur `localhost` ou `127.0.0.1` ; les tests de migration y créent leurs propres bases (droit CREATEDB) |
 | `E2E_DATABASE_URL` | seulement E2E locaux | PostgreSQL jetable Playwright |
 | `E2E_BASE_URL` | non | URL frontend E2E, défaut `http://127.0.0.1:5199` |
 | `E2E_API_PORT` | non | port API E2E, défaut `3001` |
@@ -102,7 +102,7 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 | `RELEVE_SILENCE_MS` | non | durée de calme exigée avant chaque réponse libérée et chaque relevé, défaut `300` |
 | `RELEVE_CHROMIUM` | non | exécutable de Chromium à employer, à défaut celui de Playwright |
 
-Les bases de test sont destructibles. Elles ne doivent jamais viser un volume de développement, ni une instance de production. Ces variables s'exportent dans le shell avant la commande de test ; `TEST_DATABASE_URL` peut aussi figurer dans `server/.env` pour les tests du backend lancés depuis `server/`.
+Les bases de test sont destructibles. Elles ne doivent jamais viser un volume de développement, ni une instance de production. Ces variables s'exportent dans le shell avant la commande de test : aucune n'est lue dans un fichier `.env`. En particulier, `TEST_DATABASE_URL` écrite dans `server/.env` est ignorée, et les tests HTTP et de migration sont alors ignorés (`SKIP`), ce qui n'est pas une réussite.
 
 En local, lancer les parcours Playwright avec `cd client && npm run test:e2e:local`. Avant Playwright, cette commande :
 
@@ -150,7 +150,7 @@ L'horloge du serveur n'est pas figée : l'outil refuse une exécution à cheval 
 
 Consigne de Nelson du 20-10-2026 : toute variable d'environnement lue par le code figure dans un modèle versionné et dans ce document, au fil des lots.
 
-- Une PR qui lit une nouvelle variable, ou qui change le rôle, le format ou le caractère obligatoire d'une variable existante, met à jour dans le même commit le modèle concerné et ce document. Le modèle est `server/.env.example` pour le backend et ses tests, `.env.example` pour `docker-compose.yml`, le frontend et les outils du client. Elle indique pour chaque variable son rôle, si elle est obligatoire, un exemple sans secret réel et la conséquence d'une absence.
+- Une PR qui lit une nouvelle variable, ou qui change le rôle, le format ou le caractère obligatoire d'une variable existante, met à jour dans la même PR le modèle concerné et ce document. Le modèle est `server/.env.example` pour le backend et ses tests, `.env.example` pour `docker-compose.yml`, le frontend et les outils du client. Elle indique pour chaque variable son rôle, si elle est obligatoire, un exemple sans secret réel et la conséquence d'une absence.
 - Une variable de l'application est aussi rappelée dans la liste en tête de `.env.example`, pour qu'une installation trouve tout à partir de ce fichier.
 - Un modèle ne garde aucune variable que plus rien ne lit.
 - `server/tests/environnement.test.mjs` vérifie ces règles à chaque `npm test` du backend, donc en CI. Il relève les lectures `process.env`, `import.meta.env`, `env()` de Prisma et les interpolations de `docker-compose.yml`. Seules exceptions : `PATH`, transmise par un outil, et les variables intégrées de Vite.

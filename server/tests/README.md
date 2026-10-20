@@ -19,12 +19,16 @@ régulière que telle route y était écrite. Ces tests passaient au vert sur un
 Un test doit exécuter le code : appeler la fonction, ou envoyer la requête et lire la
 réponse. C'est la règle ici.
 
-Seule exception : `environnement.test.mjs` (consigne de Nelson du 20-10-2026). Il ne prétend
-rien prouver du comportement : la propriété qu'il vérifie porte sur le texte lui-même, à
-savoir que chaque variable d'environnement que le code lit figure dans un modèle et dans la
-documentation de configuration. Son premier test est un témoin du relevé : si un motif
-cassait, les variables connues (Microsoft 365, secret JWT, base…) n'y figureraient plus et
-le test échouerait, au lieu de laisser les autres passer à vide.
+Seule exception : `environnement.test.mjs`, qui met en œuvre la consigne de Nelson du
+20-10-2026 (choix par défaut, à confirmer). Il ne prétend rien prouver du comportement : la
+propriété qu'il vérifie porte sur le texte lui-même, à savoir que chaque variable
+d'environnement que le code lit figure dans un modèle et dans la documentation de
+configuration. Son premier test est un témoin du relevé : il éprouve chaque motif sur un
+échantillon, puis vérifie que les variables connues (Microsoft 365, secret JWT, base…) sont
+trouvées dans chaque groupe ; un motif cassé fait donc échouer le test au lieu de laisser les
+autres passer à vide. Le relevé ne voit que les formes écrites en toutes lettres : une lecture
+par un nom calculé (`process.env[nom]`) lui échappe, et un alias (`const env = process.env`)
+est refusé.
 
 ## Lancer les tests
 

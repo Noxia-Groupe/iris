@@ -19,48 +19,63 @@ const lire = (chemin) => readFileSync(join(racine, chemin), 'utf8');
 const VARIABLES_DU_SYSTEME = new Set(['PATH']);
 // Variables intégrées de Vite, toujours définies.
 const VARIABLES_DE_VITE = new Set(['MODE', 'DEV', 'PROD', 'SSR', 'BASE_URL']);
+const EXTENSIONS_DE_CODE = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs'];
 
-function fichiers(chemin, extensions) {
+// Fichiers d'un dossier, récursivement (profondeur illimitée, ou 0 pour le seul dossier).
+function fichiers(chemin, extensions, profondeur = Infinity) {
   const absolu = join(racine, chemin);
   if (statSync(absolu).isFile()) return [chemin];
   return readdirSync(absolu, { withFileTypes: true }).flatMap((entree) => {
     if (['node_modules', 'dist', 'test-results', 'playwright-report'].includes(entree.name) || entree.name.startsWith('.')) return [];
     const enfant = join(chemin, entree.name);
-    if (entree.isDirectory()) return fichiers(enfant, extensions);
+    if (entree.isDirectory()) return profondeur > 0 ? fichiers(enfant, extensions, profondeur - 1) : [];
     return extensions.some((extension) => entree.name.endsWith(extension)) ? [enfant] : [];
   });
 }
 
 const NOM = '[A-Z_][A-Z0-9_]*';
+// process.env.X, process.env?.X, process.env['X'], process.env?.['X'], et de même pour
+// import.meta.env.
+const SOURCE = '(?:process\\.env|import\\.meta\\.env)';
 const LECTURES_DU_CODE = [
-  new RegExp(`process\\.env\\.(${NOM})`, 'g'),
-  new RegExp(`process\\.env\\[\\s*['"\`](${NOM})['"\`]\\s*\\]`, 'g'),
-  new RegExp(`import\\.meta\\.env\\.(${NOM})`, 'g'),
+  new RegExp(`${SOURCE}\\??\\.(${NOM})`, 'g'),
+  new RegExp(`${SOURCE}(?:\\?\\.)?\\[\\s*['"\`](${NOM})['"\`]\\s*\\]`, 'g'),
 ];
+// Déstructuration : const { A, B: b, C = 'x' } = process.env (ou import.meta.env)
+const DESTRUCTURATION = new RegExp(`\\{([^{}]*)\\}\\s*=\\s*${SOURCE}\\b`, 'g');
+// Alias qui masquerait les lectures suivantes : const env = process.env;
+const ALIAS = new RegExp(`\\b(?:const|let|var)\\s+[A-Za-z_$][\\w$]*\\s*=\\s*${SOURCE}\\s*(?:;|$)`, 'gm');
+
+// Variables lues par un texte, selon le type du fichier.
+function variablesDuTexte(texte, fichier) {
+  const noms = [];
+  if (fichier.endsWith('.prisma')) {
+    for (const [, nom] of texte.matchAll(new RegExp(`\\benv\\(\\s*"(${NOM})"\\s*\\)`, 'g'))) noms.push(nom);
+  } else if (fichier.endsWith('.yml') || fichier.endsWith('.yaml')) {
+    // ${X…} et $X ; $$ est un dollar littéral pour Docker Compose.
+    for (const [, nom] of texte.matchAll(new RegExp(`(?<!\\$)\\$\\{(${NOM})`, 'g'))) noms.push(nom);
+    for (const [, nom] of texte.matchAll(new RegExp(`(?<!\\$)\\$(${NOM})`, 'g'))) noms.push(nom);
+  } else if (fichier.endsWith('.html')) {
+    // Remplacement de Vite dans index.html : %VITE_X%
+    for (const [, nom] of texte.matchAll(new RegExp(`%(${NOM})%`, 'g'))) noms.push(nom);
+  } else {
+    for (const motif of LECTURES_DU_CODE) for (const [, nom] of texte.matchAll(motif)) noms.push(nom);
+    for (const [, liste] of texte.matchAll(DESTRUCTURATION)) {
+      for (const morceau of liste.split(',')) {
+        const nom = morceau.split(/[:=]/)[0].trim();
+        if (new RegExp(`^${NOM}$`).test(nom)) noms.push(nom);
+      }
+    }
+  }
+  return noms.filter((nom) => !VARIABLES_DU_SYSTEME.has(nom) && !VARIABLES_DE_VITE.has(nom));
+}
 
 // Variables lues par un groupe de fichiers, chacune avec le premier fichier qui la lit.
 function variablesLues(chemins) {
   const lues = new Map();
-  const noter = (nom, fichier) => {
-    if (!VARIABLES_DU_SYSTEME.has(nom) && !VARIABLES_DE_VITE.has(nom) && !lues.has(nom)) lues.set(nom, fichier);
-  };
   for (const fichier of chemins) {
     if (join(racine, fichier) === ici) continue;
-    const texte = lire(fichier);
-    if (fichier.endsWith('.prisma')) {
-      for (const [, nom] of texte.matchAll(new RegExp(`\\benv\\(\\s*"(${NOM})"\\s*\\)`, 'g'))) noter(nom, fichier);
-    } else if (fichier.endsWith('.yml')) {
-      for (const [, nom] of texte.matchAll(new RegExp(`\\$\\{(${NOM})`, 'g'))) noter(nom, fichier);
-    } else {
-      for (const motif of LECTURES_DU_CODE) for (const [, nom] of texte.matchAll(motif)) noter(nom, fichier);
-      // Déstructuration : const { A, B: b } = process.env
-      for (const [, liste] of texte.matchAll(/\{([^{}]*)\}\s*=\s*process\.env\b/g)) {
-        for (const morceau of liste.split(',')) {
-          const nom = morceau.split(/[:=]/)[0].trim();
-          if (new RegExp(`^${NOM}$`).test(nom)) noter(nom, fichier);
-        }
-      }
-    }
+    for (const nom of variablesDuTexte(lire(fichier), fichier)) if (!lues.has(nom)) lues.set(nom, fichier);
   }
   return lues;
 }
@@ -70,18 +85,17 @@ function variablesDuModele(chemin) {
   return new Set([...lire(chemin).matchAll(new RegExp(`^#?[ \\t]*(${NOM})=`, 'gm'))].map(([, nom]) => nom));
 }
 
-const groupes = {
-  application: variablesLues([
-    'server/index.ts', ...fichiers('server/src', ['.ts']), 'server/prisma/schema.prisma',
-  ]),
-  outilsServeur: variablesLues([...fichiers('server/tests', ['.mjs']), ...fichiers('server/scripts', ['.mjs'])]),
-  frontend: variablesLues(fichiers('client/src', ['.ts', '.tsx'])),
-  outilsClient: variablesLues([
+const fichiersDesGroupes = {
+  application: [...fichiers('server', ['.ts'], 0), ...fichiers('server/src', EXTENSIONS_DE_CODE), 'server/prisma/schema.prisma'],
+  outilsServeur: [...fichiers('server/tests', EXTENSIONS_DE_CODE), ...fichiers('server/scripts', EXTENSIONS_DE_CODE)],
+  frontend: [...fichiers('client/src', EXTENSIONS_DE_CODE), 'client/index.html'],
+  outilsClient: [
     'client/vite.config.ts', 'client/playwright.config.ts',
-    ...fichiers('client/scripts', ['.mjs']), ...fichiers('client/tests', ['.ts']),
-  ]),
-  compose: variablesLues(['docker-compose.yml']),
+    ...fichiers('client/scripts', EXTENSIONS_DE_CODE), ...fichiers('client/tests', EXTENSIONS_DE_CODE),
+  ],
+  compose: ['docker-compose.yml'],
 };
+const groupes = Object.fromEntries(Object.entries(fichiersDesGroupes).map(([nom, chemins]) => [nom, variablesLues(chemins)]));
 const modeleServeur = variablesDuModele('server/.env.example');
 const modeleRacine = variablesDuModele('.env.example');
 const texteRacine = lire('.env.example');
@@ -90,14 +104,35 @@ const documentation = lire('docs/CONFIGURATION-ENVIRONNEMENT.md');
 const absentes = (lues, modele) => [...lues].filter(([nom]) => !modele.has(nom)).map(([nom, fichier]) => `${nom} (lue par ${fichier})`);
 
 describe('Variables d’environnement documentées', () => {
-  test('le relevé trouve les variables connues, dans chaque groupe', () => {
-    // Témoin du relevé lui-même : un motif cassé rendrait les autres tests vides et verts.
+  test('le relevé reconnaît chaque forme de lecture, et trouve les variables connues de chaque groupe', () => {
+    // Témoin du relevé lui-même : un motif cassé rendrait les autres tests vides et verts. Chaque
+    // motif est éprouvé sur un échantillon, y compris ceux qu'aucune lecture actuelle n'emploie.
+    const code = [
+      'process.env.A_POINTEE', 'process.env?.B_OPTIONNELLE', "process.env['C_CROCHETS']", 'process.env?.["D_CROCHETS"]',
+      'import.meta.env.VITE_E', "import.meta.env['VITE_F']",
+      'const { G_DESTR, H_DESTR: h, I_DESTR = "x" } = process.env;', 'const { VITE_J } = import.meta.env;',
+      'process.env.PATH', 'import.meta.env.DEV',
+    ].join('\n');
+    assert.deepEqual(variablesDuTexte(code, 'x.ts').sort(), [
+      'A_POINTEE', 'B_OPTIONNELLE', 'C_CROCHETS', 'D_CROCHETS', 'G_DESTR', 'H_DESTR', 'I_DESTR', 'VITE_E', 'VITE_F', 'VITE_J',
+    ]);
+    assert.deepEqual(variablesDuTexte('url: ${K_GARDE:?k} ${L_REPLI:-l} $M_NUE $$N_LITTERALE', 'x.yml').sort(), ['K_GARDE', 'L_REPLI', 'M_NUE']);
+    assert.deepEqual(variablesDuTexte('url = env("O_PRISMA")', 'x.prisma'), ['O_PRISMA']);
+    assert.deepEqual(variablesDuTexte('<title>%VITE_P%</title>', 'x.html'), ['VITE_P']);
+
     assert.ok(groupes.application.has('AZURE_TENANT_ID') && groupes.application.has('AZURE_CLIENT_ID'), 'Microsoft 365');
     assert.ok(groupes.application.has('JWT_SECRET') && groupes.application.has('DATABASE_URL'), 'secret et base');
     assert.ok(groupes.outilsServeur.has('TEST_DATABASE_URL'), 'tests du backend');
     assert.ok(groupes.frontend.has('VITE_API_URL'), 'frontend');
     assert.ok(groupes.outilsClient.has('E2E_DATABASE_URL') && groupes.outilsClient.has('VITE_DEV_API_TARGET'), 'outils du client');
     assert.ok(groupes.compose.has('POSTGRES_PASSWORD'), 'docker-compose');
+  });
+
+  test('aucun alias de process.env ou import.meta.env ne masque une lecture', () => {
+    const alias = Object.values(fichiersDesGroupes).flat()
+      .filter((fichier) => join(racine, fichier) !== ici && !/\.(prisma|ya?ml|html)$/.test(fichier))
+      .flatMap((fichier) => [...lire(fichier).matchAll(ALIAS)].map(([extrait]) => `${fichier} : ${extrait.trim()}`));
+    assert.deepEqual(alias, [], 'lire chaque variable par process.env.X, pour que le relevé la voie');
   });
 
   test('chaque variable du backend et de ses outils figure dans server/.env.example', () => {
