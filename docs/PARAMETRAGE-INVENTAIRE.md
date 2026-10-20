@@ -1,6 +1,6 @@
 # Inventaire « paramétrage plutôt que règles en dur »
 
-> Annexe de la proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md) (chantier technique 4, 17-10-2026). Photographie du code à une date donnée, et non documentation tenue à jour. Le découpage du serveur par domaine (chantier 2) déplace les lignes citées, mais garde les noms des fonctions et des constantes.
+> Annexe de la proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md) (chantier technique 4, 17-10-2026). Photographie du code à une date donnée, et non documentation tenue à jour. Le découpage du serveur par domaine (chantier 2) déplace les lignes citées, mais garde les noms des fonctions et des constantes. Depuis, #216 a remplacé `isLastSuperAdmin` par `estDernierSuperAdminActif`.
 >
 > **Commit analysé : `84e27a1`** (`main`, « Merge #175 »).
 > Toutes les références `fichier:ligne` portent sur ce commit. Abréviations :
@@ -136,7 +136,7 @@ Les valeurs proposées par défaut à la création d'une fiche relèvent de B : 
 - **Écrans** : Administration > Utilisateurs ; `cli/pages/ApiKeys.tsx`. Le détail relève de l'inventaire des droits.
 
 ### 1.10 Variables d'environnement de l'instance (sans écran ni journal)
-`SUPERADMIN_EMAILS` (`idx:7919`), `BREAK_GLASS_EMAIL` et `BREAK_GLASS_TOKEN` (`idx:3112-3115`), `AZURE_TENANT_ID` et `AZURE_CLIENT_ID` (`idx:59-61`), `JWT_SECRET` (`idx:46-55`), `PORT` (`idx:30`), `NODE_ENV`, `VITE_API_URL` (`cli/api.ts:6`).
+`SUPERADMIN_EMAILS` (`idx:7919`), `BREAK_GLASS_EMAIL` et `BREAK_GLASS_TOKEN` (`idx:3112-3115`), `AZURE_TENANT_ID` et `AZURE_CLIENT_ID` (`idx:59-61`), `JWT_SECRET` (`idx:46-55`), `PORT` (`idx:30`), `NODE_ENV`, `VITE_API_URL` (`cli/api.ts:6`). Liste incomplète à cette date (`DATABASE_URL`, lue par Prisma, y manque). La liste exhaustive et tenue à jour est depuis #263 dans [`CONFIGURATION-ENVIRONNEMENT.md`](CONFIGURATION-ENVIRONNEMENT.md) (règle permanente 3).
 
 ### 1.11 Préférence par compte
 `User.theme` (`schema:22`), réglée par `PUT /api/me/theme` (`idx:3217-3230`).

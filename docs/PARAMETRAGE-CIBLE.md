@@ -2,7 +2,7 @@
 
 > **Proposition du 17-10-2026, arbitrée le 18-10-2026 par délégation de Nelson** (chantier technique 4). Nelson a délégué ce jour-là les arbitrages des questions ouvertes ; ils sont consignés en section 6 et priment sur le texte de la proposition là où il différait. La fusion de la proposition vaut sa validation ; elle revient à Claude Code depuis la décision de Nelson du 20-10-2026, « C’est toi qui fusionne TOUTES les PR » ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). Rien de ce document n'est encore implémenté : chaque lot (section 5) fait sa PR.
 >
-> L'inventaire détaillé est en annexe : [`PARAMETRAGE-INVENTAIRE.md`](PARAMETRAGE-INVENTAIRE.md). Pour chaque règle, il donne sa référence `fichier:ligne`, sa valeur actuelle et la raison pour laquelle elle varie. Les identifiants A, B-01 à B-75 et C-01 à C-28 y renvoient. Les règles « qui fait quoi » relèvent de la proposition sœur [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md).
+> L'inventaire détaillé est en annexe : [`PARAMETRAGE-INVENTAIRE.md`](PARAMETRAGE-INVENTAIRE.md). Pour chaque règle, il donne sa référence `fichier:ligne`, sa valeur au commit `84e27a1` et la raison pour laquelle elle varie. Les identifiants A, B-01 à B-75 et C-01 à C-28 y renvoient. Les règles « qui fait quoi » relèvent de la proposition sœur [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md).
 
 ## 1. Le besoin
 
@@ -23,7 +23,7 @@ C'est aussi la règle permanente ajoutée le même jour à `CLAUDE.md` : toute n
    - Un paramètre qui touche un calcul de montant, une mention légale ou la comptabilité ne change pas de valeur par défaut sans la validation de Nelson.
    - Ceux qui touchent la loi demandent en plus celle du cabinet.
    - Les références légales citées ici le sont **selon notre lecture, toujours à confirmer par le cabinet**.
-6. **Un document émis ne doit jamais lire un paramètre vivant.** Tout ce qu'une facture imprime doit être figé à son émission : c'est déjà le cas de l'émetteur, porté par la version légale, et de l'adresse du client. Une exception existe aujourd'hui, sans effet sur le contenu : la couleur du titre, lue vivante. Les lacunes en base sont suivies par #180.
+6. **Un document émis ne doit jamais lire un paramètre vivant.** Tout ce qu'une facture imprime doit être figé à son émission : c'est déjà le cas de l'émetteur, porté par la version légale, et de l'adresse du client. Une exception existe aujourd'hui, sans effet sur le contenu : la couleur du titre, lue vivante. Depuis #217 (#180), les lignes, la ventilation de TVA, la version des mentions et la date d'émission d'une facture émise sont aussi figées en base.
 
 ## 3. Inventaire classé
 
@@ -63,7 +63,7 @@ Constats de l'inventaire :
 | **Règlements** | imputation (B-35, montants) | quatre règles de montants et le trop-perçu, **validés par Nelson le 17-10-2026** (C-06). Trois **choix par défaut, à confirmer** : facture soldée par avoir refusée, surplus refusé tant qu'une autre facture du règlement reste due, ordre de répartition automatique. | Les trois choix par défaut : paramètres possibles, sur décision de Nelson. Les règles de date (au plus tôt l'émission, au plus tard le jour même) passent en C (chronologie). |
 | **Seuils et méthodes** | tolérance des alertes de dépassement (B-36, montants), seuil des jauges (B-37), jours civils ou ouvrés (B-38), méthode de la marge estimée (B-39, montants), ventilation du vendu (B-40, montants), indicateurs des conducteurs (B-41), assiduité (B-42), rattachement mensuel (B-43, lot (i)) | sans tolérance ; 85 % ; jours civils | Paramètres, sous validation de Nelson pour les montants |
 | **Listes de valeurs** | types de chantier (B-44) ; moyens de règlement, verrouillés aussi en base (B-45) ; priorités, aujourd'hui sans effet (B-46) ; couvertures (B-47) ; natures de ligne (B-48) ; TVA proposée (B-49) ; unité proposée (B-50) ; type de compte proposé (B-51) ; contrat « brouillon » jamais produit (B-52) | listes fermées | Listes tenues par la société, en référentiels. Les types de chantier, aujourd'hui ceux de la sûreté, sont vides pour une nouvelle société dès le lot P3 ; une installation existante garde les siens (décision 2). Chaque nature de ligne reste rattachée à une catégorie fiscale fixe (bien ou service), même si son libellé devient libre. |
-| **Étapes facultatives** | figement d'un devis à l'envoi ou à la signature (B-53, question ouverte de la passation) ; révision (B-54) ; fin d'intervention sans compte rendu signé (B-55, lot 3b) ; planification automatique (B-56) ; étapes de la vision non modélisées (B-57) | comportement actuel | Paramètres, quand le lot concerné les traite |
+| **Étapes facultatives** | figement d'un devis à l'envoi ou à la signature (B-53, question ouverte de la passation) ; révision (B-54) ; clôture d'une intervention (B-55) ; planification automatique (B-56) ; étapes de la vision non modélisées (B-57) | comportement actuel. B-55 : depuis #268 (lot 3b-3), terminer exige un compte rendu, signé ou accompagné d'un motif consigné au journal (client absent, refus de signer, signature impossible, autre avec une précision), pour tous les comptes (décisions de Nelson des 19 et 20-10-2026) | Paramètres, quand le lot concerné les traite. B-55 : la règle et la liste des motifs restent dans le code (#268). Les rendre paramétrables, avec la décision de Nelson pour valeur par défaut, et dans quelles limites, est une question pour Nelson. Sans nouvelle décision de sa part, un compte rendu reste toujours exigé. |
 | **Numérotation** | format des numéros hors préfixe (B-58) | formats fixes | Avec le lot des documents. La continuité reste dans le code (C-01). Le changement de préfixe suit le garde-fou de C-01. |
 | **Documents** | modèle du PDF de facture (B-59), libellés des visites (B-60), export comptable (B-62) | PDF et libellés fixes ; un seul journal de ventes | Avec l'envoi des documents (lot 6) et #35 |
 | **Format du rapport de chantier** | format `letter` (B-61) | format américain | Pas un paramètre : petite correction vers l'A4, au lot P0 |
@@ -78,8 +78,8 @@ Constats de l'inventaire :
 |---|---|
 | Numérotation continue et chronologique des factures et des avoirs (C-01, C-02) | Légale : séquence chronologique et continue (CGI, annexe II, art. 242 nonies A). Seuls les préfixes sont paramétrables. **Garde-fou à confirmer par le cabinet** : un préfixe changé en cours d'année continue la séquence (`F2026-0005` puis `X2026-0006`). En attendant l'avis, un préfixe ne se change que tant qu'aucun document de ce type n'a été numéroté dans l'année en cours (décision 1) ; la remise à zéro annuelle actuelle est gardée. |
 | Chronologie des règlements (C-06 bis) : au plus tôt la date d'émission de la facture, au plus tard le jour même | Intégrité de la chronologie, issue de B-35 |
-| Immutabilité de la facture émise et correction par avoir (C-03, C-04) ; devis signé figé (C-05) ; règlements immuables (C-06) | Légale et intégrité. Lacunes en base, dont les lignes et la version des mentions : #180. |
-| Arrondis, TVA par taux, comptes de TVA (C-07, C-08) | Règle fiscale et comptable ; taux normal (CGI art. 278) ; liste des taux légaux à confirmer par le cabinet. Le territoire fiscal (DOM et taux propres) ne se déduit pas du fuseau horaire. |
+| Immutabilité de la facture émise et correction par avoir (C-03, C-04) ; devis signé figé (C-05) ; règlements immuables (C-06) | Légale et intégrité. Depuis #217 (#180), les lignes, la ventilation de TVA, la version des mentions et la date d'émission d'une facture émise sont figées en base ; le cycle des statuts et le plafond des avoirs y sont garantis (#227, #235). La cohérence interne des pièces émises reste suivie par #243. |
+| Arrondis, TVA par taux, comptes de TVA (C-07, C-08) | Règle fiscale et comptable ; taux normal (CGI art. 278) ; liste des taux légaux à confirmer par le cabinet. Le territoire fiscal (DOM et taux propres) ne se déduit pas du fuseau horaire. La convention d'arrondi du coût de main-d'œuvre reste une question ouverte (passation, section 3) : ce classement n'en tranche pas la valeur. |
 | Mentions obligatoires et chronologie de l'émission (C-09, C-10) | Légale (CGI art. 289 et annexe II). Le contenu des mentions reste paramétrable et validé par le cabinet. |
 | Choix du site de facturation (`SITE_FACTURATION_ORDRE`) puis adresse figée à l'émission (C-13 bis) | L'adresse de facturation est une mention, et son figement une règle d'intégrité. L'ordre de choix, lui, est une **convention actuelle, gardée** (décision 1) : à défaut de site de facturation désigné, il retombe sur le site principal, le siège, puis le premier par ordre alphabétique ; « Prêt à facturer » signalera le client sans site désigné. |
 | Plafond des montants (C-11) | Technique : colonnes `Decimal(12,2)` |
@@ -89,7 +89,7 @@ Constats de l'inventaire :
 | Journaux en ajout seul (C-15) | Traçabilité ; la durée de conservation est paramétrable |
 | Un chantier par affaire, client figé après facturation (C-16) ; squelettes des cycles de vie (C-17) ; contrats, visites et coûts figés (C-18, C-19) ; échéance contractuelle (C-20) ; origine des factures (C-21) ; client actif pour ouvrir un dossier (C-22) | Intégrité, et décisions de Nelson des 14 et 16-10-2026 |
 | Formats de contrôle (C-23), semaine ISO (C-24), structures du modèle (C-25) | Validation technique et conventions |
-| Paramètres de sécurité et d'exploitation : durée du jeton, accès de secours, délais (C-26) | Constantes du code aujourd'hui ; hors assistant métier. Une variable d'environnement pourrait les régler si le besoin apparaît. |
+| Paramètres de sécurité et d'exploitation : durée du jeton, accès de secours, délais (C-26) | Constantes du code aujourd'hui ; hors assistant métier. Une variable d'environnement pourrait les régler si le besoin apparaît, documentée selon la règle permanente 3 de `CLAUDE.md` (`.env.example`, `docs/CONFIGURATION-ENVIRONNEMENT.md`, test en CI). |
 | Fuseaux limités aux fuseaux français (C-27) | Iris est un ERP natif français ; le fuseau reste au choix dans cette liste |
 
 ### 3.4 Règles légales à faire confirmer par le cabinet
@@ -101,6 +101,7 @@ Iris ne les traite pas, ou seulement en partie. Elles ne sont pas tranchées ici
 - **Mentions de la facturation électronique** : SIREN du client, adresse de livraison, nature de l'opération, option pour la TVA sur les débits.
 - **Indemnité forfaitaire de recouvrement et escompte** : la mention de l'escompte, facultative aujourd'hui (`escompte`), est peut-être obligatoire même négative.
 - **Contrats conclus hors établissement avec un particulier** : paiement interdit pendant 7 jours et rétractation de 14 jours (code de la consommation). Cela touche l'acompte bloquant (B-24).
+- **Durée de conservation du tracé de signature** d'un compte rendu d'intervention : à confirmer avec le cabinet (décision de Nelson du 19-10-2026, #253).
 - **Conservation des pièces et piste d'audit fiable**, alors que le journal des paramètres est plafonné à 90 jours.
 
 ## 4. L'assistant de démarrage
@@ -136,7 +137,7 @@ Questions tirées de l'annexe, section 6. L'assistant ne tranche rien : chaque r
 | 4. Domaines utilisés | devis, SAV, contrats, chantiers, planning, facturation, règlements, catalogue (Q4) | modules activés (après P2) |
 | 5. Qui fait quoi | clôture, conversion, acompte, SAV, planning, saisie après clôture, mentions légales et réglages (Q6 à Q8, Q11, Q25, Q28) | ajustement des rôles proposés (après le lot D3 des droits) |
 | 6. Devis et acompte | acompte demandé, taux proposé, acompte bloquant ; figement du devis (Q9, Q10) | paramètres de devis ; **montants : validation** |
-| 7. SAV et maintenance | durée d'une curative ; périodicités et couvertures habituelles ; fin d'intervention sans compte rendu signé (Q12 en partie, Q13, Q26) | paramètres du planning, des contrats et du SAV |
+| 7. SAV et maintenance | durée d'une curative ; périodicités et couvertures habituelles ; motifs de clôture sans signature, si Nelson en fait un paramètre (Q12 en partie, Q13, Q26) | paramètres du planning, des contrats et du SAV |
 | 8. Listes | activités et types de chantier, moyens de paiement, TVA et unité proposées (Q14, Q16, Q20) | référentiels (après P3) |
 | 9. Facturation et comptabilité | conditions de paiement, plan comptable, exercice, envoi des documents (Q17, Q19, Q22, Q27) | renvois vers Mentions et CGV et vers Plan comptable, **à fournir par le cabinet** ; envoi des documents avec le lot 6 |
 | 10. Rentabilité | qui la suit, marge affichée, seuils d'alerte (Q21) | `rentabilite.voir` des rôles ; seuils ; **montants : validation** |
@@ -146,7 +147,7 @@ Quatre questions n'ont pas encore de paramètre derrière elles. L'assistant ne 
 - **horaires et jours travaillés** (Q12) : lot (j) ;
 - **priorités et délais de service** (Q15) : lot P3 ;
 - **figement du devis à l'envoi ou à la signature** (Q10, B-53) : question ouverte de la passation ;
-- **fin d'intervention sans compte rendu signé** (Q26, B-55) : lot 3b.
+- **clôture d'une intervention** (Q26, B-55) : tranchée par Nelson les 19 et 20-10-2026 et appliquée dans le code par #268 ; l'assistant ne la posera que si Nelson décide d'en faire un paramètre.
 
 ### 4.3 Préréglages
 
@@ -160,7 +161,7 @@ Un préréglage choisit **les rôles et la hiérarchie**, et rien d'autre. Tous 
 | Obligations de saisie (B-22, B-23, B-24) | valeur actuelle ¹ | valeur actuelle | valeur actuelle |
 | Durées, délais, seuils, listes | valeur actuelle | valeur actuelle | valeur actuelle |
 
-¹ Le titulaire reste obligatoire à la modification (B-22), mais les écrans ne proposent aujourd'hui comme titulaires que les conducteurs de travaux ; le serveur, lui, accepte tout compte actif. Avec les seuls rôles Dirigeant, Bureau et Technicien, aucun chantier ne pourrait donc être ouvert depuis l'Administration ni recevoir de titulaire depuis la fiche chantier. Seule la conversion depuis l'écran Devis, qui laisse le titulaire vide, resterait possible. Ce préréglage suppose donc que « qui peut être titulaire » s'exprime par les rôles ([`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), décision 9, lot D2) : le rôle Bureau porte l'attribut « peut être titulaire », comme le Technicien. Le préréglage n'est proposé qu'avec les rôles paramétrables (lot P4).
+¹ Le titulaire reste obligatoire à la modification (B-22), mais les écrans ne proposent aujourd'hui comme titulaires que les conducteurs de travaux ; le serveur, lui, accepte tout compte actif. Avec les seuls rôles Dirigeant, Bureau et Technicien, aucun chantier ne pourrait donc être ouvert depuis l'Administration ni recevoir de titulaire depuis la fiche chantier. Seule la conversion depuis l'écran Devis, qui laisse le titulaire vide, resterait possible. Ce préréglage suppose donc que « qui peut être titulaire » s'exprime par les rôles ([`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), décision 9, lot D2) : le rôle Bureau porte l'attribut « peut être titulaire », comme le Technicien. Le préréglage n'est proposé qu'avec les rôles paramétrables (lot D3 des droits ; préréglage au lot P4).
 
 Les noms décrivent l'organisation, pour ne pas se confondre avec les catégories légales qui fixent le calendrier de la facturation électronique. L'écran affiche un récapitulatif avant d'appliquer un préréglage.
 
@@ -178,13 +179,14 @@ Elles n'existent pas dans le code. Elles sont posées ici sans valeur :
 | **P0** | Retirer les valeurs de société écrites en dur (B-72, B-74) : « NØXIA GROUPE », icônes et couleur de l'interface, barèmes et primes insérés par migration. Pour ces derniers, une nouvelle migration les vide, sans effet sur aucun montant depuis #159. Passer le rapport de chantier en A4 (B-61). | Petite PR, placée selon la règle du pilote (décision de Nelson du 19-10-2026, `CLAUDE.md`) : elle passe avant un lot du pilote seulement si elle est bloquante ou touche un montant, sinon après le pilote. La page de connexion et le planning public sont ouverts sans connexion : ils affichent « Iris » (décision 4). |
 | **P1** | Socle : stockage des nouveaux paramètres, écran Paramètres regroupé par thème, journal, doublon des écrans « Société » résorbé. Premier groupe : durée d'une curative (B-25), contrats (B-30, B-31), obligations de saisie (B-22, B-23), dates automatiques (B-33), échéance proposée (B-34). | Après le premier jour du pilote, sauf si l'entreprise pilote a besoin d'un de ses paramètres avant (décision 5). Le découpage du serveur, qui devait le précéder, est terminé. |
 | — | Paramètres des lots 5 et 6 (anticipation de la génération des visites, mode d'envoi) | Avec ces lots, dans la table `Parametres` actuelle, sans attendre P1 |
-| **P2** | Modules activables (B-75) | Après P1 |
+| **P2** | Modules activables (B-75) | Après P1. Il tiendra compte du choix par défaut de #272, à confirmer : la journée et le créneau d'une intervention se lisent même quand le module Planning est désactivé. |
 | **P3** | Listes tenues par la société : types de chantier, moyens de paiement, priorités, couvertures, natures (B-44 à B-50). Un délai de service par priorité serait un comportement nouveau : vide par défaut, son effet est à décider par Nelson. | Après P1. Les moyens de paiement et les natures touchent la comptabilité : validation. |
-| **P4** | Assistant de démarrage et préréglages | Les rôles paramétrables (lot D3 des droits) viennent après le pilote. D'ici là, l'assistant existe sans l'étape « qui fait quoi » (décision 3). Il ne propose alors que le préréglage « Iris actuel », et l'étape « Rentabilité » règle les trois cases actuelles des destinataires. |
+| **P4** | Assistant de démarrage et préréglages | Les rôles paramétrables (lot D3 des droits) viennent après D2 : après le pilote, sauf dans les cas prévus par la section 9 de la proposition de droits (exception du lot D1). D'ici là, l'assistant existe sans l'étape « qui fait quoi » (décision 3). Il ne propose alors que le préréglage « Iris actuel », et l'étape « Rentabilité » règle les trois cases actuelles des destinataires. |
 | **P5** | Documents : modèle du PDF, libellés, export comptable (B-59, B-60, B-62), avec l'envoi des documents (lot pilote 6) et #35. L'identité imprimée est copiée et figée à l'émission (décision 6). | Avec le lot 6 |
 | — | Numérotation hors préfixe (B-58) | Sur demande, après avis du cabinet sur le garde-fou des préfixes |
 | — | Seuils, méthodes et règles touchant les montants (B-35 à B-43) | Au cas par cas, sur décision de Nelson |
 | — | Horaires, jours fériés et astreintes (B-26 à B-29, B-38, B-64) | Lot (j), déjà décidé hors pilote |
+| — | Règle de clôture d'une intervention et liste des motifs (B-55) | Sur décision de Nelson (section 3.2) ; d'ici là, dans le code (#268) |
 | — | Sans lot, sur demande : B-24, B-51, B-52, B-63, B-65, B-66, et l'affichage (B-67 à B-71) | — |
 
 ## 6. Décisions sur les questions ouvertes (arbitrées le 18-10-2026 par délégation)
