@@ -3,6 +3,8 @@
 > Extraits **déplacés tels quels** de [`ROADMAP-PASSATION.md`](ROADMAP-PASSATION.md) le 17-10-2026, sans reformulation, pour que la passation reste courte. Ils décrivent l'état **au moment de leur rédaction** : les renvois « ci-dessus », « plus bas », « ci-dessous » et les mentions « prévu » s'entendent dans l'ancienne passation. L'état actuel, les questions ouvertes et les choix par défaut, à confirmer, sont tenus à jour dans la [passation](ROADMAP-PASSATION.md) ; aucune décision, question ou mention « à confirmer » n'a disparu (voir la PR #165, qui a fait ce déplacement). L'ancienne passation reste lisible en entier, pour résoudre ces renvois : `git show 66dd476:docs/ROADMAP-PASSATION.md`.
 >
 > Correspondances utiles : « P1a » (lot pilote 1) est la PR #155 ; « la PR « contraintes différées » qui suit #155 » est la PR #158 ; « la PR prévue sur les commissions actuelles (P1b) » est devenue sans objet, et les commissions ont été fermées par #159 ; le lot pilote 2 (catalogue dans les devis) est #161.
+>
+> Les sections datées après le 17-10-2026 sont rédigées directement ici, et non déplacées de la passation ; celle-ci n'en garde que l'état.
 
 ## Lots pilotes livrés (état d'origine)
 
@@ -131,3 +133,134 @@ Les constats relevés pendant les audits et la CI de #123 à #129 sont devenus l
   - un changement de statut pouvait mettre un devis converti en attente d'acompte ;
   - une révision pouvait réussir en même temps qu'elle.
 - Transactions Prisma et contraintes différées (relevé pendant P1a, préexistant, **corrigé** par la PR « contraintes différées » qui suit #155) : Prisma 5.22 résout une transaction interactive même si son COMMIT échoue sur un trigger différé ; l'appel réussissait alors sans rien avoir enregistré (constaté sur base jetable). Toutes les transactions interactives de l'API passent désormais par `transactionVerifiee`, qui vérifie les contraintes différées (`SET CONSTRAINTS ALL IMMEDIATE`) avant la fin de la transaction : émission, annulation, avoirs (équilibre des écritures), comptes et règles comptables (journal), règlements. Une vérification différée « statut réglé ⇔ règlements », garde en base de la règle validée par Nelson le 17-10-2026, couvre aussi les écritures faites directement en base (contre-passation, affectation ou avoir sans resynchronisation du statut) ; elle verrouille la facture, si bien que deux écritures directes concurrentes se sérialisent. Les lignes existantes ne sont pas revalidées par la migration (règle 4).
+
+## Décisions et lots des 18 et 19-10-2026
+
+Les PR du découpage du serveur fusionnées le 18-10-2026 jusqu'à `dd92bf3` (#177, #184, #185, #187, #189 à #197 et #199) sont décrites dans la [passation](ROADMAP-PASSATION.md) (chantier technique 2), et #201 en a actualisé la roadmap ; cette section couvre la suite.
+
+*Rédigé le 19-10-2026. Tests, preuves et audits : voir le corps de chaque PR.*
+
+### Décisions de Nelson
+
+- **Découpage des écrans (18-10-2026, #200).** « 1. Oui je valide le principe. Oui a plat comme aujourd'hui. Fait ce qui est le mieux a corriger apres ou en issu je te laisse le choix de la meulleur des facon. » Principe validé : déplacement pur, état laissé dans la page, fichiers à plat dans `components/`. Petites anomalies, seul point délégué : une issue chacune (#202 à #206), à corriger après les trois déplacements. L'ordre des PR (outil, Planning, Administration, fiche chantier) est un choix technique de Claude Code.
+- **Sommes en flottants (18-10-2026, #198).** « 3. Prend le meilleur choix possible et surtout ne pas laisser passer une erreur eventuel d'affichage de montant. » Choix retenu : correction à la source, sommes en décimal exact et arrondis d'affichage corrigés (#208). La PR changeait des montants affichés : sa fusion, d'abord réservée à Nelson, a été confiée à Claude Code le 19-10-2026 avec celle de #242 (décision relayée sur #247), puis par la décision générale du 20-10-2026 ; Claude Code l'a fusionnée le 20-10-2026 (`b684fae`).
+- **Propositions 3 et 4 (18-10-2026, #182, #183).** Nelson a délégué l'arbitrage de leurs questions ouvertes : « Prend la meilleur decision possible comme tu comprend parfaitement ce que doit faire cette application alors prend le meilleur choix pour le bien de l'application pour cette partie et la facilité de l'utilisation en gardant la flexibilité. » Quatorze décisions pour les droits et six pour le paramétrage sont consignées dans ces PR. Leur fusion vaut validation des propositions. La décision du 20-10-2026 ne parlait pas de cette validation. Nelson a confirmé le même jour que leur fusion, et donc cette validation, revient à Claude Code (section suivante).
+- **Délégation de fusion (rappel ; remplacée par la décision du 20-10-2026, section suivante).** Les lots de cette section ont été fusionnés par Claude Code (#200 après validation de son principe par Nelson) selon la délégation de Nelson du 17-10-2026, consignée alors dans [CLAUDE.md](../CLAUDE.md) (« Mode de livraison », #176). Nelson avait écrit d'abord : « C'est moi qui fusionne, qui valide les montants et qui valide les propositions 3 et 4 », puis précisé : « Sauf pour la validation pardon tu fait comme maintenant. Ton agent specialisé dans l'audit et si tout est ok tu fusionne directement ». Conditions, reprises de CLAUDE.md d'alors :
+  - Claude Code fusionne lui-même la PR qu'il a codée lorsque deux conditions portent sur la même SHA : la CI y est verte, et son sous-agent d'audit l'y juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 ; jamais par la fusion automatique de GitHub.
+  - La délégation ne couvre ni une PR qui change des montants (#208), ni une proposition soumise à la validation de Nelson (#182, #183), ni la mise en production.
+  - Choix de Claude Code, et non exclusion de Nelson : il ne fusionne pas lui-même une PR qui modifie CLAUDE.md (#200, #207).
+- **Cycle des statuts des factures (19-10-2026, #221).** « #221 ok pour moi avec ta proposition ». La proposition de #221 : brouillon → émise ; une facture passe d'émise à réglée, et inversement, selon ses règlements ; elle ne passe à annulée qu'avec son avoir d'annulation, créé dans la même transaction ; « annulée » est définitif. Appliqué par #227, qui l'étend, pour suivre le comportement actuel de l'application, à la création des pièces et aux avoirs (une pièce naît brouillon ou émise ; un avoir, né émis, le reste) : choix de mise en œuvre relevé par l'audit interne, non décision de Nelson.
+- **Suite des lots (19-10-2026).** Dans le même message que l'accord sur #221 : « Fait ce qu'il faut pour terminer ce qu'il reste en prenant les meilleur solution que tu propose. / Ok tu peux continuer ». Claude Code a retenu, pour #230, les options les plus complètes de l'issue : garde différé, contrôle par taux sur la ventilation enregistrée (déduite des lignes pour une pièce historique), sans reprise des pièces existantes (règle 4), et, sur proposition de l'audit interne, cohérence de chaque avoir émis (#235). Les lots #234, #237 et #238 corrigent des constats d'audit sans règle métier nouvelle.
+
+### Lots fusionnés
+
+**Découpage des écrans du client** (chantier technique 2, sans changement de comportement) :
+- #200 : proposition [`DECOUPAGE-ECRANS-CIBLE.md`](DECOUPAGE-ECRANS-CIBLE.md), documentation seule.
+- #209 : outil de comparaison du rendu (`npm run comparer:rendu`). Il relève, pour chaque étape, le HTML, l'état des champs et la liste ordonnée des requêtes API des clients de `main` et de la branche, servis avec le même serveur et la même base jetable. Aucun code applicatif.
+- #213 (PR A) : les trois modales du planning et la file à planifier dans leurs fichiers ; `Planning.tsx` passe de 873 à 406 lignes.
+- #214 (PR B) : barème, choix du responsable et onglets Utilisateurs, Marges, référentiels et Modules dans leurs fichiers ; `Admin.tsx` passe de 1 477 à 684 lignes. L'outil passe de 77 à 79 étapes.
+- La PR C (fiche chantier) attendait la fusion de #208, qui modifiait aussi `ChantierDetail.tsx` ; #208 est fusionnée le 20-10-2026.
+
+**Comptes** (règle 2, droits) :
+- #216 (#178) : les routes de comptes refusent de retirer le dernier super administrateur **actif** ; un compte désactivé ne compte plus. Suppression, changement de type (hors promotion en super administrateur) et désactivation (non la réactivation), qui peuvent retirer un super administrateur actif, prennent un verrou consultatif en tête de transaction, comptent les autres super administrateurs actifs dans cette transaction et se sérialisent, en READ COMMITTED explicite. Refus inchangés : 409 pour la suppression et le changement de type, 400 pour la désactivation.
+- #224 (#215, #218) : le garde « un simple administrateur ne touche pas un compte super administrateur » est refait sur le compte relu sous son verrou, dans cinq routes, pour qu'une promotion simultanée ne le contourne pas. Le rattachement hiérarchique prend le verrou des retraits, puis ses comptes par identifiant croissant ; un compte ou un responsable supprimé pendant la requête donne 404 ou 400, et non plus 500.
+- #228 (#219, #226) : la suppression d'un compte et celle de sa fiche intervenant ne s'interbloquent plus. La liaison d'une fiche prend le verrou des retraits et se sérialise avec la suppression et le changement de type du compte, hors promotion super administrateur. Une fiche reliée entre-temps sans ce verrou fait refuser la suppression du compte (409, à refaire). READ COMMITTED explicite pour la liaison et la suppression d'une fiche, la promotion du démarrage, les permissions et l'accès financier.
+- #232 (#231) : au démarrage, la promotion ou la création d'un compte de `SUPERADMIN_EMAILS` est retentée une fois ; un échec persistant est signalé sans arrêter le serveur, et le prochain démarrage réessaie. Une initialisation impossible, par exemple une base injoignable, arrête le serveur avec un message explicite.
+
+**Factures** (règle 2, documents figés et écritures d'argent) :
+- #217 (#180) : une facture émise a ses lignes, sa ventilation de TVA, sa version des mentions légales et sa date d'émission figées en base. Son journal est en ajout seul, horodaté par la base. Le retour au brouillon et un statut inconnu sont refusés, comme le vidage (`TRUNCATE`) des lignes, de la ventilation, des écritures et du journal.
+- #227 (#221, #222) : le cycle des statuts décidé le 19-10-2026 est garanti en base, et étendu à la création des pièces et aux avoirs (choix de mise en œuvre). Une facture ne passe à annulée qu'avec un avoir d'annulation émis, aux mêmes montants HT, TVA et TTC, dans la même transaction ; les pièces annulées avant cette migration ne sont pas revérifiées. Le vidage est refusé sur les règlements, les affectations et trois journaux comptables. L'insertion d'une écriture verrouille la pièce en `FOR NO KEY UPDATE`, sans interblocage.
+- #235 (#230) : le plafond des avoirs est garanti en base par un garde différé, vérifié à la validation de la transaction. Chaque avoir émis est cohérent et positif : aucun montant négatif, TTC = HT + TVA, ventilation par taux égale à ses totaux. Ensemble, les avoirs émis d'une facture ne dépassent ni son HT, ni sa TVA, ni son TTC, ni sa ventilation à chaque taux, et un taux absent de la facture est refusé. Un avoir partiel ne crédite qu'une facture émise ou réglée, ce qui refuse aussi l'annulation à côté d'un avoir partiel. La facture créditée est verrouillée avant la lecture de ses avoirs. Les avoirs brouillons ne comptent pas. Sans reprise (règle 4), les pièces existantes ne sont revérifiées que lorsque leur facture reçoit un nouvel avoir ou s'annule : l'annulation par l'API d'une facture incohérente écrite en SQL est alors refusée par la base et répond 500, et non un refus métier (#243).
+
+**Devis** :
+- #237 (#163) : la duplication d'un devis lit la source sous son verrou, dans la transaction qui crée le duplicata : une modification en cours est attendue, puis copiée en entier. Le taux d'acompte est lu et le numéro d'affaire tiré avant la transaction, pour ne pas épuiser le pool de connexions sous des duplications simultanées ; un devis introuvable ne consomme pas de numéro.
+
+**Administration** :
+- #234 (#220) : dans Administration > Utilisateurs, un refus du changement de type de compte ou de la case « Commercial » est affiché avec le message de l'API, puis la liste est rechargée ; une erreur réseau est signalée. Les réponses 500 de ces deux routes passent en français, et la case reçoit un nom accessible.
+
+**Tests** :
+- #229 (#225, #211) : les attentes de verrou des tests serveur ne comptent plus que les requêtes de la base du test, hors de la session qui interroge ; la page Factures n'affiche ni liste vide, ni compte, ni « aucune » avant sa première réponse.
+- #238 (#210) : la préparation des E2E et l'outil de comparaison du rendu partagent une règle stricte du nom de base jetable : « e2e » ou « test » doit former un mot du nom, écrit en lettres sans accent, chiffres, `_` ou `-` (`client/scripts/base-jetable.mjs`).
+
+**Documentation** :
+- #233 : passation du 19-10-2026, état de `main` à `44f65f7`.
+
+### Suivis ouverts pendant ces lots
+
+Suivis cités par la passation précédente (#233) ; ceux corrigés depuis sont signalés. Les suivis ouverts puis corrigés avant elle (#211, #215, #218, #219, #221, #222, #225, #226, #231) figurent avec leur lot correctif dans « Lots fusionnés ». #202 à #206 (anomalies des écrans), #210 (nom de base jetable des E2E, corrigé par #238), #212 (affichages à zéro), #220 (refus silencieux du changement de type, corrigé par #234), #223 (comptes rendus et signatures SAV non figés en base, corrigé par #255) et #230 (plafond des avoirs non garanti en base, corrigé par #235).
+
+Puis, pendant les lots suivants : #236 (aperçu de TVA d'un avoir partiel, corrigé par #242), #239 (autres actions de l'Administration), #240 (pool de connexions de `PATCH /api/devis/:id`), #241 (CLAUDE.md, règle du nom de base jetable, corrigé par #246), #243 (cohérence interne des pièces émises), #244 (jeton de session E2E recopié dans 16 parcours), #247 (double envoi du formulaire d'avoir partiel, bloqué à l'écran par #251) et #248 (gardes des bases et ports de test). #152 (parcours `entetes-mobile`) reçoit un nouveau constat : un échec intermittent au premier passage complet local, diagnostiqué dans #152 ; correctif probable #249, à surveiller.
+
+### En attente de Nelson au 19-10-2026
+
+*Suites au 20-10-2026 : #246 et #208 sont fusionnées ; #242 est fusionnée selon la décision du 20-10-2026 ; la fusion de #182 et #183, qui vaut validation, revient à Claude Code (confirmation du 20-10-2026) ; la ligne de #207 est reprise par la PR documentaire du 20-10-2026. Voir la section suivante.*
+
+- #208 (#198) et #242 (#236) : elles changent des montants affichés : leur fusion revient donc à Nelson. #208, en conflit avec `main` depuis #238, est à rafraîchir puis à réauditer ; #242 est prête (audit interne fusionnable et CI 5/5 sur `5f8426d`) ; #247 porte sur le même formulaire, à arbitrer en la fusionnant. L'état est tenu dans chaque PR, corps et commentaires.
+- #207 : état du découpage dans CLAUDE.md.
+- #246 (#241) : règle du nom de base jetable dans CLAUDE.md ; audit interne en cours à la rédaction de cette passation, fusion réservée à Nelson par choix de Claude Code.
+- #182 et #183 : propositions 3 et 4, arbitrées par délégation, à valider par leur fusion.
+
+## Décisions et lots des 19 (soir) et 20-10-2026
+
+Suite de la section précédente, depuis la passation #245 (`246d833`). *Rédigé le 20-10-2026. Tests, preuves et audits : voir le corps et les commentaires de chaque PR.*
+
+### Décisions de Nelson
+
+- **Pièce émise à montant nul (19-10-2026, #243).** « #243 on ne refuse pas une piece a emise a montant nul ». Le correctif de #243 (cohérence interne des pièces émises) n'interdira donc pas une facture ou un avoir émis à 0 / 0 / 0 € ; le reste du correctif proposé ne change pas.
+- **Fusion de #246 (19-10-2026).** « #246 je te donne l'autorisation pour fusionner cet PR » : PR qui modifiait CLAUDE.md, fusionnée par Claude Code sur cette autorisation.
+- **Double envoi de l'avoir partiel (19-10-2026, #247).** « Suivi #247 oui corrige avant. » : corrigé côté écran par #251, avant #242 comme demandé ; la clé d'idempotence côté serveur reste suivie dans #247, après le pilote.
+- **Ordre et fusion de #208 et #242 (19-10-2026, #247).** Décision relayée sur #247, sans citation mot pour mot : #251 d'abord, puis #208 rafraîchie, puis #242 rafraîchie ; Claude Code peut fusionner #208 et #242 lui-même, chacune avec une CI verte et un audit interne fusionnable sur sa SHA finale.
+- **Ordre pendant le pilote (19-10-2026).** « La prochaine PR fonctionnelle est le lot 3b. Jusqu'à la fin du pilote, un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant. Tout le reste devient une issue, traitée après le pilote. » Reportée dans [CLAUDE.md](../CLAUDE.md#méthode-de-travail-décision-de-nelson-du-16-10-2026). En application, #250 (#240, pool de connexions de la modification d'un devis) est mise en pause, en brouillon.
+- **Lot pilote 3b (19-10-2026, #253).** Réponses aux questions du jour, chaque fois sur l'option recommandée :
+  1. terminer une intervention exige un compte rendu signé ; à défaut, un motif (client absent, refus de signer, signature impossible, autre) est consigné au journal ;
+  2. les heures du technicien sur une intervention SAV hors contrat vont dans les coûts SAV, en durée brute sans arrondi, sans effet sur la marge des chantiers ; l'administration voit leur coût de main-d'œuvre (montant affiché nouveau : #253 réservait d'abord la fusion de 3b-2 à Nelson, point remplacé par la décision du 20-10-2026) ;
+  3. la signature dessinée au doigt est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé ; durée de conservation à confirmer avec le cabinet ;
+  4. le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b.
+- **Fusion des PR (20-10-2026, #253).** « Je ne fusionne aucune PR, c’est toi apres verification zt si tout est ok que tu peux fusionner les pr ». Elle remplace la délégation du 17-10-2026 : Claude Code fusionne toute PR de Claude Code, montants compris, avec une CI verte et un audit interne fusionnable sur la même SHA, par commit de fusion sur la SHA exacte, jamais par fusion automatique. La mise en production reste à Nelson. Les propositions 3 et 4 (#182, #183), dont la fusion vaut validation, restaient soumises à la confirmation de Nelson, puisque son message ne parlait que de fusion. Reportée dans [CLAUDE.md](../CLAUDE.md#mode-de-livraison).
+- **Toutes les PR (20-10-2026, message de la session de travail consigné sur #182 et #183).** « C’est toi qui fusionne TOUTES les PR » : réponse à la question de la passation sur les propositions 3 et 4. Claude Code fusionne aussi #182 et #183, ce qui valide les propositions, aux conditions de toute PR : CI verte et audit interne fusionnable sur la même SHA, commit de fusion sur la SHA attendue. La validation comptable et la mise en production restent à Nelson. Reportée dans [CLAUDE.md](../CLAUDE.md#mode-de-livraison).
+- **Libellé du coût cumulé d'une intervention (20-10-2026, #257).** « Je suis ok pour le libellé main d’oeuvre cumulée » (message de la session de travail, consigné sur #257) : hors contrat, où aucun matériel ne se saisit, le total s'intitule « Main-d’œuvre cumulée » ; avec un contrat, « Coût réel cumulé » est gardé, même pour un matériel nul.
+- **Clôture d'une intervention (20-10-2026, #253).** « je te confirme tes 3 choix, je valide tes recommandations » :
+  1. un compte rendu est toujours exigé pour terminer ; seule la signature peut manquer, remplacée par un motif consigné au journal ;
+  2. le motif « autre » exige une précision écrite courte, consignée au journal ;
+  3. la règle vaut pour tous : technicien comme encadrement.
+- **Variables d'environnement (20-10-2026, #253).** « avec un sous agent, verifie les variable a remplir necessairepour l'application, la j'ai regardé sur le VPS sur lequel j'ai fait un git pull origin main et sur le fichier .env.example je n'ai pas toutes les variable a mettre, nottement tout ce qui concernera le login avec Microsoft 365. il ne faut absolument pas l'oublier de le mettre a jour au fur et a mesure que tu construit les differentes chose et pesner toujours a le mettre a jour sur le fichier .env.example ». Appliquée par #263, qui ajoute la règle permanente 3 de [CLAUDE.md](../CLAUDE.md#règles-permanentes-de-conception-décision-de-nelson-du-17-10-2026).
+
+### Lots fusionnés
+
+Fusionnés par Claude Code : #246 sur autorisation de Nelson, #249 et #255 par la délégation du 17-10-2026, les suivants selon la décision du 20-10-2026.
+
+**Lot pilote 3b** (#253) :
+- #255, 3b-1 (#223, règle 2) : comptes rendus d'intervention en ajout seul et signatures figées en base (modification et suppression refusées), vidage refusé sur les deux tables. Une intervention qui porte un compte rendu ne se supprime plus (clé étrangère en RESTRICT). Routes, droits et écrans inchangés. Le figement dès l'enregistrement est un choix par défaut de #253, à confirmer.
+- #257, 3b-2 (montant affiché nouveau) : le technicien affecté saisit et corrige ses heures sur une intervention hors contrat, comme sur un contrat actif ; un contrat suspendu ou terminé reste fermé, et le matériel reste réservé aux contrats actifs. Les coûts d'une intervention hors contrat sont lisibles : l'administration voit le taux figé et le coût de main-d'œuvre (« Main-d’œuvre cumulée »), le technicien ses heures sans taux, le conducteur les heures sans taux ni coût. Une date d'heures future est refusée (choix par défaut, à confirmer), y compris sur un contrat. Un conflit de sérialisation répond 409 au lieu de 500.
+- #268, 3b-3 (règle 2 : documents figés, journal, périmètres) : compte rendu et signature dans la page, sans fenêtre du navigateur.
+  - Un compte rendu porte une clé d'envoi tirée à l'ouverture du formulaire : un renvoi après une réponse perdue relit le compte rendu enregistré au lieu d'en figer un second.
+  - La signature exige un tracé dessiné au doigt, vectoriel et borné (50 traits, 2 000 points : choix par défaut, à confirmer), figé en base et inclus dans l'empreinte SHA-256 ; le compte qui l'enregistre est conservé ; la migration est refusée s'il existe déjà des signatures sans tracé.
+  - Terminer exige un compte rendu, signé ou accompagné d'un motif parmi quatre, consigné au journal, pour le technicien comme pour l'encadrement ; « Autre » exige une précision écrite courte, de 3 à 200 caractères (choix par défaut, à confirmer).
+  - Compte rendu, signature et clôture se font sous le verrou de l'intervention, périmètre relu ; les horodatages des comptes rendus et des signatures sont imposés par la base.
+  - Trois passages d'audit interne : tests renforcés contre des mutants survivants (C1), périmètre relu sous verrou (C2), signature sur écran large (C3), formulaires remis à jour après un refus ou une issue inconnue (C4, C5).
+
+**Montants** (règle 2) :
+- #242 (#236) : l'aperçu de TVA d'un avoir partiel reprend le calcul du serveur, en entiers et en tenant compte des avoirs déjà émis ; il annonçait parfois un autre montant que le document émis (2,13 € pour 2,14 € sur 21,35 € HT à 10 %). Montants enregistrés et documents émis inchangés ; après un avoir créé, l'aperçu n'annonce aucun montant tant que la liste n'est pas relue.
+- #208 (#198) : sommes du suivi des chantiers, du total facturé et du reste à facturer, des commissions et des statistiques en décimal exact ; plus de fausse alerte à budget exactement consommé. L'affichage arrondit moitié vers l'extérieur sans « -0 » (2,50 € n'est plus affiché 2 €, -12,50 € s'affiche -13 €), signe et couleur suivent la valeur affichée, et les alertes de moins d'un euro sont chiffrées au centime. Montants stockés et documents émis inchangés. L'audit relève deux conventions d'arrondi du coût de main-d'œuvre (question de la passation).
+
+**Factures** :
+- #251 (#247) : le formulaire d'avoir partiel n'envoie qu'une requête. Sur une issue inconnue (réponse perdue, erreur serveur), l'écran le dit, relit la liste puis libère le formulaire ; si la relecture échoue, le bouton reste bloqué jusqu'à une relecture réussie (choix par défaut, à confirmer). Un refus est affiché tel quel. Rien ne change côté serveur.
+
+**Configuration** :
+- #263 : `.env.example` et `server/.env.example` listent toutes les variables lues, connexion Microsoft 365 comprise ; l'URI de redirection est `https://<domaine>/auth/callback`, et non l'origine seule ; `docs/CONFIGURATION-ENVIRONNEMENT.md` décrit l'inscription Entra ID pas à pas. Règle permanente 3 de CLAUDE.md, vérifiée en CI par `server/tests/environnement.test.mjs`.
+
+**Tests et documentation** :
+- #249 (#152, point 5) : le parcours `entetes-mobile` mesure chaque route dans une page neuve ; en local, Chromium refusait les modules de Vite après une trentaine de navigations dans la même page.
+- #246 (#241) : CLAUDE.md décrit la règle du nom de base jetable des E2E.
+- #266 : passation du 20-10-2026, décision de fusion reportée dans CLAUDE.md, règle du pilote, lots 3b-1 et 3b-2 ; #207 fermée, sa ligne reprise.
+
+### Suivis ouverts pendant ces lots
+
+Étiquette `suivi-audit`, tous ouverts au 20-10-2026 : #252 (taux d'acompte invalide remplacé en silence, audit de #250), #254 et #258 (formulaire d'avoir partiel, audit de #251), #256 (suppression d'un compte et comptes rendus, audit de #255), #259 et #260 (affichage des heures, cadre des coûts sur un conflit, audit de #257), #261, #262, #264 et #265 (accès de secours derrière les proxys, `+` du jeton de secours, autorisation sur `oid` et `tid`, formes restantes du test des variables, inventaire et audit de #263), #269 (notes non bloquantes des audits de #268 : instantané du journal et refus de migrer sans test, motif de clôture non affiché, périmètre par l'affaire, fin de pointeur manquée, longueur du champ de précision ; règle de clôture et motifs écrits dans le code tant que #183 n'est pas validée). #267 (deux formulations de la règle de fusion, audit de #266) est reprise et fermée par la passation qui suit #268.
+
+### En cours au 20-10-2026
+
+- #182 et #183, propositions 3 et 4 : à rafraîchir sur `main` et à réauditer, puis fusionnées par Claude Code aux conditions habituelles ; leur fusion vaut validation (confirmation de Nelson du 20-10-2026).
+- #272, lot pilote 3b-4 (« Ma journée » et fiche intervention sur téléphone) : audit interne en cours.
+- #250 (#240) : en pause, en brouillon, jusqu'à la fin du pilote.
+- Lot 3b : 3b-4 (« Ma journée » et fiche intervention sur téléphone), puis le planning du technicien limité.

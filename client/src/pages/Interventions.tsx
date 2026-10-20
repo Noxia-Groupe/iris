@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
 import { SelecteurClient } from '../components/SelecteurClient';
+import { FormulaireCloture, FormulaireCompteRendu, FormulaireSignature } from '../components/FormulairesIntervention';
+import { TraceSignature } from '../components/TraceSignature';
+import type { TraceSignature as Trace } from '../lib/traceSignature';
 import { resumeCoutsIntervention } from '../lib/coutsIntervention';
 import { isAdminRole, useCurrentUser } from '../roles';
 import { useCompanyTimezone } from '../companyTimezoneContext';
@@ -15,11 +18,13 @@ type Fournisseur = { id: string; nom: string };
 type CoutsIntervention = { totalMainOeuvreHT?: number | null; totalMaterielHT?: number | null; totalCoutsHT?: number | null; heures?: { id: string; date: string; nbrHeures: number; commentaire?: string | null; createdAt: string }[] };
 type Intervention = {
   id: string; reference: string; titre: string; description?: string | null; priorite: string; statut: string;
-  dateSouhaitee?: string | null; dateDemande?: string | null; client: Client;
+  dateSouhaitee?: string | null; dateDemande?: string | null; client: Client; contratMaintenanceId?: string | null;
   site?: { nom: string; ville?: string | null } | null; contact?: { prenom?: string | null; nom: string } | null; chantier?: { nom: string; numeroDevis?: string | null } | null;
   couvertureContrat?: { politiqueMainOeuvre: 'INCLUSE' | 'HORS_FORFAIT'; politiqueMateriel: 'INCLUS' | 'HORS_FORFAIT'; noteCouverture?: string | null };
-  rapports?: { id: string; contenu: string; createdAt: string; auteur: { name: string }; signature?: { id: string; signataire: string; accepteLe: string; empreinte: string } | null }[];
+  rapports?: { id: string; contenu: string; createdAt: string; auteur: { name: string }; signature?: { id: string; signataire: string; accepteLe: string; empreinte: string; trace?: Trace | null; enregistrePar?: { name: string } | null } | null }[];
 };
+// Formulaire ouvert sous une intervention : un seul à la fois (lot pilote 3b-3).
+type FormulaireOuvert = { type: 'compteRendu'; interventionId: string } | { type: 'signature'; interventionId: string; rapportId: string } | { type: 'cloture'; interventionId: string };
 
 const libelleStatut: Record<string, string> = { A_PLANIFIER: 'À planifier', PLANIFIEE: 'Planifiée', EN_COURS: 'En cours', TERMINEE: 'Terminée', ANNULEE: 'Annulée' };
 const libellePriorite: Record<string, string> = { BASSE: 'Basse', NORMALE: 'Normale', HAUTE: 'Haute', URGENTE: 'Urgente' };
@@ -47,6 +52,7 @@ export default function Interventions() {
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [error, setError] = useState('');
+  const [formulaire, setFormulaire] = useState<FormulaireOuvert | null>(null);
   const user = useCurrentUser();
   const estEncadrement = isAdminRole(user?.role) || user?.role === 'CONDUCTEUR_TRAVAUX';
   const estTechnicien = user?.role === 'TECHNICIEN';
@@ -65,8 +71,9 @@ export default function Interventions() {
     setCouts(Object.fromEntries(resultats.filter((resultat): resultat is readonly [string, CoutsIntervention] => resultat !== null)));
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // Relecture silencieuse (formulaire ouvert) : la liste reste affichée, les formulaires gardent leur saisie.
+  const load = useCallback(async (silencieuse = false) => {
+    if (!silencieuse) setLoading(true);
     try {
       const interventionsRes = await apiFetch('/interventions');
       const interventionData = await interventionsRes.json();
@@ -95,6 +102,20 @@ export default function Interventions() {
   }, [chargerCouts, estEncadrement]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Après une relecture, un formulaire dont l'intervention a quitté la liste (annulée ailleurs, sortie du
+  // périmètre) ou n'est plus en cours (clôture) se ferme : resté ouvert mais invisible, il masquerait les
+  // actions de toutes les cartes.
+  useEffect(() => {
+    if (!formulaire || loading) return;
+    const item = interventions.find((candidat) => candidat.id === formulaire.interventionId);
+    if (!item) {
+      setFormulaire(null);
+      setError('Cette intervention a changé entre-temps (annulée ou retirée de vos dossiers) : la liste a été relue.');
+    } else if (formulaire.type === 'cloture' && item.statut !== 'EN_COURS') {
+      setFormulaire(null);
+    }
+  }, [formulaire, interventions, loading]);
 
   const choisirClient = async (clientId: string) => {
     clientDemande.current = clientId;
@@ -128,32 +149,19 @@ export default function Interventions() {
     await load();
   };
 
-  const signerRapport = async (rapportId: string) => {
-    const signataire = window.prompt('Nom complet du signataire client :');
-    if (!signataire?.trim()) return;
-    if (!window.confirm(`Le client ${signataire.trim()} confirme avoir lu et accepté ce compte rendu. Confirmer la signature ?`)) return;
-    setError('');
-    const res = await apiFetch(`/interventions/rapports/${rapportId}/signature`, { method: 'POST', body: JSON.stringify({ signataire: signataire.trim(), confirme: true }) });
-    const data = await res.json();
-    if (!res.ok) return setError(data.error || 'Signature impossible.');
-    await load();
-  };
-
   const transition = async (id: string, statut: string) => {
     setError('');
+    // Terminer passe par le formulaire de clôture : compte rendu signé, ou motif (lot 3b-3).
+    if (statut === 'TERMINEE') return setFormulaire({ type: 'cloture', interventionId: id });
     const res = await apiFetch(`/interventions/${id}/statut`, { method: 'PATCH', body: JSON.stringify({ statut }) });
     const data = await res.json();
     if (!res.ok) return setError(data.error || 'Transition impossible.');
     await load();
   };
 
-  const ajouterRapport = async (id: string) => {
-    const contenu = window.prompt('Compte rendu terrain (3 caractères minimum) :');
-    if (contenu === null) return;
-    setError('');
-    const res = await apiFetch(`/interventions/${id}/rapports`, { method: 'POST', body: JSON.stringify({ contenu }) });
-    const data = await res.json();
-    if (!res.ok) return setError(data.error || 'Enregistrement du compte rendu impossible.');
+  // Après un enregistrement, le formulaire se ferme et la liste est relue.
+  const apresEnregistrement = async () => {
+    setFormulaire(null);
     await load();
   };
 
@@ -212,17 +220,22 @@ export default function Interventions() {
       <div className="flex justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">{item.reference}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale}{item.dateDemande && ` · Demandée le ${formatDateOnlyOrEmpty(item.dateDemande)}`} · Souhaitée le {formatDateOnlyOrEmpty(item.dateSouhaitee)}</p>{(item.site || item.contact || item.chantier) && <p className="text-sm text-gray-500">{item.site && `Site : ${item.site.nom}${item.site.ville ? ` (${item.site.ville})` : ''}`}{item.contact && `${item.site ? ' · ' : ''}Contact : ${[item.contact.prenom, item.contact.nom].filter(Boolean).join(' ')}`}{item.chantier && `${item.site || item.contact ? ' · ' : ''}Affaire : ${item.chantier.numeroDevis ? `${item.chantier.numeroDevis} — ` : ''}${item.chantier.nom}`}</p>}</div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>
       {item.description && <p className="mt-3 text-sm text-gray-600">{item.description}</p>}
       {item.couvertureContrat && <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">Couverture contractuelle figée : main-d’œuvre {item.couvertureContrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {item.couvertureContrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{item.couvertureContrat.noteCouverture ? ` · ${item.couvertureContrat.noteCouverture}` : ''}</p>}
-      {couts[item.id] && <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-        {/* Coût réel, main-d'œuvre comprise, pour l'administration ; matériel seul pour un conducteur (lot (d)). */}
+      {/* Un conducteur ne reçoit aucun total hors contrat, où le matériel ne se saisit pas : pas de cadre vide (lot 3b). */}
+      {couts[item.id] && (estTechnicien || (estEncadrement && (resumeCoutsIntervention(couts[item.id]) || (fournisseurs !== null && item.contratMaintenanceId)))) && <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+        {/* Coût réel, main-d'œuvre comprise, pour l'administration (main-d'œuvre seule hors contrat) ; matériel seul pour un conducteur (lot (d)). */}
         {estEncadrement && (() => { const resume = resumeCoutsIntervention(couts[item.id]); return resume && <p className="font-medium text-slate-800">{resume.libelle} : {montantEuros(resume.montant)} HT</p>; })()}
         {estTechnicien && <>
           {(couts[item.id].heures || []).length > 0 && <ul className="mb-3 space-y-1 text-slate-700">{couts[item.id].heures!.map((heure) => <li key={heure.id}>{formatDateOnlyOrEmpty(heure.date)} — {heure.nbrHeures} h{heure.commentaire ? ` — ${heure.commentaire}` : ''}</li>)}</ul>}
           <form onSubmit={(event) => void enregistrerHeures(event, item.id)} className="grid gap-2 sm:grid-cols-2"><input required name="date" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date (JJ-MM-AAAA)" className="form-input" /><input required name="nbrHeures" inputMode="decimal" placeholder="Heures" className="form-input" /><input name="commentaire" maxLength={500} placeholder="Commentaire" className="form-input sm:col-span-2" /><input name="motif" maxLength={500} placeholder="Motif (obligatoire si 0)" className="form-input" /><button type="submit" className="btn btn-secondary">Enregistrer mes heures</button></form>
         </>}
-        {estEncadrement && fournisseurs !== null && <form onSubmit={(event) => void enregistrerAchat(event, item.id)} className="mt-3 grid gap-2 sm:grid-cols-2"><input required name="date" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date (JJ-MM-AAAA)" className="form-input" /><select required name="fournisseurId" defaultValue="" className="form-input"><option value="" disabled>Fournisseur</option>{fournisseurs.map((fournisseur) => <option key={fournisseur.id} value={fournisseur.id}>{fournisseur.nom}</option>)}</select><input required name="description" maxLength={500} placeholder="Description du matériel" className="form-input sm:col-span-2" /><input required name="montantHT" inputMode="decimal" placeholder="Montant HT" className="form-input" /><input name="motif" maxLength={500} placeholder="Motif (obligatoire si 0)" className="form-input" /><button type="submit" className="btn btn-secondary">Enregistrer l’achat matériel</button></form>}
+        {/* Hors contrat, l'intervention ne porte que les heures du technicien (lot 3b) : pas de matériel. */}
+        {estEncadrement && fournisseurs !== null && item.contratMaintenanceId && <form onSubmit={(event) => void enregistrerAchat(event, item.id)} className="mt-3 grid gap-2 sm:grid-cols-2"><input required name="date" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date (JJ-MM-AAAA)" className="form-input" /><select required name="fournisseurId" defaultValue="" className="form-input"><option value="" disabled>Fournisseur</option>{fournisseurs.map((fournisseur) => <option key={fournisseur.id} value={fournisseur.id}>{fournisseur.nom}</option>)}</select><input required name="description" maxLength={500} placeholder="Description du matériel" className="form-input sm:col-span-2" /><input required name="montantHT" inputMode="decimal" placeholder="Montant HT" className="form-input" /><input name="motif" maxLength={500} placeholder="Motif (obligatoire si 0)" className="form-input" /><button type="submit" className="btn btn-secondary">Enregistrer l’achat matériel</button></form>}
       </div>}
-      {(item.rapports || []).length > 0 && <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm"><p className="mb-1 font-medium text-gray-700">Comptes rendus terrain</p>{item.rapports!.map((rapport) => <div key={rapport.id} className="mb-2 last:mb-0 text-gray-600"><p>{rapport.contenu} <span className="text-gray-400">— {rapport.auteur.name}, {formatCompanyDateOrEmpty(rapport.createdAt)}</span></p>{rapport.signature ? <p className="text-xs text-emerald-700">Signé par {rapport.signature.signataire} le {formatCompanyDateOrEmpty(rapport.signature.accepteLe)} · empreinte enregistrée</p> : estTechnicien && item.statut !== 'ANNULEE' ? <button type="button" onClick={() => void signerRapport(rapport.id)} className="mt-1 text-xs font-medium text-blue-700">Faire signer ce compte rendu</button> : null}</div>)}</div>}
-      <div className="mt-4 flex flex-wrap gap-2">{(transitions[item.statut] || []).filter((action) => !estTechnicien || action.statut === 'EN_COURS' || action.statut === 'TERMINEE').map((action) => <button key={action.statut} type="button" onClick={() => void transition(item.id, action.statut)} className={action.statut === 'ANNULEE' ? 'btn btn-secondary text-red-700' : 'btn btn-primary'}>{action.libelle}</button>)}{estTechnicien && item.statut === 'EN_COURS' && <button type="button" onClick={() => void ajouterRapport(item.id)} className="btn btn-secondary">Ajouter un compte rendu</button>}</div>
+      {(item.rapports || []).length > 0 && <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm"><p className="mb-1 font-medium text-gray-700">Comptes rendus terrain</p>{item.rapports!.map((rapport) => <div key={rapport.id} className="mb-2 last:mb-0 text-gray-600"><p className="whitespace-pre-line">{rapport.contenu} <span className="text-gray-400">— {rapport.auteur.name}, {formatCompanyDateOrEmpty(rapport.createdAt)}</span></p>{rapport.signature ? <div className="text-xs text-emerald-700"><p>Signé par {rapport.signature.signataire} le {formatCompanyDateOrEmpty(rapport.signature.accepteLe)}{rapport.signature.enregistrePar ? ` · enregistré par ${rapport.signature.enregistrePar.name}` : ''} · empreinte enregistrée</p>{rapport.signature.trace && <TraceSignature trace={rapport.signature.trace} signataire={rapport.signature.signataire} />}</div> : item.statut !== 'ANNULEE' && !formulaire ? <button type="button" onClick={() => setFormulaire({ type: 'signature', interventionId: item.id, rapportId: rapport.id })} className="mt-1 text-xs font-medium text-blue-700">Faire signer ce compte rendu</button> : null}</div>)}</div>}
+      {formulaire?.interventionId === item.id && formulaire.type === 'compteRendu' && <FormulaireCompteRendu interventionId={item.id} onEnregistre={apresEnregistrement} onRelire={() => load(true)} onAnnuler={() => setFormulaire(null)} />}
+      {formulaire?.interventionId === item.id && formulaire.type === 'signature' && (() => { const rapport = (item.rapports || []).find((candidat) => candidat.id === formulaire.rapportId); return rapport && <FormulaireSignature rapport={rapport} enregistrePar={user?.name || 'Session interne active'} onEnregistre={apresEnregistrement} onRelire={() => load(true)} onAnnuler={() => setFormulaire(null)} />; })()}
+      {formulaire?.interventionId === item.id && formulaire.type === 'cloture' && item.statut === 'EN_COURS' && <FormulaireCloture interventionId={item.id} nombreComptesRendus={(item.rapports || []).length} signe={(item.rapports || []).some((rapport) => rapport.signature)} onTermine={apresEnregistrement} onRelire={() => load(true)} onAjouterCompteRendu={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} onAnnuler={() => setFormulaire(null)} />}
+      {!formulaire && <div className="mt-4 flex flex-wrap gap-2">{(transitions[item.statut] || []).filter((action) => !estTechnicien || action.statut === 'EN_COURS' || action.statut === 'TERMINEE').map((action) => <button key={action.statut} type="button" onClick={() => void transition(item.id, action.statut)} className={action.statut === 'ANNULEE' ? 'btn btn-secondary text-red-700' : 'btn btn-primary'}>{action.libelle}</button>)}{item.statut === 'EN_COURS' && <button type="button" onClick={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} className="btn btn-secondary">Ajouter un compte rendu</button>}</div>}
     </article>)}</div>}
   </div>;
 }

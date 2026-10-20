@@ -10,7 +10,7 @@ import { blockCommercial, requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { routeMixte } from '../../http/routes-mixtes';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, aujourdHuiEntreprise, dateIsoStricte } from '../../commun/dates';
-import { decimalToNumber } from '../../commun/montants';
+import { decimalToNumber, sommeExacte, differenceExacte } from '../../commun/montants';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { normaliserNumeroDevis, erreurNumeroDevis, numeroDevisDejaPris } from '../devis/metier';
@@ -136,12 +136,13 @@ export function enregistrerRoutesChantiers(app: Express): void {
       if (canSeeMarge) {
         // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
         // facture annulée est visible mais ne contribue plus, son avoir la neutralise.
+        // Sommes exactes, indépendantes de l'ordre des factures (#198).
         const totalFactureHt = factures.reduce((somme, facture) => {
-          if (facture.type === 'AVOIR') return somme - Number(facture.totalHt);
+          if (facture.type === 'AVOIR') return differenceExacte(somme, facture.totalHt);
           if (facture.statut === 'ANNULEE' && !facture.avoirs.length) return somme;
-          return somme + Number(facture.totalHt);
+          return sommeExacte(somme, facture.totalHt);
         }, 0);
-        detail.facturation = decimalToNumber({ factures, totalFactureHt, resteAFacturerHt: Number(chantier.budgetGlobalVendu) - totalFactureHt });
+        detail.facturation = decimalToNumber({ factures, totalFactureHt, resteAFacturerHt: differenceExacte(chantier.budgetGlobalVendu, totalFactureHt) });
       }
       res.json(detail);
     } catch (error) {

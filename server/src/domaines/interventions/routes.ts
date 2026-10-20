@@ -1,5 +1,4 @@
 import type { Express } from 'express';
-import crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import { ROLE_TECHNICIEN, isAdminRole } from '../../droits/roles';
@@ -15,12 +14,21 @@ import { requirePlanningActif, PLANNING_EVENT_INCLUDE, validatePlanningEvent } f
 import { verrouillerContratMaintenance } from '../contrats/metier';
 import {
   CHANTIER_INTERVENTION_SELECT, chantierDuJournalReduit, journaliserIntervention, exposerIntervention, estEncadrementCoutIntervention,
-  chargerInterventionCout, interventionCoutEligible, estConflitTransactionCout, verrouillerContexteCout, heureOperationnelleTechnicien,
+  chargerInterventionCout, interventionCoutEligible, interventionHeuresEligible, dateHeuresIntervention, estConflitTransactionCout, verrouillerContexteCout, heureOperationnelleTechnicien,
   journaliserCoutIntervention, totalHeuresInterventionAuCentime, getInterventionFilterForUser, synchroniserAffectationsIntervention,
   dateDemandeCurative,
 } from './metier';
+import {
+  RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereInvalide, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
+} from './comptesRendus';
 
 class ChantierInterventionIntrouvable extends Error {}
+// Refus métier relevé sous verrou, dans la transaction : il l'annule et devient un 409.
+class RefusIntervention extends Error {}
+// Intervention sortie du périmètre du demandeur pendant qu'il attendait le verrou : 404, sans rien dire.
+class InterventionHorsPerimetre extends Error {}
+
+const HEURES_DATE_FUTURE = 'Des heures se déclarent une fois faites : la date ne peut pas dépasser aujourd’hui.';
 
 export function enregistrerRoutesInterventions(app: Express): void {
   app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, res, next) => {
@@ -94,7 +102,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
             inclureAnnulees ? {} : { statut: { not: 'ANNULEE' } },
           ],
         },
-        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT, rapports: { select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } }, signature: { select: { id: true, signataire: true, empreinte: true, accepteLe: true } } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
+        include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT, rapports: { select: { ...RAPPORT_SELECT, signature: { select: SIGNATURE_SELECT } }, orderBy: { createdAt: 'asc' } }, affectations: { include: { intervenant: { select: { id: true, nom: true, userId: true } } } } },
         orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
       });
       res.json(decimalToNumber(interventions.map(exposerIntervention)));
@@ -104,15 +112,15 @@ export function enregistrerRoutesInterventions(app: Express): void {
     }
   });
 
-  // Coûts SAV contractuels : jamais exposés dans les flux Travaux ou /api/v1.
+  // Coûts SAV : jamais exposés dans les flux Travaux ou /api/v1. Hors contrat, une intervention ne
+  // porte que les heures du technicien (lot pilote 3b), sans matériel.
   app.get('/api/interventions/:id/couts', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       const intervention = await chargerInterventionCout(req);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       const encadrement = estEncadrementCoutIntervention(req.user!.role);
       if (!encadrement && req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Accès non autorisé.' });
-      if (!intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
-      if (!encadrement && !interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      if (!encadrement && !interventionHeuresEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
 
       if (!encadrement) {
         const heures = await prisma.coutInterventionHeure.findMany({
@@ -130,11 +138,16 @@ export function enregistrerRoutesInterventions(app: Express): void {
         prisma.coutInterventionAchat.findMany({ where: { interventionId: intervention.id }, include: { fournisseur: true }, orderBy: { date: 'desc' } }),
       ]);
       const totalMainOeuvreHT = totalHeuresInterventionAuCentime(heures.filter((heure) => !heure.archivedAt));
-      const totalMaterielHT = achats.filter((achat) => !achat.archivedAt).reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+      // Hors contrat, aucun matériel ne se saisit : pas de total matériel, et le coût réel se limite à
+      // la main-d'œuvre (décision de Nelson du 19-10-2026 : l'administration le voit).
+      const totalMaterielHT = intervention.contratMaintenanceId
+        ? achats.filter((achat) => !achat.archivedAt).reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+        : null;
       // Un conducteur garde les heures et le matériel, mais ni taux ni coût de main-d'œuvre, ni le
       // total qui l'inclut (cf. voitCoutMainOeuvre).
       if (!voitCoutMainOeuvre(req)) return res.json(decimalToNumber({ heures: heures.map(sansTauxHoraire), achats, totalMainOeuvreHT: null, totalMaterielHT, totalCoutsHT: null }));
-      res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT: totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP) }));
+      const totalCoutsHT = totalMaterielHT === null ? totalMainOeuvreHT : totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+      res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT }));
     } catch (error) { console.error('Erreur lecture coûts intervention', error); res.status(500).json({ error: 'Lecture des coûts impossible.' }); }
   });
 
@@ -143,16 +156,18 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const intervention = await chargerInterventionCout(req);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       if (req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Saisie d’heures réservée au technicien affecté.' });
-      if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
-      const date = dateIsoStricte(req.body?.date); const nbrHeures = nombreDecimalNonNegatif(req.body?.nbrHeures, 8, true);
+      if (!interventionHeuresEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      const dateSaisie = dateIsoStricte(req.body?.date); const nbrHeures = nombreDecimalNonNegatif(req.body?.nbrHeures, 8, true);
       const motif = motifCorrectionValide(req.body?.motif);
-      if (!date || nbrHeures === null) return res.status(400).json({ error: 'Date ou nombre d’heures invalide.' });
+      if (!dateSaisie || nbrHeures === null) return res.status(400).json({ error: 'Date ou nombre d’heures invalide.' });
+      const date = dateHeuresIntervention(dateSaisie, (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
+      if (!date) return res.status(400).json({ error: HEURES_DATE_FUTURE });
       if (nbrHeures === 0 && !motif) return res.status(400).json({ error: 'Un motif de 3 à 500 caractères est obligatoire pour zéro heure.' });
       const intervenant = await prisma.intervenant.findFirst({ where: { userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
       if (!intervenant) return res.status(404).json({ error: 'Intervention introuvable.' });
       const cree = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, intervenant.id, req.user!.id);
-        if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
+        if (!interventionActuelle || !interventionHeuresEligible(interventionActuelle)) return null;
         const intervenantActuel = await tx.intervenant.findFirst({ where: { id: intervenant.id, userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
         if (!intervenantActuel) return null;
         const cout = await tx.coutInterventionHeure.create({ data: { interventionId: interventionActuelle.id, intervenantId: intervenantActuel.id, date, nbrHeures, tauxHoraireApplique: intervenantActuel.tauxHoraireCharge, commentaire: req.body?.commentaire ? String(req.body.commentaire).trim() : null, createdById: req.user!.id } });
@@ -200,13 +215,18 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const body = req.body ?? {};
       const motif = motifCorrectionValide(body.motifCorrection); if (!motif) return res.status(400).json({ error: 'Le motif de correction doit contenir entre 3 et 500 caractères.' });
       const data: Record<string, unknown> = {};
-      if ('date' in body) { const date = dateIsoStricte(body.date); if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' }); data.date = date; }
+      if ('date' in body) {
+        const date = dateIsoStricte(body.date); if (!date) return res.status(400).json({ error: 'La date doit être valide au format JJ-MM-AAAA.' });
+        if (heures && !dateHeuresIntervention(date, (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)) return res.status(400).json({ error: HEURES_DATE_FUTURE });
+        data.date = date;
+      }
       const cleMontant = heures ? 'nbrHeures' : 'montantHT';
       if (cleMontant in body) { const valeur = nombreDecimalNonNegatif(body[cleMontant], heures ? 8 : 10, true); if (valeur === null) return res.status(400).json({ error: 'Montant invalide.' }); data[cleMontant] = valeur; }
       if (heures && 'commentaire' in body) data.commentaire = body.commentaire ? String(body.commentaire).trim() : null;
       if (achats && 'description' in body) { const description = String(body.description || '').trim(); if (!description) return res.status(400).json({ error: 'Description obligatoire.' }); data.description = description; }
       if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Aucun champ à corriger.' });
-      if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      const eligible = heures ? interventionHeuresEligible : interventionCoutEligible;
+      if (!eligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat;
       const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
       if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
@@ -214,7 +234,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (cout.archivedAt) return res.status(409).json({ error: 'Un coût archivé ne peut pas être corrigé.' });
       const resultat = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, heures ? cout.intervenantId : undefined, heures ? req.user!.id : undefined);
-        if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
+        if (!interventionActuelle || !eligible(interventionActuelle)) return null;
         const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat;
         const coutActuel = await delegate.findFirst({ where: { id: cout.id, interventionId: interventionActuelle.id, archivedAt: null } });
         if (!coutActuel) return null;
@@ -241,9 +261,10 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const intervention = await chargerInterventionCout(req); const type = String(req.params.type); const action = String(req.params.action);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       // L'archivage et la restauration sont des actes de conservation : l'encadrement peut
-      // les accomplir après la clôture, sans jamais réautoriser une création ou correction.
-      if (!intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      // les accomplir après la clôture, sans jamais réautoriser une création ou correction. Hors
+      // contrat, seules des heures existent : aucun matériel à archiver ni à restaurer.
       const heures = type === 'heures'; const achats = type === 'achats';
+      if (achats && !intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       if ((!heures && !achats) || !['archiver', 'restaurer'].includes(action) || !estEncadrementCoutIntervention(req.user!.role)) return res.status(403).json({ error: 'Accès non autorisé.' });
       const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat; const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
       if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
@@ -270,41 +291,86 @@ export function enregistrerRoutesInterventions(app: Express): void {
     }
   });
 
-  // Les comptes rendus terrain sont des écritures append-only : un technicien affecté ne peut
-  // les ajouter que pendant une intervention en cours, jamais les modifier ou les effacer.
+  // Les comptes rendus terrain sont des écritures en ajout seul, figées en base dès leur enregistrement
+  // (#223) : on ne les ajoute que pendant une intervention en cours, sous le verrou partagé de
+  // l'intervention, si bien qu'une clôture simultanée les compte ou les fait refuser. La clé d'envoi,
+  // tirée par le formulaire, fait d'un envoi répété la relecture du compte rendu déjà enregistré.
   app.post('/api/interventions/:id/rapports', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
+    const cleEnvoi = cleEnvoiValide(req.body?.cleEnvoi);
+    const contenu = typeof req.body?.contenu === 'string' ? req.body.contenu.trim() : '';
+    // Un compte rendu retrouvé par sa clé n'est rendu que s'il est bien celui que ce compte envoie de
+    // nouveau ; une clé déjà servie pour autre chose est refusée, sans rien dire de ce qu'elle porte.
+    const repondreExistant = (existant: { interventionId: string; auteurId: string; contenu: string; id: string; createdAt: Date; auteur: { name: string } }, interventionId: string) => {
+      if (existant.interventionId !== interventionId || existant.auteurId !== req.user!.id || existant.contenu !== contenu) {
+        return res.status(409).json({ error: 'Cette clé d’envoi a déjà servi pour un autre compte rendu : rouvrez le formulaire.' });
+      }
+      return res.status(200).json({ id: existant.id, contenu: existant.contenu, createdAt: existant.createdAt, auteur: existant.auteur, dejaEnregistre: true });
+    };
+    const lireParCle = (client: Prisma.TransactionClient | typeof prisma) => client.interventionRapport.findUnique({ where: { cleEnvoi: cleEnvoi! }, select: { ...RAPPORT_SELECT, interventionId: true, auteurId: true } });
+    let interventionId = '';
     try {
-      const contenu = typeof req.body?.contenu === 'string' ? req.body.contenu.trim() : '';
-      if (contenu.length < 3 || contenu.length > 5000) return res.status(400).json({ error: 'Le compte rendu doit contenir entre 3 et 5 000 caractères.' });
-      const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), statut: 'EN_COURS', ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
+      if (contenu.length < 3 || contenu.length > 5000) return res.status(400).json({ error: 'Le compte rendu doit contenir entre 3 et 5 000 caractères.' });
+      if (contientCaractereInvalide(contenu)) return res.status(400).json({ error: 'Le compte rendu contient un caractère invalide.' });
+      if (!cleEnvoi) return res.status(400).json({ error: 'Clé d’envoi du compte rendu absente ou invalide : rechargez la page.' });
+      const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
-      const rapport = await prisma.interventionRapport.create({
-        data: { interventionId: intervention.id, auteurId: req.user!.id, contenu },
-        select: { id: true, contenu: true, createdAt: true, auteur: { select: { name: true } } },
+      interventionId = intervention.id;
+      const resultat = await transactionVerifiee(async (tx) => {
+        const statut = await verrouillerIntervention(tx, intervention.id, 'FOR SHARE');
+        if (!await interventionDansPerimetre(tx, intervention.id, req.user!)) throw new InterventionHorsPerimetre();
+        const existant = await lireParCle(tx);
+        if (existant) return { existant };
+        if (statut !== 'EN_COURS') throw new RefusIntervention('Un compte rendu s’ajoute pendant que l’intervention est en cours.');
+        const rapport = await tx.interventionRapport.create({ data: { interventionId: intervention.id, auteurId: req.user!.id, contenu, cleEnvoi }, select: RAPPORT_SELECT });
+        await journaliserCompteRendu(tx, req, 'INTERVENTION_RAPPORT', rapport.id, intervention.id, { id: rapport.id, contenu: rapport.contenu, auteur: rapport.auteur.name });
+        return { rapport };
       });
-      res.status(201).json(rapport);
+      if ('existant' in resultat) return repondreExistant(resultat.existant!, intervention.id);
+      res.status(201).json(resultat.rapport);
     } catch (error) {
+      if (error instanceof RefusIntervention) return res.status(409).json({ error: error.message });
+      if (error instanceof InterventionHorsPerimetre) return res.status(404).json({ error: 'Intervention introuvable.' });
+      // Deux envois simultanés de la même clé : le second bute sur l'index unique, puis relit le premier.
+      if ((error as { code?: string }).code === 'P2002' && cleEnvoi && interventionId) {
+        const existant = await lireParCle(prisma).catch(() => null);
+        if (existant) return repondreExistant(existant, interventionId);
+      }
+      if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : le compte rendu n’a pas été enregistré.' });
       console.error('Erreur compte rendu intervention SAV', error);
       res.status(500).json({ error: 'Erreur lors de l’enregistrement du compte rendu.' });
     }
   });
 
-  // Attestation électronique : le signataire confirme le texte figé du rapport. L'empreinte SHA-256
-  // facilite l'identification du contenu signé, mais n'est pas à elle seule une preuve cryptographique
-  // d'intégrité ni une signature qualifiée.
+  // Attestation électronique : le signataire confirme le texte figé du rapport et le signe au doigt.
+  // L'empreinte SHA-256 couvre le texte, le signataire et le tracé ; le compte qui enregistre est
+  // conservé. Elle reste possible après la clôture (choix par défaut, #253), jamais sur une
+  // intervention annulée.
   app.post('/api/interventions/rapports/:rapportId/signature', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
       if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) return res.status(400).json({ error: 'Le signataire et sa confirmation explicite sont obligatoires.' });
-      const rapport = await prisma.interventionRapport.findFirst({ where: { id: String(req.params.rapportId), intervention: getInterventionFilterForUser(req.user!) }, select: { id: true, contenu: true, intervention: { select: { statut: true } }, signature: { select: { id: true } } } });
+      if (contientCaractereInvalide(signataire)) return res.status(400).json({ error: 'Le nom du signataire contient un caractère invalide.' });
+      const trace = traceSignatureValide(req.body?.trace);
+      if (!trace) return res.status(400).json({ error: 'La signature dessinée du client est absente ou invalide.' });
+      const rapport = await prisma.interventionRapport.findFirst({ where: { id: String(req.params.rapportId), intervention: getInterventionFilterForUser(req.user!) }, select: { id: true, interventionId: true } });
       if (!rapport) return res.status(404).json({ error: 'Compte rendu introuvable.' });
-      if (rapport.intervention.statut === 'ANNULEE') return res.status(409).json({ error: 'La signature est impossible sur une intervention annulée.' });
-      if (rapport.signature) return res.status(409).json({ error: 'Ce compte rendu est déjà signé.' });
-      const empreinte = crypto.createHash('sha256').update(`${rapport.id}\n${rapport.contenu}\n${signataire}`, 'utf8').digest('hex');
-      const signature = await prisma.interventionSignature.create({ data: { rapportId: rapport.id, signataire, empreinte }, select: { id: true, signataire: true, empreinte: true, accepteLe: true } });
+      const signature = await transactionVerifiee(async (tx) => {
+        const statut = await verrouillerIntervention(tx, rapport.interventionId, 'FOR SHARE');
+        if (!await interventionDansPerimetre(tx, rapport.interventionId, req.user!)) throw new InterventionHorsPerimetre();
+        if (statut === 'ANNULEE') throw new RefusIntervention('La signature est impossible sur une intervention annulée.');
+        const actuel = await tx.interventionRapport.findUniqueOrThrow({ where: { id: rapport.id }, select: { id: true, contenu: true, signature: { select: { id: true } } } });
+        if (actuel.signature) throw new RefusIntervention('Ce compte rendu est déjà signé.');
+        const empreinte = empreinteSignature(actuel, signataire, trace);
+        const cree = await tx.interventionSignature.create({ data: { rapportId: actuel.id, signataire, trace, enregistreParId: req.user!.id, empreinte }, select: SIGNATURE_SELECT });
+        await journaliserCompteRendu(tx, req, 'INTERVENTION_SIGNATURE', cree.id, rapport.interventionId, { id: cree.id, rapportId: actuel.id, signataire, empreinte, enregistrePar: cree.enregistrePar.name });
+        return cree;
+      });
       res.status(201).json(signature);
     } catch (error) {
+      if (error instanceof RefusIntervention) return res.status(409).json({ error: error.message });
+      if (error instanceof InterventionHorsPerimetre) return res.status(404).json({ error: 'Compte rendu introuvable.' });
       if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte rendu est déjà signé.' });
+      if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la signature n’a pas été enregistrée.' });
       console.error('Erreur signature intervention SAV', error);
       res.status(500).json({ error: 'Erreur lors de la signature du compte rendu.' });
     }
@@ -313,6 +379,9 @@ export function enregistrerRoutesInterventions(app: Express): void {
   // Cycle de vie volontairement fermé : une intervention annulée ou terminée ne peut pas
   // être "réouverte" silencieusement, afin de préserver l'historique SAV. Une reprise doit
   // créer un nouveau dossier relié au même client (lot dédié avec motif de reprise).
+  // Terminer exige un compte rendu, signé par le client ou, à défaut, accompagné d'un motif consigné
+  // au journal, pour tous les comptes (décisions de Nelson des 19 et 20-10-2026). La transition et
+  // cette règle se vérifient sous le verrou exclusif de l'intervention.
   app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       const statut = String(req.body?.statut || '');
@@ -324,6 +393,9 @@ export function enregistrerRoutesInterventions(app: Express): void {
         ANNULEE: [],
       };
       if (!Object.prototype.hasOwnProperty.call(transitions, statut)) return res.status(400).json({ error: 'Statut d’intervention invalide.' });
+      const motif = motifClotureValide(req.body?.motifSansSignature, req.body?.precisionMotif);
+      if ('erreur' in motif) return res.status(400).json({ error: motif.erreur });
+      if (statut !== 'TERMINEE' && motif.texte) return res.status(400).json({ error: 'Un motif sans signature ne s’indique qu’en terminant l’intervention.' });
       // Le journal compare avant/apres : les deux instantanés doivent avoir la même forme,
       // sinon une simple transition se lit comme si le client venait d'être ajouté au dossier.
       const intervention = await prisma.intervention.findFirst({
@@ -336,14 +408,28 @@ export function enregistrerRoutesInterventions(app: Express): void {
         return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
       }
       const updated = await transactionVerifiee(async (tx) => {
+        const statutActuel = await verrouillerIntervention(tx, intervention.id, 'FOR UPDATE');
+        if (!await interventionDansPerimetre(tx, intervention.id, req.user!)) throw new InterventionHorsPerimetre();
+        if (!statutActuel || !transitions[statutActuel]?.includes(statut)) throw new RefusIntervention(`Transition impossible : ${statutActuel} vers ${statut}.`);
+        if (statut === 'TERMINEE') {
+          const rapports = await tx.interventionRapport.findMany({ where: { interventionId: intervention.id }, select: { signature: { select: { id: true } } } });
+          if (!rapports.length) throw new RefusIntervention('Un compte rendu est obligatoire pour terminer l’intervention.');
+          const signe = rapports.some((rapport) => rapport.signature);
+          if (signe && motif.texte) throw new RefusIntervention('Un compte rendu est signé par le client : aucun motif n’est à donner.');
+          if (!signe && !motif.texte) throw new RefusIntervention('Sans signature du client, choisissez un motif pour terminer l’intervention.');
+        }
+        const avant = await tx.intervention.findUniqueOrThrow({ where: { id: intervention.id }, include: { client: { select: { id: true, raisonSociale: true } } } });
         const modifiee = await tx.intervention.update({
           where: { id: intervention.id }, data: { statut }, include: { client: { select: { id: true, raisonSociale: true } } },
         });
-        await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, intervention);
+        await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, avant, motif.texte ?? undefined);
         return modifiee;
       });
       res.json(decimalToNumber(updated));
     } catch (error) {
+      if (error instanceof RefusIntervention) return res.status(409).json({ error: error.message });
+      if (error instanceof InterventionHorsPerimetre) return res.status(404).json({ error: 'Intervention introuvable.' });
+      if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la transition n’a pas été enregistrée.' });
       console.error('Erreur transition intervention SAV', error);
       res.status(500).json({ error: 'Erreur lors de la transition de l’intervention.' });
     }

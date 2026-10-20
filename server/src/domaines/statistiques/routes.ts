@@ -6,7 +6,7 @@ import { voitMontantsChantier, voitCoutMainOeuvre } from '../../droits/visibilit
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { requireAdmin, requireTravauxRead } from '../../http/gardes';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, jourCivilEntreprise, ajouterJoursCivils } from '../../commun/dates';
-import { decimalToNumber } from '../../commun/montants';
+import { decimalToNumber, sommeExacte, differenceExacte, produitExact } from '../../commun/montants';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { TYPES_CHANTIER } from '../chantiers/metier';
@@ -56,11 +56,11 @@ export function enregistrerRoutesStatistiques(app: Express): void {
         }
         for (const a of c.achats) {
           const d = new Date(a.date);
-          if (d >= start && d < endExclusive) achatsTotal += a.montantHT;
+          if (d >= start && d < endExclusive) achatsTotal = sommeExacte(achatsTotal, a.montantHT);
         }
         for (const p of c.pointages) {
           const d = new Date(p.date);
-          if (d >= start && d < endExclusive) heuresTotal += p.nbrHeures;
+          if (d >= start && d < endExclusive) heuresTotal = sommeExacte(heuresTotal, p.nbrHeures);
         }
       }
 
@@ -100,9 +100,9 @@ export function enregistrerRoutesStatistiques(app: Express): void {
           const { byCommercial } = await computeCommissionsParCommercial(commerciaux.map((c) => c.id), start, endExclusive, params);
           let caTotal = 0, margeTotal = 0, commissionCommercialeTotal = 0;
           for (const agg of Object.values(byCommercial) as any[]) {
-            caTotal += agg.caTotal;
-            margeTotal += agg.margeTotal;
-            commissionCommercialeTotal += agg.commissionTotal;
+            caTotal = sommeExacte(caTotal, agg.caTotal);
+            margeTotal = sommeExacte(margeTotal, agg.margeTotal);
+            commissionCommercialeTotal = sommeExacte(commissionCommercialeTotal, agg.commissionTotal);
           }
           result.caTotal = caTotal;
           result.margeTotal = margeTotal;
@@ -176,16 +176,16 @@ export function enregistrerRoutesStatistiques(app: Express): void {
         agg.nbChantiers++;
         if (enCours) agg.nbChantiersEnCours++;
         if (termine) agg.nbChantiersTermines++;
-        agg.depensesTotal += m.totalDepenses;
+        agg.depensesTotal = sommeExacte(agg.depensesTotal, m.totalDepenses);
         // CA et marge : l'administration les voit toujours. Un responsable, comme sur la liste et
         // la fiche : le CA (le vendu) sur les chantiers dont la société le laisse destinataire (cf.
         // voitRentabilite), la marge en plus seulement si la marge commerciale est active.
         if (isAdmin || voitRentabilite(req, c, params)) {
           agg.caVisible = true;
-          agg.caTotal += c.budgetGlobalVendu;
+          agg.caTotal = sommeExacte(agg.caTotal, c.budgetGlobalVendu);
           if (isAdmin || params.margeCommercialeActive) {
             agg.margeVisible = true;
-            agg.margeTotal += m.margeCommerciale ?? (c.budgetGlobalVendu - m.totalDepenses);
+            agg.margeTotal = sommeExacte(agg.margeTotal, m.margeCommerciale ?? differenceExacte(c.budgetGlobalVendu, m.totalDepenses));
           }
         }
 
@@ -202,15 +202,15 @@ export function enregistrerRoutesStatistiques(app: Express): void {
           else agg.nbTermineMaterielDepasse++;
           if (m.diffHeures >= 0 && materielDansBudget) agg.nbObjectifsRespectes++;
 
-          agg.heuresVenduesTermineTotal += c.heuresVendues;
-          agg.heuresRealiseesTermineTotal += m.heuresRealisees;
+          agg.heuresVenduesTermineTotal = sommeExacte(agg.heuresVenduesTermineTotal, c.heuresVendues);
+          agg.heuresRealiseesTermineTotal = sommeExacte(agg.heuresRealiseesTermineTotal, m.heuresRealisees);
           // Manque à gagner = uniquement le coût des heures EN TROP par rapport au vendu,
           // valorisées au taux horaire moyen réellement appliqué sur ce chantier — pas la
           // différence avec le budget main d'œuvre vendu (qui peut s'écarter du taux horaire
           // pour d'autres raisons et fausserait le montant du dépassement lui-même).
-          const heuresDepassement = Math.max(0, m.heuresRealisees - c.heuresVendues);
+          const heuresDepassement = Math.max(0, differenceExacte(m.heuresRealisees, c.heuresVendues));
           const tauxHoraireMoyen = m.heuresRealisees > 0 ? m.moReel / m.heuresRealisees : 0;
-          agg.manqueAGagnerMainOeuvre += heuresDepassement * tauxHoraireMoyen;
+          agg.manqueAGagnerMainOeuvre = sommeExacte(agg.manqueAGagnerMainOeuvre, heuresDepassement * tauxHoraireMoyen);
         }
       }
 
@@ -230,7 +230,7 @@ export function enregistrerRoutesStatistiques(app: Express): void {
           // (résultat définitif) — un chantier en cours en avance compenserait à tort un
           // chantier terminé en net dépassement si on les mélangeait.
           tauxDepassementHeures: a.heuresVenduesTermineTotal > 0
-            ? (Math.max(0, a.heuresRealiseesTermineTotal - a.heuresVenduesTermineTotal) / a.heuresVenduesTermineTotal) * 100
+            ? (Math.max(0, differenceExacte(a.heuresRealiseesTermineTotal, a.heuresVenduesTermineTotal)) / a.heuresVenduesTermineTotal) * 100
             : null,
         }))
         .sort((x: any, y: any) => (y.margeTotal ?? -Infinity) - (x.margeTotal ?? -Infinity) || x.name.localeCompare(y.name));
@@ -284,7 +284,7 @@ export function enregistrerRoutesStatistiques(app: Express): void {
         const dayIndex = Math.round((new Date(`${createdCivil}T00:00:00.000Z`).getTime() - new Date(`${mondayCivil}T00:00:00.000Z`).getTime()) / 86400000);
         if (dayIndex >= 0 && dayIndex < 5) {
           agg.days[dayIndex].nbSaisies += 1;
-          agg.days[dayIndex].heuresSaisies += p.nbrHeures;
+          agg.days[dayIndex].heuresSaisies = sommeExacte(agg.days[dayIndex].heuresSaisies, p.nbrHeures);
         }
         const heure = Number(new Intl.DateTimeFormat('en-GB', { timeZone: fuseauHoraire, hour: '2-digit', hourCycle: 'h23' })
           .formatToParts(created).find((partie) => partie.type === 'hour')?.value);
@@ -294,7 +294,7 @@ export function enregistrerRoutesStatistiques(app: Express): void {
       const conducteurs = users.map((u) => {
         const agg = byUser[u.id];
         const joursActifs = agg.days.filter((d) => d.nbSaisies > 0).length;
-        const heuresTotalesSaisies = agg.days.reduce((s, d) => s + d.heuresSaisies, 0);
+        const heuresTotalesSaisies = agg.days.reduce((s, d) => sommeExacte(s, d.heuresSaisies), 0);
         const nbSaisiesTotal = agg.days.reduce((s, d) => s + d.nbSaisies, 0);
         const tranchesHoraires = Object.entries(agg.heuresParHeureJournee)
           .map(([heure, nbSaisies]) => ({ heure: Number(heure), nbSaisies }))
@@ -339,7 +339,7 @@ export function enregistrerRoutesStatistiques(app: Express): void {
       let positif = 0, tempsSeul = 0, materielSeul = 0, lesDeux = 0;
       for (const c of chantiers) {
         const m = computeChantierMetrics(c, params, true);
-        const tempsOk = m.diffHeures >= 0 && (c.budgetMainOeuvreVendu - m.moReel) >= 0;
+        const tempsOk = m.diffHeures >= 0 && differenceExacte(c.budgetMainOeuvreVendu, m.moReel) >= 0;
         const materielOk = m.materielReel <= c.budgetMaterielVendu;
         if (tempsOk && materielOk) positif++;
         else if (!tempsOk && materielOk) tempsSeul++;
@@ -381,8 +381,8 @@ export function enregistrerRoutesStatistiques(app: Express): void {
       const byIntervenant: Record<string, { heures: number; cout: number }> = {};
       for (const p of pointages) {
         const cur = byIntervenant[p.intervenantId] || { heures: 0, cout: 0 };
-        cur.heures += p.nbrHeures;
-        cur.cout += p.nbrHeures * p.tauxHoraireApplique;
+        cur.heures = sommeExacte(cur.heures, p.nbrHeures);
+        cur.cout = sommeExacte(cur.cout, produitExact(p.nbrHeures, p.tauxHoraireApplique));
         byIntervenant[p.intervenantId] = cur;
       }
 
@@ -423,7 +423,7 @@ export function enregistrerRoutesStatistiques(app: Express): void {
       const byFournisseur: Record<string, { total: number; nb: number }> = {};
       for (const a of achats) {
         const cur = byFournisseur[a.fournisseurId] || { total: 0, nb: 0 };
-        cur.total += a.montantHT;
+        cur.total = sommeExacte(cur.total, a.montantHT);
         cur.nb += 1;
         byFournisseur[a.fournisseurId] = cur;
       }

@@ -4,6 +4,7 @@ import { Ban, Download, FilePlus2, HandCoins, Plus, RefreshCw, Send, Trash2 } fr
 import { apiFetch } from '../api';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 import { situationReglement } from '../lib/reglements';
+import { nombreFr, totauxApercuAvoir, type AvoirPrecedent } from '../lib/apercuAvoir';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
@@ -25,7 +26,9 @@ type Facture = {
   statut: string;
   type: 'FACTURE' | 'AVOIR';
   factureOrigine?: { id: string; numero: string | null } | null;
-  avoirs?: { id: string; numero: string | null; estAvoirAnnulation: boolean }[];
+  // Avec leur ventilation HT (ou leurs lignes, pour un document historique) : l'aperçu d'un nouvel
+  // avoir en déduit sa TVA comme le serveur, d'après les bases déjà créditées (#236).
+  avoirs?: ({ id: string; numero: string | null; estAvoirAnnulation: boolean } & AvoirPrecedent)[];
   dateEmission: string;
   dateEcheance: string;
   totalHt: number;
@@ -42,32 +45,26 @@ type Facture = {
 };
 
 const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: '1', prixUnitaireHt: '', tauxTva: '20' });
-const nombreFr = (valeur: string): number | null => { const normalise = valeur.trim().replace(',', '.'); return /^\d+(\.\d+)?$/.test(normalise) ? Number(normalise) : null; };
 const formatDate = (date: string) => formatDateOnly(date);
 const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
-// Même arithmétique que le serveur : chaque ligne est arrondie au centime avant
-// agrégation, puis la TVA est calculée par taux. L’aperçu doit annoncer le document émis.
-const centimes = (montant: number) => Math.round((montant + Number.EPSILON) * 100) / 100;
-const entierDecimal = (valeur: string, decimales: number): bigint | null => {
-  const resultat = new RegExp(`^(\\d+)(?:[,.](\\d{1,${decimales}}))?$`).exec(valeur.trim());
-  return resultat ? BigInt(resultat[1]) * 10n ** BigInt(decimales) + BigInt((resultat[2] || '').padEnd(decimales, '0') || '0') : null;
-};
-const centimesLigne = (quantite: string, prixUnitaireHt: string): number => {
-  const milliemes = entierDecimal(quantite, 3), centimesPu = entierDecimal(prixUnitaireHt, 2);
-  return milliemes === null || centimesPu === null ? 0 : Number((milliemes * centimesPu + 500n) / 1000n) / 100;
-};
 const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoir) => !avoir.estAvoirAnnulation);
 
 export default function Factures() {
   const [factures, setFactures] = useState<Facture[]>([]);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [chargement, setChargement] = useState(false);
+  // Inconnu (null) jusqu'à la première réponse : la pagination ne donne pas de compte qu'elle n'a pas
+  // reçu, « 0 document(s) » se lirait comme une liste vide (#211).
+  const [total, setTotal] = useState<number | null>(null);
+  // Vrai dès le premier rendu : la page ne montre jamais « Aucune facture » avant sa première réponse,
+  // et les parcours qui attendent la fin du chargement attendent bien cette réponse (#211).
+  const [chargement, setChargement] = useState(true);
   const pageCourante = useRef(1);
   const requeteListe = useRef(0);
   const taillePage = 25;
-  const nombrePages = Math.max(1, Math.ceil(total / taillePage));
-  const [derniereDateEmission, setDerniereDateEmission] = useState<string | null>(null);
+  const nombrePages = Math.max(1, Math.ceil((total ?? 0) / taillePage));
+  // Inconnue (undefined) avant la réponse de la chronologie, absente (null) s'il n'y a encore aucune
+  // facture numérotée : la page ne dit « aucune » qu'une fois la réponse reçue (#211).
+  const [derniereDateEmission, setDerniereDateEmission] = useState<string | null | undefined>(undefined);
   const [clients, setClients] = useState<Client[]>([]);
   const [rechercheClient, setRechercheClient] = useState('');
   const [resultatsClients, setResultatsClients] = useState<Client[] | null>(null);
@@ -89,6 +86,17 @@ export default function Factures() {
   const [fuseauHoraire, setFuseauHoraire] = useState<string | null>(null);
   const [factureAvoir, setFactureAvoir] = useState<Facture | null>(null);
   const [lignesAvoir, setLignesAvoir] = useState<Ligne[]>([nouvelleLigne()]);
+  // Un avoir émis est figé : un double clic ou une touche Entrée répétée ne doit pas en émettre deux
+  // (#247). L'indicateur synchrone arrête une seconde soumission du même instant, avant que l'état
+  // n'ait désactivé le bouton ; l'état garde ce bouton désactivé jusqu'à la réponse et, après une issue
+  // inconnue, jusqu'à la fin de la relecture de la liste.
+  const envoiAvoirEnCours = useRef(false);
+  const [envoiAvoir, setEnvoiAvoir] = useState(false);
+  // Après une issue inconnue, le bouton reste désactivé tant que la liste n'a pas été relue avec
+  // succès : si la relecture échoue aussi, la liste affichée est périmée et ne montrerait pas un
+  // avoir déjà émis (#247). Toute relecture réussie et non dépassée par une plus récente, dont
+  // « Actualiser », le libère.
+  const [relectureRequise, setRelectureRequise] = useState(false);
   const [factureTraceId, setFactureTraceId] = useState<string | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [traceErreur, setTraceErreur] = useState('');
@@ -146,8 +154,14 @@ export default function Factures() {
         return;
       }
       setFactures(facturesData.items);
+      // Un avoir partiel en cours de saisie suit la facture rechargée : son aperçu compte alors les
+      // avoirs créés depuis l'ouverture du formulaire. Une facture sortie de la page relue (poussée
+      // en page suivante par l'avoir qu'elle vient de recevoir, par exemple) n'a pas été relue : son
+      // formulaire se ferme plutôt que d'annoncer la TVA d'un instantané périmé.
+      setFactureAvoir((ouverte) => ouverte && ((facturesData.items as Facture[]).find((facture) => facture.id === ouverte.id) ?? null));
       setTotal(facturesData.total);
       setChargement(false);
+      setRelectureRequise(false);
       setClients(clientsData.clients || clientsData || []);
       setChantiers(Array.isArray(chantiersData) ? chantiersData : []);
       setInterventions(Array.isArray(interventionsData) ? interventionsData : []);
@@ -243,33 +257,57 @@ export default function Factures() {
       : lignesActuelles);
   };
 
-  const totauxAvoir = (() => {
-    const htParTaux = new Map<number, number>();
-    for (const ligne of lignesAvoir) {
-      const tauxTva = nombreFr(ligne.tauxTva) ?? 0;
-      // Le serveur arrondit chaque ligne avant de sommer : faire de même ici évite
-      // qu’un aperçu à côté d’un plafond annonce un montant différent du document.
-      htParTaux.set(tauxTva, centimes((htParTaux.get(tauxTva) || 0) + centimesLigne(ligne.quantite, ligne.prixUnitaireHt)));
-    }
-    const totalHt = centimes([...htParTaux.values()].reduce((somme, ht) => somme + ht, 0));
-    const totalTva = centimes([...htParTaux.entries()].reduce((somme, [taux, ht]) => somme + centimes(ht * taux / 100), 0));
-    return { totalHt, totalTva, totalTtc: centimes(totalHt + totalTva) };
-  })();
+  // Même arithmétique que le serveur, en entiers, y compris la TVA d'un avoir qui suit d'autres
+  // avoirs de la facture : l'aperçu annonce le document émis.
+  const totauxAvoir = totauxApercuAvoir(lignesAvoir, factureAvoir?.avoirs ?? []);
+  // Tant que la liste n'a pas été relue, la facture affichée peut ignorer un avoir déjà émis : l'aperçu
+  // ne donne aucun montant qu'il ne peut garantir.
+  const montantApercu = (montant: number) => (relectureRequise ? '—' : formatMontant(montant));
 
   const creerAvoirPartiel = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!factureAvoir) return;
+    if (!factureAvoir || envoiAvoirEnCours.current) return;
     setErreur('');
     setSucces('');
     const lignesConverties = lignesAvoir.map((ligne) => ({ ...ligne, designation: ligne.designation.trim(), quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
     const fautive = lignesConverties.findIndex((ligne) => !ligne.designation || ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.prixUnitaireHt < 0 || ligne.tauxTva === null || ligne.tauxTva < 0 || ligne.tauxTva > 100);
     if (fautive >= 0) return setErreur(`Ligne d’avoir ${fautive + 1} : désignation obligatoire, quantité supérieure à zéro et montants numériques attendus (TVA entre 0 et 100).`);
-    const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
-    const data = await res.json();
-    if (!res.ok) return setErreur(data.error || 'Création de l’avoir partiel impossible.');
-    setFactureAvoir(null);
-    setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
-    await charger();
+    envoiAvoirEnCours.current = true;
+    setEnvoiAvoir(true);
+    let cree = false;
+    // Sans réponse exploitable de l'API (réponse perdue, erreur serveur, réponse sans message), l'avoir a
+    // pu être émis : on ne l'affirme ni ne le nie, comme pour une réponse perdue à l'ouverture d'un
+    // chantier. La liste est relue avant de libérer le formulaire, pour montrer un avoir émis avant toute
+    // nouvelle soumission ; si cette relecture échoue, `relectureRequise` garde le bouton désactivé (#247).
+    const issueInconnue = async (cause: string) => {
+      setErreur(`La création de l’avoir n’a pas pu être confirmée : ${cause}. Vérifiez les avoirs de la facture dans la liste avant de réessayer.`);
+      setRelectureRequise(true);
+      await charger();
+    };
+    try {
+      const res = await apiFetch(`/factures/${factureAvoir.id}/avoirs`, { method: 'POST', body: JSON.stringify({ lignes: lignesConverties }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Un refus métier de l'API (4xx) porte son message : l'avoir n'a pas été émis. Une erreur serveur
+        // (5xx), même avec un message, ou une réponse sans message, d'une passerelle par exemple, ne dit
+        // pas si l'avoir a été émis.
+        if (data.error && res.status < 500) setErreur(data.error);
+        else await issueInconnue(`réponse inattendue du serveur (${res.status})`);
+        return;
+      }
+      setFactureAvoir(null);
+      setSucces(`Avoir ${data.numero || ''} créé et émis.`.trim());
+      // La liste affichée ne porte pas encore cet avoir : un formulaire rouvert sur cette facture
+      // annoncerait la TVA sans lui. Le prochain envoi attend donc une relecture réussie (#236).
+      setRelectureRequise(true);
+      cree = true;
+    } catch {
+      await issueInconnue('impossible de joindre le serveur');
+    } finally {
+      envoiAvoirEnCours.current = false;
+      setEnvoiAvoir(false);
+    }
+    if (cree) await charger();
   };
 
   const creer = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -382,7 +420,7 @@ export default function Factures() {
 
       {erreur && <p className="text-red-600">{erreur}</p>}
       {erreurListe && <p className="text-red-600">{erreurListe}</p>}
-      <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
+      <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission === undefined ? (erreurListe ? 'indisponible' : 'en cours de chargement') : derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
       {succes && <p className="text-emerald-700">{succes}</p>}
 
       {factureAvoir && (
@@ -419,11 +457,12 @@ export default function Factures() {
             ))}
           </section>
           <div data-testid="aperçu-avoir" className="grid gap-3 rounded-lg border bg-white p-3 text-sm sm:grid-cols-3">
-            <span><strong>Total HT</strong><br />{formatMontant(totauxAvoir.totalHt)}</span>
-            <span><strong>TVA</strong><br />{formatMontant(totauxAvoir.totalTva)}</span>
-            <span><strong>Total TTC</strong><br />{formatMontant(totauxAvoir.totalTtc)}</span>
+            <span><strong>Total HT</strong><br />{montantApercu(totauxAvoir.totalHt)}</span>
+            <span><strong>TVA</strong><br />{montantApercu(totauxAvoir.totalTva)}</span>
+            <span><strong>Total TTC</strong><br />{montantApercu(totauxAvoir.totalTtc)}</span>
           </div>
-          <button className="btn btn-primary" type="submit"><Send size={16} /> Créer l’avoir partiel</button>
+          {relectureRequise && !envoiAvoir && <p role="status" className="text-sm text-amber-700">La liste n’a pas pu être relue : actualisez-la pour vérifier les avoirs de la facture avant de réessayer.</p>}
+          <button className="btn btn-primary" type="submit" disabled={envoiAvoir || relectureRequise}><Send size={16} /> Créer l’avoir partiel</button>
         </form>
       )}
 
@@ -518,7 +557,7 @@ export default function Factures() {
                   {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && (emissionImpossible(facture)
                     ? <span className="text-sm text-amber-700"><button className="btn btn-secondary" disabled><Send size={16} /> Émission impossible</button> Date antérieure à la dernière facture numérotée du {formatDate(derniereDateEmission!)}</span>
                     : <button className="btn btn-secondary" onClick={() => void emettre(facture)}><Send size={16} /> Émettre</button>)}
-                  {facture.type === 'FACTURE' && ['EMISE', 'REGLEE'].includes(facture.statut) && <button className="btn btn-secondary" onClick={() => ouvrirAvoirPartiel(facture)}><FilePlus2 size={16} /> Créer un avoir partiel</button>}
+                  {facture.type === 'FACTURE' && ['EMISE', 'REGLEE'].includes(facture.statut) && <button className="btn btn-secondary" disabled={chargement} title={chargement ? 'Liste en cours de chargement' : undefined} onClick={() => ouvrirAvoirPartiel(facture)}><FilePlus2 size={16} /> Créer un avoir partiel</button>}
                   {facture.type === 'FACTURE' && facture.statut === 'EMISE' && <>
                     {(facture.resteDu ?? 0) > 0 && <Link className="btn btn-secondary" to={`/reglements?facture=${facture.id}`}><HandCoins size={16} /> Enregistrer un règlement</Link>}
                     {avoirsPartiels(facture).length
@@ -538,7 +577,7 @@ export default function Factures() {
       </div>
       <nav data-testid="pagination-factures" aria-label="Pagination des factures" className="flex flex-wrap items-center justify-between gap-3 text-sm">
         <button type="button" className="btn btn-secondary" disabled={page <= 1} onClick={() => changerPage(page - 1)}>Page précédente</button>
-        <span>Page {page} sur {nombrePages} — {total} document(s)</span>
+        <span>{total === null ? `Page ${page}` : `Page ${page} sur ${nombrePages} — ${total} document(s)`}</span>
         <button type="button" className="btn btn-secondary" disabled={page >= nombrePages} onClick={() => changerPage(page + 1)}>Page suivante</button>
       </nav>
       {factureTraceId && (

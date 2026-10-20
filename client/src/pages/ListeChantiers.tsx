@@ -10,6 +10,7 @@ import {
   alertesDuChantier, ancienneteSaisie, estASurveiller, filtrerChantiers, trierChantiers,
   type ChantierSuivi, type FiltreChantiers, type TriChantiers,
 } from '../lib/suiviChantiers';
+import { arrondiEuro } from '../lib/montants';
 
 type ChantierListe = ChantierSuivi & { metrics?: ChantierSuivi['metrics'] & { diffHeures?: number } };
 
@@ -30,7 +31,7 @@ const TRIS: { valeur: TriChantiers; libelle: string; margeRequise?: boolean }[] 
   { valeur: 'NOM', libelle: 'Nom (A → Z)' },
 ];
 
-const fmtEuro = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`;
+const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString('fr-FR')} €`;
 const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
 
 // Compteurs cliquables : un chiffre qui intrigue mène directement à la liste filtrée.
@@ -213,17 +214,17 @@ const ListeChantiers = () => {
                     {margeVisible ? (
                       margeCommerciale != null ? (
                         <>
-                          <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm whitespace-nowrap ${margeCommerciale >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                            {margeCommerciale > 0 ? '+' : ''}{fmtEuro(margeCommerciale)}
+                          <span className={`inline-block px-3 py-1 rounded-md font-bold text-sm whitespace-nowrap ${arrondiEuro(margeCommerciale) >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                            {arrondiEuro(margeCommerciale) > 0 ? '+' : ''}{fmtEuro(margeCommerciale)}
                           </span>
                           {metrics.margePct != null && (
-                            <div className={`text-xs font-semibold mt-1 ${margeCommerciale >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            <div className={`text-xs font-semibold mt-1 ${arrondiEuro(margeCommerciale) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                               {metrics.margePct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % du vendu
                             </div>
                           )}
                           {c.statut === 'EN_COURS' && metrics.margeEstimee != null && metrics.margeEstimeePct != null && (
                             <div className="text-xs text-gray-500 mt-1 whitespace-nowrap" data-marge-estimee title="Marge estimée en fin de chantier : détail des hypothèses sur la fiche">
-                              Fin estimée : <strong className={metrics.margeEstimee >= 0 ? 'text-gray-700' : 'text-red-700'}>{fmtEuro(metrics.margeEstimee)}</strong>
+                              Fin estimée : <strong className={arrondiEuro(metrics.margeEstimee) >= 0 ? 'text-gray-700' : 'text-red-700'}>{fmtEuro(metrics.margeEstimee)}</strong>
                               {' · '}{metrics.margeEstimeePct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %
                             </div>
                           )}

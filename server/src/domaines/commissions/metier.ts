@@ -1,6 +1,6 @@
 import { prisma } from '../../db';
 import { AFFAIRE_NON_ANNULEE } from '../../droits/perimetres';
-import { decimalToNumber } from '../../commun/montants';
+import { decimalToNumber, sommeExacte } from '../../commun/montants';
 import { type Parametres, remunerationNeutre } from '../parametres/metier';
 import { computeChantierMetrics } from '../chantiers/suivi';
 
@@ -72,9 +72,10 @@ export async function computeCommissionsParCommercial(commercialIds: string[], s
     buckets[c.commercialId] ??= {};
     buckets[c.commercialId][moisKey] ??= { ca: 0, margeStandard: 0, margeReduite: 0 };
     const b = buckets[c.commercialId][moisKey];
-    b.ca += c.budgetGlobalVendu;
-    if (c.baremeReduit) b.margeReduite += m.margeCommerciale ?? 0;
-    else b.margeStandard += m.margeCommerciale ?? 0;
+    // Sommes exactes, indépendantes de l'ordre des chantiers (#198).
+    b.ca = sommeExacte(b.ca, c.budgetGlobalVendu);
+    if (c.baremeReduit) b.margeReduite = sommeExacte(b.margeReduite, m.margeCommerciale ?? 0);
+    else b.margeStandard = sommeExacte(b.margeStandard, m.margeCommerciale ?? 0);
   }
 
   const commissionsParMoisGroupe: Record<string, { standard: number; reduit: number }> = {};
@@ -86,23 +87,23 @@ export async function computeCommissionsParCommercial(commercialIds: string[], s
       const cStandard = commissionBaremeProgressif(b.margeStandard, regles.baremeStandard);
       const cReduit = commissionBaremeProgressif(b.margeReduite, regles.baremeReduit);
       commissionsParMoisGroupe[`${id}:${moisKey}`] = { standard: cStandard, reduit: cReduit };
-      commissionStandard += cStandard;
-      commissionReduite += cReduit;
-      caTotal += b.ca;
-      margeStandard += b.margeStandard;
-      margeReduite += b.margeReduite;
-      margeTotal += b.margeStandard + b.margeReduite;
+      commissionStandard = sommeExacte(commissionStandard, cStandard);
+      commissionReduite = sommeExacte(commissionReduite, cReduit);
+      caTotal = sommeExacte(caTotal, b.ca);
+      margeStandard = sommeExacte(margeStandard, b.margeStandard);
+      margeReduite = sommeExacte(margeReduite, b.margeReduite);
+      margeTotal = sommeExacte(margeTotal, b.margeStandard, b.margeReduite);
       // Un objectif à 0 n'est pas un objectif atteint d'office : sans seuil défini,
       // aucune prime n'est due.
-      if (regles.objectifCaMensuel > 0 && b.ca >= regles.objectifCaMensuel) primeCA += regles.primeObjectifCa;
-      if (regles.objectifMargeMensuel > 0 && b.margeStandard + b.margeReduite >= regles.objectifMargeMensuel) primeMarge += regles.primeObjectifMarge;
-      if (suiviAdminSet.has(`${id}:${moisKey}`)) primeAdmin += regles.primeSuiviAdministratif;
+      if (regles.objectifCaMensuel > 0 && b.ca >= regles.objectifCaMensuel) primeCA = sommeExacte(primeCA, regles.primeObjectifCa);
+      if (regles.objectifMargeMensuel > 0 && sommeExacte(b.margeStandard, b.margeReduite) >= regles.objectifMargeMensuel) primeMarge = sommeExacte(primeMarge, regles.primeObjectifMarge);
+      if (suiviAdminSet.has(`${id}:${moisKey}`)) primeAdmin = sommeExacte(primeAdmin, regles.primeSuiviAdministratif);
     }
-    const commissionBareme = commissionStandard + commissionReduite;
+    const commissionBareme = sommeExacte(commissionStandard, commissionReduite);
     byCommercial[id] = {
       caTotal, margeTotal, margeStandard, margeReduite,
       commissionBareme, commissionStandard, commissionReduite, primeCA, primeMarge, primeAdmin,
-      commissionTotal: commissionBareme + primeCA + primeMarge + primeAdmin,
+      commissionTotal: sommeExacte(commissionBareme, primeCA, primeMarge, primeAdmin),
       sansPlanCommercial: true,
     };
   }
