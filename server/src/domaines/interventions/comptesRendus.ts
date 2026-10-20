@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import type { AuthRequest } from '../../http/auth';
 import { valeurJournal } from '../../commun/journal-administration';
+import { getInterventionFilterForUser } from './metier';
 
 // --- Comptes rendus, signatures dessinées et clôture des interventions (lot pilote 3b-3) ---
 
@@ -56,6 +57,10 @@ export function empreinteSignature(rapport: { id: string; contenu: string }, sig
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// PostgreSQL refuse le caractère nul dans un texte : il est refusé en amont (400) plutôt qu'en erreur
+// serveur.
+export const contientCaractereNul = (texte: string) => texte.includes('\u0000');
+
 export function cleEnvoiValide(valeur: unknown): string | null {
   return typeof valeur === 'string' && UUID.test(valeur) ? valeur.toLowerCase() : null;
 }
@@ -78,6 +83,9 @@ export type MotifCloture = { texte: string | null } | { erreur: string };
 // ensuite, sous verrou, s'il en fallait un.
 export function motifClotureValide(motif: unknown, precision: unknown): MotifCloture {
   const precisionTexte = typeof precision === 'string' ? precision.trim() : '';
+  if (precisionTexte.includes('\u0000')) return { erreur: 'La précision du motif contient un caractère invalide.' };
+  // Même métrique Unicode que PostgreSQL et que les autres motifs : un emoji compte pour un caractère.
+  const longueur = [...precisionTexte].length;
   if (motif === undefined || motif === null || motif === '') {
     return precisionTexte ? { erreur: 'Une précision accompagne seulement le motif « Autre ».' } : { texte: null };
   }
@@ -86,7 +94,7 @@ export function motifClotureValide(motif: unknown, precision: unknown): MotifClo
   if (motif !== 'AUTRE') {
     return precisionTexte ? { erreur: 'Une précision accompagne seulement le motif « Autre ».' } : { texte: `Clôture sans signature du client : ${MOTIFS_CLOTURE_SANS_SIGNATURE[motif]}` };
   }
-  if (precisionTexte.length < PRECISION_MOTIF_MIN || precisionTexte.length > PRECISION_MOTIF_MAX) {
+  if (longueur < PRECISION_MOTIF_MIN || longueur > PRECISION_MOTIF_MAX) {
     return { erreur: `Le motif « Autre » exige une précision de ${PRECISION_MOTIF_MIN} à ${PRECISION_MOTIF_MAX} caractères.` };
   }
   return { texte: `Clôture sans signature du client : Autre — ${precisionTexte}` };
@@ -98,6 +106,12 @@ export function motifClotureValide(motif: unknown, precision: unknown): MotifClo
 export async function verrouillerIntervention(tx: Prisma.TransactionClient, interventionId: string, mode: 'FOR SHARE' | 'FOR UPDATE'): Promise<string | null> {
   const lignes = await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Intervention" WHERE "id" = ${interventionId} ${Prisma.raw(mode)}`);
   return lignes[0]?.statut ?? null;
+}
+
+// Le périmètre se relit une fois le verrou obtenu : un retrait d'affectation prend le verrou exclusif
+// de l'intervention, et l'écriture qui l'attendait ne doit pas s'enregistrer après lui.
+export async function interventionDansPerimetre(tx: Prisma.TransactionClient, interventionId: string, user: { id: string; role: string; equipeIds?: string[] }): Promise<boolean> {
+  return (await tx.intervention.count({ where: { id: interventionId, ...getInterventionFilterForUser(user) } })) > 0;
 }
 
 export async function journaliserCompteRendu(tx: Prisma.TransactionClient, req: AuthRequest, cible: 'INTERVENTION_RAPPORT' | 'INTERVENTION_SIGNATURE', cibleId: string, interventionId: string, apres: unknown) {

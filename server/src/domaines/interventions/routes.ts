@@ -19,12 +19,14 @@ import {
   dateDemandeCurative,
 } from './metier';
 import {
-  RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, empreinteSignature, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
+  RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereNul, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
 } from './comptesRendus';
 
 class ChantierInterventionIntrouvable extends Error {}
 // Refus métier relevé sous verrou, dans la transaction : il l'annule et devient un 409.
 class RefusIntervention extends Error {}
+// Intervention sortie du périmètre du demandeur pendant qu'il attendait le verrou : 404, sans rien dire.
+class InterventionHorsPerimetre extends Error {}
 
 const HEURES_DATE_FUTURE = 'Des heures se déclarent une fois faites : la date ne peut pas dépasser aujourd’hui.';
 
@@ -308,12 +310,14 @@ export function enregistrerRoutesInterventions(app: Express): void {
     let interventionId = '';
     try {
       if (contenu.length < 3 || contenu.length > 5000) return res.status(400).json({ error: 'Le compte rendu doit contenir entre 3 et 5 000 caractères.' });
+      if (contientCaractereNul(contenu)) return res.status(400).json({ error: 'Le compte rendu contient un caractère invalide.' });
       if (!cleEnvoi) return res.status(400).json({ error: 'Clé d’envoi du compte rendu absente ou invalide : rechargez la page.' });
       const intervention = await prisma.intervention.findFirst({ where: { id: paramId(req), ...getInterventionFilterForUser(req.user!) }, select: { id: true } });
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       interventionId = intervention.id;
       const resultat = await transactionVerifiee(async (tx) => {
         const statut = await verrouillerIntervention(tx, intervention.id, 'FOR SHARE');
+        if (!await interventionDansPerimetre(tx, intervention.id, req.user!)) throw new InterventionHorsPerimetre();
         const existant = await lireParCle(tx);
         if (existant) return { existant };
         if (statut !== 'EN_COURS') throw new RefusIntervention('Un compte rendu s’ajoute pendant que l’intervention est en cours.');
@@ -325,6 +329,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       res.status(201).json(resultat.rapport);
     } catch (error) {
       if (error instanceof RefusIntervention) return res.status(409).json({ error: error.message });
+      if (error instanceof InterventionHorsPerimetre) return res.status(404).json({ error: 'Intervention introuvable.' });
       // Deux envois simultanés de la même clé : le second bute sur l'index unique, puis relit le premier.
       if ((error as { code?: string }).code === 'P2002' && cleEnvoi && interventionId) {
         const existant = await lireParCle(prisma).catch(() => null);
@@ -344,12 +349,14 @@ export function enregistrerRoutesInterventions(app: Express): void {
     try {
       const signataire = typeof req.body?.signataire === 'string' ? req.body.signataire.trim() : '';
       if (signataire.length < 2 || signataire.length > 200 || req.body?.confirme !== true) return res.status(400).json({ error: 'Le signataire et sa confirmation explicite sont obligatoires.' });
+      if (contientCaractereNul(signataire)) return res.status(400).json({ error: 'Le nom du signataire contient un caractère invalide.' });
       const trace = traceSignatureValide(req.body?.trace);
       if (!trace) return res.status(400).json({ error: 'La signature dessinée du client est absente ou invalide.' });
       const rapport = await prisma.interventionRapport.findFirst({ where: { id: String(req.params.rapportId), intervention: getInterventionFilterForUser(req.user!) }, select: { id: true, interventionId: true } });
       if (!rapport) return res.status(404).json({ error: 'Compte rendu introuvable.' });
       const signature = await transactionVerifiee(async (tx) => {
         const statut = await verrouillerIntervention(tx, rapport.interventionId, 'FOR SHARE');
+        if (!await interventionDansPerimetre(tx, rapport.interventionId, req.user!)) throw new InterventionHorsPerimetre();
         if (statut === 'ANNULEE') throw new RefusIntervention('La signature est impossible sur une intervention annulée.');
         const actuel = await tx.interventionRapport.findUniqueOrThrow({ where: { id: rapport.id }, select: { id: true, contenu: true, signature: { select: { id: true } } } });
         if (actuel.signature) throw new RefusIntervention('Ce compte rendu est déjà signé.');
@@ -361,6 +368,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       res.status(201).json(signature);
     } catch (error) {
       if (error instanceof RefusIntervention) return res.status(409).json({ error: error.message });
+      if (error instanceof InterventionHorsPerimetre) return res.status(404).json({ error: 'Compte rendu introuvable.' });
       if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Ce compte rendu est déjà signé.' });
       if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la signature n’a pas été enregistrée.' });
       console.error('Erreur signature intervention SAV', error);
@@ -401,6 +409,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       }
       const updated = await transactionVerifiee(async (tx) => {
         const statutActuel = await verrouillerIntervention(tx, intervention.id, 'FOR UPDATE');
+        if (!await interventionDansPerimetre(tx, intervention.id, req.user!)) throw new InterventionHorsPerimetre();
         if (!statutActuel || !transitions[statutActuel]?.includes(statut)) throw new RefusIntervention(`Transition impossible : ${statutActuel} vers ${statut}.`);
         if (statut === 'TERMINEE') {
           const rapports = await tx.interventionRapport.findMany({ where: { interventionId: intervention.id }, select: { signature: { select: { id: true } } } });
@@ -419,6 +428,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       res.json(decimalToNumber(updated));
     } catch (error) {
       if (error instanceof RefusIntervention) return res.status(409).json({ error: error.message });
+      if (error instanceof InterventionHorsPerimetre) return res.status(404).json({ error: 'Intervention introuvable.' });
       if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la transition n’a pas été enregistrée.' });
       console.error('Erreur transition intervention SAV', error);
       res.status(500).json({ error: 'Erreur lors de la transition de l’intervention.' });

@@ -7,6 +7,8 @@ export function ZoneSignature({ onChange, desactivee = false }: { onChange: (tra
   const canvas = useRef<HTMLCanvasElement>(null);
   const traits = useRef<Point[][]>([]);
   const enCours = useRef(false);
+  // Un seul doigt trace à la fois : les autres pointeurs (paume, second doigt) sont ignorés.
+  const pointeur = useRef<number | null>(null);
   const [borneAtteinte, setBorneAtteinte] = useState(false);
   const [vide, setVide] = useState(true);
 
@@ -59,39 +61,44 @@ export function ZoneSignature({ onChange, desactivee = false }: { onChange: (tra
   };
 
   const debut = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (desactivee) return;
+    if (desactivee || enCours.current) return;
     event.preventDefault();
     canvas.current!.setPointerCapture?.(event.pointerId);
     if (!commencerTrait(traits.current, pointDe(event))) { setBorneAtteinte(true); return; }
     enCours.current = true;
+    pointeur.current = event.pointerId;
     redessiner();
   };
   const mouvement = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!enCours.current) return;
+    if (!enCours.current || event.pointerId !== pointeur.current) return;
     event.preventDefault();
     const { largeur, hauteur } = dimensions();
     if (!prolongerTrait(traits.current, pointDe(event), largeur / hauteur)) setBorneAtteinte(true);
     redessiner();
   };
-  const fin = () => {
-    if (!enCours.current) return;
+  const fin = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!enCours.current || event.pointerId !== pointeur.current) return;
     enCours.current = false;
+    pointeur.current = null;
     publier();
   };
   const effacer = () => {
     traits.current = [];
     enCours.current = false;
+    pointeur.current = null;
     setBorneAtteinte(false);
     redessiner();
     publier();
   };
 
+  // Largeur bornée (max-w-xl, 36 rem pour 10 rem de haut) : sur un écran large, les proportions de la
+  // zone resteraient sinon au-delà de celles que le serveur admet (10 au plus), et la signature serait refusée.
   return <div className="space-y-2">
     <canvas
       ref={canvas}
       role="img"
       aria-label="Zone de signature du client"
-      className={`block h-40 w-full rounded-lg border-2 border-dashed bg-white ${desactivee ? 'border-gray-200' : 'border-gray-400'}`}
+      className={`block h-40 w-full max-w-xl rounded-lg border-2 border-dashed bg-white ${desactivee ? 'border-gray-200' : 'border-gray-400'}`}
       style={{ touchAction: 'none' }}
       onPointerDown={debut}
       onPointerMove={mouvement}

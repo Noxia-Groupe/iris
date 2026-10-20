@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { APIRequestContext, Browser, Locator, Page, Route } from '@playwright/test';
 import { test, expect, dateDuJour } from './fixtures';
 
@@ -194,4 +194,84 @@ test('l’encadrement termine sans signature avec un motif, « Autre » exigeant
   const journal = await (await request.get(`${api}/interventions/${intervention.id}/journal-saisies`, { headers })).json() as { action: string; motif: string | null; apres: { statut?: string } }[];
   expect(journal.find((entree) => entree.action === 'CHANGEMENT_STATUT' && entree.apres.statut === 'TERMINEE')?.motif).toBe('Clôture sans signature du client : Autre — Client parti avant la fin');
   expect(fenetres, 'aucune fenêtre du navigateur').toEqual([]);
+});
+
+// Au doigt, et non à la souris : de vrais événements tactiles (CDP). Sans `touch-action: none`, la page
+// défilerait sous le doigt et le tracé serait réduit à deux points (constaté à l'audit).
+test('sur téléphone tactile, la signature se dessine au doigt sans faire défiler la page', async ({ session, request, creerClient, browser }) => {
+  const { technicien, intervention, titre, headers } = await preparer(request, session.token, creerClient, 'signature-tactile');
+  expect((await request.post(`${api}/interventions/${intervention.id}/rapports`, { headers, data: { contenu: 'Compte rendu à signer au doigt.', cleEnvoi: randomUUID() } })).status()).toBe(201);
+  const contexte = await browser.newContext({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+  const page = await contexte.newPage();
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [jetonPour(technicien.id), JSON.stringify({ ...technicien, permissions: ['chantiers:read', 'clients:read'] })]);
+  try {
+    await page.goto('/interventions', { waitUntil: 'networkidle' });
+    const carte = page.locator('article', { hasText: titre });
+    await carte.getByRole('button', { name: 'Faire signer ce compte rendu' }).click();
+    const signature = carte.getByRole('dialog', { name: 'Signature du client' });
+    const zone = signature.getByRole('img', { name: 'Zone de signature du client' });
+    await zone.scrollIntoViewIfNeeded();
+    const cadre = (await zone.boundingBox())!;
+    const defilement = await page.evaluate(() => window.scrollY);
+    const cdp = await contexte.newCDPSession(page);
+    const point = (x: number, y: number) => ({ x: cadre.x + cadre.width * x, y: cadre.y + cadre.height * y });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point(0.1, 0.8)] });
+    for (let i = 1; i <= 20; i += 1) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point(0.1 + i * 0.035, i % 2 ? 0.2 : 0.8)] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    expect(await page.evaluate(() => window.scrollY), 'la page ne défile pas sous le doigt').toBe(defilement);
+    await expect(signature.getByText('Signature dessinée.')).toBeVisible();
+    await signature.getByLabel('Nom du signataire client').fill('Client Tactile');
+    await signature.getByLabel('Confirmation du client').check();
+    const signe = page.waitForResponse((reponse) => reponse.request().method() === 'POST' && reponse.url().endsWith('/signature'));
+    await signature.getByRole('button', { name: 'Enregistrer la signature' }).click();
+    const reponse = await signe;
+    expect(reponse.status()).toBe(201);
+    expect((reponse.request().postDataJSON() as { trace: { traits: number[][][] } }).trace.traits.flat().length, 'le tracé garde les points du doigt').toBeGreaterThan(15);
+  } finally {
+    await contexte.close();
+  }
+});
+
+// Sur un écran large, la zone de signature garde des proportions que le serveur admet (10 au plus).
+test('sur un écran large, la signature dessinée est acceptée', async ({ session, request, creerClient, page }) => {
+  const { intervention, titre, headers } = await preparer(request, session.token, creerClient, 'signature-large');
+  expect((await request.post(`${api}/interventions/${intervention.id}/rapports`, { headers, data: { contenu: 'Compte rendu signé sur grand écran.', cleEnvoi: randomUUID() } })).status()).toBe(201);
+  await page.setViewportSize({ width: 2560, height: 1200 });
+  await page.addInitScript(([token, user]) => { localStorage.setItem('token', token as string); localStorage.setItem('user', user as string); }, [session.token, JSON.stringify(session.user)]);
+  await page.goto('/interventions', { waitUntil: 'networkidle' });
+  const carte = page.locator('article', { hasText: titre });
+  await carte.getByRole('button', { name: 'Faire signer ce compte rendu' }).click();
+  const signature = carte.getByRole('dialog', { name: 'Signature du client' });
+  await signature.getByLabel('Nom du signataire client').fill('Client Grand Écran');
+  await signature.getByLabel('Confirmation du client').check();
+  await dessinerSignature(page, signature.getByRole('img', { name: 'Zone de signature du client' }));
+  const signe = page.waitForResponse((reponse) => reponse.request().method() === 'POST' && reponse.url().endsWith('/signature'));
+  await signature.getByRole('button', { name: 'Enregistrer la signature' }).click();
+  const reponse = await signe;
+  expect(reponse.status(), await reponse.text()).toBe(201);
+  expect((reponse.request().postDataJSON() as { trace: { ratio: number } }).trace.ratio).toBeLessThanOrEqual(10);
+});
+
+// Le compte rendu est signé sur un autre appareil pendant que le formulaire de clôture demande un motif :
+// le refus relit la liste, et le formulaire passe à la simple confirmation au lieu de boucler sur le motif.
+test('une clôture sur un état périmé se remet d’elle-même à jour', async ({ session, request, creerClient, allerSurPageAdmin }) => {
+  const { intervention, titre, headers } = await preparer(request, session.token, creerClient, 'cloture-perimee');
+  const compteRendu = await request.post(`${api}/interventions/${intervention.id}/rapports`, { headers, data: { contenu: 'Compte rendu signé ailleurs.', cleEnvoi: randomUUID() } });
+  expect(compteRendu.status()).toBe(201);
+  const page = await allerSurPageAdmin('/interventions');
+  const carte = page.locator('article', { hasText: titre });
+  await carte.getByRole('button', { name: 'Terminer' }).click();
+  const cloture = carte.getByRole('dialog', { name: 'Terminer l’intervention' });
+  await cloture.getByRole('radio', { name: 'Client absent' }).check();
+  const signeAilleurs = await request.post(`${api}/interventions/rapports/${(await compteRendu.json()).id}/signature`, { headers, data: { signataire: 'Client Ailleurs', confirme: true, trace: { ratio: 2, traits: [[[0.1, 0.1], [0.5, 0.5]]] } } });
+  expect(signeAilleurs.status()).toBe(201);
+  await cloture.getByRole('button', { name: 'Terminer sans signature' }).click();
+  await expect(cloture.getByRole('alert')).toContainText('aucun motif');
+  await expect(carte.getByText(/Signé par Client Ailleurs/)).toBeVisible();
+  await expect(cloture.getByRole('radio')).toHaveCount(0);
+  await cloture.getByRole('button', { name: 'Confirmer la fin de l’intervention' }).click();
+  await expect(carte.getByText('Terminée', { exact: true })).toBeVisible();
 });

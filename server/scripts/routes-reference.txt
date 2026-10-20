@@ -74,9 +74,9 @@ POST /api/interventions/:id/couts/achats requireAuth#76fb48c2d0f5 > blockCommerc
 PATCH /api/interventions/:id/couts/:type/:coutId requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#b6e1b61bab0d
 POST /api/interventions/:id/couts/:type/:coutId/:action requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#60eb271babe0
 GET /api/interventions/:id/journal-saisies requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#6d9623c26cdd
-POST /api/interventions/:id/rapports requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#601c6e57bed6
-POST /api/interventions/rapports/:rapportId/signature requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#1b170fb5d54f
-PATCH /api/interventions/:id/statut requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#5dad03c5382a
+POST /api/interventions/:id/rapports requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#ed7454a5a13f
+POST /api/interventions/rapports/:rapportId/signature requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#398ecc1341d9
+PATCH /api/interventions/:id/statut requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#dc24b6b412aa
 GET /api/planning/interventions-a-planifier requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > requirePlanningActif#20945635a340 > <anonymous>#02fa19bc763a
 PUT /api/interventions/:id/planning requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d54544a33096
 GET /api/health <anonymous>#8e6d60bb30d8

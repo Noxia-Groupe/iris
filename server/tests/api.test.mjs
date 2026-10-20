@@ -272,7 +272,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.course.cle@iris.test', 'sav.verrou.annulation@iris.test', 'sav.verrou.affectation@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
@@ -5542,6 +5542,8 @@ if (!TEST_DATABASE_URL) {
         const refus = await envoyer({ contenu, cleEnvoi });
         assert.equal(refus.status, 400, `${cleEnvoi} : ${JSON.stringify(refus.body)}`);
       }
+      const caractereNul = await envoyer({ contenu: 'TEST Compte rendu\u0000 tronqué.', cleEnvoi: randomUUID() });
+      assert.equal(caractereNul.status, 400, JSON.stringify(caractereNul.body));
       assert.equal(await prisma.interventionRapport.count({ where: { interventionId: id } }), 0);
 
       const cleEnvoi = randomUUID();
@@ -5555,6 +5557,14 @@ if (!TEST_DATABASE_URL) {
       // Une clé déjà servie ne couvre ni un autre texte, ni un autre auteur.
       assert.equal((await envoyer({ contenu: 'TEST Autre compte rendu.', cleEnvoi })).status, 409);
       assert.equal((await envoyer({ contenu, cleEnvoi }, session)).status, 409);
+      // Ni un autre dossier, même pour le même auteur et le même texte : rien n'est relu ni divulgué.
+      const autreDossier = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Clé d’envoi SAV, autre dossier' });
+      await prisma.interventionAffectation.create({ data: { interventionId: autreDossier.body.id, intervenantId: technicien.intervenantId } });
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) assert.equal((await statutSav(autreDossier.body.id, session, { statut })).status, 200);
+      const autreDossierMemeCle = await request(app).post(`/api/interventions/${autreDossier.body.id}/rapports`).set('Authorization', `Bearer ${technicien.jeton}`).send({ contenu, cleEnvoi });
+      assert.equal(autreDossierMemeCle.status, 409, JSON.stringify(autreDossierMemeCle.body));
+      assert.deepEqual(Object.keys(autreDossierMemeCle.body), ['error']);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: autreDossier.body.id } }), 0);
       // Deux envois simultanés d'une même clé n'enregistrent qu'un compte rendu.
       const cleSimultanee = randomUUID();
       const simultanes = await Promise.all([1, 2].map(() => envoyer({ contenu: 'TEST Envoi double.', cleEnvoi: cleSimultanee })));
@@ -5588,6 +5598,11 @@ if (!TEST_DATABASE_URL) {
         assert.ok(valeur > debut, `${nom} = ${valeur.toISOString()}`);
       }
       assert.equal(signature.accepteLe.getTime(), signature.createdAt.getTime());
+      // La base refuse elle-même un tracé qui n'est pas un objet, ou démesuré.
+      const nonSigne = await prisma.interventionRapport.create({ data: { interventionId: id, auteurId: technicien.userId, contenu: 'TEST Compte rendu au tracé refusé par la base.' } });
+      for (const trace of ['[]', `{"x": "${'a'.repeat(70000)}"}`]) {
+        await assert.rejects(prisma.$executeRawUnsafe('INSERT INTO "InterventionSignature" ("id", "rapportId", "signataire", "trace", "enregistreParId", "empreinte") VALUES ($1, $2, $3, $4::jsonb, $5, $6)', randomUUID(), nonSigne.id, 'TEST Signataire', trace, technicien.userId, '0'.repeat(64)), /InterventionSignature_trace_objet/);
+      }
     });
 
     test('signature : tracé dessiné obligatoire, canonique et borné ; empreinte du texte, du signataire et du tracé ; enregistreur conservé', async () => {
@@ -5606,6 +5621,7 @@ if (!TEST_DATABASE_URL) {
         'coordonnée absente': { ratio: 2, traits: [[[0.1, 0.2], [null, 0.3]]] },
         'point à trois valeurs': { ratio: 2, traits: [[[0.1, 0.2, 0.3], [0.2, 0.3]]] },
         'proportions absurdes': { ratio: 0.1, traits: [[[0.1, 0.2], [0.3, 0.4]]] },
+        'proportions trop larges': { ratio: 10.001, traits: [[[0.1, 0.2], [0.3, 0.4]]] },
         'trop de traits': { ratio: 2, traits: Array.from({ length: 51 }, () => [[0.1, 0.2], [0.3, 0.4]]) },
         'trop de points': { ratio: 2, traits: [traitDe(1000), traitDe(1001)] },
       };
@@ -5613,8 +5629,10 @@ if (!TEST_DATABASE_URL) {
         const refus = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace });
         assert.equal(refus.status, 400, `${cas} : ${JSON.stringify(refus.body)}`);
       }
+      const signataireNul = await signerSav(compteRendu.body.id, technicien.jeton, { ...base, signataire: 'TEST\u0000 Client', trace: TRACE_SIGNATURE_TEST });
+      assert.equal(signataireNul.status, 400, JSON.stringify(signataireNul.body));
       // Les bornes elles-mêmes sont admises : 50 traits, 2 000 points.
-      const limite = { ratio: 2, traits: [traitDe(1000), ...Array.from({ length: 48 }, () => [[0.1, 0.2]]), traitDe(952)] };
+      const limite = { ratio: 10, traits: [traitDe(1000), ...Array.from({ length: 48 }, () => [[0.1, 0.2]]), traitDe(952)] };
       assert.equal(limite.traits.length, 50);
       assert.equal(limite.traits.flat().length, 2000);
       const autre = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu au tracé maximal.');
@@ -5645,6 +5663,16 @@ if (!TEST_DATABASE_URL) {
       assert.equal(journal[0].apres.empreinte, attendue);
       assert.equal(journal[0].apres.signataire, 'TEST Client tracé');
       assert.equal(journal[0].apres.trace, undefined);
+      // L'enregistreur est le compte qui enregistre la signature, pas l'auteur du compte rendu.
+      const secours = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true, name: true } });
+      const rapportTechnicien = await ajouterCompteRendu(id, technicien.jeton, 'TEST Compte rendu signé devant l’encadrement.');
+      const parEncadrement = await signerSav(rapportTechnicien.body.id, session, { ...base, trace: dessin });
+      assert.equal(parEncadrement.status, 201, JSON.stringify(parEncadrement.body));
+      assert.equal(parEncadrement.body.enregistrePar.name, secours.name);
+      assert.equal((await prisma.interventionSignature.findUniqueOrThrow({ where: { id: parEncadrement.body.id } })).enregistreParId, secours.id);
+      const journalEncadrement = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { cible: 'INTERVENTION_SIGNATURE', cibleId: parEncadrement.body.id } });
+      assert.equal(journalEncadrement.apres.enregistrePar, secours.name);
+      assert.equal(journalEncadrement.auteurId, secours.id);
       // Une seule signature par compte rendu, et aucune sur une intervention annulée.
       assert.equal((await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace: dessin })).status, 409);
       const annulee = await dossierEnCours('sav.trace.annule@iris.test', 'SAV tracé annulé');
@@ -5674,6 +5702,10 @@ if (!TEST_DATABASE_URL) {
         { motifSansSignature: 'AUTRE', precisionMotif: '  a ' },
         { motifSansSignature: 'AUTRE', precisionMotif: 'x'.repeat(201) },
         { motifSansSignature: 'AUTRE', precisionMotif: 42 },
+        // Longueur comptée en caractères (points de code), comme les autres motifs : deux emoji n'en
+        // font pas quatre. Un caractère nul est refusé avant PostgreSQL.
+        { motifSansSignature: 'AUTRE', precisionMotif: '🙂🙂' },
+        { motifSansSignature: 'AUTRE', precisionMotif: 'Client\u0000 absent' },
         { motifSansSignature: 'CLIENT_ABSENT', precisionMotif: 'Une précision sans « Autre ».' },
         { precisionMotif: 'Une précision sans motif.' },
       ];
@@ -5744,6 +5776,73 @@ if (!TEST_DATABASE_URL) {
       await relacherSignature();
       const termine = await clotureSansMotif;
       assert.equal(termine.status, 200, JSON.stringify(termine.body));
+    });
+
+    // Course réelle sur la clé d'envoi : les deux envois attendent le même verrou, le relâchement les
+    // lance ensemble ; le second bute sur l'index unique (P2002) et relit le premier.
+    test('deux envois simultanés d’une même clé : l’index unique tranche, le second relit le premier', async () => {
+      const course = await dossierEnCours('sav.course.cle@iris.test', 'SAV course clé');
+      const relacher = await tenirTransactionSav(async (tx) => { await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${course.id} FOR UPDATE`; });
+      const cleEnvoi = randomUUID();
+      const envois = [1, 2].map(() => request(app).post(`/api/interventions/${course.id}/rapports`).set('Authorization', `Bearer ${course.technicien.jeton}`).send({ contenu: 'TEST Envoi en course.', cleEnvoi }).then((reponse) => reponse));
+      for (let tour = 0; tour < 250 && await attentesVerrouSav() < 2; tour += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(await attentesVerrouSav(), 2, 'les deux envois attendent le verrou');
+      await relacher();
+      const reponses = await Promise.all(envois);
+      assert.deepEqual(reponses.map((reponse) => reponse.status).sort(), [200, 201], JSON.stringify(reponses.map((reponse) => reponse.body)));
+      assert.equal(reponses[0].body.id, reponses[1].body.id);
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: course.id } }), 1);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: course.id, cible: 'INTERVENTION_RAPPORT' } }), 1);
+    });
+
+    // Le périmètre se relit sous le verrou : un retrait d'affectation (qui prend le verrou exclusif de
+    // l'intervention) fait refuser l'écriture du technicien retiré, au lieu de l'enregistrer après lui.
+    test('un retrait d’affectation en cours fait refuser compte rendu, signature et clôture du technicien retiré', async () => {
+      const dossier = await dossierEnCours('sav.verrou.affectation@iris.test', 'SAV verrou affectation');
+      const compteRendu = await ajouterCompteRendu(dossier.id, dossier.technicien.jeton, 'TEST Compte rendu avant le retrait.');
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      for (const acte of ['compte rendu', 'signature', 'cloture']) {
+        const relacher = await tenirTransactionSav(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${dossier.id} FOR UPDATE`;
+          await tx.interventionAffectation.deleteMany({ where: { interventionId: dossier.id } });
+        });
+        const jeton = dossier.technicien.jeton;
+        const reponse = (acte === 'compte rendu' ? ajouterCompteRendu(dossier.id, jeton, 'TEST Compte rendu après le retrait.')
+          : acte === 'signature' ? signerSav(compteRendu.body.id, jeton, { signataire: 'TEST Client', confirme: true, trace: TRACE_SIGNATURE_TEST })
+            : statutSav(dossier.id, jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).then((r) => r);
+        assert.equal(await attendreVerrouSav(), true, `${acte} attend le retrait`);
+        await relacher();
+        const refus = await reponse;
+        assert.equal(refus.status, 404, `${acte} : ${JSON.stringify(refus.body)}`);
+        await prisma.interventionAffectation.create({ data: { interventionId: dossier.id, intervenantId: dossier.technicien.intervenantId } });
+      }
+      assert.equal(await prisma.interventionRapport.count({ where: { interventionId: dossier.id } }), 1);
+      assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: dossier.id } })).statut, 'EN_COURS');
+    });
+
+    test('une annulation en cours fait attendre puis refuser une signature et une clôture', async () => {
+      const dossier = await dossierEnCours('sav.verrou.annulation@iris.test', 'SAV verrou annulation');
+      const compteRendu = await ajouterCompteRendu(dossier.id, dossier.technicien.jeton, 'TEST Compte rendu avant annulation.');
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      for (const acte of ['signature', 'cloture']) {
+        const relacher = await tenirTransactionSav(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${dossier.id} FOR UPDATE`;
+          await tx.intervention.update({ where: { id: dossier.id }, data: { statut: 'ANNULEE' } });
+        });
+        const reponse = (acte === 'signature'
+          ? signerSav(compteRendu.body.id, dossier.technicien.jeton, { signataire: 'TEST Client', confirme: true, trace: TRACE_SIGNATURE_TEST })
+          : statutSav(dossier.id, dossier.technicien.jeton, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).then((r) => r);
+        assert.equal(await attendreVerrouSav(), true, `${acte} attend l’annulation`);
+        await relacher();
+        const refus = await reponse;
+        assert.equal(refus.status, 409, `${acte} : ${JSON.stringify(refus.body)}`);
+        if (acte === 'cloture') assert.match(refus.body.error, /ANNULEE vers TERMINEE/);
+        assert.equal(await prisma.interventionSignature.count({ where: { rapportId: compteRendu.body.id } }), 0);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: dossier.id } })).statut, 'ANNULEE');
+        // Retour au statut en cours, en SQL de test, pour rejouer l'acte suivant sur le même dossier.
+        await prisma.intervention.update({ where: { id: dossier.id }, data: { statut: 'EN_COURS' } });
+      }
     });
 
     test('applique le périmètre hiérarchique aux interventions rattachées à une affaire', async () => {

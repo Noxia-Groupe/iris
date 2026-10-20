@@ -9,7 +9,7 @@ import type { TraceSignature } from '../lib/traceSignature';
 type Reponse = { ok: boolean; status: number; data: { error?: string } };
 
 // Une réponse perdue (réseau) ou une erreur du serveur laisse l'issue inconnue : l'écran le dit au
-// lieu d'annoncer un échec, et relit la liste.
+// lieu d'annoncer un échec ; chaque formulaire décide ensuite s'il relit la liste.
 async function envoyer(chemin: string, methode: 'POST' | 'PATCH', corps: unknown): Promise<Reponse | null> {
   try {
     const res = await apiFetch(chemin, { method: methode, body: JSON.stringify(corps) });
@@ -46,7 +46,7 @@ function useEnvoiUnique() {
 
 const cadre = 'mt-3 space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4';
 
-export function FormulaireCompteRendu({ interventionId, onEnregistre, onAnnuler }: { interventionId: string; onEnregistre: () => Promise<void>; onAnnuler: () => void }) {
+export function FormulaireCompteRendu({ interventionId, onEnregistre, onRelire, onAnnuler }: { interventionId: string; onEnregistre: () => Promise<void>; onRelire: () => Promise<void>; onAnnuler: () => void }) {
   const cleEnvoi = useRef(nouvelleCleEnvoi());
   const [contenu, setContenu] = useState('');
   const [erreur, setErreur] = useState('');
@@ -63,20 +63,25 @@ export function FormulaireCompteRendu({ interventionId, onEnregistre, onAnnuler 
         setErreur('L’enregistrement du compte rendu n’a pas pu être confirmé. Renvoyez-le : il ne sera pas enregistré deux fois.');
         return;
       }
-      if (!reponse.ok) { setErreur(reponse.data.error || 'Enregistrement du compte rendu impossible.'); return; }
+      if (!reponse.ok) {
+        setErreur(reponse.data.error || 'Enregistrement du compte rendu impossible.');
+        // Clé déjà servie, intervention qui n'est plus en cours : la liste relue montre l'état réel.
+        if (reponse.status === 409) await onRelire();
+        return;
+      }
       await onEnregistre();
     });
   };
 
   return <form role="dialog" aria-label="Compte rendu d’intervention" onSubmit={soumettre} className={cadre}>
     <div><h3 className="font-semibold">Compte rendu d’intervention</h3><p className="text-sm text-gray-600">Une fois enregistré, il ne se modifie plus : une correction passe par un compte rendu complémentaire.</p></div>
-    <label className="block text-sm font-medium">Travaux réalisés et constats<textarea aria-label="Texte du compte rendu" className="form-input mt-1 min-h-[8rem] w-full" maxLength={5000} value={contenu} onChange={(event) => setContenu(event.target.value)} disabled={envoi} /></label>
+    <label className="block text-sm font-medium">Travaux réalisés et constats<textarea aria-label="Texte du compte rendu" autoFocus className="form-input mt-1 min-h-[8rem] w-full" maxLength={5000} value={contenu} onChange={(event) => setContenu(event.target.value)} disabled={envoi} /></label>
     {erreur && <p role="alert" className="text-sm text-red-700">{erreur}</p>}
     <div className="flex flex-wrap gap-2"><button type="submit" className="btn btn-primary" disabled={envoi || !valide}>{envoi ? 'Enregistrement…' : 'Enregistrer le compte rendu'}</button><button type="button" className="btn btn-secondary" onClick={onAnnuler} disabled={envoi}>Annuler</button></div>
   </form>;
 }
 
-export function FormulaireSignature({ rapport, enregistrePar, onEnregistre, onAnnuler }: { rapport: { id: string; contenu: string }; enregistrePar: string; onEnregistre: () => Promise<void>; onAnnuler: () => void }) {
+export function FormulaireSignature({ rapport, enregistrePar, onEnregistre, onRelire, onAnnuler }: { rapport: { id: string; contenu: string }; enregistrePar: string; onEnregistre: () => Promise<void>; onRelire: () => Promise<void>; onAnnuler: () => void }) {
   const [signataire, setSignataire] = useState('');
   const [confirme, setConfirme] = useState(false);
   const [trace, setTrace] = useState<TraceSignature | null>(null);
@@ -97,8 +102,9 @@ export function FormulaireSignature({ rapport, enregistrePar, onEnregistre, onAn
       }
       if (!reponse.ok) {
         setErreur(reponse.data.error || 'Signature impossible.');
-        // Déjà signé : la liste relue montre la signature enregistrée.
-        if (reponse.status === 409) await onEnregistre();
+        // Déjà signé ou conflit : la liste relue montre la signature enregistrée, sans fermer le formulaire
+        // ni effacer le message et le tracé.
+        if (reponse.status === 409) await onRelire();
         return;
       }
       await onEnregistre();
@@ -109,7 +115,7 @@ export function FormulaireSignature({ rapport, enregistrePar, onEnregistre, onAn
     <div><h3 className="font-semibold">Signature du client</h3><p className="text-sm text-gray-600">Le client relit le compte rendu, confirme et signe au doigt. La signature ne se modifie plus.</p></div>
     <blockquote className="rounded border border-gray-200 bg-white p-3 text-sm text-gray-700">{rapport.contenu}</blockquote>
     <label className="block text-sm font-medium">Enregistré par<input aria-label="Enregistré par" readOnly className="form-input mt-1 w-full bg-gray-100" value={enregistrePar} /></label>
-    <label className="block text-sm font-medium">Nom du signataire client<input aria-label="Nom du signataire client" className="form-input mt-1 w-full" maxLength={200} value={signataire} onChange={(event) => setSignataire(event.target.value)} disabled={envoi} placeholder="Prénom et nom" /></label>
+    <label className="block text-sm font-medium">Nom du signataire client<input aria-label="Nom du signataire client" autoFocus className="form-input mt-1 w-full" maxLength={200} value={signataire} onChange={(event) => setSignataire(event.target.value)} disabled={envoi} placeholder="Prénom et nom" /></label>
     <ZoneSignature onChange={setTrace} desactivee={envoi} />
     <label className="flex items-start gap-2 text-sm"><input aria-label="Confirmation du client" type="checkbox" className="mt-1" checked={confirme} onChange={(event) => setConfirme(event.target.checked)} disabled={envoi} /><span>Le client confirme avoir lu et accepté ce compte rendu.</span></label>
     {erreur && <p role="alert" className="text-sm text-red-700">{erreur}</p>}
@@ -126,8 +132,8 @@ const MOTIFS = [
 
 // Terminer exige un compte rendu, signé par le client ou, à défaut, accompagné d'un motif
 // (décisions de Nelson des 19 et 20-10-2026). Le serveur relit la règle sous verrou.
-export function FormulaireCloture({ interventionId, nombreComptesRendus, signe, onTermine, onAjouterCompteRendu, onAnnuler }: {
-  interventionId: string; nombreComptesRendus: number; signe: boolean; onTermine: () => Promise<void>; onAjouterCompteRendu: () => void; onAnnuler: () => void;
+export function FormulaireCloture({ interventionId, nombreComptesRendus, signe, onTermine, onRelire, onAjouterCompteRendu, onAnnuler }: {
+  interventionId: string; nombreComptesRendus: number; signe: boolean; onTermine: () => Promise<void>; onRelire: () => Promise<void>; onAjouterCompteRendu: () => void; onAnnuler: () => void;
 }) {
   const [motif, setMotif] = useState('');
   const [precision, setPrecision] = useState('');
@@ -143,11 +149,19 @@ export function FormulaireCloture({ interventionId, nombreComptesRendus, signe, 
       const corps = signe ? { statut: 'TERMINEE' } : { statut: 'TERMINEE', motifSansSignature: motif, ...(motif === 'AUTRE' ? { precisionMotif: precision.trim() } : {}) };
       const reponse = await envoyer(`/interventions/${interventionId}/statut`, 'PATCH', corps);
       if (!reponse) {
+        // Relecture silencieuse : le message reste affiché ; si l'intervention est terminée, la liste
+        // relue le montre et le formulaire se ferme.
         setErreur('La fin de l’intervention n’a pas pu être confirmée : la liste est relue.');
-        await onTermine();
+        await onRelire();
         return;
       }
-      if (!reponse.ok) { setErreur(reponse.data.error || 'Transition impossible.'); return; }
+      if (!reponse.ok) {
+        setErreur(reponse.data.error || 'Transition impossible.');
+        // Un compte rendu signé ou ajouté entre-temps, sur un autre appareil : la liste relue remet le
+        // formulaire dans le bon état (confirmation ou motif) au lieu de redemander indéfiniment un motif.
+        if (reponse.status === 409) await onRelire();
+        return;
+      }
       await onTermine();
     });
   };
