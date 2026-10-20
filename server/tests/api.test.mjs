@@ -5355,6 +5355,15 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.$executeRawUnsafe('UPDATE "InterventionSignature" SET "rapportId" = $1 WHERE "id" = $2', libre.body.id, signature.body.id), /Signature d'intervention figée/);
       await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "InterventionRapport" WHERE "id" = $1', libre.body.id), /Compte rendu d'intervention figé/);
       await assert.rejects(prisma.$executeRawUnsafe('DELETE FROM "InterventionSignature" WHERE "id" = $1', signature.body.id), /Signature d'intervention figée/);
+      // Colonne par colonne, y compris celles qu'ajouteront les lots suivants : un garde restreint à
+      // une liste de colonnes (UPDATE OF …) laisserait passer l'auteur, l'horodatage ou l'identifiant.
+      for (const [table, id, refus] of [['InterventionRapport', libre.body.id, /Compte rendu d'intervention figé/], ['InterventionSignature', signature.body.id, /Signature d'intervention figée/]]) {
+        const colonnes = await prisma.$queryRawUnsafe('SELECT column_name::text AS nom FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position', table);
+        assert.ok(colonnes.length >= 5, `${table} : ${colonnes.length} colonnes lues`);
+        for (const { nom } of colonnes) {
+          await assert.rejects(prisma.$executeRawUnsafe(`UPDATE "${table}" SET "${nom}" = "${nom}" WHERE "id" = $1`, id), refus, `${table}.${nom}`);
+        }
+      }
       assert.equal(await prisma.interventionRapport.count({ where: { interventionId: temoin.id } }), 1);
 
       // L'ajout reste ouvert : une correction passe par un nouveau compte rendu, sans toucher aux autres.
