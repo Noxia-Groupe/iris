@@ -140,7 +140,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       // Un conducteur garde les heures et le matériel, mais ni taux ni coût de main-d'œuvre, ni le
       // total qui l'inclut (cf. voitCoutMainOeuvre).
       if (!voitCoutMainOeuvre(req)) return res.json(decimalToNumber({ heures: heures.map(sansTauxHoraire), achats, totalMainOeuvreHT: null, totalMaterielHT, totalCoutsHT: null }));
-      const totalCoutsHT = totalMaterielHT ? totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP) : totalMainOeuvreHT;
+      const totalCoutsHT = totalMaterielHT === null ? totalMainOeuvreHT : totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
       res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT }));
     } catch (error) { console.error('Erreur lecture coûts intervention', error); res.status(500).json({ error: 'Lecture des coûts impossible.' }); }
   });

@@ -251,7 +251,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.fournisseur.deleteMany({ where: { nom: { startsWith: 'TEST ' } } });
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
-      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
+      'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
       'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
       'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
@@ -5409,8 +5409,11 @@ if (!TEST_DATABASE_URL) {
       // Jours civils de la société : la date future se juge au fuseau de l'entreprise, pas en UTC.
       const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
       const enJJMMAAAA = (jourIso) => jourIso.split('-').reverse().join('-');
-      const aujourdhui = enJJMMAAAA(jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris'));
-      const demain = enJJMMAAAA(jourCivilEntreprise(new Date(Date.now() + 86_400_000), societe?.fuseauHoraire || 'Europe/Paris'));
+      const jourIso = jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris');
+      const aujourdhui = enJJMMAAAA(jourIso);
+      // Lendemain calendaire, et non « maintenant + 24 h » : le jour du passage à l'heure d'hiver dure 25 h.
+      const lendemain = new Date(`${jourIso}T12:00:00.000Z`); lendemain.setUTCDate(lendemain.getUTCDate() + 1);
+      const demain = enJJMMAAAA(lendemain.toISOString().slice(0, 10));
       const heuresDe = (jeton) => request(app).post(`/api/interventions/${id}/couts/heures`).set('Authorization', `Bearer ${jeton}`);
       const corriger = (jeton, corps) => request(app).patch(`/api/interventions/${id}/couts/heures/${saisie.body.id}`).set('Authorization', `Bearer ${jeton}`).send(corps);
 
@@ -5457,6 +5460,57 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 409);
       const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, cible: 'COUT_INTERVENTION_HEURE' }, select: { action: true }, orderBy: { createdAt: 'asc' } });
       assert.deepEqual(journal.map((entree) => entree.action), ['CREATION', 'CORRECTION', 'ARCHIVAGE', 'RESTAURATION']);
+    });
+
+    // Hors contrat, le verrou de l'intervention reste le premier pris : une saisie engagée pendant
+    // une annulation l'attend, puis est refusée sans rien écrire.
+    test('une saisie d’heures hors contrat attend l’annulation concurrente puis est refusée', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.curative.course@iris.test', 'TEST Technicien curative course');
+      const curative = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`).send({ clientId, titre: 'TEST Curative course annulation' });
+      assert.equal(curative.status, 201, JSON.stringify(curative.body));
+      const id = curative.body.id;
+      await prisma.interventionAffectation.create({ data: { interventionId: id, intervenantId: technicien.intervenantId } });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`;
+        pret();
+        await attente;
+        await tx.intervention.update({ where: { id }, data: { statut: 'ANNULEE' } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      let requete; let bloque = false;
+      try {
+        requete = request(app).post(`/api/interventions/${id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '01-10-2026', nbrHeures: 1 }).then((r) => r);
+        for (let tour = 0; tour < 150; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+          if (sessions.length) { bloque = true; break; }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const reponse = await requete;
+      assert.equal(bloque, true, 'la saisie attend le verrou de l’intervention');
+      assert.equal(reponse.status, 409, `${JSON.stringify(reponse.body)}`);
+      assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: id } }), 0, 'aucune heure');
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: id, cible: 'COUT_INTERVENTION_HEURE' } }), 0, 'aucune trace');
+    });
+
+    // Le contrat terminé ferme les heures comme le contrat suspendu, sans que l'intervention soit annulée.
+    test('une intervention d’un contrat terminé ne reçoit plus d’heures', async () => {
+      const technicien = await compteTechnicienSav('sav.cout.contrat.termine@iris.test', 'TEST Technicien contrat terminé');
+      const contrat = await prisma.contratMaintenance.create({ data: { clientId, titre: 'TEST Contrat terminé heures', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z') } });
+      const intervention = await prisma.intervention.create({ data: { reference: `I26-TERMINE-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance, titre: 'TEST Visite contrat terminé' } });
+      await prisma.interventionAffectation.create({ data: { interventionId: intervention.id, intervenantId: technicien.intervenantId } });
+      const saisir = () => request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '01-10-2026', nbrHeures: 1 });
+      assert.equal((await saisir()).status, 201);
+      await prisma.contratMaintenance.update({ where: { id: contrat.id }, data: { statut: 'TERMINE' } });
+      assert.equal((await saisir()).status, 409, 'contrat terminé : saisie refusée');
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 409, 'contrat terminé : lecture technicien refusée');
+      assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: intervention.id } }), 1);
     });
 
     test('réserve les coûts à un technicien et fige son taux à la saisie', async () => {

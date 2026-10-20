@@ -68,4 +68,19 @@ test('le technicien saisit ses heures sur une curative hors contrat ; l’admini
   const carteAdmin = admin.locator('article', { hasText: titre });
   await expect(carteAdmin.getByText(/Coût réel cumulé : 60,00\s€ HT/)).toBeVisible();
   await expect(carteAdmin.getByRole('button', { name: 'Enregistrer l’achat matériel' })).toHaveCount(0);
+
+  // 3. Un conducteur ne reçoit aucun total hors contrat : pas de cadre de coûts vide sur sa curative.
+  const conducteur: Compte = await envoyer('post', '/users', { email: `heures.curative.conducteur.${suffixe}@iris.test`, name: `Conducteur heures ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' });
+  const titreConducteur = `Dépannage du conducteur ${suffixe}`;
+  const creation = await request.post(`${api}/interventions`, { headers: { Authorization: `Bearer ${jetonPour(conducteur.id)}` }, data: { clientId: client.id, titre: titreConducteur } });
+  expect(creation.ok(), await creation.text()).toBeTruthy();
+  const vueConducteur = await pageDe(browser, conducteur);
+  try {
+    await vueConducteur.goto('/interventions', { waitUntil: 'networkidle' });
+    const carteConducteur = vueConducteur.locator('article', { hasText: titreConducteur });
+    await expect(carteConducteur).toBeVisible();
+    await expect(carteConducteur.locator('div.border-slate-200')).toHaveCount(0);
+  } finally {
+    await vueConducteur.context().close();
+  }
 });

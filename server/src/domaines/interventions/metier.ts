@@ -59,13 +59,18 @@ export function interventionHeuresEligible(intervention: InterventionCout) {
   if (!STATUTS_COUT_INTERVENTION.includes(intervention.statut)) return false;
   return !intervention.contratMaintenanceId || intervention.contratMaintenance?.statut === 'ACTIF';
 }
-// Des heures se déclarent une fois faites : une date postérieure au jour de la société est refusée.
+// Des heures se déclarent une fois faites : une date postérieure au jour de la société est refusée
+// (choix par défaut, à confirmer, #253 ; il vaut aussi pour les interventions de contrat).
 export function dateHeuresIntervention(value: unknown, fuseauHoraire: string, instant = new Date()): string | null {
   const date = dateIsoStricte(value);
   return date && dateSeuleEnJourCivil(date) <= aujourdHuiEntreprise(fuseauHoraire, instant) ? date : null;
 }
 export function estConflitTransactionCout(error: unknown) {
-  return ['P2034', 'P2003'].includes((error as { code?: string })?.code || '');
+  const erreur = error as { code?: string; meta?: { code?: string } } | null;
+  // Un refus de sérialisation ou un interblocage remonte en P2034, sauf sur une requête brute (les
+  // verrous FOR UPDATE de verrouillerContexteCout), que Prisma rapporte en P2010 avec le code SQL.
+  if (erreur?.code === 'P2010') return ['40001', '40P01'].includes(erreur.meta?.code || '');
+  return ['P2034', 'P2003'].includes(erreur?.code || '');
 }
 // Toutes les mutations de coût prennent ces verrous dans cet ordre afin que la relecture
 // d'éligibilité soit atomique avec les changements de contrat, statut et affectation. Hors contrat,
