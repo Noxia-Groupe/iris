@@ -147,7 +147,7 @@ Chaque permission accordée porte un périmètre parmi quatre, comme le demande 
 **Relations.** « Ses dossiers » se définit par une ou plusieurs relations, choisies **pour chaque permission** du rôle :
 - **chantiers** : titulaire (`responsableId`), commercial (`commercialId`) ;
 - **interventions** : intervenant affecté (par sa fiche), créateur, titulaire du chantier lié ;
-- **planning** : intervenant affecté à l'événement (`PlanningEvent.intervenants`, par sa fiche), intervention affectée projetée, chantier dont il est titulaire. La relation retenue pour le technicien est fixée par la PR du planning limité (note 11) ;
+- **planning** : intervenant affecté à l'événement (`PlanningEvent.intervenants`, par sa fiche), intervention affectée projetée, chantier dont il est titulaire. Pour le technicien, la relation retenue est l'intervenant affecté à l'événement (#275, note 11) ;
 - **devis** : aucune relation n'existe aujourd'hui (le devis n'a ni commercial ni auteur).
 
 « Son équipe » et « sa branche » appliquent les mêmes relations aux collaborateurs concernés.
@@ -227,7 +227,7 @@ Légende des cases :
 | `interventions.couts` | T | T | — | — ⁸ | D af cr cl | — | — | — | — | — ¹⁶ |
 | `interventions.journal` | T | T | — | D af, B cl | D af cr cl | — | D af ⁷ | D af ⁷ | D af ⁷ | — |
 | `contrats.*` | T | T | — | — | — | — | — | — | — | — |
-| `planning.consulter` | T | T | — | T ¹¹ | T ¹¹ | — | — ⁷ | — ⁷ | — ⁷ | T ¹¹ |
+| `planning.consulter` | T | T | — | T ¹¹ | T ¹¹ | — | — ⁷ | — ⁷ | — ⁷ | D af ¹¹ |
 | `planning.modifier`, `planning.types` | T | T | — | T | T | — | — ⁷ | — ⁷ | — ⁷ | — |
 | `planning.partager` | T | T | — | — | — | — | — | — | — | — |
 | `factures.*`, `mentions.gerer`, `reglements.*`, `comptabilite.*` | T | T | — | — | — | — | — | — | — | — |
@@ -265,7 +265,7 @@ Ces règles sont celles du code d'aujourd'hui (annexe, A3 à A8). Plusieurs ne t
 8. **SAV du responsable** : interventions où il est affecté, ou dont le chantier lié a pour titulaire un membre de sa branche ou lui-même. Il ne voit pas une intervention sans chantier affectée à un membre de sa branche. Coûts SAV : 403 dans son périmètre.
 9. **Annuaire du commercial, du directeur commercial, de l'assistante et du comptable** : l'API le leur sert, mais l'écran le leur ferme (`ROLES_ANNUAIRE`).
 10. **Technicien et clients désactivés** : l'annuaire les lui ferme (404 sur la fiche et l'historique, filtre ignoré). L'intervention qui lui est affectée lui montre pourtant client, site et contact (invariant, section 8.2).
-11. **Planning en lecture** : les événements sans intervention de toute l'entreprise, les projections d'interventions dans le périmètre SAV, et la liste de **tous** les chantiers, annulés compris. Le directeur commercial, l'assistante et le comptable n'y ont plus accès après D0 (note 7). **Technicien** : Nelson a décidé le 19-10-2026 (#253) que son planning est limité à ce dont il est chargé, dans une PR séparée après le lot pilote 3b, sans attendre D1 ni D2. Cette PR fixe ce périmètre (événements, projections d'interventions et chantiers proposés). Elle change volontairement un droit : elle met à jour cette table, où « T ¹¹ » décrit le comportement jusqu'à elle, et la matrice (section 7.1) si celle-ci est déjà enregistrée. Pour les autres comptes, la liste des chantiers est harmonisée en D2 (décision 8). En écriture, `planning.modifier` sur toute l'entreprise ne vaut que pour les événements libres : une projection d'intervention reste limitée au périmètre SAV.
+11. **Planning en lecture** : les événements sans intervention de toute l'entreprise, les projections d'interventions dans le périmètre SAV, et la liste de **tous** les chantiers, annulés compris. Le directeur commercial, l'assistante et le comptable n'y ont plus accès après D0 (note 7). **Technicien** : Nelson a décidé le 19-10-2026 (#253) que son planning est limité à ce dont il est chargé, dans une PR séparée après le lot pilote 3b, sans attendre D1 ni D2. Depuis cette PR (#275), il ne lit que les affectations où figure sa fiche intervenant (relation « affecté »), événements libres comme projections d'interventions, avec leurs coéquipiers ; sans fiche reliée, aucune. La liste des chantiers du planning lui est refusée (403), puisqu'il ne crée pas d'affectation ; il garde la lecture des types d'événement. D'où la case « D af ¹¹ », qui remplace « T ¹¹ ». La matrice (section 7.1), enregistrée après, reprendra ce comportement. Pour les autres comptes, la liste des chantiers est harmonisée en D2 (décision 8). En écriture, `planning.modifier` sur toute l'entreprise ne vaut que pour les événements libres : une projection d'intervention reste limitée au périmètre SAV.
 12. **Tableau de bord** : le contenu varie selon le type.
     - Les achats ne sont envoyés ni au commercial ni au technicien.
     - Les heures ne sont envoyées ni à l'administrateur ni au commercial.
@@ -384,7 +384,7 @@ Chaque type de compte actuel devient le rôle prédéfini correspondant, au comp
 
 La colonne des routes vient du script `server/scripts/routes.mjs` du chantier 2 (PR #177, fusionnée).
 
-**Ordre.** La matrice est enregistrée comme un lot de tests seul, juste après les corrections du lot D0 et avant tout lot du moteur (décision 6) ; la section 9 en donne le placement par rapport au pilote. Un lot qui change ensuite volontairement un droit met la matrice à jour dans sa propre PR, l'écart restant visible au diff, comme la liste des routes. Cela vaut pour les choix « à appliquer » de la passation, section 4, pour les décisions de Nelson encore à appliquer, comme le planning limité du technicien (note 11), et pour chaque harmonisation de D2.
+**Ordre.** La matrice est enregistrée comme un lot de tests seul, juste après les corrections du lot D0 et avant tout lot du moteur (décision 6) ; la section 9 en donne le placement par rapport au pilote. Un lot qui change ensuite volontairement un droit met la matrice à jour dans sa propre PR, l'écart restant visible au diff, comme la liste des routes. Cela vaut pour les choix « à appliquer » de la passation, section 4, pour les décisions de Nelson encore à appliquer (le planning limité du technicien l'a été par #275, avant l'enregistrement de la matrice : note 11), et pour chaque harmonisation de D2.
 
 **Écran.** D2 fait lire à l'écran les permissions effectives au lieu des types de compte. L'écran s'ouvrirait alors partout où il est plus restrictif que le serveur : annuaire du commercial, Performances du responsable, journaux d'achats du directeur. La décision 12 tranche : par défaut, le serveur se restreint à ce que l'écran montre, sauf si un écran que le rôle utilise a besoin de la donnée.
 
@@ -538,7 +538,7 @@ La numérotation reprend celle des anciennes questions ; les sections précéden
    - **saisie du directeur** : reste fermée ;
    - **tableau de bord** : chaque bloc suit la permission qui lui correspond, au lieu du type de compte ;
    - **statistiques des fournisseurs** : restreintes au périmètre des chantiers du demandeur ;
-   - **planning** : les chantiers proposés excluent les affaires annulées et suivent le périmètre de `chantiers.consulter`. Pour le technicien, la décision de Nelson du 19-10-2026 (note 11) prime : elle s'applique avant, dans sa propre PR.
+   - **planning** : les chantiers proposés excluent les affaires annulées et suivent le périmètre de `chantiers.consulter`. Pour le technicien, la décision de Nelson du 19-10-2026 (note 11) prime : elle s'applique avant, dans sa propre PR (#275).
 9. **Titulaire.**
    - **D1** : la règle actuelle, à l'identique. Le serveur accepte tout compte actif ; l'écran ne propose que les conducteurs. La correction D0 (#181) journalise les réattributions sans changer qui peut être titulaire.
    - **D2** : seul peut être **désigné** titulaire un compte actif dont le rôle a l'attribut « peut être titulaire ». L'écran propose alors tous ces comptes.
