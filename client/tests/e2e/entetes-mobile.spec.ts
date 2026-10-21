@@ -138,6 +138,9 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
     // Une visite à planifier : la file du planning coupait son bouton « Placer ».
     await envoyer('post', `/contrats-maintenance/${contrat.id}/generer-intervention`, {});
     await envoyer('post', '/interventions', { clientId: client.id, chantierId: chantier.id, titre: `Fuite sur le réseau de chauffage ${Date.now()}` });
+    // Un numéro de série insécable dans un titre : la liste des interventions, grille à une
+    // colonne, prenait la largeur de sa carte la plus large et sortait de l'écran (#281).
+    await envoyer('post', '/interventions', { clientId: client.id, titre: `Remplacement du circulateur SN${suffixe}A7B3C9D2E8F4` });
     await envoyer('post', '/factures', { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Écrans sur téléphone', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'Prestation', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
     // Une facture émise, en partie réglée : la liste des règlements et le formulaire ouvert sur
     // cette facture (client, factures à régler, montants) sont mesurés avec leurs données.
