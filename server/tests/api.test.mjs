@@ -5394,12 +5394,16 @@ if (!TEST_DATABASE_URL) {
       assert.ok(date);
       let entrees = await journal(chantier.id);
       assert.equal(entrees.length, 1);
-      assert.deepEqual([entrees[0].action, entrees[0].auteurNom, entrees[0].avant, entrees[0].apres], [
-        'CHANGEMENT_ENCAISSEMENT', adminNom, { encaisse: false, dateEncaissement: null }, { encaisse: true, dateEncaissement: new Date(date).toISOString() },
+      assert.deepEqual([entrees[0].action, entrees[0].auteurId, entrees[0].auteurNom, entrees[0].avant, entrees[0].apres], [
+        'CHANGEMENT_ENCAISSEMENT', adminId, adminNom, { encaisse: false, dateEncaissement: null }, { encaisse: true, dateEncaissement: new Date(date).toISOString() },
       ]);
+      // À l'identique, la ligne n'est pas réécrite : ni la date d'encaissement, ni updatedAt (date de
+      // clôture de repli du résultat commercial, cf. dateClotureChantier) ne bougent.
+      const misAJour = (await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).updatedAt.toISOString();
       const encore = await encaisser(true);
       assert.equal(encore.status, 200);
       assert.equal(encore.body.dateEncaissement, date, 'la date d’encaissement ne bouge pas');
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).updatedAt.toISOString(), misAJour);
       assert.equal((await journal(chantier.id)).length, 1);
       const decoche = await encaisser(false);
       assert.equal(decoche.status, 200);
@@ -5462,7 +5466,7 @@ if (!TEST_DATABASE_URL) {
         reponse = lancer().then((r) => r);
         let attente = false;
         for (let tour = 0; tour < 150 && !attente; tour += 1) {
-          attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n > 0;
+          attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Chantier"%FOR UPDATE%'`)[0].n > 0;
           if (!attente) await new Promise((r) => setTimeout(r, 20));
         }
         assert.equal(attente, true, 'la requête attend la ligne du chantier');
@@ -5506,6 +5510,41 @@ if (!TEST_DATABASE_URL) {
         ['CHANGEMENT_COMMERCIAL', adminId, adminNom, { commercialId: null, nom: null }, { commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }],
         ['CHANGEMENT_COMMERCIAL', adminId, adminNom, { commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }, { commercialId: comptes.commercialB.id, nom: 'TEST 181 commercialB' }],
       ]);
+    });
+
+    // La comparaison se fait sur la ligne verrouillée : si une autre transaction a déjà enregistré le
+    // même titulaire ou le même commercial pendant l'attente du verrou, la requête n'écrit rien.
+    test('titulaire et commercial déjà enregistrés entre-temps à la même valeur : aucune entrée', async () => {
+      const titulaire = await creerChantier('verrou titulaire identique');
+      const r1 = await sousVerrouTiers(titulaire.id, () => request(app).patch(`/api/chantiers/${titulaire.id}`).set(admin).send({ responsableId: comptes.conducteurB.id }), { responsableId: comptes.conducteurB.id });
+      assert.equal(r1.status, 200, JSON.stringify(r1.body));
+      assert.equal((await journal(titulaire.id)).length, 0);
+      const commercial = await creerChantier('verrou commercial identique');
+      const r2 = await sousVerrouTiers(commercial.id, () => request(app).patch(`/api/chantiers/${commercial.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id }), { commercialId: comptes.commercialB.id });
+      assert.equal(r2.status, 200, JSON.stringify(r2.body));
+      assert.equal((await journal(commercial.id)).length, 0);
+    });
+
+    // Depuis la fiche, l'administration envoie le titulaire avec le client quand elle change les deux.
+    test('client et titulaire changés par la même requête : deux entrées', async () => {
+      const fiche = await prisma.client.create({ data: { raisonSociale: `TEST 181 client ${Date.now()}` } });
+      const chantier = await creerChantier('client et titulaire');
+      const r = await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ clientId: fiche.id, responsableId: comptes.conducteurB.id });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const entrees = await journal(chantier.id);
+      assert.deepEqual(entrees.map((e) => [e.action, e.auteurId]).sort(), [['CHANGEMENT_CLIENT', adminId], ['CHANGEMENT_TITULAIRE', adminId]]);
+      assert.deepEqual(entrees.find((e) => e.action === 'CHANGEMENT_TITULAIRE').apres, { responsableId: comptes.conducteurB.id, nom: 'TEST 181 conducteurB' });
+    });
+
+    // Le changement de client relit lui aussi l'« avant » sous le verrou de la ligne.
+    test('changement de client : l’avant est relu sous le verrou de la ligne', async () => {
+      const [a, b, c] = await Promise.all(['A', 'B', 'C'].map((x) => prisma.client.create({ data: { raisonSociale: `TEST 181 client verrou ${x} ${Date.now()}` } })));
+      const chantier = await prisma.chantier.update({ where: { id: (await creerChantier('verrou client')).id }, data: { clientId: a.id, client: a.raisonSociale } });
+      const r = await sousVerrouTiers(chantier.id, () => request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ clientId: c.id }), { clientId: b.id, client: b.raisonSociale });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const entrees = await journal(chantier.id);
+      assert.deepEqual(entrees.map((e) => [e.action, e.avant, e.apres]), [['CHANGEMENT_CLIENT',
+        { clientId: b.id, raisonSociale: b.raisonSociale, libelle: b.raisonSociale }, { clientId: c.id, raisonSociale: c.raisonSociale, libelle: c.raisonSociale }]]);
     });
   });
 

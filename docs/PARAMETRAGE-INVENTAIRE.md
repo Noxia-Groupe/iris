@@ -1,6 +1,6 @@
 # Inventaire « paramétrage plutôt que règles en dur »
 
-> Annexe de la proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md) (chantier technique 4, 17-10-2026). Photographie du code à une date donnée, et non documentation tenue à jour. Le découpage du serveur par domaine (chantier 2) déplace les lignes citées, mais garde les noms des fonctions et des constantes. Depuis, #216 a remplacé `isLastSuperAdmin` par `estDernierSuperAdminActif`.
+> Annexe de la proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md) (chantier technique 4, 17-10-2026). Photographie du code à une date donnée, et non documentation tenue à jour. Le découpage du serveur par domaine (chantier 2) déplace les lignes citées, mais garde les noms des fonctions et des constantes. Depuis, #216 a remplacé `isLastSuperAdmin` par `estDernierSuperAdminActif`. #283 journalise la réattribution du titulaire et du commercial et la case « Encaissé » (B-15, B-16, B-17).
 >
 > **Commit analysé : `84e27a1`** (`main`, « Merge #175 »).
 > Toutes les références `fichier:ligne` portent sur ce commit. Abréviations :
