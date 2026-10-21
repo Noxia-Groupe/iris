@@ -218,9 +218,9 @@ model JournalSaisieChantier {
   chantierId     String?
   interventionId String?
   contratMaintenanceId String?
-  cible          String   // ACHAT | HEURE | INTERVENTION | INTERVENTION_RAPPORT | INTERVENTION_SIGNATURE | CONTRAT | CHANTIER (changement de client de l’affaire)
+  cible          String   // ACHAT | HEURE | INTERVENTION | INTERVENTION_RAPPORT | INTERVENTION_SIGNATURE | CONTRAT | CHANTIER (changement de client, de titulaire, de commercial ou de la case « Encaissé » de l’affaire)
   cibleId        String
-  action         String   // CREATION | CORRECTION | ARCHIVAGE | RESTAURATION | CHANGEMENT_STATUT | CREATION_CONTRAT | SUSPENSION | REACTIVATION | CLOTURE | CHANGEMENT_CLIENT
+  action         String   // CREATION | CORRECTION | ARCHIVAGE | RESTAURATION | CHANGEMENT_STATUT | CREATION_CONTRAT | SUSPENSION | REACTIVATION | CLOTURE | CHANGEMENT_CLIENT | CHANGEMENT_TITULAIRE | CHANGEMENT_COMMERCIAL | CHANGEMENT_ENCAISSEMENT
   auteurId       String
   auteur         User     @relation("JournalSaisieChantierAuteur", fields: [auteurId], references: [id], onDelete: Restrict)
   // Nom figé à l'acte, lisible même si le compte est désactivé ultérieurement.

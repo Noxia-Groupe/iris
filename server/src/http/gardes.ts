@@ -1,6 +1,6 @@
 import express from 'express';
 import type { AuthRequest } from './auth';
-import { ROLE_DIRECTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, isAdminRole, isSuperAdminRole } from '../droits/roles';
+import { ROLE_ASSISTANTE_COMMERCIALE, ROLE_COMPTABLE, ROLE_DIRECTEUR, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE, ROLE_TECHNICIEN, isAdminRole, isSuperAdminRole } from '../droits/roles';
 
 export const requireAdmin: express.RequestHandler = (req, res, next) => {
   if (!isAdminRole((req as AuthRequest).user?.role)) {
@@ -42,6 +42,26 @@ export const blockCommercial: express.RequestHandler = (req, res, next) => {
     return;
   }
   next();
+};
+
+// Planning (lectures comprises) et écritures des référentiels des achats : le directeur commercial,
+// l'assistante commerciale et le comptable en sont refusés comme le commercial (décision 11 de la
+// proposition de droits, #179, placée avant la fin du pilote par Nelson le 21-10-2026). Rien ne les
+// y prévoit, et ils ne consultent que les chantiers dont ils sont titulaires. Le message nomme le
+// type de compte, comme pour le commercial et le directeur. Ailleurs (fiche chantier, SAV),
+// blockCommercial seul s'applique jusqu'à l'harmonisation des droits (lot D2).
+const TYPES_SANS_PLANNING_NI_REFERENTIELS: Record<string, string> = {
+  [ROLE_DIRECTEUR_COMMERCIAL]: 'directeur commercial',
+  [ROLE_ASSISTANTE_COMMERCIALE]: 'assistante commerciale',
+  [ROLE_COMPTABLE]: 'comptable',
+};
+export const blockCommercialEtAssimiles: express.RequestHandler = (req, res, next) => {
+  const libelle = TYPES_SANS_PLANNING_NI_REFERENTIELS[(req as AuthRequest).user?.role ?? ''];
+  if (libelle) {
+    res.status(403).json({ error: `Accès non autorisé pour un compte ${libelle}.` });
+    return;
+  }
+  blockCommercial(req, res, next);
 };
 
 // Le technicien n'écrit que dans ses propres interventions (lot pilote 3, choix par défaut) : ni

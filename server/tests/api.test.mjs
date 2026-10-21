@@ -282,6 +282,8 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test', 'planning.limite.responsable@iris.test',
+      'd0.181.conducteur.a@iris.test', 'd0.181.conducteur.b@iris.test', 'd0.181.conducteur.c@iris.test', 'd0.181.commercial.a@iris.test', 'd0.181.commercial.b@iris.test',
+      'd0.179.directeur.commercial@iris.test', 'd0.179.assistante.commerciale@iris.test', 'd0.179.comptable@iris.test', 'd0.179.conducteur@iris.test', 'd0.179.commercial@iris.test', 'd0.179.admin@iris.test',
       'planning.limite.titulaire@iris.test', 'planning.limite.coequipier@iris.test', 'planning.limite.titulaire.sansfiche@iris.test', 'planning.limite.autre.titulaire@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
@@ -5634,6 +5636,380 @@ if (!TEST_DATABASE_URL) {
         await prisma.planningEvent.deleteMany({ where: { id: libre.body.id } });
         await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
       }
+    });
+  });
+
+  // #181 (lot D0, placé avant la fin du pilote par Nelson le 21-10-2026) : la réattribution du
+  // titulaire et du commercial, et la case « Encaissé », s'écrivent au journal des saisies du chantier,
+  // dans la même transaction, avec l'auteur, l'avant et l'après ; un enregistrement à l'identique n'en
+  // écrit pas.
+  describe('#181 : réattributions et encaissement journalisés', () => {
+    let admin = {};
+    let adminNom = '';
+    let adminId = '';
+    const comptes = {};
+    const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      ({ name: adminNom, id: adminId } = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } }));
+      for (const [cle, email, role] of [
+        ['conducteurA', 'd0.181.conducteur.a@iris.test', 'CONDUCTEUR_TRAVAUX'],
+        ['conducteurB', 'd0.181.conducteur.b@iris.test', 'CONDUCTEUR_TRAVAUX'],
+        ['conducteurC', 'd0.181.conducteur.c@iris.test', 'CONDUCTEUR_TRAVAUX'],
+        ['commercialA', 'd0.181.commercial.a@iris.test', 'COMMERCIAL'],
+        ['commercialB', 'd0.181.commercial.b@iris.test', 'COMMERCIAL'],
+      ]) comptes[cle] = await prisma.user.create({ data: { email, name: `TEST 181 ${cle}`, role, actif: true } });
+    });
+
+    const creerChantier = (nom) => prisma.chantier.create({ data: {
+      nom: `TEST 181 ${nom} ${Date.now()}`, client: 'TEST Client 181', dateDebut: new Date(), budgetGlobalVendu: 1000,
+      responsableId: comptes.conducteurA.id, commercialId: comptes.commercialA.id,
+    } });
+    const journal = (chantierId) => prisma.journalSaisieChantier.findMany({ where: { chantierId }, orderBy: { createdAt: 'asc' } });
+
+    test('le titulaire et le commercial réattribués s’écrivent au journal, avec l’auteur, l’avant et l’après', async () => {
+      const chantier = await creerChantier('réattributions');
+      const titulaire = (enTete, responsableId) => request(app).patch(`/api/chantiers/${chantier.id}`).set(enTete).send({ responsableId });
+      const commercial = (enTete, commercialId) => request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(enTete).send({ commercialId });
+
+      assert.equal((await titulaire(admin, comptes.conducteurB.id)).status, 200);
+      let entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 1);
+      assert.deepEqual(
+        { cible: entrees[0].cible, cibleId: entrees[0].cibleId, action: entrees[0].action, auteurId: entrees[0].auteurId, auteurNom: entrees[0].auteurNom, avant: entrees[0].avant, apres: entrees[0].apres },
+        { cible: 'CHANTIER', cibleId: chantier.id, action: 'CHANGEMENT_TITULAIRE', auteurId: adminId, auteurNom: adminNom,
+          avant: { responsableId: comptes.conducteurA.id, nom: 'TEST 181 conducteurA' }, apres: { responsableId: comptes.conducteurB.id, nom: 'TEST 181 conducteurB' } },
+      );
+      // À l'identique, ou sans titulaire dans la requête : aucune entrée.
+      assert.equal((await titulaire(admin, comptes.conducteurB.id)).status, 200);
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ nom: `${chantier.nom} renommé` })).status, 200);
+      assert.equal((await journal(chantier.id)).length, 1);
+      // Le titulaire confie lui-même son chantier : il est l'auteur de l'entrée.
+      assert.equal((await titulaire(jeton(comptes.conducteurB), comptes.conducteurA.id)).status, 200);
+      entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 2);
+      assert.equal(entrees[1].auteurId, comptes.conducteurB.id);
+      assert.deepEqual(entrees[1].apres, { responsableId: comptes.conducteurA.id, nom: 'TEST 181 conducteurA' });
+
+      // Commercial : réattribution par le titulaire, puis à l'identique.
+      assert.equal((await commercial(jeton(comptes.conducteurA), comptes.commercialB.id)).status, 200);
+      assert.equal((await commercial(admin, comptes.commercialB.id)).status, 200);
+      entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 3);
+      assert.equal(entrees[2].action, 'CHANGEMENT_COMMERCIAL');
+      assert.equal(entrees[2].auteurId, comptes.conducteurA.id);
+      assert.deepEqual([entrees[2].avant, entrees[2].apres], [
+        { commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }, { commercialId: comptes.commercialB.id, nom: 'TEST 181 commercialB' },
+      ]);
+      // Un refus n'écrit rien.
+      assert.equal((await commercial(admin, comptes.conducteurB.id)).status, 400);
+      assert.equal((await titulaire(admin, '')).status, 400);
+      assert.equal((await journal(chantier.id)).length, 3);
+      // Le journal de la fiche les rend, au même périmètre que la fiche.
+      const lu = await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set(jeton(comptes.conducteurA));
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      assert.deepEqual(lu.body.map((entree) => entree.action).sort(), ['CHANGEMENT_COMMERCIAL', 'CHANGEMENT_TITULAIRE', 'CHANGEMENT_TITULAIRE']);
+      assert.equal((await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set(jeton(comptes.conducteurB))).status, 404);
+    });
+
+    test('la case « Encaissé » s’écrit au journal ; à l’identique, ni entrée ni nouvelle date', async () => {
+      const chantier = await creerChantier('encaissement');
+      const encaisser = (encaisse) => request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(admin).send({ encaisse });
+      const coche = await encaisser(true);
+      assert.equal(coche.status, 200, JSON.stringify(coche.body));
+      assert.equal(coche.body.encaisse, true);
+      const date = coche.body.dateEncaissement;
+      assert.ok(date);
+      let entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 1);
+      assert.deepEqual([entrees[0].action, entrees[0].auteurId, entrees[0].auteurNom, entrees[0].avant, entrees[0].apres], [
+        'CHANGEMENT_ENCAISSEMENT', adminId, adminNom, { encaisse: false, dateEncaissement: null }, { encaisse: true, dateEncaissement: new Date(date).toISOString() },
+      ]);
+      // À l'identique, la ligne n'est pas réécrite : ni la date d'encaissement, ni updatedAt (date de
+      // clôture de repli du résultat commercial, cf. dateClotureChantier) ne bougent.
+      const misAJour = (await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).updatedAt.toISOString();
+      const encore = await encaisser(true);
+      assert.equal(encore.status, 200);
+      assert.equal(encore.body.dateEncaissement, date, 'la date d’encaissement ne bouge pas');
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).updatedAt.toISOString(), misAJour);
+      assert.equal((await journal(chantier.id)).length, 1);
+      const decoche = await encaisser(false);
+      assert.equal(decoche.status, 200);
+      assert.equal(decoche.body.dateEncaissement, null);
+      entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 2);
+      assert.deepEqual([entrees[1].avant, entrees[1].apres], [{ encaisse: true, dateEncaissement: new Date(date).toISOString() }, { encaisse: false, dateEncaissement: null }]);
+      assert.equal((await request(app).patch('/api/chantiers/00000000-0000-0000-0000-000000000000/encaisse').set(admin).send({ encaisse: true })).status, 404);
+      // Réservée à l'administration, comme avant.
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(jeton(comptes.conducteurA)).send({ encaisse: true })).status, 403);
+      assert.equal((await journal(chantier.id)).length, 2);
+    });
+
+    test('sans la trace, aucun des trois changements n’a lieu', async () => {
+      const chantier = await creerChantier('atomicité');
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_refuser_journal_181"()
+        RETURNS TRIGGER AS $$ BEGIN
+          IF NEW."chantierId" = '${chantier.id}' THEN RAISE EXCEPTION 'journal refusé pour le test'; END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_journal_181" ON "JournalSaisieChantier"');
+      await prisma.$executeRawUnsafe('CREATE TRIGGER "test_refuser_journal_181" BEFORE INSERT ON "JournalSaisieChantier" FOR EACH ROW EXECUTE FUNCTION "test_refuser_journal_181"()');
+      try {
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ responsableId: comptes.conducteurB.id, nom: `${chantier.nom} bis` })).status, 500);
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id })).status, 500);
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(admin).send({ encaisse: true })).status, 500);
+        const relu = await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } });
+        assert.deepEqual([relu.nom, relu.responsableId, relu.commercialId, relu.encaisse, relu.dateEncaissement], [chantier.nom, comptes.conducteurA.id, comptes.commercialA.id, false, null]);
+        assert.equal((await journal(chantier.id)).length, 0);
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_journal_181" ON "JournalSaisieChantier"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_refuser_journal_181"()');
+      }
+      // Dans l'autre sens : si l'enregistrement du chantier échoue après la trace, la trace s'en va avec lui.
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_refuser_chantier_181"()
+        RETURNS TRIGGER AS $$ BEGIN
+          IF NEW."id" = '${chantier.id}' THEN RAISE EXCEPTION 'enregistrement refusé pour le test'; END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_chantier_181" ON "Chantier"');
+      await prisma.$executeRawUnsafe('CREATE TRIGGER "test_refuser_chantier_181" BEFORE UPDATE ON "Chantier" FOR EACH ROW EXECUTE FUNCTION "test_refuser_chantier_181"()');
+      try {
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ responsableId: comptes.conducteurB.id })).status, 500);
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id })).status, 500);
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(admin).send({ encaisse: true })).status, 500);
+        assert.equal((await journal(chantier.id)).length, 0);
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_chantier_181" ON "Chantier"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_refuser_chantier_181"()');
+      }
+    });
+
+    // Une transaction de test tient la ligne du chantier : la requête part, attend le verrou, puis la
+    // transaction change le champ directement en base et valide. La requête doit comparer et journaliser
+    // l'état validé, relu sous verrou, et non celui qu'elle a lu avant sa transaction.
+    const sousVerrouTiers = async (chantierId, lancer, changer) => {
+      let reponse;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} FOR UPDATE`;
+        reponse = lancer().then((r) => r);
+        let attente = false;
+        for (let tour = 0; tour < 150 && !attente; tour += 1) {
+          attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"Chantier"%FOR UPDATE%'`)[0].n > 0;
+          if (!attente) await new Promise((r) => setTimeout(r, 20));
+        }
+        assert.equal(attente, true, 'la requête attend la ligne du chantier');
+        await tx.chantier.update({ where: { id: chantierId }, data: changer });
+      }, { timeout: 20000 });
+      return reponse;
+    };
+
+    test('l’avant est relu sous le verrou de la ligne : titulaire, commercial et encaissement changés entre-temps', async () => {
+      const titulaire = await creerChantier('verrou titulaire');
+      const r1 = await sousVerrouTiers(titulaire.id, () => request(app).patch(`/api/chantiers/${titulaire.id}`).set(admin).send({ responsableId: comptes.conducteurB.id }), { responsableId: comptes.conducteurC.id });
+      assert.equal(r1.status, 200, JSON.stringify(r1.body));
+      let entrees = await journal(titulaire.id);
+      assert.equal(entrees.length, 1);
+      assert.deepEqual([entrees[0].avant, entrees[0].apres], [{ responsableId: comptes.conducteurC.id, nom: 'TEST 181 conducteurC' }, { responsableId: comptes.conducteurB.id, nom: 'TEST 181 conducteurB' }]);
+
+      const commercial = await prisma.chantier.update({ where: { id: (await creerChantier('verrou commercial')).id }, data: { commercialId: null } });
+      const r2 = await sousVerrouTiers(commercial.id, () => request(app).patch(`/api/chantiers/${commercial.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id }), { commercialId: comptes.commercialA.id });
+      assert.equal(r2.status, 200, JSON.stringify(r2.body));
+      entrees = await journal(commercial.id);
+      assert.equal(entrees.length, 1);
+      assert.deepEqual([entrees[0].avant, entrees[0].apres], [{ commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }, { commercialId: comptes.commercialB.id, nom: 'TEST 181 commercialB' }]);
+
+      // Case cochée entre-temps (par un autre administrateur) : la requête qui la coche à son tour ne
+      // change rien, ni la date, ni le journal.
+      const encaissement = await creerChantier('verrou encaissement');
+      const datee = new Date('2026-10-01T10:00:00.000Z');
+      const r3 = await sousVerrouTiers(encaissement.id, () => request(app).patch(`/api/chantiers/${encaissement.id}/encaisse`).set(admin).send({ encaisse: true }), { encaisse: true, dateEncaissement: datee });
+      assert.equal(r3.status, 200, JSON.stringify(r3.body));
+      assert.equal(new Date(r3.body.dateEncaissement).toISOString(), datee.toISOString());
+      assert.equal((await journal(encaissement.id)).length, 0);
+    });
+
+    test('le commercial attribué puis réattribué par l’administration : auteur, nom figé, avant et après', async () => {
+      const chantier = await prisma.chantier.update({ where: { id: (await creerChantier('commercial par l’administration')).id }, data: { commercialId: null } });
+      const premier = await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(admin).send({ commercialId: comptes.commercialA.id });
+      assert.equal(premier.status, 200, JSON.stringify(premier.body));
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id })).status, 200);
+      const entrees = await journal(chantier.id);
+      assert.deepEqual(entrees.map((e) => [e.action, e.auteurId, e.auteurNom, e.avant, e.apres]), [
+        ['CHANGEMENT_COMMERCIAL', adminId, adminNom, { commercialId: null, nom: null }, { commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }],
+        ['CHANGEMENT_COMMERCIAL', adminId, adminNom, { commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }, { commercialId: comptes.commercialB.id, nom: 'TEST 181 commercialB' }],
+      ]);
+    });
+
+    // La comparaison se fait sur la ligne verrouillée : si une autre transaction a déjà enregistré le
+    // même titulaire ou le même commercial pendant l'attente du verrou, la requête n'écrit rien.
+    test('titulaire et commercial déjà enregistrés entre-temps à la même valeur : aucune entrée', async () => {
+      const titulaire = await creerChantier('verrou titulaire identique');
+      const r1 = await sousVerrouTiers(titulaire.id, () => request(app).patch(`/api/chantiers/${titulaire.id}`).set(admin).send({ responsableId: comptes.conducteurB.id }), { responsableId: comptes.conducteurB.id });
+      assert.equal(r1.status, 200, JSON.stringify(r1.body));
+      assert.equal((await journal(titulaire.id)).length, 0);
+      const commercial = await creerChantier('verrou commercial identique');
+      const r2 = await sousVerrouTiers(commercial.id, () => request(app).patch(`/api/chantiers/${commercial.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id }), { commercialId: comptes.commercialB.id });
+      assert.equal(r2.status, 200, JSON.stringify(r2.body));
+      assert.equal((await journal(commercial.id)).length, 0);
+    });
+
+    // Depuis la fiche, l'administration envoie le titulaire avec le client quand elle change les deux.
+    test('client et titulaire changés par la même requête : deux entrées', async () => {
+      const fiche = await prisma.client.create({ data: { raisonSociale: `TEST 181 client ${Date.now()}` } });
+      const chantier = await creerChantier('client et titulaire');
+      const r = await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ clientId: fiche.id, responsableId: comptes.conducteurB.id });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const entrees = await journal(chantier.id);
+      assert.deepEqual(entrees.map((e) => [e.action, e.auteurId]).sort(), [['CHANGEMENT_CLIENT', adminId], ['CHANGEMENT_TITULAIRE', adminId]]);
+      assert.deepEqual(entrees.find((e) => e.action === 'CHANGEMENT_TITULAIRE').apres, { responsableId: comptes.conducteurB.id, nom: 'TEST 181 conducteurB' });
+    });
+
+    // Le changement de client relit lui aussi l'« avant » sous le verrou de la ligne.
+    test('changement de client : l’avant est relu sous le verrou de la ligne', async () => {
+      const [a, b, c] = await Promise.all(['A', 'B', 'C'].map((x) => prisma.client.create({ data: { raisonSociale: `TEST 181 client verrou ${x} ${Date.now()}` } })));
+      const chantier = await prisma.chantier.update({ where: { id: (await creerChantier('verrou client')).id }, data: { clientId: a.id, client: a.raisonSociale } });
+      const r = await sousVerrouTiers(chantier.id, () => request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ clientId: c.id }), { clientId: b.id, client: b.raisonSociale });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const entrees = await journal(chantier.id);
+      assert.deepEqual(entrees.map((e) => [e.action, e.avant, e.apres]), [['CHANGEMENT_CLIENT',
+        { clientId: b.id, raisonSociale: b.raisonSociale, libelle: b.raisonSociale }, { clientId: c.id, raisonSociale: c.raisonSociale, libelle: c.raisonSociale }]]);
+    });
+  });
+
+  // #179, décision 11 de la proposition de droits (placée avant la fin du pilote par Nelson le
+  // 21-10-2026) : le directeur commercial, l'assistante commerciale et le comptable sont refusés
+  // comme le commercial sur toutes les routes du planning, lectures comprises, et sur les écritures
+  // des référentiels des achats. Lectures des référentiels et routes SAV : inchangées.
+  describe('#179 : directeur commercial, assistante commerciale et comptable sans planning ni écriture des référentiels', () => {
+    let admin = {};
+    const comptes = {};
+    const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+    const REFUSES = [
+      ['directeurCommercial', 'd0.179.directeur.commercial@iris.test', 'DIRECTEUR_COMMERCIAL', 'Accès non autorisé pour un compte directeur commercial.'],
+      ['assistante', 'd0.179.assistante.commerciale@iris.test', 'ASSISTANTE_COMMERCIALE', 'Accès non autorisé pour un compte assistante commerciale.'],
+      ['comptable', 'd0.179.comptable@iris.test', 'COMPTABLE', 'Accès non autorisé pour un compte comptable.'],
+    ];
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      for (const [cle, email, role] of [...REFUSES, ['conducteur', 'd0.179.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX'], ['commercial', 'd0.179.commercial@iris.test', 'COMMERCIAL'], ['admin', 'd0.179.admin@iris.test', 'ADMIN']]) {
+        comptes[cle] = await prisma.user.create({ data: { email, name: `TEST 179 ${cle}`, role, actif: true } });
+      }
+    });
+
+    test('chaque route du planning et chaque écriture des référentiels leur répond 403, sans rien modifier', async () => {
+      const suffixe = Date.now();
+      const fiche = await prisma.intervenant.create({ data: { nom: `TEST 179 fiche ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+      const type = await prisma.planningEventType.create({ data: { nom: `TEST 179 type ${suffixe}`, couleur: '#336699' } });
+      const evenement = await prisma.planningEvent.create({ data: { categorie: 'HORS_CHANTIER', titre: `TEST 179 affectation ${suffixe}`, dateDebut: new Date('2098-04-01T00:00:00Z'), dateFin: new Date('2098-04-01T00:00:00Z'), intervenants: { connect: [{ id: fiche.id }] } } });
+      const categorie = await prisma.categorie.create({ data: { nom: `TEST 179 catégorie ${suffixe}` } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST 179 fournisseur ${suffixe}` } });
+      // Une intervention en base : sans elle, « liste SAV vide » et le refus du placement ne prouveraient rien.
+      const client = await prisma.client.create({ data: { raisonSociale: `TEST 179 client ${suffixe}` } });
+      const intervention = await prisma.intervention.create({ data: { reference: `TEST-179-${suffixe}`, clientId: client.id, titre: 'TEST 179 SAV', statut: 'A_PLANIFIER' } });
+      try {
+        const etat = async () => ({
+          evenements: await prisma.planningEvent.count(), types: await prisma.planningEventType.count(),
+          categories: await prisma.categorie.count(), fournisseurs: await prisma.fournisseur.count(),
+          evenement: await prisma.planningEvent.findUnique({ where: { id: evenement.id } }),
+          type: await prisma.planningEventType.findUnique({ where: { id: type.id } }),
+          categorie: await prisma.categorie.findUnique({ where: { id: categorie.id } }),
+          fournisseur: await prisma.fournisseur.findUnique({ where: { id: fournisseur.id } }),
+          partage: await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } }),
+        });
+        const avant = await etat();
+        const PLANNING = [
+          ['get', '/api/planning/chantiers'],
+          ['get', '/api/planning/events?start=01-04-2098&end=07-04-2098'],
+          ['post', '/api/planning/events', { categorie: 'HORS_CHANTIER', titre: 'TEST 179 refus', dateDebut: '2098-04-02', intervenantIds: [fiche.id] }],
+          ['patch', `/api/planning/events/${evenement.id}`, { titre: 'TEST 179 modifié' }],
+          ['delete', `/api/planning/events/${evenement.id}`],
+          ['get', '/api/planning/types'],
+          ['post', '/api/planning/types', { nom: `TEST 179 type refusé ${suffixe}` }],
+          ['put', `/api/planning/types/${type.id}`, { nom: `TEST 179 type renommé ${suffixe}` }],
+          ['delete', `/api/planning/types/${type.id}`],
+          ['get', '/api/planning/interventions-a-planifier'],
+        ];
+        const REFERENTIELS = [
+          ['post', '/api/categories', { nom: `TEST 179 catégorie refusée ${suffixe}` }],
+          ['put', `/api/categories/${categorie.id}`, { nom: `TEST 179 catégorie renommée ${suffixe}` }],
+          ['delete', `/api/categories/${categorie.id}`],
+          ['post', '/api/fournisseurs', { nom: `TEST 179 fournisseur refusé ${suffixe}` }],
+          ['put', `/api/fournisseurs/${fournisseur.id}`, { nom: `TEST 179 fournisseur renommé ${suffixe}` }],
+          ['delete', `/api/fournisseurs/${fournisseur.id}`],
+        ];
+        // Le partage public reste réservé à l'administration, pour eux comme pour tous.
+        const PARTAGE = [['get', '/api/planning/share'], ['post', '/api/planning/share'], ['patch', '/api/planning/share', { active: false }]];
+        for (const [cle, , role, message] of REFUSES) {
+          for (const [methode, chemin, corps] of [...PLANNING, ...REFERENTIELS]) {
+            const res = await request(app)[methode](chemin).set(jeton(comptes[cle])).send(corps);
+            assert.equal(res.status, 403, `${role} ${methode.toUpperCase()} ${chemin} : ${JSON.stringify(res.body)}`);
+            assert.deepEqual(res.body, { error: message }, `${role} ${methode.toUpperCase()} ${chemin}`);
+          }
+          for (const [methode, chemin, corps] of PARTAGE) {
+            assert.equal((await request(app)[methode](chemin).set(jeton(comptes[cle])).send(corps)).status, 403, `${role} ${methode.toUpperCase()} ${chemin}`);
+          }
+          // Lectures des référentiels et routes SAV : inchangées (filtre par affectation, vide pour eux).
+          for (const chemin of ['/api/categories', '/api/fournisseurs', '/api/interventions']) {
+            const res = await request(app).get(chemin).set(jeton(comptes[cle]));
+            assert.equal(res.status, 200, `${role} GET ${chemin} : ${JSON.stringify(res.body)}`);
+            if (chemin === '/api/interventions') assert.deepEqual(res.body, [], `${role} : filtre SAV vide`);
+          }
+          // Placement d'une intervention (exception du test suivant) : hors de leur filtre SAV, introuvable.
+          const placement = await request(app).put(`/api/interventions/${intervention.id}/planning`).set(jeton(comptes[cle])).send({ dateDebut: '2098-04-03', creneau: 'JOURNEE', intervenantIds: [fiche.id] });
+          assert.equal(placement.status, 404, `${role} placement : ${JSON.stringify(placement.body)}`);
+          assert.ok((await request(app).get('/api/categories').set(jeton(comptes[cle]))).body.some((c) => c.id === categorie.id), role);
+        }
+        assert.deepEqual(await etat(), avant, 'aucune écriture');
+
+        // Témoins : le commercial garde son message ; le conducteur et l'administrateur gardent planning et référentiels.
+        assert.deepEqual((await request(app).get('/api/planning/types').set(jeton(comptes.commercial))).body, { error: 'Accès non autorisé pour un compte commercial.' });
+        // Le partage public reste réservé à l'administration : le conducteur en est refusé aussi.
+        for (const [methode, chemin, corps] of PARTAGE) {
+          assert.equal((await request(app)[methode](chemin).set(jeton(comptes.conducteur)).send(corps)).status, 403, `conducteur ${methode.toUpperCase()} ${chemin}`);
+        }
+        for (const cle of ['conducteur', 'admin']) {
+          for (const chemin of ['/api/planning/chantiers', '/api/planning/types', '/api/planning/events?start=01-04-2098&end=07-04-2098', '/api/planning/interventions-a-planifier']) {
+            const res = await request(app).get(chemin).set(jeton(comptes[cle]));
+            assert.equal(res.status, 200, `${cle} GET ${chemin} : ${JSON.stringify(res.body)}`);
+          }
+          const renomme = await request(app).put(`/api/categories/${categorie.id}`).set(jeton(comptes[cle])).send({ nom: `TEST 179 catégorie ${cle} ${suffixe}` });
+          assert.equal(renomme.status, 200, `${cle} : ${JSON.stringify(renomme.body)}`);
+        }
+      } finally {
+        await prisma.planningEvent.delete({ where: { id: evenement.id } }).catch(() => {});
+        await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
+        await prisma.planningEvent.deleteMany({ where: { interventionId: intervention.id } }).catch(() => {});
+        await prisma.intervention.delete({ where: { id: intervention.id } }).catch(() => {});
+      }
+    });
+
+    test('toute route du planning, sauf le lien public, passe par la garde des trois types ou est réservée à l’administration', () => {
+      // Route du planning : chemin qui contient « planning » (/api/planning et sa racine, mais aussi
+      // /api/chantiers/:id/planning ou /api/planning-export), ou route soumise au module
+      // (requirePlanningActif). Exceptions écrites : le lien public, ouvert à tous (décision du
+      // 21-10-2026), et le placement d'une intervention, route SAV (décision 11, table 4.1 :
+      // interventions.placer, « D af ⁷ »), harmonisée au lot D2.
+      // La référence est tenue à jour par `routes.mjs --verifier` (CI, travail backend) : en local,
+      // lancer `node scripts/routes.mjs --verifier` avant de se fier à ce test.
+      const EXCEPTIONS = ['GET /api/planning/public/:token ', 'PUT /api/interventions/:id/planning '];
+      const lignes = readFileSync(new URL('../scripts/routes-reference.txt', import.meta.url), 'utf8').split('\n')
+        .filter((ligne) => /^[A-Z]+ \S*planning/.test(ligne) || ligne.includes('requirePlanningActif#'));
+      assert.ok(lignes.length >= 15, `routes du planning trouvées : ${lignes.length}`);
+      assert.equal(lignes.filter((ligne) => EXCEPTIONS.some((e) => ligne.startsWith(e))).length, EXCEPTIONS.length, 'exceptions présentes');
+      const nonGardees = lignes.filter((ligne) => !EXCEPTIONS.some((e) => ligne.startsWith(e)) && !/(blockCommercialEtAssimiles|requireAdmin)#/.test(ligne));
+      assert.deepEqual(nonGardees, []);
+      // Le partage public (planning.partager) reste réservé à l'administration, pas seulement aux trois types.
+      const partage = lignes.filter((ligne) => /^[A-Z]+ \/api\/planning\/share /.test(ligne));
+      assert.equal(partage.length, 3, 'routes du partage public');
+      assert.deepEqual(partage.filter((ligne) => !ligne.includes('requireAdmin#')), []);
+      const ecrituresReferentiels = readFileSync(new URL('../scripts/routes-reference.txt', import.meta.url), 'utf8').split('\n')
+        .filter((ligne) => /^(POST|PUT|PATCH|DELETE) \/api\/(categories|fournisseurs)\b/.test(ligne));
+      assert.equal(ecrituresReferentiels.length, 6);
+      assert.deepEqual(ecrituresReferentiels.filter((ligne) => !ligne.includes('blockCommercialEtAssimiles#')), []);
     });
   });
 
