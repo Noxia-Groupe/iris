@@ -83,12 +83,25 @@ export function estExcluDesOperations(role?: string | null): boolean {
 }
 
 /**
+ * Directeur commercial, assistante commerciale et comptable : ni planning, lectures comprises, ni
+ * écriture des référentiels des achats (décision 11 de la proposition de droits, #179). Même règle
+ * que blockCommercialEtAssimiles côté serveur.
+ */
+export const ROLES_SANS_PLANNING_NI_REFERENTIELS = [ROLE_DIRECTEUR_COMMERCIAL, ROLE_ASSISTANTE_COMMERCIALE, ROLE_COMPTABLE];
+
+/** Planning : fermé aux comptes exclus des opérations et aux trois types ci-dessus. */
+export function peutConsulterPlanning(role?: string | null): boolean {
+  return !estExcluDesOperations(role) && !ROLES_SANS_PLANNING_NI_REFERENTIELS.includes(role || '');
+}
+
+/**
  * Administration : complète pour les administrateurs, réduite aux référentiels des achats
  * (fournisseurs, catégories) pour le conducteur. Le technicien n'y a plus rien à faire depuis le
- * lot pilote 3, qui lui retire ces écritures (choix par défaut) ; le serveur les lui refuse aussi.
+ * lot pilote 3, qui lui retire ces écritures (choix par défaut), ni le directeur commercial,
+ * l'assistante commerciale et le comptable depuis #179 ; le serveur les leur refuse aussi.
  */
 export function peutOuvrirAdministration(role?: string | null): boolean {
-  return !estExcluDesOperations(role) && role !== ROLE_TECHNICIEN;
+  return !estExcluDesOperations(role) && role !== ROLE_TECHNICIEN && !ROLES_SANS_PLANNING_NI_REFERENTIELS.includes(role || '');
 }
 
 /**
