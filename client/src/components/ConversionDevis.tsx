@@ -72,7 +72,7 @@ export default function ConversionDevis({ devis, cible, onFermer, onConverti }: 
   return <form role="dialog" aria-label={titre} onSubmit={envoyer} className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3">
     <div>
       <h2 className="font-semibold">{titre}</h2>
-      <p className="text-sm text-gray-600">{devis.numero} v{devis.version} · {devis.client.raisonSociale}. {intervention ? 'L’intervention sera à planifier.' : 'Le contrat sera actif, première échéance à sa date de début.'}</p>
+      <p className="text-sm text-gray-600 break-words">{devis.numero} v{devis.version} · {devis.client.raisonSociale}. {intervention ? 'L’intervention sera à planifier.' : 'Le contrat sera actif, première échéance à sa date de début.'}</p>
     </div>
     {erreurClient && <p role="alert" className="text-red-600">{erreurClient}</p>}
     <label className="text-sm font-medium block">Titre<input required name="titre" defaultValue={devis.objet} maxLength={intervention ? undefined : 200} className="mt-1 w-full border rounded px-3 py-2"/></label>
@@ -83,7 +83,7 @@ export default function ConversionDevis({ devis, cible, onFermer, onConverti }: 
       <label className="text-sm font-medium block">Date souhaitée<input name="dateSouhaitee" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA (facultatif)" className="mt-1 w-full border rounded px-3 py-2"/></label>
     </div> : <>
       <div className="grid gap-3 sm:grid-cols-3">
-        <label className="text-sm font-medium block">Date de début<input key={fuseauConnu ? 'fuseau-connu' : 'fuseau-inconnu'} required name="dateDebut" defaultValue={fuseauConnu ? companyDateInputValue(fuseau) : ''} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" className="mt-1 w-full border rounded px-3 py-2"/></label>
+        <label className="text-sm font-medium block">Date de début<input required name="dateDebut" defaultValue={fuseauConnu ? companyDateInputValue(fuseau) : ''} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" className="mt-1 w-full border rounded px-3 py-2"/></label>
         <label className="text-sm font-medium block">Périodicité (mois)<input required name="periodiciteMois" type="number" min="1" max="60" defaultValue="12" className="mt-1 w-full border rounded px-3 py-2"/></label>
         <label className="text-sm font-medium block">Durée prévue (minutes)<input required name="dureePrevisionnelleMinutes" type="number" min="15" max="1440" defaultValue="60" className="mt-1 w-full border rounded px-3 py-2"/></label>
       </div>

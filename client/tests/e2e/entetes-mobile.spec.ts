@@ -134,13 +134,16 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
     // intervention, une visite de contrat à planifier et une facture brouillon.
     const plan = await (await request.get(`${api}/comptabilite`, { headers })).json() as { comptes: unknown[] };
     expect(plan.comptes.length).toBeGreaterThan(0);
-    const contrat = await envoyer('post', '/contrats-maintenance', { clientId: client.id, titre: `Maintenance préventive des installations ${Date.now()}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-10-2030' }) as { id: string };
+    // Un numéro de série insécable dans la couverture d'un contrat et dans la description d'une
+    // intervention : les deux listes, grilles à une colonne, sortaient de l'écran (#281).
+    const serie = `SN${suffixe}A7B3C9D2E8F4G6H1J5K0`;
+    const contrat = await envoyer('post', '/contrats-maintenance', { clientId: client.id, titre: `Maintenance préventive des installations ${Date.now()}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-10-2030', noteCouverture: `Circulateur ${serie}` }) as { id: string };
     // Une visite à planifier : la file du planning coupait son bouton « Placer ».
     await envoyer('post', `/contrats-maintenance/${contrat.id}/generer-intervention`, {});
     await envoyer('post', '/interventions', { clientId: client.id, chantierId: chantier.id, titre: `Fuite sur le réseau de chauffage ${Date.now()}` });
     // Un numéro de série insécable dans un titre : la liste des interventions, grille à une
     // colonne, prenait la largeur de sa carte la plus large et sortait de l'écran (#281).
-    await envoyer('post', '/interventions', { clientId: client.id, titre: `Remplacement du circulateur SN${suffixe}A7B3C9D2E8F4` });
+    await envoyer('post', '/interventions', { clientId: client.id, titre: `Remplacement du circulateur SN${suffixe}A7B3C9D2E8F4`, description: `Ancien circulateur ${serie}` });
     await envoyer('post', '/factures', { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Écrans sur téléphone', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'Prestation', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
     // Une facture émise, en partie réglée : la liste des règlements et le formulaire ouvert sur
     // cette facture (client, factures à régler, montants) sont mesurés avec leurs données.

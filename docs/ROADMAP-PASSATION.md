@@ -61,9 +61,9 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - versions, signature avec empreinte, acompte constaté à la main, annulation, duplication, conversion en chantier ;
     - duplication lue sous le verrou du devis source, dans la transaction du duplicata (#237) ;
     - lignes reprises du catalogue et copiées figées, prix d'achat prévu réservé à l'administration ;
-    - devis signé figé en base (#161).
+    - devis signé figé en base (#161) ;
+    - conversion en intervention ou en contrat (lot pilote 4, #281 ; non validée pour mise en service).
   - Absent :
-    - conversion en intervention ou en contrat (lot pilote 4) ;
     - PDF et envoi d'un devis (lot pilote 6) ;
     - paiement ou rapprochement de l'acompte.
   - Un devis envoyé non signé reste modifiable (question).
@@ -172,7 +172,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 | 1. Règlements (A3) | **Implémenté** (P1a). P1b, sur les commissions actuelles, est sans objet. | #155, garde en base renforcée par #158 ; commissions fermées par #159 |
 | 2. Catalogue dans les devis (A8) | **Implémenté** | #161 |
 | 3. Parcours technicien sur téléphone | **Implémenté** : prérequis et droits (3a), parcours sur téléphone (3b-1 à 3b-4) et planning limité du technicien. Non validé pour mise en service. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3), #272 (3b-4), #275 (planning limité) |
-| 4. Conversion des devis (A7) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
+| 4. Conversion des devis (A7) | **Implémenté** : intervention et contrat depuis un devis signé ; règles (a) et (b) posées en question (section 3). Non validé pour mise en service | #281 |
 | 5. Génération automatique des visites (A9) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
 | 6. Envoi des documents (A10) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
 
@@ -205,7 +205,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
      - les heures du technicien hors contrat vont dans les coûts SAV, en durée brute sans arrondi, sans effet sur la marge des chantiers ; l'administration voit leur coût de main-d'œuvre (**implémenté** par #257, libellé « Main-d’œuvre cumulée » validé le 20-10-2026) ;
      - la signature dessinée est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé (**implémenté** par #268) ; durée de conservation à confirmer avec le cabinet ;
      - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**implémenté** par #275 ; périmètre et choix par défaut en section 4). La décision de Nelson du 21-10-2026 l'étend (« Des 2 », **implémenté** par #279) : il voit aussi les affectations des chantiers dont il est titulaire ; le lien public reste ouvert à toute personne qui en a l'adresse.
-4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent.
+4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent. **Implémenté** par #281 (choix par défaut en section 4, questions (a) et (b) en section 3).
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
    - Si Microsoft 365 n'est pas prêt au premier jour, le pilote télécharge le PDF et l'envoie à la main, comme aujourd'hui (recommandation initiale, à confirmer).

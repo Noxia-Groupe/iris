@@ -4705,7 +4705,10 @@ if (!TEST_DATABASE_URL) {
 
       test('un devis signé crée son intervention, à planifier, et l’affaire n’est plus convertie', async () => {
         const devis = await devisAccepte('TEST Conversion en intervention');
-        const cree = await convertirEn(devis.id, 'INTERVENTION', { siteId, contactId, priorite: 'HAUTE', dateSouhaitee: '15-12-2099' });
+        // Un chantier du même client transmis par le corps n'est pas rattaché : la conversion crée
+        // une intervention hors affaire, comme le dit sa ligne.
+        const chantierDuClient = await prisma.chantier.create({ data: { nom: 'TEST Conversion chantier non rattaché', client: 'TEST Client cycle', clientId, dateDebut: new Date('2026-10-01T00:00:00.000Z'), budgetGlobalVendu: 0 } });
+        const cree = await convertirEn(devis.id, 'INTERVENTION', { siteId, contactId, priorite: 'HAUTE', dateSouhaitee: '15-12-2099', description: '  TEST Description de la demande  ', chantierId: chantierDuClient.id });
         assert.equal(cree.status, 201, JSON.stringify(cree.body));
         assert.match(cree.body.reference, /^I\d{2}-\d{4}$/);
         assert.equal(cree.body.titre, 'TEST Conversion en intervention', 'l’objet du devis devient le titre');
@@ -4716,6 +4719,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(cree.body.statut, 'A_PLANIFIER');
         assert.equal(cree.body.chantierId, null);
         assert.equal(cree.body.dateSouhaitee, '2099-12-15T00:00:00.000Z');
+        assert.equal(cree.body.description, 'TEST Description de la demande');
         assert.ok(cree.body.dateDemande, 'la demande est datée du jour civil de la société');
         const conversion = await prisma.devisConversion.findUnique({ where: { devisId: devis.id } });
         assert.deepEqual([conversion.cibleType, conversion.cibleId], ['INTERVENTION', cree.body.id]);
@@ -4745,6 +4749,9 @@ if (!TEST_DATABASE_URL) {
         assert.match(annulation.body.error, /Ce devis a créé une intervention : il ne s’annule plus/);
         assert.equal((await prisma.devis.findUnique({ where: { id: devis.id } })).statut, 'ACCEPTE');
         assert.equal((await prisma.intervention.findUnique({ where: { id: cree.body.id } })).statut, 'A_PLANIFIER');
+        const revision = await request(app).post(`/api/devis/${devis.id}/revisions`).set(admin());
+        assert.equal(revision.status, 409, JSON.stringify(revision.body));
+        assert.equal(revision.body.error, 'Ce devis est déjà converti : il ne peut plus être révisé.');
       });
 
       test('un devis signé crée son contrat de maintenance, actif, avec sa couverture', async () => {
@@ -4771,6 +4778,12 @@ if (!TEST_DATABASE_URL) {
         const annulation = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST erreur' });
         assert.equal(annulation.status, 409, JSON.stringify(annulation.body));
         assert.match(annulation.body.error, /Ce devis a créé un contrat de maintenance : il ne s’annule plus/);
+        const statut = await request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' });
+        assert.equal(statut.status, 400, JSON.stringify(statut.body));
+        assert.equal(statut.body.error, 'Ce devis est déjà converti : son statut ne change plus.');
+        const revision = await request(app).post(`/api/devis/${devis.id}/revisions`).set(admin());
+        assert.equal(revision.status, 409, JSON.stringify(revision.body));
+        assert.equal(revision.body.error, 'Ce devis est déjà converti : il ne peut plus être révisé.');
         assert.deepEqual(await dossiersCrees('TEST Conversion en contrat'), { interventions: 0, contrats: 1, chantiers: 0 });
 
         // Un titre propre au contrat remplace l'objet du devis, limité comme à sa création directe.
@@ -4903,6 +4916,38 @@ if (!TEST_DATABASE_URL) {
         }
         assert.equal(await prisma.intervention.count({ where: { titre: 'TEST Conversion autre version' } }), 0);
         assert.equal(await prisma.contratMaintenance.count({ where: { titre: 'TEST Conversion autre version' } }), 0);
+
+        // Une version plus récente, non annulée (révision brouillon), retient l'ancienne.
+        const ancienne = await devisAccepte('TEST Conversion version dépassée');
+        const brouillon = await request(app).post(`/api/devis/${ancienne.id}/revisions`).set(admin());
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        for (const [cible, corps] of [['INTERVENTION', {}], ['CONTRAT', CONTRAT]]) {
+          const refus = await convertirEn(ancienne.id, cible, corps);
+          assert.equal(refus.status, 409, `${cible} : ${JSON.stringify(refus.body)}`);
+          assert.equal(refus.body.error, 'Seule la dernière version non annulée du dossier peut être convertie.');
+        }
+        assert.deepEqual(await dossiersCrees('TEST Conversion version dépassée'), { interventions: 0, contrats: 0, chantiers: 0 });
+      });
+
+      test('la création directe d’une intervention ou d’un contrat garde l’ordre de ses refus', async () => {
+        const refus = [
+          ['/api/interventions', { clientId: 'client-inconnu', titre: '' }, 400, 'Le titre de l’intervention est obligatoire.'],
+          ['/api/interventions', { clientId: 'client-inconnu', titre: 'TEST Ordre', priorite: 'ENORME' }, 400, 'Priorité d’intervention invalide.'],
+          ['/api/interventions', { clientId: 'client-inconnu', titre: 'TEST Ordre', siteId: siteEtrangerId, dateSouhaitee: 'demain' }, 404, 'Client introuvable.'],
+          ['/api/interventions', { clientId, titre: 'TEST Ordre', siteId: siteEtrangerId, contactId: contactEtrangerId, dateSouhaitee: 'demain' }, 404, 'Site introuvable pour ce client.'],
+          ['/api/interventions', { clientId, titre: 'TEST Ordre', contactId: contactEtrangerId, dateSouhaitee: 'demain' }, 404, 'Contact introuvable pour ce client.'],
+          ['/api/interventions', { clientId, titre: 'TEST Ordre', dateSouhaitee: 'demain', dateDemande: 'hier' }, 400, 'La date souhaitée doit être valide au format JJ-MM-AAAA.'],
+          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'ab', siteId: siteEtrangerId }, 400, 'Le titre du contrat doit contenir entre 3 et 200 caractères.'],
+          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'TEST Ordre', dateDebut: 'bientôt' }, 400, 'La date de début doit être valide au format JJ-MM-AAAA.'],
+          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'TEST Ordre', siteId: siteEtrangerId }, 404, 'Client introuvable.'],
+        ];
+        for (const [chemin, corps, code, message] of refus) {
+          const reponse = await request(app).post(chemin).set(admin()).send(corps);
+          assert.equal(reponse.status, code, `${chemin} ${JSON.stringify(corps)} : ${JSON.stringify(reponse.body)}`);
+          assert.equal(reponse.body.error, message);
+        }
+        assert.equal(await prisma.intervention.count({ where: { titre: 'TEST Ordre' } }), 0);
+        assert.equal(await prisma.contratMaintenance.count({ where: { titre: 'TEST Ordre' } }), 0);
       });
 
       test('trois conversions simultanées du même devis vers trois cibles : une seule aboutit', async () => {

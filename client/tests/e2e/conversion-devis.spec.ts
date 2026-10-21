@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { test, expect } from './fixtures';
+import { test, expect, dateDuJour } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
@@ -74,13 +74,19 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   // Contrat : actif, avec sa périodicité, visible dans la liste des contrats.
   await ligne(objetContrat).getByRole('button', { name: 'Créer le contrat' }).click();
   const formulaireContrat = page.getByRole('dialog', { name: 'Créer le contrat du devis' });
+  // Date de début préremplie au jour civil de la société ; titre propre au contrat.
+  await expect(formulaireContrat.getByLabel('Date de début')).toHaveValue(dateDuJour());
+  await formulaireContrat.getByLabel('Titre').fill(`${objetContrat} — contrat`);
   await formulaireContrat.getByLabel('Périodicité (mois)').fill('6');
   await formulaireContrat.getByLabel('Durée prévue (minutes)').fill('90');
   await formulaireContrat.getByLabel('Main-d’œuvre').selectOption('INCLUSE');
   await formulaireContrat.getByLabel('Matériel').selectOption('INCLUS');
   const creationContrat = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/convertir'));
   await formulaireContrat.getByRole('button', { name: 'Créer le contrat' }).click();
-  expect((await creationContrat).status()).toBe(201);
+  const contratCree = await creationContrat;
+  expect(contratCree.status()).toBe(201);
+  const [jour, mois, annee] = dateDuJour().split('-');
+  expect(await contratCree.json()).toMatchObject({ titre: `${objetContrat} — contrat`, dateDebut: `${annee}-${mois}-${jour}T00:00:00.000Z`, periodiciteMois: 6, politiqueMateriel: 'INCLUS' });
   await expect(ligne(objetContrat)).toContainText('Contrat de maintenance issu de ce devis');
   for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Créer le contrat', 'Annuler']) {
     await expect(ligne(objetContrat).getByRole('button', { name: action, exact: true })).toHaveCount(0);
@@ -125,4 +131,30 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
     await contexte.close();
   }
   expect(fenetres).toEqual([]);
+});
+
+// Le fuseau de la société peut arriver après l'ouverture du formulaire : la date de début se
+// remplit alors, au lieu de rester vide.
+test('la date de début du contrat se remplit quand le fuseau de la société arrive après l’ouverture', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
+    const reponse = await request[methode](`${api}${path}`, { headers, data });
+    expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
+    return reponse.json();
+  };
+  const client = await creerClient('conversion-devis-fuseau', false);
+  const objet = `Fuseau tardif ${Date.now()}`;
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet, lignes: [{ designation: 'Visite', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  let liberer: () => void = () => {};
+  const retenue = new Promise<void>((resolve) => { liberer = resolve; });
+  const page = await allerSurPageAdmin('about:blank');
+  await page.route('**/api/company', async (route) => { await retenue; await route.continue(); });
+  await page.goto('/devis', { waitUntil: 'domcontentloaded' });
+  await page.locator('li', { hasText: objet }).getByRole('button', { name: 'Créer le contrat', exact: true }).click();
+  const formulaire = page.getByRole('dialog', { name: 'Créer le contrat du devis' });
+  await expect(formulaire.getByLabel('Date de début')).toHaveValue('');
+  liberer();
+  await expect(formulaire.getByLabel('Date de début')).toHaveValue(dateDuJour());
 });
