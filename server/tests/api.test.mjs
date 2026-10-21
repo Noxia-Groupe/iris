@@ -281,6 +281,7 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test', 'planning.limite.responsable@iris.test',
+      'planning.limite.titulaire@iris.test', 'planning.limite.coequipier@iris.test', 'planning.limite.titulaire.sansfiche@iris.test', 'planning.limite.autre.titulaire@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
@@ -5244,7 +5245,7 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
-  describe('Planning du technicien limité à ce dont il est chargé (décision de Nelson du 19-10-2026)', () => {
+  describe('Planning du technicien : ses affectations (décision de Nelson du 19-10-2026) et celles des chantiers dont il est titulaire (21-10-2026)', () => {
     let admin = {};
     let clientId = '';
     const comptes = {};
@@ -5262,6 +5263,10 @@ if (!TEST_DATABASE_URL) {
         ['relie', 'planning.limite.relie@iris.test', 'TECHNICIEN'],
         ['conducteur', 'planning.limite.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX'],
         ['responsable', 'planning.limite.responsable@iris.test', 'RESPONSABLE'],
+        ['titulaire', 'planning.limite.titulaire@iris.test', 'TECHNICIEN'],
+        ['coequipier', 'planning.limite.coequipier@iris.test', 'TECHNICIEN'],
+        ['titulaireSansFiche', 'planning.limite.titulaire.sansfiche@iris.test', 'TECHNICIEN'],
+        ['autreTitulaire', 'planning.limite.autre.titulaire@iris.test', 'TECHNICIEN'],
       ]) comptes[cle] = await prisma.user.create({ data: { email, name: `TEST Planning limité ${cle}`, role, actif: true } });
       const client = await request(app).post('/api/clients').set(admin).send({ raisonSociale: 'TEST Client planning limité' });
       assert.equal(client.status, 201, JSON.stringify(client.body));
@@ -5336,6 +5341,96 @@ if (!TEST_DATABASE_URL) {
       } finally {
         await prisma.planningEvent.deleteMany({ where: { id: { in: libres } } });
         await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
+      }
+    });
+
+    // Décision de Nelson du 21-10-2026 (« des 2 ») : le technicien lit aussi les affectations des
+    // chantiers dont il est titulaire, quel que soit l'intervenant ; une affaire annulée en sort.
+    test('le technicien lit aussi les affectations des chantiers dont il est titulaire', async () => {
+      const ficheTitulaire = await prisma.intervenant.create({ data: { nom: 'TEST Planning titulaire fiche titulaire', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const ficheCoequipier = await prisma.intervenant.create({ data: { nom: 'TEST Planning titulaire fiche coéquipier', role: 'Technicien', tauxHoraireCharge: 40 } });
+      for (const [fiche, compte] of [[ficheTitulaire, comptes.titulaire], [ficheCoequipier, comptes.coequipier]]) {
+        assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/compte`, admin, { userId: compte.id })).status, 200);
+      }
+      const chantier = (nom, responsable) => prisma.chantier.create({ data: {
+        nom: `TEST Planning titulaire ${nom}`, client: 'TEST Client planning limité', clientId, dateDebut: new Date('2098-03-01T00:00:00Z'),
+        budgetGlobalVendu: 1000, responsableId: responsable.id,
+      } });
+      const chantierTitulaire = await chantier('du titulaire', comptes.titulaire);
+      const chantierAutre = await chantier('d’un autre titulaire', comptes.autreTitulaire);
+      const chantierAnnule = await chantier('annulé du titulaire', comptes.titulaire);
+      const chantierSansFiche = await chantier('du titulaire sans fiche', comptes.titulaireSansFiche);
+      const crees = [];
+      try {
+        const creer = async (corps) => {
+          const res = await envoyer('post', '/api/planning/events', admin, corps);
+          assert.equal(res.status, 201, JSON.stringify(res.body));
+          crees.push(res.body.id);
+          return res.body.id;
+        };
+        const surChantier = (chantierCible, jour) => creer({ categorie: 'CHANTIER', chantierId: chantierCible.id, dateDebut: jour, intervenantIds: [ficheCoequipier.id] });
+        const coequipierSurSonChantier = await surChantier(chantierTitulaire, '2098-03-02');
+        const coequipierAilleurs = await surChantier(chantierAutre, '2098-03-03');
+        const coequipierSurAnnule = await surChantier(chantierAnnule, '2098-03-04');
+        const coequipierChezSansFiche = await surChantier(chantierSansFiche, '2098-03-05');
+        const libreCoequipier = await creer({ categorie: 'HORS_CHANTIER', titre: 'TEST Planning titulaire libre du coéquipier', dateDebut: '2098-03-06', intervenantIds: [ficheCoequipier.id] });
+        const libreTitulaire = await creer({ categorie: 'HORS_CHANTIER', titre: 'TEST Planning titulaire libre du titulaire', dateDebut: '2098-03-06', intervenantIds: [ficheTitulaire.id] });
+        // Dossier SAV rattaché à son chantier, placé pour le coéquipier : la projection suit le périmètre SAV.
+        const dossier = await envoyer('post', '/api/interventions', admin, { clientId, chantierId: chantierTitulaire.id, titre: 'TEST Planning titulaire dossier sur son chantier' });
+        assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
+        assert.equal(dossier.body.chantierId, chantierTitulaire.id);
+        const placement = await envoyer('put', `/api/interventions/${dossier.body.id}/planning`, admin, { dateDebut: '2098-03-07', creneau: 'JOURNEE', intervenantIds: [ficheCoequipier.id] });
+        assert.equal(placement.status, 200, JSON.stringify(placement.body));
+        const projectionSurSonChantier = placement.body.id;
+        // Annulée après coup, l'affaire garde son affectation, que plus aucun titulaire ne lit.
+        await prisma.chantier.update({ where: { id: chantierAnnule.id }, data: { statut: 'ANNULE', annuleLe: new Date(), motifAnnulation: 'TEST annulation' } });
+        const tous = [coequipierSurSonChantier, coequipierAilleurs, coequipierSurAnnule, coequipierChezSansFiche, libreCoequipier, libreTitulaire, projectionSurSonChantier];
+        const lire = async (enTete) => {
+          const res = await request(app).get(SEMAINE).set(enTete);
+          assert.equal(res.status, 200, JSON.stringify(res.body));
+          return res.body;
+        };
+        const nosEvenements = (evenements) => evenements.map((ev) => ev.id).filter((id) => tous.includes(id)).sort();
+
+        // Le titulaire : ses affectations, et celle de son chantier confiée au coéquipier, avec son intervenant.
+        const duTitulaire = await lire(jeton(comptes.titulaire));
+        assert.deepEqual(nosEvenements(duTitulaire), [libreTitulaire, coequipierSurSonChantier].sort());
+        assert.deepEqual(duTitulaire.map((ev) => ev.id).sort(), [libreTitulaire, coequipierSurSonChantier].sort(), 'rien d’autre de la semaine');
+        const surSonChantier = duTitulaire.find((ev) => ev.id === coequipierSurSonChantier);
+        assert.equal(surSonChantier.chantier.id, chantierTitulaire.id);
+        assert.deepEqual(surSonChantier.intervenants.map((i) => i.id), [ficheCoequipier.id]);
+        assert.equal('tauxHoraireCharge' in surSonChantier.intervenants[0], false);
+
+        // Titulaire sans fiche : les affectations de son chantier seulement.
+        assert.deepEqual((await lire(jeton(comptes.titulaireSansFiche))).map((ev) => ev.id), [coequipierChezSansFiche]);
+        // L'autre titulaire lit la sienne ; le coéquipier garde toutes les siennes, l'affaire annulée comprise.
+        assert.deepEqual((await lire(jeton(comptes.autreTitulaire))).map((ev) => ev.id), [coequipierAilleurs]);
+        assert.deepEqual(nosEvenements(await lire(jeton(comptes.coequipier))), [...tous].filter((id) => id !== libreTitulaire).sort());
+        assert.deepEqual(nosEvenements(await lire(admin)), [...tous].sort());
+
+        // Le chantier confié à un autre titulaire, ses affectations quittent le planning de l'ancien.
+        await prisma.chantier.update({ where: { id: chantierTitulaire.id }, data: { responsableId: comptes.autreTitulaire.id } });
+        assert.deepEqual((await lire(jeton(comptes.titulaire))).map((ev) => ev.id), [libreTitulaire]);
+        assert.deepEqual((await lire(jeton(comptes.autreTitulaire))).map((ev) => ev.id).sort(), [coequipierAilleurs, coequipierSurSonChantier].sort());
+
+        // Défense en profondeur : sa fiche ajoutée à la projection sans affectation SAV, état que l'application
+        // n'écrit jamais, ne la lui montre pas : la clause extérieure exige le périmètre SAV du dossier.
+        await prisma.planningEvent.update({ where: { id: projectionSurSonChantier }, data: { intervenants: { connect: [{ id: ficheTitulaire.id }] } } });
+        assert.equal((await lire(jeton(comptes.titulaire))).some((ev) => ev.id === projectionSurSonChantier), false);
+        // Une affaire terminée reste dans son périmètre, comme dans sa liste de chantiers.
+        const chantierTermine = await chantier('terminé du titulaire', comptes.titulaire);
+        await prisma.chantier.update({ where: { id: chantierTermine.id }, data: { statut: 'TERMINE', dateFin: new Date('2098-03-02T00:00:00Z') } });
+        const surTermine = await surChantier(chantierTermine, '2098-03-03');
+        // Commercial d'un chantier sans en être titulaire : ses affectations ne lui sont pas envoyées.
+        const chantierCommercial = await prisma.chantier.create({ data: {
+          nom: 'TEST Planning titulaire dont il est le commercial', client: 'TEST Client planning limité', clientId, dateDebut: new Date('2098-03-01T00:00:00Z'),
+          budgetGlobalVendu: 1000, responsableId: comptes.autreTitulaire.id, commercialId: comptes.titulaire.id,
+        } });
+        const surSaVente = await surChantier(chantierCommercial, '2098-03-04');
+        assert.deepEqual((await lire(jeton(comptes.titulaire))).map((ev) => ev.id).sort(), [libreTitulaire, surTermine].sort());
+        assert.ok((await lire(jeton(comptes.autreTitulaire))).some((ev) => ev.id === surSaVente));
+      } finally {
+        await prisma.planningEvent.deleteMany({ where: { id: { in: crees } } });
       }
     });
 

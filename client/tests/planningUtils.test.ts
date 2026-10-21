@@ -30,8 +30,8 @@ test('formatFr affiche un jour AAAA-MM-JJ au format JJ-MM-AAAA', () => {
   assert.equal(formatFr('2026-10-05'), '05-10-2026');
 });
 
-// Planning limité à ce dont il est chargé (décision de Nelson du 19-10-2026) : le technicien ne voit
-// que la ligne de la fiche reliée à son compte ; l'encadrement voit toute l'équipe.
+// Planning limité à ce dont il est chargé (décision de Nelson du 19-10-2026) : sans affectation reçue,
+// le technicien ne voit que la ligne de la fiche reliée à son compte ; l'encadrement voit toute l'équipe.
 test('lignesDuPlanning réduit la grille du technicien à sa propre fiche', () => {
   const equipe = [
     { id: 'f1', nom: 'Alice', userId: 'u1' },
@@ -44,4 +44,24 @@ test('lignesDuPlanning réduit la grille du technicien à sa propre fiche', () =
   assert.deepEqual(lignesDuPlanning(equipe, { id: 'u9' }), [], 'sans fiche reliée, aucune ligne');
   assert.deepEqual(lignesDuPlanning(equipe, {}), [], 'sans identifiant, aucune ligne, pas même les fiches sans compte');
   assert.deepEqual(lignesDuPlanning(equipe, { id: undefined }), []);
+});
+
+// Chantiers dont il est titulaire (décision de Nelson du 21-10-2026) : le serveur lui envoie aussi les
+// affectations de ses chantiers ; leurs intervenants prennent une ligne, après la sienne.
+test('lignesDuPlanning ajoute au technicien les intervenants des affectations reçues, après sa fiche', () => {
+  const equipe = [
+    { id: 'f1', nom: 'Alice', userId: 'u1' },
+    { id: 'f2', nom: 'Bruno', userId: 'u2' },
+    { id: 'f3', nom: 'Externe', userId: null },
+    { id: 'f4', nom: 'Historique' },
+  ];
+  const surSonChantier = { intervenants: [{ id: 'f3', nom: 'Externe' }, { id: 'f1', nom: 'Alice' }] };
+  const partagee = { intervenants: [{ id: 'f2', nom: 'Bruno' }, { id: 'f1', nom: 'Alice' }] };
+  assert.deepEqual(lignesDuPlanning(equipe, { id: 'u2' }, [surSonChantier, partagee]).map((i) => i.id), ['f2', 'f1', 'f3'], 'sa fiche d’abord, sans doublon, puis l’ordre de l’équipe');
+  assert.deepEqual(lignesDuPlanning(equipe, { id: 'u2' }, [partagee]).map((i) => i.id), ['f2', 'f1']);
+  assert.deepEqual(lignesDuPlanning(equipe, { id: 'u9' }, [surSonChantier]).map((i) => i.id), ['f1', 'f3'], 'sans fiche reliée, les intervenants de ses chantiers seulement');
+  assert.deepEqual(lignesDuPlanning(equipe, { id: 'u9' }, []), []);
+  // Un intervenant absent de l'équipe lue n'invente pas de ligne.
+  assert.deepEqual(lignesDuPlanning(equipe, { id: 'u9' }, [{ intervenants: [{ id: 'f9', nom: 'Inconnu' }] }]), []);
+  assert.deepEqual(lignesDuPlanning(equipe, null, [surSonChantier]).map((i) => i.id), ['f1', 'f2', 'f3', 'f4'], 'encadrement : toute l’équipe, quelles que soient les affectations');
 });

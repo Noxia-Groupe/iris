@@ -6,6 +6,7 @@ import { prisma, transactionVerifiee } from '../../db';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { blockCommercial, blockTechnicien, requireAdmin } from '../../http/gardes';
 import { ROLE_TECHNICIEN } from '../../droits/roles';
+import { perimetreChantiers } from '../../droits/perimetres';
 import { paramId } from '../../http/requete';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, aujourdHuiEntreprise, ajouterJoursCivils } from '../../commun/dates';
 import { journaliserAdministration, verrouillerReglage } from '../../commun/journal-administration';
@@ -66,9 +67,15 @@ export function enregistrerRoutesPlanning(app: Express): void {
       const start = parsePlanningJour(req.query.start);
       const end = parsePlanningJour(req.query.end);
       if (!start || !end) return res.status(400).json({ error: 'Plage de dates invalide (start et end requis, au format JJ-MM-AAAA ou AAAA-MM-JJ).' });
-      // Le technicien ne lit que les affectations dont il est chargé (décision de Nelson du 19-10-2026) :
-      // événements libres comme projections, par la fiche intervenant reliée à son compte. Sans fiche, rien.
-      const chargeDe = req.user!.role === ROLE_TECHNICIEN ? [{ intervenants: { some: { userId: req.user!.id } } }] : [];
+      // Le technicien lit les affectations dont il est chargé, par la fiche intervenant reliée à son
+      // compte (décision de Nelson du 19-10-2026), et celles des chantiers dont il est titulaire, quel
+      // que soit l'intervenant (décision du 21-10-2026). Le chantier est pris dans son périmètre de
+      // lecture : une affaire annulée en sort. Une projection SAV n'est jamais rattachée à un chantier
+      // ici : elle reste soumise au périmètre du dossier. Sans fiche ni chantier, rien.
+      const chargeDe = req.user!.role === ROLE_TECHNICIEN ? [{ OR: [
+        { intervenants: { some: { userId: req.user!.id } } },
+        { chantier: { is: perimetreChantiers(req) } },
+      ] }] : [];
       const events = await prisma.planningEvent.findMany({
         where: { dateDebut: { lte: end }, dateFin: { gte: start }, OR: [
           { interventionId: null }, { intervention: { is: getInterventionFilterForUser(req.user!) } },
