@@ -1,4 +1,5 @@
 import express from 'express';
+import { Prisma } from '@prisma/client';
 import type { Express } from 'express';
 import { prisma, transactionVerifiee } from '../../db';
 import { ROLE_RESPONSABLE, isAdminRole } from '../../droits/roles';
@@ -12,7 +13,7 @@ import { dateIsoStricte } from '../../commun/dates';
 import { decimalToNumber } from '../../commun/montants';
 import { nombreDecimalNonNegatif, motifCorrectionValide, motifRestaurationValide } from '../../commun/validation';
 import { valeurJournal } from '../../commun/journal-administration';
-import { CHANTIER_LITE_SELECT } from './metier';
+import { CHANTIER_LITE_SELECT, journaliserChangementChantier } from './metier';
 import { requireTravauxWrite, requireTravauxArchive } from './droits';
 
 // Un chantier clôturé (TERMINE) devient en lecture seule pour les conducteurs : ils ne
@@ -398,14 +399,23 @@ export function enregistrerRoutesSaisiesTravaux(app: Express): void {
   // Clause de sécurisation : un chantier ne compte dans le CA et la marge validés du
   // commercial que s'il est Terminé ET Encaissé. Sans plan commercial, aucune commission
   // n'en découle (décision du 17-10-2026). Réservé aux admins ; togglable indépendamment
-  // du statut Terminé/En cours.
+  // du statut Terminé/En cours. Chaque changement est journalisé (#181) ; un enregistrement à
+  // l'identique ne change rien, pas même la date d'encaissement, et n'écrit aucune entrée.
   app.patch('/api/chantiers/:id/encaisse', requireAuth, requireAdmin, async (req, res) => {
     try {
       const encaisse = !!req.body.encaisse;
-      const chantier = await prisma.chantier.update({
-        where: { id: paramId(req) },
-        data: { encaisse, dateEncaissement: encaisse ? new Date() : null },
+      const id = paramId(req);
+      const chantier = await transactionVerifiee(async (tx) => {
+        const [ligne] = await tx.$queryRaw<Array<{ encaisse: boolean; dateEncaissement: Date | null }>>(Prisma.sql`SELECT "encaisse", "dateEncaissement" FROM "Chantier" WHERE "id" = ${id} FOR UPDATE`);
+        if (!ligne) return null;
+        if (ligne.encaisse === encaisse) return tx.chantier.findUniqueOrThrow({ where: { id } });
+        const dateEncaissement = encaisse ? new Date() : null;
+        await journaliserChangementChantier(tx, id, (req as AuthRequest).user!, 'CHANGEMENT_ENCAISSEMENT',
+          { encaisse: ligne.encaisse, dateEncaissement: ligne.dateEncaissement?.toISOString() ?? null },
+          { encaisse, dateEncaissement: dateEncaissement?.toISOString() ?? null });
+        return tx.chantier.update({ where: { id }, data: { encaisse, dateEncaissement } });
       });
+      if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
       res.json(decimalToNumber(chantier));
     } catch (error) {
       res.status(500).json({ error: 'Error updating encaissement' });
