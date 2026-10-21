@@ -208,7 +208,7 @@ Les principes de la section 2 s'appliquent : aucune valeur métier inventée, mo
    - Il est livré avant les rôles paramétrables, sans l'étape « qui fait quoi ». Il ne propose alors que le préréglage « Iris actuel », et l'étape « Rentabilité » règle les trois cases actuelles des destinataires (option du lot P4).
 4. **Marque.**
    - La page de connexion affiche « Iris », la marque du produit. Confirmé par Nelson le 21-10-2026 quant au nom de l'application sur la page de connexion (citation à la ligne P0, [historique](HISTORIQUE-DECISIONS.md#décisions-du-21-10-2026)) ; la graphie affichée (« Iris » ou « IRIS ») reste un choix par défaut du lot P0, à confirmer.
-   - Le planning public, ouvert par son lien sans connexion, affiche lui aussi « Iris ». Y montrer le nom de la société serait un choix séparé.
+   - Le planning public, ouvert par son lien sans connexion, affiche lui aussi le nom de l'application. Y montrer le nom de la société serait un choix séparé.
    - « NØXIA GROUPE » et les autres valeurs de société écrites en dur sont retirées au lot P0. Après la connexion, l'application lit l'identité de la société dans `CompanySettings`.
    - Le nom de l'éditeur reste dans le README et dans les informations du dépôt, mais pas dans l'application.
 5. **Placement.** Le lot P0 au plus tôt ; mise à jour : depuis le 19-10-2026, la règle du pilote, décidée par Nelson, prime, et le 21-10-2026 Nelson a placé P0 avant la fin du pilote, avant le premier jour selon la lecture retenue (section 5). Le lot P1 après le premier jour du pilote, sauf si l'entreprise pilote a besoin d'un de ses paramètres avant : le périmètre du pilote reste la boussole.
