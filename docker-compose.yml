@@ -11,7 +11,7 @@ services:
       # Stockage persistant de la base PostgreSQL
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - noxia-network
+      - iris-network
       # Réseau partagé avec pgBackWeb pour les sauvegardes
       - backup-net
     healthcheck:
@@ -38,7 +38,7 @@ services:
       db:
         condition: service_healthy
     networks:
-      - noxia-network
+      - iris-network
 
   frontend:
     build:
@@ -49,13 +49,13 @@ services:
     environment:
       - VITE_API_URL=/api
     networks:
-      - noxia-network
+      - iris-network
       # Réseau externe Nginx Proxy Manager
       - nginx-proxy
     # Nginx Proxy Manager pourra cibler ce conteneur (iris_frontend) sur le port 80
 
 networks:
-  noxia-network:
+  iris-network:
     driver: bridge
   # Réseau géré par votre Nginx Proxy Manager Hostinger
   nginx-proxy:

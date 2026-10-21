@@ -33,6 +33,10 @@ par un nom calculé (`process.env[nom]`) lui échappe, et un accès indirect est
 exemple y compte comme une vraie lecture. Pour qu'elle ne compte pas, la citer sous une autre
 forme, par exemple « la variable X de process.env ».
 
+Côté client, `client/tests/identite.test.ts` (lot P0) relève de la même exception : il vérifie
+qu'aucun nom ni aucune couleur de société n'est écrit dans le code livré, propriété du texte
+lui-même ; l'affichage du nom de l'application est prouvé par l'E2E `identite-application`.
+
 ## Lancer les tests
 
 ```bash

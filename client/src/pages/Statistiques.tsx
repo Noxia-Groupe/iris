@@ -65,7 +65,7 @@ function PeriodNav({
 const CHANTIER_COLORS: Record<string, string> = {
   positif: '#10b981',
   tempsSeul: '#f59e0b',
-  materielSeul: '#0251a1',
+  materielSeul: '#2563eb',
   lesDeux: '#ef4444',
 };
 const CHANTIER_SHORT_LABELS: Record<string, string> = {
