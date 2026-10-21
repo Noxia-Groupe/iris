@@ -36,8 +36,9 @@ const Planning = () => {
   const isAdmin = isAdminRole(userRole);
   // Le technicien consulte le planning sans le modifier (lot pilote 3, choix par défaut) : ni
   // affectation, ni type d'événement, ni placement. Le serveur le refuse aussi (blockTechnicien).
-  // Il n'y voit que ce dont il est chargé (décision de Nelson du 19-10-2026) : sa ligne, et les
-  // seules affectations que le serveur lui envoie.
+  // Il n'y voit que ses affectations et celles des chantiers dont il est titulaire (décisions de Nelson
+  // du 19 et du 21-10-2026) : sa ligne, puis celles des intervenants des affectations que le serveur
+  // lui envoie.
   const lectureSeule = userRole === ROLE_TECHNICIEN;
   // Module désactivé par un super administrateur : la page n'est plus atteignable que par
   // lui (cf. App.tsx), d'où l'avertissement ci-dessous — il doit savoir que ce qu'il
@@ -119,14 +120,27 @@ const Planning = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (!lectureSeule) fetchQueue(); }, []);
 
+  // Semaine des affectations reçues, et semaine dont la lecture a échoué : au changement de
+  // semaine, les lignes des collègues du technicien ne reprennent pas celles de la semaine quittée,
+  // et son message « aucune fiche » attend la réponse.
+  const [semaineRecue, setSemaineRecue] = useState<string | null>(null);
+  const [semaineEnEchec, setSemaineEnEchec] = useState<string | null>(null);
   const fetchEvents = async () => {
     const requete = ++requeteEvents.current;
+    const semaine = weekStartStr;
+    let recue = false;
     try {
       const res = await apiFetch(`/planning/events?start=${weekStartStr}&end=${weekEndStr}`);
       const data = await res.json();
-      if (Array.isArray(data) && requete === requeteEvents.current) setEvents(data);
+      if (Array.isArray(data) && requete === requeteEvents.current) {
+        setEvents(data);
+        setSemaineRecue(semaine);
+        recue = true;
+      }
     } catch (e) {
       console.error(e);
+    } finally {
+      if (!recue && requete === requeteEvents.current) setSemaineEnEchec(semaine);
     }
   };
 
@@ -213,7 +227,9 @@ const Planning = () => {
   );
 
   const labelSemaine = `Semaine du ${jourFrancais(weekStartStr)} au ${jourFrancais(weekEndStr)}`;
-  const lignes = lignesDuPlanning(intervenants, lectureSeule ? { id: user?.id } : null);
+  const lignes = lignesDuPlanning(intervenants, lectureSeule ? { id: user?.id } : null, semaineRecue === weekStartStr ? events : []);
+  const semaineLue = semaineRecue === weekStartStr || semaineEnEchec === weekStartStr;
+  const ficheReliee = !!user?.id && intervenants.some((intervenant) => intervenant.userId === user.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -225,7 +241,7 @@ const Planning = () => {
             <Info size={14} className="shrink-0" />
             Prévisionnel uniquement : n'alimente jamais les heures des chantiers (saisie manuelle dans le Journal des Heures).
           </p>
-          {lectureSeule && <p className="text-sm text-muted mt-1">Vous ne voyez que les affectations dont vous êtes chargé.</p>}
+          {lectureSeule && <p className="text-sm text-muted mt-1">Vous ne voyez que vos affectations et celles des chantiers dont vous êtes titulaire.</p>}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {isAdmin && (
@@ -297,15 +313,21 @@ const Planning = () => {
         <h2 className="text-base font-bold text-gray-800 m-0 text-right">{labelSemaine}</h2>
       </div>
 
+      {lectureSeule && !equipeIllisible && !ficheReliee && lignes.length > 0 && (
+        <p className="mb-4 text-sm text-muted">Aucune fiche intervenant n'est reliée à votre compte : seules les affectations des chantiers dont vous êtes titulaire s'affichent.</p>
+      )}
+
       {equipeIllisible ? (
         <div className="card text-center py-12" role="alert">
           <p className="text-gray-500 font-semibold mb-2">Lecture de l'équipe impossible pour le moment.</p>
           <p className="text-sm text-gray-400">Rechargez la page dans un instant.</p>
         </div>
+      ) : lectureSeule && lignes.length === 0 && !semaineLue ? (
+        <div className="card text-center py-12 text-sm text-gray-400">Chargement des affectations…</div>
       ) : lectureSeule && lignes.length === 0 ? (
         <div className="card text-center py-12">
           <p className="text-gray-500 font-semibold mb-2">Aucune fiche intervenant n'est reliée à votre compte.</p>
-          <p className="text-sm text-gray-400">Votre planning s'affichera dès que l'administration l'aura reliée.</p>
+          <p className="text-sm text-gray-400">Vos affectations s'afficheront dès que l'administration l'aura reliée ; celles des chantiers dont vous êtes titulaire apparaissent ici lorsqu'il y en a cette semaine.</p>
         </div>
       ) : intervenants.length === 0 ? (
         <div className="card text-center py-12">
