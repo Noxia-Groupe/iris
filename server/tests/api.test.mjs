@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { cpus } from 'node:os';
-import test, { after, before, describe, mock } from 'node:test';
+import test, { after, afterEach, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
 
 // Fige l'horloge du processus (Date seulement : ni les minuteries ni la base) au dernier 21 h UTC
@@ -12705,9 +12705,11 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await regler(30)).status, 200);
     });
 
-    after(async () => {
-      await regler(30);
+    // Chaque test repart du réglage par défaut, sans passage du jour fictif, même s'il échoue : un
+    // échec ne fait pas échouer les suivants (alerte « n'a pas tourné », génération désactivée).
+    afterEach(async () => {
       await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR_FICTIF } });
+      await regler(30);
     });
 
     test('passage automatique : une fois par jour civil, visites dans l’anticipation, sans compte auteur, échéance d’une visite terminée avancée', async () => {
