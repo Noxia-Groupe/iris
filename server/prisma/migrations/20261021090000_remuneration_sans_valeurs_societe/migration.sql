@@ -1,11 +1,12 @@
--- Lot P0 (décision de Nelson du 21-10-2026 : « il ne doit plus y avoir de noxia groupe dans
--- l’application, c’est une application ouverte a toute les entreprise ») : la migration
+-- Lot P0 (décision de Nelson du 21-10-2026, réponse 4, citée dans docs/HISTORIQUE-DECISIONS.md :
+-- Iris est une application ouverte à toutes les entreprises) : la migration
 -- 20260904210000_parametres_remuneration avait inséré les barèmes et les primes d'une société.
 -- Aucun calcul ne les lit depuis #159 (commissions fermées tant qu'aucun plan commercial n'est
 -- attribué) : les vider ne change aucun montant.
 --
--- Chaque colonne n'est vidée que si elle garde la valeur insérée : une valeur déjà saisie par
--- un super administrateur est conservée. Le libellé du barème réduit, générique, est conservé.
+-- Chaque colonne restée égale à la valeur insérée en 2026-09 est vidée, qu'elle ait été ressaisie
+-- ou non ; une valeur différente, saisie par un super administrateur, est conservée. Le libellé du
+-- barème réduit, générique, est conservé. La migration n'écrit pas au journal des réglages.
 UPDATE "ParametresRemuneration"
 SET
     "baremeStandard" = CASE

@@ -65,7 +65,7 @@
 }
 
 /* Mode sombre : redéfinit les mêmes tokens (jamais une palette séparée), dans la même
-   famille bleu nuit que la sidebar (déjà sombre) pour rester cohérent avec la marque. */
+   famille bleu nuit que la sidebar (déjà sombre) pour rester cohérent avec l'interface. */
 .dark {
   color-scheme: dark;
   --color-gray-light: #232d47;

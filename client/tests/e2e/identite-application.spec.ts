@@ -24,6 +24,18 @@ test('la connexion et le planning public portent le nom de l’application, sans
     expect(await icone.text()).toContain('<svg');
     const manifeste = await (await page.request.get('/manifest.webmanifest')).json() as { name: string; theme_color: string; description: string };
     expect(manifeste).toMatchObject({ name: 'Iris', theme_color: '#1e3a8a', description: 'ERP pour métiers techniques' });
+    // Les icônes PNG (Safari, écran d'accueil d'iOS, manifeste) sont celles de l'application : fond
+    // #1e3a8a pris près du bord gauche, à mi-hauteur.
+    await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/apple-touch-icon.png');
+    for (const icone of ['/icon-192.png', '/apple-touch-icon.png', '/favicon-32x32.png']) {
+      const pixel = await page.evaluate(async (src) => {
+        const image = new Image(); image.src = src; await image.decode();
+        const toile = document.createElement('canvas'); toile.width = image.width; toile.height = image.height;
+        const contexte = toile.getContext('2d')!; contexte.drawImage(image, 0, 0);
+        return Array.from(contexte.getImageData(Math.floor(image.width / 20) + 1, Math.floor(image.height / 2), 1, 1).data);
+      }, icone);
+      expect(pixel.slice(0, 3), icone).toEqual([30, 58, 138]);
+    }
 
     // Planning public, ouvert par son lien sans connexion.
     const partage = await request.post(`${api}/planning/share`, { headers });

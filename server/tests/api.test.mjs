@@ -532,7 +532,7 @@ if (!TEST_DATABASE_URL) {
 
     test('la base migrée ne garde aucune des valeurs insérées', async () => {
       const ligne = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
-      if (!ligne) return; // Installation sans ligne : les règles neutres s'appliquent (getReglesRemuneration).
+      assert.ok(ligne, 'la migration 20260904210000 insère toujours la ligne singleton');
       const actuelles = await lire(prisma);
       for (const [champ, valeur] of Object.entries(INSEREES)) assert.notDeepEqual(actuelles[champ], valeur, champ);
     });
@@ -548,15 +548,22 @@ if (!TEST_DATABASE_URL) {
           baremeStandard: [], baremeReduit: [], libelleBaremeReduit: 'TEST Libellé conservé',
           objectifCaMensuel: 0, primeObjectifCa: 0, objectifMargeMensuel: 0, primeObjectifMarge: 0, primeSuiviAdministratif: 0,
         });
-        // Une valeur saisie depuis : seule celle restée identique à l'insertion est vidée.
-        await tx.parametresRemuneration.update({ where: { id: 'singleton' }, data: { ...INSEREES, baremeStandard: [{ plafond: null, taux: 10 }], primeObjectifCa: 99 } });
-        assert.equal(await tx.$executeRawUnsafe(MIGRATION), 1);
-        const apres = await lire(tx);
-        assert.deepEqual(apres.baremeStandard, [{ plafond: null, taux: 10 }]);
-        assert.equal(apres.primeObjectifCa, 99);
-        assert.deepEqual(apres.baremeReduit, []);
-        assert.equal(apres.objectifCaMensuel, 0);
-        assert.equal(apres.primeSuiviAdministratif, 0);
+        // Une valeur saisie depuis, colonne par colonne, au-dessus puis au-dessous de la valeur
+        // insérée : elle reste ; chaque autre colonne, restée identique à l'insertion, est vidée.
+        const VIDE = { baremeStandard: [], baremeReduit: [], objectifCaMensuel: 0, primeObjectifCa: 0, objectifMargeMensuel: 0, primeObjectifMarge: 0, primeSuiviAdministratif: 0 };
+        const SAISIES = [
+          ['baremeStandard', [{ plafond: null, taux: 10 }]], ['baremeReduit', [{ plafond: 50000, taux: 5 }, { plafond: null, taux: 7 }]],
+          ['objectifCaMensuel', 80000], ['objectifCaMensuel', 60000], ['primeObjectifCa', 600], ['primeObjectifCa', 99],
+          ['objectifMargeMensuel', 18000], ['objectifMargeMensuel', 16000], ['primeObjectifMarge', 600], ['primeObjectifMarge', 300],
+          ['primeSuiviAdministratif', 300], ['primeSuiviAdministratif', 100],
+        ];
+        for (const [champ, valeur] of SAISIES) {
+          await tx.parametresRemuneration.update({ where: { id: 'singleton' }, data: { ...INSEREES, [champ]: valeur } });
+          assert.equal(await tx.$executeRawUnsafe(MIGRATION), 1, `${champ} = ${JSON.stringify(valeur)}`);
+          const { libelleBaremeReduit, ...apres } = await lire(tx);
+          assert.equal(libelleBaremeReduit, 'TEST Libellé conservé');
+          assert.deepEqual(apres, { ...VIDE, [champ]: valeur }, `${champ} = ${JSON.stringify(valeur)}`);
+        }
         // Rejouée sur des valeurs déjà vidées ou saisies, elle ne touche plus rien.
         assert.equal(await tx.$executeRawUnsafe(MIGRATION), 0);
         throw ANNULATION;
