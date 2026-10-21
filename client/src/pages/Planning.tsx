@@ -120,14 +120,27 @@ const Planning = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (!lectureSeule) fetchQueue(); }, []);
 
+  // Semaine des affectations reçues, et semaine dont la lecture a échoué : au changement de
+  // semaine, les lignes des collègues du technicien ne reprennent pas celles de la semaine quittée,
+  // et son message « aucune fiche » attend la réponse.
+  const [semaineRecue, setSemaineRecue] = useState<string | null>(null);
+  const [semaineEnEchec, setSemaineEnEchec] = useState<string | null>(null);
   const fetchEvents = async () => {
     const requete = ++requeteEvents.current;
+    const semaine = weekStartStr;
+    let recue = false;
     try {
       const res = await apiFetch(`/planning/events?start=${weekStartStr}&end=${weekEndStr}`);
       const data = await res.json();
-      if (Array.isArray(data) && requete === requeteEvents.current) setEvents(data);
+      if (Array.isArray(data) && requete === requeteEvents.current) {
+        setEvents(data);
+        setSemaineRecue(semaine);
+        recue = true;
+      }
     } catch (e) {
       console.error(e);
+    } finally {
+      if (!recue && requete === requeteEvents.current) setSemaineEnEchec(semaine);
     }
   };
 
@@ -214,7 +227,8 @@ const Planning = () => {
   );
 
   const labelSemaine = `Semaine du ${jourFrancais(weekStartStr)} au ${jourFrancais(weekEndStr)}`;
-  const lignes = lignesDuPlanning(intervenants, lectureSeule ? { id: user?.id } : null, events);
+  const lignes = lignesDuPlanning(intervenants, lectureSeule ? { id: user?.id } : null, semaineRecue === weekStartStr ? events : []);
+  const semaineLue = semaineRecue === weekStartStr || semaineEnEchec === weekStartStr;
   const ficheReliee = !!user?.id && intervenants.some((intervenant) => intervenant.userId === user.id);
 
   return (
@@ -308,6 +322,8 @@ const Planning = () => {
           <p className="text-gray-500 font-semibold mb-2">Lecture de l'équipe impossible pour le moment.</p>
           <p className="text-sm text-gray-400">Rechargez la page dans un instant.</p>
         </div>
+      ) : lectureSeule && lignes.length === 0 && !semaineLue ? (
+        <div className="card text-center py-12 text-sm text-gray-400">Chargement des affectations…</div>
       ) : lectureSeule && lignes.length === 0 ? (
         <div className="card text-center py-12">
           <p className="text-gray-500 font-semibold mb-2">Aucune fiche intervenant n'est reliée à votre compte.</p>

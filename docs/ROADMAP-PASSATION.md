@@ -96,7 +96,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
       - horodatages des comptes rendus et des signatures imposés par la base.
     - « Ma journée » à l'accueil du technicien (3b-4, #272) : ses interventions du jour, au jour civil de la société, triées par créneau ; terminées à part ; celles restées ouvertes les jours précédents ; jour précédent et jour suivant ; « Ma journée » remplace pour lui le tableau de bord des chantiers ; il retrouve ses chantiers dans « Liste des chantiers » ;
     - fiche intervention sur téléphone (3b-4, #272) : adresse du site, à défaut de l'affaire, téléphone du contact en lien d'appel, et les actions de l'intervention.
-  - Livré par la PR du planning limité (#275, décision de Nelson du 19-10-2026) : le technicien ne lit au planning que les affectations où figure sa fiche intervenant, et l'écran ne lui montre que sa ligne ; la liste des chantiers du planning lui est refusée ; si la liste des intervenants ne se lit pas, l'écran le dit. Choix par défaut, à confirmer, en section 4.
+  - Livré par la PR du planning limité (#275, décision de Nelson du 19-10-2026), puis étendu par #279 (décision du 21-10-2026, « Des 2 ») : le technicien lit au planning les affectations où figure sa fiche intervenant et celles des chantiers dont il est titulaire ; l'écran lui montre sa ligne, puis celles des intervenants des affectations reçues pour la semaine ; la liste des chantiers du planning lui est refusée ; si la liste des intervenants ne se lit pas, l'écran le dit. Choix par défaut, à confirmer, en section 4.
   - Absent : le motif d'une clôture sans signature n'est affiché dans aucun écran ; il est consigné au journal SAV, réservé à l'encadrement (#269).
   - Ne pas qualifier « l'écran Travaux reste entièrement à créer » sans auditer la fiche actuelle.
   - Les issues [#16](https://github.com/Noxia-Groupe/iris/issues/16) et [#19](https://github.com/Noxia-Groupe/iris/issues/19) sont fermées depuis le 16-10-2026 ; leurs reliquats sont suivis dans [#135](https://github.com/Noxia-Groupe/iris/issues/135) et [#136](https://github.com/Noxia-Groupe/iris/issues/136), ouvertes : comparer leurs sous-points au code avant de les replanifier.
@@ -204,7 +204,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
      - terminer une intervention exige un compte rendu signé ; à défaut, un motif est choisi (client absent, refus de signer, signature impossible, autre) et consigné au journal. Précisé le 20-10-2026 : un compte rendu est toujours exigé, seule la signature peut être remplacée par le motif ; le motif « autre » exige une précision écrite courte ; la règle vaut pour le technicien comme pour l'encadrement. **Implémenté** par #268 ;
      - les heures du technicien hors contrat vont dans les coûts SAV, en durée brute sans arrondi, sans effet sur la marge des chantiers ; l'administration voit leur coût de main-d'œuvre (**implémenté** par #257, libellé « Main-d’œuvre cumulée » validé le 20-10-2026) ;
      - la signature dessinée est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé (**implémenté** par #268) ; durée de conservation à confirmer avec le cabinet ;
-     - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**implémenté** par #275 ; périmètre et choix par défaut en section 4). La décision de Nelson du 21-10-2026 l'étend (« Des 2 », **à appliquer** dans sa propre PR) : il verra aussi les affectations des chantiers dont il est titulaire ; le lien public reste ouvert à toute personne qui en a l'adresse.
+     - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**implémenté** par #275 ; périmètre et choix par défaut en section 4). La décision de Nelson du 21-10-2026 l'étend (« Des 2 », **implémenté** par #279) : il voit aussi les affectations des chantiers dont il est titulaire ; le lien public reste ouvert à toute personne qui en a l'adresse.
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent.
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
@@ -344,7 +344,7 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - « Consultation seule » et refus explicite conservés. **Appliqué** (#123).
 - Son affaire n'est modifiable que par l'administration. **Appliqué** (#123).
 - Aucun accès financier : déduction de #123 (aucun montant), à confirmer. **Appliqué** (#123).
-- Ses écritures hors affaire (planning, catégories, fournisseurs) lui sont retirées au lot du parcours technicien. **Appliqué** (#166), y compris le placement de sa propre intervention : il ne replanifie pas et ne change pas les intervenants de son dossier. Il garde la lecture de son planning, limitée depuis #275 aux affectations dont il est chargé (plus bas), et des référentiels, et n'a plus l'Administration.
+- Ses écritures hors affaire (planning, catégories, fournisseurs) lui sont retirées au lot du parcours technicien. **Appliqué** (#166), y compris le placement de sa propre intervention : il ne replanifie pas et ne change pas les intervenants de son dossier. Il garde la lecture de son planning, limitée depuis #275 aux affectations dont il est chargé, et depuis #279 aussi à celles des chantiers dont il est titulaire (plus bas), et des référentiels, et n'a plus l'Administration.
 - Seul un compte technicien actif, relié à aucune autre fiche, se relie à une fiche intervenant. Un compte qui quitte ensuite le type technicien perd sa fiche (déliée et journalisée dans la même transaction) : par ses affectations, elle lui ouvrirait les interventions avec les écritures de son nouveau type. La liaison se sérialise avec le changement de type et la suppression du compte (#228) ; seule une promotion super administrateur simultanée à une liaison est refusée (409), à refaire. Un compte désactivé garde sa fiche, sans pouvoir se connecter. Un simple administrateur ne touche pas à la fiche d'un compte super administrateur. **Appliqué** (#166, #228).
 - Une intervention curative placée depuis la file reçoit une durée proposée de 60 minutes, modifiable avant de confirmer. **Appliqué** (#166).
 - Le mode hors ligne (zone sans réseau) reste hors du lot pilote 3.
@@ -372,13 +372,19 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 
   **Appliqués** (#272), à confirmer.
 - Ajoutés par #275 (planning limité) :
-  - « chargé » veut dire que sa fiche intervenant figure parmi les intervenants de l'affectation ; être titulaire du chantier d'une affectation ne suffit pas. **Remplacé** par la décision de Nelson du 21-10-2026 : ses affectations et celles des chantiers dont il est titulaire (à appliquer) ;
+  - « chargé » veut dire que sa fiche intervenant figure parmi les intervenants de l'affectation ; être titulaire du chantier d'une affectation ne suffit pas. **Remplacé** par la décision de Nelson du 21-10-2026 : ses affectations et celles des chantiers dont il est titulaire (implémenté par #279) ;
   - une affectation partagée lui montre ses coéquipiers ;
   - la liste des chantiers du planning lui est refusée (403), et non réduite à ses chantiers, puisqu'il ne crée pas d'affectation ;
   - il garde la lecture des types d'événement ;
   - le lien public du planning reste complet : il montre tout le planning à qui en a l'adresse. **Confirmé** par Nelson le 21-10-2026 : « Lien public a tout le monde disposant de l’adresse. »
 
   **Appliqués** (#275). Le premier est remplacé et le dernier confirmé par Nelson le 21-10-2026 ; les trois autres restent à confirmer.
+- Ajoutés par #279 (planning étendu aux chantiers dont il est titulaire) :
+  - une affaire annulée sort de son planning de titulaire, comme de sa liste de chantiers ; il y garde les affectations où figure sa fiche ;
+  - la projection d'une intervention rattachée à son chantier reste soumise au périmètre SAV : il ne la voit que s'il y est affecté ;
+  - la ligne d'un collègue ne paraît que les semaines où l'une de ses affectations lui est envoyée, et ne montre que celles-là ; un technicien qui n'est titulaire d'aucun chantier voit ainsi la ligne du coéquipier d'une affectation partagée.
+
+  **Appliqués** (#279), à confirmer.
 
 **Journal des paramètres et des droits** (lot (a), #133)
 - L'auteur de la création et de la publication des mentions légales, et la création des comptes comptables, sont journalisés. **À appliquer**.

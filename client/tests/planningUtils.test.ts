@@ -30,8 +30,8 @@ test('formatFr affiche un jour AAAA-MM-JJ au format JJ-MM-AAAA', () => {
   assert.equal(formatFr('2026-10-05'), '05-10-2026');
 });
 
-// Planning limité à ce dont il est chargé (décision de Nelson du 19-10-2026) : le technicien ne voit
-// que la ligne de la fiche reliée à son compte ; l'encadrement voit toute l'équipe.
+// Planning limité à ce dont il est chargé (décision de Nelson du 19-10-2026) : sans affectation reçue,
+// le technicien ne voit que la ligne de la fiche reliée à son compte ; l'encadrement voit toute l'équipe.
 test('lignesDuPlanning réduit la grille du technicien à sa propre fiche', () => {
   const equipe = [
     { id: 'f1', nom: 'Alice', userId: 'u1' },

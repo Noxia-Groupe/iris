@@ -5245,7 +5245,7 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
-  describe('Planning du technicien limité à ce dont il est chargé (décision de Nelson du 19-10-2026)', () => {
+  describe('Planning du technicien : ses affectations (décision de Nelson du 19-10-2026) et celles des chantiers dont il est titulaire (21-10-2026)', () => {
     let admin = {};
     let clientId = '';
     const comptes = {};
@@ -5412,6 +5412,23 @@ if (!TEST_DATABASE_URL) {
         await prisma.chantier.update({ where: { id: chantierTitulaire.id }, data: { responsableId: comptes.autreTitulaire.id } });
         assert.deepEqual((await lire(jeton(comptes.titulaire))).map((ev) => ev.id), [libreTitulaire]);
         assert.deepEqual((await lire(jeton(comptes.autreTitulaire))).map((ev) => ev.id).sort(), [coequipierAilleurs, coequipierSurSonChantier].sort());
+
+        // Défense en profondeur : sa fiche ajoutée à la projection sans affectation SAV, état que l'application
+        // n'écrit jamais, ne la lui montre pas : la clause extérieure exige le périmètre SAV du dossier.
+        await prisma.planningEvent.update({ where: { id: projectionSurSonChantier }, data: { intervenants: { connect: [{ id: ficheTitulaire.id }] } } });
+        assert.equal((await lire(jeton(comptes.titulaire))).some((ev) => ev.id === projectionSurSonChantier), false);
+        // Une affaire terminée reste dans son périmètre, comme dans sa liste de chantiers.
+        const chantierTermine = await chantier('terminé du titulaire', comptes.titulaire);
+        await prisma.chantier.update({ where: { id: chantierTermine.id }, data: { statut: 'TERMINE', dateFin: new Date('2098-03-02T00:00:00Z') } });
+        const surTermine = await surChantier(chantierTermine, '2098-03-03');
+        // Commercial d'un chantier sans en être titulaire : ses affectations ne lui sont pas envoyées.
+        const chantierCommercial = await prisma.chantier.create({ data: {
+          nom: 'TEST Planning titulaire dont il est le commercial', client: 'TEST Client planning limité', clientId, dateDebut: new Date('2098-03-01T00:00:00Z'),
+          budgetGlobalVendu: 1000, responsableId: comptes.autreTitulaire.id, commercialId: comptes.titulaire.id,
+        } });
+        const surSaVente = await surChantier(chantierCommercial, '2098-03-04');
+        assert.deepEqual((await lire(jeton(comptes.titulaire))).map((ev) => ev.id).sort(), [libreTitulaire, surTermine].sort());
+        assert.ok((await lire(jeton(comptes.autreTitulaire))).some((ev) => ev.id === surSaVente));
       } finally {
         await prisma.planningEvent.deleteMany({ where: { id: { in: crees } } });
       }
