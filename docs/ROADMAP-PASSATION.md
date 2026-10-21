@@ -9,7 +9,7 @@
 >
 > Avant chaque lot : relire ce document, puis vérifier le code, les tests, les issues **et leurs commentaires**. Une case non cochée ou une issue ancienne ne prouve pas une absence.
 >
-> Le détail des lots livrés (a) à (h), des décisions déjà appliquées et des constats corrigés se trouve dans [HISTORIQUE-DECISIONS.md](HISTORIQUE-DECISIONS.md), qui tient aussi les décisions et les lots des 18, 19 et 20-10-2026.
+> Le détail des lots livrés (a) à (h), des décisions déjà appliquées et des constats corrigés se trouve dans [HISTORIQUE-DECISIONS.md](HISTORIQUE-DECISIONS.md), qui tient aussi les décisions et les lots des 18, 19, 20 et 21-10-2026.
 
 Iris est un ERP français natif, simple pour les métiers techniques, déployé **par société sur une instance et une base propres**. Iris est la source de vérité pour clients, sites, catalogue, devis, affaires, interventions, contrats et factures. Microsoft 365, la banque et les plateformes de facturation électronique ne sont que des connecteurs. Voir la [vision produit](PRODUCT-VISION-ERP-TECHNIQUE.md), l'[architecture d'instance](ARCHITECTURE-INSTANCE-DEDIEE.md) et le [modèle de droits](MODELE-DROITS-COMPTES.md). Aucune instance n'est déclarée en production : le déploiement et la validation comptable restent des conditions de sortie, pas des tâches acquises.
 
@@ -165,7 +165,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 
 **Périmètre (A1) : option 1, SAV et maintenance.** Clients, sites et contacts, devis, interventions SAV, contrats de maintenance et leurs visites, planning, facturation des interventions et des contrats. Ces écrans existent. Les réponses du 16-10-2026 tranchent les questions bloquantes (A) du tri de ce jour.
 
-**Décidés pour le premier jour** (recommandation A1 acceptée, et A8) : lots 1 à 3, dans l'ordre proposé. **Décidés sur le fond, à placer avant ou après le premier jour** : lots 4 à 6, proposés avant, dans cet ordre, à confirmer par Nelson.
+**Décidés pour le premier jour** (recommandation A1 acceptée, et A8) : lots 1 à 3, dans l'ordre proposé ; lots 4 à 6, dans cet ordre, placés avant le premier jour par Nelson le 21-10-2026 (« Oui », [historique](HISTORIQUE-DECISIONS.md#décisions-du-21-10-2026)).
 
 | Lot | Statut | PR |
 |---|---|---|
@@ -204,7 +204,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
      - terminer une intervention exige un compte rendu signé ; à défaut, un motif est choisi (client absent, refus de signer, signature impossible, autre) et consigné au journal. Précisé le 20-10-2026 : un compte rendu est toujours exigé, seule la signature peut être remplacée par le motif ; le motif « autre » exige une précision écrite courte ; la règle vaut pour le technicien comme pour l'encadrement. **Implémenté** par #268 ;
      - les heures du technicien hors contrat vont dans les coûts SAV, en durée brute sans arrondi, sans effet sur la marge des chantiers ; l'administration voit leur coût de main-d'œuvre (**implémenté** par #257, libellé « Main-d’œuvre cumulée » validé le 20-10-2026) ;
      - la signature dessinée est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé (**implémenté** par #268) ; durée de conservation à confirmer avec le cabinet ;
-     - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**implémenté** par #275 ; périmètre et choix par défaut en section 4). Étendu par la décision de Nelson du 21-10-2026 : il voit ses affectations et celles des chantiers dont il est titulaire (« Des 2 », **à appliquer**) ; le lien public reste ouvert à toute personne qui en a l'adresse.
+     - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**implémenté** par #275 ; périmètre et choix par défaut en section 4). La décision de Nelson du 21-10-2026 l'étend (« Des 2 », **à appliquer** dans sa propre PR) : il verra aussi les affectations des chantiers dont il est titulaire ; le lien public reste ouvert à toute personne qui en a l'adresse.
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent.
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
@@ -270,7 +270,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 
 ### Ordre de travail (proposé, à confirmer par Nelson)
 
-Depuis le 16-10-2026, l'ordre suit le pilote : voir le tableau des lots ci-dessus. Après le pilote, ordre indicatif, à revoir selon les vrais utilisateurs : la facturation électronique (A2) suit l'échéance légale, à confirmer par le cabinet ; puis banque et rapprochement, abonnements et locations (lot (k)), financeurs et télécom, plan commercial (lot (i)), astreintes (lot (j)). La préparation de l'instance pilote (recette métier et sécurité, configuration vide réelle, sauvegarde **et restauration testées**, supervision, validation du cabinet, autorisation explicite de mise en service) reste un préalable à la mise en service ; pas de déploiement automatique.
+Depuis le 16-10-2026, l'ordre suit le pilote : voir le tableau des lots ci-dessus. Ordre retenu par Claude Code après les décisions du 21-10-2026 ([historique](HISTORIQUE-DECISIONS.md#décisions-du-21-10-2026)), choix de mise en œuvre : planning étendu du technicien, lot P0, #179, #181, puis les lots 4, 5 et 6 ; ensuite la matrice D1a, puis la PR C du découpage des écrans. Après le pilote, ordre indicatif, à revoir selon les vrais utilisateurs : la facturation électronique (A2) suit l'échéance légale, à confirmer par le cabinet ; puis banque et rapprochement, abonnements et locations (lot (k)), financeurs et télécom, plan commercial (lot (i)), astreintes (lot (j)). La préparation de l'instance pilote (recette métier et sécurité, configuration vide réelle, sauvegarde **et restauration testées**, supervision, validation du cabinet, autorisation explicite de mise en service) reste un préalable à la mise en service ; pas de déploiement automatique.
 
 ### Chantiers techniques (décision de Nelson du 17-10-2026)
 
@@ -288,17 +288,18 @@ Quatre chantiers techniques, chacun dans sa ou ses PR, selon les règles habitue
      - Outil de comparaison du rendu : implémenté (#209, `npm run comparer:rendu`, 79 étapes) ; il n'est pas lancé par la CI, chaque PR de découpage joint son relevé.
      - PR A, Planning : implémentée (#213), `Planning.tsx` passe de 873 à 406 lignes.
      - PR B, Administration : implémentée (#214), `Admin.tsx` passe de 1 477 à 684 lignes (698 depuis #234).
-     - PR C, fiche chantier : à faire. #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée ; l'écran compte 1 479 lignes et reste le seul au-delà de 800. La PR C vient après le lot pilote 3b (règle du pilote du 19-10-2026, ordre choisi par Claude Code) ; le lot 3 est implémenté depuis #275.
+     - PR C, fiche chantier : à faire. #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée ; l'écran compte 1 479 lignes et reste le seul au-delà de 800. La PR C vient après le lot pilote 3b (règle du pilote du 19-10-2026, ordre choisi par Claude Code) ; le lot 3 est implémenté depuis #275. Depuis les décisions du 21-10-2026, elle suit les lots 4 à 6 et la matrice D1a (ordre retenu par Claude Code, section « Ordre de travail » plus haut).
      - Anomalies relevées, une issue chacune (#202 à #206) : à corriger après les trois déplacements, chacune dans sa PR.
 3. **Droits flexibles et simples à paramétrer** : proposition [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), avec son [inventaire](MODELE-DROITS-INVENTAIRE.md) (permissions élémentaires, périmètres, rôles paramétrables, hiérarchie facultative, modèles « petite équipe » et « équipe avec hiérarchie », migration rôle par rôle à comportement identique). Questions ouvertes arbitrées le 18-10-2026 par délégation de Nelson (section 10 du document). Proposition validée par sa fusion (#182), selon la décision de Nelson du 20-10-2026 (« C’est toi qui fusionne TOUTES les PR »). Parcours de droits : règle 2. Modèle cible (D1 à D4) **prévu**, rien n'en est implémenté. Lot D0 **partiel**, une PR par défaut relevé par l'inventaire : #178 et #180 corrigés (#216, #217), #179 et #181 ouverts, à corriger avant la fin du pilote (décision de Nelson du 21-10-2026).
-4. **Paramétrage plutôt que règles en dur** : proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md), avec son [inventaire](PARAMETRAGE-INVENTAIRE.md) (inventaire des règles classées en déjà paramétrables, à rendre paramétrables, ou à garder dans le code ; assistant de démarrage dans Paramètres). Aucune valeur métier inventée. Questions ouvertes arbitrées le 18-10-2026 par délégation de Nelson (section 6 du document). Proposition validée par sa fusion (#183), selon la décision de Nelson du 20-10-2026 (« C’est toi qui fusionne TOUTES les PR »). **Prévu** : rien n'est implémenté. Lot P0 avant la fin du pilote (décision de Nelson du 21-10-2026) : « il ne doit plus y avoir de noxia groupe dans l’application » ; la page de connexion porte le nom de l'application, IRIS.
+4. **Paramétrage plutôt que règles en dur** : proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md), avec son [inventaire](PARAMETRAGE-INVENTAIRE.md) (inventaire des règles classées en déjà paramétrables, à rendre paramétrables, ou à garder dans le code ; assistant de démarrage dans Paramètres). Aucune valeur métier inventée. Questions ouvertes arbitrées le 18-10-2026 par délégation de Nelson (section 6 du document). Proposition validée par sa fusion (#183), selon la décision de Nelson du 20-10-2026 (« C’est toi qui fusionne TOUTES les PR »). **Prévu** : rien n'est implémenté. Lot P0 avant le premier jour (décision de Nelson du 21-10-2026) : « il ne doit plus y avoir de noxia groupe dans l’application » ; la page de connexion porte le nom de l'application (graphie : choix par défaut du lot P0, à confirmer).
 
 Deux règles permanentes de conception sont ajoutées le même jour à [CLAUDE.md](../CLAUDE.md#règles-permanentes-de-conception-décision-de-nelson-du-17-10-2026) et à [AGENTS.md](../.agents/AGENTS.md) : une nouvelle règle propre au fonctionnement d'une entreprise devient un paramètre, avec une valeur par défaut documentée ; aucun fichier de code applicatif ne dépasse environ 800 lignes. Une troisième, sur les variables d'environnement toujours documentées, s'y ajoute le 20-10-2026 (consigne de Nelson : CLAUDE.md par #263, AGENTS.md par la PR documentaire du 20-10-2026).
 
 ## 3. Questions ouvertes pour Nelson
 
 Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilote, lots (i) et (k)). Restent ouvertes :
-- **Pilote** : les lots 4 à 6 sont livrés avant le premier jour (décision de Nelson du 21-10-2026). Si Microsoft 365 n'est pas prêt, le pilote envoie-t-il ses PDF à la main ?
+- **Pilote** : les lots 4 à 6 sont à livrer avant le premier jour (décision de Nelson du 21-10-2026). Si Microsoft 365 n'est pas prêt, le pilote envoie-t-il ses PDF à la main ?
+- **Lot P5 du paramétrage et lot 6** : le lot 6 passe avant le premier jour (décision du 21-10-2026). P5 (modèle du PDF, libellés, export comptable, identité de l'émetteur copiée et figée à l'émission) l'accompagne-t-il en entier, ou seulement ce que l'envoi exige, le reste venant après le premier jour sauf exigence du cabinet (décision 6 de la proposition de paramétrage) ?
 - **Travaux dans le pilote** : les écrans des chantiers (heures, achats, rentabilité, facture d'affaire) restent-ils ouverts au pilote en l'état, sans lot préalable ?
 - **Lot (i), fait générateur** : réglage unique dans les paramètres généraux (A5, 16-10-2026) ou réglage par plan (14-10-2026) ? Lecture retenue : le réglage général remplace le réglage par plan.
 - **Lot (i), jour de coupure** (montants) : la décision du 14-10-2026 le place dans les options du plan (par exemple le 20). Suit-il le fait générateur dans les paramètres généraux, ou reste-t-il propre à chaque plan ? Un fait générateur survenu le jour même (le 20) se rattache-t-il encore au mois ? « Sinon fin de chantier à mois + 1 » désigne-t-il seulement les faits générateurs postérieurs à la coupure, ou aussi un mode où toute commission se rattache au mois suivant ?
@@ -375,9 +376,9 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
   - une affectation partagée lui montre ses coéquipiers ;
   - la liste des chantiers du planning lui est refusée (403), et non réduite à ses chantiers, puisqu'il ne crée pas d'affectation ;
   - il garde la lecture des types d'événement ;
-  - le lien public du planning reste complet : il montre tout le planning à qui en a l'adresse. **Confirmé** par Nelson le 21-10-2026 : « Lien public a tout le monde disposant de l’adresse ».
+  - le lien public du planning reste complet : il montre tout le planning à qui en a l'adresse. **Confirmé** par Nelson le 21-10-2026 : « Lien public a tout le monde disposant de l’adresse. »
 
-  **Appliqués** (#275), à confirmer.
+  **Appliqués** (#275). Le premier est remplacé et le dernier confirmé par Nelson le 21-10-2026 ; les trois autres restent à confirmer.
 
 **Journal des paramètres et des droits** (lot (a), #133)
 - L'auteur de la création et de la publication des mentions légales, et la création des comptes comptables, sont journalisés. **À appliquer**.
