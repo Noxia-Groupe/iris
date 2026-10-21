@@ -277,3 +277,14 @@ Fusionnés par Claude Code : #246 sur autorisation de Nelson, #249 et #255 par l
 - Lot pilote 3 implémenté, non validé pour mise en service : 3a, 3b-1 à 3b-4 et planning limité (#166, #255, #257, #268, #272, #275). #253 est fermée.
 - #250 (#240) : en pause, en brouillon, jusqu'à la fin du pilote.
 - Questions à Nelson (passation, section 3) : place des lots 4 à 6 avant le premier jour ; planning du technicien (sens de « chargé », lien public) ; #179, #181 et le lot P0 avant la fin du pilote.
+
+## Décisions du 21-10-2026
+
+*Rédigé le 21-10-2026.* Réponses de Nelson, mot pour mot (message de la session de travail), aux quatre questions de la passation posées après la fusion de #275 :
+
+1. **Lots pilotes 4 à 6** (conversion des devis, génération des visites, envoi des documents), à livrer avant le premier jour ? « Oui ». Ils passent avant le premier jour, chacun dans sa PR.
+2. **Planning du technicien** : ses seules affectations, ou aussi celles des chantiers dont il est titulaire ? « Des 2 ». Le choix par défaut de #275 (ses seules affectations) est remplacé : il voit aussi les affectations des chantiers dont il est titulaire. **À appliquer**, dans sa propre PR.
+3. **Lien public du planning** : le restreindre, ou ne pas le communiquer aux techniciens qui ont un compte ? « Lien public a tout le monde disposant de l’adresse ». Le comportement actuel est confirmé : le lien montre tout le planning à quiconque en a l'adresse.
+4. **#179, #181 et le lot P0 du paramétrage avant la fin du pilote ?** « Oui a traiter avant, il ne doit plus y avoir de noxia groupe dans l’application, c’est une application ouverte a toute les entreprise. La page de connexion doit etre au nom de l’application c’est a dire IRIS. » #179, #181 et le lot P0 passent avant la fin du pilote, chacun dans sa PR.
+
+Ordre de travail retenu par Claude Code : planning étendu, lot P0, #179, #181, puis les lots 4, 5 et 6.

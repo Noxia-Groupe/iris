@@ -41,7 +41,7 @@ Iris doit avancer en largeur sur ce dont le premier client a besoin, sans relâc
 
 Ce qui ne change pas : une PR par lot, jamais de push direct sur `main`, l'audit interne, et l'audit indépendant à la demande de Nelson ; une CI verte seule n'autorise aucune fusion (conditions de la décision du 20-10-2026, plus haut) ; Nelson valide les montants avec le cabinet et décide de la mise en production ; Iris reste sa propre source de vérité, et aucune règle de prix, de commission ou de conformité n'est inventée.
 
-**Ordre pendant le pilote** (décision de Nelson du 19-10-2026) : « La prochaine PR fonctionnelle est le lot 3b. Jusqu'à la fin du pilote, un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant. Tout le reste devient une issue, traitée après le pilote. »
+**Ordre pendant le pilote** (décision de Nelson du 19-10-2026) : « La prochaine PR fonctionnelle est le lot 3b. Jusqu'à la fin du pilote, un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant. Tout le reste devient une issue, traitée après le pilote. » Le 21-10-2026, le lot 3 étant implémenté, Nelson a placé les lots pilotes 4 à 6 avant le premier jour, et #179, #181 et le lot P0 du paramétrage avant la fin du pilote ([historique](docs/HISTORIQUE-DECISIONS.md#décisions-du-21-10-2026)).
 
 Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'étiquette s'appelle `suivi-audit` ; l'issue reprend le constat, sa preuve et le correctif proposé, et la PR la cite.
 
