@@ -586,6 +586,8 @@ test('l’écran Devis ne donne le lien vers la fiche du chantier ouvert qu’à
   const admin = await allerSurPageAdmin('/devis');
   const ligneAdmin = admin.locator('li', { hasText: devis.numero });
   await expect(ligneAdmin.getByRole('link', { name: 'voir la fiche' })).toHaveAttribute('href', `/chantiers/${ouvert.id}`);
+  // Un devis converti en chantier reste annulable depuis sa ligne (seul chemin de retour sur l'affaire).
+  await expect(ligneAdmin.getByRole('button', { name: 'Annuler', exact: true })).toBeVisible();
   // Ouvert depuis l'écran Devis, sans titulaire : la liste de l'Administration le signale.
   await admin.goto('/admin', { waitUntil: 'networkidle' });
   const carte = admin.locator('div.p-4').filter({ has: admin.getByRole('link', { name: devis.objet }) });

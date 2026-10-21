@@ -52,6 +52,8 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   await ligne(objetIntervention).getByRole('button', { name: 'Créer l’intervention' }).click();
   const formulaireIntervention = page.getByRole('dialog', { name: 'Créer l’intervention du devis' });
   await expect(formulaireIntervention.getByLabel('Titre')).toHaveValue(objetIntervention);
+  // Priorité par défaut : normale, comme à la création directe.
+  await expect(formulaireIntervention.getByLabel('Priorité')).toHaveValue('NORMALE');
   await formulaireIntervention.getByLabel('Priorité').selectOption('HAUTE');
   await formulaireIntervention.getByLabel('Site').selectOption({ label: 'Facturation — Caen' });
   await formulaireIntervention.getByLabel('Contact').selectOption({ label: `Camille Contact ${suffixe}` });
@@ -79,6 +81,10 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   await formulaireContrat.getByLabel('Titre').fill(`${objetContrat} — contrat`);
   await formulaireContrat.getByLabel('Périodicité (mois)').fill('6');
   await formulaireContrat.getByLabel('Durée prévue (minutes)').fill('90');
+  // Couverture par défaut : hors forfait, l'option la plus restrictive ; le site choisi est transmis.
+  await expect(formulaireContrat.getByLabel('Main-d’œuvre')).toHaveValue('HORS_FORFAIT');
+  await expect(formulaireContrat.getByLabel('Matériel')).toHaveValue('HORS_FORFAIT');
+  await formulaireContrat.getByLabel('Site').selectOption({ label: 'Facturation — Caen' });
   await formulaireContrat.getByLabel('Main-d’œuvre').selectOption('INCLUSE');
   await formulaireContrat.getByLabel('Matériel').selectOption('INCLUS');
   const creationContrat = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/convertir'));
@@ -86,7 +92,7 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   const contratCree = await creationContrat;
   expect(contratCree.status()).toBe(201);
   const [jour, mois, annee] = dateDuJour().split('-');
-  expect(await contratCree.json()).toMatchObject({ titre: `${objetContrat} — contrat`, dateDebut: `${annee}-${mois}-${jour}T00:00:00.000Z`, periodiciteMois: 6, politiqueMateriel: 'INCLUS' });
+  expect(await contratCree.json()).toMatchObject({ titre: `${objetContrat} — contrat`, dateDebut: `${annee}-${mois}-${jour}T00:00:00.000Z`, periodiciteMois: 6, politiqueMateriel: 'INCLUS', site: { nom: 'Facturation' } });
   await expect(ligne(objetContrat)).toContainText('Contrat de maintenance issu de ce devis');
   for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Créer le contrat', 'Annuler']) {
     await expect(ligne(objetContrat).getByRole('button', { name: action, exact: true })).toHaveCount(0);
@@ -127,6 +133,10 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
     await expect(ligneCommercial.getByRole('button', { name: 'Ouvrir le chantier', exact: true })).toBeVisible();
     await expect(ligneCommercial.getByRole('button', { name: 'Créer l’intervention', exact: true })).toHaveCount(0);
     await expect(ligneCommercial.getByRole('button', { name: 'Créer le contrat', exact: true })).toHaveCount(0);
+    // La ligne d'un devis converti dit ce qu'il a créé, sans lien vers une fiche que le commercial ne consulte pas.
+    const ligneConvertie = vueCommercial.locator('li', { hasText: objetIntervention });
+    await expect(ligneConvertie).toContainText('Intervention issue de ce devis.');
+    await expect(ligneConvertie.getByRole('link', { name: 'voir la fiche' })).toHaveCount(0);
   } finally {
     await contexte.close();
   }
