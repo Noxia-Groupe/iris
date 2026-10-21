@@ -30,7 +30,7 @@ test('le directeur commercial, l’assistante commerciale et le comptable n’on
       await page.addInitScript(([token, user]) => {
         localStorage.setItem('token', token as string);
         localStorage.setItem('user', user as string);
-      }, [jetonPour(id), JSON.stringify({ id, name: nom, email: `profil179.${cle}@iris.test`, role, permissions: [] })]);
+      }, [jetonPour(id), JSON.stringify({ id, name: nom, email: `profil179.${cle}.${suffixe}@iris.test`, role, permissions: [] })]);
       await page.goto('/', { waitUntil: 'networkidle' });
       const menu = page.locator('#menu-principal');
       await expect(menu).toContainText(nom);
