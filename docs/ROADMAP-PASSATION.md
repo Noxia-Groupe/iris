@@ -322,6 +322,9 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
   - (montants) le prix d'achat prévu des lignes de devis doit-il alimenter le chantier ouvert (budget matériel prévu, marge estimée), à la place de la moyenne des chantiers terminés ?
   - (montants) les heures vendues d'un chantier additionnent la quantité des lignes de main-d'œuvre, quelle que soit leur unité : une prestation au forfait y compte pour une heure. Convertir par la durée indicative de la fiche, ne compter que les lignes à l'heure, ou garder ce calcul ?
   - la vision veut un devis figé dès son envoi ; le code le fige à la signature, un devis envoyé non signé restant modifiable. Lequel retenir ?
+- **Conversion des devis (lot pilote 4, #281)** (règles métier) :
+  - (a) une affaire ne se convertit qu'une fois, quelle que soit la cible (décision du 14-10-2026 pour le chantier, étendue par #281) ; un devis qui vend une installation et son contrat de maintenance ne crée donc pas les deux. Garder cette règle, ou permettre un chantier et un contrat (ou une intervention) pour la même affaire, ce qui change le modèle (`DevisConversion.dossierId` unique) ?
+  - (b) un devis converti en intervention ou en contrat ne s'annule plus (l'intervention s'annule, le contrat se suspend ou se termine depuis leurs écrans), alors qu'un devis converti en chantier s'annule avec lui. Garder, ou annuler la cible avec le devis ?
 
 ## 4. Choix par défaut, à confirmer
 
@@ -405,6 +408,14 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Réglages d'ouverture réservés à l'administration. **Appliqué** (#129).
 - Le formulaire d'Administration n'ouvre toujours pas de chantier sans conducteur actif. L'API n'est pas modifiée, car l'écran Devis convertit sans titulaire (état actuel conservé). **Appliqué**.
 - L'obligation de commercial ne compte que les commerciaux actifs. **Appliqué à l'écran** ; le serveur compte encore tous les commerciaux.
+
+**Conversion des devis en intervention ou en contrat** (lot pilote 4, #281)
+- Droits de la création directe de la cible, en plus du droit devis : l'intervention par l'administration, ou par un conducteur auquel un super administrateur a accordé individuellement le droit devis (API seulement, l'écran ne propose la conversion qu'à l'administration) ; le contrat par l'administration seule ; aucune clé d'intégration. **Appliqué** (#281).
+- L'intervention reprend le client et l'objet du devis (titre modifiable), à planifier, sans ses lignes ni son montant ; date de demande au jour civil de la société, ou date passée transmise par l'API, comme à la création directe. **Appliqué** (#281).
+- Le contrat reprend le client et l'objet (titre propre possible, de 3 à 200 caractères), actif, première échéance à sa date de début, sans prix. **Appliqué** (#281).
+- Trace : motif « Conversion du devis N (version v). » au journal de la cible, et ligne du devis ; aucun lien depuis la fiche de la cible. **Appliqué** (#281).
+- La facture se crée depuis l'écran Factures, avec l'origine Intervention ou Contrat. **Appliqué** (état actuel).
+- Une seule conversion par affaire, et devis converti en intervention ou en contrat non annulable : appliqués par #281, posés en question (section 3).
 
 **Dates**
 - Date de demande curative : alignée sur les autres dates métier. **À appliquer**.

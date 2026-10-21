@@ -452,7 +452,7 @@ Aucune donnée réelle n'existe (règle 4) : la migration des comptes se limite 
 | Création d'une intervention réservée à l'administration et au conducteur, sans contrôle du périmètre du chantier | `interventions.creer`. Le contrôle du périmètre est un choix « à appliquer » (passation, section 4). |
 | Saisie des heures SAV réservée au technicien affecté | `interventions.sesHeures`, sur « ses dossiers ». |
 | Champs d'ouverture d'un chantier réservés à l'administration à la conversion | `devis.ouvrirChantier`, distinct de `chantiers.reattribuer`. |
-| Conversion d'un devis en intervention ou en contrat (lot pilote 4) : droit devis et droit de création de la cible, en session seulement | `devis.convertir` avec `interventions.creer` pour l'intervention ; avec la création des contrats, réservée à l'administration, pour le contrat. Aucune clé ne crée l'un ou l'autre. |
+| Conversion d'un devis en intervention ou en contrat (lot pilote 4) : droit devis et droit de création de la cible, en session seulement | `devis.convertir` avec `interventions.creer` pour l'intervention ; avec `contrats.gerer`, réservée à l'administration, pour le contrat. Aucune clé ne crée l'un ou l'autre. |
 | Fiche intervenant reliée seulement à un technicien actif, perdue en quittant ce type | Propriété du rôle « peut porter une fiche intervenant » (section 3.5). |
 | Éligibilité au titulariat : le serveur accepte tout compte actif, l'écran ne propose que des conducteurs | Règle actuelle reproduite en D1 ; attribut de rôle « peut être titulaire » en D2 (décision 9). #181 journalise les réattributions dès D0. |
 | Le super administrateur garde le planning quand le module est désactivé | Invariant des modules (8.1). |

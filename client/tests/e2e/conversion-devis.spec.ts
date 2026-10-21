@@ -31,7 +31,8 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
     await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
     return devis;
   };
-  const client = await creerClient('conversion-devis', false);
+  const client = await creerClient('conversion-devis', true);
+  const contact = await envoyer('post', `/clients/${client.id}/contacts`, { prenom: 'Camille', nom: `Contact ${suffixe}` }) as { id: string };
   const objetIntervention = `Dépannage converti ${suffixe}`;
   const objetContrat = `Maintenance convertie ${suffixe}`;
   await devisSigne(client.id, objetIntervention);
@@ -52,11 +53,18 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   const formulaireIntervention = page.getByRole('dialog', { name: 'Créer l’intervention du devis' });
   await expect(formulaireIntervention.getByLabel('Titre')).toHaveValue(objetIntervention);
   await formulaireIntervention.getByLabel('Priorité').selectOption('HAUTE');
+  await formulaireIntervention.getByLabel('Site').selectOption({ label: 'Facturation — Caen' });
+  await formulaireIntervention.getByLabel('Contact').selectOption({ label: `Camille Contact ${suffixe}` });
+  await formulaireIntervention.getByLabel('Date souhaitée').fill('15-12-2099');
+  let envois = 0;
+  page.on('request', (r) => { if (r.method() === 'POST' && r.url().includes('/convertir')) envois += 1; });
   const creationIntervention = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/convertir'));
-  await formulaireIntervention.getByRole('button', { name: 'Créer l’intervention' }).click();
+  // Double envoi : deux soumissions dans le même instant ne font qu'une requête.
+  await formulaireIntervention.evaluate((f: HTMLFormElement) => { f.requestSubmit(); f.requestSubmit(); });
   const interventionCreee = await creationIntervention;
   expect(interventionCreee.status()).toBe(201);
-  expect(await interventionCreee.json()).toMatchObject({ titre: objetIntervention, priorite: 'HAUTE', statut: 'A_PLANIFIER' });
+  expect(await interventionCreee.json()).toMatchObject({ titre: objetIntervention, priorite: 'HAUTE', statut: 'A_PLANIFIER', site: { nom: 'Facturation' }, contact: { id: contact.id }, dateSouhaitee: '2099-12-15T00:00:00.000Z' });
+  expect(envois).toBe(1);
   await expect(formulaireIntervention).toHaveCount(0);
   await expect(ligne(objetIntervention)).toContainText('Intervention issue de ce devis');
   for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Créer le contrat', 'Annuler']) {
@@ -69,10 +77,14 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   await formulaireContrat.getByLabel('Périodicité (mois)').fill('6');
   await formulaireContrat.getByLabel('Durée prévue (minutes)').fill('90');
   await formulaireContrat.getByLabel('Main-d’œuvre').selectOption('INCLUSE');
+  await formulaireContrat.getByLabel('Matériel').selectOption('INCLUS');
   const creationContrat = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/convertir'));
   await formulaireContrat.getByRole('button', { name: 'Créer le contrat' }).click();
   expect((await creationContrat).status()).toBe(201);
   await expect(ligne(objetContrat)).toContainText('Contrat de maintenance issu de ce devis');
+  for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Créer le contrat', 'Annuler']) {
+    await expect(ligne(objetContrat).getByRole('button', { name: action, exact: true })).toHaveCount(0);
+  }
 
   // Refus du serveur : le client a été désactivé ; le message reste dans le formulaire.
   await ligne(objetRefuse).getByRole('button', { name: 'Créer l’intervention' }).click();
@@ -89,7 +101,7 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   await page.goto('/contrats-maintenance', { waitUntil: 'networkidle' });
   const contrat = page.locator('article', { hasText: objetContrat });
   await expect(contrat).toContainText('Tous les 6 mois · 90 min prévues');
-  await expect(contrat).toContainText('main-d’œuvre incluse');
+  await expect(contrat).toContainText('main-d’œuvre incluse · matériel inclus');
 
   // Un commercial, qui a le droit devis, ouvre toujours le chantier, mais ne se voit proposer ni
   // l'intervention ni le contrat, que le serveur lui refuse.

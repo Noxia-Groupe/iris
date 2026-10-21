@@ -124,6 +124,11 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
     const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
     const affectation = await request.patch(`${api}/chantiers/${chantier.id}`, { headers, data: { responsableId: conducteur.id } });
     expect(affectation.ok(), await affectation.text()).toBeTruthy();
+    // Un devis signé, encore à convertir : sa ligne porte toutes les actions de conversion (chantier,
+    // intervention, contrat), qui débordaient à 320 et 375 px avant #281, sans dépendre d'un autre parcours.
+    const aConvertir = await envoyer('post', '/devis', { clientId: client.id, objet: `Contrat de maintenance de la chaufferie collective ${suffixe}`, lignes: [{ designation: 'Visite', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
+    await envoyer('put', `/devis/${aConvertir.id}/statut`, { statut: 'ENVOYE' });
+    await envoyer('post', `/devis/${aConvertir.id}/signature`, { signataire: 'Client E2E', confirme: true });
     // Des listes non vides : une carte ou une ligne trop large n'apparaît qu'avec des données (les
     // actions d'un contrat sortaient de l'écran). Un compte au plan comptable, un contrat, une
     // intervention, une visite de contrat à planifier et une facture brouillon.

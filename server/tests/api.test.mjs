@@ -4853,12 +4853,69 @@ if (!TEST_DATABASE_URL) {
         assert.equal(await prisma.devisConversion.count({ where: { devisId: { in: [avecAcompte.id, cree.body.id] } } }), 0);
       });
 
+      // Un super administrateur peut accorder le droit devis à un conducteur : la conversion suit
+      // alors les droits de la création directe (intervention oui, contrat non).
+      test('un conducteur porteur du droit devis crée l’intervention, jamais le contrat', async () => {
+        const accorde = await request(app).put(`/api/users/${comptes.conducteur.id}/permissions`).set(admin()).send({ permissions: ['devis:read', 'devis:write'] });
+        assert.equal(accorde.status, 200, JSON.stringify(accorde.body));
+        try {
+          const devis = await devisAccepte('TEST Conversion conducteur');
+          const intervention = await convertirEn(devis.id, 'INTERVENTION', { titre: '  TEST Conversion conducteur titrée  ' }, entete('conducteur'));
+          assert.equal(intervention.status, 201, JSON.stringify(intervention.body));
+          assert.equal(intervention.body.titre, 'TEST Conversion conducteur titrée', 'le titre saisi remplace l’objet');
+          const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+          assert.equal(intervention.body.dateDemande, `${jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris')}T00:00:00.000Z`, 'demande datée du jour civil de la société');
+          assert.equal((await prisma.intervention.findUnique({ where: { id: intervention.body.id } })).createdById, comptes.conducteur.id);
+          const autre = await devisAccepte('TEST Conversion conducteur contrat');
+          const contrat = await convertirEn(autre.id, 'CONTRAT', CONTRAT, entete('conducteur'));
+          assert.equal(contrat.status, 403, JSON.stringify(contrat.body));
+          assert.equal(contrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration.');
+          assert.equal(await prisma.devisConversion.count({ where: { devisId: autre.id } }), 0);
+        } finally {
+          const retire = await request(app).put(`/api/users/${comptes.conducteur.id}/permissions`).set(admin()).send({ permissions: [] });
+          assert.equal(retire.status, 200, JSON.stringify(retire.body));
+        }
+      });
+
+      test('une référence d’affaire portée par un chantier, ou une autre version convertie, bloque l’intervention et le contrat', async () => {
+        const devis = await devisAccepte('TEST Conversion référence prise');
+        await prisma.chantier.create({ data: { nom: 'TEST Conversion chantier saisi à la main', client: 'TEST Client cycle', numeroDevis: devis.numero, dateDebut: new Date('2026-10-01T00:00:00.000Z'), budgetGlobalVendu: 0 } });
+        for (const [cible, corps] of [['INTERVENTION', {}], ['CONTRAT', CONTRAT]]) {
+          const refus = await convertirEn(devis.id, cible, corps);
+          assert.equal(refus.status, 409, `${cible} : ${JSON.stringify(refus.body)}`);
+          assert.equal(refus.body.error, `L’affaire ${devis.numero} a déjà un chantier : corrigez la référence de ce chantier avant de convertir le devis.`);
+        }
+        assert.deepEqual(await dossiersCrees('TEST Conversion référence prise'), { interventions: 0, contrats: 0, chantiers: 0 });
+
+        // v2 signée, convertie en chantier puis annulée : v1 redevient la dernière version non
+        // annulée, mais son affaire a déjà été convertie.
+        const premiere = await devisAccepte('TEST Conversion autre version');
+        const revision = await request(app).post(`/api/devis/${premiere.id}/revisions`).set(admin());
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        assert.equal((await request(app).put(`/api/devis/${revision.body.id}/statut`).set(admin()).send({ statut: 'ENVOYE' })).status, 200);
+        assert.equal((await request(app).post(`/api/devis/${revision.body.id}/signature`).set(admin()).send({ signataire: 'TEST Signataire autre version', confirme: true })).status, 201);
+        assert.equal((await convertirEn(revision.body.id, 'CHANTIER')).status, 201);
+        assert.equal((await request(app).post(`/api/devis/${revision.body.id}/annulation`).set(admin()).send({ motif: 'TEST autre version annulée' })).status, 200);
+        for (const [cible, corps] of [['INTERVENTION', {}], ['CONTRAT', CONTRAT]]) {
+          const refus = await convertirEn(premiere.id, cible, corps);
+          assert.equal(refus.status, 409, `${cible} : ${JSON.stringify(refus.body)}`);
+          assert.equal(refus.body.error, 'Une autre version de ce devis a déjà été convertie : chaque affaire n’est convertie qu’une fois. Pour la reprendre, dupliquez le devis.');
+        }
+        assert.equal(await prisma.intervention.count({ where: { titre: 'TEST Conversion autre version' } }), 0);
+        assert.equal(await prisma.contratMaintenance.count({ where: { titre: 'TEST Conversion autre version' } }), 0);
+      });
+
       test('trois conversions simultanées du même devis vers trois cibles : une seule aboutit', async () => {
         const devis = await devisAccepte('TEST Conversion simultanée');
         const reponses = await Promise.all([
           convertirEn(devis.id, 'INTERVENTION'), convertirEn(devis.id, 'CONTRAT', CONTRAT), convertirEn(devis.id, 'CHANTIER'),
         ]);
         assert.deepEqual(reponses.map((reponse) => reponse.status).sort(), [201, 409, 409], JSON.stringify(reponses.map((reponse) => reponse.body.error)));
+        // Les perdantes lisent, sous le verrou du devis, la conversion gagnante : sans ce verrou, une
+        // contrainte unique les refuserait aussi, mais avec un autre message.
+        for (const reponse of reponses.filter((r) => r.status === 409)) {
+          assert.match(reponse.body.error, /^Ce devis a déjà (créé son (intervention|contrat|chantier) : chaque affaire n’est convertie qu’une fois|été converti : chaque affaire n’ouvre qu’un seul chantier)\.$/, reponse.body.error);
+        }
         assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 1);
         const crees = await dossiersCrees('TEST Conversion simultanée');
         assert.equal(crees.interventions + crees.contrats + crees.chantiers, 1, JSON.stringify(crees));

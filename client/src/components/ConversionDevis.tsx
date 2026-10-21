@@ -83,7 +83,7 @@ export default function ConversionDevis({ devis, cible, onFermer, onConverti }: 
       <label className="text-sm font-medium block">Date souhaitée<input name="dateSouhaitee" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA (facultatif)" className="mt-1 w-full border rounded px-3 py-2"/></label>
     </div> : <>
       <div className="grid gap-3 sm:grid-cols-3">
-        <label className="text-sm font-medium block">Date de début<input required name="dateDebut" defaultValue={fuseauConnu ? companyDateInputValue(fuseau) : ''} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" className="mt-1 w-full border rounded px-3 py-2"/></label>
+        <label className="text-sm font-medium block">Date de début<input key={fuseauConnu ? 'fuseau-connu' : 'fuseau-inconnu'} required name="dateDebut" defaultValue={fuseauConnu ? companyDateInputValue(fuseau) : ''} inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" className="mt-1 w-full border rounded px-3 py-2"/></label>
         <label className="text-sm font-medium block">Périodicité (mois)<input required name="periodiciteMois" type="number" min="1" max="60" defaultValue="12" className="mt-1 w-full border rounded px-3 py-2"/></label>
         <label className="text-sm font-medium block">Durée prévue (minutes)<input required name="dureePrevisionnelleMinutes" type="number" min="15" max="1440" defaultValue="60" className="mt-1 w-full border rounded px-3 py-2"/></label>
       </div>
