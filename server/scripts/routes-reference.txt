@@ -114,7 +114,7 @@ PUT /api/intervenants/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab >
 PUT /api/intervenants/:id/compte requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5e61db3bb78c
 DELETE /api/intervenants/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#86e1b7b43b2b
 GET /api/planning/chantiers requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#35c56b70d597
-GET /api/planning/events requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#e1045f6f5a09
+GET /api/planning/events requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#d25ca4de9e46
 POST /api/planning/events requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d20ba39cc1f2
 PATCH /api/planning/events/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#72ed95d3b1f9
 DELETE /api/planning/events/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#59692ae83863
