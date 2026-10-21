@@ -158,3 +158,28 @@ test('la date de début du contrat se remplit quand le fuseau de la société ar
   liberer();
   await expect(formulaire.getByLabel('Date de début')).toHaveValue(dateDuJour());
 });
+
+// À 320 px, une raison sociale insécable se coupe dans l'en-tête du formulaire de conversion au
+// lieu d'élargir la page (troisième audit de #281).
+test('formulaire de conversion à 320 px : une raison sociale insécable se coupe dans l’en-tête', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
+    const reponse = await request[methode](`${api}${path}`, { headers, data });
+    expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
+    return reponse.json();
+  };
+  const client = await creerClient(`SocieteDeMaintenanceDesInstallationsThermiques${Date.now()}`, false);
+  const objet = `En-tête insécable ${Date.now()}`;
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet, lignes: [{ designation: 'Visite', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const page = await allerSurPageAdmin('about:blank');
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto('/devis', { waitUntil: 'networkidle' });
+  await page.locator('li', { hasText: objet }).getByRole('button', { name: 'Créer le contrat', exact: true }).click();
+  const formulaire = page.getByRole('dialog', { name: 'Créer le contrat du devis' });
+  const entete = formulaire.locator('p').first();
+  await expect(entete).toContainText(client.raisonSociale);
+  expect(await entete.evaluate((p) => p.scrollWidth - p.clientWidth), 'texte de l’en-tête hors de sa boîte').toBeLessThanOrEqual(0);
+  expect(await page.evaluate(() => { const m = document.querySelector('main')!; return m.scrollWidth - m.clientWidth; }), 'zone principale élargie').toBeLessThanOrEqual(0);
+});

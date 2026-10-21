@@ -147,9 +147,9 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
 // Chaque affaire n'est convertie qu'une fois, quelle que soit la cible (décision de Nelson du
 // 14-10-2026 pour le chantier ; son extension aux deux autres cibles est posée en question à
 // Nelson, passation section 3 (a)) : un devis déjà converti, un dossier dont une autre version
-// l'est déjà et une référence d'affaire déjà portée par un chantier sont refusés (409). Le verrou du devis fait passer l'une après
-// l'autre deux conversions du même devis ; les contraintes uniques de DevisConversion restent le
-// filet.
+// l'est déjà et une référence d'affaire déjà portée par un chantier sont refusés (409). Le
+// verrou du devis fait passer l'une après l'autre deux conversions du même devis ; les
+// contraintes uniques de DevisConversion restent le filet.
 //
 // L'intervention et le contrat ne se créent que depuis une session, avec les droits de leur
 // création directe : l'encadrement SAV pour l'intervention, l'administration pour le contrat.

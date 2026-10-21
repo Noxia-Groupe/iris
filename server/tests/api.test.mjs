@@ -4931,14 +4931,17 @@ if (!TEST_DATABASE_URL) {
 
       test('la création directe d’une intervention ou d’un contrat garde l’ordre de ses refus', async () => {
         const refus = [
-          ['/api/interventions', { clientId: 'client-inconnu', titre: '' }, 400, 'Le titre de l’intervention est obligatoire.'],
+          ['/api/interventions', { clientId: 'client-inconnu', titre: '', priorite: 'ENORME' }, 400, 'Le titre de l’intervention est obligatoire.'],
           ['/api/interventions', { clientId: 'client-inconnu', titre: 'TEST Ordre', priorite: 'ENORME' }, 400, 'Priorité d’intervention invalide.'],
           ['/api/interventions', { clientId: 'client-inconnu', titre: 'TEST Ordre', siteId: siteEtrangerId, dateSouhaitee: 'demain' }, 404, 'Client introuvable.'],
           ['/api/interventions', { clientId, titre: 'TEST Ordre', siteId: siteEtrangerId, contactId: contactEtrangerId, dateSouhaitee: 'demain' }, 404, 'Site introuvable pour ce client.'],
           ['/api/interventions', { clientId, titre: 'TEST Ordre', contactId: contactEtrangerId, dateSouhaitee: 'demain' }, 404, 'Contact introuvable pour ce client.'],
           ['/api/interventions', { clientId, titre: 'TEST Ordre', dateSouhaitee: 'demain', dateDemande: 'hier' }, 400, 'La date souhaitée doit être valide au format JJ-MM-AAAA.'],
-          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'ab', siteId: siteEtrangerId }, 400, 'Le titre du contrat doit contenir entre 3 et 200 caractères.'],
-          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'TEST Ordre', dateDebut: 'bientôt' }, 400, 'La date de début doit être valide au format JJ-MM-AAAA.'],
+          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'ab', periodiciteMois: 0, dureePrevisionnelleMinutes: 5, dateDebut: 'bientôt', politiqueMainOeuvre: 'TOUT', siteId: siteEtrangerId }, 400, 'Le titre du contrat doit contenir entre 3 et 200 caractères.'],
+          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'TEST Ordre', periodiciteMois: 0, dureePrevisionnelleMinutes: 5, dateDebut: 'bientôt', politiqueMainOeuvre: 'TOUT' }, 400, 'La périodicité doit être comprise entre 1 et 60 mois.'],
+          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'TEST Ordre', dureePrevisionnelleMinutes: 5, dateDebut: 'bientôt', politiqueMainOeuvre: 'TOUT' }, 400, 'La durée prévisionnelle doit être comprise entre 15 et 1 440 minutes.'],
+          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'TEST Ordre', dateDebut: 'bientôt', politiqueMainOeuvre: 'TOUT' }, 400, 'La date de début doit être valide au format JJ-MM-AAAA.'],
+          ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'TEST Ordre', politiqueMainOeuvre: 'TOUT' }, 400, 'La politique de couverture est invalide.'],
           ['/api/contrats-maintenance', { ...CONTRAT, clientId: 'client-inconnu', titre: 'TEST Ordre', siteId: siteEtrangerId }, 404, 'Client introuvable.'],
         ];
         for (const [chemin, corps, code, message] of refus) {
@@ -4976,10 +4979,13 @@ if (!TEST_DATABASE_URL) {
         let reponse;
         await prisma.$transaction(async (tx) => {
           await tx.$queryRaw`SELECT "id" FROM "Devis" WHERE "id" = ${devis.id} FOR UPDATE`;
+          const [{ pid: pidVerrou }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
           reponse = convertirEn(devis.id, 'INTERVENTION').then((r) => r);
           let attente = false;
           for (let tour = 0; tour < 150 && !attente; tour += 1) {
-            attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n > 0;
+            // Seule une session bloquée par cette transaction compte : l'attente d'un autre verrou
+            // dans la même base (autre suite, outil d'administration) ne prouve rien.
+            attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidVerrou}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0;
             if (!attente) await new Promise((r) => setTimeout(r, 20));
           }
           assert.equal(attente, true, 'la conversion attend le verrou du devis');
