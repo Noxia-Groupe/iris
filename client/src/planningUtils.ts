@@ -27,12 +27,16 @@ export interface PlanningEvent {
   intervenants: Intervenant[];
 }
 
-// Lignes de la grille : le technicien ne voit que la sienne, celle de la fiche intervenant reliée à
-// son compte (planning limité à ce dont il est chargé, décision de Nelson du 19-10-2026). Sans fiche
-// reliée, aucune ligne. Les autres comptes voient toute l'équipe.
-export function lignesDuPlanning(intervenants: Intervenant[], technicien: { id?: string } | null): Intervenant[] {
+// Lignes de la grille. Le technicien voit d'abord la sienne, celle de la fiche intervenant reliée à
+// son compte (décision de Nelson du 19-10-2026), puis celles des intervenants présents dans les
+// affectations que le serveur lui envoie pour la semaine : les siennes et celles des chantiers dont il
+// est titulaire (décision du 21-10-2026). Sans fiche reliée ni affectation reçue, aucune ligne. Les
+// autres comptes voient toute l'équipe.
+export function lignesDuPlanning(intervenants: Intervenant[], technicien: { id?: string } | null, evenements: Array<Pick<PlanningEvent, 'intervenants'>> = []): Intervenant[] {
   if (!technicien) return intervenants;
-  return technicien.id ? intervenants.filter((intervenant) => intervenant.userId === technicien.id) : [];
+  const siennes = technicien.id ? intervenants.filter((intervenant) => intervenant.userId === technicien.id) : [];
+  const presents = new Set(evenements.flatMap((ev) => ev.intervenants.map((intervenant) => intervenant.id)));
+  return [...siennes, ...intervenants.filter((intervenant) => presents.has(intervenant.id) && !siennes.includes(intervenant))];
 }
 
 // --- Aides dates (le planning raisonne en jours "YYYY-MM-DD", jamais en heures) ---
