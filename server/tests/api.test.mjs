@@ -281,6 +281,7 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test', 'planning.limite.responsable@iris.test',
+      'd0.181.conducteur.a@iris.test', 'd0.181.conducteur.b@iris.test', 'd0.181.commercial.a@iris.test', 'd0.181.commercial.b@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
@@ -5240,6 +5241,147 @@ if (!TEST_DATABASE_URL) {
       } finally {
         await prisma.planningEvent.deleteMany({ where: { id: libre.body.id } });
         await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
+      }
+    });
+  });
+
+  // #181 (lot D0, placé avant la fin du pilote par Nelson le 21-10-2026) : la réattribution du
+  // titulaire et du commercial, et la case « Encaissé », s'écrivent au journal des saisies du chantier,
+  // dans la même transaction, avec l'auteur, l'avant et l'après ; un enregistrement à l'identique n'en
+  // écrit pas.
+  describe('#181 : réattributions et encaissement journalisés', () => {
+    let admin = {};
+    let adminNom = '';
+    let adminId = '';
+    const comptes = {};
+    const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      ({ name: adminNom, id: adminId } = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } }));
+      for (const [cle, email, role] of [
+        ['conducteurA', 'd0.181.conducteur.a@iris.test', 'CONDUCTEUR_TRAVAUX'],
+        ['conducteurB', 'd0.181.conducteur.b@iris.test', 'CONDUCTEUR_TRAVAUX'],
+        ['commercialA', 'd0.181.commercial.a@iris.test', 'COMMERCIAL'],
+        ['commercialB', 'd0.181.commercial.b@iris.test', 'COMMERCIAL'],
+      ]) comptes[cle] = await prisma.user.create({ data: { email, name: `TEST 181 ${cle}`, role, actif: true } });
+    });
+
+    const creerChantier = (nom) => prisma.chantier.create({ data: {
+      nom: `TEST 181 ${nom} ${Date.now()}`, client: 'TEST Client 181', dateDebut: new Date(), budgetGlobalVendu: 1000,
+      responsableId: comptes.conducteurA.id, commercialId: comptes.commercialA.id,
+    } });
+    const journal = (chantierId) => prisma.journalSaisieChantier.findMany({ where: { chantierId }, orderBy: { createdAt: 'asc' } });
+
+    test('le titulaire et le commercial réattribués s’écrivent au journal, avec l’auteur, l’avant et l’après', async () => {
+      const chantier = await creerChantier('réattributions');
+      const titulaire = (enTete, responsableId) => request(app).patch(`/api/chantiers/${chantier.id}`).set(enTete).send({ responsableId });
+      const commercial = (enTete, commercialId) => request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(enTete).send({ commercialId });
+
+      assert.equal((await titulaire(admin, comptes.conducteurB.id)).status, 200);
+      let entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 1);
+      assert.deepEqual(
+        { cible: entrees[0].cible, cibleId: entrees[0].cibleId, action: entrees[0].action, auteurId: entrees[0].auteurId, auteurNom: entrees[0].auteurNom, avant: entrees[0].avant, apres: entrees[0].apres },
+        { cible: 'CHANTIER', cibleId: chantier.id, action: 'CHANGEMENT_TITULAIRE', auteurId: adminId, auteurNom: adminNom,
+          avant: { responsableId: comptes.conducteurA.id, nom: 'TEST 181 conducteurA' }, apres: { responsableId: comptes.conducteurB.id, nom: 'TEST 181 conducteurB' } },
+      );
+      // À l'identique, ou sans titulaire dans la requête : aucune entrée.
+      assert.equal((await titulaire(admin, comptes.conducteurB.id)).status, 200);
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ nom: `${chantier.nom} renommé` })).status, 200);
+      assert.equal((await journal(chantier.id)).length, 1);
+      // Le titulaire confie lui-même son chantier : il est l'auteur de l'entrée.
+      assert.equal((await titulaire(jeton(comptes.conducteurB), comptes.conducteurA.id)).status, 200);
+      entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 2);
+      assert.equal(entrees[1].auteurId, comptes.conducteurB.id);
+      assert.deepEqual(entrees[1].apres, { responsableId: comptes.conducteurA.id, nom: 'TEST 181 conducteurA' });
+
+      // Commercial : réattribution par le titulaire, puis à l'identique.
+      assert.equal((await commercial(jeton(comptes.conducteurA), comptes.commercialB.id)).status, 200);
+      assert.equal((await commercial(admin, comptes.commercialB.id)).status, 200);
+      entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 3);
+      assert.equal(entrees[2].action, 'CHANGEMENT_COMMERCIAL');
+      assert.equal(entrees[2].auteurId, comptes.conducteurA.id);
+      assert.deepEqual([entrees[2].avant, entrees[2].apres], [
+        { commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }, { commercialId: comptes.commercialB.id, nom: 'TEST 181 commercialB' },
+      ]);
+      // Un refus n'écrit rien.
+      assert.equal((await commercial(admin, comptes.conducteurB.id)).status, 400);
+      assert.equal((await titulaire(admin, '')).status, 400);
+      assert.equal((await journal(chantier.id)).length, 3);
+      // Le journal de la fiche les rend, au même périmètre que la fiche.
+      const lu = await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set(jeton(comptes.conducteurA));
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      assert.deepEqual(lu.body.map((entree) => entree.action).sort(), ['CHANGEMENT_COMMERCIAL', 'CHANGEMENT_TITULAIRE', 'CHANGEMENT_TITULAIRE']);
+      assert.equal((await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set(jeton(comptes.conducteurB))).status, 404);
+    });
+
+    test('la case « Encaissé » s’écrit au journal ; à l’identique, ni entrée ni nouvelle date', async () => {
+      const chantier = await creerChantier('encaissement');
+      const encaisser = (encaisse) => request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(admin).send({ encaisse });
+      const coche = await encaisser(true);
+      assert.equal(coche.status, 200, JSON.stringify(coche.body));
+      assert.equal(coche.body.encaisse, true);
+      const date = coche.body.dateEncaissement;
+      assert.ok(date);
+      let entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 1);
+      assert.deepEqual([entrees[0].action, entrees[0].auteurNom, entrees[0].avant, entrees[0].apres], [
+        'CHANGEMENT_ENCAISSEMENT', adminNom, { encaisse: false, dateEncaissement: null }, { encaisse: true, dateEncaissement: new Date(date).toISOString() },
+      ]);
+      const encore = await encaisser(true);
+      assert.equal(encore.status, 200);
+      assert.equal(encore.body.dateEncaissement, date, 'la date d’encaissement ne bouge pas');
+      assert.equal((await journal(chantier.id)).length, 1);
+      const decoche = await encaisser(false);
+      assert.equal(decoche.status, 200);
+      assert.equal(decoche.body.dateEncaissement, null);
+      entrees = await journal(chantier.id);
+      assert.equal(entrees.length, 2);
+      assert.deepEqual([entrees[1].avant, entrees[1].apres], [{ encaisse: true, dateEncaissement: new Date(date).toISOString() }, { encaisse: false, dateEncaissement: null }]);
+      assert.equal((await request(app).patch('/api/chantiers/00000000-0000-0000-0000-000000000000/encaisse').set(admin).send({ encaisse: true })).status, 404);
+      // Réservée à l'administration, comme avant.
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(jeton(comptes.conducteurA)).send({ encaisse: true })).status, 403);
+      assert.equal((await journal(chantier.id)).length, 2);
+    });
+
+    test('sans la trace, aucun des trois changements n’a lieu', async () => {
+      const chantier = await creerChantier('atomicité');
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_refuser_journal_181"()
+        RETURNS TRIGGER AS $$ BEGIN
+          IF NEW."chantierId" = '${chantier.id}' THEN RAISE EXCEPTION 'journal refusé pour le test'; END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe('CREATE TRIGGER "test_refuser_journal_181" BEFORE INSERT ON "JournalSaisieChantier" FOR EACH ROW EXECUTE FUNCTION "test_refuser_journal_181"()');
+      try {
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ responsableId: comptes.conducteurB.id, nom: `${chantier.nom} bis` })).status, 500);
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id })).status, 500);
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(admin).send({ encaisse: true })).status, 500);
+        const relu = await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } });
+        assert.deepEqual([relu.nom, relu.responsableId, relu.commercialId, relu.encaisse, relu.dateEncaissement], [chantier.nom, comptes.conducteurA.id, comptes.commercialA.id, false, null]);
+        assert.equal((await journal(chantier.id)).length, 0);
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_journal_181" ON "JournalSaisieChantier"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_refuser_journal_181"()');
+      }
+      // Dans l'autre sens : si l'enregistrement du chantier échoue après la trace, la trace s'en va avec lui.
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "test_refuser_chantier_181"()
+        RETURNS TRIGGER AS $$ BEGIN
+          IF NEW."id" = '${chantier.id}' THEN RAISE EXCEPTION 'enregistrement refusé pour le test'; END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe('CREATE TRIGGER "test_refuser_chantier_181" BEFORE UPDATE ON "Chantier" FOR EACH ROW EXECUTE FUNCTION "test_refuser_chantier_181"()');
+      try {
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ responsableId: comptes.conducteurB.id })).status, 500);
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id })).status, 500);
+        assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/encaisse`).set(admin).send({ encaisse: true })).status, 500);
+        assert.equal((await journal(chantier.id)).length, 0);
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_chantier_181" ON "Chantier"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_refuser_chantier_181"()');
       }
     });
   });

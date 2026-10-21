@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { isCommercialLike, COMMERCIAL_OR_FILTER } from '../../droits/roles';
 
@@ -24,6 +25,27 @@ export async function refusCommercial(commercialId: string, actuelId: string | n
   }
   const commercial = await prisma.user.findUnique({ where: { id: commercialId }, select: { role: true, estCommercial: true, actif: true } });
   return !commercial || !isCommercialLike(commercial) || (!commercial.actif && commercialId !== actuelId) ? 'Commercial introuvable.' : null;
+}
+
+// #181 : un changement de titulaire, de commercial ou de la case « Encaissé » s'écrit au journal
+// des saisies du chantier, comme un changement de client, dans la transaction qui l'enregistre :
+// sans la trace, le changement n'a pas lieu. L'auteur et les noms des comptes sont figés à l'acte.
+// Un enregistrement à l'identique n'en écrit pas : c'est à l'appelant de comparer, sur la ligne
+// verrouillée.
+export type ChangementChantier = 'CHANGEMENT_TITULAIRE' | 'CHANGEMENT_COMMERCIAL' | 'CHANGEMENT_ENCAISSEMENT';
+export async function journaliserChangementChantier(
+  tx: Prisma.TransactionClient, chantierId: string, auteur: { id: string; name: string },
+  action: ChangementChantier, avant: Prisma.InputJsonObject, apres: Prisma.InputJsonObject,
+) {
+  await tx.journalSaisieChantier.create({ data: {
+    chantierId, cible: 'CHANTIER', cibleId: chantierId, action, auteurId: auteur.id, auteurNom: auteur.name, avant, apres,
+  } });
+}
+// Un compte tel qu'il figure au journal : son identifiant et son nom à l'acte (null s'il n'y en a pas).
+export async function compteAuJournal(tx: Prisma.TransactionClient, id: string | null): Promise<{ id: string | null; nom: string | null }> {
+  if (!id) return { id: null, nom: null };
+  const compte = await tx.user.findUnique({ where: { id }, select: { name: true } });
+  return { id, nom: compte?.name ?? null };
 }
 
 // Le chantier tel qu'il accompagne un achat ou un pointage : de quoi l'identifier, rien

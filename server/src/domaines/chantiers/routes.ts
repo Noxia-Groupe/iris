@@ -14,7 +14,7 @@ import { decimalToNumber, sommeExacte, differenceExacte } from '../../commun/mon
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { normaliserNumeroDevis, erreurNumeroDevis, numeroDevisDejaPris } from '../devis/metier';
-import { sanitizeTypes, refusTitulaire, refusCommercial } from './metier';
+import { sanitizeTypes, refusTitulaire, refusCommercial, journaliserChangementChantier, compteAuJournal } from './metier';
 import {
   voitRentabilite, REFUS_TECHNICIEN_MODIFICATION, REFUS_TECHNICIEN_COMMERCIAL, REFUS_TECHNICIEN_CLOTURE, peutCloturerChantier,
   chantierSelonRentabilite,
@@ -326,6 +326,16 @@ export function enregistrerRoutesChantiers(app: Express): void {
             } });
           }
         }
+        // Réattribution du titulaire (#181) : relue sur la ligne verrouillée, journalisée si elle change.
+        if (typeof data.responsableId === 'string') {
+          const [ligne] = await tx.$queryRaw<Array<{ responsableId: string | null }>>(Prisma.sql`SELECT "responsableId" FROM "Chantier" WHERE "id" = ${existant.id} FOR UPDATE`);
+          if (ligne.responsableId !== data.responsableId) {
+            const avant = await compteAuJournal(tx, ligne.responsableId);
+            const apres = await compteAuJournal(tx, data.responsableId);
+            await journaliserChangementChantier(tx, existant.id, authUser, 'CHANGEMENT_TITULAIRE',
+              { responsableId: avant.id, nom: avant.nom }, { responsableId: apres.id, nom: apres.nom });
+          }
+        }
         return tx.chantier.update({ where: { id: existant.id }, data });
       });
       res.json(await chantierSelonRentabilite(req, chantier));
@@ -427,10 +437,20 @@ export function enregistrerRoutesChantiers(app: Express): void {
       const refus = await refusCommercial(commercialId ?? '', chantier.commercialId);
       if (refus) return res.status(400).json({ error: refus });
 
-      const updated = await prisma.chantier.update({
-        where: { id: chantier.id },
-        data: { commercialId },
-        include: { commercial: RESPONSABLE_SELECT },
+      // Réattribution journalisée (#181), comparée sur la ligne verrouillée.
+      const updated = await transactionVerifiee(async (tx) => {
+        const [ligne] = await tx.$queryRaw<Array<{ commercialId: string | null }>>(Prisma.sql`SELECT "commercialId" FROM "Chantier" WHERE "id" = ${chantier.id} FOR UPDATE`);
+        if (ligne.commercialId !== commercialId) {
+          const avant = await compteAuJournal(tx, ligne.commercialId);
+          const apres = await compteAuJournal(tx, commercialId);
+          await journaliserChangementChantier(tx, chantier.id, authUser, 'CHANGEMENT_COMMERCIAL',
+            { commercialId: avant.id, nom: avant.nom }, { commercialId: apres.id, nom: apres.nom });
+        }
+        return tx.chantier.update({
+          where: { id: chantier.id },
+          data: { commercialId },
+          include: { commercial: RESPONSABLE_SELECT },
+        });
       });
       res.json(await chantierSelonRentabilite(req, updated));
     } catch (error) {
