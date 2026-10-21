@@ -46,6 +46,7 @@ import { enregistrerRoutesChantiers, enregistrerRoutesAnalyseChantier } from './
 import { enregistrerRoutesSaisiesTravaux } from './src/domaines/chantiers/saisies';
 import { dateDemandeCurative, dateHeuresIntervention } from './src/domaines/interventions/metier';
 import { enregistrerRoutesContrats } from './src/domaines/contrats/routes';
+import { demarrerGenerationAutomatique, executerGenerationVisites, etatGenerationVisites, alerteGenerationVisites } from './src/domaines/contrats/generation';
 import { enregistrerRoutesInterventions } from './src/domaines/interventions/routes';
 import { enregistrerRoutesPlanning } from './src/domaines/planning/routes';
 export { libelleComptableValide } from './src/domaines/comptabilite/metier';
@@ -163,6 +164,8 @@ if (require.main === module) {
     try {
       await initDb();
       await ensureSuperAdmins();
+      // Génération quotidienne des visites de maintenance (lot pilote 5), une fois la base prête.
+      demarrerGenerationAutomatique();
       console.log(`Server running on port ${port}`);
     } catch (error) {
       console.error('[DÉMARRAGE] Initialisation impossible :', error);
@@ -181,6 +184,9 @@ export {
   reglerDelaisConnexion,
   initDb,
   ensureSuperAdmins,
+  executerGenerationVisites,
+  etatGenerationVisites,
+  alerteGenerationVisites,
   clientPayload,
   contactPayload,
   sitePayload,

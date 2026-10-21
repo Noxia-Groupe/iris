@@ -1,0 +1,126 @@
+import { createHmac } from 'node:crypto';
+import { test, expect, dateDuJour } from './fixtures';
+
+const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+
+// Même procédé que les autres parcours : un jeton signé avec le secret du backend jetable
+// ouvre une session dans un rôle non administrateur.
+const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toString('base64url');
+function jetonPour(userId: string) {
+  const corps = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
+  return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
+}
+
+// Jour civil de Paris décalé de quelques jours, au format JJ-MM-AAAA.
+function dansJours(jours: number) {
+  const [jour, mois, annee] = dateDuJour().split('-').map(Number);
+  const date = new Date(Date.UTC(annee, mois - 1, jour + jours));
+  return `${String(date.getUTCDate()).padStart(2, '0')}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${date.getUTCFullYear()}`;
+}
+
+// Lot pilote 5 (décision A9) : l'administration règle l'anticipation de la génération des
+// visites, lance un passage depuis l'écran des contrats, et retrouve la visite créée dans la
+// file des interventions. Le serveur des tests ne lance aucun passage quotidien
+// (GENERATION_VISITES_AUTOMATIQUE=0), ce que l'écran indique.
+test('l’administration règle l’anticipation, lance la génération et retrouve la visite à planifier', async ({ allerSurPageAdmin, creerClient, request, session, page: pageAdmin }) => {
+  test.slow();
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const fenetres: string[] = [];
+  pageAdmin.on('dialog', (dialogue) => { fenetres.push(`${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
+  const suffixe = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const client = await creerClient('generation-visites', false);
+  const titre = `Contrat généré ${suffixe}`;
+  const creation = await request.post(`${api}/contrats-maintenance`, { headers, data: { clientId: client.id, titre, periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: dansJours(5) } });
+  expect(creation.status(), await creation.text()).toBe(201);
+  const contrat = await creation.json() as { id: string };
+  const visitesDuContrat = async () => {
+    const reponse = await request.get(`${api}/interventions`, { headers });
+    expect(reponse.ok(), await reponse.text()).toBeTruthy();
+    return (await reponse.json() as { contratMaintenanceId: string | null; titre: string; statut: string }[]).filter((i) => i.contratMaintenanceId === contrat.id);
+  };
+
+  try {
+    const page = await allerSurPageAdmin('/contrats-maintenance');
+    const panneau = page.getByRole('region', { name: 'Génération automatique des visites' });
+    await expect(panneau.getByText('La génération automatique est arrêtée sur ce serveur')).toBeVisible();
+    const anticipation = panneau.getByLabel('Anticipation (jours avant l’échéance)');
+    const lancer = async () => {
+      const reponse = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith('/contrats-maintenance/generation-visites'));
+      await panneau.getByRole('button', { name: 'Lancer la génération maintenant' }).click();
+      expect((await reponse).status()).toBe(201);
+      await expect(panneau.getByText(/^Génération terminée : \d+ visites? créées?, \d+ échéances? avancées?\.$/)).toBeVisible();
+    };
+
+    // Échéance à 5 jours, anticipation de 2 jours : pas encore de visite.
+    await anticipation.fill('2');
+    await panneau.getByRole('button', { name: 'Enregistrer' }).click();
+    await expect(panneau.getByText('Anticipation enregistrée : 2 jours.')).toBeVisible();
+    await lancer();
+    expect(await visitesDuContrat()).toEqual([]);
+    await expect(panneau.getByText(`lancé par ${session.user.name}`, { exact: false })).toBeVisible();
+
+    // Anticipation de 10 jours : la visite est créée, à planifier, et la liste des contrats suit.
+    await anticipation.fill('10');
+    await panneau.getByRole('button', { name: 'Enregistrer' }).click();
+    await expect(panneau.getByText('Anticipation enregistrée : 10 jours.')).toBeVisible();
+    await lancer();
+    expect(await visitesDuContrat()).toEqual([expect.objectContaining({ titre: `Maintenance préventive — ${titre}`, statut: 'A_PLANIFIER' })]);
+    await expect(panneau.getByRole('alert')).toHaveCount(0);
+
+    // Vide : génération désactivée, le passage manuel n'est plus proposé.
+    await anticipation.fill('');
+    await panneau.getByRole('button', { name: 'Enregistrer' }).click();
+    await expect(panneau.getByText('Génération automatique désactivée.', { exact: true })).toBeVisible();
+    await expect(panneau.getByRole('button', { name: 'Lancer la génération maintenant' })).toBeDisabled();
+
+    await page.goto('/interventions', { waitUntil: 'networkidle' });
+    await expect(page.getByText(`Maintenance préventive — ${titre}`)).toBeVisible();
+  } finally {
+    const retour = await request.put(`${api}/parametres`, { headers, data: { anticipationVisitesJours: 30 } });
+    expect(retour.ok(), await retour.text()).toBeTruthy();
+  }
+  expect(fenetres).toEqual([]);
+});
+
+// L'alerte (dernier passage en échec, interrompu, ou absent depuis avant-hier) est calculée par le
+// serveur, qui la teste ; ici, l'écran la montre à l'administration, en tête des contrats et des
+// interventions, avec un lien vers les contrats.
+test('l’alerte de la génération s’affiche à l’administration sur les interventions et les contrats', async ({ allerSurPageAdmin, page }) => {
+  const texte = 'La génération des visites du 14-10-2026 est en échec (1 erreur) : des visites peuvent manquer. Relancez-la une fois la cause corrigée.';
+  await page.route('**/api/contrats-maintenance/generation-visites', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const reponse = await route.fetch();
+    await route.fulfill({ response: reponse, json: { ...(await reponse.json()), alerte: texte } });
+  });
+  await allerSurPageAdmin('/interventions');
+  const alerte = page.getByRole('alert').filter({ hasText: texte });
+  await expect(alerte).toBeVisible();
+  await alerte.getByRole('link', { name: 'Contrats de maintenance' }).click();
+  await expect(page).toHaveURL(/\/contrats-maintenance$/);
+  await expect(page.getByRole('region', { name: 'Génération automatique des visites' }).getByRole('alert')).toHaveText(texte);
+});
+
+test('un conducteur de travaux ne lit pas l’état de la génération des visites', async ({ request, session, browser }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const suffixe = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const creation = await request.post(`${api}/users`, { headers, data: { email: `generation.conducteur.${suffixe}@iris.test`, name: `Conducteur génération ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' } });
+  expect(creation.status(), await creation.text()).toBe(201);
+  const conducteur = await creation.json() as { id: string; name: string; email: string };
+  const refus = await request.get(`${api}/contrats-maintenance/generation-visites`, { headers: { Authorization: `Bearer ${jetonPour(conducteur.id)}` } });
+  expect(refus.status()).toBe(403);
+  const contexte = await browser.newContext();
+  try {
+    const vue = await contexte.newPage();
+    const lectures: string[] = [];
+    vue.on('request', (requete) => { if (requete.url().includes('/generation-visites')) lectures.push(requete.url()); });
+    await vue.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token as string);
+      localStorage.setItem('user', user as string);
+    }, [jetonPour(conducteur.id), JSON.stringify({ ...conducteur, role: 'CONDUCTEUR_TRAVAUX', permissions: [] })]);
+    await vue.goto('/interventions', { waitUntil: 'networkidle' });
+    await expect(vue.getByRole('heading', { name: 'Interventions SAV' })).toBeVisible();
+    expect(lectures).toEqual([]);
+  } finally {
+    await contexte.close();
+  }
+});

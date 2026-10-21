@@ -1,14 +1,15 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type ContratMaintenance } from '@prisma/client';
 import type { AuthRequest } from '../../http/auth';
 import { valeurJournal } from '../../commun/journal-administration';
-import { dateIsoStricte } from '../../commun/dates';
+import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, dateFrancaise, dateIsoStricte } from '../../commun/dates';
+import { CHANTIER_INTERVENTION_SELECT, auteurJournalSav, journaliserIntervention, prochaineReferenceIntervention } from '../interventions/metier';
 
-export async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE' | 'AVANCEMENT_ECHEANCE', contrat: unknown, avant: unknown, motif?: string) {
-  const user = req.user!;
+// `req` null : écriture de la génération automatique des visites (lot pilote 5).
+export async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest | null, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE' | 'AVANCEMENT_ECHEANCE', contrat: unknown, avant: unknown, motif?: string) {
   const cibleId = String((contrat as { id: string }).id);
   await tx.journalSaisieChantier.create({ data: {
     chantierId: null, interventionId: null, contratMaintenanceId: cibleId, cible: 'CONTRAT', cibleId, action,
-    auteurId: user.id, auteurNom: user.name,
+    ...auteurJournalSav(req),
     avant: avant === null ? Prisma.JsonNull : valeurJournal(avant) as Prisma.InputJsonValue,
     apres: valeurJournal(contrat) as Prisma.InputJsonValue,
     motif: motif || null,
@@ -88,4 +89,52 @@ export function echeanceSuivante(dateDebut: Date, echeanceCourante: Date, period
     + (echeanceCourante.getUTCMonth() - dateDebut.getUTCMonth());
   const periodesEcoulees = Math.max(0, Math.round(moisEcoules / periodiciteMois));
   return ajouterMoisUTC(dateDebut, (periodesEcoulees + 1) * periodiciteMois);
+}
+
+// --- Visites d'un contrat : création et avancement de l'échéance ---
+// Partagés par les actions de l'écran (un administrateur) et la génération automatique
+// (`req` null, lot pilote 5). L'appelant a pris le verrou du contrat et relu son statut.
+export const VISITE_INCLUDE = { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT } as const;
+
+export function visiteDeLEcheance(tx: Prisma.TransactionClient, contrat: Pick<ContratMaintenance, 'id' | 'prochaineEcheance'>) {
+  return tx.intervention.findFirst({
+    where: { contratMaintenanceId: contrat.id, echeanceContrat: contrat.prochaineEcheance },
+    include: VISITE_INCLUDE,
+  });
+}
+
+// Crée l'intervention à planifier de l'échéance courante, numérotée dans l'année civile de la
+// société, avec l'instantané de la couverture du contrat, et l'écrit au journal SAV.
+export async function creerVisiteContrat(tx: Prisma.TransactionClient, contrat: ContratMaintenance, req: AuthRequest | null, motif?: string) {
+  const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
+  const annee = anneeEntreprise(new Date(), societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
+  const reference = await prochaineReferenceIntervention(tx, annee);
+  const intervention = await tx.intervention.create({
+    data: {
+      reference, clientId: contrat.clientId, siteId: contrat.siteId, contratMaintenanceId: contrat.id,
+      echeanceContrat: contrat.prochaineEcheance, titre: `Maintenance préventive — ${contrat.titre}`,
+      description: `Intervention prévisionnelle issue du contrat. Durée prévue : ${contrat.dureePrevisionnelleMinutes} minutes.`,
+      dateSouhaitee: contrat.prochaineEcheance, dateDemande: contrat.prochaineEcheance, createdById: auteurJournalSav(req).auteurId,
+      couvertureContrat: {
+        politiqueMainOeuvre: contrat.politiqueMainOeuvre,
+        politiqueMateriel: contrat.politiqueMateriel,
+        noteCouverture: contrat.noteCouverture,
+      },
+    },
+    include: VISITE_INCLUDE,
+  });
+  await journaliserIntervention(tx, req, 'CREATION_CONTRAT', intervention, undefined, motif);
+  return intervention;
+}
+
+// Passe à l'échéance suivante une fois la visite de l'échéance courante terminée (l'appelant
+// l'a vérifié), et l'écrit au journal du contrat avec son motif.
+export async function avancerEcheanceContrat(
+  tx: Prisma.TransactionClient, contrat: ContratMaintenance, visite: { reference: string }, req: AuthRequest | null, prefixeMotif = '',
+) {
+  const prochaineEcheance = echeanceSuivante(contrat.dateDebut, contrat.prochaineEcheance, contrat.periodiciteMois);
+  const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { prochaineEcheance } });
+  const motif = `${prefixeMotif}Intervention ${visite.reference} terminée : échéance du ${dateFrancaise(contrat.prochaineEcheance)} au ${dateFrancaise(prochaineEcheance)}.`;
+  await journaliserContrat(tx, req, 'AVANCEMENT_ECHEANCE', maj, contrat, motif);
+  return maj;
 }

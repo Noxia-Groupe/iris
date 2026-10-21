@@ -37,6 +37,9 @@ export default defineConfig({
         BREAK_GLASS_EMAIL: 'secours@iris.test',
         BREAK_GLASS_TOKEN: 'jeton-de-secours-e2e-au-moins-32-caracteres',
         SUPERADMIN_EMAILS: 'secours@iris.test',
+        // Aucun passage quotidien de la génération des visites pendant les tests, même à minuit :
+        // les visites ne se créent que par les actions des tests.
+        GENERATION_VISITES_AUTOMATIQUE: '0',
       },
       reuseExistingServer: !process.env.CI,
       stdout: 'pipe',

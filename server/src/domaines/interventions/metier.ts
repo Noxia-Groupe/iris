@@ -20,12 +20,22 @@ export function chantierDuJournalReduit(instantane: Prisma.JsonValue | null): Pr
 }
 
 // --- Interventions SAV natives ---
-export async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRequest, action: string, intervention: unknown, avant?: unknown, motif?: string) {
-  const user = req.user!;
+// Auteur d'une écriture du journal SAV. `null` désigne la génération automatique des visites
+// (lot pilote 5), seule écriture sans compte auteur, au nom ci-dessous (contrainte CHECK en
+// base) ; une requête doit, elle, porter son compte.
+export const AUTEUR_GENERATION_AUTOMATIQUE = 'Génération automatique';
+export function auteurJournalSav(req: AuthRequest | null): { auteurId: string | null; auteurNom: string } {
+  if (req === null) return { auteurId: null, auteurNom: AUTEUR_GENERATION_AUTOMATIQUE };
+  const user = req.user;
+  if (!user) throw new Error('Écriture du journal SAV sans compte auteur.');
+  return { auteurId: user.id, auteurNom: user.name };
+}
+
+export async function journaliserIntervention(tx: Prisma.TransactionClient, req: AuthRequest | null, action: string, intervention: unknown, avant?: unknown, motif?: string) {
   const cibleId = String((intervention as { id: string }).id);
   await tx.journalSaisieChantier.create({ data: {
     chantierId: null, interventionId: cibleId, cible: 'INTERVENTION', cibleId, action,
-    auteurId: user.id, auteurNom: user.name,
+    ...auteurJournalSav(req),
     avant: avant ? valeurJournal(avant) as Prisma.InputJsonValue : undefined,
     apres: valeurJournal(intervention) as Prisma.InputJsonValue, motif: motif || null,
   } });
@@ -169,17 +179,22 @@ export async function lireDetailsIntervention(db: Prisma.TransactionClient, body
   return { description, priorite, siteId, contactId, dateSouhaitee, dateDemande };
 }
 
+// Référence suivante de la séquence de l'année civile de la société (I26-0001), réservée dans la
+// transaction de l'appelant.
+export async function prochaineReferenceIntervention(tx: Prisma.TransactionClient, annee: number) {
+  const sequence = await tx.sequenceIntervention.upsert({
+    where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
+  });
+  return `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+}
+
 // Numérote et crée l'intervention, puis l'écrit au journal SAV, dans la transaction de l'appelant.
-// La référence suit la séquence de l'année civile de la société (I26-0001).
 export async function creerInterventionNumerotee(
   tx: Prisma.TransactionClient, req: AuthRequest, annee: number,
   donnees: { clientId: string; titre: string; chantierId: string | null } & Awaited<ReturnType<typeof lireDetailsIntervention>>,
   motif?: string,
 ) {
-  const sequence = await tx.sequenceIntervention.upsert({
-    where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
-  });
-  const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+  const reference = await prochaineReferenceIntervention(tx, annee);
   const cree = await tx.intervention.create({
     data: { reference, ...donnees, createdById: req.user!.id },
     include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },

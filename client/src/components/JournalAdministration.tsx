@@ -77,6 +77,7 @@ const CHAMPS_JOURNAL: Record<string, string> = {
   tauxAcompteDefaut: 'Acompte par défaut (%)',
   seuilMargeFaible: 'Seuil de marge faible (%)',
   joursSansSaisie: 'Jours sans saisie',
+  anticipationVisitesJours: 'Anticipation des visites (jours)',
   rentabiliteConducteur: 'Rentabilité : conducteur',
   rentabiliteHierarchie: 'Rentabilité : hiérarchie',
   rentabiliteDirecteurs: 'Rentabilité : directeurs',

@@ -47,10 +47,13 @@ Les trois variables `POSTGRES_*` ne reconfigurent pas une base déjà initialis�
 | `SUPERADMIN_EMAILS` | oui sur base vierge | liste vide | aucun superadministrateur n’est créé |
 | `BREAK_GLASS_EMAIL` | non mais recommandé | vide | accès de secours inactif |
 | `BREAK_GLASS_TOKEN` | non mais recommandé | vide | accès de secours inactif; moins de 32 caractères le désactive |
+| `GENERATION_VISITES_AUTOMATIQUE` | non | vide (actif) | `0` arrête sur ce serveur le passage quotidien qui crée les visites des contrats de maintenance ; à laisser vide en production |
 
 `JWT_SECRET` signe les sessions (JWT HS256, 7 jours pour Microsoft, 1 heure pour le secours) et les aperçus d'import du plan comptable. Le générer avec `openssl rand -base64 48`. Le changer déconnecte tout le monde et invalide les aperçus d'import en cours.
 
 `SUPERADMIN_EMAILS` est une liste d’adresses séparées par des virgules. Ces comptes sont créés ou promus à chaque démarrage, et une liste vide ne retire personne. Chaque adresse doit être celle que Microsoft renvoie à la connexion, sans tenir compte des majuscules : le claim `email` du jeton, c'est-à-dire l'adresse de messagerie de l'utilisateur dès qu'il en a une, sinon `preferred_username`, en pratique l'UPN. Si l'adresse de messagerie diffère de l'UPN, c'est elle qui compte. Y ajouter `BREAK_GLASS_EMAIL`.
+
+Le passage quotidien de la génération des visites (lot pilote 5) tourne dans le processus du backend : à son démarrage, puis toutes les 15 minutes, il vérifie si le passage du jour civil de la société a eu lieu. L'anticipation se règle dans l'écran Contrats de maintenance ; vide, la génération automatique est désactivée. `GENERATION_VISITES_AUTOMATIQUE=0` n'arrête que ce passage, sur ce serveur : les tests de bout en bout et l'outil de comparaison du rendu le fixent pour qu'aucune visite ne se crée pendant qu'ils tournent. L'écran l'indique, et le passage lancé à la main reste possible.
 
 Le jeton de secours a les droits d’un superadministrateur. Le générer avec `openssl rand -hex 32` : un jeton en base64 contenant `+` échoue dans le lien `#token=`, qui lit ce caractère comme une espace (#262). Le conserver uniquement dans `server/.env` et dans un gestionnaire de mots de passe, et le changer après usage réel. Le compte de `BREAK_GLASS_EMAIL` doit exister, être actif et avoir le rôle SUPERADMIN. La session dure une heure ; cinq essais manqués en quinze minutes bloquent l'accès. Derrière les proxys de production, ce blocage est aujourd'hui commun à tous les clients, faute de réglage `trust proxy` (#261).
 
