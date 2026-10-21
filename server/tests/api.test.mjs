@@ -4965,6 +4965,31 @@ if (!TEST_DATABASE_URL) {
         const crees = await dossiersCrees('TEST Conversion simultanée');
         assert.equal(crees.interventions + crees.contrats + crees.chantiers, 1, JSON.stringify(crees));
       });
+
+      // Le test précédent ne prouve le verrou que si les trois requêtes se chevauchent. Ici, une
+      // transaction de test tient la ligne du devis : la conversion part, doit attendre ce verrou,
+      // puis la transaction enregistre une conversion concurrente et valide. La requête doit relire
+      // cette conversion sous le verrou et la refuser avec son message, sans rien créer.
+      test('la conversion attend le verrou du devis et relit la conversion validée entre-temps', async () => {
+        const devis = await devisAccepte('TEST Conversion sous verrou');
+        const { dossierId } = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, select: { dossierId: true } });
+        let reponse;
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Devis" WHERE "id" = ${devis.id} FOR UPDATE`;
+          reponse = convertirEn(devis.id, 'INTERVENTION').then((r) => r);
+          let attente = false;
+          for (let tour = 0; tour < 150 && !attente; tour += 1) {
+            attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n > 0;
+            if (!attente) await new Promise((r) => setTimeout(r, 20));
+          }
+          assert.equal(attente, true, 'la conversion attend le verrou du devis');
+          await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType: 'CONTRAT', cibleId: 'TEST-conversion-concurrente' } });
+        }, { timeout: 20000 });
+        const refus = await reponse;
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.equal(refus.body.error, 'Ce devis a déjà créé son contrat : chaque affaire n’est convertie qu’une fois.');
+        assert.deepEqual(await dossiersCrees('TEST Conversion sous verrou'), { interventions: 0, contrats: 0, chantiers: 0 });
+      });
     });
   });
 
