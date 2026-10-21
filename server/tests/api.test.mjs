@@ -5049,6 +5049,32 @@ if (!TEST_DATABASE_URL) {
         assert.equal(refus.body.error, 'Ce devis a déjà créé son contrat : chaque affaire n’est convertie qu’une fois.');
         assert.deepEqual(await dossiersCrees('TEST Conversion sous verrou'), { interventions: 0, contrats: 0, chantiers: 0 });
       });
+
+      // Même procédé pour l'annulation, que la course précédente ne prouve que si les requêtes se
+      // chevauchent : une transaction de test tient la ligne du devis, l'annulation part et doit
+      // attendre ce verrou ; la transaction enregistre alors une conversion en intervention et valide.
+      // L'annulation doit la relire sous le verrou et la refuser (règle (b), posée en question à Nelson).
+      test('l’annulation attend le verrou du devis et relit la conversion en intervention validée entre-temps', async () => {
+        const devis = await devisAccepte('TEST Annulation sous verrou');
+        const { dossierId } = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, select: { dossierId: true } });
+        let reponse;
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Devis" WHERE "id" = ${devis.id} FOR SHARE`;
+          const [{ pid: pidVerrou }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          reponse = request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST annulation sous verrou' }).then((r) => r);
+          let attente = false;
+          for (let tour = 0; tour < 150 && !attente; tour += 1) {
+            attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidVerrou}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0;
+            if (!attente) await new Promise((r) => setTimeout(r, 20));
+          }
+          assert.equal(attente, true, 'l’annulation attend le verrou du devis');
+          await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType: 'INTERVENTION', cibleId: 'TEST-annulation-concurrente' } });
+        }, { timeout: 20000 });
+        const refus = await reponse;
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.equal(refus.body.error, 'Ce devis a créé une intervention : il ne s’annule plus. Annulez l’intervention depuis sa fiche si elle ne doit pas avoir lieu.');
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ACCEPTE');
+      });
     });
   });
 
