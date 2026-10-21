@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { test, expect, dateDuJour } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
@@ -18,6 +18,14 @@ function dansJours(jours: number) {
   return `${String(date.getUTCDate()).padStart(2, '0')}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${date.getUTCFullYear()}`;
 }
 
+// Même jour civil un an plus tard (le 29-02 devient le 28-02), comme l'échéance suivante d'un
+// contrat annuel.
+function dansUnAn(jjmmaaaa: string) {
+  const [jour, mois, annee] = jjmmaaaa.split('-').map(Number);
+  const dernier = new Date(Date.UTC(annee + 1, mois, 0)).getUTCDate();
+  return `${String(Math.min(jour, dernier)).padStart(2, '0')}-${String(mois).padStart(2, '0')}-${annee + 1}`;
+}
+
 // Lot pilote 5 (décision A9) : l'administration règle l'anticipation de la génération des
 // visites, lance un passage depuis l'écran des contrats, et retrouve la visite créée dans la
 // file des interventions. Le serveur des tests ne lance aucun passage quotidien
@@ -33,6 +41,23 @@ test('l’administration règle l’anticipation, lance la génération et retro
   const creation = await request.post(`${api}/contrats-maintenance`, { headers, data: { clientId: client.id, titre, periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: dansJours(5) } });
   expect(creation.status(), await creation.text()).toBe(201);
   const contrat = await creation.json() as { id: string };
+  // Second contrat, échu aujourd'hui, dont la visite est déjà terminée : le passage avance son
+  // échéance d'un an, et la liste des contrats doit le montrer.
+  const titreTermine = `Contrat visite terminée ${suffixe}`;
+  const creationTermine = await request.post(`${api}/contrats-maintenance`, { headers, data: { clientId: client.id, titre: titreTermine, periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: dateDuJour() } });
+  expect(creationTermine.status(), await creationTermine.text()).toBe(201);
+  const contratTermine = await creationTermine.json() as { id: string };
+  const visite = await request.post(`${api}/contrats-maintenance/${contratTermine.id}/generer-intervention`, { headers });
+  expect(visite.status(), await visite.text()).toBe(201);
+  const visiteId = (await visite.json() as { id: string }).id;
+  for (const statut of ['PLANIFIEE', 'EN_COURS']) {
+    const transition = await request.patch(`${api}/interventions/${visiteId}/statut`, { headers, data: { statut } });
+    expect(transition.ok(), await transition.text()).toBeTruthy();
+  }
+  const compteRendu = await request.post(`${api}/interventions/${visiteId}/rapports`, { headers, data: { contenu: 'Visite réalisée.', cleEnvoi: randomUUID() } });
+  expect(compteRendu.status(), await compteRendu.text()).toBe(201);
+  const fin = await request.patch(`${api}/interventions/${visiteId}/statut`, { headers, data: { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' } });
+  expect(fin.ok(), await fin.text()).toBeTruthy();
   const visitesDuContrat = async () => {
     const reponse = await request.get(`${api}/interventions`, { headers });
     expect(reponse.ok(), await reponse.text()).toBeTruthy();
@@ -55,8 +80,11 @@ test('l’administration règle l’anticipation, lance la génération et retro
     await anticipation.fill('2');
     await panneau.getByRole('button', { name: 'Enregistrer' }).click();
     await expect(panneau.getByText('Anticipation enregistrée : 2 jours.')).toBeVisible();
+    const carteTermine = page.locator('article').filter({ has: page.getByRole('heading', { name: titreTermine }) });
+    await expect(carteTermine).toContainText(`Échéance : ${dateDuJour()}`);
     await lancer();
     expect(await visitesDuContrat()).toEqual([]);
+    await expect(carteTermine).toContainText(`Échéance : ${dansUnAn(dateDuJour())}`);
     await expect(panneau.getByText(`lancé par ${session.user.name}`, { exact: false })).toBeVisible();
 
     // Anticipation de 10 jours : la visite est créée, à planifier, et la liste des contrats suit.
