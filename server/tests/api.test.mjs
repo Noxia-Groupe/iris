@@ -7,6 +7,7 @@
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import test, { after, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
@@ -510,6 +511,61 @@ if (!TEST_DATABASE_URL) {
   // Chaque scénario possède son commercial et son chantier : les autres coûts du harnais ne
   // peuvent pas masquer une régression financière. Le barème global réglé à 10 % ne produit
   // aucune commission : sans plan commercial, il n'y en a pas (décision du 17-10-2026).
+  // Lot P0 (décision de Nelson du 21-10-2026) : les barèmes et les primes d'une société, insérés par
+  // la migration 20260904210000, sont vidés ; une valeur déjà saisie par un super administrateur reste.
+  describe('Lot P0 : règles de rémunération sans valeurs de société', () => {
+    const MIGRATION = readFileSync(new URL('../prisma/migrations/20261021090000_remuneration_sans_valeurs_societe/migration.sql', import.meta.url), 'utf8');
+    const INSEREES = {
+      baremeStandard: [{ plafond: 20000, taux: 16 }, { plafond: 30000, taux: 20 }, { plafond: null, taux: 25 }],
+      baremeReduit: [{ plafond: 20000, taux: 8 }, { plafond: 30000, taux: 10 }, { plafond: null, taux: 12.5 }],
+      objectifCaMensuel: 70000, primeObjectifCa: 450, objectifMargeMensuel: 17000, primeObjectifMarge: 450, primeSuiviAdministratif: 250,
+    };
+    const lire = async (client) => {
+      const ligne = await client.parametresRemuneration.findUniqueOrThrow({ where: { id: 'singleton' } });
+      return {
+        baremeStandard: ligne.baremeStandard, baremeReduit: ligne.baremeReduit, libelleBaremeReduit: ligne.libelleBaremeReduit,
+        objectifCaMensuel: Number(ligne.objectifCaMensuel), primeObjectifCa: Number(ligne.primeObjectifCa),
+        objectifMargeMensuel: Number(ligne.objectifMargeMensuel), primeObjectifMarge: Number(ligne.primeObjectifMarge),
+        primeSuiviAdministratif: Number(ligne.primeSuiviAdministratif),
+      };
+    };
+
+    test('la base migrée ne garde aucune des valeurs insérées', async () => {
+      const ligne = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
+      if (!ligne) return; // Installation sans ligne : les règles neutres s'appliquent (getReglesRemuneration).
+      const actuelles = await lire(prisma);
+      for (const [champ, valeur] of Object.entries(INSEREES)) assert.notDeepEqual(actuelles[champ], valeur, champ);
+    });
+
+    test('la migration vide chaque valeur insérée et garde une valeur déjà saisie', async () => {
+      const avant = await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } });
+      const ANNULATION = new Error('annulation volontaire du test');
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const donnees = { ...INSEREES, libelleBaremeReduit: 'TEST Libellé conservé' };
+        await tx.parametresRemuneration.upsert({ where: { id: 'singleton' }, update: donnees, create: { id: 'singleton', ...donnees } });
+        assert.equal(await tx.$executeRawUnsafe(MIGRATION), 1);
+        assert.deepEqual(await lire(tx), {
+          baremeStandard: [], baremeReduit: [], libelleBaremeReduit: 'TEST Libellé conservé',
+          objectifCaMensuel: 0, primeObjectifCa: 0, objectifMargeMensuel: 0, primeObjectifMarge: 0, primeSuiviAdministratif: 0,
+        });
+        // Une valeur saisie depuis : seule celle restée identique à l'insertion est vidée.
+        await tx.parametresRemuneration.update({ where: { id: 'singleton' }, data: { ...INSEREES, baremeStandard: [{ plafond: null, taux: 10 }], primeObjectifCa: 99 } });
+        assert.equal(await tx.$executeRawUnsafe(MIGRATION), 1);
+        const apres = await lire(tx);
+        assert.deepEqual(apres.baremeStandard, [{ plafond: null, taux: 10 }]);
+        assert.equal(apres.primeObjectifCa, 99);
+        assert.deepEqual(apres.baremeReduit, []);
+        assert.equal(apres.objectifCaMensuel, 0);
+        assert.equal(apres.primeSuiviAdministratif, 0);
+        // Rejouée sur des valeurs déjà vidées ou saisies, elle ne touche plus rien.
+        assert.equal(await tx.$executeRawUnsafe(MIGRATION), 0);
+        throw ANNULATION;
+      }), (erreur) => erreur === ANNULATION);
+      // La transaction annulée laisse la ligne telle qu'elle était.
+      assert.deepEqual(await prisma.parametresRemuneration.findUnique({ where: { id: 'singleton' } }), avant);
+    });
+  });
+
   describe('Archivage Travaux : coûts, marge, et aucune commission sans plan commercial', () => {
     for (const scenario of [
       { nom: 'achat', chemin: '/api/achats', cible: 'ACHAT', cout: 120,

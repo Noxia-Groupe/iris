@@ -243,7 +243,7 @@ remplacer — voir [`docs/ACCES-SANS-MICROSOFT.md`](docs/ACCES-SANS-MICROSOFT.md
 - Frontend : React / Vite
 - Base : PostgreSQL 16 (dockerisé)
 - Déploiement : Docker Compose sur VPS CommercePro 46.202.129.169
-- Réseaux : `noxia-network` + `nginx-proxy` (NPM) + `backup-net` (pgBackWeb)
+- Réseaux : `iris-network` + `nginx-proxy` (NPM) + `backup-net` (pgBackWeb)
 
 ## Propriété
 Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtiennent un accès à leur instance sans accès au code source. Chaque client dispose de son propre déploiement et de sa propre base de données ; aucune donnée métier n'est partagée entre sociétés.
