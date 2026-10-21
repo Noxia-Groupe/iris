@@ -23,10 +23,10 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
     return reponse.json();
   };
   const suffixe = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-  const devisSigne = async (clientId: string, objet: string) => {
+  const devisSigne = async (clientId: string, objet: string, extra: object = {}) => {
     const devis = await envoyer('post', '/devis', { clientId, objet, lignes: [
       { designation: 'Visite', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 150, tauxTva: 20 },
-    ] }) as { id: string };
+    ], ...extra }) as { id: string };
     await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
     await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
     return devis;
@@ -37,6 +37,9 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   const objetContrat = `Maintenance convertie ${suffixe}`;
   await devisSigne(client.id, objetIntervention);
   await devisSigne(client.id, objetContrat);
+  // Signé, mais son acompte n'est pas constaté : ni chantier, ni intervention, ni contrat proposés.
+  const objetAcompte = `Acompte attendu ${suffixe}`;
+  await devisSigne(client.id, objetAcompte, { acompteExige: true });
   const clientInactif = await creerClient('conversion-devis-inactif', false);
   const objetRefuse = `Conversion refusée ${suffixe}`;
   await devisSigne(clientInactif.id, objetRefuse);
@@ -47,6 +50,10 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   pageAdmin.on('dialog', (dialogue) => { fenetres.push(`${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
   const page = await allerSurPageAdmin('/devis');
   const ligne = (objet: string) => page.locator('li', { hasText: objet });
+  await expect(ligne(objetAcompte)).toContainText('exigé avant conversion du devis');
+  for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Créer le contrat']) {
+    await expect(ligne(objetAcompte).getByRole('button', { name: action, exact: true })).toHaveCount(0);
+  }
 
   // Intervention : à planifier, reliée au devis, sans autre conversion possible.
   await ligne(objetIntervention).getByRole('button', { name: 'Créer l’intervention' }).click();
@@ -103,6 +110,11 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   const formulaireRefuse = page.getByRole('dialog', { name: 'Créer l’intervention du devis' });
   await formulaireRefuse.getByRole('button', { name: 'Créer l’intervention' }).click();
   await expect(formulaireRefuse.getByRole('alert')).toHaveText('Le client de ce devis est désactivé : l’intervention ne peut pas être créée. Réactivez d’abord sa fiche.');
+  // Après un refus, le même formulaire renvoie bien la demande.
+  const nouvelEnvoi = page.waitForRequest((r) => r.method() === 'POST' && r.url().includes('/convertir'), { timeout: 10_000 });
+  await formulaireRefuse.getByRole('button', { name: 'Créer l’intervention' }).click();
+  await nouvelEnvoi;
+  await expect(formulaireRefuse.getByRole('alert')).toHaveText('Le client de ce devis est désactivé : l’intervention ne peut pas être créée. Réactivez d’abord sa fiche.');
   await formulaireRefuse.getByRole('button', { name: 'Annuler' }).click();
   await expect(formulaireRefuse).toHaveCount(0);
   await expect(ligne(objetRefuse).getByRole('button', { name: 'Créer l’intervention' })).toBeVisible();
@@ -115,30 +127,36 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   await expect(contrat).toContainText('Tous les 6 mois · 90 min prévues');
   await expect(contrat).toContainText('main-d’œuvre incluse · matériel inclus');
 
-  // Un commercial, qui a le droit devis, ouvre toujours le chantier, mais ne se voit proposer ni
-  // l'intervention ni le contrat, que le serveur lui refuse.
-  const creation = await request.post(`${api}/users`, { headers, data: { email: `conversion.commercial.${suffixe}@iris.test`, name: `Commercial conversion ${suffixe}`, role: 'COMMERCIAL' } });
-  expect(creation.status(), await creation.text()).toBe(201);
-  const commercial = await creation.json() as { id: string; name: string; email: string };
-  const contexte = await browser.newContext();
-  try {
-    const vueCommercial = await contexte.newPage();
-    vueCommercial.on('dialog', (dialogue) => { fenetres.push(`${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
-    await vueCommercial.addInitScript(([token, user]) => {
-      localStorage.setItem('token', token as string);
-      localStorage.setItem('user', user as string);
-    }, [jetonPour(commercial.id), JSON.stringify({ ...commercial, role: 'COMMERCIAL', permissions: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'] })]);
-    await vueCommercial.goto('/devis', { waitUntil: 'networkidle' });
-    const ligneCommercial = vueCommercial.locator('li', { hasText: objetRefuse });
-    await expect(ligneCommercial.getByRole('button', { name: 'Ouvrir le chantier', exact: true })).toBeVisible();
-    await expect(ligneCommercial.getByRole('button', { name: 'Créer l’intervention', exact: true })).toHaveCount(0);
-    await expect(ligneCommercial.getByRole('button', { name: 'Créer le contrat', exact: true })).toHaveCount(0);
-    // La ligne d'un devis converti dit ce qu'il a créé, sans lien vers une fiche que le commercial ne consulte pas.
-    const ligneConvertie = vueCommercial.locator('li', { hasText: objetIntervention });
-    await expect(ligneConvertie).toContainText('Intervention issue de ce devis.');
-    await expect(ligneConvertie.getByRole('link', { name: 'voir la fiche' })).toHaveCount(0);
-  } finally {
-    await contexte.close();
+  // Un commercial ou une assistante commerciale, qui ont le droit devis, ouvrent toujours le
+  // chantier, mais ne se voient proposer ni l'intervention ni le contrat, que le serveur leur refuse.
+  for (const [role, cle] of [['COMMERCIAL', 'commercial'], ['ASSISTANTE_COMMERCIALE', 'assistante']] as const) {
+    const creation = await request.post(`${api}/users`, { headers, data: { email: `conversion.${cle}.${suffixe}@iris.test`, name: `Conversion ${cle} ${suffixe}`, role } });
+    expect(creation.status(), await creation.text()).toBe(201);
+    const compte = await creation.json() as { id: string; name: string; email: string };
+    const contexte = await browser.newContext();
+    try {
+      const vueCommercial = await contexte.newPage();
+      vueCommercial.on('dialog', (dialogue) => { fenetres.push(`${role} ${dialogue.type()} : ${dialogue.message()}`); void dialogue.dismiss(); });
+      await vueCommercial.addInitScript(([token, user]) => {
+        localStorage.setItem('token', token as string);
+        localStorage.setItem('user', user as string);
+      }, [jetonPour(compte.id), JSON.stringify({ ...compte, role, permissions: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read'] })]);
+      await vueCommercial.goto('/devis', { waitUntil: 'networkidle' });
+      const ligneCommercial = vueCommercial.locator('li', { hasText: objetRefuse });
+      await expect(ligneCommercial.getByRole('button', { name: 'Ouvrir le chantier', exact: true }), role).toBeVisible();
+      await expect(ligneCommercial.getByRole('button', { name: 'Créer l’intervention', exact: true }), role).toHaveCount(0);
+      await expect(ligneCommercial.getByRole('button', { name: 'Créer le contrat', exact: true }), role).toHaveCount(0);
+      // La ligne d'un devis converti dit ce qu'il a créé, sans lien vers une fiche ou une liste
+      // que ces comptes ne consultent pas.
+      const ligneConvertie = vueCommercial.locator('li', { hasText: objetIntervention });
+      await expect(ligneConvertie, role).toContainText('Intervention issue de ce devis.');
+      await expect(ligneConvertie.getByRole('link', { name: 'voir la fiche' }), role).toHaveCount(0);
+      const ligneContrat = vueCommercial.locator('li', { hasText: objetContrat });
+      await expect(ligneContrat, role).toContainText('Contrat de maintenance issu de ce devis.');
+      await expect(ligneContrat.getByRole('link', { name: 'voir les contrats' }), role).toHaveCount(0);
+    } finally {
+      await contexte.close();
+    }
   }
   expect(fenetres).toEqual([]);
 });

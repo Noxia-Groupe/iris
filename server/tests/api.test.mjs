@@ -284,13 +284,14 @@ if (!TEST_DATABASE_URL) {
       'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test', 'planning.limite.responsable@iris.test',
       'd0.181.conducteur.a@iris.test', 'd0.181.conducteur.b@iris.test', 'd0.181.conducteur.c@iris.test', 'd0.181.commercial.a@iris.test', 'd0.181.commercial.b@iris.test',
       'd0.179.directeur.commercial@iris.test', 'd0.179.assistante.commerciale@iris.test', 'd0.179.comptable@iris.test', 'd0.179.conducteur@iris.test', 'd0.179.commercial@iris.test', 'd0.179.admin@iris.test',
+      'conversion4.admin@iris.test',
       'planning.limite.titulaire@iris.test', 'planning.limite.coequipier@iris.test', 'planning.limite.titulaire.sansfiche@iris.test', 'planning.limite.autre.titulaire@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
       'garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test',
       'conversion4.commercial@iris.test', 'conversion4.conducteur@iris.test', 'conversion4.assistante@iris.test', 'conversion4.comptable@iris.test',
-      'conversion4.directeur.commercial@iris.test', 'conversion4.directeur@iris.test',
+      'conversion4.directeur.commercial@iris.test', 'conversion4.directeur@iris.test', 'conversion4.responsable@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
@@ -4699,11 +4700,14 @@ if (!TEST_DATABASE_URL) {
           ['commercial', 'COMMERCIAL', 'conversion4.commercial@iris.test'], ['conducteur', 'CONDUCTEUR_TRAVAUX', 'conversion4.conducteur@iris.test'],
           ['assistante', 'ASSISTANTE_COMMERCIALE', 'conversion4.assistante@iris.test'], ['comptable', 'COMPTABLE', 'conversion4.comptable@iris.test'],
           ['directeurCommercial', 'DIRECTEUR_COMMERCIAL', 'conversion4.directeur.commercial@iris.test'], ['directeur', 'DIRECTEUR', 'conversion4.directeur@iris.test'],
+          ['responsable', 'RESPONSABLE', 'conversion4.responsable@iris.test'],
         ]) {
           comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Conversion ${cle}`, role } });
         }
         siteId = (await prisma.clientSite.create({ data: { clientId, nom: 'TEST Site conversion', adresse: '1 rue du Devis', codePostal: '69001', ville: 'Lyon' } })).id;
         contactId = (await prisma.clientContact.create({ data: { clientId, nom: 'TEST Contact conversion' } })).id;
+        // Administrateur (ADMIN), distinct du super administrateur de la session de secours.
+        comptes.admin = await prisma.user.upsert({ where: { email: 'conversion4.admin@iris.test' }, update: { role: 'ADMIN', actif: true, permissions: [] }, create: { email: 'conversion4.admin@iris.test', name: 'TEST Conversion admin', role: 'ADMIN' } });
         const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST Client conversion étranger' } });
         siteEtrangerId = (await prisma.clientSite.create({ data: { clientId: autreClient.id, nom: 'TEST Site étranger', adresse: '2 rue Ailleurs', codePostal: '75001', ville: 'Paris' } })).id;
         contactEtrangerId = (await prisma.clientContact.create({ data: { clientId: autreClient.id, nom: 'TEST Contact étranger' } })).id;
@@ -4714,7 +4718,8 @@ if (!TEST_DATABASE_URL) {
         // Un chantier du même client transmis par le corps n'est pas rattaché : la conversion crée
         // une intervention hors affaire, comme le dit sa ligne.
         const chantierDuClient = await prisma.chantier.create({ data: { nom: 'TEST Conversion chantier non rattaché', client: 'TEST Client cycle', clientId, dateDebut: new Date('2026-10-01T00:00:00.000Z'), budgetGlobalVendu: 0 } });
-        const cree = await convertirEn(devis.id, 'INTERVENTION', { titre: '   ', siteId, contactId, priorite: 'HAUTE', dateSouhaitee: '15-12-2099', description: '  TEST Description de la demande  ', chantierId: chantierDuClient.id });
+        // Par un administrateur (ADMIN), et non par le super administrateur de la session de secours.
+        const cree = await convertirEn(devis.id, 'INTERVENTION', { titre: '   ', siteId, contactId, priorite: 'HAUTE', dateSouhaitee: '15-12-2099', description: '  TEST Description de la demande  ', chantierId: chantierDuClient.id }, entete('admin'));
         assert.equal(cree.status, 201, JSON.stringify(cree.body));
         assert.match(cree.body.reference, /^I\d{2}-\d{4}$/);
         assert.equal(cree.body.titre, 'TEST Conversion en intervention', 'un titre blanc laisse l’objet du devis en titre');
@@ -4797,7 +4802,8 @@ if (!TEST_DATABASE_URL) {
         const tropLong = await convertirEn(autre.id, 'CONTRAT', CONTRAT);
         assert.equal(tropLong.status, 400, JSON.stringify(tropLong.body));
         assert.equal(tropLong.body.error, 'Le titre du contrat doit contenir entre 3 et 200 caractères.');
-        const titre = await convertirEn(autre.id, 'CONTRAT', { ...CONTRAT, titre: '  TEST Contrat titré  ' });
+        // Par un administrateur (ADMIN) : le contrat est réservé à l'administration, pas au seul super administrateur.
+        const titre = await convertirEn(autre.id, 'CONTRAT', { ...CONTRAT, titre: '  TEST Contrat titré  ' }, entete('admin'));
         assert.equal(titre.status, 201, JSON.stringify(titre.body));
         assert.equal(titre.body.titre, 'TEST Contrat titré');
       });
@@ -4813,13 +4819,16 @@ if (!TEST_DATABASE_URL) {
         // Le conducteur crée des interventions, mais n'a pas le droit devis.
         assert.equal((await convertirEn(devis.id, 'INTERVENTION', {}, entete('conducteur'))).status, 403);
         // Porteurs du droit devis hors de l'encadrement SAV et de l'administration : l'assistante
-        // commerciale, le comptable et le directeur commercial l'ont par défaut ; le directeur, s'il
-        // lui est accordé. Ils ne créent ni intervention ni contrat. Par la création directe, même
-        // code ; seul le directeur y reçoit le message de blockCommercial (MODELE-DROITS-CIBLE, D1a).
-        await prisma.user.update({ where: { id: comptes.directeur.id }, data: { permissions: ['devis:read', 'devis:write'] } });
+        // commerciale, le comptable et le directeur commercial l'ont par défaut ; le directeur et le
+        // responsable, s'il leur est accordé. Ils ne créent ni intervention ni contrat. Par la création
+        // directe, même code ; seul le directeur y reçoit le message de blockCommercial (D1a).
+        for (const compte of ['directeur', 'responsable']) {
+          await prisma.user.update({ where: { id: comptes[compte].id }, data: { permissions: ['devis:read', 'devis:write'] } });
+        }
         for (const [compte, messageDirect] of [
           ['assistante', 'Création réservée à l’encadrement SAV.'], ['comptable', 'Création réservée à l’encadrement SAV.'],
           ['directeurCommercial', 'Création réservée à l’encadrement SAV.'], ['directeur', 'Accès non autorisé pour un compte directeur.'],
+          ['responsable', 'Création réservée à l’encadrement SAV.'],
         ]) {
           const intervention = await convertirEn(devis.id, 'INTERVENTION', {}, entete(compte));
           assert.equal(intervention.status, 403, `${compte} : ${JSON.stringify(intervention.body)}`);
@@ -4838,10 +4847,12 @@ if (!TEST_DATABASE_URL) {
           assert.equal(parCle.status, 403, `${cible} : ${JSON.stringify(parCle.body)}`);
           assert.equal(parCle.body.error, 'Une intervention ou un contrat ne se crée depuis un devis que dans une session de l’application.');
         }
-        for (const champ of ['responsableId', 'commercialId', 'types']) {
-          const refus = await convertirEn(devis.id, 'INTERVENTION', { [champ]: champ === 'types' ? [] : comptes.conducteur.id });
-          assert.equal(refus.status, 400, `${champ} : ${JSON.stringify(refus.body)}`);
-          assert.equal(refus.body.error, 'Le titulaire, le commercial et les types ne s’attribuent qu’à l’ouverture d’un chantier.');
+        for (const [cible, corps] of [['INTERVENTION', {}], ['CONTRAT', CONTRAT]]) {
+          for (const champ of ['responsableId', 'commercialId', 'types']) {
+            const refus = await convertirEn(devis.id, cible, { ...corps, [champ]: champ === 'types' ? [] : comptes.conducteur.id });
+            assert.equal(refus.status, 400, `${cible} ${champ} : ${JSON.stringify(refus.body)}`);
+            assert.equal(refus.body.error, 'Le titulaire, le commercial et les types ne s’attribuent qu’à l’ouverture d’un chantier.');
+          }
         }
         assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 0);
         assert.deepEqual(await dossiersCrees('TEST Conversion réservée'), { interventions: 0, contrats: 0, chantiers: 0 });
@@ -5052,28 +5063,34 @@ if (!TEST_DATABASE_URL) {
 
       // Même procédé pour l'annulation, que la course précédente ne prouve que si les requêtes se
       // chevauchent : une transaction de test tient la ligne du devis, l'annulation part et doit
-      // attendre ce verrou ; la transaction enregistre alors une conversion en intervention et valide.
-      // L'annulation doit la relire sous le verrou et la refuser (règle (b), posée en question à Nelson).
-      test('l’annulation attend le verrou du devis et relit la conversion en intervention validée entre-temps', async () => {
-        const devis = await devisAccepte('TEST Annulation sous verrou');
-        const { dossierId } = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, select: { dossierId: true } });
-        let reponse;
-        await prisma.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT "id" FROM "Devis" WHERE "id" = ${devis.id} FOR SHARE`;
-          const [{ pid: pidVerrou }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
-          reponse = request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST annulation sous verrou' }).then((r) => r);
-          let attente = false;
-          for (let tour = 0; tour < 150 && !attente; tour += 1) {
-            attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidVerrou}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0;
-            if (!attente) await new Promise((r) => setTimeout(r, 20));
-          }
-          assert.equal(attente, true, 'l’annulation attend le verrou du devis');
-          await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType: 'INTERVENTION', cibleId: 'TEST-annulation-concurrente' } });
-        }, { timeout: 20000 });
-        const refus = await reponse;
-        assert.equal(refus.status, 409, JSON.stringify(refus.body));
-        assert.equal(refus.body.error, 'Ce devis a créé une intervention : il ne s’annule plus. Annulez l’intervention depuis sa fiche si elle ne doit pas avoir lieu.');
-        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ACCEPTE');
+      // attendre ce verrou ; la transaction enregistre alors une conversion en intervention, puis en
+      // contrat, et valide. L'annulation doit la relire sous le verrou et la refuser (règle (b),
+      // posée en question à Nelson) : chacun des deux refus a sa propre lecture à prouver.
+      test('l’annulation attend le verrou du devis et relit la conversion en intervention ou en contrat validée entre-temps', async () => {
+        for (const [cible, message] of [
+          ['INTERVENTION', 'Ce devis a créé une intervention : il ne s’annule plus. Annulez l’intervention depuis sa fiche si elle ne doit pas avoir lieu.'],
+          ['CONTRAT', 'Ce devis a créé un contrat de maintenance : il ne s’annule plus. Suspendez ou terminez le contrat depuis la liste des contrats.'],
+        ]) {
+          const devis = await devisAccepte(`TEST Annulation sous verrou ${cible}`);
+          const { dossierId } = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, select: { dossierId: true } });
+          let reponse;
+          await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "id" FROM "Devis" WHERE "id" = ${devis.id} FOR SHARE`;
+            const [{ pid: pidVerrou }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+            reponse = request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST annulation sous verrou' }).then((r) => r);
+            let attente = false;
+            for (let tour = 0; tour < 150 && !attente; tour += 1) {
+              attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidVerrou}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0;
+              if (!attente) await new Promise((r) => setTimeout(r, 20));
+            }
+            assert.equal(attente, true, `${cible} : l’annulation attend le verrou du devis`);
+            await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType: cible, cibleId: `TEST-annulation-concurrente-${cible}` } });
+          }, { timeout: 20000 });
+          const refus = await reponse;
+          assert.equal(refus.status, 409, `${cible} : ${JSON.stringify(refus.body)}`);
+          assert.equal(refus.body.error, message);
+          assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ACCEPTE');
+        }
       });
     });
   });
