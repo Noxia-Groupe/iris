@@ -16,7 +16,7 @@ import {
   CHANTIER_INTERVENTION_SELECT, chantierDuJournalReduit, journaliserIntervention, exposerIntervention, estEncadrementCoutIntervention,
   chargerInterventionCout, interventionCoutEligible, interventionHeuresEligible, dateHeuresIntervention, estConflitTransactionCout, verrouillerContexteCout, heureOperationnelleTechnicien,
   journaliserCoutIntervention, totalHeuresInterventionAuCentime, getInterventionFilterForUser, synchroniserAffectationsIntervention,
-  dateDemandeCurative,
+  lireDetailsIntervention, creerInterventionNumerotee, SaisieInterventionInvalide, PRIORITES_INTERVENTION,
 } from './metier';
 import {
   RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereInvalide, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
@@ -39,27 +39,14 @@ export function enregistrerRoutesInterventions(app: Express): void {
     try {
       const titre = String(req.body?.titre || '').trim();
       const clientId = String(req.body?.clientId || '');
-      const description = req.body?.description == null ? null : String(req.body.description).trim() || null;
       const priorite = String(req.body?.priorite || 'NORMALE');
       if (!titre) return res.status(400).json({ error: 'Le titre de l’intervention est obligatoire.' });
-      if (!['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'].includes(priorite)) return res.status(400).json({ error: 'Priorité d’intervention invalide.' });
+      if (!PRIORITES_INTERVENTION.includes(priorite)) return res.status(400).json({ error: 'Priorité d’intervention invalide.' });
       const client = await prisma.client.findFirst({ where: { id: clientId, actif: true }, select: { id: true } });
       if (!client) return res.status(404).json({ error: 'Client introuvable.' });
-      const siteId = req.body?.siteId ? String(req.body.siteId) : null;
-      const contactId = req.body?.contactId ? String(req.body.contactId) : null;
       const chantierId = req.body?.chantierId ? String(req.body.chantierId) : null;
-      if (siteId && !await prisma.clientSite.findFirst({ where: { id: siteId, clientId }, select: { id: true } })) {
-        return res.status(404).json({ error: 'Site introuvable pour ce client.' });
-      }
-      if (contactId && !await prisma.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
-        return res.status(404).json({ error: 'Contact introuvable pour ce client.' });
-      }
-      const dateSouhaitee = req.body?.dateSouhaitee ? dateIsoStricte(req.body.dateSouhaitee) : null;
-      if (req.body?.dateSouhaitee && !dateSouhaitee) return res.status(400).json({ error: 'La date souhaitée doit être valide au format JJ-MM-AAAA.' });
       const societe = await getCompanySettings();
-      const dateDemande = dateDemandeCurative(req.body?.dateDemande, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
-      if (!dateDemande) return res.status(400).json({ error: 'La date de demande doit être valide au format JJ-MM-AAAA et ne peut pas être future.' });
-      if (dateSouhaitee && dateSouhaitee < dateDemande) return res.status(400).json({ error: 'La date souhaitée ne peut pas précéder la date de demande.' });
+      const details = await lireDetailsIntervention(prisma, req.body ?? {}, clientId, societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
       const annee = anneeEntreprise(new Date(), societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
       const intervention = await transactionVerifiee(async (tx) => {
         // Le chantier rattaché doit être lié à la fiche de ce client (clientId), et non à un libellé
@@ -71,20 +58,12 @@ export function enregistrerRoutesInterventions(app: Express): void {
         if (chantierId && !(await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} AND "annuleLe" IS NULL FOR SHARE`)).length) {
           throw new ChantierInterventionIntrouvable();
         }
-        const sequence = await tx.sequenceIntervention.upsert({
-          where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
-        });
-        const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-        const cree = await tx.intervention.create({
-          data: { reference, clientId, siteId, contactId, chantierId, titre, description, priorite, dateSouhaitee, dateDemande, createdById: req.user!.id },
-          include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
-        });
-        await journaliserIntervention(tx, req, 'CREATION', cree);
-        return cree;
+        return creerInterventionNumerotee(tx, req, annee, { clientId, titre, chantierId, ...details });
       });
       res.status(201).json(decimalToNumber(exposerIntervention(intervention)));
     } catch (error) {
       if (error instanceof ChantierInterventionIntrouvable) return res.status(404).json({ error: 'Chantier introuvable pour ce client.' });
+      if (error instanceof SaisieInterventionInvalide) return res.status(error.status).json({ error: error.message });
       console.error('Erreur création intervention SAV', error);
       res.status(500).json({ error: 'Erreur lors de la création de l’intervention.' });
     }

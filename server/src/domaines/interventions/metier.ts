@@ -140,3 +140,50 @@ export function dateDemandeCurative(value: unknown, fuseauHoraire: string, insta
   const date = dateIsoStricte(value);
   return date && dateSeuleEnJourCivil(date) <= aujourdHuiEntreprise(fuseauHoraire, instant) ? date : null;
 }
+
+// Champs facultatifs d'une intervention SAV, lus de la même façon à sa création directe et à la
+// conversion d'un devis (lot pilote 4) : description, priorité, site et contact du client, dates.
+// Un refus porte son code HTTP (400 pour une saisie invalide, 404 pour un site ou un contact
+// étranger au client).
+export class SaisieInterventionInvalide extends Error {
+  constructor(readonly status: 400 | 404, message: string) { super(message); }
+}
+export const PRIORITES_INTERVENTION = ['BASSE', 'NORMALE', 'HAUTE', 'URGENTE'];
+export async function lireDetailsIntervention(db: Prisma.TransactionClient, body: Record<string, unknown>, clientId: string, fuseauHoraire: string) {
+  const description = body.description == null ? null : String(body.description).trim() || null;
+  const priorite = String(body.priorite || 'NORMALE');
+  if (!PRIORITES_INTERVENTION.includes(priorite)) throw new SaisieInterventionInvalide(400, 'Priorité d’intervention invalide.');
+  const siteId = body.siteId ? String(body.siteId) : null;
+  const contactId = body.contactId ? String(body.contactId) : null;
+  if (siteId && !await db.clientSite.findFirst({ where: { id: siteId, clientId }, select: { id: true } })) {
+    throw new SaisieInterventionInvalide(404, 'Site introuvable pour ce client.');
+  }
+  if (contactId && !await db.clientContact.findFirst({ where: { id: contactId, clientId }, select: { id: true } })) {
+    throw new SaisieInterventionInvalide(404, 'Contact introuvable pour ce client.');
+  }
+  const dateSouhaitee = body.dateSouhaitee ? dateIsoStricte(body.dateSouhaitee) : null;
+  if (body.dateSouhaitee && !dateSouhaitee) throw new SaisieInterventionInvalide(400, 'La date souhaitée doit être valide au format JJ-MM-AAAA.');
+  const dateDemande = dateDemandeCurative(body.dateDemande, fuseauHoraire);
+  if (!dateDemande) throw new SaisieInterventionInvalide(400, 'La date de demande doit être valide au format JJ-MM-AAAA et ne peut pas être future.');
+  if (dateSouhaitee && dateSouhaitee < dateDemande) throw new SaisieInterventionInvalide(400, 'La date souhaitée ne peut pas précéder la date de demande.');
+  return { description, priorite, siteId, contactId, dateSouhaitee, dateDemande };
+}
+
+// Numérote et crée l'intervention, puis l'écrit au journal SAV, dans la transaction de l'appelant.
+// La référence suit la séquence de l'année civile de la société (I26-0001).
+export async function creerInterventionNumerotee(
+  tx: Prisma.TransactionClient, req: AuthRequest, annee: number,
+  donnees: { clientId: string; titre: string; chantierId: string | null } & Awaited<ReturnType<typeof lireDetailsIntervention>>,
+  motif?: string,
+) {
+  const sequence = await tx.sequenceIntervention.upsert({
+    where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
+  });
+  const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
+  const cree = await tx.intervention.create({
+    data: { reference, ...donnees, createdById: req.user!.id },
+    include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
+  });
+  await journaliserIntervention(tx, req, 'CREATION', cree, undefined, motif);
+  return cree;
+}

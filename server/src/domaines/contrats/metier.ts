@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { AuthRequest } from '../../http/auth';
 import { valeurJournal } from '../../commun/journal-administration';
+import { dateIsoStricte } from '../../commun/dates';
 
 export async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE' | 'AVANCEMENT_ECHEANCE', contrat: unknown, avant: unknown, motif?: string) {
   const user = req.user!;
@@ -32,6 +33,37 @@ export function lirePolitiqueCouverture(body: Record<string, unknown>, defaults?
   else return null;
   if (!POLITIQUES_MAIN_OEUVRE.includes(politiqueMainOeuvre) || !POLITIQUES_MATERIEL.includes(politiqueMateriel) || (noteCouverture !== null && noteCouverture.length > 1000)) return null;
   return { politiqueMainOeuvre, politiqueMateriel, noteCouverture };
+}
+
+// Saisie d'un contrat de maintenance, lue de la même façon à sa création directe et à la
+// conversion d'un devis (lot pilote 4) : titre, périodicité, durée prévisionnelle, date de
+// début et politique de couverture. Le premier champ invalide est refusé (400).
+export class SaisieContratInvalide extends Error {}
+export function lireSaisieContrat(body: Record<string, unknown>) {
+  const titre = typeof body.titre === 'string' ? body.titre.trim() : '';
+  const periodiciteMois = Number(body.periodiciteMois);
+  const dureePrevisionnelleMinutes = Number(body.dureePrevisionnelleMinutes);
+  const dateDebut = dateIsoStricte(body.dateDebut);
+  const couverture = lirePolitiqueCouverture(body);
+  if (titre.length < 3 || titre.length > 200) throw new SaisieContratInvalide('Le titre du contrat doit contenir entre 3 et 200 caractères.');
+  if (!Number.isInteger(periodiciteMois) || periodiciteMois < 1 || periodiciteMois > 60) throw new SaisieContratInvalide('La périodicité doit être comprise entre 1 et 60 mois.');
+  if (!Number.isInteger(dureePrevisionnelleMinutes) || dureePrevisionnelleMinutes < 15 || dureePrevisionnelleMinutes > 1440) throw new SaisieContratInvalide('La durée prévisionnelle doit être comprise entre 15 et 1 440 minutes.');
+  if (!dateDebut) throw new SaisieContratInvalide('La date de début doit être valide au format JJ-MM-AAAA.');
+  if (!couverture) throw new SaisieContratInvalide('La politique de couverture est invalide.');
+  return { titre, periodiciteMois, dureePrevisionnelleMinutes, dateDebut, ...couverture };
+}
+
+// Crée le contrat, actif, première échéance à sa date de début, et l'écrit au journal, dans la
+// transaction de l'appelant.
+export async function creerContratMaintenance(
+  tx: Prisma.TransactionClient, req: AuthRequest, donnees: { clientId: string; siteId: string | null } & ReturnType<typeof lireSaisieContrat>, motif?: string,
+) {
+  const cree = await tx.contratMaintenance.create({
+    data: { ...donnees, prochaineEcheance: donnees.dateDebut, createdById: req.user!.id },
+    include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
+  });
+  await journaliserContrat(tx, req, 'CREATION', cree, null, motif);
+  return cree;
 }
 
 // Tous les parcours qui changent le cycle contractualisé prennent ce verrou avant de

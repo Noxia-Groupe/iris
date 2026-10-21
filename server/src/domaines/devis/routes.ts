@@ -10,13 +10,15 @@ import type { ApiRequest } from '../../http/cles-api';
 import { requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { routeMixte } from '../../http/routes-mixtes';
-import { FUSEAU_HORAIRE_PAR_DEFAUT, aujourdHuiEntreprise, dateIsoStricte } from '../../commun/dates';
+import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, aujourdHuiEntreprise, dateIsoStricte } from '../../commun/dates';
 import { decimalToNumber, centimes } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { type CatalogueFamily, catalogueFamily, catalogueModels } from '../catalogue/metier';
 import { sanitizeTypes, refusTitulaire, refusCommercial } from '../chantiers/metier';
+import { SaisieInterventionInvalide, creerInterventionNumerotee, estEncadrementCoutIntervention, exposerIntervention, lireDetailsIntervention } from '../interventions/metier';
+import { SaisieContratInvalide, creerContratMaintenance, lireSaisieContrat } from '../contrats/metier';
 import {
   DevisSaisieError, DevisConflitError, DevisDroitError, devisPayload, NATURE_DEVIS_PAR_FAMILLE, devisPourLecteur, resoudreLignesDevis,
   devisInclude, contenuDevisSigne, copieLigneDevis, verrouillerDevis, acompteDevisPayload, nouveauNumeroDevis,
@@ -111,11 +113,12 @@ const TRANSITIONS_DEVIS: Record<string, string[]> = {
   ANNULE: [],
 };
 
-// Un devis dont le chantier existe déjà est figé : sa seule évolution possible est
-// l'annulation, qui passe par sa propre route.
-function refusStatutFige(devis: { statut: string; conversion?: unknown }): string | null {
+// Un devis converti est figé : celui qui a ouvert un chantier ne peut plus qu'être annulé, par
+// sa propre route ; celui qui a créé une intervention ou un contrat ne change plus (lot pilote 4).
+function refusStatutFige(devis: { statut: string; conversion?: { cibleType: string } | null }): string | null {
   if (devis.statut === 'ANNULE') return 'Ce devis est annulé : son statut ne peut plus changer.';
-  if (devis.conversion) return 'Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus.';
+  if (devis.conversion?.cibleType === 'CHANTIER') return 'Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus.';
+  if (devis.conversion) return 'Ce devis est déjà converti : son statut ne change plus.';
   return null;
 }
 const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
@@ -137,13 +140,20 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
   res.json(devisPourLecteur(req, decimalToNumber(maj)));
 } catch (error) { devisErreur(res, error); } };
 
-// Une conversion ne démarre qu'après acceptation. Phase 5 cible le chantier, déjà natif ;
-// les cibles intervention, contrat et facture seront activées par leurs modules respectifs.
+// Une conversion ne démarre qu'après acceptation. Elle ouvre le chantier de l'affaire, ou, depuis
+// le lot pilote 4 (décision A7), crée son intervention SAV ou son contrat de maintenance, sans
+// ressaisie du client ni de l'objet. La facture reste créée depuis l'écran Factures.
 //
-// Chaque affaire a son chantier, un seul (décision de Nelson du 14-10-2026) : un devis déjà
-// converti, un dossier dont une autre version l'est déjà et une référence d'affaire déjà portée
-// par un chantier sont refusés (409). Le verrou du devis fait passer l'une après l'autre deux
-// conversions du même devis ; les contraintes uniques de DevisConversion restent le filet.
+// Chaque affaire n'est convertie qu'une fois, quelle que soit la cible (décision de Nelson du
+// 14-10-2026 pour le chantier, étendue aux deux autres cibles, choix par défaut à confirmer) : un
+// devis déjà converti, un dossier dont une autre version l'est déjà et une référence d'affaire
+// déjà portée par un chantier sont refusés (409). Le verrou du devis fait passer l'une après
+// l'autre deux conversions du même devis ; les contraintes uniques de DevisConversion restent le
+// filet.
+//
+// L'intervention et le contrat ne se créent que depuis une session, avec les droits de leur
+// création directe : l'encadrement SAV pour l'intervention, l'administration pour le contrat.
+// Aucune clé d'intégration ne crée l'un ou l'autre, ni par cette route ni ailleurs.
 //
 // Depuis l'Administration, la même conversion ouvre le chantier avec son titulaire, son
 // commercial, ses types et sa date de début. Ces choix relèvent de la fiche, que seuls
@@ -152,6 +162,20 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
 // ensuite depuis sa fiche.
 const CHAMPS_OUVERTURE_CHANTIER = ['responsableId', 'commercialId', 'types', 'dateDebut'];
 const REFUS_DOUBLE_CONVERSION = 'Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier.';
+type CibleConversion = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT';
+const CIBLES_CONVERSION: CibleConversion[] = ['CHANTIER', 'INTERVENTION', 'CONTRAT'];
+const LIBELLES_CIBLE: Record<CibleConversion, { ouvrir: string; pasEncore: string; pas: string; dossier: string }> = {
+  CHANTIER: { ouvrir: 'ouvrir de chantier', pasEncore: 'le chantier ne peut pas encore être ouvert', pas: 'le chantier ne peut pas être ouvert', dossier: 'son chantier' },
+  INTERVENTION: { ouvrir: 'créer d’intervention', pasEncore: 'l’intervention ne peut pas encore être créée', pas: 'l’intervention ne peut pas être créée', dossier: 'son intervention' },
+  CONTRAT: { ouvrir: 'créer de contrat', pasEncore: 'le contrat ne peut pas encore être créé', pas: 'le contrat ne peut pas être créé', dossier: 'son contrat' },
+};
+const cibleConnue = (valeur: string): CibleConversion => (CIBLES_CONVERSION as string[]).includes(valeur) ? valeur as CibleConversion : 'CHANTIER';
+function refusDejaConverti(existante: string, cible: CibleConversion): string {
+  if (existante === 'CHANTIER' && cible === 'CHANTIER') return REFUS_DOUBLE_CONVERSION;
+  return `Ce devis a déjà créé ${LIBELLES_CIBLE[cibleConnue(existante)].dossier} : chaque affaire n’est convertie qu’une fois.`;
+}
+// Le titulaire, le commercial et les types n'existent que sur un chantier.
+const CHAMPS_CHANTIER_SEUL = ['responsableId', 'commercialId', 'types'];
 async function ouvertureChantier(body: Record<string, unknown>): Promise<{ responsableId?: string; commercialId?: string | null; types?: string[]; dateDebut?: string }> {
   const ouverture: { responsableId?: string; commercialId?: string | null; types?: string[]; dateDebut?: string } = {};
   if ('responsableId' in body) {
@@ -178,16 +202,26 @@ async function ouvertureChantier(body: Record<string, unknown>): Promise<{ respo
 }
 const convertirDevis: express.RequestHandler = async (req, res) => { try {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const cible = String(body.cible || '');
-  if (cible !== 'CHANTIER') throw new DevisSaisieError('Cible de conversion non disponible.');
-  if (CHAMPS_OUVERTURE_CHANTIER.some(cle => cle in body) && ((req as ApiRequest).apiKey || !isAdminRole((req as AuthRequest).user?.role))) {
+  const valeurCible = String(body.cible || '');
+  if (!(CIBLES_CONVERSION as string[]).includes(valeurCible)) throw new DevisSaisieError('Cible de conversion non disponible.');
+  const cible = valeurCible as CibleConversion;
+  const auteur = (req as AuthRequest).user;
+  if (cible === 'CHANTIER' && CHAMPS_OUVERTURE_CHANTIER.some(cle => cle in body) && ((req as ApiRequest).apiKey || !isAdminRole(auteur?.role))) {
     return void res.status(403).json({ error: 'Seule l’administration choisit le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche.' });
   }
-  const ouverture = await ouvertureChantier(body);
+  if (cible !== 'CHANTIER') {
+    if ((req as ApiRequest).apiKey || !auteur) return void res.status(403).json({ error: 'Une intervention ou un contrat ne se crée depuis un devis que dans une session de l’application.' });
+    if (cible === 'INTERVENTION' && !estEncadrementCoutIntervention(auteur.role)) return void res.status(403).json({ error: 'Création réservée à l’encadrement SAV.' });
+    if (cible === 'CONTRAT' && !isAdminRole(auteur.role)) return void res.status(403).json({ error: 'La création d’un contrat de maintenance est réservée à l’administration.' });
+    if (CHAMPS_CHANTIER_SEUL.some(cle => cle in body)) throw new DevisSaisieError('Le titulaire, le commercial et les types ne s’attribuent qu’à l’ouverture d’un chantier.');
+  }
+  const libelles = LIBELLES_CIBLE[cible];
+  const ouverture = cible === 'CHANTIER' ? await ouvertureChantier(body) : {};
   // Sans date choisie, le chantier commence le jour civil de la société (décision de Nelson du
   // 14-10-2026), enregistré en date-seule comme une date saisie, et non à l'instant UTC.
   const societe = await getCompanySettings();
-  const debutParDefaut = `${aujourdHuiEntreprise(societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)}T00:00:00.000Z`;
+  const fuseau = societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+  const debutParDefaut = `${aujourdHuiEntreprise(fuseau)}T00:00:00.000Z`;
   const resultat = await transactionVerifiee(async tx => {
     // Verrou du devis, comme pour sa modification, sa révision, sa signature, son statut, son
     // acompte et son annulation : ces écritures et deux conversions simultanées du même devis
@@ -197,22 +231,25 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     if (!await verrouillerDevis(tx, paramId(req))) throw new DevisSaisieError('Devis introuvable.');
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { client: true, conversion: true, signature: true, lignes: true } });
     if (!devis) throw new DevisSaisieError('Devis introuvable.');
-    if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est annulé : il ne peut plus ouvrir de chantier.');
+    if (devis.statut === 'ANNULE') throw new DevisSaisieError(`Ce devis est annulé : il ne peut plus ${libelles.ouvrir}.`);
     const versionPlusRecente = await tx.devis.findFirst({ where: { dossierId: devis.dossierId, version: { gt: devis.version }, statut: { not: 'ANNULE' } }, select: { id: true } });
     if (versionPlusRecente) throw new DevisConflitError('Seule la dernière version non annulée du dossier peut être convertie.');
-    if (devis.statut === 'EN_ATTENTE_ACOMPTE') throw new DevisSaisieError('Ce devis attend son acompte : le chantier ne peut pas encore être ouvert.');
+    if (devis.statut === 'EN_ATTENTE_ACOMPTE') throw new DevisSaisieError(`Ce devis attend son acompte : ${libelles.pasEncore}.`);
     if (devis.statut !== 'ACCEPTE') throw new DevisSaisieError('Seul un devis accepté peut être converti.');
     if (!devis.signature) throw new DevisSaisieError('Seul un devis signé en interne peut être converti.');
-    if (devis.conversion) throw new DevisConflitError(REFUS_DOUBLE_CONVERSION);
+    if (devis.conversion) throw new DevisConflitError(refusDejaConverti(devis.conversion.cibleType, cible));
     // Verrou de fond, indépendant du statut : un devis qui exige un acompte n'ouvre pas de
     // chantier tant que sa réception n'a pas été constatée. Le statut peut être manipulé,
     // pas ce fait.
-    if (devis.acompteExige && !devis.acompteRecuLe) throw new DevisSaisieError('L’acompte exigé par ce devis n’a pas été constaté : le chantier ne peut pas être ouvert.');
+    if (devis.acompteExige && !devis.acompteRecuLe) throw new DevisSaisieError(`L’acompte exigé par ce devis n’a pas été constaté : ${libelles.pas}.`);
     // Une autre version du dossier a déjà ouvert le chantier de l'affaire, puis a pu être annulée
     // avec lui : l'affaire a eu son chantier. Sa reprise passe par la duplication du devis, qui
     // crée une nouvelle affaire (cf. POST /api/devis/:id/duplication).
-    if (await tx.devisConversion.findFirst({ where: { dossierId: devis.dossierId }, select: { id: true } })) {
-      throw new DevisConflitError('Une autre version de ce devis a déjà ouvert le chantier de l’affaire : chaque affaire n’en ouvre qu’un. Pour la reprendre, dupliquez le devis.');
+    const conversionDuDossier = await tx.devisConversion.findFirst({ where: { dossierId: devis.dossierId }, select: { cibleType: true } });
+    if (conversionDuDossier) {
+      throw new DevisConflitError(conversionDuDossier.cibleType === 'CHANTIER' && cible === 'CHANTIER'
+        ? 'Une autre version de ce devis a déjà ouvert le chantier de l’affaire : chaque affaire n’en ouvre qu’un. Pour la reprendre, dupliquez le devis.'
+        : 'Une autre version de ce devis a déjà été convertie : chaque affaire n’est convertie qu’une fois. Pour la reprendre, dupliquez le devis.');
     }
     // Un chantier saisi à la main sous cette référence (fiche corrigée, par exemple) est déjà
     // celui de l'affaire : la fiche refuse de même un numéro déjà pris. Une affaire annulée ne
@@ -222,6 +259,26 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
       throw new DevisConflitError(chantierDeLaReference.statut === 'ANNULE'
         ? `L’affaire ${devis.numero} a déjà eu un chantier, annulé depuis : pour la reprendre, dupliquez le devis.`
         : `L’affaire ${devis.numero} a déjà un chantier : corrigez la référence de ce chantier avant de convertir le devis.`);
+    }
+    const motif = `Conversion du devis ${devis.numero} (version ${devis.version}).`;
+    if (cible !== 'CHANTIER') {
+      // Comme leur création directe : un client désactivé n'ouvre plus de dossier.
+      if (!await tx.client.findFirst({ where: { id: devis.clientId, actif: true }, select: { id: true } })) {
+        throw new DevisConflitError(`Le client de ce devis est désactivé : ${libelles.pas}. Réactivez d’abord sa fiche.`);
+      }
+      const titre = typeof body.titre === 'string' && body.titre.trim() ? body.titre.trim() : devis.objet;
+      if (cible === 'INTERVENTION') {
+        const details = await lireDetailsIntervention(tx, body, devis.clientId, fuseau);
+        const intervention = await creerInterventionNumerotee(tx, req as AuthRequest, anneeEntreprise(new Date(), fuseau), { clientId: devis.clientId, titre, chantierId: null, ...details }, motif);
+        await tx.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'INTERVENTION', cibleId: intervention.id } });
+        return exposerIntervention(intervention);
+      }
+      const saisie = lireSaisieContrat({ ...body, titre });
+      const siteId = typeof body.siteId === 'string' && body.siteId ? body.siteId : null;
+      if (siteId && !await tx.clientSite.findFirst({ where: { id: siteId, clientId: devis.clientId }, select: { id: true } })) throw new SaisieInterventionInvalide(404, 'Site introuvable.');
+      const contrat = await creerContratMaintenance(tx, req as AuthRequest, { clientId: devis.clientId, siteId, ...saisie }, motif);
+      await tx.devisConversion.create({ data: { devisId: devis.id, dossierId: devis.dossierId, cibleType: 'CONTRAT', cibleId: contrat.id } });
+      return contrat;
     }
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
@@ -242,7 +299,13 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   // convertit qu'une fois la conversion précédente visible, que le contrôle du dossier refuse.
   // Si le filet servait malgré tout, la seconde serait refusée et son chantier annulé avec la
   // transaction.
-  if ((error as { code?: string })?.code === 'P2002') return void res.status(409).json({ error: 'Une autre version de ce devis vient d’ouvrir le chantier de l’affaire : chaque affaire n’en ouvre qu’un.' });
+  if ((error as { code?: string })?.code === 'P2002') {
+    return void res.status(409).json({ error: String((req.body ?? {}).cible || '') === 'CHANTIER'
+      ? 'Une autre version de ce devis vient d’ouvrir le chantier de l’affaire : chaque affaire n’en ouvre qu’un.'
+      : 'Une autre version de ce devis vient d’être convertie : chaque affaire n’est convertie qu’une fois.' });
+  }
+  if (error instanceof SaisieInterventionInvalide) return void res.status(error.status).json({ error: error.message });
+  if (error instanceof SaisieContratInvalide) return void res.status(400).json({ error: error.message });
   devisErreur(res, error);
 } };
 
@@ -370,6 +433,10 @@ export function enregistrerRoutesDevis(app: Express): void {
       const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: { conversion: true } });
       if (!devis) throw new DevisSaisieError('Devis introuvable.');
       if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est déjà annulé.');
+      // L'intervention ou le contrat créé depuis le devis vit sa propre vie : le devis, trace de la
+      // vente, ne s'annule plus (choix par défaut, à confirmer).
+      if (devis.conversion?.cibleType === 'INTERVENTION') throw new DevisConflitError('Ce devis a créé une intervention : il ne s’annule plus. Annulez l’intervention depuis sa fiche si elle ne doit pas avoir lieu.');
+      if (devis.conversion?.cibleType === 'CONTRAT') throw new DevisConflitError('Ce devis a créé un contrat de maintenance : il ne s’annule plus. Suspendez ou terminez le contrat depuis la liste des contrats.');
 
       let chantierArchive: string | null = null;
       if (devis.conversion?.cibleType === 'CHANTIER') {

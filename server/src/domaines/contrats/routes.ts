@@ -3,10 +3,10 @@ import { prisma, transactionVerifiee } from '../../db';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
-import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, dateIsoStricte, dateFrancaise } from '../../commun/dates';
+import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, dateFrancaise } from '../../commun/dates';
 import { decimalToNumber } from '../../commun/montants';
 import { CHANTIER_INTERVENTION_SELECT, journaliserIntervention, exposerIntervention } from '../interventions/metier';
-import { journaliserContrat, motifContratValide, lirePolitiqueCouverture, verrouillerContratMaintenance, echeanceSuivante } from './metier';
+import { journaliserContrat, motifContratValide, lirePolitiqueCouverture, verrouillerContratMaintenance, echeanceSuivante, lireSaisieContrat, creerContratMaintenance, SaisieContratInvalide } from './metier';
 
 export function enregistrerRoutesContrats(app: Express): void {
   // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
@@ -34,16 +34,7 @@ export function enregistrerRoutesContrats(app: Express): void {
 
   app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
     try {
-      const titre = typeof req.body?.titre === 'string' ? req.body.titre.trim() : '';
-      const periodiciteMois = Number(req.body?.periodiciteMois);
-      const dureePrevisionnelleMinutes = Number(req.body?.dureePrevisionnelleMinutes);
-      const dateDebut = dateIsoStricte(req.body?.dateDebut);
-      const couverture = lirePolitiqueCouverture(req.body || {});
-      if (titre.length < 3 || titre.length > 200) return res.status(400).json({ error: 'Le titre du contrat doit contenir entre 3 et 200 caractères.' });
-      if (!Number.isInteger(periodiciteMois) || periodiciteMois < 1 || periodiciteMois > 60) return res.status(400).json({ error: 'La périodicité doit être comprise entre 1 et 60 mois.' });
-      if (!Number.isInteger(dureePrevisionnelleMinutes) || dureePrevisionnelleMinutes < 15 || dureePrevisionnelleMinutes > 1440) return res.status(400).json({ error: 'La durée prévisionnelle doit être comprise entre 15 et 1 440 minutes.' });
-      if (!dateDebut) return res.status(400).json({ error: 'La date de début doit être valide au format JJ-MM-AAAA.' });
-      if (!couverture) return res.status(400).json({ error: 'La politique de couverture est invalide.' });
+      const saisie = lireSaisieContrat(req.body || {});
       // Même règle que la création directe d’intervention : un client désactivé n'ouvre plus
       // de dossier par le contrat, qui ne doit jamais devenir une porte de contournement.
       const client = await prisma.client.findFirst({ where: { id: String(req.body?.clientId || ''), actif: true }, select: { id: true } });
@@ -53,16 +44,10 @@ export function enregistrerRoutesContrats(app: Express): void {
         const site = await prisma.clientSite.findFirst({ where: { id: siteId, clientId: client.id }, select: { id: true } });
         if (!site) return res.status(404).json({ error: 'Site introuvable.' });
       }
-      const contrat = await transactionVerifiee(async (tx) => {
-        const cree = await tx.contratMaintenance.create({
-          data: { clientId: client.id, siteId, titre, periodiciteMois, dureePrevisionnelleMinutes, dateDebut, prochaineEcheance: dateDebut, ...couverture, createdById: req.user!.id },
-          include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
-        });
-        await journaliserContrat(tx, req, 'CREATION', cree, null);
-        return cree;
-      });
+      const contrat = await transactionVerifiee((tx) => creerContratMaintenance(tx, req, { clientId: client.id, siteId, ...saisie }));
       res.status(201).json(decimalToNumber(contrat));
     } catch (error) {
+      if (error instanceof SaisieContratInvalide) return res.status(400).json({ error: error.message });
       res.status(500).json({ error: 'Création du contrat de maintenance impossible.' });
     }
   });
