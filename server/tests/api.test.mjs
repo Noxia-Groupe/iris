@@ -7,6 +7,7 @@
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import test, { after, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
@@ -281,6 +282,7 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test', 'planning.limite.responsable@iris.test',
+      'd0.179.directeur.commercial@iris.test', 'd0.179.assistante.commerciale@iris.test', 'd0.179.comptable@iris.test', 'd0.179.conducteur@iris.test', 'd0.179.commercial@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
       'dernier.super.a@iris.test', 'dernier.super.b@iris.test', 'dernier.super.admin@iris.test', 'dernier.super.responsable@iris.test', 'dernier.super.collaborateur@iris.test',
@@ -5241,6 +5243,112 @@ if (!TEST_DATABASE_URL) {
         await prisma.planningEvent.deleteMany({ where: { id: libre.body.id } });
         await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
       }
+    });
+  });
+
+  // #179, décision 11 de la proposition de droits (placée avant la fin du pilote par Nelson le
+  // 21-10-2026) : le directeur commercial, l'assistante commerciale et le comptable sont refusés
+  // comme le commercial sur toutes les routes du planning, lectures comprises, et sur les écritures
+  // des référentiels des achats. Lectures des référentiels et routes SAV : inchangées.
+  describe('#179 : directeur commercial, assistante commerciale et comptable sans planning ni écriture des référentiels', () => {
+    let admin = {};
+    const comptes = {};
+    const jeton = (compte) => ({ Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` });
+    const REFUSES = [
+      ['directeurCommercial', 'd0.179.directeur.commercial@iris.test', 'DIRECTEUR_COMMERCIAL', 'Accès non autorisé pour un compte directeur commercial.'],
+      ['assistante', 'd0.179.assistante.commerciale@iris.test', 'ASSISTANTE_COMMERCIALE', 'Accès non autorisé pour un compte assistante commerciale.'],
+      ['comptable', 'd0.179.comptable@iris.test', 'COMPTABLE', 'Accès non autorisé pour un compte comptable.'],
+    ];
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      for (const [cle, email, role] of [...REFUSES, ['conducteur', 'd0.179.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX'], ['commercial', 'd0.179.commercial@iris.test', 'COMMERCIAL']]) {
+        comptes[cle] = await prisma.user.create({ data: { email, name: `TEST 179 ${cle}`, role, actif: true } });
+      }
+    });
+
+    test('chaque route du planning et chaque écriture des référentiels leur répond 403, sans rien modifier', async () => {
+      const suffixe = Date.now();
+      const fiche = await prisma.intervenant.create({ data: { nom: `TEST 179 fiche ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+      const type = await prisma.planningEventType.create({ data: { nom: `TEST 179 type ${suffixe}`, couleur: '#336699' } });
+      const evenement = await prisma.planningEvent.create({ data: { categorie: 'HORS_CHANTIER', titre: `TEST 179 affectation ${suffixe}`, dateDebut: new Date('2098-04-01T00:00:00Z'), dateFin: new Date('2098-04-01T00:00:00Z'), intervenants: { connect: [{ id: fiche.id }] } } });
+      const categorie = await prisma.categorie.create({ data: { nom: `TEST 179 catégorie ${suffixe}` } });
+      const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST 179 fournisseur ${suffixe}` } });
+      try {
+        const etat = async () => ({
+          evenements: await prisma.planningEvent.count(), types: await prisma.planningEventType.count(),
+          categories: await prisma.categorie.count(), fournisseurs: await prisma.fournisseur.count(),
+          evenement: await prisma.planningEvent.findUnique({ where: { id: evenement.id } }),
+          type: await prisma.planningEventType.findUnique({ where: { id: type.id } }),
+          categorie: await prisma.categorie.findUnique({ where: { id: categorie.id } }),
+          fournisseur: await prisma.fournisseur.findUnique({ where: { id: fournisseur.id } }),
+          partage: await prisma.planningPublicShare.findUnique({ where: { id: 'singleton' } }),
+        });
+        const avant = await etat();
+        const PLANNING = [
+          ['get', '/api/planning/chantiers'],
+          ['get', '/api/planning/events?start=01-04-2098&end=07-04-2098'],
+          ['post', '/api/planning/events', { categorie: 'HORS_CHANTIER', titre: 'TEST 179 refus', dateDebut: '2098-04-02', intervenantIds: [fiche.id] }],
+          ['patch', `/api/planning/events/${evenement.id}`, { titre: 'TEST 179 modifié' }],
+          ['delete', `/api/planning/events/${evenement.id}`],
+          ['get', '/api/planning/types'],
+          ['post', '/api/planning/types', { nom: `TEST 179 type refusé ${suffixe}` }],
+          ['put', `/api/planning/types/${type.id}`, { nom: `TEST 179 type renommé ${suffixe}` }],
+          ['delete', `/api/planning/types/${type.id}`],
+          ['get', '/api/planning/interventions-a-planifier'],
+        ];
+        const REFERENTIELS = [
+          ['post', '/api/categories', { nom: `TEST 179 catégorie refusée ${suffixe}` }],
+          ['put', `/api/categories/${categorie.id}`, { nom: `TEST 179 catégorie renommée ${suffixe}` }],
+          ['delete', `/api/categories/${categorie.id}`],
+          ['post', '/api/fournisseurs', { nom: `TEST 179 fournisseur refusé ${suffixe}` }],
+          ['put', `/api/fournisseurs/${fournisseur.id}`, { nom: `TEST 179 fournisseur renommé ${suffixe}` }],
+          ['delete', `/api/fournisseurs/${fournisseur.id}`],
+        ];
+        // Le partage public reste réservé à l'administration, pour eux comme pour tous.
+        const PARTAGE = [['get', '/api/planning/share'], ['post', '/api/planning/share'], ['patch', '/api/planning/share', { active: false }]];
+        for (const [cle, , role, message] of REFUSES) {
+          for (const [methode, chemin, corps] of [...PLANNING, ...REFERENTIELS]) {
+            const res = await request(app)[methode](chemin).set(jeton(comptes[cle])).send(corps);
+            assert.equal(res.status, 403, `${role} ${methode.toUpperCase()} ${chemin} : ${JSON.stringify(res.body)}`);
+            assert.deepEqual(res.body, { error: message }, `${role} ${methode.toUpperCase()} ${chemin}`);
+          }
+          for (const [methode, chemin, corps] of PARTAGE) {
+            assert.equal((await request(app)[methode](chemin).set(jeton(comptes[cle])).send(corps)).status, 403, `${role} ${methode.toUpperCase()} ${chemin}`);
+          }
+          // Lectures des référentiels et routes SAV : inchangées (filtre par affectation, vide pour eux).
+          for (const chemin of ['/api/categories', '/api/fournisseurs', '/api/interventions']) {
+            const res = await request(app).get(chemin).set(jeton(comptes[cle]));
+            assert.equal(res.status, 200, `${role} GET ${chemin} : ${JSON.stringify(res.body)}`);
+          }
+          assert.ok((await request(app).get('/api/categories').set(jeton(comptes[cle]))).body.some((c) => c.id === categorie.id), role);
+        }
+        assert.deepEqual(await etat(), avant, 'aucune écriture');
+
+        // Témoins : le commercial garde son message ; le conducteur garde planning et référentiels.
+        assert.deepEqual((await request(app).get('/api/planning/types').set(jeton(comptes.commercial))).body, { error: 'Accès non autorisé pour un compte commercial.' });
+        for (const chemin of ['/api/planning/chantiers', '/api/planning/types', '/api/planning/events?start=01-04-2098&end=07-04-2098', '/api/planning/interventions-a-planifier']) {
+          const res = await request(app).get(chemin).set(jeton(comptes.conducteur));
+          assert.equal(res.status, 200, `conducteur GET ${chemin} : ${JSON.stringify(res.body)}`);
+        }
+        const renomme = await request(app).put(`/api/categories/${categorie.id}`).set(jeton(comptes.conducteur)).send({ nom: `TEST 179 catégorie du conducteur ${suffixe}` });
+        assert.equal(renomme.status, 200, JSON.stringify(renomme.body));
+      } finally {
+        await prisma.planningEvent.delete({ where: { id: evenement.id } }).catch(() => {});
+        await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
+      }
+    });
+
+    test('toute route du planning, sauf le lien public, passe par la garde des trois types ou est réservée à l’administration', () => {
+      const lignes = readFileSync(new URL('../scripts/routes-reference.txt', import.meta.url), 'utf8').split('\n').filter((ligne) => / \/api\/planning\//.test(ligne));
+      assert.ok(lignes.length >= 14, `routes du planning trouvées : ${lignes.length}`);
+      const nonGardees = lignes.filter((ligne) => !ligne.includes('/api/planning/public/') && !/(blockCommercialEtAssimiles|requireAdmin)#/.test(ligne));
+      assert.deepEqual(nonGardees, []);
+      const ecrituresReferentiels = readFileSync(new URL('../scripts/routes-reference.txt', import.meta.url), 'utf8').split('\n')
+        .filter((ligne) => /^(POST|PUT|PATCH|DELETE) \/api\/(categories|fournisseurs)\b/.test(ligne));
+      assert.equal(ecrituresReferentiels.length, 6);
+      assert.deepEqual(ecrituresReferentiels.filter((ligne) => !ligne.includes('blockCommercialEtAssimiles#')), []);
     });
   });
 

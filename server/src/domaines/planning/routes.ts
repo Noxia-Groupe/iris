@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import { type AuthRequest, requireAuth } from '../../http/auth';
-import { blockCommercial, blockTechnicien, requireAdmin } from '../../http/gardes';
+import { blockCommercialEtAssimiles, blockTechnicien, requireAdmin } from '../../http/gardes';
 import { ROLE_TECHNICIEN } from '../../droits/roles';
 import { paramId } from '../../http/requete';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, aujourdHuiEntreprise, ajouterJoursCivils } from '../../commun/dates';
@@ -47,7 +47,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
   // bord...), qui reste strictement scoped par responsable pour un conducteur.
   // Le technicien ne crée pas d'affectation : cette liste, qui ne sert qu'au formulaire d'affectation,
   // lui est fermée (planning limité à ce dont il est chargé, décision de Nelson du 19-10-2026).
-  app.get('/api/planning/chantiers', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+  app.get('/api/planning/chantiers', requireAuth, blockCommercialEtAssimiles, requirePlanningActif, async (req: AuthRequest, res) => {
     if (req.user!.role === ROLE_TECHNICIEN) return res.status(403).json({ error: 'La liste des chantiers du planning sert à créer une affectation : elle n’est pas ouverte au technicien.' });
     try {
       const chantiers = await prisma.chantier.findMany({
@@ -61,7 +61,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
   });
 
   // Affectations chevauchant la plage de jours [start, end] (bornes incluses).
-  app.get('/api/planning/events', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+  app.get('/api/planning/events', requireAuth, blockCommercialEtAssimiles, requirePlanningActif, async (req: AuthRequest, res) => {
     try {
       const start = parsePlanningJour(req.query.start);
       const end = parsePlanningJour(req.query.end);
@@ -82,7 +82,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
     }
   });
 
-  app.post('/api/planning/events', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req, res) => {
+  app.post('/api/planning/events', requireAuth, blockCommercialEtAssimiles, blockTechnicien, requirePlanningActif, async (req, res) => {
     try {
       const { error, data, intervenantIds } = await validatePlanningEvent(req.body);
       if (error) return res.status(400).json({ error });
@@ -98,7 +98,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
 
   // Édition complète ou déplacement (glisser-déposer) : fusion existant + corps reçu,
   // puis revalidation de l'ensemble — cf. validatePlanningEvent.
-  app.patch('/api/planning/events/:id', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req: AuthRequest, res) => {
+  app.patch('/api/planning/events/:id', requireAuth, blockCommercialEtAssimiles, blockTechnicien, requirePlanningActif, async (req: AuthRequest, res) => {
     try {
       const existing = await prisma.planningEvent.findUnique({
         where: { id: paramId(req) },
@@ -163,7 +163,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
     }
   });
 
-  app.delete('/api/planning/events/:id', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req: AuthRequest, res) => {
+  app.delete('/api/planning/events/:id', requireAuth, blockCommercialEtAssimiles, blockTechnicien, requirePlanningActif, async (req: AuthRequest, res) => {
     try {
       const existing = await prisma.planningEvent.findUnique({ where: { id: paramId(req) } });
       if (!existing) return res.status(404).json({ error: 'Affectation introuvable.' });
@@ -180,7 +180,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
   });
 
   // Types d'événements personnalisés du planning (libellé + couleur, réutilisables).
-  app.get('/api/planning/types', requireAuth, blockCommercial, requirePlanningActif, async (req, res) => {
+  app.get('/api/planning/types', requireAuth, blockCommercialEtAssimiles, requirePlanningActif, async (req, res) => {
     try {
       res.json(await prisma.planningEventType.findMany({ orderBy: { nom: 'asc' } }));
     } catch (error) {
@@ -188,7 +188,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
     }
   });
 
-  app.post('/api/planning/types', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req, res) => {
+  app.post('/api/planning/types', requireAuth, blockCommercialEtAssimiles, blockTechnicien, requirePlanningActif, async (req, res) => {
     try {
       const nom = String(req.body.nom || '').trim();
       if (!nom) return res.status(400).json({ error: 'Le libellé du type est requis.' });
@@ -200,7 +200,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
     }
   });
 
-  app.put('/api/planning/types/:id', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req, res) => {
+  app.put('/api/planning/types/:id', requireAuth, blockCommercialEtAssimiles, blockTechnicien, requirePlanningActif, async (req, res) => {
     try {
       const data: Record<string, unknown> = {};
       if (typeof req.body.nom === 'string' && req.body.nom.trim()) data.nom = req.body.nom.trim();
@@ -214,7 +214,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
   });
 
   // Supprimer un type d'événement. Bloqué si des affectations du planning l'utilisent.
-  app.delete('/api/planning/types/:id', requireAuth, blockCommercial, blockTechnicien, requirePlanningActif, async (req, res) => {
+  app.delete('/api/planning/types/:id', requireAuth, blockCommercialEtAssimiles, blockTechnicien, requirePlanningActif, async (req, res) => {
     try {
       const id = paramId(req);
       const used = await prisma.planningEvent.count({ where: { typeEventId: id } });

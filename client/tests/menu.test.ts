@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sectionsMenu } from '../src/lib/menu.ts';
-import { estExcluDesOperations, peutOuvrirAdministration, peutVoirFinance, roleLabel } from '../src/lib/droits.ts';
+import { estExcluDesOperations, peutConsulterPlanning, peutOuvrirAdministration, peutVoirFinance, roleLabel } from '../src/lib/droits.ts';
 
 const liens = (role: string, planningActif = true, permissions: string[] = []) =>
   sectionsMenu({ role, permissions }, planningActif).flatMap((s) => s.entrees.map((e) => e.to)).sort();
@@ -9,11 +9,13 @@ const liens = (role: string, planningActif = true, permissions: string[] = []) =
 // Règles de visibilité de l'ancien menu à plat, réécrites ici à part : le regroupement ne
 // doit ni montrer ni cacher une seule entrée par rapport à elles. Seules évolutions depuis :
 // l'annuaire des clients ouvert au technicien (décision de Nelson du 13-10-2026), puis au
-// conducteur de travaux (décision du 16-10-2026), et l'écran des règlements, réservé à
-// l'administration (décision A3 du 16-10-2026).
+// conducteur de travaux (décision du 16-10-2026), l'écran des règlements, réservé à
+// l'administration (décision A3 du 16-10-2026), et le planning et l'administration fermés au
+// directeur commercial, à l'assistante commerciale et au comptable (#179, décision 11).
 function attendu(role: string, planningActif: boolean, permissions: string[]) {
   const admin = role === 'ADMIN' || role === 'SUPERADMIN';
   const commercial = role === 'COMMERCIAL';
+  const sansPlanning = ['DIRECTEUR_COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'COMPTABLE'].includes(role);
   const travaux = admin || role === 'CONDUCTEUR_TRAVAUX' || role === 'RESPONSABLE';
   const regles: [string, boolean][] = [
     ['/', true], ['/chantiers', true],
@@ -22,9 +24,10 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
     ['/contrats-maintenance', admin], ['/prete-a-facturer', admin], ['/factures', admin], ['/reglements', admin], ['/mentions-legales', admin],
     ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN' || role === 'CONDUCTEUR_TRAVAUX'], ['/catalogue', admin],
     ['/achats', travaux], ['/heures', travaux], ['/statistiques', travaux],
-    ['/planning', !commercial && planningActif], ['/resultat-commercial', commercial],
-    // Administration : plus pour le technicien, qui ne modifie plus les référentiels (lot pilote 3).
-    ['/admin', !commercial && role !== 'TECHNICIEN'], ['/societe', admin], ['/administration/api', role === 'SUPERADMIN'],
+    ['/planning', !commercial && !sansPlanning && planningActif], ['/resultat-commercial', commercial],
+    // Administration : plus pour le technicien, qui ne modifie plus les référentiels (lot pilote 3),
+    // ni pour les trois types que #179 en écarte.
+    ['/admin', !commercial && role !== 'TECHNICIEN' && !sansPlanning], ['/societe', admin], ['/administration/api', role === 'SUPERADMIN'],
     ['/performances', admin], ['/commerciaux', admin],
   ];
   return regles.filter(([, visible]) => visible).map(([to]) => to).sort();
@@ -110,4 +113,20 @@ test('le technicien et le conducteur consultent l’annuaire des clients, dans l
   for (const role of ['COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE', 'DIRECTEUR']) {
     assert.equal(liens(role, true, ['clients:read']).includes('/clients'), false, role);
   }
+});
+
+// #179 (décision 11 de la proposition de droits) : le directeur commercial, l'assistante commerciale
+// et le comptable n'ont ni le planning ni l'administration, comme le commercial et le directeur.
+test('le directeur commercial, l’assistante commerciale et le comptable n’ont ni planning ni administration (#179)', () => {
+  for (const role of ['DIRECTEUR_COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'COMPTABLE', 'COMMERCIAL', 'DIRECTEUR']) {
+    assert.equal(peutConsulterPlanning(role), false, role);
+    assert.equal(peutOuvrirAdministration(role), false, role);
+    assert.equal(liens(role).includes('/planning'), false, role);
+    assert.equal(liens(role).includes('/admin'), false, role);
+  }
+  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN']) {
+    assert.equal(peutConsulterPlanning(role), true, role);
+    assert.equal(liens(role).includes('/planning'), true, role);
+  }
+  assert.equal(peutConsulterPlanning(undefined), true, 'sans compte connu, le repli reste celui du conducteur');
 });
