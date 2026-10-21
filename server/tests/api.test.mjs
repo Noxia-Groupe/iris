@@ -282,7 +282,7 @@ if (!TEST_DATABASE_URL) {
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
       'catalogue.devis.commercial@iris.test', 'catalogue.devis.technicien@iris.test', 'catalogue.devis.conducteur@iris.test',
       'planning.limite.technicien@iris.test', 'planning.limite.collegue@iris.test', 'planning.limite.sansfiche@iris.test', 'planning.limite.relie@iris.test', 'planning.limite.conducteur@iris.test', 'planning.limite.responsable@iris.test',
-      'd0.181.conducteur.a@iris.test', 'd0.181.conducteur.b@iris.test', 'd0.181.commercial.a@iris.test', 'd0.181.commercial.b@iris.test',
+      'd0.181.conducteur.a@iris.test', 'd0.181.conducteur.b@iris.test', 'd0.181.conducteur.c@iris.test', 'd0.181.commercial.a@iris.test', 'd0.181.commercial.b@iris.test',
       'planning.limite.titulaire@iris.test', 'planning.limite.coequipier@iris.test', 'planning.limite.titulaire.sansfiche@iris.test', 'planning.limite.autre.titulaire@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
@@ -5327,6 +5327,7 @@ if (!TEST_DATABASE_URL) {
       for (const [cle, email, role] of [
         ['conducteurA', 'd0.181.conducteur.a@iris.test', 'CONDUCTEUR_TRAVAUX'],
         ['conducteurB', 'd0.181.conducteur.b@iris.test', 'CONDUCTEUR_TRAVAUX'],
+        ['conducteurC', 'd0.181.conducteur.c@iris.test', 'CONDUCTEUR_TRAVAUX'],
         ['commercialA', 'd0.181.commercial.a@iris.test', 'COMMERCIAL'],
         ['commercialB', 'd0.181.commercial.b@iris.test', 'COMMERCIAL'],
       ]) comptes[cle] = await prisma.user.create({ data: { email, name: `TEST 181 ${cle}`, role, actif: true } });
@@ -5419,6 +5420,7 @@ if (!TEST_DATABASE_URL) {
           IF NEW."chantierId" = '${chantier.id}' THEN RAISE EXCEPTION 'journal refusé pour le test'; END IF;
           RETURN NEW;
         END; $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_journal_181" ON "JournalSaisieChantier"');
       await prisma.$executeRawUnsafe('CREATE TRIGGER "test_refuser_journal_181" BEFORE INSERT ON "JournalSaisieChantier" FOR EACH ROW EXECUTE FUNCTION "test_refuser_journal_181"()');
       try {
         assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ responsableId: comptes.conducteurB.id, nom: `${chantier.nom} bis` })).status, 500);
@@ -5437,6 +5439,7 @@ if (!TEST_DATABASE_URL) {
           IF NEW."id" = '${chantier.id}' THEN RAISE EXCEPTION 'enregistrement refusé pour le test'; END IF;
           RETURN NEW;
         END; $$ LANGUAGE plpgsql;`);
+      await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_chantier_181" ON "Chantier"');
       await prisma.$executeRawUnsafe('CREATE TRIGGER "test_refuser_chantier_181" BEFORE UPDATE ON "Chantier" FOR EACH ROW EXECUTE FUNCTION "test_refuser_chantier_181"()');
       try {
         assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(admin).send({ responsableId: comptes.conducteurB.id })).status, 500);
@@ -5447,6 +5450,62 @@ if (!TEST_DATABASE_URL) {
         await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "test_refuser_chantier_181" ON "Chantier"');
         await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS "test_refuser_chantier_181"()');
       }
+    });
+
+    // Une transaction de test tient la ligne du chantier : la requête part, attend le verrou, puis la
+    // transaction change le champ directement en base et valide. La requête doit comparer et journaliser
+    // l'état validé, relu sous verrou, et non celui qu'elle a lu avant sa transaction.
+    const sousVerrouTiers = async (chantierId, lancer, changer) => {
+      let reponse;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} FOR UPDATE`;
+        reponse = lancer().then((r) => r);
+        let attente = false;
+        for (let tour = 0; tour < 150 && !attente; tour += 1) {
+          attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`)[0].n > 0;
+          if (!attente) await new Promise((r) => setTimeout(r, 20));
+        }
+        assert.equal(attente, true, 'la requête attend la ligne du chantier');
+        await tx.chantier.update({ where: { id: chantierId }, data: changer });
+      }, { timeout: 20000 });
+      return reponse;
+    };
+
+    test('l’avant est relu sous le verrou de la ligne : titulaire, commercial et encaissement changés entre-temps', async () => {
+      const titulaire = await creerChantier('verrou titulaire');
+      const r1 = await sousVerrouTiers(titulaire.id, () => request(app).patch(`/api/chantiers/${titulaire.id}`).set(admin).send({ responsableId: comptes.conducteurB.id }), { responsableId: comptes.conducteurC.id });
+      assert.equal(r1.status, 200, JSON.stringify(r1.body));
+      let entrees = await journal(titulaire.id);
+      assert.equal(entrees.length, 1);
+      assert.deepEqual([entrees[0].avant, entrees[0].apres], [{ responsableId: comptes.conducteurC.id, nom: 'TEST 181 conducteurC' }, { responsableId: comptes.conducteurB.id, nom: 'TEST 181 conducteurB' }]);
+
+      const commercial = await prisma.chantier.update({ where: { id: (await creerChantier('verrou commercial')).id }, data: { commercialId: null } });
+      const r2 = await sousVerrouTiers(commercial.id, () => request(app).patch(`/api/chantiers/${commercial.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id }), { commercialId: comptes.commercialA.id });
+      assert.equal(r2.status, 200, JSON.stringify(r2.body));
+      entrees = await journal(commercial.id);
+      assert.equal(entrees.length, 1);
+      assert.deepEqual([entrees[0].avant, entrees[0].apres], [{ commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }, { commercialId: comptes.commercialB.id, nom: 'TEST 181 commercialB' }]);
+
+      // Case cochée entre-temps (par un autre administrateur) : la requête qui la coche à son tour ne
+      // change rien, ni la date, ni le journal.
+      const encaissement = await creerChantier('verrou encaissement');
+      const datee = new Date('2026-10-01T10:00:00.000Z');
+      const r3 = await sousVerrouTiers(encaissement.id, () => request(app).patch(`/api/chantiers/${encaissement.id}/encaisse`).set(admin).send({ encaisse: true }), { encaisse: true, dateEncaissement: datee });
+      assert.equal(r3.status, 200, JSON.stringify(r3.body));
+      assert.equal(new Date(r3.body.dateEncaissement).toISOString(), datee.toISOString());
+      assert.equal((await journal(encaissement.id)).length, 0);
+    });
+
+    test('le commercial attribué puis réattribué par l’administration : auteur, nom figé, avant et après', async () => {
+      const chantier = await prisma.chantier.update({ where: { id: (await creerChantier('commercial par l’administration')).id }, data: { commercialId: null } });
+      const premier = await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(admin).send({ commercialId: comptes.commercialA.id });
+      assert.equal(premier.status, 200, JSON.stringify(premier.body));
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/commercial`).set(admin).send({ commercialId: comptes.commercialB.id })).status, 200);
+      const entrees = await journal(chantier.id);
+      assert.deepEqual(entrees.map((e) => [e.action, e.auteurId, e.auteurNom, e.avant, e.apres]), [
+        ['CHANGEMENT_COMMERCIAL', adminId, adminNom, { commercialId: null, nom: null }, { commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }],
+        ['CHANGEMENT_COMMERCIAL', adminId, adminNom, { commercialId: comptes.commercialA.id, nom: 'TEST 181 commercialA' }, { commercialId: comptes.commercialB.id, nom: 'TEST 181 commercialB' }],
+      ]);
     });
   });
 

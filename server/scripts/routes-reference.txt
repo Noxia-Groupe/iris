@@ -93,7 +93,7 @@ GET /api/v1/chantiers <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerC
 GET /api/chantiers/:id requireAuth#76fb48c2d0f5 > <anonymous>#5b27a1bfd28f
 GET /api/chantiers/:id/journal-saisies requireAuth#76fb48c2d0f5 > <anonymous>#4373de266aea
 POST /api/chantiers requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
-PATCH /api/chantiers/:id requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#50a4ca7f71ab
+PATCH /api/chantiers/:id requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#82e823ced404
 DELETE /api/chantiers/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c4bcd35fe13f
 PATCH /api/chantiers/:id/statut requireAuth#76fb48c2d0f5 > blockCommercialSeulement#f36b50e5b6cd > <anonymous>#b69e5b3dc15a
 PATCH /api/chantiers/:id/commercial requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#a888c4b20222

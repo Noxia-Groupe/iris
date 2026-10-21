@@ -3,10 +3,6 @@
 
 export type EntreeJournalChantier = { cible: string; action: string; avant?: unknown; apres?: unknown };
 
-export function estChangementClient(entree: EntreeJournalChantier): boolean {
-  return entree.cible === 'CHANTIER' && entree.action === 'CHANGEMENT_CLIENT';
-}
-
 // Un côté d'une réattribution : le nom du compte, figé à l'acte.
 function compteLisible(valeur: unknown, sansCompte: string): string {
   const instantane = (valeur && typeof valeur === 'object' ? valeur : {}) as { nom?: string | null; responsableId?: string | null; commercialId?: string | null };

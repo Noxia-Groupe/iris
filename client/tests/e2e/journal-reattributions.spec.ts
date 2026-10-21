@@ -14,7 +14,7 @@ test('titulaire, commercial et encaissement changés se lisent au journal de la 
   };
   const suffixe = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
   const client = await creerClient('journal-181', false);
-  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Journal 181 ${suffixe}`, lignes: [
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Journal 181 ${suffixe.replace('.', ' ')}`, lignes: [
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
   ] }) as { id: string };
   await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
@@ -41,6 +41,7 @@ test('titulaire, commercial et encaissement changés se lisent au journal de la 
   await expect(commerciaux).toHaveCount(1);
   await expect(commerciaux.first()).toContainText('Avant : aucun commercial');
   await expect(commerciaux.first()).toContainText(`Après : ${commercial.name}`);
+  await expect(commerciaux.first()).toContainText(` · ${auteur}`);
 
   // Réattribution depuis la fiche : une nouvelle entrée, la plus récente en tête.
   await page.getByRole('button', { name: 'Modifier', exact: true }).first().click();
@@ -63,6 +64,7 @@ test('titulaire, commercial et encaissement changés se lisent au journal de la 
   await expect(encaissements).toHaveCount(1);
   await expect(encaissements.first()).toContainText('Avant : Non encaissé');
   await expect(encaissements.first()).toContainText('Après : Encaissé');
+  await expect(encaissements.first()).toContainText(` · ${auteur}`);
   await page.getByRole('button', { name: '✓ Encaissé', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Non encaissé', exact: true })).toBeVisible();
   await expect(encaissements).toHaveCount(2);

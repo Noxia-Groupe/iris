@@ -318,12 +318,9 @@ export function enregistrerRoutesChantiers(app: Express): void {
             const ancienne = verrouille.clientId
               ? await tx.client.findUnique({ where: { id: verrouille.clientId }, select: { raisonSociale: true } })
               : null;
-            await tx.journalSaisieChantier.create({ data: {
-              chantierId: existant.id, cible: 'CHANTIER', cibleId: existant.id, action: 'CHANGEMENT_CLIENT',
-              auteurId: authUser.id, auteurNom: authUser.name,
-              avant: { clientId: verrouille.clientId, raisonSociale: ancienne?.raisonSociale ?? null, libelle: verrouille.client },
-              apres: { clientId: cibleClient.id, raisonSociale: cibleClient.raisonSociale, libelle: String(data.client ?? verrouille.client) },
-            } });
+            await journaliserChangementChantier(tx, existant.id, authUser, 'CHANGEMENT_CLIENT',
+              { clientId: verrouille.clientId, raisonSociale: ancienne?.raisonSociale ?? null, libelle: verrouille.client },
+              { clientId: cibleClient.id, raisonSociale: cibleClient.raisonSociale, libelle: String(data.client ?? verrouille.client) });
           }
         }
         // Réattribution du titulaire (#181) : relue sur la ligne verrouillée, journalisée si elle change.

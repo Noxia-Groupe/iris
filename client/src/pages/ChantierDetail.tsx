@@ -1307,12 +1307,12 @@ const ChantierDetail = () => {
                     <span className="text-gray-500">{formatCompanyDate(entree.createdAt, companyTimezone)} · {entree.auteurNom}</span>
                   </div>
                   {entree.motif && <p className="mt-1 text-gray-600">Motif : {entree.motif}</p>}
-                  {changementAffaire(entree) && (
+                  {(() => { const changement = changementAffaire(entree); return changement && (
                     <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
-                      <p className="rounded bg-red-50 p-2 text-red-900">Avant : {changementAffaire(entree)!.avant}</p>
-                      <p className="rounded bg-emerald-50 p-2 text-emerald-900">Après : {changementAffaire(entree)!.apres}</p>
+                      <p className="rounded bg-red-50 p-2 text-red-900">Avant : {changement.avant}</p>
+                      <p className="rounded bg-emerald-50 p-2 text-emerald-900">Après : {changement.apres}</p>
                     </div>
-                  )}
+                  ); })()}
                   {entree.action === 'CORRECTION' && (
                     <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
                       <pre className="overflow-auto rounded bg-red-50 p-2 text-red-900">Avant : {instantaneLisible(entree.avant, companyTimezone)}</pre>
