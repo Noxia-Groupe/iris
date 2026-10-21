@@ -8,6 +8,7 @@ import {
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, adresseEvent,
 } from '../planningUtils';
 import { formatCompanyDateTime, jourFrancais, jourSemaineFrancais } from '../lib/dateFormatting';
+import { NOM_APPLICATION } from '../lib/marque';
 
 // Plage de la semaine au format JJ-MM-AAAA : « 13-07-2026 – 19-07-2026 ».
 function formatPlageSemaine(debut: string, fin: string): string {
@@ -132,7 +133,7 @@ const PlanningPublic = () => {
     <div className="min-h-screen bg-[var(--color-bg)]">
       <header className="bg-primary text-white px-4 py-4 sticky top-0 z-10 shadow-md">
         <h1 className="text-lg font-bold m-0 leading-tight">Planning d'intervention</h1>
-        <p className="text-xs opacity-80 m-0">NØXIA GROUPE — lecture seule</p>
+        <p className="text-xs opacity-80 m-0">{NOM_APPLICATION} — lecture seule</p>
       </header>
 
       <div className="max-w-md mx-auto px-3 py-4">

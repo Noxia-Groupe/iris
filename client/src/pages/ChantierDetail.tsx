@@ -444,7 +444,8 @@ const ChantierDetail = () => {
       filename: `Rapport_${chantier.nom}.pdf`,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in' as const, format: 'letter' as const, orientation: 'portrait' as const },
+      // Format A4, le format papier attendu en France (lot P0, B-61), et non le format américain.
+      jsPDF: { unit: 'in' as const, format: 'a4' as const, orientation: 'portrait' as const },
     };
     html2pdf().set(opt).from(printRef.current).save();
   };
@@ -996,7 +997,7 @@ const ChantierDetail = () => {
               <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
                 <Package size={16} className="text-accent" /> Achats par catégorie
               </h3>
-              <BarBreakdown rows={parCategorie} color="#0251a1" formatValue={fmtEuro} emptyLabel="Aucun achat enregistré" />
+              <BarBreakdown rows={parCategorie} color="#2563eb" formatValue={fmtEuro} emptyLabel="Aucun achat enregistré" />
             </div>
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
               <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
