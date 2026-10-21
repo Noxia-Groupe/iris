@@ -4,6 +4,7 @@ import { PublicClientApplication } from '@azure/msal-browser';
 import { apiFetch } from '../api';
 import { applyTheme } from '../theme';
 import { refreshModules } from '../modules';
+import { NOM_APPLICATION } from '../lib/marque';
 
 const Login = () => {
 
@@ -88,8 +89,7 @@ const Login = () => {
     <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-primary-dark)' }}>
       <div className="card" style={{ width: '100%', maxWidth: '400px' }}>
         <div style={{ textAlign: 'center', marginBottom: 'var(--spacing-4)' }}>
-          <h2 className="text-primary" style={{ margin: 0, fontWeight: 700 }}>NØXIA GROUPE</h2>
-          <span style={{ fontSize: '0.8rem', opacity: 0.8, letterSpacing: '2px', color: 'var(--color-text-muted)' }}>IRIS</span>
+          <h2 className="text-primary" style={{ margin: 0, fontWeight: 700, letterSpacing: '2px' }}>{NOM_APPLICATION}</h2>
         </div>
         
         {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">{error}</div>}

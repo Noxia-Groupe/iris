@@ -65,7 +65,7 @@ test('limite les corps JSON à 5 Mo avec erreur 413 JSON même sans connexion à
 describe('Fiche client', () => {
   test('la raison sociale est obligatoire à la création', () => {
     assert.throws(() => clientPayload({}, true), /raison sociale est obligatoire/);
-    assert.deepEqual(clientPayload({ raisonSociale: '  Noxia  ' }, true).raisonSociale, 'Noxia');
+    assert.deepEqual(clientPayload({ raisonSociale: '  Société Test  ' }, true).raisonSociale, 'Société Test');
   });
 
   test('le SIREN doit faire exactement neuf chiffres', () => {
@@ -80,7 +80,7 @@ describe('Fiche client', () => {
   });
 
   test("l'e-mail est normalisé et validé", () => {
-    assert.equal(clientPayload({ raisonSociale: 'X', email: '  Contact@Noxia.FR ' }, true).email, 'contact@noxia.fr');
+    assert.equal(clientPayload({ raisonSociale: 'X', email: '  Contact@Exemple.FR ' }, true).email, 'contact@exemple.fr');
     assert.throws(() => clientPayload({ raisonSociale: 'X', email: 'pas-un-email' }, true), /email/);
   });
 
