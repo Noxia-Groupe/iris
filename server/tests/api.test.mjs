@@ -5338,6 +5338,9 @@ if (!TEST_DATABASE_URL) {
       const evenement = await prisma.planningEvent.create({ data: { categorie: 'HORS_CHANTIER', titre: `TEST 179 affectation ${suffixe}`, dateDebut: new Date('2098-04-01T00:00:00Z'), dateFin: new Date('2098-04-01T00:00:00Z'), intervenants: { connect: [{ id: fiche.id }] } } });
       const categorie = await prisma.categorie.create({ data: { nom: `TEST 179 catégorie ${suffixe}` } });
       const fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST 179 fournisseur ${suffixe}` } });
+      // Une intervention en base : sans elle, « liste SAV vide » et le refus du placement ne prouveraient rien.
+      const client = await prisma.client.create({ data: { raisonSociale: `TEST 179 client ${suffixe}` } });
+      const intervention = await prisma.intervention.create({ data: { reference: `TEST-179-${suffixe}`, clientId: client.id, titre: 'TEST 179 SAV', statut: 'A_PLANIFIER' } });
       try {
         const etat = async () => ({
           evenements: await prisma.planningEvent.count(), types: await prisma.planningEventType.count(),
@@ -5386,12 +5389,19 @@ if (!TEST_DATABASE_URL) {
             assert.equal(res.status, 200, `${role} GET ${chemin} : ${JSON.stringify(res.body)}`);
             if (chemin === '/api/interventions') assert.deepEqual(res.body, [], `${role} : filtre SAV vide`);
           }
+          // Placement d'une intervention (exception du test suivant) : hors de leur filtre SAV, introuvable.
+          const placement = await request(app).put(`/api/interventions/${intervention.id}/planning`).set(jeton(comptes[cle])).send({ dateDebut: '2098-04-03', creneau: 'JOURNEE', intervenantIds: [fiche.id] });
+          assert.equal(placement.status, 404, `${role} placement : ${JSON.stringify(placement.body)}`);
           assert.ok((await request(app).get('/api/categories').set(jeton(comptes[cle]))).body.some((c) => c.id === categorie.id), role);
         }
         assert.deepEqual(await etat(), avant, 'aucune écriture');
 
         // Témoins : le commercial garde son message ; le conducteur et l'administrateur gardent planning et référentiels.
         assert.deepEqual((await request(app).get('/api/planning/types').set(jeton(comptes.commercial))).body, { error: 'Accès non autorisé pour un compte commercial.' });
+        // Le partage public reste réservé à l'administration : le conducteur en est refusé aussi.
+        for (const [methode, chemin, corps] of PARTAGE) {
+          assert.equal((await request(app)[methode](chemin).set(jeton(comptes.conducteur)).send(corps)).status, 403, `conducteur ${methode.toUpperCase()} ${chemin}`);
+        }
         for (const cle of ['conducteur', 'admin']) {
           for (const chemin of ['/api/planning/chantiers', '/api/planning/types', '/api/planning/events?start=01-04-2098&end=07-04-2098', '/api/planning/interventions-a-planifier']) {
             const res = await request(app).get(chemin).set(jeton(comptes[cle]));
@@ -5403,11 +5413,14 @@ if (!TEST_DATABASE_URL) {
       } finally {
         await prisma.planningEvent.delete({ where: { id: evenement.id } }).catch(() => {});
         await prisma.planningEventType.delete({ where: { id: type.id } }).catch(() => {});
+        await prisma.planningEvent.deleteMany({ where: { interventionId: intervention.id } }).catch(() => {});
+        await prisma.intervention.delete({ where: { id: intervention.id } }).catch(() => {});
       }
     });
 
     test('toute route du planning, sauf le lien public, passe par la garde des trois types ou est réservée à l’administration', () => {
-      // Route du planning : chemin sous /api/planning, racine comprise, ou route soumise au module
+      // Route du planning : chemin qui contient « planning » (/api/planning et sa racine, mais aussi
+      // /api/chantiers/:id/planning ou /api/planning-export), ou route soumise au module
       // (requirePlanningActif). Exceptions écrites : le lien public, ouvert à tous (décision du
       // 21-10-2026), et le placement d'une intervention, route SAV (décision 11, table 4.1 :
       // interventions.placer, « D af ⁷ »), harmonisée au lot D2.
@@ -5415,11 +5428,15 @@ if (!TEST_DATABASE_URL) {
       // lancer `node scripts/routes.mjs --verifier` avant de se fier à ce test.
       const EXCEPTIONS = ['GET /api/planning/public/:token ', 'PUT /api/interventions/:id/planning '];
       const lignes = readFileSync(new URL('../scripts/routes-reference.txt', import.meta.url), 'utf8').split('\n')
-        .filter((ligne) => /^[A-Z]+ \/api\/planning(\/|\s)/.test(ligne) || ligne.includes('requirePlanningActif#'));
+        .filter((ligne) => /^[A-Z]+ \S*planning/.test(ligne) || ligne.includes('requirePlanningActif#'));
       assert.ok(lignes.length >= 15, `routes du planning trouvées : ${lignes.length}`);
       assert.equal(lignes.filter((ligne) => EXCEPTIONS.some((e) => ligne.startsWith(e))).length, EXCEPTIONS.length, 'exceptions présentes');
       const nonGardees = lignes.filter((ligne) => !EXCEPTIONS.some((e) => ligne.startsWith(e)) && !/(blockCommercialEtAssimiles|requireAdmin)#/.test(ligne));
       assert.deepEqual(nonGardees, []);
+      // Le partage public (planning.partager) reste réservé à l'administration, pas seulement aux trois types.
+      const partage = lignes.filter((ligne) => /^[A-Z]+ \/api\/planning\/share /.test(ligne));
+      assert.equal(partage.length, 3, 'routes du partage public');
+      assert.deepEqual(partage.filter((ligne) => !ligne.includes('requireAdmin#')), []);
       const ecrituresReferentiels = readFileSync(new URL('../scripts/routes-reference.txt', import.meta.url), 'utf8').split('\n')
         .filter((ligne) => /^(POST|PUT|PATCH|DELETE) \/api\/(categories|fournisseurs)\b/.test(ligne));
       assert.equal(ecrituresReferentiels.length, 6);
