@@ -66,7 +66,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - lignes reprises du catalogue et copiées figées, prix d'achat prévu réservé à l'administration ;
     - devis signé figé en base (#161) ;
     - conversion en intervention ou en contrat (lot pilote 4, #281 ; non validée pour mise en service) ;
-    - PDF du devis sur le modèle commun, depuis l'écran Devis ; un devis signé s'imprime depuis l'identité de l'émetteur et le client copiés à sa signature (lot 6a-2, #PR6A2 ; non validé pour mise en service).
+    - PDF du devis sur le modèle commun, depuis l'écran Devis ; un devis signé s'imprime depuis l'identité de l'émetteur et le client copiés à sa signature (lot 6a-2, #301 ; non validé pour mise en service).
   - Absent :
     - envoi d'un devis (lot pilote 6, PR 6a-3) ;
     - paiement ou rapprochement de l'acompte.
@@ -180,7 +180,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 | 3. Parcours technicien sur téléphone | **Implémenté** : prérequis et droits (3a), parcours sur téléphone (3b-1 à 3b-4) et planning limité du technicien. Non validé pour mise en service. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3), #272 (3b-4), #275 (planning limité) |
 | 4. Conversion des devis (A7) | **Implémenté** : intervention et contrat depuis un devis signé ; règles (a) et (b) posées en question (section 3). Non validé pour mise en service | #281 |
 | 5. Génération automatique des visites (A9) | **Implémenté** : passage quotidien côté serveur, anticipation paramétrable, alerte et passage manuel ; questions (a) à (c) posées (section 3). Non validé pour mise en service | #293 |
-| 6. Envoi des documents (A10) | **Partiel** : décisions du 22-10-2026 (repli par la messagerie, option B de P5, deux temps, tous les documents) ; 6a-1 **implémenté** (modèle PDF commun, identité et logo de l'émetteur figés sur les factures et les avoirs) et 6a-2 **implémenté** (PDF du devis, copies prises à la signature), non validés pour mise en service ; 6a-3, 6a-4 et 6b prévus. **Avant le premier jour** (décision de Nelson du 21-10-2026) | #300 (6a-1), #PR6A2 (6a-2) |
+| 6. Envoi des documents (A10) | **Partiel** : décisions du 22-10-2026 (repli par la messagerie, option B de P5, deux temps, tous les documents) ; 6a-1 **implémenté** (modèle PDF commun, identité et logo de l'émetteur figés sur les factures et les avoirs) et 6a-2 **implémenté** (PDF du devis, copies prises à la signature), non validés pour mise en service ; 6a-3, 6a-4 et 6b prévus. **Avant le premier jour** (décision de Nelson du 21-10-2026) | #300 (6a-1), #301 (6a-2) |
 
 1. **Règlements (A3).**
    - Périmètre : saisie manuelle des encaissements, affectés aux factures (règlements partiels, reste dû, facture partiellement réglée). Banque et rapprochement viennent plus tard. Montants : exigence maximale (règle 2).
@@ -219,7 +219,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
      - P5, option B : seul ce que l'envoi exige accompagne le lot 6 (modèle PDF commun ; identité et logo de l'émetteur copiés à l'émission des factures et des avoirs) ; libellés des visites, export comptable et modèles personnalisables après le premier jour ;
      - deux temps : envoi manuel avec ses PDF et son journal (6a), puis Microsoft 365 (6b) ;
      - tous les documents : factures et avoirs, devis, rapport de chantier, compte rendu d'intervention, contrat de maintenance.
-   - Découpage retenu par Claude Code : 6a-1, modèle commun et identité figée (**implémenté** par #300, choix par défaut en section 4) ; 6a-2, PDF du devis (**implémenté** par #PR6A2, choix par défaut en section 4) ; 6a-3, envoi par la messagerie et journal des envois ; 6a-4, PDF des autres documents et leur envoi ; 6b, Microsoft 365.
+   - Découpage retenu par Claude Code : 6a-1, modèle commun et identité figée (**implémenté** par #300, choix par défaut en section 4) ; 6a-2, PDF du devis (**implémenté** par #301, choix par défaut en section 4) ; 6a-3, envoi par la messagerie et journal des envois ; 6a-4, PDF des autres documents et leur envoi ; 6b, Microsoft 365.
    - Journal des envois : choix par défaut, à confirmer.
    - Ne pas déclarer l'envoi Outlook ni la synchronisation réalisés du seul fait du SSO.
 
@@ -330,8 +330,8 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 - **Catalogue dans les devis (lot pilote 2, #161)** :
   - (montants) le prix d'achat prévu des lignes de devis doit-il alimenter le chantier ouvert (budget matériel prévu, marge estimée), à la place de la moyenne des chantiers terminés ?
   - (montants) les heures vendues d'un chantier additionnent la quantité des lignes de main-d'œuvre, quelle que soit leur unité : une prestation au forfait y compte pour une heure. Convertir par la durée indicative de la fiche, ne compter que les lignes à l'heure, ou garder ce calcul ?
-  - la vision veut un devis figé dès son envoi ; le code le fige à la signature, un devis envoyé non signé restant modifiable. Lequel retenir ? Les copies imprimées sur le devis (identité de l'émetteur, client) sont prises au même moment que le figement : à la signature depuis le lot 6a-2 (#PR6A2), elles suivraient un figement à l'envoi.
-- **PDF du devis (lot 6a-2, #PR6A2)** (mentions, à confirmer avec le cabinet) : faut-il imprimer sur le devis une durée de validité (paramètre de la société, absent aujourd'hui), les conditions générales de vente de la version légale active, ou d'autres mentions propres au métier (assurance professionnelle, par exemple) ? Le devis imprime aujourd'hui l'identité de la société, le client, les lignes, la ventilation de la TVA, le taux d'acompte demandé et le pied de page des documents.
+  - la vision veut un devis figé dès son envoi ; le code le fige à la signature, un devis envoyé non signé restant modifiable. Lequel retenir ? Les copies imprimées sur le devis (identité de l'émetteur, client) sont prises au même moment que le figement : à la signature depuis le lot 6a-2 (#301), elles suivraient un figement à l'envoi.
+- **PDF du devis (lot 6a-2, #301)** (mentions, à confirmer avec le cabinet) : faut-il imprimer sur le devis une durée de validité (paramètre de la société, absent aujourd'hui), les conditions générales de vente de la version légale active, ou d'autres mentions propres au métier (assurance professionnelle, par exemple) ? Le devis imprime aujourd'hui l'identité de la société, le client, les lignes, la ventilation de la TVA, le taux d'acompte demandé et le pied de page des documents.
 - **Conversion des devis (lot pilote 4, #281)** (règles métier) :
   - (a) une affaire ne se convertit qu'une fois, quelle que soit la cible (décision du 14-10-2026 pour le chantier, étendue par #281) ; un devis qui vend une installation et son contrat de maintenance ne crée donc pas les deux. Garder cette règle, ou permettre un chantier et un contrat (ou une intervention) pour la même affaire, ce qui change le modèle (`DevisConversion.dossierId` unique) ?
   - (b) un devis converti en intervention ou en contrat ne s'annule plus (l'intervention s'annule, le contrat se suspend ou se termine depuis leurs écrans), alors qu'un devis converti en chantier s'annule avec lui. Garder, ou annuler la cible avec le devis ?
@@ -501,7 +501,7 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Logo : PNG ou JPEG, 500 Ko et 2 000 pixels de côté au plus, téléversé par le super administrateur comme l'identité, journalisé ; un logo remplacé n'est supprimé que si aucune pièce ne l'imprime. Le champ « URL du logo » quitte l'écran Société ; `logoUrl` reste lisible par l'API.
 - Le PDF porte en tête le logo et l'identité, et sur chaque page le pied de page et la pagination.
 
-**PDF du devis** (lot 6a-2, #PR6A2), choix par défaut, à confirmer :
+**PDF du devis** (lot 6a-2, #301), choix par défaut, à confirmer :
 - Tout devis, quel que soit son statut, a son PDF (`GET /api/devis/:id/document.pdf`), pour les porteurs du droit de lecture des devis, en session seulement, comme le PDF des factures : ni technicien, ni clé d'intégration.
 - Un devis signé, figé en base (#161), s'imprime depuis des copies prises à sa signature : l'identité de l'émetteur (la ligne figée du lot 6a-1, avec son logo, sa couleur et son pied de page), la raison sociale du client et son adresse de facturation (même choix du site que la facture ; absente si le client n'a aucun site). La base exige ces copies pour toute nouvelle signature et les fige avec elle.
 - Enregistrer une signature exige donc l'identité complète de la société (mêmes champs que pour émettre une facture) ; sinon, refus 409 qui nomme les champs manquants, sans rien écrire.
