@@ -72,7 +72,7 @@ export default function ConversionDevis({ devis, cible, onFermer, onConverti }: 
   return <form role="dialog" aria-label={titre} onSubmit={envoyer} className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3">
     <div>
       <h2 className="font-semibold">{titre}</h2>
-      <p className="text-sm text-gray-600">{devis.numero} v{devis.version} · {devis.client.raisonSociale}. {intervention ? 'L’intervention sera à planifier.' : 'Le contrat sera actif, première échéance à sa date de début.'}</p>
+      <p className="text-sm text-gray-600 break-words">{devis.numero} v{devis.version} · {devis.client.raisonSociale}. {intervention ? 'L’intervention sera à planifier.' : 'Le contrat sera actif, première échéance à sa date de début.'}</p>
     </div>
     {erreurClient && <p role="alert" className="text-red-600">{erreurClient}</p>}
     <label className="text-sm font-medium block">Titre<input required name="titre" defaultValue={devis.objet} maxLength={intervention ? undefined : 200} className="mt-1 w-full border rounded px-3 py-2"/></label>

@@ -4,7 +4,7 @@ import { prisma, transactionVerifiee } from '../../db';
 import { ROLE_TECHNICIEN, isAdminRole } from '../../droits/roles';
 import { voitCoutMainOeuvre, sansTauxHoraire, saisieSelonDroits } from '../../droits/visibilite';
 import { type AuthRequest, requireAuth } from '../../http/auth';
-import { blockCommercial, blockTechnicien } from '../../http/gardes';
+import { blockCommercial, blockCommercialEtAssimiles, blockTechnicien } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, dateIsoStricte } from '../../commun/dates';
 import { decimalToNumber } from '../../commun/montants';
@@ -396,7 +396,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
 
   // La file ne contient que les visites engendrées par un contrat et encore dépourvues
   // de projection. Le même filtre de périmètre gouverne la fiche SAV et son placement.
-  app.get('/api/planning/interventions-a-planifier', requireAuth, blockCommercial, requirePlanningActif, async (req: AuthRequest, res) => {
+  app.get('/api/planning/interventions-a-planifier', requireAuth, blockCommercialEtAssimiles, requirePlanningActif, async (req: AuthRequest, res) => {
     try {
       // Visites d'un contrat actif, et interventions curatives (SAV hors contrat, lot pilote 3) : toute
       // intervention à affecter qui n'a pas encore de projection, dans le périmètre du demandeur.

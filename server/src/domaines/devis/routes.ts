@@ -145,11 +145,11 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
 // ressaisie du client ni de l'objet. La facture reste créée depuis l'écran Factures.
 //
 // Chaque affaire n'est convertie qu'une fois, quelle que soit la cible (décision de Nelson du
-// 14-10-2026 pour le chantier, étendue aux deux autres cibles, choix par défaut à confirmer) : un
-// devis déjà converti, un dossier dont une autre version l'est déjà et une référence d'affaire
-// déjà portée par un chantier sont refusés (409). Le verrou du devis fait passer l'une après
-// l'autre deux conversions du même devis ; les contraintes uniques de DevisConversion restent le
-// filet.
+// 14-10-2026 pour le chantier ; son extension aux deux autres cibles est posée en question à
+// Nelson, passation section 3 (a)) : un devis déjà converti, un dossier dont une autre version
+// l'est déjà et une référence d'affaire déjà portée par un chantier sont refusés (409). Le
+// verrou du devis fait passer l'une après l'autre deux conversions du même devis ; les
+// contraintes uniques de DevisConversion restent le filet.
 //
 // L'intervention et le contrat ne se créent que depuis une session, avec les droits de leur
 // création directe : l'encadrement SAV pour l'intervention, l'administration pour le contrat.
@@ -434,7 +434,7 @@ export function enregistrerRoutesDevis(app: Express): void {
       if (!devis) throw new DevisSaisieError('Devis introuvable.');
       if (devis.statut === 'ANNULE') throw new DevisSaisieError('Ce devis est déjà annulé.');
       // L'intervention ou le contrat créé depuis le devis vit sa propre vie : le devis, trace de la
-      // vente, ne s'annule plus (choix par défaut, à confirmer).
+      // vente, ne s'annule plus (règle posée en question à Nelson, passation section 3 (b)).
       if (devis.conversion?.cibleType === 'INTERVENTION') throw new DevisConflitError('Ce devis a créé une intervention : il ne s’annule plus. Annulez l’intervention depuis sa fiche si elle ne doit pas avoir lieu.');
       if (devis.conversion?.cibleType === 'CONTRAT') throw new DevisConflitError('Ce devis a créé un contrat de maintenance : il ne s’annule plus. Suspendez ou terminez le contrat depuis la liste des contrats.');
 

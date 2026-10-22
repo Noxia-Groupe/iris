@@ -32,7 +32,7 @@ import Comptabilite from './pages/Comptabilite';
 import MentionsLegales from './pages/MentionsLegales';
 import PreteAFacturer from './pages/PreteAFacturer';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, estExcluDesOperations, peutAccederAuxDevis, peutOuvrirAdministration, ROLES_ANNUAIRE, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
+import { useCurrentUser, peutAccederAuxDevis, peutConsulterPlanning, peutOuvrirAdministration, ROLES_ANNUAIRE, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
 import { useModules } from './modules';
 import { CompanyTimezoneProvider } from './companyTimezone';
 
@@ -42,7 +42,7 @@ const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
 const ROLES_INTERVENTIONS = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
 const ROLES_TRAVAUX = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE];
 
-const PrivateRoute = ({ children, requiredRoles, horsOperations, administration }: { children: JSX.Element, requiredRoles?: string[], horsOperations?: boolean, administration?: boolean }) => {
+const PrivateRoute = ({ children, requiredRoles, planning, administration }: { children: JSX.Element, requiredRoles?: string[], planning?: boolean, administration?: boolean }) => {
   const token = localStorage.getItem('token');
   const userStr = localStorage.getItem('user');
   // Compte relu auprès du serveur au chargement de l'application (le cadre n'est pas remonté
@@ -59,8 +59,8 @@ const PrivateRoute = ({ children, requiredRoles, horsOperations, administration 
   if (requiredRoles && !requiredRoles.includes(role)) {
     return <Navigate to="/" />; // Redirect to dashboard if not authorized
   }
-  // Écran opérationnel : fermé au commercial et au directeur (cf. estExcluDesOperations).
-  if (horsOperations && estExcluDesOperations(role)) {
+  // Planning : même règle que son entrée de menu (cf. peutConsulterPlanning).
+  if (planning && !peutConsulterPlanning(role)) {
     return <Navigate to="/" />;
   }
   // Administration : même règle que son entrée de menu (cf. peutOuvrirAdministration).
@@ -225,7 +225,7 @@ function App() {
         } />
 
         <Route path="/planning" element={
-          <PrivateRoute horsOperations>
+          <PrivateRoute planning>
             <PlanningRoute />
           </PrivateRoute>
         } />

@@ -15,7 +15,7 @@ import { useModules } from '../modules';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre, instantaneLisible } from '../lib/dateFormatting';
 import { archivagesRestaurables } from '../lib/archivesRestaurables';
-import { clientLisible, estChangementClient, titreEntreeJournal } from '../lib/journalChantier';
+import { changementAffaire, titreEntreeJournal } from '../lib/journalChantier';
 import { AlertesChantier } from '../components/AlertesChantier';
 import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
 import { sommeExacte, differenceExacte, arrondiEuro, arrondiCentime } from '../lib/montants';
@@ -444,7 +444,8 @@ const ChantierDetail = () => {
       filename: `Rapport_${chantier.nom}.pdf`,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in' as const, format: 'letter' as const, orientation: 'portrait' as const },
+      // Format A4, le format papier attendu en France (lot P0, B-61), et non le format américain.
+      jsPDF: { unit: 'in' as const, format: 'a4' as const, orientation: 'portrait' as const },
     };
     html2pdf().set(opt).from(printRef.current).save();
   };
@@ -996,7 +997,7 @@ const ChantierDetail = () => {
               <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
                 <Package size={16} className="text-accent" /> Achats par catégorie
               </h3>
-              <BarBreakdown rows={parCategorie} color="#0251a1" formatValue={fmtEuro} emptyLabel="Aucun achat enregistré" />
+              <BarBreakdown rows={parCategorie} color="#2563eb" formatValue={fmtEuro} emptyLabel="Aucun achat enregistré" />
             </div>
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
               <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
@@ -1293,7 +1294,7 @@ const ChantierDetail = () => {
         <section aria-labelledby="journal-saisies-titre" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100">
             <h2 id="journal-saisies-titre" className="font-bold text-primary-dark">Journal d’audit des saisies</h2>
-            <p className="text-sm text-gray-500 mt-1">Historique immuable des créations, corrections et archivages du chantier, et des changements de son client.</p>
+            <p className="text-sm text-gray-500 mt-1">Historique immuable des créations, corrections et archivages du chantier, et des changements de son client, de son titulaire, de son commercial et de son encaissement.</p>
           </div>
           {journalSaisies.length === 0 ? (
             <p className="px-6 py-5 text-sm italic text-gray-400">Aucune entrée au journal de ce chantier.</p>
@@ -1306,12 +1307,12 @@ const ChantierDetail = () => {
                     <span className="text-gray-500">{formatCompanyDate(entree.createdAt, companyTimezone)} · {entree.auteurNom}</span>
                   </div>
                   {entree.motif && <p className="mt-1 text-gray-600">Motif : {entree.motif}</p>}
-                  {estChangementClient(entree) && (
+                  {(() => { const changement = changementAffaire(entree); return changement && (
                     <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
-                      <p className="rounded bg-red-50 p-2 text-red-900">Avant : {clientLisible(entree.avant)}</p>
-                      <p className="rounded bg-emerald-50 p-2 text-emerald-900">Après : {clientLisible(entree.apres)}</p>
+                      <p className="rounded bg-red-50 p-2 text-red-900">Avant : {changement.avant}</p>
+                      <p className="rounded bg-emerald-50 p-2 text-emerald-900">Après : {changement.apres}</p>
                     </div>
-                  )}
+                  ); })()}
                   {entree.action === 'CORRECTION' && (
                     <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
                       <pre className="overflow-auto rounded bg-red-50 p-2 text-red-900">Avant : {instantaneLisible(entree.avant, companyTimezone)}</pre>
