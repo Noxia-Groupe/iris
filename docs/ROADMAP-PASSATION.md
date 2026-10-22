@@ -136,7 +136,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
   - Identité de l'application (lot P0, #280, non validé pour mise en service ; décision de Nelson du 21-10-2026) :
     - la page de connexion ([Login.tsx](../client/src/pages/Login.tsx)) et le planning public ([PlanningPublic.tsx](../client/src/pages/PlanningPublic.tsx)) affichent « IRIS », le nom de l'application ;
     - icônes neutres de l'application (`client/public/icone.svg` et ses rendus) ; les trois bleus de l'ancienne marque remplacés par trois bleus de la palette standard de Tailwind 3, les deux gris neutres et la police de l'ancienne charte gardés ;
-    - ni le nom de l'ancienne société, sous aucune graphie, ni aucun des trois bleus de l'ancienne marque dans le code livré, hors les deux migrations déjà appliquées (`20260703090000`, `20260904210000`), sous la garde statique `client/tests/identite.test.ts` ; barèmes et primes insérés par migration vidés, sauf valeur différente de celle insérée (la migration de #280 ne cite ces valeurs que pour les reconnaître) ;
+    - ni le nom de l'ancienne société, avec O ou Ø et quelle que soit la casse, ni aucun des trois bleus de l'ancienne marque dans le code livré, hors les deux migrations déjà appliquées (`20260703090000`, `20260904210000`), sous la garde statique `client/tests/identite.test.ts` ; barèmes et primes insérés par migration vidés, sauf valeur différente de celle insérée (la migration de #280 ne cite ces valeurs que pour les reconnaître) ;
     - le menu, lui, affiche le nom de la société (#118) ;
     - choix par défaut en section 4.
   - La police est chargée depuis Google Fonts ; choix : l'héberger avec l'application.

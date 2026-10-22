@@ -34,9 +34,10 @@ exemple y compte comme une vraie lecture. Pour qu'elle ne compte pas, la citer s
 forme, par exemple « la variable X de process.env ».
 
 Côté client, `client/tests/identite.test.ts` (lot P0) relève de la même exception : il vérifie
-que ni le nom de l'ancienne société, sous aucune graphie, ni les trois bleus de son ancienne
-marque ne sont écrits dans le code livré (hors deux migrations déjà appliquées), propriété du
-texte lui-même ; l'affichage du nom de l'application est prouvé par l'E2E `identite-application`.
+que ni le nom de l'ancienne société, avec O ou Ø et quelle que soit la casse, ni les trois bleus
+de son ancienne marque ne sont écrits dans le code livré (hors deux migrations déjà appliquées),
+propriété du texte lui-même ; l'affichage du nom de l'application est prouvé par l'E2E
+`identite-application`.
 
 ## Lancer les tests
 
