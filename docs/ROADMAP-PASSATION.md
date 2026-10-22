@@ -102,7 +102,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
   - Les issues [#16](https://github.com/Noxia-Groupe/iris/issues/16) et [#19](https://github.com/Noxia-Groupe/iris/issues/19) sont fermées depuis le 16-10-2026 ; leurs reliquats sont suivis dans [#135](https://github.com/Noxia-Groupe/iris/issues/135) et [#136](https://github.com/Noxia-Groupe/iris/issues/136), ouvertes : comparer leurs sous-points au code avant de les replanifier.
 - **Contrats de maintenance — partiel.**
   - Livré : contrat cyclique, durée et couverture, avancement d'échéance, création idempotente d'une intervention à planifier par une action de l'écran (`POST`).
-  - Absent : génération automatique quotidienne (lot pilote 5). Ne pas présenter la génération actuelle comme automatisée.
+  - Génération automatique quotidienne des visites (lot pilote 5, #293 ; non validée pour mise en service) : une fois par jour civil de la société, visite créée pour l'échéance qui tombe dans l'anticipation réglée (30 jours par défaut, vide pour la désactiver), échéance d'une visite terminée avancée ; passage manuel par l'administration ; alerte en cas d'échec, d'interruption ou d'absence de passage. Choix par défaut, à confirmer, en section 4 ; questions (a) à (c) en section 3.
 - **Facturation et comptabilité — partiel.**
   - Livré :
     - factures numérotées et leur PDF, avoirs, écritures, ventilation de TVA ;
@@ -173,7 +173,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 | 2. Catalogue dans les devis (A8) | **Implémenté** | #161 |
 | 3. Parcours technicien sur téléphone | **Implémenté** : prérequis et droits (3a), parcours sur téléphone (3b-1 à 3b-4) et planning limité du technicien. Non validé pour mise en service. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3), #272 (3b-4), #275 (planning limité) |
 | 4. Conversion des devis (A7) | **Implémenté** : intervention et contrat depuis un devis signé ; règles (a) et (b) posées en question (section 3). Non validé pour mise en service | #281 |
-| 5. Génération automatique des visites (A9) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
+| 5. Génération automatique des visites (A9) | **Implémenté** : passage quotidien côté serveur, anticipation paramétrable, alerte et passage manuel ; questions (a) à (c) posées (section 3). Non validé pour mise en service | #293 |
 | 6. Envoi des documents (A10) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
 
 1. **Règlements (A3).**
@@ -206,7 +206,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
      - la signature dessinée est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé (**implémenté** par #268) ; durée de conservation à confirmer avec le cabinet ;
      - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**implémenté** par #275 ; périmètre et choix par défaut en section 4). La décision de Nelson du 21-10-2026 l'étend (« Des 2 », **implémenté** par #279) : il voit aussi les affectations des chantiers dont il est titulaire ; le lien public reste ouvert à toute personne qui en a l'adresse.
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent. **Implémenté** par #281 (choix par défaut en section 4, questions (a) et (b) en section 3).
-5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
+5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA. **Implémenté** par #293 (choix par défaut en section 4, questions (a) à (c) en section 3).
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
    - Si Microsoft 365 n'est pas prêt au premier jour, le pilote télécharge le PDF et l'envoie à la main, comme aujourd'hui (recommandation initiale, à confirmer).
    - Journal des envois : choix par défaut, à confirmer.
@@ -325,6 +325,10 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 - **Conversion des devis (lot pilote 4, #281)** (règles métier) :
   - (a) une affaire ne se convertit qu'une fois, quelle que soit la cible (décision du 14-10-2026 pour le chantier, étendue par #281) ; un devis qui vend une installation et son contrat de maintenance ne crée donc pas les deux. Garder cette règle, ou permettre un chantier et un contrat (ou une intervention) pour la même affaire, ce qui change le modèle (`DevisConversion.dossierId` unique) ?
   - (b) un devis converti en intervention ou en contrat ne s'annule plus (l'intervention s'annule, le contrat se suspend ou se termine depuis leurs écrans), alors qu'un devis converti en chantier s'annule avec lui. Garder, ou annuler la cible avec le devis ?
+- **Génération automatique des visites (lot pilote 5, #293)** (règle nouvelle, règles métier et modèle de données ; appliquées par défaut, voir section 4) :
+  - (a) anticipation de 30 jours par défaut, appliquée dès la mise en service : la garder, en retenir une autre, ou livrer la génération désactivée (vide) jusqu'au réglage par la société (règle permanente 1 : une valeur non décidée d'une règle nouvelle est posée en question) ?
+  - (b) le passage avance lui-même l'échéance d'une visite terminée, et ne saute aucune échéance passée (sa visite est créée en retard, puis les suivantes une à une au fil des visites terminées) : garder, ou reprendre à la prochaine échéance à venir ?
+  - (c) les écritures du passage n'ont pas de compte auteur : la base admet un auteur vide au journal SAV pour la seule « Génération automatique » (création de la visite, avancement de l'échéance), alors que #67 exigeait que toute trace désigne un compte Iris réel. Garder, ou porter ces écritures par un compte système qui ne se connecte pas ?
 
 ## 4. Choix par défaut, à confirmer
 
@@ -422,6 +426,15 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Trace : motif « Conversion du devis N (version v). » au journal de la cible, et ligne du devis ; aucun lien depuis la fiche de la cible. **Appliqué** (#281).
 - La facture se crée depuis l'écran Factures, avec l'origine Intervention ou Contrat. **Appliqué** (état actuel).
 - Une seule conversion par affaire, et devis converti en intervention ou en contrat non annulable : appliqués par #281, posés en question (section 3).
+
+**Génération automatique des visites de maintenance** (lot pilote 5, #293)
+- Anticipation de 30 jours par défaut, appliquée dès la mise en service ; de 0 à 365 jours, vide pour désactiver la génération automatique. **Appliqué** (#293), posé en question (section 3).
+- Le passage avance aussi l'échéance d'une visite terminée (règle de l'action « Échéance suivante »), faute de quoi seule la première visite de chaque contrat serait automatique. **Appliqué** (#293), posé en question (section 3).
+- Une échéance passée n'est pas sautée : sa visite est créée en retard, comme par l'action manuelle, et les suivantes au fil des visites terminées, une par jour au plus pour chaque contrat. **Appliqué** (#293), posé en question (section 3).
+- Client désactivé et visite annulée : contrat laissé de côté et signalé, sans échec. **Appliqué** (#293).
+- L'alerte s'affiche aux administrateurs en tête des écrans Contrats de maintenance et Interventions ; aucun courriel (l'envoi des documents est le lot 6). **Appliqué** (#293).
+- Le passage du jour a lieu peu après minuit, heure de la société (première vérification du jour) ; le passage lancé à la main est au nom de l'administrateur. **Appliqué** (#293).
+- Le passage automatique écrit sans compte auteur, au nom « Génération automatique ». **Appliqué** (#293), posé en question (section 3).
 
 **Dates**
 - Date de demande curative : alignée sur les autres dates métier. **À appliquer**.

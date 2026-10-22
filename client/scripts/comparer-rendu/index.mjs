@@ -206,6 +206,8 @@ async function principal() {
       BREAK_GLASS_EMAIL: 'secours@iris.test',
       BREAK_GLASS_TOKEN: JETON_SECOURS,
       SUPERADMIN_EMAILS: 'secours@iris.test',
+      // Données identiques d'un relevé à l'autre : aucun passage quotidien de la génération des visites.
+      GENERATION_VISITES_AUTOMATIQUE: '0',
     },
   }, path.join(options.sortie, 'serveur.log'));
   await attendre(`http://127.0.0.1:${ports.api}/api/health`, serveur);

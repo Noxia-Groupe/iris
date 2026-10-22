@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
-import test, { after, before, describe, mock } from 'node:test';
+import test, { after, afterEach, before, describe, mock } from 'node:test';
 import { PDFParse } from 'pdf-parse';
 
 // Fige l'horloge du processus (Date seulement : ni les minuteries ni la base) au dernier 21 h UTC
@@ -250,6 +250,9 @@ if (!TEST_DATABASE_URL) {
     const contratIds = (await prisma.contratMaintenance.findMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } }, select: { id: true } })).map((contrat) => contrat.id);
     await prisma.journalSaisieChantier.deleteMany({ where: { contratMaintenanceId: { in: contratIds } } });
     await prisma.contratMaintenance.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    // Passages de la génération des visites (lot pilote 5) : dans une base de test, tous viennent
+    // des tests ; repartir sans eux rend l'alerte de la génération indépendante des suites passées.
+    await prisma.executionGenerationVisites.deleteMany({});
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientContact.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.cataloguePrestation.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
@@ -292,6 +295,7 @@ if (!TEST_DATABASE_URL) {
       'garde.verrou.cible@iris.test', 'garde.verrou.responsable@iris.test', 'garde.verrou.ancien@iris.test',
       'conversion4.commercial@iris.test', 'conversion4.conducteur@iris.test', 'conversion4.assistante@iris.test', 'conversion4.comptable@iris.test',
       'conversion4.directeur.commercial@iris.test', 'conversion4.directeur@iris.test', 'conversion4.responsable@iris.test',
+      'generation5.conducteur@iris.test', 'generation5.commercial@iris.test', 'generation5.technicien@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
@@ -13445,6 +13449,508 @@ if (!TEST_DATABASE_URL) {
         await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_refuser_journal ON "JournalAdministration"');
         await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_refuser_journal()');
       }
+    });
+  });
+
+  // Lot pilote 5 (décision A9) : génération quotidienne des visites de maintenance, côté serveur,
+  // avec une anticipation réglable et une alerte en cas d'échec. Un passage traite TOUS les
+  // contrats actifs de la base : les assertions portent sur les contrats créés ici.
+  describe('Lot pilote 5 : génération automatique des visites de maintenance', () => {
+    let executerGenerationVisites;
+    let session = '';
+    let clientId = '';
+    const comptes = {};
+    const admin = () => ({ Authorization: `Bearer ${session}` });
+    const entete = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    // Jour fictif des passages automatiques : la clé du jour est unique, ses passages sont donc
+    // effacés avant chaque essai. À 11 h UTC, c'est le 15-06-2026 dans chacun des fuseaux
+    // français que la société peut avoir (de 1 h à Tahiti à 23 h à Wallis) : une suite précédente
+    // peut avoir changé ce fuseau.
+    const JOUR_FICTIF = '2026-06-15';
+    const INSTANT_FICTIF = new Date(`${JOUR_FICTIF}T11:00:00.000Z`);
+    const regler = (anticipationVisitesJours) => request(app).put('/api/parametres').set(admin()).send({ anticipationVisitesJours });
+    const creerContrat = async (titre, dateDebut, donnees = {}) => {
+      const res = await request(app).post('/api/contrats-maintenance').set(admin()).send({ clientId, titre, periodiciteMois: 1, dureePrevisionnelleMinutes: 60, dateDebut, ...donnees });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const visites = (contratId) => prisma.intervention.findMany({ where: { contratMaintenanceId: contratId }, orderBy: { echeanceContrat: 'asc' } });
+    const echeance = async (contratId) => (await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contratId } })).prochaineEcheance.toISOString().slice(0, 10);
+    const lancer = (auth = admin()) => request(app).post('/api/contrats-maintenance/generation-visites').set(auth);
+    const etat = (auth = admin()) => request(app).get('/api/contrats-maintenance/generation-visites').set(auth);
+    const terminer = async (interventionId) => {
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) {
+        const res = await request(app).patch(`/api/interventions/${interventionId}/statut`).set(admin()).send({ statut });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      }
+      const fin = await terminerIntervention(interventionId, session);
+      assert.equal(fin.status, 200, JSON.stringify(fin.body));
+    };
+
+    before(async () => {
+      ({ executerGenerationVisites } = await import('../dist/index.js'));
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      for (const [cle, role] of [['conducteur', 'CONDUCTEUR_TRAVAUX'], ['commercial', 'COMMERCIAL'], ['technicien', 'TECHNICIEN']]) {
+        const email = `generation5.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Génération ${cle}`, role } });
+      }
+      clientId = (await prisma.client.create({ data: { raisonSociale: 'TEST Client génération des visites' } })).id;
+      assert.equal((await regler(30)).status, 200);
+    });
+
+    // Chaque test repart du réglage par défaut, sans passage du jour fictif, même s'il échoue : un
+    // échec ne fait pas échouer les suivants (alerte « n'a pas tourné », génération désactivée).
+    afterEach(async () => {
+      await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR_FICTIF } });
+      await regler(30);
+    });
+
+    test('passage automatique : une fois par jour civil, visites dans l’anticipation, sans compte auteur, échéance d’une visite terminée avancée', async () => {
+      const dansAnticipation = await creerContrat('TEST Génération dans l’anticipation', '01-07-2026');
+      // Bornes de l'anticipation de 30 jours depuis le 15-06 : le 15-07 en est, le 16-07 non.
+      const borne = await creerContrat('TEST Génération à la borne', '15-07-2026');
+      const auDela = await creerContrat('TEST Génération au-delà', '16-07-2026');
+      const terminee = await creerContrat('TEST Génération visite terminée', '15-05-2026');
+      const premiere = await request(app).post(`/api/contrats-maintenance/${terminee.id}/generer-intervention`).set(admin());
+      assert.equal(premiere.status, 201, JSON.stringify(premiere.body));
+      await terminer(premiere.body.id);
+
+      await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR_FICTIF } });
+      const passage = await executerGenerationVisites({ type: 'AUTOMATIQUE' }, INSTANT_FICTIF);
+      assert.ok(passage, 'premier passage du jour');
+      assert.deepEqual(
+        [passage.declenchement, passage.cleJourAutomatique, passage.jour.toISOString().slice(0, 10), passage.auteurId, passage.auteurNom, passage.anticipationJours, passage.statut],
+        ['AUTOMATIQUE', JOUR_FICTIF, JOUR_FICTIF, null, null, 30, 'REUSSIE'],
+      );
+      assert.deepEqual(passage.erreurs, [], JSON.stringify(passage.erreurs));
+      assert.ok(passage.fin && passage.fin >= passage.debut);
+
+      // Échéance du 01-07, à 16 jours : créée, comme par l'action de l'écran, sans compte auteur.
+      const [visite] = await visites(dansAnticipation.id);
+      assert.ok(visite, 'visite créée');
+      assert.deepEqual(
+        [visite.titre, visite.statut, visite.echeanceContrat.toISOString().slice(0, 10), visite.dateSouhaitee.toISOString().slice(0, 10), visite.createdById, visite.clientId],
+        ['Maintenance préventive — TEST Génération dans l’anticipation', 'A_PLANIFIER', '2026-07-01', '2026-07-01', null, clientId],
+      );
+      assert.match(visite.reference, /^I\d{2}-\d{4}$/);
+      assert.deepEqual(visite.couvertureContrat, { politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: null });
+      const creation = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: visite.id } });
+      assert.deepEqual([creation.cible, creation.action, creation.auteurId, creation.auteurNom, creation.motif], ['INTERVENTION', 'CREATION_CONTRAT', null, 'Génération automatique', 'Génération automatique : échéance du 01-07-2026.']);
+      // Échéance du 15-07, à 30 jours : créée ; du 16-07, à 31 jours : rien.
+      assert.deepEqual((await visites(borne.id)).map((v) => v.echeanceContrat.toISOString().slice(0, 10)), ['2026-07-15']);
+      assert.equal((await visites(auDela.id)).length, 0);
+      // Visite du 15-05 terminée : échéance avancée au 15-06, dans l'anticipation, donc créée aussi.
+      assert.equal(await echeance(terminee.id), '2026-06-15');
+      const suite = await visites(terminee.id);
+      assert.deepEqual(suite.map((v) => [v.echeanceContrat.toISOString().slice(0, 10), v.statut]), [['2026-05-15', 'TERMINEE'], ['2026-06-15', 'A_PLANIFIER']]);
+      const avancement = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { contratMaintenanceId: terminee.id, action: 'AVANCEMENT_ECHEANCE' } });
+      assert.deepEqual([avancement.auteurId, avancement.auteurNom], [null, 'Génération automatique']);
+      assert.equal(avancement.motif, `Génération automatique : Intervention ${premiere.body.reference} terminée : échéance du 15-05-2026 au 15-06-2026.`);
+      assert.ok(passage.visitesCreees >= 3 && passage.echeancesAvancees >= 1, JSON.stringify(passage));
+
+      // Même jour civil : aucun second passage automatique, aucune visite en plus.
+      const interventionsAvant = await prisma.intervention.count();
+      assert.equal(await executerGenerationVisites({ type: 'AUTOMATIQUE' }, new Date(`${JOUR_FICTIF}T11:30:00.000Z`)), null, 'même jour civil, une demi-heure plus tard');
+      assert.equal(await prisma.intervention.count(), interventionsAvant);
+      assert.equal(await prisma.executionGenerationVisites.count({ where: { cleJourAutomatique: JOUR_FICTIF } }), 1);
+
+      // Plus de passage automatique depuis le 15-06 : alerte, puisque le minuteur tourne ici.
+      const lu = await etat();
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      assert.equal(lu.body.anticipationVisitesJours, 30);
+      assert.equal(lu.body.minuteurActif, true);
+      assert.equal(lu.body.derniereExecutionAutomatique.cleJourAutomatique, JOUR_FICTIF);
+      assert.match(lu.body.alerte, /n’a pas tourné depuis le 15-06-2026/);
+      await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR_FICTIF } });
+      assert.equal((await etat()).body.alerte, null);
+    });
+
+    test('passage manuel : au nom de l’administrateur ; client désactivé et visite annulée signalés ; contrat suspendu ignoré', async () => {
+      const aujourdhui = jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
+      const [a, m, j] = aujourdhui.split('-');
+      const dateDuJour = `${j}-${m}-${a}`;
+      const normal = await creerContrat('TEST Génération manuelle', dateDuJour);
+      const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST Client génération désactivé' } });
+      const desactive = await creerContrat('TEST Génération client désactivé', dateDuJour, { clientId: autreClient.id });
+      await prisma.client.update({ where: { id: autreClient.id }, data: { actif: false } });
+      const annule = await creerContrat('TEST Génération visite annulée', dateDuJour);
+      const visiteAnnulee = await request(app).post(`/api/contrats-maintenance/${annule.id}/generer-intervention`).set(admin());
+      assert.equal(visiteAnnulee.status, 201, JSON.stringify(visiteAnnulee.body));
+      assert.equal((await request(app).patch(`/api/interventions/${visiteAnnulee.body.id}/statut`).set(admin()).send({ statut: 'ANNULEE' })).status, 200);
+      const suspendu = await creerContrat('TEST Génération suspendu', dateDuJour);
+      assert.equal((await request(app).patch(`/api/contrats-maintenance/${suspendu.id}/statut`).set(admin()).send({ statut: 'SUSPENDU', motif: 'TEST suspension' })).status, 200);
+
+      const res = await lancer();
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const passage = res.body.execution;
+      const secours = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      assert.deepEqual([passage.declenchement, passage.cleJourAutomatique, passage.auteurId, passage.auteurNom, passage.jour.slice(0, 10)], ['MANUEL', null, secours.id, secours.name, aujourdhui]);
+      assert.deepEqual(passage.erreurs, [], JSON.stringify(passage.erreurs));
+      const [visite] = await visites(normal.id);
+      assert.equal(visite.createdById, passage.auteurId);
+      const creation = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: visite.id } });
+      assert.deepEqual([creation.auteurId, creation.auteurNom], [secours.id, secours.name]);
+      assert.equal(creation.motif, `Génération des visites lancée par un administrateur : échéance du ${dateDuJour}.`);
+
+      const ignores = Object.fromEntries(passage.contratsIgnores.map((c) => [c.contratId, c]));
+      assert.match(ignores[desactive.id]?.motif ?? '', /Client désactivé/);
+      assert.equal(ignores[desactive.id].titre, 'TEST Génération client désactivé');
+      assert.equal(ignores[annule.id]?.motif, `Visite ${visiteAnnulee.body.reference} de l’échéance du ${dateDuJour} annulée : l’échéance n’avance plus d’elle-même.`);
+      assert.equal(ignores[suspendu.id], undefined, 'un contrat suspendu n’est pas traité');
+      assert.equal(ignores[normal.id], undefined);
+      assert.equal((await visites(desactive.id)).length, 0);
+      assert.equal((await visites(suspendu.id)).length, 0);
+      assert.deepEqual((await visites(annule.id)).map((v) => v.statut), ['ANNULEE']);
+      assert.equal(res.body.etat.derniereExecution.id, passage.id);
+      assert.equal(res.body.etat.alerte, null);
+
+      // Relancé aussitôt : idempotent, aucune visite en double.
+      const encore = await lancer();
+      assert.equal(encore.status, 201, JSON.stringify(encore.body));
+      assert.equal((await visites(normal.id)).length, 1);
+    });
+
+    test('échec d’un contrat : consigné sans détail technique, les autres traités, alerte jusqu’à une relance réussie', async () => {
+      const aujourdhui = jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
+      const [a, m, j] = aujourdhui.split('-');
+      const enEchec = await creerContrat('TEST Génération piégée', `${j}-${m}-${a}`);
+      const voisin = await creerContrat('TEST Génération voisine', `${j}-${m}-${a}`);
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION test_pieger_generation() RETURNS trigger AS $$
+        BEGIN
+          IF NEW."titre" = 'Maintenance préventive — TEST Génération piégée' THEN RAISE EXCEPTION 'détail technique à ne pas montrer'; END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql`);
+      await prisma.$executeRawUnsafe('CREATE TRIGGER test_pieger_generation BEFORE INSERT ON "Intervention" FOR EACH ROW EXECUTE FUNCTION test_pieger_generation()');
+      let echec;
+      try {
+        echec = await lancer();
+      } finally {
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_pieger_generation ON "Intervention"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_pieger_generation()');
+      }
+      assert.equal(echec.status, 201, JSON.stringify(echec.body));
+      assert.equal(echec.body.execution.statut, 'ECHEC');
+      const erreur = echec.body.execution.erreurs.find((e) => e.contratId === enEchec.id);
+      assert.deepEqual(erreur, { contratId: enEchec.id, titre: 'TEST Génération piégée', message: 'Contrat non traité : erreur technique, détaillée dans le journal du serveur.' });
+      assert.doesNotMatch(JSON.stringify(echec.body), /détail technique/);
+      assert.equal((await visites(enEchec.id)).length, 0, 'rien de la transaction en échec ne reste');
+      assert.equal((await visites(voisin.id)).length, 1, 'le contrat voisin est traité');
+      assert.match(echec.body.etat.alerte, /est en échec \(\d+ erreurs?\)/);
+      assert.match((await etat()).body.alerte, /est en échec/);
+
+      const relance = await lancer();
+      assert.equal(relance.status, 201, JSON.stringify(relance.body));
+      assert.deepEqual([relance.body.execution.statut, relance.body.execution.erreurs], ['REUSSIE', []]);
+      assert.equal((await visites(enEchec.id)).length, 1);
+      assert.equal(relance.body.etat.alerte, null);
+    });
+
+    // Note N6 du second audit interne de #293 : si la liste des contrats ne peut pas être lue, le
+    // passage est en échec, avec une erreur sans détail technique, et son enregistrement est clos.
+    // La table est renommée le temps du passage : les suites lancées en parallèle (migrations,
+    // serveur, environnement) ne la lisent pas, et celle-ci est séquentielle.
+    test('lecture impossible des contrats : passage en échec, erreur sans détail technique, puis relance réussie', async () => {
+      await prisma.$executeRawUnsafe('ALTER TABLE "ContratMaintenance" RENAME TO "ContratMaintenance_test_lecture"');
+      let echec;
+      try {
+        echec = await lancer();
+      } finally {
+        await prisma.$executeRawUnsafe('ALTER TABLE "ContratMaintenance_test_lecture" RENAME TO "ContratMaintenance"');
+      }
+      assert.equal(echec.status, 201, JSON.stringify(echec.body));
+      assert.equal(echec.body.execution.statut, 'ECHEC');
+      assert.deepEqual(echec.body.execution.erreurs, [{ contratId: null, titre: null, message: 'Lecture des contrats impossible : erreur technique, détaillée dans le journal du serveur.' }]);
+      assert.deepEqual([echec.body.execution.visitesCreees, echec.body.execution.echeancesAvancees], [0, 0]);
+      assert.ok(echec.body.execution.fin, 'le passage est clos');
+      assert.match(echec.body.etat.alerte, /est en échec \(1 erreur\)/);
+      const relance = await lancer();
+      assert.deepEqual([relance.status, relance.body.execution.statut, relance.body.etat.alerte], [201, 'REUSSIE', null]);
+    });
+
+    test('anticipation : bornes, désactivation, journal des réglages, et contrainte en base', async () => {
+      for (const valeur of [-1, 366, 1.5, 'abc', '12a', ' 7 8', true]) {
+        const refus = await regler(valeur);
+        assert.equal(refus.status, 400, `${JSON.stringify(valeur)} : ${JSON.stringify(refus.body)}`);
+        assert.match(refus.body.error, /entre 0 et 365/);
+      }
+      assert.equal((await regler('0')).body.anticipationVisitesJours, 0);
+      assert.equal((await regler(' 45 ')).body.anticipationVisitesJours, 45);
+      const entree = await prisma.journalAdministration.findFirstOrThrow({ where: { domaine: 'REGLAGES', type: 'PARAMETRES' }, orderBy: { createdAt: 'desc' } });
+      assert.deepEqual([entree.avant, entree.apres], [{ anticipationVisitesJours: 0 }, { anticipationVisitesJours: 45 }]);
+      // Bornes incluses (ajout du second audit) : 365 est accepté, par l'API comme par la base.
+      assert.equal((await regler(365)).body.anticipationVisitesJours, 365);
+      assert.equal(await prisma.$executeRaw`UPDATE "Parametres" SET "anticipationVisitesJours" = 365 WHERE "id" = 'singleton'`, 1);
+      await assert.rejects(prisma.$executeRaw`UPDATE "Parametres" SET "anticipationVisitesJours" = 366 WHERE "id" = 'singleton'`);
+      await assert.rejects(prisma.$executeRaw`UPDATE "Parametres" SET "anticipationVisitesJours" = -1 WHERE "id" = 'singleton'`);
+
+      // Désactivée : aucun passage automatique, le passage manuel est refusé, aucune alerte.
+      assert.equal((await regler('')).body.anticipationVisitesJours, null);
+      const passagesAvant = await prisma.executionGenerationVisites.count();
+      await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR_FICTIF } });
+      assert.equal(await executerGenerationVisites({ type: 'AUTOMATIQUE' }, INSTANT_FICTIF), null);
+      const refus = await lancer();
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /désactivée/);
+      assert.ok(await prisma.executionGenerationVisites.count() <= passagesAvant, 'aucun passage enregistré');
+      const lu = (await etat()).body;
+      assert.deepEqual([lu.anticipationVisitesJours, lu.alerte], [null, null]);
+      assert.equal((await regler(30)).body.anticipationVisitesJours, 30);
+    });
+
+    test('droits : état et passage réservés à l’administration, comme le réglage', async () => {
+      for (const cle of ['conducteur', 'commercial', 'technicien']) {
+        assert.equal((await etat(entete(cle))).status, 403, cle);
+        assert.equal((await lancer(entete(cle))).status, 403, cle);
+        assert.equal((await request(app).put('/api/parametres').set(entete(cle)).send({ anticipationVisitesJours: 5 })).status, 403, cle);
+      }
+      assert.equal((await request(app).get('/api/contrats-maintenance/generation-visites')).status, 401);
+      assert.equal((await request(app).post('/api/contrats-maintenance/generation-visites')).status, 401);
+      assert.equal((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).anticipationVisitesJours, 30);
+    });
+
+    test('en base : seule la génération écrit au journal SAV sans compte auteur ; un passage est cohérent', async () => {
+      const contrat = await creerContrat('TEST Génération contrainte', '01-01-2099');
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.id}/generer-intervention`).set(admin());
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      const id = visite.body.id;
+      const inserer = (action, auteurNom, cible = 'INTERVENTION') => prisma.$executeRaw`INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "contratMaintenanceId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif")
+        VALUES (${randomUUID()}, ${cible === 'INTERVENTION' ? id : null}, ${cible === 'CONTRAT' ? contrat.id : null}, ${cible}, ${cible === 'INTERVENTION' ? id : contrat.id}, ${action}, NULL, ${auteurNom}, 'TEST motif')`;
+      await assert.rejects(inserer('CORRECTION', 'Génération automatique'), /auteur_generation/);
+      await assert.rejects(inserer('CREATION_CONTRAT', 'Quelqu’un'), /auteur_generation/);
+      await assert.rejects(inserer('CREATION_CONTRAT', 'Génération automatique', 'CONTRAT'), /auteur_generation/);
+      await assert.rejects(inserer('SUSPENSION', 'Génération automatique', 'CONTRAT'), /auteur_generation/);
+      assert.equal(await inserer('CREATION_CONTRAT', 'Génération automatique'), 1);
+      assert.equal(await inserer('AVANCEMENT_ECHEANCE', 'Génération automatique', 'CONTRAT'), 1);
+
+      const passage = (declenchement, cle, auteurId, auteurNom, statut = 'REUSSIE') => prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "cleJourAutomatique", "auteurId", "auteurNom", "anticipationJours", "statut")
+        VALUES (${randomUUID()}, DATE '2001-02-03', ${declenchement}, ${cle}, ${auteurId}, ${auteurNom}, 30, ${statut})`;
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-04', null, null), /coherence/);
+      await assert.rejects(passage('AUTOMATIQUE', null, null, null), /coherence/);
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', 'un-compte', 'Quelqu’un'), /coherence/);
+      await assert.rejects(passage('MANUEL', null, null, null), /coherence/);
+      await assert.rejects(passage('MANUEL', '2001-02-03', 'un-compte', 'Quelqu’un'), /coherence/);
+      await assert.rejects(passage('MANUEL', null, 'un-compte', 'Quelqu’un', 'INCONNU'), /coherence/);
+      assert.equal(await passage('MANUEL', null, 'un-compte', 'Quelqu’un'), 1);
+      assert.equal(await passage('AUTOMATIQUE', '2001-02-03', null, null), 1);
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', null, null), /cleJourAutomatique|unique/i);
+      await prisma.executionGenerationVisites.deleteMany({ where: { jour: new Date('2001-02-03T00:00:00.000Z') } });
+    });
+
+    // --- Ajouts proposés par l'audit interne de #293 ---
+    // Le passage quotidien a lieu peu après minuit, heure de la société : à Paris, c'est encore la
+    // veille en UTC. Le jour civil et l'anticipation doivent être comptés au fuseau de la société.
+    test('passage automatique peu après minuit, heure de la société : jour civil et anticipation au fuseau de la société', async () => {
+      const fuseauInitial = (await request(app).get('/api/company').set(admin())).body.fuseauHoraire;
+      assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: 'Europe/Paris' })).status, 200);
+      try {
+        const borne = await creerContrat('TEST Génération minuit à la borne', '15-07-2026');
+        const auDela = await creerContrat('TEST Génération minuit au-delà', '16-07-2026');
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: { in: ['2026-06-14', JOUR_FICTIF] } } });
+        // 00 h 30 à Paris le 15-06-2026, 22 h 30 UTC le 14-06.
+        const passage = await executerGenerationVisites({ type: 'AUTOMATIQUE' }, new Date('2026-06-14T22:30:00.000Z'));
+        assert.equal(passage?.cleJourAutomatique, JOUR_FICTIF);
+        assert.deepEqual((await visites(borne.id)).map((v) => v.echeanceContrat.toISOString().slice(0, 10)), ['2026-07-15']);
+        assert.equal((await visites(auDela.id)).length, 0);
+        // 23 h 30 à Paris le même jour civil (21 h 30 UTC le 15-06) : aucun second passage.
+        assert.equal(await executerGenerationVisites({ type: 'AUTOMATIQUE' }, new Date('2026-06-15T21:30:00.000Z')), null);
+      } finally {
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: '2026-06-14' } });
+        await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+      }
+    });
+
+    // Un passage relit chaque contrat sous son verrou : l'« Échéance suivante » ou la suspension
+    // engagée par un administrateur pendant le passage est vue, sans double avancement ni visite.
+    test('passage concurrent d’une action sur le contrat : attend son verrou et relit échéance et statut', async () => {
+      const aujourdhui = jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
+      const [a, m, j] = aujourdhui.split('-');
+      // Échéance trois jours plus tôt : ce contrat est traité avant l'autre (ordre des échéances).
+      const veille = new Date(Date.UTC(Number(a), Number(m) - 1, Number(j) - 3)).toISOString().slice(0, 10).split('-').reverse().join('-');
+      const avance = await creerContrat('TEST Génération course échéance', veille);
+      const premiere = await request(app).post(`/api/contrats-maintenance/${avance.id}/generer-intervention`).set(admin());
+      assert.equal(premiere.status, 201, JSON.stringify(premiere.body));
+      await terminer(premiere.body.id);
+      const suspendu = await creerContrat('TEST Génération course suspension', `${j}-${m}-${a}`);
+      const secours = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        await tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" IN (${avance.id}, ${suspendu.id}) FOR UPDATE`;
+        pret(pid);
+        await attente;
+        // « Échéance suivante » et suspension engagées pendant le passage, dans la transaction qui tient le verrou.
+        await tx.contratMaintenance.update({ where: { id: avance.id }, data: { prochaineEcheance: new Date('2099-01-01T00:00:00.000Z') } });
+        await tx.journalSaisieChantier.create({ data: { contratMaintenanceId: avance.id, cible: 'CONTRAT', cibleId: avance.id, action: 'AVANCEMENT_ECHEANCE', auteurId: secours.id, auteurNom: secours.name, motif: 'TEST avancement concurrent' } });
+        await tx.contratMaintenance.update({ where: { id: suspendu.id }, data: { statut: 'SUSPENDU' } });
+      }, { timeout: 15000 });
+      const pidVerrou = await verrouPris;
+      let passage;
+      try {
+        passage = lancer().then((reponse) => reponse);
+        let bloque = false;
+        for (let tour = 0; tour < 250 && !bloque; tour++) {
+          // Seule compte une session que la transaction du verrou bloque : une autre session en
+          // attente d'un verrou dans la même base ne doit pas libérer la transaction trop tôt.
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE ${pidVerrou}::int = ANY(pg_blocking_pids(pid))`;
+          bloque = sessions.length > 0;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'le passage doit attendre le verrou du contrat');
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const res = await passage;
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: avance.id, action: 'AVANCEMENT_ECHEANCE' } }), 1, 'aucun second avancement');
+      assert.equal(await echeance(avance.id), '2099-01-01');
+      assert.equal((await visites(suspendu.id)).length, 0, 'aucune visite pour un contrat suspendu entre-temps');
+    });
+
+    // Ajout du second audit interne de #293 : le verrou du contrat est pris dans la transaction du
+    // passage et tenu jusqu'à sa fin. Un verrou relâché aussitôt pris (pris hors de la transaction)
+    // laisserait une action de l'écran avancer l'échéance entre la relecture et l'écriture.
+    test('le passage tient le verrou du contrat jusqu’à la fin de sa transaction', async () => {
+      const aujourdhui = jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
+      const [a, m, j] = aujourdhui.split('-');
+      const contrat = await creerContrat('TEST Génération verrou tenu', `${j}-${m}-${a}`);
+      const CLE = 293293;
+      // La création de la visite de ce contrat attend un verrou consultatif tenu par le test : le
+      // passage est alors retenu au milieu de la transaction du contrat. Le déclencheur porte un nom
+      // qui le fait passer avant « Intervention_dateDemande_contrat » (ordre alphabétique), lequel
+      // prend un verrou partagé sur le contrat : seul le verrou du passage est alors en jeu.
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION test_retenir_generation() RETURNS trigger AS $$
+        BEGIN
+          IF NEW."titre" = 'Maintenance préventive — TEST Génération verrou tenu' THEN PERFORM pg_advisory_xact_lock(${CLE}); END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql`);
+      await prisma.$executeRawUnsafe('CREATE TRIGGER "A_test_retenir_generation" BEFORE INSERT ON "Intervention" FOR EACH ROW EXECUTE FUNCTION test_retenir_generation()');
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const retenuePrise = new Promise((resolve) => { pret = resolve; });
+      const retenue = prisma.$transaction(async (tx) => {
+        const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${CLE})::text`;
+        pret(pid);
+        await attente;
+      }, { timeout: 20000 });
+      let passage;
+      try {
+        const pidRetenue = await retenuePrise;
+        passage = lancer().then((reponse) => reponse);
+        let retenu = false;
+        for (let tour = 0; tour < 500 && !retenu; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE ${pidRetenue}::int = ANY(pg_blocking_pids(pid))`;
+          retenu = sessions.length > 0;
+          if (!retenu) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(retenu, true, 'le passage doit être retenu à la création de la visite');
+        await assert.rejects(
+          prisma.$transaction((tx) => tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${contrat.id} FOR UPDATE NOWAIT`),
+          /55P03|could not obtain lock/,
+          'le contrat reste verrouillé par la transaction du passage',
+        );
+      } finally {
+        liberer();
+        await retenue;
+        if (passage) await passage;
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "A_test_retenir_generation" ON "Intervention"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_retenir_generation()');
+      }
+      const res = await passage;
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal((await visites(contrat.id)).length, 1);
+    });
+
+    // L'alerte d'absence porte sur le dernier passage AUTOMATIQUE : un passage manuel ne la masque pas.
+    test('alerte d’absence : un passage manuel réussi ne remplace pas le passage automatique manquant', async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const aujourdhui = jourCivilEntreprise(new Date(), fuseau);
+      const ilYATroisJours = new Date(new Date(`${aujourdhui}T00:00:00.000Z`).getTime() - 3 * 86_400_000);
+      const cle = ilYATroisJours.toISOString().slice(0, 10);
+      await prisma.executionGenerationVisites.create({ data: { jour: ilYATroisJours, declenchement: 'AUTOMATIQUE', cleJourAutomatique: cle, anticipationJours: 30, statut: 'REUSSIE', fin: ilYATroisJours } });
+      try {
+        assert.equal((await lancer()).status, 201);
+        const lu = (await etat()).body;
+        assert.equal(lu.derniereExecution.declenchement, 'MANUEL');
+        assert.match(lu.alerte ?? '', /n’a pas tourné depuis le/);
+      } finally {
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: cle } });
+      }
+    });
+
+    // Ajout du second audit interne de #293 : l'alerte d'absence compte, elle aussi, les jours au
+    // fuseau de la société (peu après minuit à Paris, c'est encore la veille en UTC).
+    test('alerte d’absence : jours comptés au fuseau de la société, peu après minuit', async () => {
+      const { etatGenerationVisites } = await import('../dist/index.js');
+      const fuseauInitial = (await request(app).get('/api/company').set(admin())).body.fuseauHoraire;
+      assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: 'Europe/Paris' })).status, 200);
+      await prisma.executionGenerationVisites.create({ data: { jour: new Date('2026-06-13T00:00:00.000Z'), declenchement: 'AUTOMATIQUE', cleJourAutomatique: '2026-06-13', anticipationJours: 30, statut: 'REUSSIE', fin: new Date() } });
+      try {
+        // 23 h 30 à Paris le 14-06 (21 h 30 UTC) : le passage d'hier suffit.
+        assert.equal((await etatGenerationVisites(new Date('2026-06-14T21:30:00.000Z'))).alerte, null);
+        // 00 h 30 à Paris le 15-06 (22 h 30 UTC le 14-06) : aucun passage depuis avant-hier.
+        assert.match((await etatGenerationVisites(new Date('2026-06-14T22:30:00.000Z'))).alerte ?? '', /n’a pas tourné depuis le 13-06-2026/);
+      } finally {
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: '2026-06-13' } });
+        await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+      }
+    });
+
+    // Le minuteur lui-même : une vérification dès son démarrage, puis à intervalle régulier ; rien
+    // avec GENERATION_VISITES_AUTOMATIQUE=0.
+    test('minuteur : vérification dès le démarrage, intervalle d’au plus une heure, arrêté par la variable', async () => {
+      const { demarrerGenerationAutomatique, INTERVALLE_VERIFICATION_MS } = await import('../dist/src/domaines/contrats/generation.js');
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const jour = jourCivilEntreprise(new Date(), fuseau);
+      const variable = process.env.GENERATION_VISITES_AUTOMATIQUE;
+      await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: jour } });
+      try {
+        process.env.GENERATION_VISITES_AUTOMATIQUE = '0';
+        assert.equal(demarrerGenerationAutomatique(), null);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(await prisma.executionGenerationVisites.count({ where: { cleJourAutomatique: jour } }), 0);
+        delete process.env.GENERATION_VISITES_AUTOMATIQUE;
+        const minuteur = demarrerGenerationAutomatique();
+        try {
+          assert.ok(minuteur);
+          let passage = null;
+          for (let tour = 0; tour < 200 && !passage?.fin; tour++) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            passage = await prisma.executionGenerationVisites.findUnique({ where: { cleJourAutomatique: jour } });
+          }
+          assert.equal(passage?.declenchement, 'AUTOMATIQUE', 'passage du jour enregistré dès le démarrage');
+          assert.ok(INTERVALLE_VERIFICATION_MS > 0 && INTERVALLE_VERIFICATION_MS <= 60 * 60_000);
+        } finally {
+          clearInterval(minuteur);
+        }
+      } finally {
+        if (variable === undefined) delete process.env.GENERATION_VISITES_AUTOMATIQUE; else process.env.GENERATION_VISITES_AUTOMATIQUE = variable;
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: jour } });
+      }
+    });
+
+    // Bornes en base que les tests existants n'éprouvent pas : une création ordinaire (ou un
+    // avancement sur une intervention) sans compte, et un passage hors des bornes d'anticipation.
+    test('en base : création ordinaire sans compte et passage hors bornes refusés', async () => {
+      const contrat = await creerContrat('TEST Génération contrainte bis', '01-01-2099');
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.id}/generer-intervention`).set(admin());
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      for (const action of ['CREATION', 'AVANCEMENT_ECHEANCE']) {
+        await assert.rejects(prisma.$executeRaw`INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif")
+          VALUES (${randomUUID()}, ${visite.body.id}, 'INTERVENTION', ${visite.body.id}, ${action}, NULL, 'Génération automatique', 'TEST motif')`, /auteur_generation/, action);
+      }
+      for (const anticipation of [-1, 366]) {
+        await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours")
+          VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', ${anticipation})`, /coherence/, String(anticipation));
+      }
+      // Ajout du second audit : compteurs négatifs refusés.
+      await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours", "visitesCreees")
+        VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', 30, -1)`, /coherence/, 'visitesCreees');
+      await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours", "echeancesAvancees")
+        VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', 30, -1)`, /coherence/, 'echeancesAvancees');
     });
   });
 }

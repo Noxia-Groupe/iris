@@ -60,12 +60,14 @@ GET /api/reglements requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anon
 POST /api/reglements requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#51f9704bcdc4
 POST /api/reglements/:id/contrepasser requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#f9592331ed59
 GET /api/contrats-maintenance requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#106802cb4df7
+GET /api/contrats-maintenance/generation-visites requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#373a35ed462c
+POST /api/contrats-maintenance/generation-visites requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#1e9928683461
 GET /api/contrats-maintenance/:id/journal-saisies requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#3f95c0d7c799
 POST /api/contrats-maintenance requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#cb003fe48a0c
 PATCH /api/contrats-maintenance/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c56b20c5c1cc
 PATCH /api/contrats-maintenance/:id/statut requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0a3d898d249d
-POST /api/contrats-maintenance/:id/avancer-echeance requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#85afc458f0c2
-POST /api/contrats-maintenance/:id/generer-intervention requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#1239714635db
+POST /api/contrats-maintenance/:id/avancer-echeance requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#6c7a62204870
+POST /api/contrats-maintenance/:id/generer-intervention requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#ff2867025ef0
 POST /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#051bd6c57c60 > <anonymous>#5f8877e44fed
 GET /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#174bd48a1244
 GET /api/interventions/journee requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
@@ -214,7 +216,7 @@ GET /api/company requireAuth#76fb48c2d0f5 > <anonymous>#0b08e4374fe7
 PUT /api/company requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#f4c33f529f68
 GET /api/parametres/remuneration requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#61efeee81638
 PUT /api/parametres/remuneration requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#98b0a30737c8
-PUT /api/parametres requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#fa20503ba077
+PUT /api/parametres requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#9a85dc27c687
 GET /api/modules requireAuth#76fb48c2d0f5 > <anonymous>#409f48a66fe8
 PUT /api/modules requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#8f2e5db809d0
 GET /api/journal-administration requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#38867022b71f
@@ -229,6 +231,7 @@ GET /api/stats/fournisseurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c
 GET /api/stats/types-chantiers requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#e403d98394dc
 GET /api/stats/commerciaux requireAuth#76fb48c2d0f5 > <anonymous>#3ec062c1a65f
 POST /api/chantiers/:id/analyze requireAuth#76fb48c2d0f5 > <anonymous>#0c1d287413d9
+EXPORT alerteGenerationVisites
 EXPORT anneeEntreprise
 EXPORT apiKeyHash
 EXPORT app
@@ -249,6 +252,8 @@ EXPORT dateHeuresIntervention
 EXPORT decimalToNumber
 EXPORT devisPayload
 EXPORT ensureSuperAdmins
+EXPORT etatGenerationVisites
+EXPORT executerGenerationVisites
 EXPORT fuseauHoraireEntrepriseValide
 EXPORT getReglesRemuneration
 EXPORT initDb

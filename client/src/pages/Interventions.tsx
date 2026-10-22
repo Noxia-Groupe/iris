@@ -6,6 +6,7 @@ import { SelecteurClient } from '../components/SelecteurClient';
 import { CoordonneesIntervention } from '../components/CoordonneesIntervention';
 import { FormulaireCloture, FormulaireCompteRendu, FormulaireSignature } from '../components/FormulairesIntervention';
 import { TraceSignature } from '../components/TraceSignature';
+import { AlerteGenerationVisites } from '../components/GenerationVisites';
 import type { TraceSignature as Trace } from '../lib/traceSignature';
 import { resumeCoutsIntervention } from '../lib/coutsIntervention';
 import { isAdminRole, useCurrentUser } from '../roles';
@@ -217,6 +218,7 @@ export default function Interventions({ interventionId }: { interventionId?: str
         : <div><h1 className="text-2xl font-bold text-gray-900">{estTechnicien ? 'Mes interventions' : 'Interventions SAV'}</h1><p className="text-gray-500">{estTechnicien ? 'Uniquement les dossiers qui vous sont explicitement affectés.' : 'Demandes clients et interventions en cours. Le planning reste une projection prévisionnelle.'}</p></div>}
       {estEncadrement && !interventionId && <button className="btn btn-primary flex items-center gap-2" onClick={() => setFormOpen(true)}><Plus size={18} /> Nouvelle intervention</button>}
     </div>
+    {isAdminRole(user?.role) && !interventionId && <AlerteGenerationVisites />}
     {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{error}</div>}
     {formOpen && <form onSubmit={create} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
       <h2 className="font-semibold">Nouvelle intervention SAV</h2>

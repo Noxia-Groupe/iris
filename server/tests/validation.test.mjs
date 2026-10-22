@@ -15,7 +15,7 @@ const {
   commissionBaremeProgressif, computeChantierMetrics, voitRentabilite, peutVoirFinance,
   parseBareme, serialiseBareme, validerBareme,
   arrondiCommercialLigneHt, centimesTtcLigne, devisPayload,
-  libelleComptableValide,
+  libelleComptableValide, alerteGenerationVisites,
 } = await import('../dist/index.js');
 
 test('date demandée : défaut selon le jour civil entreprise à minuit et format français strict', () => {
@@ -598,4 +598,56 @@ test('peutVoirFinance : jamais pour un technicien, même avec un accès financie
   assert.equal(peutVoirFinance({ role: 'CONDUCTEUR_TRAVAUX', accesFinance: true }), true);
   assert.equal(peutVoirFinance({ role: 'CONDUCTEUR_TRAVAUX', accesFinance: false }), false);
   assert.equal(peutVoirFinance({ role: 'SUPERADMIN', accesFinance: false }), true);
+});
+
+// Ajout du second audit interne de #293 : l'auteur du journal SAV.
+describe('Lot pilote 5 : auteur du journal SAV', () => {
+  test('seule la génération automatique écrit sans compte ; une requête sans compte est refusée', async () => {
+    const { auteurJournalSav, AUTEUR_GENERATION_AUTOMATIQUE } = await import('../dist/src/domaines/interventions/metier.js');
+    assert.deepEqual(auteurJournalSav(null), { auteurId: null, auteurNom: AUTEUR_GENERATION_AUTOMATIQUE });
+    assert.deepEqual(auteurJournalSav({ user: { id: 'compte', name: 'Nom' } }), { auteurId: 'compte', auteurNom: 'Nom' });
+    assert.throws(() => auteurJournalSav({}), /sans compte auteur/);
+  });
+});
+
+// Lot pilote 5 : alerte de la génération automatique des visites, montrée aux administrateurs.
+describe('Alerte de la génération automatique des visites', () => {
+  const instant = new Date('2026-06-15T10:00:00.000Z');
+  const jour = (iso) => new Date(`${iso}T00:00:00.000Z`);
+  const etat = (modifs) => ({ anticipation: 30, minuteurActif: true, jour: '2026-06-15', instant, derniere: null, derniereAutomatique: null, ...modifs });
+  const passage = (modifs) => ({ jour: jour('2026-06-15'), statut: 'REUSSIE', debut: new Date('2026-06-15T00:05:00.000Z'), erreurs: [], ...modifs });
+
+  test('un passage réussi d’hier ou d’aujourd’hui, ou aucun passage encore, ne déclenche rien', () => {
+    assert.equal(alerteGenerationVisites(etat({})), null);
+    assert.equal(alerteGenerationVisites(etat({ derniere: passage({}), derniereAutomatique: passage({}) })), null);
+    const hier = passage({ jour: jour('2026-06-14') });
+    assert.equal(alerteGenerationVisites(etat({ derniere: hier, derniereAutomatique: hier })), null);
+  });
+
+  test('un dernier passage en échec est signalé, avec son jour et son nombre d’erreurs', () => {
+    const echec = passage({ statut: 'ECHEC', erreurs: [{ contratId: 'a' }, { contratId: 'b' }] });
+    assert.match(alerteGenerationVisites(etat({ derniere: echec, derniereAutomatique: echec })), /du 15-06-2026 est en échec \(2 erreurs\)/);
+    const uneErreur = passage({ statut: 'ECHEC', erreurs: [{ contratId: 'a' }] });
+    assert.match(alerteGenerationVisites(etat({ derniere: uneErreur })), /\(1 erreur\)/);
+  });
+
+  test('un passage resté en cours plus d’une heure est signalé interrompu ; en cours depuis moins, rien', () => {
+    const recent = passage({ statut: 'EN_COURS', debut: new Date('2026-06-15T09:01:00.000Z') });
+    assert.equal(alerteGenerationVisites(etat({ derniere: recent, derniereAutomatique: recent })), null);
+    const ancien = passage({ statut: 'EN_COURS', debut: new Date('2026-06-15T08:59:00.000Z') });
+    assert.match(alerteGenerationVisites(etat({ derniere: ancien, derniereAutomatique: ancien })), /du 15-06-2026 s’est interrompue/);
+  });
+
+  test('sans passage automatique depuis avant-hier, alerte si le minuteur tourne, et seulement alors', () => {
+    const avantHier = passage({ jour: jour('2026-06-13') });
+    assert.match(alerteGenerationVisites(etat({ derniere: avantHier, derniereAutomatique: avantHier })), /n’a pas tourné depuis le 13-06-2026/);
+    assert.equal(alerteGenerationVisites(etat({ derniere: avantHier, derniereAutomatique: avantHier, minuteurActif: false })), null);
+    // Un passage manuel réussi ne remplace pas le passage automatique manquant.
+    assert.match(alerteGenerationVisites(etat({ derniere: passage({}), derniereAutomatique: avantHier })), /n’a pas tourné depuis le 13-06-2026/);
+  });
+
+  test('une génération désactivée (anticipation vide) ne signale rien, même après un échec', () => {
+    const echec = passage({ statut: 'ECHEC', erreurs: [{ contratId: 'a' }] });
+    assert.equal(alerteGenerationVisites(etat({ anticipation: null, derniere: echec, derniereAutomatique: passage({ jour: jour('2026-01-01') }) })), null);
+  });
 });

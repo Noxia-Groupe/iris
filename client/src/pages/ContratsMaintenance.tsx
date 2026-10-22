@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CalendarPlus, FilePlus2, RefreshCw, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
 import { SelecteurClient } from '../components/SelecteurClient';
+import { GenerationVisites } from '../components/GenerationVisites';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 
@@ -141,6 +142,7 @@ export default function ContratsMaintenance() {
     </div>
     {erreur && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{erreur}</div>}
     {succes && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">{succes}</div>}
+    <GenerationVisites onGeneration={() => void charger()} />
     {formulaireOuvert && <form onSubmit={creer} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
       <h2 className="font-semibold">Nouveau contrat de maintenance</h2>
       <SelecteurClient id="client-contrat" name="clientId" label="Client du contrat" required valeur={clientIdFormulaire} onChange={(client) => { setClientIdFormulaire(client?.id ?? ''); void choisirClient(client?.id ?? ''); }} />

@@ -110,7 +110,7 @@ export function enregistrerRoutesRemunerationEtReglages(app: Express): void {
     }
   });
 
-  // N'écrit QUE les réglages de marge, d'acompte et d'alertes : l'activation des modules (planningActif) est
+  // N'écrit QUE les réglages de marge, d'acompte, d'alertes et d'anticipation des visites : l'activation des modules (planningActif) est
   // réservée au superadmin et passe par PUT /api/modules — un ADMIN ne doit pas pouvoir la
   // modifier, même en glissant le champ dans le corps de cette requête.
   app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
@@ -156,6 +156,19 @@ export function enregistrerRoutesRemunerationEtReglages(app: Express): void {
             return res.status(400).json({ error: 'Le délai sans saisie doit être un nombre entier de jours entre 1 et 365, ou vide pour désactiver l’alerte.' });
           }
           data.joursSansSaisie = jours;
+        }
+      }
+      // Génération automatique des visites de maintenance (lot pilote 5) : anticipation en jours
+      // civils, de 0 (le jour de l'échéance) à 365 ; vide, la génération automatique est désactivée.
+      if ('anticipationVisitesJours' in req.body) {
+        const brut = req.body.anticipationVisitesJours;
+        if (brut === null || brut === '') data.anticipationVisitesJours = null;
+        else {
+          const jours = typeof brut === 'number' ? brut : typeof brut === 'string' && /^\d+$/.test(brut.trim()) ? Number(brut.trim()) : NaN;
+          if (!Number.isInteger(jours) || jours < 0 || jours > 365) {
+            return res.status(400).json({ error: 'L’anticipation des visites doit être un nombre entier de jours entre 0 et 365, ou vide pour désactiver la génération automatique.' });
+          }
+          data.anticipationVisitesJours = jours;
         }
       }
       // Destinataires du suivi de rentabilité (cf. voitRentabilite) : chaque case absente du

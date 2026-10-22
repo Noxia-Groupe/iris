@@ -3,10 +3,10 @@ import { prisma, transactionVerifiee } from '../../db';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
-import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, dateFrancaise } from '../../commun/dates';
 import { decimalToNumber } from '../../commun/montants';
-import { CHANTIER_INTERVENTION_SELECT, journaliserIntervention, exposerIntervention } from '../interventions/metier';
-import { journaliserContrat, motifContratValide, lirePolitiqueCouverture, verrouillerContratMaintenance, echeanceSuivante, lireSaisieContrat, creerContratMaintenance, SaisieContratInvalide } from './metier';
+import { exposerIntervention } from '../interventions/metier';
+import { GenerationVisitesDesactivee, etatGenerationVisites, executerGenerationVisites } from './generation';
+import { journaliserContrat, motifContratValide, lirePolitiqueCouverture, verrouillerContratMaintenance, lireSaisieContrat, creerContratMaintenance, SaisieContratInvalide, visiteDeLEcheance, creerVisiteContrat, avancerEcheanceContrat, VISITE_INCLUDE } from './metier';
 
 export function enregistrerRoutesContrats(app: Express): void {
   // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
@@ -19,6 +19,28 @@ export function enregistrerRoutesContrats(app: Express): void {
       orderBy: [{ prochaineEcheance: 'asc' }, { createdAt: 'desc' }],
     });
     res.json(decimalToNumber(contrats));
+  });
+
+  // Génération automatique des visites (lot pilote 5) : état du dernier passage, alerte éventuelle,
+  // et passage lancé à la main (même traitement, au nom de l'administrateur), réservés à
+  // l'administration comme les contrats.
+  app.get('/api/contrats-maintenance/generation-visites', requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      res.json(await etatGenerationVisites());
+    } catch (error) {
+      res.status(500).json({ error: 'Lecture de l’état de la génération des visites impossible.' });
+    }
+  });
+
+  app.post('/api/contrats-maintenance/generation-visites', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const execution = await executerGenerationVisites({ type: 'MANUEL', req });
+      res.status(201).json({ execution, etat: await etatGenerationVisites() });
+    } catch (error) {
+      if (error instanceof GenerationVisitesDesactivee) return res.status(409).json({ error: error.message });
+      console.error('[GÉNÉRATION DES VISITES] Passage manuel impossible :', error);
+      res.status(500).json({ error: 'Génération des visites impossible.' });
+    }
   });
 
   app.get('/api/contrats-maintenance/:id/journal-saisies', requireAuth, requireAdmin, async (req, res) => {
@@ -121,16 +143,9 @@ export function enregistrerRoutesContrats(app: Express): void {
         await verrouillerContratMaintenance(tx, paramId(req));
         const contrat = await tx.contratMaintenance.findFirst({ where: { id: paramId(req), statut: 'ACTIF' } });
         if (!contrat) return { erreur: 'NOT_FOUND' as const };
-        const intervention = await tx.intervention.findFirst({
-          where: { contratMaintenanceId: contrat.id, echeanceContrat: contrat.prochaineEcheance },
-          select: { id: true, reference: true, statut: true },
-        });
+        const intervention = await visiteDeLEcheance(tx, contrat);
         if (!intervention || intervention.statut !== 'TERMINEE') return { erreur: 'NOT_READY' as const };
-        const prochaineEcheance = echeanceSuivante(contrat.dateDebut, contrat.prochaineEcheance, contrat.periodiciteMois);
-        const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { prochaineEcheance } });
-        const motif = `Intervention ${intervention.reference} terminée : échéance du ${dateFrancaise(contrat.prochaineEcheance)} au ${dateFrancaise(prochaineEcheance)}.`;
-        await journaliserContrat(tx, req, 'AVANCEMENT_ECHEANCE', maj, contrat, motif);
-        return { contrat: maj };
+        return { contrat: await avancerEcheanceContrat(tx, contrat, intervention, req) };
       });
       if ('erreur' in resultat) {
         if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Contrat de maintenance actif introuvable.' });
@@ -146,38 +161,11 @@ export function enregistrerRoutesContrats(app: Express): void {
     try {
       const resultat = await transactionVerifiee(async (tx) => {
         await verrouillerContratMaintenance(tx, paramId(req));
-        const contrat = await tx.contratMaintenance.findFirst({
-          where: { id: paramId(req), statut: 'ACTIF' },
-          include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
-        });
+        const contrat = await tx.contratMaintenance.findFirst({ where: { id: paramId(req), statut: 'ACTIF' } });
         if (!contrat) return null;
-        const existante = await tx.intervention.findFirst({
-          where: { contratMaintenanceId: contrat.id, echeanceContrat: contrat.prochaineEcheance },
-          include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
-        });
+        const existante = await visiteDeLEcheance(tx, contrat);
         if (existante) return { intervention: existante, creee: false };
-        const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
-        const annee = anneeEntreprise(new Date(), societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT);
-        const sequence = await tx.sequenceIntervention.upsert({
-          where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } },
-        });
-        const reference = `I${String(annee).slice(-2)}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-        const intervention = await tx.intervention.create({
-          data: {
-            reference, clientId: contrat.clientId, siteId: contrat.siteId, contratMaintenanceId: contrat.id,
-            echeanceContrat: contrat.prochaineEcheance, titre: `Maintenance préventive — ${contrat.titre}`,
-            description: `Intervention prévisionnelle issue du contrat. Durée prévue : ${contrat.dureePrevisionnelleMinutes} minutes.`,
-            dateSouhaitee: contrat.prochaineEcheance, dateDemande: contrat.prochaineEcheance, createdById: req.user!.id,
-            couvertureContrat: {
-              politiqueMainOeuvre: contrat.politiqueMainOeuvre,
-              politiqueMateriel: contrat.politiqueMateriel,
-              noteCouverture: contrat.noteCouverture,
-            },
-          },
-          include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
-        });
-        await journaliserIntervention(tx, req, 'CREATION_CONTRAT', intervention);
-        return { intervention, creee: true };
+        return { intervention: await creerVisiteContrat(tx, contrat, req), creee: true };
       });
       if (!resultat) return res.status(404).json({ error: 'Contrat de maintenance actif introuvable.' });
       res.status(resultat.creee ? 201 : 200).json(decimalToNumber(exposerIntervention(resultat.intervention)));
@@ -189,7 +177,7 @@ export function enregistrerRoutesContrats(app: Express): void {
         const existante = contrat && await prisma.intervention.findFirst({
           where: { contratMaintenanceId: paramId(req), echeanceContrat: contrat.prochaineEcheance },
           orderBy: { createdAt: 'desc' },
-          include: { client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT },
+          include: VISITE_INCLUDE,
         });
         if (existante) return res.status(200).json(decimalToNumber(exposerIntervention(existante)));
       }

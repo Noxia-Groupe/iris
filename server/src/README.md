@@ -54,7 +54,8 @@ server/
     domaines/interventions/   routes.ts (SAV, coûts, comptes rendus, placement), metier.ts,
                               lectures.ts (liste, « Ma journée », fiche), comptesRendus.ts (tracé,
                               empreinte, clé d'envoi, motifs de clôture, verrou et périmètre relu, journal)
-    domaines/contrats/        routes.ts, metier.ts (couverture, échéances, verrou)
+    domaines/contrats/        routes.ts, metier.ts (couverture, échéances, visites, verrou),
+                              generation.ts (passage quotidien des visites, alerte, minuteur)
     domaines/planning/        routes.ts (événements, types, partage, lien public), metier.ts
                               (module actif, validation des événements)
     domaines/factures/        routes.ts, metier.ts (sélection, adresse, avoirs), pdf.ts
