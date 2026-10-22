@@ -179,7 +179,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 | 3. Parcours technicien sur téléphone | **Implémenté** : prérequis et droits (3a), parcours sur téléphone (3b-1 à 3b-4) et planning limité du technicien. Non validé pour mise en service. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3), #272 (3b-4), #275 (planning limité) |
 | 4. Conversion des devis (A7) | **Implémenté** : intervention et contrat depuis un devis signé ; règles (a) et (b) posées en question (section 3). Non validé pour mise en service | #281 |
 | 5. Génération automatique des visites (A9) | **Implémenté** : passage quotidien côté serveur, anticipation paramétrable, alerte et passage manuel ; questions (a) à (c) posées (section 3). Non validé pour mise en service | #293 |
-| 6. Envoi des documents (A10) | **Partiel** : décisions du 22-10-2026 (repli par la messagerie, option B de P5, deux temps, tous les documents) ; 6a-1 **implémenté** (modèle PDF commun, identité et logo de l'émetteur figés sur les factures et les avoirs), non validé pour mise en service ; 6a-2 à 6a-4 et 6b prévus. **Avant le premier jour** (décision de Nelson du 21-10-2026) | lot 6a-1 |
+| 6. Envoi des documents (A10) | **Partiel** : décisions du 22-10-2026 (repli par la messagerie, option B de P5, deux temps, tous les documents) ; 6a-1 **implémenté** (modèle PDF commun, identité et logo de l'émetteur figés sur les factures et les avoirs), non validé pour mise en service ; 6a-2 à 6a-4 et 6b prévus. **Avant le premier jour** (décision de Nelson du 21-10-2026) | #300 (6a-1) |
 
 1. **Règlements (A3).**
    - Périmètre : saisie manuelle des encaissements, affectés aux factures (règlements partiels, reste dû, facture partiellement réglée). Banque et rapprochement viennent plus tard. Montants : exigence maximale (règle 2).
@@ -218,7 +218,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
      - P5, option B : seul ce que l'envoi exige accompagne le lot 6 (modèle PDF commun ; identité et logo de l'émetteur copiés à l'émission des factures et des avoirs) ; libellés des visites, export comptable et modèles personnalisables après le premier jour ;
      - deux temps : envoi manuel avec ses PDF et son journal (6a), puis Microsoft 365 (6b) ;
      - tous les documents : factures et avoirs, devis, rapport de chantier, compte rendu d'intervention, contrat de maintenance.
-   - Découpage retenu par Claude Code : 6a-1, modèle commun et identité figée (**implémenté**, choix par défaut en section 4) ; 6a-2, PDF du devis ; 6a-3, envoi par la messagerie et journal des envois ; 6a-4, PDF des autres documents et leur envoi ; 6b, Microsoft 365.
+   - Découpage retenu par Claude Code : 6a-1, modèle commun et identité figée (**implémenté** par #300, choix par défaut en section 4) ; 6a-2, PDF du devis ; 6a-3, envoi par la messagerie et journal des envois ; 6a-4, PDF des autres documents et leur envoi ; 6b, Microsoft 365.
    - Journal des envois : choix par défaut, à confirmer.
    - Ne pas déclarer l'envoi Outlook ni la synchronisation réalisés du seul fait du SSO.
 
@@ -491,7 +491,7 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 
 **Envoi des documents** (lot pilote 6) : journal des envois, choix par défaut, à confirmer, à préciser dans la PR du lot.
 
-**Identité de l'émetteur et modèle des documents** (lot 6a-1, option B de P5 retenue le 22-10-2026), choix par défaut, à confirmer, les champs imprimés par le cabinet :
+**Identité de l'émetteur et modèle des documents** (lot 6a-1, #300, option B de P5 retenue le 22-10-2026), choix par défaut, à confirmer, les champs imprimés par le cabinet :
 - Émettre une facture ou créer un avoir exige raison sociale, SIRET, adresse, code postal et ville ; l'écran Prêt à facturer le signale, et l'émission refusée ne consomme aucun numéro. Le format du SIRET n'est pas vérifié.
 - À l'émission, la pièce copie aussi le nom commercial, la TVA intracommunautaire, le pays, le téléphone, l'e-mail, le site, le pied de page (« Pied de page des documents »), la couleur principale et le logo. La copie ne change jamais, et deux pièces de même identité la partagent ; la base refuse toute pièce qui quitte le brouillon sans copie.
 - Un avoir, total ou partiel, copie l'identité du jour de sa création, et non celle de sa facture.
