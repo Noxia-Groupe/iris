@@ -13678,5 +13678,141 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', null, null), /cleJourAutomatique|unique/i);
       await prisma.executionGenerationVisites.deleteMany({ where: { jour: new Date('2001-02-03T00:00:00.000Z') } });
     });
+
+    // --- Ajouts proposés par l'audit interne de #293 ---
+    // Le passage quotidien a lieu peu après minuit, heure de la société : à Paris, c'est encore la
+    // veille en UTC. Le jour civil et l'anticipation doivent être comptés au fuseau de la société.
+    test('passage automatique peu après minuit, heure de la société : jour civil et anticipation au fuseau de la société', async () => {
+      const fuseauInitial = (await request(app).get('/api/company').set(admin())).body.fuseauHoraire;
+      assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: 'Europe/Paris' })).status, 200);
+      try {
+        const borne = await creerContrat('TEST Génération minuit à la borne', '15-07-2026');
+        const auDela = await creerContrat('TEST Génération minuit au-delà', '16-07-2026');
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: { in: ['2026-06-14', JOUR_FICTIF] } } });
+        // 00 h 30 à Paris le 15-06-2026, 22 h 30 UTC le 14-06.
+        const passage = await executerGenerationVisites({ type: 'AUTOMATIQUE' }, new Date('2026-06-14T22:30:00.000Z'));
+        assert.equal(passage?.cleJourAutomatique, JOUR_FICTIF);
+        assert.deepEqual((await visites(borne.id)).map((v) => v.echeanceContrat.toISOString().slice(0, 10)), ['2026-07-15']);
+        assert.equal((await visites(auDela.id)).length, 0);
+        // 23 h 30 à Paris le même jour civil (21 h 30 UTC le 15-06) : aucun second passage.
+        assert.equal(await executerGenerationVisites({ type: 'AUTOMATIQUE' }, new Date('2026-06-15T21:30:00.000Z')), null);
+      } finally {
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: '2026-06-14' } });
+        await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
+      }
+    });
+
+    // Un passage relit chaque contrat sous son verrou : l'« Échéance suivante » ou la suspension
+    // engagée par un administrateur pendant le passage est vue, sans double avancement ni visite.
+    test('passage concurrent d’une action sur le contrat : attend son verrou et relit échéance et statut', async () => {
+      const aujourdhui = jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
+      const [a, m, j] = aujourdhui.split('-');
+      // Échéance trois jours plus tôt : ce contrat est traité avant l'autre (ordre des échéances).
+      const veille = new Date(Date.UTC(Number(a), Number(m) - 1, Number(j) - 3)).toISOString().slice(0, 10).split('-').reverse().join('-');
+      const avance = await creerContrat('TEST Génération course échéance', veille);
+      const premiere = await request(app).post(`/api/contrats-maintenance/${avance.id}/generer-intervention`).set(admin());
+      assert.equal(premiere.status, 201, JSON.stringify(premiere.body));
+      await terminer(premiere.body.id);
+      const suspendu = await creerContrat('TEST Génération course suspension', `${j}-${m}-${a}`);
+      const secours = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" IN (${avance.id}, ${suspendu.id}) FOR UPDATE`;
+        pret();
+        await attente;
+        // « Échéance suivante » et suspension engagées pendant le passage, dans la transaction qui tient le verrou.
+        await tx.contratMaintenance.update({ where: { id: avance.id }, data: { prochaineEcheance: new Date('2099-01-01T00:00:00.000Z') } });
+        await tx.journalSaisieChantier.create({ data: { contratMaintenanceId: avance.id, cible: 'CONTRAT', cibleId: avance.id, action: 'AVANCEMENT_ECHEANCE', auteurId: secours.id, auteurNom: secours.name, motif: 'TEST avancement concurrent' } });
+        await tx.contratMaintenance.update({ where: { id: suspendu.id }, data: { statut: 'SUSPENDU' } });
+      }, { timeout: 15000 });
+      await verrouPris;
+      let passage;
+      try {
+        passage = lancer().then((reponse) => reponse);
+        let bloque = false;
+        for (let tour = 0; tour < 250 && !bloque; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`;
+          bloque = sessions.length > 0;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'le passage doit attendre le verrou du contrat');
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const res = await passage;
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: avance.id, action: 'AVANCEMENT_ECHEANCE' } }), 1, 'aucun second avancement');
+      assert.equal(await echeance(avance.id), '2099-01-01');
+      assert.equal((await visites(suspendu.id)).length, 0, 'aucune visite pour un contrat suspendu entre-temps');
+    });
+
+    // L'alerte d'absence porte sur le dernier passage AUTOMATIQUE : un passage manuel ne la masque pas.
+    test('alerte d’absence : un passage manuel réussi ne remplace pas le passage automatique manquant', async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const aujourdhui = jourCivilEntreprise(new Date(), fuseau);
+      const ilYATroisJours = new Date(new Date(`${aujourdhui}T00:00:00.000Z`).getTime() - 3 * 86_400_000);
+      const cle = ilYATroisJours.toISOString().slice(0, 10);
+      await prisma.executionGenerationVisites.create({ data: { jour: ilYATroisJours, declenchement: 'AUTOMATIQUE', cleJourAutomatique: cle, anticipationJours: 30, statut: 'REUSSIE', fin: ilYATroisJours } });
+      try {
+        assert.equal((await lancer()).status, 201);
+        const lu = (await etat()).body;
+        assert.equal(lu.derniereExecution.declenchement, 'MANUEL');
+        assert.match(lu.alerte ?? '', /n’a pas tourné depuis le/);
+      } finally {
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: cle } });
+      }
+    });
+
+    // Le minuteur lui-même : une vérification dès son démarrage, puis à intervalle régulier ; rien
+    // avec GENERATION_VISITES_AUTOMATIQUE=0.
+    test('minuteur : vérification dès le démarrage, intervalle d’au plus une heure, arrêté par la variable', async () => {
+      const { demarrerGenerationAutomatique, INTERVALLE_VERIFICATION_MS } = await import('../dist/src/domaines/contrats/generation.js');
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const jour = jourCivilEntreprise(new Date(), fuseau);
+      const variable = process.env.GENERATION_VISITES_AUTOMATIQUE;
+      await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: jour } });
+      try {
+        process.env.GENERATION_VISITES_AUTOMATIQUE = '0';
+        assert.equal(demarrerGenerationAutomatique(), null);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(await prisma.executionGenerationVisites.count({ where: { cleJourAutomatique: jour } }), 0);
+        delete process.env.GENERATION_VISITES_AUTOMATIQUE;
+        const minuteur = demarrerGenerationAutomatique();
+        try {
+          assert.ok(minuteur);
+          let passage = null;
+          for (let tour = 0; tour < 200 && !passage?.fin; tour++) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            passage = await prisma.executionGenerationVisites.findUnique({ where: { cleJourAutomatique: jour } });
+          }
+          assert.equal(passage?.declenchement, 'AUTOMATIQUE', 'passage du jour enregistré dès le démarrage');
+          assert.ok(INTERVALLE_VERIFICATION_MS > 0 && INTERVALLE_VERIFICATION_MS <= 60 * 60_000);
+        } finally {
+          clearInterval(minuteur);
+        }
+      } finally {
+        if (variable === undefined) delete process.env.GENERATION_VISITES_AUTOMATIQUE; else process.env.GENERATION_VISITES_AUTOMATIQUE = variable;
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: jour } });
+      }
+    });
+
+    // Bornes en base que les tests existants n'éprouvent pas : une création ordinaire (ou un
+    // avancement sur une intervention) sans compte, et un passage hors des bornes d'anticipation.
+    test('en base : création ordinaire sans compte et passage hors bornes refusés', async () => {
+      const contrat = await creerContrat('TEST Génération contrainte bis', '01-01-2099');
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.id}/generer-intervention`).set(admin());
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      for (const action of ['CREATION', 'AVANCEMENT_ECHEANCE']) {
+        await assert.rejects(prisma.$executeRaw`INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif")
+          VALUES (${randomUUID()}, ${visite.body.id}, 'INTERVENTION', ${visite.body.id}, ${action}, NULL, 'Génération automatique', 'TEST motif')`, /auteur_generation/, action);
+      }
+      for (const anticipation of [-1, 366]) {
+        await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours")
+          VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', ${anticipation})`, /coherence/, String(anticipation));
+      }
+    });
   });
 }

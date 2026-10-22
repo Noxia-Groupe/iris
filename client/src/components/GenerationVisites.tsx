@@ -99,7 +99,7 @@ export function GenerationVisites({ onGeneration }: { onGeneration: () => void }
   });
 
   const derniere = etat?.derniereExecution;
-  return <section aria-labelledby="titre-generation-visites" className="rounded-xl border bg-white p-5 shadow-sm space-y-3">
+  return <section aria-labelledby="titre-generation-visites" className="rounded-xl border bg-white p-5 shadow-sm space-y-3 break-words">
     <h2 id="titre-generation-visites" className="flex items-center gap-2 font-semibold text-gray-900"><CalendarClock size={18} /> Génération automatique des visites</h2>
     <p className="text-sm text-gray-600">Chaque jour, le serveur crée l’intervention à planifier d’une échéance dès qu’elle tombe dans l’anticipation, et passe à l’échéance suivante quand la visite est terminée.</p>
     {etat?.alerte && <AlerteGeneration texte={etat.alerte} />}

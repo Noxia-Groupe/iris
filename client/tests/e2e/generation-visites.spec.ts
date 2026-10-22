@@ -152,3 +152,28 @@ test('un conducteur de travaux ne lit pas l’état de la génération des visit
     await contexte.close();
   }
 });
+
+// Ajout proposé par l'audit interne de #293 : le panneau montre le dernier passage avec ses dates
+// au format JJ-MM-AAAA, ses contrats laissés de côté et ses erreurs, sans rien couper à 320 px,
+// même avec un numéro de série insécable dans le titre d'un contrat.
+test('le panneau détaille le dernier passage, dates JJ-MM-AAAA, sans déborder à 320 px', async ({ allerSurPageAdmin, page }) => {
+  const serie = 'SNA7B3C9D2E8F4G5H6J7K8L9M0P1Q2R3S4T5U6V7W8';
+  const execution = {
+    id: 'e2e', jour: '2026-10-14T00:00:00.000Z', declenchement: 'MANUEL', cleJourAutomatique: null, auteurId: 'x', auteurNom: 'Administratrice E2E',
+    anticipationJours: 30, debut: '2026-10-14T05:07:09.000Z', fin: '2026-10-14T05:08:00.000Z', statut: 'ECHEC', visitesCreees: 3, echeancesAvancees: 1,
+    contratsIgnores: [{ contratId: 'a', titre: `Contrat ${serie}`, motif: 'Client désactivé : aucune visite n’est créée ni aucune échéance avancée.' }],
+    erreurs: [{ contratId: 'b', titre: 'Contrat en échec', message: 'Contrat non traité : erreur technique, détaillée dans le journal du serveur.' }],
+  };
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.route('**/api/contrats-maintenance/generation-visites', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const reponse = await route.fetch();
+    await route.fulfill({ response: reponse, json: { ...(await reponse.json()), anticipationVisitesJours: 30, derniereExecution: execution } });
+  });
+  await allerSurPageAdmin('/contrats-maintenance');
+  const panneau = page.getByRole('region', { name: 'Génération automatique des visites' });
+  await expect(panneau).toContainText('Dernier passage : 14-10-2026 07:07:09 (lancé par Administratrice E2E, échéances jusqu’à 30 jours après le 14-10-2026) : 3 visites créées, 1 échéance avancée, en échec.');
+  await expect(panneau.getByRole('listitem').filter({ hasText: serie })).toContainText('Client désactivé');
+  await expect(panneau.getByRole('listitem').filter({ hasText: 'Contrat en échec' })).toContainText('Contrat non traité');
+  expect(await page.evaluate(() => { const p = document.querySelector('main')!; return p.scrollWidth - p.clientWidth; })).toBeLessThanOrEqual(0);
+});

@@ -325,6 +325,10 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
 - **Conversion des devis (lot pilote 4, #281)** (règles métier) :
   - (a) une affaire ne se convertit qu'une fois, quelle que soit la cible (décision du 14-10-2026 pour le chantier, étendue par #281) ; un devis qui vend une installation et son contrat de maintenance ne crée donc pas les deux. Garder cette règle, ou permettre un chantier et un contrat (ou une intervention) pour la même affaire, ce qui change le modèle (`DevisConversion.dossierId` unique) ?
   - (b) un devis converti en intervention ou en contrat ne s'annule plus (l'intervention s'annule, le contrat se suspend ou se termine depuis leurs écrans), alors qu'un devis converti en chantier s'annule avec lui. Garder, ou annuler la cible avec le devis ?
+- **Génération automatique des visites (lot pilote 5, #293)** (règle nouvelle, règles métier et modèle de données ; appliquées par défaut, voir section 4) :
+  - (a) anticipation de 30 jours par défaut, appliquée dès la mise en service : la garder, en retenir une autre, ou livrer la génération désactivée (vide) jusqu'au réglage par la société (règle permanente 1 : une valeur non décidée d'une règle nouvelle est posée en question) ?
+  - (b) le passage avance lui-même l'échéance d'une visite terminée, et ne saute aucune échéance passée (sa visite est créée en retard, puis les suivantes une à une au fil des visites terminées) : garder, ou reprendre à la prochaine échéance à venir ?
+  - (c) les écritures du passage n'ont pas de compte auteur : la base admet un auteur vide au journal SAV pour la seule « Génération automatique » (création de la visite, avancement de l'échéance), alors que #67 exigeait que toute trace désigne un compte Iris réel. Garder, ou porter ces écritures par un compte système qui ne se connecte pas ?
 
 ## 4. Choix par défaut, à confirmer
 
@@ -424,12 +428,12 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Une seule conversion par affaire, et devis converti en intervention ou en contrat non annulable : appliqués par #281, posés en question (section 3).
 
 **Génération automatique des visites de maintenance** (lot pilote 5, #293)
-- Anticipation de 30 jours par défaut, appliquée dès la mise en service ; de 0 à 365 jours, vide pour désactiver la génération automatique. **Appliqué** (#293).
-- Le passage avance aussi l'échéance d'une visite terminée (règle de l'action « Échéance suivante »), faute de quoi seule la première visite de chaque contrat serait automatique. **Appliqué** (#293).
-- Une échéance passée n'est pas sautée : sa visite est créée en retard, comme par l'action manuelle, et les suivantes au fil des visites terminées, une par jour au plus pour chaque contrat. **Appliqué** (#293).
+- Anticipation de 30 jours par défaut, appliquée dès la mise en service ; de 0 à 365 jours, vide pour désactiver la génération automatique. **Appliqué** (#293), posé en question (section 3).
+- Le passage avance aussi l'échéance d'une visite terminée (règle de l'action « Échéance suivante »), faute de quoi seule la première visite de chaque contrat serait automatique. **Appliqué** (#293), posé en question (section 3).
+- Une échéance passée n'est pas sautée : sa visite est créée en retard, comme par l'action manuelle, et les suivantes au fil des visites terminées, une par jour au plus pour chaque contrat. **Appliqué** (#293), posé en question (section 3).
 - Client désactivé et visite annulée : contrat laissé de côté et signalé, sans échec. **Appliqué** (#293).
 - L'alerte s'affiche aux administrateurs en tête des écrans Contrats de maintenance et Interventions ; aucun courriel (l'envoi des documents est le lot 6). **Appliqué** (#293).
-- Le passage du jour a lieu peu après minuit, heure de la société (première vérification du jour) ; le passage lancé à la main est au nom de l'administrateur ; le passage automatique écrit sans compte auteur, au nom « Génération automatique ». **Appliqué** (#293).
+- Le passage du jour a lieu peu après minuit, heure de la société (première vérification du jour) ; le passage lancé à la main est au nom de l'administrateur ; le passage automatique écrit sans compte auteur, au nom « Génération automatique ». **Appliqué** (#293), posé en question (section 3).
 
 **Dates**
 - Date de demande curative : alignée sur les autres dates métier. **À appliquer**.

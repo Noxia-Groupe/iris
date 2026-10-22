@@ -850,8 +850,6 @@ model RegleTvaComptable {
   @@index([compteId])
 }
 
-// Contrat de maintenance natif : son échéance est un engagement métier, distinct du planning.
-// Les interventions générées y seront rattachées afin de garantir l'idempotence du cycle.
 // Passages de la génération des visites de maintenance (lot pilote 5). Un passage automatique au
 // plus par jour civil de la société : cleJourAutomatique (« AAAA-MM-JJ », unique) n'est
 // renseignée que pour eux (CHECK en base). Les passages lancés à la main par un administrateur
@@ -878,6 +876,8 @@ model ExecutionGenerationVisites {
   @@index([debut])
 }
 
+// Contrat de maintenance natif : son échéance est un engagement métier, distinct du planning.
+// Les interventions générées y seront rattachées afin de garantir l'idempotence du cycle.
 model ContratMaintenance {
   id                          String      @id @default(uuid())
   clientId                    String
