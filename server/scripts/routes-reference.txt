@@ -37,7 +37,7 @@ GET /api/factures/:id/document.pdf requireAuth#76fb48c2d0f5 > requireAdmin#72440
 GET /api/factures/:id/journal requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
 GET /api/factures/:id/tracabilite requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4d3a959b39f5
 POST /api/factures requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d1503c57bcdd
-GET /api/facturation/prete-a-facturer requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#727ce6475ab0
+GET /api/facturation/prete-a-facturer requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#be63c1fffb33
 GET /api/comptabilite requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#13e90d7b003f
 POST /api/comptabilite/comptes requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#6b69dfe1117a
 PATCH /api/comptabilite/comptes/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#62c34363c7c5

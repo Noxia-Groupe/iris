@@ -22,7 +22,10 @@ export type DocumentPdf = {
 };
 
 const MARGE = 48;
-const MARGE_BAS = 84;
+const MARGE_BAS_MIN = 84;
+// Au-delà (une quarantaine de lignes, que seuls des retours à la ligne atteignent sous la limite de
+// 2 000 caractères du champ), le pied serait tronqué plutôt que d'écraser le contenu de la page.
+const HAUTEUR_PIED_MAX = 300;
 const LARGEUR_LOGO = 160;
 const HAUTEUR_LOGO = 64;
 
@@ -51,8 +54,18 @@ function lignesIdentite(identite: IdentiteImprimee) {
   ].filter((valeur): valeur is string => Boolean(valeur));
 }
 
+// Hauteur du pied de page, mesurée dans la police et la largeur où il s'imprime.
+function hauteurPied(texte: string) {
+  const mesure = new PDFDocument({ size: 'A4', margins: { top: MARGE, left: MARGE, right: MARGE, bottom: MARGE } });
+  return mesure.font('Helvetica').fontSize(7).heightOfString(texte, { width: mesure.page.width - 2 * MARGE, align: 'center' });
+}
+
 export function ouvrirDocumentPdf({ titre, identite }: { titre: string; identite: IdentiteImprimee | null }): DocumentPdf {
-  const pdf = new PDFDocument({ size: 'A4', margins: { top: MARGE, left: MARGE, right: MARGE, bottom: MARGE_BAS }, bufferPages: true, info: { Title: texteWinAnsi(titre) } });
+  // Le pied de page (mentions, conditions de règlement) s'imprime en entier sur chaque page : la
+  // marge basse lui réserve sa hauteur, au-dessus de la pagination.
+  const pied = identite?.piedDocument ? texteWinAnsi(identite.piedDocument) : null;
+  const margeBas = Math.max(MARGE_BAS_MIN, pied ? Math.min(HAUTEUR_PIED_MAX, Math.ceil(hauteurPied(pied))) + 54 : 0);
+  const pdf = new PDFDocument({ size: 'A4', margins: { top: MARGE, left: MARGE, right: MARGE, bottom: margeBas }, bufferPages: true, info: { Title: texteWinAnsi(titre) } });
   const morceaux: Buffer[] = [];
   const fini = new Promise<Buffer>((resolve, reject) => {
     pdf.on('data', (morceau: Buffer) => morceaux.push(morceau));
@@ -98,8 +111,8 @@ export function ouvrirDocumentPdf({ titre, identite }: { titre: string; identite
       pdf.page.margins.bottom = 0;
       const hauteur = pdf.page.height;
       pdf.font('Helvetica').fillColor('#4b5563');
-      if (identite?.piedDocument) {
-        pdf.fontSize(7).text(texteWinAnsi(identite.piedDocument), MARGE, hauteur - MARGE_BAS + 18, { width: largeurPage, height: 30, ellipsis: true, align: 'center' });
+      if (pied) {
+        pdf.fontSize(7).text(pied, MARGE, hauteur - margeBas + 18, { width: largeurPage, height: margeBas - 54, ellipsis: true, align: 'center' });
       }
       pdf.fontSize(7.5).text(`Page ${index + 1} / ${pages.count}`, MARGE, hauteur - 34, { width: largeurPage, align: 'right', lineBreak: false });
       pdf.page.margins.bottom = margeBas;

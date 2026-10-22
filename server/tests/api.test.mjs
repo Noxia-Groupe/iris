@@ -14009,14 +14009,23 @@ if (!TEST_DATABASE_URL) {
       const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(corps));
       return Buffer.concat([longueur, corps, crc]);
     };
-    const png = async ({ largeur = 4, hauteur = 2, idat = null, teinte = 0 } = {}) => {
+    // RGBA 8 bits ; `filtre(n)` donne l'octet de filtre de la n-ième ligne écrite ; `entrelace`
+    // écrit les sept passes Adam7, sans ligne pour une passe vide (norme PNG) ; `morceaux` s'insère
+    // après l'IHDR.
+    const png = async ({ largeur = 4, hauteur = 2, idat = null, teinte = 0, filtre = () => 0, entrelace = false, morceaux = [] } = {}) => {
       const { deflateSync } = await import('node:zlib');
-      const entete = Buffer.alloc(13); entete.writeUInt32BE(largeur, 0); entete.writeUInt32BE(hauteur, 4); entete[8] = 8; entete[9] = 6;
+      const entete = Buffer.alloc(13); entete.writeUInt32BE(largeur, 0); entete.writeUInt32BE(hauteur, 4); entete[8] = 8; entete[9] = 6; entete[12] = entrelace ? 1 : 0;
+      const passes = entrelace ? [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] : [[0, 0, 1, 1]];
       const lignes = [];
-      for (let y = 0; y < hauteur; y++) { lignes.push(0); for (let x = 0; x < largeur; x++) lignes.push((x * 40 + teinte) & 255, (y * 90) & 255, 120, 255); }
-      return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), morceauPng('IHDR', entete), morceauPng('IDAT', idat ?? deflateSync(Buffer.from(lignes))), morceauPng('IEND', Buffer.alloc(0))]);
+      let rang = 0;
+      for (const [x0, y0, pasX, pasY] of passes) {
+        const l = Math.ceil((largeur - x0) / pasX), h = Math.ceil((hauteur - y0) / pasY);
+        if (l <= 0 || h <= 0) continue;
+        for (let y = 0; y < h; y++) { lignes.push(filtre(rang++)); for (let x = 0; x < l; x++) lignes.push((x * 40 + teinte) & 255, (y * 90) & 255, 120, 255); }
+      }
+      return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), morceauPng('IHDR', entete), ...morceaux, morceauPng('IDAT', idat ?? deflateSync(Buffer.from(lignes))), morceauPng('IEND', Buffer.alloc(0))]);
     };
-    // JPEG 1 × 1 pixel minimal (marqueurs SOI, DQT, SOF0, DHT, SOS, EOI).
+    // JPEG 1 × 1 pixel minimal (marqueurs SOI, APP0, DQT, SOF2, DHT, SOS).
     const JPEG = Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64');
     const enDataUrl = (type, octets) => `data:${type};base64,${octets.toString('base64')}`;
     const televerser = (fichier, auth = admin()) => request(app).put('/api/company/logo').set(auth).send({ fichier });
@@ -14049,6 +14058,20 @@ if (!TEST_DATABASE_URL) {
       return { octets: res.body, texte: text };
     };
     const avecImage = (octets) => octets.includes(Buffer.from('/Subtype /Image'));
+    // Couleurs de tracé et de remplissage (opérateurs scn et SCN des flux du PDF, que PDFKit
+    // compresse), en hexadécimal : la couleur imprimée vient de la copie, jamais du réglage vivant.
+    const couleursPdf = async (octets) => {
+      const { inflateSync } = await import('node:zlib');
+      const texte = octets.toString('latin1');
+      const couleurs = new Set();
+      for (const flux of texte.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, texte.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        for (const [, ...rvb] of contenu.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) (?:scn|SCN)\b/g)) couleurs.add(`#${rvb.map((v) => Math.round(Number(v) * 255).toString(16).padStart(2, '0')).join('')}`);
+      }
+      return couleurs;
+    };
     // Prérequis comptables de l'émission, posés s'ils manquent : le bloc reste exécutable seul.
     const assurerFacturation = async () => {
       const plan = async () => (await request(app).get('/api/comptabilite').set(admin())).body;
@@ -14094,7 +14117,9 @@ if (!TEST_DATABASE_URL) {
       const annee = Number((await aujourdhui()).slice(6));
       const sequenceAvant = await prisma.sequenceFacture.findUnique({ where: { annee } });
       try {
-        await definirSociete({ siret: '', ville: '  ' });
+        // Ville faite de blancs écrite en base, sans passer par l'API qui les retire : la copie la refuse aussi.
+        await definirSociete({ siret: '' });
+        await prisma.companySettings.update({ where: { id: 'singleton' }, data: { ville: '  ' } });
         const refus = await emettre(brouillon.id);
         assert.equal(refus.status, 409, JSON.stringify(refus.body));
         assert.match(refus.body.error, /Identité de la société incomplète : renseignez SIRET, ville dans l’écran Société avant d’émettre\./);
@@ -14130,16 +14155,37 @@ if (!TEST_DATABASE_URL) {
       }
       // L'identité figurant en en-tête, le bloc « Émetteur » des pièces antérieures disparaît.
       assert.doesNotMatch(avant.texte, /^Émetteur$/m);
+      assert.ok((await couleursPdf(avant.octets)).has(IDENTITE_A.couleurPrimaire), 'couleur copiée absente du PDF');
       await definirSociete(IDENTITE_B);
       const apres = await documentPdf(facture.id);
       assert.ok(apres.texte.includes('TEST Émetteur A') && apres.texte.includes('TEST Pied de page A'));
       assert.doesNotMatch(apres.texte, /TEST Émetteur B|22222222200022|TEST Pied de page B|2 avenue Nouvelle/);
+      const couleursApres = await couleursPdf(apres.octets);
+      assert.ok(couleursApres.has(IDENTITE_A.couleurPrimaire) && !couleursApres.has(IDENTITE_B.couleurPrimaire), `couleur vivante imprimée : ${[...couleursApres]}`);
       assert.deepEqual(await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: facture.identiteEmetteurId } }), copie);
       const suivante = await creerEmise('TEST Copie B');
       assert.notEqual(suivante.identiteEmetteurId, facture.identiteEmetteurId);
       assert.equal((await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: suivante.identiteEmetteurId } })).raisonSociale, 'TEST Émetteur B');
       assert.ok((await documentPdf(suivante.id)).texte.includes('TEST Pied de page B'));
       await definirSociete(IDENTITE_A);
+    });
+
+    // La copie appartient à la transaction de l'émission : un refus survenu après elle ne laisse
+    // aucune identité figée derrière lui.
+    test('une émission refusée après la copie de l’identité n’en laisse aucune trace', async () => {
+      const telephone = `02 31 ${String(Date.now()).slice(-6)}`;
+      try {
+        await definirSociete({ telephone });
+        const jour = await aujourdhui();
+        const brouillon = await request(app).post('/api/factures').set(admin()).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST émetteur figé', dateEmission: jour, dateEcheance: jour, lignes: [{ designation: 'TEST Taux sans compte', quantite: 1, prixUnitaireHt: 10, tauxTva: 7.77 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        const refus = await emettre(brouillon.body.id);
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /Paramétrage comptable incomplet/);
+        assert.equal(await prisma.identiteEmetteur.count({ where: { telephone } }), 0);
+      } finally {
+        await definirSociete(IDENTITE_A);
+      }
     });
 
     test('deux pièces émises avec la même identité partagent la même copie, y compris en émissions simultanées', async () => {
@@ -14223,6 +14269,57 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Verrou exclusif de la société : un changement de logo attend un changement en cours, puis
+    // journalise et nettoie l'état validé, et non celui lu avant ce changement.
+    test('logo : le remplacement et le retrait attendent un changement de la société en cours', async () => {
+      const sousVerrou = async (action) => {
+        const intercale = { contenu: JPEG, typeMime: 'image/jpeg', empreinte: `TEST-${randomUUID()}`, taille: JPEG.length };
+        let liberer;
+        const retenue = new Promise((resolve) => { liberer = resolve; });
+        let pidTenant = null;
+        let logoIntercale = null;
+        const tenant = prisma.$transaction(async (tx) => {
+          [{ pid: pidTenant }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          await tx.$queryRaw`SELECT 1 FROM "CompanySettings" WHERE "id" = 'singleton' FOR UPDATE`;
+          logoIntercale = await tx.logoDocument.create({ data: intercale });
+          await tx.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: logoIntercale.id } });
+          await retenue;
+        }, { timeout: 20_000 });
+        try {
+          while (pidTenant === null || logoIntercale === null) await new Promise((resolve) => setTimeout(resolve, 10));
+          const requete = action().then((reponse) => reponse);
+          let bloquee = false;
+          for (let essai = 0; essai < 250 && !bloquee; essai++) {
+            const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidTenant}::int = ANY(pg_blocking_pids(pid))`;
+            bloquee = n > 0;
+            if (!bloquee) await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          liberer();
+          await tenant;
+          const reponse = await requete;
+          assert.equal(bloquee, true, 'le changement de logo doit attendre le verrou de la société');
+          assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+          return { reponse, logoIntercale };
+        } finally {
+          liberer();
+          await tenant.catch(() => undefined);
+        }
+      };
+      try {
+        const nouveau = enDataUrl('image/png', await png({ teinte: 7 }));
+        const remplace = await sousVerrou(() => televerser(nouveau));
+        const entree = await prisma.journalAdministration.findFirstOrThrow({ where: { type: 'SOCIETE', action: 'LOGO_DOCUMENTS' }, orderBy: { createdAt: 'desc' } });
+        assert.equal(entree.avant.logoDocuments, `JPEG, 1 Ko, empreinte ${remplace.logoIntercale.empreinte.slice(0, 12)}`);
+        assert.equal(await prisma.logoDocument.count({ where: { id: remplace.logoIntercale.id } }), 0, 'logo intercalé, orphelin, non supprimé');
+        const retire = await sousVerrou(() => request(app).delete('/api/company/logo').set(admin()));
+        const entreeRetrait = await prisma.journalAdministration.findFirstOrThrow({ where: { type: 'SOCIETE', action: 'LOGO_DOCUMENTS_RETIRE' }, orderBy: { createdAt: 'desc' } });
+        assert.equal(entreeRetrait.avant.logoDocuments, `JPEG, 1 Ko, empreinte ${retire.logoIntercale.empreinte.slice(0, 12)}`);
+        assert.equal(await prisma.logoDocument.count({ where: { id: retire.logoIntercale.id } }), 0, 'logo intercalé, orphelin, non supprimé');
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+      }
+    });
+
     test('en base : copie et logo immuables, aucune pièce ne quitte le brouillon sans identité figée', async () => {
       const facture = await creerEmise('TEST Garde base');
       const autre = await prisma.identiteEmetteur.create({ data: { empreinte: `TEST-${randomUUID()}`, raisonSociale: 'TEST Autre', siret: '3', adresse: 'x', codePostal: '1', ville: 'y', couleurPrimaire: '#000000' } });
@@ -14246,6 +14343,18 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.id } })).statut, 'BROUILLON');
     });
 
+    test('logo : un PNG transparent et entrelacé, aux cinq filtres de ligne, est accepté et imprimé', async () => {
+      try {
+        const pose = await televerser(enDataUrl('image/png', await png({ largeur: 24, hauteur: 12, entrelace: true, filtre: (rang) => rang % 5 })));
+        assert.equal(pose.status, 200, JSON.stringify(pose.body));
+        const facture = await creerEmise('TEST Logo entrelacé');
+        // L'impression en décompresse les pixels de façon asynchrone : une exception y arrêterait la suite.
+        assert.equal(avecImage((await documentPdf(facture.id)).octets), true);
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+      }
+    });
+
     test('une pièce émise avant ce lot, sans copie, s’imprime comme à l’origine', async () => {
       const facture = await creerEmise('TEST Pièce antérieure');
       await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "Facture_immutabilite_origine_emise"');
@@ -14260,6 +14369,9 @@ if (!TEST_DATABASE_URL) {
       assert.doesNotMatch(texte, /TEST Émetteur A|SIRET 11111111100011|TEST Pied de page A/);
       assert.match(texte, /Page 1 \/ 1/);
       assert.equal(avecImage(octets), false);
+      // Couleur par défaut, et non la couleur principale actuelle (#0f766e), qui est un réglage vivant.
+      const couleurs = await couleursPdf(octets);
+      assert.ok(couleurs.has('#1e3a8a') && !couleurs.has(IDENTITE_A.couleurPrimaire), `couleurs : ${[...couleurs]}`);
       // Le statut d'une pièce antérieure évolue encore (réglée, annulée) : le garde ne vise que l'émission.
       const total = await request(app).post(`/api/factures/${facture.id}/annuler`).set(admin());
       assert.equal(total.status, 200, JSON.stringify(total.body));
@@ -14275,12 +14387,32 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await request(app).delete('/api/company/logo').set(entete(administrateur))).status, 403);
         assert.equal((await request(app).get('/api/company/logo')).status, 401);
         assert.equal((await request(app).get('/api/company/logo').set(entete(technicien))).status, 404);
+        // Une clé d'intégration, même autorisée à lire la société, n'atteint aucune route du logo.
+        const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé logo', scopes: ['company:read'] });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        try {
+          const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
+          assert.equal((await request(app).get('/api/company/logo').set(parCle)).status, 401);
+          assert.equal((await televerser(enDataUrl('image/png', fichierPng), parCle)).status, 401);
+          assert.equal((await request(app).delete('/api/company/logo').set(parCle)).status, 401);
+        } finally {
+          await prisma.apiAccessKey.deleteMany({ where: { nom: 'TEST clé logo' } });
+        }
         // Fichiers refusés : sans data URL, GIF, contenu d'un autre format, PNG corrompu, trop grand.
         const refus = [
+          // JPEG de 2 001 pixels de large (en-tête SOF modifié) : sa taille n'est lue que par le moteur PDF.
+          [enDataUrl('image/jpeg', (() => { const large = Buffer.from(JPEG); large.writeUInt16BE(2001, large.indexOf(Buffer.from([0xff, 0xc2])) + 7); return large; })()), /2 000 pixels/],
           [undefined, /Joignez un fichier/], ['bonjour', /PNG ou JPEG/], [enDataUrl('image/gif', Buffer.from('GIF89a')), /PNG ou JPEG/],
           [enDataUrl('image/png', JPEG), /ne correspond pas à son format/], [enDataUrl('image/png', await png({ idat: Buffer.from('pas du zlib') })), /illisible/],
           [enDataUrl('image/png', (await png()).subarray(0, 40)), /illisible/], [enDataUrl('image/png', await png({ largeur: 2001, hauteur: 1 })), /2 000 pixels/],
           [enDataUrl('image/png', Buffer.concat([await png(), Buffer.alloc(500 * 1024)])), /trop volumineux \(limite : 500 Ko\)/],
+          // Fichiers que le moteur PDF ne lirait qu'à l'impression, hors requête : filtre de ligne
+          // inconnu (exception asynchrone qui arrête le serveur), passe Adam7 vide d'une image
+          // étroite (le moteur y lit un filtre de trop, ici 200), tRNS d'une image RGBA (le moteur
+          // s'y désaligne et boucle sans fin dès la lecture de l'en-tête).
+          [enDataUrl('image/png', await png({ filtre: (rang) => (rang === 1 ? 5 : 0) })), /illisible/],
+          [enDataUrl('image/png', await png({ largeur: 3, hauteur: 3, entrelace: true, teinte: 200 })), /illisible/],
+          [enDataUrl('image/png', await png({ morceaux: [morceauPng('tRNS', Buffer.from([0, 0, 0, 0, 0xff, 0xff, 0xff, 0xf4, 0x7a, 0x7a, 0x7a, 0x7a]))] })), /illisible/],
         ];
         for (const [fichier, motif] of refus) {
           const res = await televerser(fichier);
@@ -14289,6 +14421,9 @@ if (!TEST_DATABASE_URL) {
         }
         const tropLourd = await televerser(`data:image/png;base64,${'A'.repeat(1_100_000)}`);
         assert.equal(tropLourd.status, 413); assert.equal(tropLourd.body.error, 'Logo trop volumineux (limite : 500 Ko).');
+        // La limite de 1 Mo ne vaut que pour le logo : l'identité de la société garde la limite commune.
+        const societeTropLourde = await request(app).put('/api/company').set(admin()).send({ piedFacture: 'x'.repeat(150_000) });
+        assert.equal(societeTropLourde.status, 413); assert.equal(societeTropLourde.body.error, 'Requête trop volumineuse.');
         assert.equal((await prisma.companySettings.findUniqueOrThrow({ where: { id: 'singleton' } })).logoDocumentId, null);
 
         const journalAvant = await prisma.journalAdministration.count({ where: { type: 'SOCIETE' } });
@@ -14327,9 +14462,34 @@ if (!TEST_DATABASE_URL) {
         assert.equal(avecImage((await documentPdf(sansLogo.id)).octets), false);
         // Un logo imprimé par une pièce ne se supprime pas.
         await assert.rejects(prisma.logoDocument.delete({ where: { id: jpeg.body.logoDocumentId } }), /Foreign key constraint|violates foreign key/i);
+        // Un nouveau logo n'atteint ni la pièce émise avec le JPEG, ni celle émise sans logo.
+        assert.equal((await televerser(enDataUrl('image/png', fichierPng))).status, 200);
+        assert.ok((await documentPdf(facture.id)).octets.includes(Buffer.from('/DCTDecode')), 'le JPEG copié n’est plus imprimé');
+        assert.equal(avecImage((await documentPdf(sansLogo.id)).octets), false);
       } finally {
         await request(app).delete('/api/company/logo').set(admin());
         await prisma.user.deleteMany({ where: { email: { in: ['emetteur6a.admin@iris.test', 'emetteur6a.technicien@iris.test'] } } });
+      }
+    });
+
+    // Le champ admet 2 000 caractères, et l'écran y invite aux mentions et conditions de règlement :
+    // une pièce émise ne doit pas en imprimer une version tronquée.
+    test('gabarit : un pied de page long s’imprime en entier sur chaque page', async () => {
+      const pied = `TEST Conditions de règlement : ${Array.from({ length: 200 }, (_, i) => `clause${i}`).join(' ')} TESTFINDUPIED`;
+      try {
+        await definirSociete({ piedFacture: pied });
+        const facture = await creerEmise('TEST Pied long', 70);
+        const { texte } = await documentPdf(facture.id);
+        const pages = Number(/Page 1 \/ (\d+)/.exec(texte)?.[1]);
+        assert.ok(pages >= 2, `pagination absente : ${pages}`);
+        assert.equal(texte.split('TESTFINDUPIED').length - 1, pages, 'pied de page tronqué');
+        assert.ok(texte.includes('TEST Pied long 70'));
+        // Un pied fait de centaines de retours à la ligne reste borné : il n'envahit pas la page.
+        await definirSociete({ piedFacture: 'TEST ligne\n'.repeat(180) });
+        const courte = await creerEmise('TEST Pied démesuré');
+        assert.match((await documentPdf(courte.id)).texte, /Page 1 \/ 1/);
+      } finally {
+        await definirSociete(IDENTITE_A);
       }
     });
 

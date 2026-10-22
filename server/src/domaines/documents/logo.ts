@@ -24,9 +24,10 @@ const CANAUX_PNG: Record<number, { canaux: number; profondeurs: number[] }> = {
 // Les sept passes de l'entrelacement Adam7 : colonne et ligne de départ, pas horizontal et vertical.
 const PASSES_ADAM7 = [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]];
 
-// Le moteur PDF décompresse les pixels d'un PNG transparent de façon asynchrone, et une donnée
-// corrompue y lève une exception hors de toute requête, qui arrêterait le serveur à l'impression.
-// Les pixels sont donc décompressés ici, à l'envoi du fichier, et leur volume vérifié.
+// Le moteur PDF décompresse les pixels d'un PNG transparent ou entrelacé de façon asynchrone, et une
+// donnée corrompue y lève une exception hors de toute requête, qui arrêterait le serveur à
+// l'impression. Les pixels sont donc décompressés ici, à l'envoi du fichier, leur volume vérifié et
+// leurs lignes parcourues comme le moteur les parcourt.
 function verifierPixelsPng(contenu: Buffer) {
   let position = 8;
   let entete: Buffer | null = null;
@@ -40,6 +41,9 @@ function verifierPixelsPng(contenu: Buffer) {
     if (debut + longueur + 4 > contenu.length) throw new LogoInvalideError(ILLISIBLE);
     const morceau = contenu.subarray(debut, debut + longueur);
     if (!entete && type !== 'IHDR') throw new LogoInvalideError(ILLISIBLE);
+    // Le moteur (png-js) ne lit pas le contenu d'un tRNS sous un type autre que 0, 2 ou 3 (la norme
+    // l'y interdit) : il se désaligne alors sur la suite du fichier, jusqu'à boucler sans fin.
+    if (type === 'tRNS' && ![0, 2, 3].includes(entete![9])) throw new LogoInvalideError(ILLISIBLE);
     if (type === 'IHDR') entete = morceau;
     else if (type === 'PLTE') palette = true;
     else if (type === 'IDAT') donnees.push(morceau);
@@ -68,6 +72,19 @@ function verifierPixelsPng(contenu: Buffer) {
     throw new LogoInvalideError(ILLISIBLE);
   }
   if (pixels.length !== attendu) throw new LogoInvalideError(ILLISIBLE);
+  // Chaque ligne commence par son filtre (0 à 4) : le moteur lève l'exception asynchrone sur tout
+  // autre octet. Il lit aussi, contre la norme, un octet de filtre par ligne d'une passe Adam7 vide
+  // (image entrelacée de moins de 5 pixels de large) : ce parcours reproduit sa lecture.
+  const octetsPixel = (format.canaux * profondeur) / 8;
+  let curseur = 0;
+  for (const [x, y, pasX, pasY] of entrelacement ? PASSES_ADAM7 : [[0, 0, 1, 1]]) {
+    const largeurPasse = Math.ceil((largeur - x) / pasX);
+    const hauteurPasse = Math.ceil((hauteur - y) / pasY);
+    for (let ligne = 0; ligne < hauteurPasse && curseur < pixels.length; ligne++) {
+      if (pixels[curseur] > 4) throw new LogoInvalideError(ILLISIBLE);
+      curseur += 1 + Math.max(0, Math.ceil(octetsPixel * largeurPasse));
+    }
+  }
 }
 
 // Le fichier arrive en `data:` URL (le corps JSON de l'API). Le type déclaré doit correspondre au

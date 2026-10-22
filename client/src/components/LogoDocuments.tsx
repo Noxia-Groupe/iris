@@ -93,7 +93,8 @@ export default function LogoDocuments({ logoDocumentId, modifiable, apresChangem
         </div>
         {modifiable && (
           <div className="flex flex-wrap gap-2">
-            <label className={`btn btn-secondary ${enCours ? 'pointer-events-none opacity-60' : 'cursor-pointer'}`}>
+            {/* Le champ de fichier, masqué, garde le focus clavier : le libellé qui lui sert de bouton le montre. */}
+            <label className={`btn btn-secondary focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 ${enCours ? 'pointer-events-none opacity-60' : 'cursor-pointer'}`}>
               {logoDocumentId ? 'Remplacer le logo' : 'Choisir un logo'}
               <input ref={champ} type="file" accept="image/png,image/jpeg" className="sr-only" disabled={enCours} onChange={(e) => void envoyer(e.target.files?.[0])} />
             </label>

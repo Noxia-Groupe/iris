@@ -213,7 +213,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent. **Implémenté** par #281 (choix par défaut en section 4, questions (a) et (b) en section 3).
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA. **Implémenté** par #293 (choix par défaut en section 4, questions (a) à (c) en section 3).
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
-   - Décisions de Nelson du 22-10-2026 ([historique](HISTORIQUE-DECISIONS.md#décisions-du-22-10-2026)) :
+   - Décisions de Nelson du 22-10-2026 ([historique](HISTORIQUE-DECISIONS.md#décisions-du-22-10-2026), citations et lecture retenue) :
      - si Microsoft 365 n'est pas prêt, repli « du style mailto » : la messagerie s'ouvre avec le destinataire, l'objet et le texte remplis ; un lien `mailto:` ne joint aucun fichier, le PDF est téléchargé en même temps et joint à la main ;
      - P5, option B : seul ce que l'envoi exige accompagne le lot 6 (modèle PDF commun ; identité et logo de l'émetteur copiés à l'émission des factures et des avoirs) ; libellés des visites, export comptable et modèles personnalisables après le premier jour ;
      - deux temps : envoi manuel avec ses PDF et son journal (6a), puis Microsoft 365 (6b) ;
@@ -495,7 +495,7 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Émettre une facture ou créer un avoir exige raison sociale, SIRET, adresse, code postal et ville ; l'écran Prêt à facturer le signale, et l'émission refusée ne consomme aucun numéro. Le format du SIRET n'est pas vérifié.
 - À l'émission, la pièce copie aussi le nom commercial, la TVA intracommunautaire, le pays, le téléphone, l'e-mail, le site, le pied de page (« Pied de page des documents »), la couleur principale et le logo. La copie ne change jamais, et deux pièces de même identité la partagent ; la base refuse toute pièce qui quitte le brouillon sans copie.
 - Un avoir, total ou partiel, copie l'identité du jour de sa création, et non celle de sa facture.
-- Une pièce émise avant ce lot n'a pas de copie : elle s'imprime comme à l'origine (émetteur tiré du texte des mentions légales figées), mais dans la couleur par défaut, et non plus dans la couleur principale actuelle, qui est un paramètre vivant.
+- Une pièce émise avant ce lot n'a pas de copie : son émetteur reste tiré du texte des mentions légales figées, comme à l'origine, mais elle s'imprime dans la couleur par défaut, et non plus dans la couleur principale actuelle, qui est un paramètre vivant, et sur le modèle commun (pagination, marge basse).
 - Logo : PNG ou JPEG, 500 Ko et 2 000 pixels de côté au plus, téléversé par le super administrateur comme l'identité, journalisé ; un logo remplacé n'est supprimé que si aucune pièce ne l'imprime. Le champ « URL du logo » quitte l'écran Société ; `logoUrl` reste lisible par l'API.
 - Le PDF porte en tête le logo et l'identité, et sur chaque page le pied de page et la pagination.
 

@@ -23,7 +23,7 @@ C'est aussi la règle permanente ajoutée le même jour à `CLAUDE.md` : toute n
    - Un paramètre qui touche un calcul de montant, une mention légale ou la comptabilité ne change pas de valeur par défaut sans la validation de Nelson.
    - Ceux qui touchent la loi demandent en plus celle du cabinet.
    - Les références légales citées ici le sont **selon notre lecture, toujours à confirmer par le cabinet**.
-6. **Un document émis ne doit jamais lire un paramètre vivant.** Tout ce qu'une facture imprime doit être figé à son émission : c'est déjà le cas de l'émetteur, porté par la version légale, et de l'adresse du client. Une exception existe aujourd'hui, sans effet sur le contenu : la couleur du titre, lue vivante. Depuis #217 (#180), les lignes, la ventilation de TVA, la version des mentions et la date d'émission d'une facture émise sont aussi figées en base.
+6. **Un document émis ne doit jamais lire un paramètre vivant.** Tout ce qu'une facture imprime doit être figé à son émission : c'est le cas de l'adresse du client et, depuis le lot 6a-1 (#300), de l'identité de l'émetteur, avec son logo, sa couleur et son pied de page, copiés à l'émission (décision 6) ; auparavant, l'émetteur venait du texte de la version légale et la couleur du titre était lue vivante. Une pièce émise avant ce lot garde son émetteur tiré de la version légale, imprimé dans la couleur par défaut. Depuis #217 (#180), les lignes, la ventilation de TVA, la version des mentions et la date d'émission d'une facture émise sont aussi figées en base.
 
 ## 3. Inventaire classé
 

@@ -53,11 +53,24 @@ test.describe('Logo et identité de l’émetteur figés sur les pièces', () =>
     const section = page.getByRole('region', { name: 'Logo des documents' });
     await expect(section.getByText('Aucun logo')).toBeVisible();
     await expect(page.getByText(/Raison sociale, SIRET, adresse, code postal et ville sont exigés pour émettre une facture/)).toBeVisible();
-    await expect(page.getByLabel('URL du logo')).toHaveCount(0);
+    await expect(page.getByText('URL du logo')).toHaveCount(0);
 
     const champ = section.locator('input[type="file"]');
+    // Le champ de fichier, masqué, s'atteint au clavier ; son libellé, qui lui sert de bouton, en montre le focus.
+    await expect(champ).toHaveAccessibleName('Choisir un logo');
+    let atteint = false;
+    for (let essai = 0; essai < 80 && !atteint; essai++) {
+      await page.keyboard.press('Tab');
+      atteint = await champ.evaluate((element) => element === document.activeElement);
+    }
+    expect(atteint, 'champ du logo inaccessible au clavier').toBe(true);
+    await expect(section.locator('label').filter({ has: page.locator('input[type="file"]') })).not.toHaveCSS('box-shadow', 'none');
+    // Un fichier qui n'est pas une image est refusé par l'écran, sans être envoyé.
+    let envois = 0;
+    page.on('request', (requete) => { if (requete.method() === 'PUT' && requete.url().endsWith('/api/company/logo')) envois += 1; });
     await champ.setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('pas une image') });
     await expect(section.getByRole('alert')).toHaveText('Le logo doit être un fichier PNG ou JPEG.');
+    expect(envois).toBe(0);
     await champ.setInputFiles({ name: 'casse.png', mimeType: 'image/png', buffer: Buffer.concat([logoPng(10).subarray(0, 33), Buffer.from('corrompu')]) });
     await expect(section.getByRole('alert')).toContainText('illisible');
     await expect(section.getByText('Aucun logo')).toBeVisible();
@@ -88,7 +101,7 @@ test.describe('Logo et identité de l’émetteur figés sur les pièces', () =>
       expect((await request.put(`${api}/company/logo`, { headers, data: { fichier: `data:image/png;base64,${logoPng(120).toString('base64')}` } })).ok()).toBeTruthy();
       const page = await allerSurPageAdmin('/prete-a-facturer');
       await expect(page.getByText('Identité de la société', { exact: true })).toBeVisible();
-      await expect(page.getByText(/Raison sociale, SIRET et adresse sont renseignés/)).toBeVisible();
+      await expect(page.getByText(/Raison sociale, SIRET, adresse, code postal et ville sont renseignés/)).toBeVisible();
 
       const client = await creerClient('émetteur figé');
       await page.goto('/factures', { waitUntil: 'networkidle' });
