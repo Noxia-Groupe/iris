@@ -306,7 +306,7 @@ Ordre de travail retenu par Claude Code (choix de mise en œuvre, non décidé p
 
 ### Suivis ouverts pendant ces lots
 
-Étiquette `suivi-audit` : #284 (E2E `dates-societe`, audit de #280), #285 et #286 (chantiers ; suppression d'un compte), #287 et #288 (E2E de la signature au doigt et de `entetes-mobile`), #289 (statut d'un chantier écrit sans contrôle par l'API), #290 (test sentinelle du planning), #291 (tests de verrou, audit de #283), #292 (tests du sixième audit de #281, fermée par #294), #295 (clé du formulaire de conversion, audit de #294) et #296 (notes du troisième audit de #293).
+Étiquette `suivi-audit` : #284 (E2E `dates-societe`, audit de #280), #285 et #286 (chantiers ; suppression d'un compte), #287 et #288 (E2E de la signature au doigt et de `entetes-mobile`), #289 (statut d'un chantier écrit sans contrôle par l'API), #290 (test sentinelle du planning), #291 (tests de verrou, audit de #283), #292 (tests du sixième audit de #281, fermée par #294), #295 (clé du formulaire de conversion, audit de #294), #296 (notes du troisième audit de #293) et #299 (teinte de survol dérivée de l'ancien accent, audit de #297).
 
 ### En cours au 22-10-2026
 
