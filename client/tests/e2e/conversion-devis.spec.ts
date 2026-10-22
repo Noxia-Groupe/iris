@@ -55,6 +55,11 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
     await expect(ligne(objetAcompte).getByRole('button', { name: action, exact: true })).toHaveCount(0);
   }
 
+  // Passer d'un devis à l'autre sans fermer le formulaire repart d'un formulaire neuf : le titre
+  // saisi pour le premier devis ne passe pas au second.
+  await ligne(objetContrat).getByRole('button', { name: 'Créer l’intervention' }).click();
+  await page.getByRole('dialog', { name: 'Créer l’intervention du devis' }).getByLabel('Titre').fill('Titre saisi pour un autre devis');
+
   // Intervention : à planifier, reliée au devis, sans autre conversion possible.
   await ligne(objetIntervention).getByRole('button', { name: 'Créer l’intervention' }).click();
   const formulaireIntervention = page.getByRole('dialog', { name: 'Créer l’intervention du devis' });
@@ -101,6 +106,7 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   const [jour, mois, annee] = dateDuJour().split('-');
   expect(await contratCree.json()).toMatchObject({ titre: `${objetContrat} — contrat`, dateDebut: `${annee}-${mois}-${jour}T00:00:00.000Z`, periodiciteMois: 6, politiqueMateriel: 'INCLUS', site: { nom: 'Facturation' } });
   await expect(ligne(objetContrat)).toContainText('Contrat de maintenance issu de ce devis');
+  await expect(ligne(objetContrat).getByRole('link', { name: 'voir les contrats' })).toHaveAttribute('href', '/contrats-maintenance');
   for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Créer le contrat', 'Annuler']) {
     await expect(ligne(objetContrat).getByRole('button', { name: action, exact: true })).toHaveCount(0);
   }
