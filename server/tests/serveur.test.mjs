@@ -121,3 +121,30 @@ test('l’accès de secours réglé sur l’adresse du compte système est annon
   assert.match(serveur.stderr, /\[SECOURS\] Accès de secours INACTIF : systeme@iris\.invalid est l'adresse réservée du compte système, qui ne se connecte jamais\./);
   assert.doesNotMatch(serveur.stdout, /Accès de secours actif/);
 });
+
+// Audit n° 2 de #302 : avec l'adresse réservée du compte système, l'accès de secours est réellement
+// fermé, et pas seulement annoncé inactif : la page de secours ne se propose pas et la route refuse le
+// jeton (503), avant toute lecture en base. Témoin : le même jeton avec une autre adresse ouvre l'accès.
+test('l’accès de secours réglé sur l’adresse du compte système est fermé, sans effet sur une adresse valide', () => {
+  const jeton = 'jeton-de-secours-de-test-au-moins-32-caracteres';
+  const sonder = (adresse) => {
+    const script = `const { app } = require(${JSON.stringify(fileURLToPath(new URL('../dist/index.js', import.meta.url)))});
+      const serveur = app.listen(0, '127.0.0.1', async () => {
+        const base = 'http://127.0.0.1:' + serveur.address().port + '/api/auth/secours';
+        const etat = await (await fetch(base + '/etat')).json();
+        const connexion = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: ${JSON.stringify(jeton)} }) });
+        console.log(JSON.stringify({ etat, statut: connexion.status, code: (await connexion.json()).code ?? null }));
+        process.exit(0);
+      });`;
+    const sortie = spawnSync(process.execPath, ['-e', script], {
+      env: { ...process.env, SUPERADMIN_EMAILS: '', BREAK_GLASS_EMAIL: adresse, BREAK_GLASS_TOKEN: jeton, DATABASE_URL: 'postgresql://iris:iris@127.0.0.1:1/iris_injoignable?schema=public&connect_timeout=2' },
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    assert.equal(sortie.status, 0, sortie.stderr);
+    return JSON.parse(sortie.stdout.trim().split('\n').at(-1));
+  };
+  assert.deepEqual(sonder(' Systeme@IRIS.invalid '), { etat: { disponible: false }, statut: 503, code: 'SECOURS_INACTIF' });
+  // Adresse ordinaire : l'accès est proposé ; la connexion lit alors la base, ici injoignable (500).
+  assert.deepEqual(sonder('secours@iris.test').etat, { disponible: true });
+});
