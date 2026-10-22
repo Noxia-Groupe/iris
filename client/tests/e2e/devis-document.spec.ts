@@ -76,3 +76,34 @@ test('PDF du devis : bouton d’un devis signé, ouvert au commercial, sans déb
     await contexte.close();
   }
 });
+
+// Le message s'affiche en haut de l'écran : à 375 px, un refus déclenché depuis la liste y est
+// ramené ; le téléchargement suivant l'efface.
+test('PDF du devis : à 375 px, le refus est ramené en vue, puis effacé au téléchargement suivant', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const headers = auth(session.token);
+  const client = await creerClient('devis PDF refus mobile');
+  const cree = await request.post(`${api}/devis`, { headers, data: { clientId: client.id, objet: `E2E PDF devis refus mobile ${Date.now()}`, lignes: [{ designation: 'Diagnostic', quantite: 1, prixUnitaireHt: 80, tauxTva: 20 }] } });
+  expect(cree.status(), await cree.text()).toBe(201);
+  const devis = await cree.json() as { id: string; numero: string };
+
+  const page = await allerSurPageAdmin('/devis');
+  await page.setViewportSize({ width: 375, height: 700 });
+  const bouton = page.getByRole('button', { name: `PDF du devis ${devis.numero} version 1` });
+  const societe = await (await request.get(`${api}/company`, { headers })).json() as { siret: string };
+  try {
+    const maj = await request.put(`${api}/company`, { headers, data: { siret: '' } });
+    expect(maj.ok(), await maj.text()).toBeTruthy();
+    await bouton.scrollIntoViewIfNeeded();
+    // Le bouton, dans la liste, est loin du haut de l'écran où s'affiche le message.
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await bouton.click();
+    await expect(page.getByRole('alert')).toHaveText('Identité de la société incomplète : renseignez SIRET dans l’écran Société avant d’imprimer un devis.');
+    await expect(page.getByRole('alert')).toBeInViewport();
+  } finally {
+    await request.put(`${api}/company`, { headers, data: { siret: societe.siret } });
+  }
+  const telechargement = page.waitForEvent('download');
+  await bouton.click();
+  expect((await telechargement).suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});

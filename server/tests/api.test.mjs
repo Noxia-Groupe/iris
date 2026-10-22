@@ -14502,6 +14502,13 @@ if (!TEST_DATABASE_URL) {
       assert.equal(texte.split('TEST Pied de page A').length - 1, pages);
       assert.ok(texte.includes('TEST Ligne longue 70'));
     });
+
+    // Lot 6a-2 : le repli des désignations, mis en commun avec le devis, garde la largeur de la facture.
+    test('gabarit : une désignation de 35 caractères tient sur la ligne de ses montants', async () => {
+      const facture = await creerEmise('TEST Désignation de trente-quatre');
+      const { texte } = await documentPdf(facture.id);
+      assert.match(texte, /^TEST Désignation de trente-quatre 1\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+    });
   });
 
   describe('Lot 6a-2 : PDF du devis sur le modèle commun, copies figées à la signature', () => {
@@ -14735,6 +14742,8 @@ if (!TEST_DATABASE_URL) {
       }
       const copie = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } });
       await assert.rejects(prisma.identiteEmetteur.delete({ where: { id: copie.identiteEmetteurId } }), /Foreign key constraint|violates foreign key/i);
+      // La date de création, imprimée « établi le », est figée avec le devis signé.
+      await assert.rejects(prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2020-01-01T00:00:00Z') } }), /Devis signé : client, objet, montants/);
 
       // Signature enregistrée avant ce lot (sans copie, garde désactivé le temps de l'écrire) : le
       // devis s'imprime avec l'identité et la fiche client actuelles, signature comprise.
@@ -14800,6 +14809,22 @@ if (!TEST_DATABASE_URL) {
       assert.ok(texte.includes('TEST Client Dvorák ?'), texte);
     });
 
+    test('caractères hors WinAnsi : un remplacement ne change jamais le sens, un accent combinant est recomposé', async () => {
+      const client = await creerClient(`TEST Client sens des caractères ${Date.now()}`);
+      // Exposant, chiffre cerclé, barre de négation : « ? », jamais un autre texte lisible (10⁶ n'est pas
+      // 106, ≠ n'est pas =). Accent combinant d'un texte copié : recomposé. Ligature et signe ångström
+      // gardent leurs lettres.
+      const devis = await creerDevis(client.id, 'TEST Cafe\u0301 cre\u0300me', [
+        { designation: 'TEST 10\u2076 \u2260 10\u2074 \u2460 \u226e ok', quantite: 1, prixUnitaireHt: 12.34, tauxTva: 20 },
+        { designation: 'TEST \ufb01ltre 10 \u212b fin', quantite: 1, prixUnitaireHt: 56.78, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      const ligneDe = (debut) => texte.split('\n').find((l) => l.startsWith(debut)) ?? '';
+      assert.match(ligneDe('TEST 10'), /^TEST 10\? \? 10\? \? \? ok\s+1\s+12,34 €\s+20 %\s+12,34 €$/, texte);
+      assert.match(ligneDe('TEST filtre'), /^TEST filtre 10 Å fin\s+1\s+56,78 €\s+20 %\s+56,78 €$/, texte);
+      assert.ok(texte.includes('Objet : TEST Café crème'), texte);
+    });
+
     test('concurrence : le PDF d’un devis non signé lit ses lignes et ses totaux dans un même état', async () => {
       const client = await creerClient(`TEST Client devis concurrent ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Devis modifié pendant l’impression', [{ designation: 'TEST Ligne avant', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }]);
@@ -14836,6 +14861,48 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('concurrence : le PDF d’un devis non signé lit l’identité et son logo dans un même état', async () => {
+      const client = await creerClient(`TEST Client logo concurrent ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis dont le logo est retiré pendant l’impression');
+      // Logo propre à ce test (octets uniques) : aucune pièce ne l'imprime, son retrait peut le supprimer.
+      const contenu = Buffer.concat([Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64'), Buffer.from(randomUUID())]);
+      const logo = await prisma.logoDocument.create({ data: { contenu, typeMime: 'image/jpeg', empreinte: createHash('sha256').update(contenu).digest('hex'), taille: contenu.length } });
+      await prisma.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: logo.id } });
+      const autre = new PrismaClient();
+      let liberer; const libere = new Promise((resoudre) => { liberer = resoudre; });
+      let signalerVerrou; const verrouPris = new Promise((resoudre) => { signalerVerrou = resoudre; });
+      try {
+        // Un retrait concurrent tient la table des logos : l'impression lit le devis et la société, puis
+        // attend le logo, que le retrait supprime avec un changement d'identité avant de valider.
+        const retrait = autre.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe('LOCK TABLE "LogoDocument" IN ACCESS EXCLUSIVE MODE');
+          signalerVerrou();
+          await libere;
+          await tx.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: null, raisonSociale: SOCIETE_B.raisonSociale } });
+          await tx.logoDocument.delete({ where: { id: logo.id } });
+        }, { timeout: 20_000 });
+        await verrouPris;
+        const impression = texteDevis(devis.id);
+        let attente = 0;
+        for (let essai = 0; essai < 400 && !attente; essai++) {
+          [{ attente }] = await prisma.$queryRaw`SELECT count(*)::int AS attente FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%LogoDocument%'`;
+          if (!attente) await new Promise((resoudre) => setTimeout(resoudre, 25));
+        }
+        assert.ok(attente, 'l’impression n’a pas attendu le verrou des logos');
+        liberer();
+        await retrait;
+        const { texte, octets } = await impression;
+        const avecLogo = octets.includes(Buffer.from('/Subtype /Image'));
+        // L'ancienne identité avec son logo, ou la nouvelle sans logo : jamais l'une avec l'état de l'autre.
+        assert.ok(texte.includes(SOCIETE_A.raisonSociale) ? avecLogo : !avecLogo, `identité et logo de deux états différents (logo imprimé : ${avecLogo})\n${texte}`);
+      } finally {
+        liberer();
+        await autre.$disconnect();
+        await prisma.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: null, raisonSociale: SOCIETE_A.raisonSociale } });
+        await prisma.logoDocument.deleteMany({ where: { id: logo.id } });
+      }
+    });
+
     test('dates : un devis signé garde le fuseau de sa signature ; un devis non signé suit celui de la société', async () => {
       const jourA = (instant, fuseau) => jourCivilEntreprise(new Date(instant), fuseau).split('-').reverse().join('-');
       const client = await creerClient(`TEST Client devis daté ${Date.now()}`);
@@ -14859,6 +14926,23 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('fuseau copié : celui de la société à la signature, même hors du fuseau par défaut', async () => {
+      const client = await creerClient(`TEST Client fuseau copié ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé à Tahiti');
+      // Créé le 15-01-2026 à 23 h 30 UTC : encore le 15-01-2026 à Tahiti, déjà le 16-01-2026 à Paris.
+      await prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2026-01-15T23:30:00Z') } });
+      const initial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      try {
+        await definirSociete({ fuseauHoraire: 'Pacific/Tahiti' });
+        assert.equal((await signer(devis.id)).status, 201);
+        assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).fuseauHoraire, 'Pacific/Tahiti');
+        await definirSociete({ fuseauHoraire: 'Europe/Paris' });
+        assert.ok((await texteDevis(devis.id)).texte.includes('Version 1 · établi le 15-01-2026'));
+      } finally {
+        await definirSociete({ fuseauHoraire: initial });
+      }
+    });
+
     test('client copié : même site que la facture ; une signature sans adresse n’en reçoit pas après coup', async () => {
       const client = await creerClient(`TEST Client deux sites devis ${Date.now()}`, false);
       // Le site de facturation, créé le premier et nommé après l'autre, est celui qui doit être choisi.
@@ -14877,6 +14961,21 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await signer(devisSansSite.id)).status, 201);
       assert.equal((await request(app).post(`/api/clients/${sansSite.id}/sites`).set(admin()).send({ nom: 'TEST Site tardif', adresse: '7 rue Tardive', codePostal: '44000', ville: 'Nantes', estSiteFacturation: true })).status, 201);
       assert.ok(!(await texteDevis(devisSansSite.id)).texte.includes('7 rue Tardive'), 'adresse ajoutée après la signature imprimée');
+    });
+
+    test('client copié : le site de facturation, même créé après un autre site', async () => {
+      const client = await creerClient(`TEST Client site de facturation tardif ${Date.now()}`, false);
+      // Le site de facturation est créé après l'autre et nommé après lui : ni l'ordre d'écriture ni
+      // le nom ne doivent le désigner.
+      for (const site of [
+        { nom: 'A Chantier', adresse: '1 rue du Chantier', codePostal: '33000', ville: 'Bordeaux' },
+        { nom: 'B Facturation', adresse: '2 rue Facturée', codePostal: '31000', ville: 'Toulouse', estSiteFacturation: true },
+      ]) assert.equal((await request(app).post(`/api/clients/${client.id}/sites`).set(admin()).send(site)).status, 201);
+      const devis = await creerDevis(client.id, 'TEST Devis site de facturation tardif');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes('2 rue Facturée') && !nonSigne.includes('1 rue du Chantier'), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '2 rue Facturée\n31000 Toulouse');
     });
 
     test('devis non signé : le logo actuel est imprimé, puis plus après son retrait', async () => {
@@ -14904,6 +15003,8 @@ if (!TEST_DATABASE_URL) {
         assert.equal(deja.status, 409); assert.equal(deja.body.error, 'Ce devis est déjà signé.');
         const etat = await signer(annule.id);
         assert.equal(etat.status, 409); assert.equal(etat.body.error, 'Ce devis ne peut plus être signé dans son état actuel.');
+        // Le devis signé s'imprime depuis ses copies, même quand l'identité actuelle est incomplète.
+        assert.ok((await texteDevis(signe.id)).texte.includes('Accepté par TEST Signataire client'));
       } finally {
         await definirSociete(SOCIETE_A);
       }
@@ -14937,6 +15038,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(devis.totalTva, 0.02);
       const { texte } = await texteDevis(devis.id);
       assert.ok(texte.includes('TVA 20 % sur 0,09 € : 0,02 €') && texte.includes('TVA totale : 0,02 €'), texte);
+      assert.ok(!texte.includes('Acompte'), `acompte imprimé pour un devis qui n’en exige pas :\n${texte}`);
     });
 
     test('prix d’achat prévu : absent du PDF sous toutes ses écritures', async () => {

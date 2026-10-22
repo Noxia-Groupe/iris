@@ -33,20 +33,29 @@ const HAUTEUR_LOGO = 64;
 const WIN_ANSI_HORS_LATIN1 = new Set([0x20ac, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x017d,
   0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x017e, 0x0178]);
 const encodableWinAnsi = (code: number) => code === 0x0a || (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff) || WIN_ANSI_HORS_LATIN1.has(code);
+// Seules décompositions de compatibilité sans changement de sens : ligatures (ﬁ → fi) et formes
+// pleine chasse (Ａ１ → A1). Les autres (10⁶ → 106, ① → 1, ㎡ → m2) changeraient le texte imprimé.
+const compatibiliteSansPerte = (code: number) => (code >= 0xfb00 && code <= 0xfb06) || (code >= 0xff01 && code <= 0xff5e);
+// Accents combinants, sauf les surimpressions U+0334 à U+0338 : retirer la barre de « ≠ » ou de
+// « ≮ » imprimerait « = » ou « < », le contraire du texte saisi.
+const ACCENTS_COMBINANTS = /[\u0300-\u0333\u0339-\u036f]/g;
 
 // Les polices standards PDFKit sont WinAnsi : normaliser les caractères typographiques non encodables avant impression.
 // Un autre caractère (Ω, ≥, ⌀, ł, émoji, tabulation…) serait écrit par PDFKit avec plus ou moins de deux
 // chiffres hexadécimaux et décalerait toute la suite de la ligne, montants compris : il devient sa
-// lettre de base quand elle existe (č → c), sinon « ? ».
+// lettre de base quand elle existe (č → c), sinon « ? ». Le texte est d'abord recomposé (NFC) : un
+// « e » suivi d'un accent combinant, fréquent dans un texte copié, s'imprime « é », et non « e? ».
 export function texteWinAnsi(texte: string) {
-  return [...String(texte)].map((caractere) => {
+  return [...String(texte).normalize('NFC')].map((caractere) => {
     const code = caractere.codePointAt(0)!;
     if (code === 0x2007 || code === 0x2009 || code === 0x202f || code === 0x09) return ' ';
     if (code === 0x2011) return '-';
     if (code === 0x0d) return '';
     if (encodableWinAnsi(code)) return caractere;
-    const base = caractere.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
-    return base && [...base].every((lettre) => encodableWinAnsi(lettre.codePointAt(0)!)) ? base : '?';
+    const base = caractere.normalize(compatibiliteSansPerte(code) ? 'NFKD' : 'NFD').replace(ACCENTS_COMBINANTS, '');
+    // Accent combinant resté seul (sur une lettre sans forme composée) : la lettre est déjà imprimée.
+    if (!base) return '';
+    return [...base].every((lettre) => encodableWinAnsi(lettre.codePointAt(0)!)) ? base : '?';
   }).join('');
 }
 

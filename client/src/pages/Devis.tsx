@@ -194,7 +194,7 @@ export default function Devis() {
   // les autres avec l'identité de la société et la fiche client actuelles.
   const telechargerDocument = async (d: Devis) => { setError(''); try {
     const res = await apiFetch(`/devis/${d.id}/document.pdf`);
-    if (!res.ok) throw new Error((await res.json()).error || 'Document indisponible.');
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Document indisponible.');
     const url = URL.createObjectURL(await res.blob());
     const a = document.createElement('a');
     a.href = url; a.download = `${d.numero}-v${d.version}.pdf`; a.click();
