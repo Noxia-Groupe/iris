@@ -4684,6 +4684,7 @@ if (!TEST_DATABASE_URL) {
       let contactId = '';
       let siteEtrangerId = '';
       let contactEtrangerId = '';
+      let autreClientId = '';
       const entete = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
       const admin = () => ({ Authorization: `Bearer ${session}` });
       const convertirEn = (id, cible, corps = {}, auth = admin()) => request(app).post(`/api/devis/${id}/convertir`).set(auth).send({ cible, ...corps });
@@ -4709,6 +4710,7 @@ if (!TEST_DATABASE_URL) {
         // Administrateur (ADMIN), distinct du super administrateur de la session de secours.
         comptes.admin = await prisma.user.upsert({ where: { email: 'conversion4.admin@iris.test' }, update: { role: 'ADMIN', actif: true, permissions: [] }, create: { email: 'conversion4.admin@iris.test', name: 'TEST Conversion admin', role: 'ADMIN' } });
         const autreClient = await prisma.client.create({ data: { raisonSociale: 'TEST Client conversion étranger' } });
+        autreClientId = autreClient.id;
         siteEtrangerId = (await prisma.clientSite.create({ data: { clientId: autreClient.id, nom: 'TEST Site étranger', adresse: '2 rue Ailleurs', codePostal: '75001', ville: 'Paris' } })).id;
         contactEtrangerId = (await prisma.clientContact.create({ data: { clientId: autreClient.id, nom: 'TEST Contact étranger' } })).id;
       });
@@ -4716,10 +4718,11 @@ if (!TEST_DATABASE_URL) {
       test('un devis signé crée son intervention, à planifier, et l’affaire n’est plus convertie', async () => {
         const devis = await devisAccepte('TEST Conversion en intervention');
         // Un chantier du même client transmis par le corps n'est pas rattaché : la conversion crée
-        // une intervention hors affaire, comme le dit sa ligne.
+        // une intervention hors affaire, comme le dit sa ligne. Un client transmis est ignoré : le
+        // client est celui du devis.
         const chantierDuClient = await prisma.chantier.create({ data: { nom: 'TEST Conversion chantier non rattaché', client: 'TEST Client cycle', clientId, dateDebut: new Date('2026-10-01T00:00:00.000Z'), budgetGlobalVendu: 0 } });
         // Par un administrateur (ADMIN), et non par le super administrateur de la session de secours.
-        const cree = await convertirEn(devis.id, 'INTERVENTION', { titre: '   ', siteId, contactId, priorite: 'HAUTE', dateSouhaitee: '15-12-2099', description: '  TEST Description de la demande  ', chantierId: chantierDuClient.id }, entete('admin'));
+        const cree = await convertirEn(devis.id, 'INTERVENTION', { titre: '   ', siteId, contactId, priorite: 'HAUTE', dateSouhaitee: '15-12-2099', description: '  TEST Description de la demande  ', chantierId: chantierDuClient.id, clientId: autreClientId }, entete('admin'));
         assert.equal(cree.status, 201, JSON.stringify(cree.body));
         assert.match(cree.body.reference, /^I\d{2}-\d{4}$/);
         assert.equal(cree.body.titre, 'TEST Conversion en intervention', 'un titre blanc laisse l’objet du devis en titre');
@@ -4763,11 +4766,18 @@ if (!TEST_DATABASE_URL) {
         const revision = await request(app).post(`/api/devis/${devis.id}/revisions`).set(admin());
         assert.equal(revision.status, 409, JSON.stringify(revision.body));
         assert.equal(revision.body.error, 'Ce devis est déjà converti : il ne peut plus être révisé.');
+        // L'intervention annulée depuis sa fiche, le devis ne s'annule toujours pas (règle (b), posée
+        // en question à Nelson).
+        const interventionAnnulee = await request(app).patch(`/api/interventions/${cree.body.id}/statut`).set(admin()).send({ statut: 'ANNULEE' });
+        assert.equal(interventionAnnulee.status, 200, JSON.stringify(interventionAnnulee.body));
+        const apresCible = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST intervention annulée' });
+        assert.equal(apresCible.status, 409, JSON.stringify(apresCible.body));
+        assert.match(apresCible.body.error, /Ce devis a créé une intervention : il ne s’annule plus/);
       });
 
       test('un devis signé crée son contrat de maintenance, actif, avec sa couverture', async () => {
         const devis = await devisAccepte('TEST Conversion en contrat');
-        const cree = await convertirEn(devis.id, 'CONTRAT', { ...CONTRAT, siteId, politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'TEST deux visites par an' });
+        const cree = await convertirEn(devis.id, 'CONTRAT', { ...CONTRAT, siteId, politiqueMainOeuvre: 'INCLUSE', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: 'TEST deux visites par an', clientId: autreClientId });
         assert.equal(cree.status, 201, JSON.stringify(cree.body));
         assert.equal(cree.body.titre, 'TEST Conversion en contrat');
         assert.equal(cree.body.client.id, clientId);
@@ -4796,6 +4806,12 @@ if (!TEST_DATABASE_URL) {
         assert.equal(revision.status, 409, JSON.stringify(revision.body));
         assert.equal(revision.body.error, 'Ce devis est déjà converti : il ne peut plus être révisé.');
         assert.deepEqual(await dossiersCrees('TEST Conversion en contrat'), { interventions: 0, contrats: 1, chantiers: 0 });
+        // Le contrat terminé depuis la liste des contrats, le devis ne s'annule toujours pas (règle (b)).
+        const termine = await request(app).patch(`/api/contrats-maintenance/${cree.body.id}/statut`).set(admin()).send({ statut: 'TERMINE', motif: 'TEST fin du contrat' });
+        assert.equal(termine.status, 200, JSON.stringify(termine.body));
+        const apresCible = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST contrat terminé' });
+        assert.equal(apresCible.status, 409, JSON.stringify(apresCible.body));
+        assert.match(apresCible.body.error, /Ce devis a créé un contrat de maintenance : il ne s’annule plus/);
 
         // Un titre propre au contrat remplace l'objet du devis, limité comme à sa création directe.
         const autre = await devisAccepte(`TEST Conversion titrée ${'x'.repeat(220)}`);
@@ -4806,6 +4822,8 @@ if (!TEST_DATABASE_URL) {
         const titre = await convertirEn(autre.id, 'CONTRAT', { ...CONTRAT, titre: '  TEST Contrat titré  ' }, entete('admin'));
         assert.equal(titre.status, 201, JSON.stringify(titre.body));
         assert.equal(titre.body.titre, 'TEST Contrat titré');
+        // Sans couverture saisie, la plus restrictive, comme à la création directe.
+        assert.deepEqual([titre.body.politiqueMainOeuvre, titre.body.politiqueMateriel, titre.body.noteCouverture], ['HORS_FORFAIT', 'HORS_FORFAIT', null]);
       });
 
       test('seuls l’encadrement SAV (intervention) et l’administration (contrat) convertissent, depuis une session', async () => {
@@ -4916,6 +4934,20 @@ if (!TEST_DATABASE_URL) {
           const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
           assert.equal(intervention.body.dateDemande, `${jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris')}T00:00:00.000Z`, 'demande datée du jour civil de la société');
           assert.equal((await prisma.intervention.findUnique({ where: { id: intervention.body.id } })).createdById, comptes.conducteur.id);
+          // Au fuseau de la société, et non à celui de Paris : à 21 h UTC, Wallis est déjà au lendemain.
+          const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+          try {
+            figerHorlogeA21hUtc();
+            assert.notEqual(jourDans('Pacific/Wallis'), jourDans('Europe/Paris'), 'le jour de la société diffère de celui de Paris');
+            assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: 'Pacific/Wallis' })).status, 200);
+            const devisWallis = await devisAccepte('TEST Conversion conducteur fuseau');
+            const interventionWallis = await convertirEn(devisWallis.id, 'INTERVENTION', {}, entete('conducteur'));
+            assert.equal(interventionWallis.status, 201, JSON.stringify(interventionWallis.body));
+            assert.equal(interventionWallis.body.dateDemande, `${jourDans('Pacific/Wallis')}T00:00:00.000Z`);
+          } finally {
+            mock.timers.reset();
+            await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: societe?.fuseauHoraire || 'Europe/Paris' });
+          }
           const autre = await devisAccepte('TEST Conversion conducteur contrat');
           const contrat = await convertirEn(autre.id, 'CONTRAT', CONTRAT, entete('conducteur'));
           assert.equal(contrat.status, 403, JSON.stringify(contrat.body));
