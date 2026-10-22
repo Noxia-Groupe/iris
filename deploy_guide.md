@@ -101,7 +101,7 @@ docker network create backup-net
 ```
 *Ajoutez ensuite ce même réseau externe `backup-net` au service pgBackWeb dans son propre `docker-compose.yml`, puis connectez-vous à la base depuis pgBackWeb avec l'hôte `iris_db` (nom du conteneur), le port `5432` et les identifiants définis dans votre `.env`.*
 
-*Note : depuis le lot P0 (#280), le réseau interne de la stack s'appelle `iris-network` (auparavant `noxia-network`). Sur une installation existante, `docker compose up -d --build` crée le nouveau réseau et y recrée les conteneurs ; l'ancien réseau, désormais inutilisé, reste. Repérez-le avec `docker network ls` (son nom est préfixé par celui du projet Compose, par défaut le dossier du dépôt), puis supprimez-le : `docker network rm <projet>_noxia-network`.*
+*Note : depuis le lot P0 (#280), le réseau interne de la stack s'appelle `iris-network` (auparavant `noxia-network`). Sur une installation existante, `docker compose up -d --build` crée le nouveau réseau et y recrée les trois conteneurs (coupure de quelques secondes ; volumes, réseaux externes et noms de conteneurs inchangés) ; l'ancien réseau, désormais inutilisé, reste. Repérez-le avec `docker network ls` (son nom est préfixé par celui du projet Compose, par défaut le dossier du dépôt : `noxia-iris-chantier_noxia-network` avec le clonage de la section 1), puis supprimez-le : `docker network rm <projet>_noxia-network`.*
 
 ### Migrations de base de données
 

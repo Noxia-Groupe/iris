@@ -295,6 +295,7 @@ Ordre de travail retenu par Claude Code (choix de mise en œuvre, non décidé p
 
 ### Lots fusionnés
 
+- #277 : passation du 20-10-2026 au soir, lot pilote 3 implémenté, propositions 3 et 4 validées.
 - #278 : décisions de Nelson du 21-10-2026 reportées dans la passation et cet historique.
 - #279 : planning du technicien étendu aux affectations des chantiers dont il est titulaire (décision « Des 2 »).
 - #280 (lot P0) : Iris sans valeurs de société ; « IRIS » sur la connexion et le planning public ; icônes et couleurs neutres ; barèmes et primes insérés par migration vidés, sauf valeur saisie, sans effet sur aucun montant ; rapport de chantier en A4 ; réseau Docker interne renommé `iris-network`.
@@ -309,5 +310,5 @@ Ordre de travail retenu par Claude Code (choix de mise en œuvre, non décidé p
 
 ### En cours au 22-10-2026
 
-- Lots pilotes 4 et 5 implémentés, non validés pour mise en service ; le lot 6 (envoi des documents) attend les réponses de Nelson aux questions de la section 3 de la passation (repli des PDF envoyés à la main, périmètre de P5).
+- Lots pilotes 4 et 5 implémentés, non validés pour mise en service ; le lot 6 (envoi des documents) reste à livrer ; deux questions de la section 3 de la passation en touchent le périmètre (repli des PDF envoyés à la main, périmètre de P5).
 - #250 (#240) : toujours en pause, en brouillon, jusqu'à la fin du pilote.
