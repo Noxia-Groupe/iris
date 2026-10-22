@@ -33,11 +33,20 @@ CREATE TRIGGER compte_systeme_fige BEFORE UPDATE OR DELETE ON "User"
 FOR EACH ROW EXECUTE FUNCTION figer_compte_systeme();
 
 -- Journal SAV : toute nouvelle écriture désigne un compte, le compte système pour la génération
--- automatique. Les écritures déjà faites sans compte, au nom « Génération automatique », restent
--- telles quelles : la contrainte ne vérifie que les lignes nouvelles ou modifiées (NOT VALID).
+-- automatique. Comme l'exception qu'elle remplace, la contrainte borne ce que le compte système
+-- écrit : la création de la visite d'un contrat et l'avancement de son échéance, rien d'autre.
+-- Les écritures déjà faites sans compte, au nom « Génération automatique », restent telles
+-- quelles : la contrainte ne vérifie que les lignes nouvelles ou modifiées (NOT VALID).
 ALTER TABLE "JournalSaisieChantier" DROP CONSTRAINT "JournalSaisieChantier_auteur_generation_check";
 ALTER TABLE "JournalSaisieChantier" ADD CONSTRAINT "JournalSaisieChantier_auteur_check"
-  CHECK ("auteurId" IS NOT NULL) NOT VALID;
+  CHECK (
+    "auteurId" IS NOT NULL
+    AND (
+      "auteurId" <> '00000000-0000-4000-8000-000000000001'
+      OR ("cible" = 'INTERVENTION' AND "action" = 'CREATION_CONTRAT')
+      OR ("cible" = 'CONTRAT' AND "action" = 'AVANCEMENT_ECHEANCE')
+    )
+  ) NOT VALID;
 
 -- Passages de la génération : le passage automatique est lui aussi au nom du compte système.
 -- Les passages automatiques déjà enregistrés, sans auteur, restent tels quels (NOT VALID).

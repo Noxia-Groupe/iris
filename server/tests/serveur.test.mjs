@@ -105,3 +105,19 @@ test('une base injoignable au démarrage arrête le serveur avec un message expl
   assert.match(serveur.stderr, /\[DÉMARRAGE\] Initialisation impossible/);
   assert.doesNotMatch(serveur.stdout, /Server running/);
 });
+
+// Audit de #302 (N9) : l'adresse réservée du compte système, mise dans BREAK_GLASS_EMAIL, n'ouvre pas
+// l'accès de secours ; le démarrage le signale au lieu de l'annoncer actif. La base, injoignable,
+// arrête ensuite le serveur : seul le message des routes d'authentification est vérifié.
+test('l’accès de secours réglé sur l’adresse du compte système est annoncé inactif', () => {
+  const serveur = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/index.js', import.meta.url))], {
+    env: {
+      ...process.env, PORT: '0', SUPERADMIN_EMAILS: '', BREAK_GLASS_EMAIL: 'Systeme@iris.invalid', BREAK_GLASS_TOKEN: 'jeton-de-secours-de-test-au-moins-32-caracteres',
+      DATABASE_URL: 'postgresql://iris:iris@127.0.0.1:1/iris_injoignable?schema=public&connect_timeout=5',
+    },
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  assert.match(serveur.stderr, /\[SECOURS\] Accès de secours INACTIF : systeme@iris\.invalid est l'adresse réservée du compte système, qui ne se connecte jamais\./);
+  assert.doesNotMatch(serveur.stdout, /Accès de secours actif/);
+});

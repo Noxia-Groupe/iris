@@ -22,6 +22,7 @@ export const ROLE_DIRECTEUR = 'DIRECTEUR';
 export const ROLE_SYSTEME = 'SYSTEME';
 export const COMPTE_SYSTEME_ID = '00000000-0000-4000-8000-000000000001';
 export const NOM_COMPTE_SYSTEME = 'Iris (automatique)';
+export const EMAIL_COMPTE_SYSTEME = 'systeme@iris.invalid';
 
 export function isAdminRole(role: string | undefined | null): boolean {
   return role === 'ADMIN' || role === ROLE_SUPERADMIN;

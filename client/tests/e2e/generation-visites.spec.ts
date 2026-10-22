@@ -100,6 +100,12 @@ test('l’administration règle l’anticipation, lance la génération et retro
     await panneau.getByRole('button', { name: 'Enregistrer' }).click();
     await expect(panneau.getByText('Génération automatique désactivée.', { exact: true })).toBeVisible();
     await expect(panneau.getByRole('button', { name: 'Lancer la génération maintenant' })).toBeDisabled();
+    // État d'une instance au démarrage (décision du 22-10-2026) : rechargé, l'écran l'annonce et ne
+    // préremplit aucune anticipation (ajout de l'audit de #302).
+    await page.reload({ waitUntil: 'networkidle' });
+    await expect(panneau.getByText('Génération automatique désactivée : les actions de chaque contrat restent disponibles.')).toBeVisible();
+    await expect(anticipation).toHaveValue('');
+    await expect(panneau.getByRole('button', { name: 'Lancer la génération maintenant' })).toBeDisabled();
 
     await page.goto('/interventions', { waitUntil: 'networkidle' });
     await expect(page.getByText(`Maintenance préventive — ${titre}`)).toBeVisible();

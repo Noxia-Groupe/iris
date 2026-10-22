@@ -100,16 +100,15 @@ PATCH /api/chantiers/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660
 DELETE /api/chantiers/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c4bcd35fe13f
 PATCH /api/chantiers/:id/statut requireAuth#07b983da0ce5 > blockCommercialSeulement#f36b50e5b6cd > <anonymous>#b69e5b3dc15a
 PATCH /api/chantiers/:id/commercial requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#a888c4b20222
-USE /api/users/:id <anonymous>#77016775c236
 GET /api/users requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#25aa992576b7
 POST /api/users requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d2a05dc6e5a0
-DELETE /api/users/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#74803f5b5389
-PATCH /api/users/:id/role requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#8cded3afe1bd
-PATCH /api/users/:id/responsable-hierarchique requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#5a6000b3b5b1
-PATCH /api/users/:id/est-commercial requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4450aa149024
-PUT /api/users/:id/permissions requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#af6a696dea18
-PATCH /api/users/:id/acces-finance requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#72b545dfd957
-PATCH /api/users/:id/actif requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#76a3352c758f
+DELETE /api/users/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b402a62e9497
+PATCH /api/users/:id/role requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#5cb9dc1449ae
+PATCH /api/users/:id/responsable-hierarchique requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b49e15113c76
+PATCH /api/users/:id/est-commercial requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7c2c0b1a156c
+PUT /api/users/:id/permissions requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#aa7a7f3e5c06
+PATCH /api/users/:id/acces-finance requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#df39bb4b0258
+PATCH /api/users/:id/actif requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#368df173608e
 GET /api/commerciaux requireAuth#07b983da0ce5 > <anonymous>#bed7235de09c
 GET /api/conducteurs requireAuth#07b983da0ce5 > <anonymous>#73f7374f60c7
 GET /api/intervenants requireAuth#07b983da0ce5 > <anonymous>#7f11ac3852d4

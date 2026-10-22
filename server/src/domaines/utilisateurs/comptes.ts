@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import {
   ROLE_SUPERADMIN, ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL,
-  ROLE_RESPONSABLE, ROLE_DIRECTEUR, ROLE_SYSTEME, COMPTE_SYSTEME_ID, isAdminRole, isSuperAdminRole,
+  ROLE_RESPONSABLE, ROLE_DIRECTEUR, ROLE_SYSTEME, isAdminRole, isSuperAdminRole,
 } from '../../droits/roles';
 import { DROITS_INTERDITS_TECHNICIEN, permissionsEffectives } from '../../droits/permissions';
 import { type AuthRequest, brancheHierarchique, requireAuth } from '../../http/auth';
@@ -115,18 +115,15 @@ const estVerrouIndisponible = (error: unknown) => {
 
 const erreurDernierSuperAdmin = () => Object.assign(new Error('Dernier super administrateur actif.'), { code: 'DERNIER_SUPERADMIN' });
 
+// Le compte système (écritures automatiques) n'existe pas pour la gestion des comptes : chaque route
+// d'un compte le lit comme un compte inexistant, après ses propres gardes et au même endroit, donc
+// avec la même réponse (audit de #302). La base refuse aussi de le modifier ou de le supprimer.
+const compteGere = (id: string) => ({ id, role: { not: ROLE_SYSTEME } });
+
 export function enregistrerRoutesComptes(app: Express): void {
   // Users (administration réservée aux admins)
   // La liste des comptes EST la liste blanche d'autorisation Microsoft Entra ID : seuls les
   // emails présents ici peuvent se connecter. L'authentification locale est interdite.
-  // Le compte système (écritures automatiques) n'existe pas pour la gestion des comptes : aucune
-  // route ne le lit, ne le modifie ni ne le supprime (la base refuse aussi de le changer).
-  // La session est vérifiée d'abord : sans elle, ce compte ne se distingue pas des autres.
-  app.use('/api/users/:id', (req, res, next) => {
-    if (req.params.id !== COMPTE_SYSTEME_ID) return next();
-    requireAuth(req, res, () => void res.status(404).json({ error: 'Utilisateur introuvable.' }));
-  });
-
   app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     try {
       // Le rôle SUPERADMIN n'existe pas du point de vue d'un ADMIN : les comptes qui le
@@ -215,7 +212,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       if (id === (req as AuthRequest).user?.id) {
         return res.status(403).json({ error: 'Vous ne pouvez pas supprimer votre propre compte.' });
       }
-      const target = await prisma.user.findUnique({ where: { id } });
+      const target = await prisma.user.findFirst({ where: compteGere(id) });
       if (!target) {
         return res.status(404).json({ error: 'Utilisateur introuvable.' });
       }
@@ -320,7 +317,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       if (!ALLOWED_ROLES.includes(role)) {
         return res.status(400).json({ error: 'Rôle invalide' });
       }
-      const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+      const target = await prisma.user.findFirst({ where: compteGere(paramId(req)) });
       if (!target) {
         return res.status(404).json({ error: 'Utilisateur introuvable.' });
       }
@@ -388,12 +385,12 @@ export function enregistrerRoutesComptes(app: Express): void {
         // promotion attend ce verrou de ligne) : les types lus pour le garde et pour le journal sont
         // ceux du moment de l'écriture (#215). Plus aucun verrou n'est demandé ensuite.
         await verrouillerRetraitsComptes(tx);
-        const actuel = await tx.user.findUnique({ where: { id: paramId(req) }, select: { responsableHierarchiqueId: true } });
+        const actuel = await tx.user.findFirst({ where: compteGere(paramId(req)), select: { responsableHierarchiqueId: true } });
         if (!actuel) return { statut: 404, erreur: 'Utilisateur introuvable.' };
         const verrouilles = [...new Set([paramId(req), responsableId, actuel.responsableHierarchiqueId].filter((v): v is string => !!v))].sort();
         await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "User" WHERE "id" IN (${Prisma.join(verrouilles)}) ORDER BY "id" FOR UPDATE`);
-        const target = await tx.user.findUnique({
-          where: { id: paramId(req) },
+        const target = await tx.user.findFirst({
+          where: compteGere(paramId(req)),
           select: { id: true, name: true, email: true, role: true, responsableHierarchique: { select: { id: true, name: true, role: true } } },
         });
         if (!target) return { statut: 404, erreur: 'Utilisateur introuvable.' };
@@ -440,7 +437,7 @@ export function enregistrerRoutesComptes(app: Express): void {
   // ADMIN : un COMMERCIAL est déjà commercial, un conducteur n'a pas vocation à y apparaître.
   app.patch('/api/users/:id/est-commercial', requireAuth, requireAdmin, async (req, res) => {
     try {
-      const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+      const target = await prisma.user.findFirst({ where: compteGere(paramId(req)) });
       if (!target) {
         return res.status(404).json({ error: 'Utilisateur introuvable.' });
       }
@@ -479,7 +476,7 @@ export function enregistrerRoutesComptes(app: Express): void {
   // défaut. Seul un superadministrateur peut les accorder ou les retirer.
   app.put('/api/users/:id/permissions', requireAuth, requireSuperAdmin, async (req, res) => {
     try {
-      const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+      const target = await prisma.user.findFirst({ where: compteGere(paramId(req)) });
       if (!target) return void res.status(404).json({ error: 'Utilisateur introuvable.' });
       const rawPermissions: unknown[] | null = Array.isArray(req.body?.permissions) ? req.body.permissions : null;
       const permissions: string[] | null = rawPermissions ? [...new Set(rawPermissions.map((permission) => String(permission)))] : null;
@@ -512,7 +509,7 @@ export function enregistrerRoutesComptes(app: Express): void {
   // lui-même. Un superadmin y accède de toute façon sans cette autorisation.
   app.patch('/api/users/:id/acces-finance', requireAuth, requireSuperAdmin, async (req, res) => {
     try {
-      const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+      const target = await prisma.user.findFirst({ where: compteGere(paramId(req)) });
       if (!target) {
         return res.status(404).json({ error: 'Utilisateur introuvable.' });
       }
@@ -545,7 +542,7 @@ export function enregistrerRoutesComptes(app: Express): void {
   app.patch('/api/users/:id/actif', requireAuth, requireAdmin, async (req, res) => {
     try {
       const authUser = (req as AuthRequest).user!;
-      const target = await prisma.user.findUnique({ where: { id: paramId(req) } });
+      const target = await prisma.user.findFirst({ where: compteGere(paramId(req)) });
       if (!target) {
         return res.status(404).json({ error: 'Utilisateur introuvable.' });
       }
