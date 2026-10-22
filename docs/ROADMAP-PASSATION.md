@@ -61,9 +61,9 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - versions, signature avec empreinte, acompte constaté à la main, annulation, duplication, conversion en chantier ;
     - duplication lue sous le verrou du devis source, dans la transaction du duplicata (#237) ;
     - lignes reprises du catalogue et copiées figées, prix d'achat prévu réservé à l'administration ;
-    - devis signé figé en base (#161).
+    - devis signé figé en base (#161) ;
+    - conversion en intervention ou en contrat (lot pilote 4, #281 ; non validée pour mise en service).
   - Absent :
-    - conversion en intervention ou en contrat (lot pilote 4) ;
     - PDF et envoi d'un devis (lot pilote 6) ;
     - paiement ou rapprochement de l'acompte.
   - Un devis envoyé non signé reste modifiable (question).
@@ -172,7 +172,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 | 1. Règlements (A3) | **Implémenté** (P1a). P1b, sur les commissions actuelles, est sans objet. | #155, garde en base renforcée par #158 ; commissions fermées par #159 |
 | 2. Catalogue dans les devis (A8) | **Implémenté** | #161 |
 | 3. Parcours technicien sur téléphone | **Implémenté** : prérequis et droits (3a), parcours sur téléphone (3b-1 à 3b-4) et planning limité du technicien. Non validé pour mise en service. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3), #272 (3b-4), #275 (planning limité) |
-| 4. Conversion des devis (A7) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
+| 4. Conversion des devis (A7) | **Implémenté** : intervention et contrat depuis un devis signé ; règles (a) et (b) posées en question (section 3). Non validé pour mise en service | #281 |
 | 5. Génération automatique des visites (A9) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
 | 6. Envoi des documents (A10) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
 
@@ -205,7 +205,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
      - les heures du technicien hors contrat vont dans les coûts SAV, en durée brute sans arrondi, sans effet sur la marge des chantiers ; l'administration voit leur coût de main-d'œuvre (**implémenté** par #257, libellé « Main-d’œuvre cumulée » validé le 20-10-2026) ;
      - la signature dessinée est un tracé vectoriel figé : coordonnées normalisées, sans horodatage ni pression ; taille bornée ; tracé inclus dans l'empreinte et figé en base ; auteur de l'enregistrement conservé (**implémenté** par #268) ; durée de conservation à confirmer avec le cabinet ;
      - le planning du technicien est limité à ce dont il est chargé, dans une PR séparée, après le 3b (**implémenté** par #275 ; périmètre et choix par défaut en section 4). La décision de Nelson du 21-10-2026 l'étend (« Des 2 », **implémenté** par #279) : il voit aussi les affectations des chantiers dont il est titulaire ; le lien public reste ouvert à toute personne qui en a l'adresse.
-4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent.
+4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent. **Implémenté** par #281 (choix par défaut en section 4, questions (a) et (b) en section 3).
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA.
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
    - Si Microsoft 365 n'est pas prêt au premier jour, le pilote télécharge le PDF et l'envoie à la main, comme aujourd'hui (recommandation initiale, à confirmer).
@@ -322,6 +322,9 @@ Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilo
   - (montants) le prix d'achat prévu des lignes de devis doit-il alimenter le chantier ouvert (budget matériel prévu, marge estimée), à la place de la moyenne des chantiers terminés ?
   - (montants) les heures vendues d'un chantier additionnent la quantité des lignes de main-d'œuvre, quelle que soit leur unité : une prestation au forfait y compte pour une heure. Convertir par la durée indicative de la fiche, ne compter que les lignes à l'heure, ou garder ce calcul ?
   - la vision veut un devis figé dès son envoi ; le code le fige à la signature, un devis envoyé non signé restant modifiable. Lequel retenir ?
+- **Conversion des devis (lot pilote 4, #281)** (règles métier) :
+  - (a) une affaire ne se convertit qu'une fois, quelle que soit la cible (décision du 14-10-2026 pour le chantier, étendue par #281) ; un devis qui vend une installation et son contrat de maintenance ne crée donc pas les deux. Garder cette règle, ou permettre un chantier et un contrat (ou une intervention) pour la même affaire, ce qui change le modèle (`DevisConversion.dossierId` unique) ?
+  - (b) un devis converti en intervention ou en contrat ne s'annule plus (l'intervention s'annule, le contrat se suspend ou se termine depuis leurs écrans), alors qu'un devis converti en chantier s'annule avec lui. Garder, ou annuler la cible avec le devis ?
 
 ## 4. Choix par défaut, à confirmer
 
@@ -411,6 +414,14 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - Réglages d'ouverture réservés à l'administration. **Appliqué** (#129).
 - Le formulaire d'Administration n'ouvre toujours pas de chantier sans conducteur actif. L'API n'est pas modifiée, car l'écran Devis convertit sans titulaire (état actuel conservé). **Appliqué**.
 - L'obligation de commercial ne compte que les commerciaux actifs. **Appliqué à l'écran** ; le serveur compte encore tous les commerciaux.
+
+**Conversion des devis en intervention ou en contrat** (lot pilote 4, #281)
+- Droits de la création directe de la cible, en plus du droit devis : l'intervention par l'administration, ou par un conducteur auquel un super administrateur a accordé individuellement le droit devis (API seulement, l'écran ne propose la conversion qu'à l'administration) ; le contrat par l'administration seule ; aucune clé d'intégration. **Appliqué** (#281).
+- L'intervention reprend le client et l'objet du devis (titre modifiable), à planifier, sans ses lignes ni son montant ; date de demande au jour civil de la société, ou date passée transmise par l'API, comme à la création directe. **Appliqué** (#281).
+- Le contrat reprend le client et l'objet (titre propre possible, de 3 à 200 caractères), actif, première échéance à sa date de début, sans prix. **Appliqué** (#281).
+- Trace : motif « Conversion du devis N (version v). » au journal de la cible, et ligne du devis ; aucun lien depuis la fiche de la cible. **Appliqué** (#281).
+- La facture se crée depuis l'écran Factures, avec l'origine Intervention ou Contrat. **Appliqué** (état actuel).
+- Une seule conversion par affaire, et devis converti en intervention ou en contrat non annulable : appliqués par #281, posés en question (section 3).
 
 **Dates**
 - Date de demande curative : alignée sur les autres dates métier. **À appliquer**.
