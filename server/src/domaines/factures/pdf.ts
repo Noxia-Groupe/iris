@@ -1,5 +1,5 @@
 import { formatMontantFacture, formatDateFacture, ventilationFacture } from './metier';
-import { ouvrirDocumentPdf, replierTexte, type IdentiteImprimee } from '../documents/gabarit';
+import { ligneColonnes, ouvrirDocumentPdf, replierTexte, type IdentiteImprimee } from '../documents/gabarit';
 
 // Une facture émise s'imprime uniquement depuis ses copies figées : client, mentions légales et,
 // depuis le lot 6a-1, identité de l'émetteur avec son logo, sa couleur et son pied de page. Aucun
@@ -10,9 +10,7 @@ export async function rendreDocumentFacturePdf(facture: any): Promise<Buffer> {
   const document = ouvrirDocumentPdf({ titre: `Facture ${facture.numero}`, identite });
   const { pdf, ligne, couleur } = document;
   const legal = facture.mentionsLegalesVersion;
-  // Une valeur large ne doit jamais se coller à la colonne précédente : on garde au moins un séparateur.
-  const colonne = (valeur: string, largeur: number) => (valeur.length >= largeur ? ` ${valeur}` : valeur.padStart(largeur));
-  const colonnes = (a: string, b: string, c: string, d: string, e: string) => a.padEnd(38) + colonne(b, 9) + colonne(c, 16) + colonne(d, 8) + colonne(e, 16);
+  const colonnes = (...cellules: string[]) => ligneColonnes(cellules, [38, 9, 16, 8, 16]);
 
   pdf.fillColor(couleur);
   const estAvoir = facture.type === 'AVOIR';

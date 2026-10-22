@@ -14743,7 +14743,7 @@ if (!TEST_DATABASE_URL) {
       const copie = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } });
       await assert.rejects(prisma.identiteEmetteur.delete({ where: { id: copie.identiteEmetteurId } }), /Foreign key constraint|violates foreign key/i);
       // La date de création, imprimée « établi le », est figée avec le devis signé.
-      await assert.rejects(prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2020-01-01T00:00:00Z') } }), /Devis signé : client, objet, montants/);
+      await assert.rejects(prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2020-01-01T00:00:00Z') } }), /Devis signé : client, objet, date, montants/);
 
       // Signature enregistrée avant ce lot (sans copie, garde désactivé le temps de l'écrire) : le
       // devis s'imprime avec l'identité et la fiche client actuelles, signature comprise.
@@ -14796,9 +14796,9 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('caractères hors WinAnsi : remplacés un à un, sans brouiller la suite de la ligne ni ses montants', async () => {
-      const client = await creerClient(`TEST Client Dvořák ≥ ${Date.now()}`);
+      const client = await creerClient(`TEST Client Dvořák ∞ ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Objet Ω\tfin', [
-        { designation: 'TEST Résist. 10 Ω ≥ 3 ⌀ 🔧 ok', quantite: 1, prixUnitaireHt: 12.34, tauxTva: 20 },
+        { designation: 'TEST Résist. 10 Ω ∞ 3 ⌀ 🔧 ok', quantite: 1, prixUnitaireHt: 12.34, tauxTva: 20 },
         { designation: 'TEST Main-d’œuvre … — « fin »', quantite: 1, prixUnitaireHt: 56.78, tauxTva: 20 },
       ]);
       const { texte } = await texteDevis(devis.id);
@@ -14823,6 +14823,59 @@ if (!TEST_DATABASE_URL) {
       assert.match(ligneDe('TEST 10'), /^TEST 10\? \? 10\? \? \? ok\s+1\s+12,34 €\s+20 %\s+12,34 €$/, texte);
       assert.match(ligneDe('TEST filtre'), /^TEST filtre 10 Å fin\s+1\s+56,78 €\s+20 %\s+56,78 €$/, texte);
       assert.ok(texte.includes('Objet : TEST Café crème'), texte);
+    });
+
+    test('caractères hors WinAnsi : une barre au-dessus (négation, décimale périodique) n’est pas effacée', async () => {
+      const client = await creerClient(`TEST Client barre au-dessus ${Date.now()}`);
+      // « A̅ » (non A), « 0,3̅ » (0,333…) : effacer la barre imprimerait « A » ou « 0,3 », un autre texte.
+      const devis = await creerDevis(client.id, 'TEST Barre au-dessus', [
+        { designation: 'TEST Entrée A\u0305 0,3\u0305 B\u033f ok', quantite: 1, prixUnitaireHt: 12.34, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      const ligne = texte.split('\n').find((l) => l.startsWith('TEST Entrée')) ?? '';
+      assert.match(ligne, /^TEST Entrée A\? 0,3\? B\? ok\s+1\s+12,34 €\s+20 %\s+12,34 €$/, texte);
+    });
+
+    test('gabarit : une désignation longue se replie à la largeur de sa colonne, ses montants sur la première ligne', async () => {
+      const client = await creerClient(`TEST Client repli devis ${Date.now()}`);
+      // 42 caractères : la colonne en tient 31, le reste passe à la ligne suivante, sans décaler les montants.
+      const devis = await creerDevis(client.id, 'TEST Repli des désignations', [{ designation: 'TEST Désignation longue de devis à replier', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }]);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Désignation longue de\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+      assert.match(texte, /^devis à replier$/m, texte);
+    });
+
+    test('caractères hors WinAnsi : pleine chasse, trait et espace insécables, accent isolé, retour chariot', async () => {
+      const client = await creerClient(`TEST Client caractères copiés ${Date.now()}`);
+      // Texte copié : formes pleine chasse (Ａ１), trait insécable, espace fine insécable (aussi celle
+      // des milliers des montants), accent combinant sans forme composée (q́), fin de ligne Windows.
+      const devis = await creerDevis(client.id, 'TEST Objet\r\nsuite', [
+        { designation: 'TEST \uff21\uff11 a\u2011b q\u0301 1\u202f2 fin', quantite: 1, prixUnitaireHt: 1234, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST A1 a-b q 1 2 fin\s+1\s+1 234,00 €\s+20 %\s+1 234,00 €$/m, texte);
+      assert.ok(texte.includes('Objet : TEST Objet\nsuite'), texte);
+      assert.ok(texte.includes('Total HT : 1 234,00 €'), texte);
+    });
+
+    test('caractères hors WinAnsi : équivalents de même sens, invisibles retirés, colonnes mesurées sur le texte imprimé', async () => {
+      const client = await creerClient(`TEST Client équivalents ${Date.now()}`);
+      // Signe moins, cadratin d'espace, trait d'union, inégalités larges ; espace sans chasse, marque
+      // d'ordre des octets et trait d'union conditionnel, invisibles à la saisie. Imprimée, la
+      // désignation tient dans ses 31 colonnes ; mesurée avant impression, elle les dépasserait.
+      const devis = await creerDevis(client.id, 'TEST Équivalents', [
+        { designation: 'TEST \u2212 5\u2003a\u2010b \u2264 3 \u2265 1 x\u200by\ufeffz co\u00adop', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+        // Même texte, accents décomposés ou composés (désignation et unité) : deux lignes identiques.
+        // Le calage des colonnes, que l'extraction du texte ne restitue pas, est vérifié par les tests
+        // unitaires du gabarit (validation.test.mjs).
+        { designation: 'TEST Cafe\u0301 noir', unite: 'pie\u0300ce', quantite: 2, prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST Café noir', unite: 'pièce', quantite: 2, prixUnitaireHt: 10, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST - 5 a-b <= 3 >= 1 xyz coop\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+      const cafes = texte.split('\n').filter((l) => l.startsWith('TEST Café noir'));
+      assert.equal(cafes.length, 2, texte);
+      assert.equal(cafes[0], cafes[1]);
     });
 
     test('concurrence : le PDF d’un devis non signé lit ses lignes et ses totaux dans un même état', async () => {

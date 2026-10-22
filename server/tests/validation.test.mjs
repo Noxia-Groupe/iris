@@ -651,3 +651,24 @@ describe('Alerte de la génération automatique des visites', () => {
     assert.equal(alerteGenerationVisites(etat({ anticipation: null, derniere: echec, derniereAutomatique: passage({ jour: jour('2026-01-01') }) })), null);
   });
 });
+
+// Lot 6a-2, troisième audit (N3) : les tableaux à chasse fixe des documents (devis, factures) se
+// calent sur le texte tel qu'il s'imprime ; un accent à recomposer ou un caractère invisible ne
+// décale pas les colonnes.
+describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
+  test('chaque cellule est mesurée telle qu’elle s’imprime ; une valeur trop large garde un séparateur', async () => {
+    const { ligneColonnes } = await import('../dist/src/domaines/documents/gabarit.js');
+    const largeurs = [10, 8, 6];
+    assert.equal(ligneColonnes(['Café', '2 pièce', '1 234'], largeurs), 'Café       2 pièce 1 234');
+    assert.equal(ligneColonnes(['Café', '2 pièce', '1 234'], largeurs), 'Café       2 pièce 1 234');
+    // Une valeur aussi large que sa colonne garde elle aussi son séparateur.
+    assert.equal(ligneColonnes(['A', '12345678', 'x'], largeurs), 'A          12345678     x');
+  });
+
+  test('le repli d’une désignation se mesure sur le texte imprimé', async () => {
+    const { replierTexte } = await import('../dist/src/domaines/documents/gabarit.js');
+    // L'espace sans chasse et la marque d'ordre des octets, invisibles, ne coupent pas un mot.
+    assert.deepEqual(replierTexte('Café x﻿y co­op', 6), ['Café', 'xy', 'coop']);
+    assert.deepEqual(replierTexte('Café noir', 9), ['Café noir']);
+  });
+});

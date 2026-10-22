@@ -1,7 +1,7 @@
 import { baseHtDuTaux, tauxUtilises, tvaDuTaux } from '../../commun/montants';
 import { jourCivilEntreprise } from '../../commun/dates';
 import { formatMontantFacture } from '../factures/metier';
-import { ouvrirDocumentPdf, replierTexte, type IdentiteImprimee } from '../documents/gabarit';
+import { ligneColonnes, ouvrirDocumentPdf, replierTexte, type IdentiteImprimee } from '../documents/gabarit';
 
 // PDF du devis (lot 6a-2), sur le modèle commun du lot 6a-1. L'appelant fournit l'identité et le
 // client à imprimer : les copies prises à la signature pour un devis signé, les données
@@ -24,9 +24,7 @@ export async function rendreDocumentDevisPdf({ devis, identite, client, fuseau }
   const document = ouvrirDocumentPdf({ titre: `Devis ${devis.numero} version ${devis.version}`, identite });
   const { pdf, ligne, couleur } = document;
   const jour = (instant: Date) => jourCivilEntreprise(instant, fuseau).split('-').reverse().join('-');
-  // Une valeur large ne doit jamais se coller à la colonne précédente : on garde au moins un séparateur.
-  const colonne = (valeur: string, largeur: number) => (valeur.length >= largeur ? ` ${valeur}` : valeur.padStart(largeur));
-  const colonnes = (a: string, b: string, c: string, d: string, e: string) => a.padEnd(33) + colonne(b, 12) + colonne(c, 16) + colonne(d, 8) + colonne(e, 16);
+  const colonnes = (...cellules: string[]) => ligneColonnes(cellules, [33, 12, 16, 8, 16]);
 
   pdf.fillColor(couleur);
   ligne(`DEVIS ${devis.numero}`, { taille: 18 });

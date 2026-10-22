@@ -38,7 +38,7 @@ FOR EACH ROW EXECUTE FUNCTION exiger_copies_signature_devis();
 
 -- La date de création d'un devis signé est imprimée sur son PDF (« établi le ») : elle rejoint le
 -- contenu figé. Corps repris de la migration 20261017120000_catalogue_devis, avec la seule colonne
--- "createdAt" ajoutée.
+-- "createdAt" ajoutée, et nommée dans le message de refus.
 CREATE OR REPLACE FUNCTION figer_contenu_devis_signe() RETURNS trigger AS $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM "DevisSignature" WHERE "devisId" = OLD."id") THEN
@@ -53,7 +53,7 @@ BEGIN
   IF (NEW."dossierId", NEW."numero", NEW."version", NEW."clientId", NEW."objet", NEW."totalHt", NEW."totalTva", NEW."totalTtc", NEW."acompteExige", NEW."tauxAcompte", NEW."createdAt")
      IS DISTINCT FROM
      (OLD."dossierId", OLD."numero", OLD."version", OLD."clientId", OLD."objet", OLD."totalHt", OLD."totalTva", OLD."totalTtc", OLD."acompteExige", OLD."tauxAcompte", OLD."createdAt") THEN
-    RAISE EXCEPTION 'Devis signé : client, objet, montants et acompte exigé sont figés, créez une nouvelle révision.';
+    RAISE EXCEPTION 'Devis signé : client, objet, date, montants et acompte exigé sont figés, créez une nouvelle révision.';
   END IF;
   RETURN NEW;
 END;

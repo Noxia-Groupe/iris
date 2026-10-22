@@ -13,6 +13,9 @@ test('PDF du devis : téléchargé depuis l’écran Devis, refus expliqué si l
   const cree = await request.post(`${api}/devis`, { headers, data: { clientId: client.id, objet: `E2E PDF devis ${Date.now()}`, lignes: [{ designation: 'Diagnostic', quantite: 1, prixUnitaireHt: 80, tauxTva: 20 }] } });
   expect(cree.status(), await cree.text()).toBe(201);
   const devis = await cree.json() as { id: string; numero: string };
+  // Un devis plus récent le précède dans la liste : le bouton doit imprimer le sien, pas le premier.
+  const autre = await request.post(`${api}/devis`, { headers, data: { clientId: client.id, objet: `E2E PDF autre devis ${Date.now()}`, lignes: [{ designation: 'Diagnostic', quantite: 1, prixUnitaireHt: 90, tauxTva: 20 }] } });
+  expect(autre.status(), await autre.text()).toBe(201);
 
   const page = await allerSurPageAdmin('/devis');
   const bouton = page.getByRole('button', { name: `PDF du devis ${devis.numero} version 1` });
@@ -20,7 +23,10 @@ test('PDF du devis : téléchargé depuis l’écran Devis, refus expliqué si l
   await bouton.click();
   const fichier = await telechargement;
   expect(fichier.suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
-  expect((await readFile(await fichier.path() as string)).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  const octets = await readFile(await fichier.path() as string);
+  expect(octets.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  // Le fichier est bien celui de ce devis : son titre porte son numéro et sa version.
+  expect(octets.includes(Buffer.from(`(Devis ${devis.numero} version 1)`))).toBe(true);
 
   // Identité incomplète : le message du serveur s'affiche et aucun fichier n'est téléchargé.
   const societe = await (await request.get(`${api}/company`, { headers })).json() as { siret: string };
@@ -72,6 +78,12 @@ test('PDF du devis : bouton d’un devis signé, ouvert au commercial, sans déb
     await bouton.click();
     expect((await telechargement).suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    // La liste masque ce qui déborde (overflow-hidden) : chaque action du devis, PDF compris, reste
+    // entière dans la largeur de l'écran, au lieu d'être coupée sans défilement.
+    for (const action of await page.getByRole('listitem').filter({ has: bouton }).getByRole('button').all()) {
+      const boite = await action.boundingBox();
+      expect(boite && boite.x + boite.width).toBeLessThanOrEqual(375);
+    }
   } finally {
     await contexte.close();
   }
@@ -106,4 +118,17 @@ test('PDF du devis : à 375 px, le refus est ramené en vue, puis effacé au té
   await bouton.click();
   expect((await telechargement).suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
   await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+// Une erreur sans corps JSON (passerelle, proxy) s'annonce sans message technique.
+test('PDF du devis : une erreur sans corps JSON affiche « Document indisponible. »', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const headers = auth(session.token);
+  const client = await creerClient('devis PDF erreur brute');
+  const cree = await request.post(`${api}/devis`, { headers, data: { clientId: client.id, objet: `E2E PDF devis erreur brute ${Date.now()}`, lignes: [{ designation: 'Diagnostic', quantite: 1, prixUnitaireHt: 80, tauxTva: 20 }] } });
+  expect(cree.status(), await cree.text()).toBe(201);
+  const devis = await cree.json() as { id: string; numero: string };
+  const page = await allerSurPageAdmin('/devis');
+  await page.route(`**/api/devis/${devis.id}/document.pdf`, (route) => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>Bad Gateway</body></html>' }));
+  await page.getByRole('button', { name: `PDF du devis ${devis.numero} version 1` }).click();
+  await expect(page.getByRole('alert')).toHaveText('Document indisponible.');
 });
