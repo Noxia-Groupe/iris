@@ -27,16 +27,17 @@ ENV apres PRISMA_QUERY_ENGINE_LIBRARY
 SET x-powered-by=false
 USE / corsMiddleware#26a091524dc5
 USE /api/comptabilite/importer jsonParser{readOptions.defaultCharset="utf-8",readOptions.inflate=true,readOptions.limit=5242880,readOptions.verify=false}#223e9f48a546
+USE /api/company/logo jsonParser{readOptions.defaultCharset="utf-8",readOptions.inflate=true,readOptions.limit=1048576,readOptions.verify=false}#223e9f48a546
 USE / jsonParser{readOptions.defaultCharset="utf-8",readOptions.inflate=true,readOptions.limit=102400,readOptions.verify=false}#223e9f48a546
-USE / <anonymous>#58adfc6183a2
+USE / <anonymous>#aad6e7e7a45c
 GET /api/factures/chronologie requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d089685a5f45
 GET /api/factures/a-regler requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#da27e52f58a3
 GET /api/factures requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#bb316d5281c8
-GET /api/factures/:id/document.pdf requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0657f899f7dd
+GET /api/factures/:id/document.pdf requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#21a2ee87a500
 GET /api/factures/:id/journal requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
 GET /api/factures/:id/tracabilite requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4d3a959b39f5
 POST /api/factures requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d1503c57bcdd
-GET /api/facturation/prete-a-facturer requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c5ccf9a38ec5
+GET /api/facturation/prete-a-facturer requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#be63c1fffb33
 GET /api/comptabilite requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#13e90d7b003f
 POST /api/comptabilite/comptes requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#6b69dfe1117a
 PATCH /api/comptabilite/comptes/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#62c34363c7c5
@@ -52,10 +53,10 @@ GET /api/factures/export-comptable.csv requireAuth#76fb48c2d0f5 > requireAdmin#7
 POST /api/mentions-legales/:version/publier requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#1b5902ebb285
 POST /api/mentions-legales requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#80030fa61cd1
 GET /api/mentions-legales requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#dcdb04c92920
-POST /api/factures/:id/emettre requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4dacb72f3a2a
+POST /api/factures/:id/emettre requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#540f6b430f38
 POST /api/factures/:id/regler requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#7c4c1669baf6
-POST /api/factures/:id/annuler requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#cc5363a312b3
-POST /api/factures/:id/avoirs requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#8bfb223b52e9
+POST /api/factures/:id/annuler requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#9ae7ad2b98c2
+POST /api/factures/:id/avoirs requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4527855323e1
 GET /api/reglements requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c8df78a7855a
 POST /api/reglements requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#51f9704bcdc4
 POST /api/reglements/:id/contrepasser requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#f9592331ed59
@@ -214,6 +215,9 @@ POST /api/devis/:id/annulation requireAuth#76fb48c2d0f5 > requireAdmin#72440b319
 POST /api/devis/:id/duplication requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#807a81482e59
 GET /api/company requireAuth#76fb48c2d0f5 > <anonymous>#0b08e4374fe7
 PUT /api/company requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#f4c33f529f68
+GET /api/company/logo requireAuth#76fb48c2d0f5 > <anonymous>#8234217eaf1c
+PUT /api/company/logo requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#ff41154d07ab
+DELETE /api/company/logo requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#a0ed659f0e66
 GET /api/parametres/remuneration requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#61efeee81638
 PUT /api/parametres/remuneration requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#98b0a30737c8
 PUT /api/parametres requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#9a85dc27c687

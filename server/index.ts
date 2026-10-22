@@ -28,6 +28,7 @@ import { validerBareme, parseBareme, getReglesRemuneration, serialiseBareme } fr
 import { companySettingsPayload } from './src/domaines/administration/metier';
 import { enregistrerRoutesParametres, enregistrerRoutesRemunerationEtReglages } from './src/domaines/parametres/routes';
 import { enregistrerRoutesClesIntegration, enregistrerRoutesSociete, enregistrerRoutesModules } from './src/domaines/administration/routes';
+import { enregistrerRoutesLogoDocuments } from './src/domaines/documents/routes';
 import { enregistrerRoutesJournalAdministration } from './src/domaines/administration/journal';
 import { secretIdentique } from './src/domaines/authentification/secours';
 import { enregistrerRoutesAuthentification } from './src/domaines/authentification/routes';
@@ -67,9 +68,11 @@ app.disable('x-powered-by');
 app.use(cors());
 // Le seul import du plan peut atteindre 5 000 comptes ; les autres routes gardent la limite par défaut.
 app.use('/api/comptabilite/importer', express.json({ limit: '5mb' }));
+// Le logo des documents (500 Ko au plus) arrive encodé en base64, soit un tiers de plus.
+app.use('/api/company/logo', express.json({ limit: '1mb' }));
 app.use(express.json());
 app.use((error: Error & { type?: string }, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (error.type === 'entity.too.large') return void res.status(413).json({ error: req.path === '/api/comptabilite/importer' ? 'Fichier trop volumineux (limite : 5 Mo).' : 'Requête trop volumineuse.' });
+  if (error.type === 'entity.too.large') return void res.status(413).json({ error: req.path === '/api/comptabilite/importer' ? 'Fichier trop volumineux (limite : 5 Mo).' : req.path === '/api/company/logo' ? 'Logo trop volumineux (limite : 500 Ko).' : 'Requête trop volumineuse.' });
   next(error);
 });
 
@@ -132,6 +135,9 @@ enregistrerRoutesDevis(app);
 
 // --- Société (src/domaines/administration/routes.ts) ---
 enregistrerRoutesSociete(app);
+
+// --- Logo des documents (src/domaines/documents/routes.ts) ---
+enregistrerRoutesLogoDocuments(app);
 
 // --- Rémunération commerciale et paramètres métier (src/domaines/parametres/routes.ts) ---
 enregistrerRoutesRemunerationEtReglages(app);

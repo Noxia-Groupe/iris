@@ -52,6 +52,15 @@ async function preparerFacturation(request: APIRequestContext, token: string) {
     const { version } = await created.json();
     expect((await request.post(`${api}/mentions-legales/${version}/publier`, { headers: auth })).ok()).toBeTruthy();
   }
+  // Lot 6a-1 : une pièce ne s'émet qu'avec l'identité de la société, copiée à son émission. Seuls
+  // les champs exigés et vides sont complétés : un parcours qui a changé le nom le garde.
+  const societe = await (await request.get(`${api}/company`, { headers: auth })).json() as Record<string, string | null>;
+  const identite = { raisonSociale: 'Société E2E', siret: '12345678900011', adresse: '1 rue des Tests', codePostal: '14000', ville: 'Caen' };
+  const manquants = Object.fromEntries(Object.entries(identite).filter(([cle]) => !String(societe[cle] ?? '').trim()));
+  if (Object.keys(manquants).length) {
+    const maj = await request.put(`${api}/company`, { headers: auth, data: manquants });
+    expect(maj.ok(), await maj.text()).toBeTruthy();
+  }
 }
 
 async function creerClient(request: APIRequestContext, token: string, libelle: string, avecSite: boolean) {

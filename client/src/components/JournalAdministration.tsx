@@ -60,6 +60,8 @@ const ACTIONS_JOURNAL: Record<string, string> = {
   PUBLICATION: 'Publication',
   NOUVEAU_LIEN: 'Nouveau lien',
   FICHE_INTERVENANT: 'Fiche intervenant',
+  LOGO_DOCUMENTS: 'Logo des documents',
+  LOGO_DOCUMENTS_RETIRE: 'Logo des documents retiré',
 };
 
 const FILTRES_VIDES: Filtres = { du: '', au: '', type: '', auteur: '' };
@@ -84,6 +86,7 @@ const CHAMPS_JOURNAL: Record<string, string> = {
   planningActif: 'Planning',
   suiviAdministratif: 'Prime de suivi administratif',
   journalConservationJours: 'Conservation (jours)',
+  logoDocuments: 'Logo des documents',
 };
 
 function lisible(valeur: unknown, champ?: string): string {

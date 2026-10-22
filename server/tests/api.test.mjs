@@ -47,6 +47,13 @@ if (!TEST_DATABASE_URL) {
   const { PrismaClient } = await import('@prisma/client');
   const jwt = (await import('jsonwebtoken')).default;
   const prisma = new PrismaClient();
+  // Lot 6a-1 : une pièce ne quitte le brouillon qu'avec l'identité de l'émetteur figée (garde SQL).
+  // Les pièces écrites directement en base par les tests en reçoivent une, partagée.
+  const identiteEmetteurFixture = async () => {
+    await prisma.$executeRaw`INSERT INTO "IdentiteEmetteur" ("id", "empreinte", "raisonSociale", "siret", "adresse", "codePostal", "ville", "couleurPrimaire")
+      VALUES (${randomUUID()}, 'TEST-IDENTITE-FIXTURE', 'TEST Société émettrice', '12345678900011', '1 rue des Tests', '14000', 'Caen', '#1e3a8a') ON CONFLICT ("empreinte") DO NOTHING`;
+    return (await prisma.identiteEmetteur.findUniqueOrThrow({ where: { empreinte: 'TEST-IDENTITE-FIXTURE' }, select: { id: true } })).id;
+  };
   // Lot 3b-3 : terminer une intervention exige un compte rendu, signé par le client ou accompagné
   // d'un motif. Les tests qui ne portent pas sur cette règle terminent avec un compte rendu et le
   // motif « client absent ».
@@ -194,6 +201,10 @@ if (!TEST_DATABASE_URL) {
     // donc avant les factures de test. Ceci conserve le teardown rejouable avec plusieurs avoirs.
     await prisma.facture.deleteMany({ where: { type: 'AVOIR', client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.facture.deleteMany({ where: { type: 'FACTURE', client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    // Identités figées et logos que plus aucune pièce ni réglage ne référence (lot 6a-1).
+    await prisma.companySettings.updateMany({ data: { logoDocumentId: null } });
+    await prisma.$executeRaw`DELETE FROM "IdentiteEmetteur" i WHERE NOT EXISTS (SELECT 1 FROM "Facture" f WHERE f."identiteEmetteurId" = i."id")`;
+    await prisma.$executeRaw`DELETE FROM "LogoDocument" l WHERE NOT EXISTS (SELECT 1 FROM "IdentiteEmetteur" i WHERE i."logoId" = l."id")`;
     await prisma.mentionsLegalesVersion.deleteMany({});
     try {
       await prisma.$executeRawUnsafe('ALTER TABLE "JournalRegleComptable" DISABLE TRIGGER "journal_regle_append_only"');
@@ -325,6 +336,9 @@ if (!TEST_DATABASE_URL) {
     // toujours d'un état propre, sinon la suite n'est rejouable qu'une fois.
     await nettoyer();
     await prisma.mentionsLegalesVersion.create({ data: { version: 1, mentions: 'TEST Mentions légales', cgv: 'TEST Conditions générales', penalites: 'TEST Pénalités de retard', actif: true, publieeLe: new Date() } });
+    // Lot 6a-1 : une pièce ne s'émet qu'avec l'identité de la société, copiée à son émission.
+    const identiteSociete = { raisonSociale: 'TEST Société émettrice', siret: '12345678900011', adresse: '1 rue des Tests', codePostal: '14000', ville: 'Caen' };
+    await prisma.companySettings.upsert({ where: { id: 'singleton' }, create: { id: 'singleton', ...identiteSociete }, update: identiteSociete });
   });
 
   after(async () => {
@@ -9032,6 +9046,7 @@ if (!TEST_DATABASE_URL) {
       const piece = async (tx, type, statut, numero, jour, factureOrigineId = null, estAvoirAnnulation = false) => {
         const creee = await tx.facture.create({ data: {
           clientId, clientRaisonSociale: 'TEST Client contrat maintenance', type, statut, numero, factureOrigineId, estAvoirAnnulation,
+          identiteEmetteurId: await identiteEmetteurFixture(),
           dateEmission: new Date(`${jour}T00:00:00.000Z`), dateEcheance: new Date(`${jour}T00:00:00.000Z`),
           totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST chronologie',
           ecrituresScellees: false,
@@ -10506,7 +10521,7 @@ if (!TEST_DATABASE_URL) {
       const original = await prisma.ecritureFacture.findFirstOrThrow({ where: { factureId: brouillon.body.id } });
       const vide = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST pièce sans écritures', dateEmission: '08-09-2026', dateEcheance: '08-10-2026', lignes: [{ designation: 'TEST vide', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       assert.equal(vide.status, 201);
-      await assert.rejects(() => prisma.facture.update({ where: { id: vide.body.id }, data: { statut: 'EMISE', numero: `TEST-VIDE-${Date.now()}`, annee: 2026, ecrituresScellees: true } }), /absentes|déséquilibrées/i);
+      await assert.rejects(async () => prisma.facture.update({ where: { id: vide.body.id }, data: { statut: 'EMISE', numero: `TEST-VIDE-${Date.now()}`, annee: 2026, ecrituresScellees: true, identiteEmetteurId: await identiteEmetteurFixture() } }), /absentes|déséquilibrées/i);
       assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: vide.body.id } })).statut, 'BROUILLON');
       await assert.rejects(() => prisma.facture.update({ where: { id: brouillon.body.id }, data: { ecrituresScellees: false } }), /scellée : retour interdit/i);
       assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.body.id } })).ecrituresScellees, true);
@@ -10564,12 +10579,12 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(await prisma.factureLigne.findMany({ where: { factureId: facture.id } }), lignes);
       // Dès l'émission, avant même le scellement de la même transaction, la ligne est figée.
       await assert.rejects(prisma.$transaction(async (tx) => {
-        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE' } });
+        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE', identiteEmetteurId: await identiteEmetteurFixture() } });
         await tx.factureLigne.update({ where: { id: ligneBrouillon.id }, data: { designation: 'TEST après émission' } });
       }), figee);
       // La suppression ne passe que par le contrôle de la pièce d'origine : il porte aussi sur le statut.
       await assert.rejects(prisma.$transaction(async (tx) => {
-        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE' } });
+        await tx.facture.update({ where: { id: brouillon.id }, data: { statut: 'EMISE', identiteEmetteurId: await identiteEmetteurFixture() } });
         await tx.factureLigne.delete({ where: { id: ligneBrouillon.id } });
       }), figee);
       // Ventilation de TVA : ni ajout, ni modification, ni suppression.
@@ -10709,9 +10724,10 @@ if (!TEST_DATABASE_URL) {
       const sansAvoir = /ne s'annule qu'avec son avoir d'annulation/;
       const avoirSansFacture = /n'existe qu'avec sa facture annulée/;
       const totaux = { totalHt: 10, totalTva: 2, totalTtc: 12 };
+      const identiteEmetteurId = await identiteEmetteurFixture();
       const piece = (type, statut, extra = {}) => ({
         clientId, clientRaisonSociale: 'TEST Client cycle', type, statut, dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
-        ...totaux, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST cycle SQL', ...extra,
+        ...totaux, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST cycle SQL', identiteEmetteurId, ...extra,
       });
       // Écritures équilibrées sur le TTC de la pièce (seul montant que contrôle le garde d'équilibre) :
       // une pièce peut ainsi ne différer d'une autre que par une seule de ses colonnes de montant.
@@ -10768,7 +10784,7 @@ if (!TEST_DATABASE_URL) {
         const brouillon = await creer('TEST cycle brouillon');
         purger.push(brouillon.id);
         await prisma.ecritureFacture.createMany({ data: ecritures(brouillon.id, 'FACTURE') });
-        await assert.rejects(prisma.facture.update({ where: { id: brouillon.id }, data: { statut: 'ANNULEE', ecrituresScellees: true } }), horsCycle, 'brouillon → annulée');
+        await assert.rejects(prisma.facture.update({ where: { id: brouillon.id }, data: { statut: 'ANNULEE', ecrituresScellees: true, identiteEmetteurId } }), horsCycle, 'brouillon → annulée');
 
         // Une autre facture déjà annulée par l'API : son avoir ne vaut pas pour celle-ci.
         const autre = await emettre('TEST cycle autre');
@@ -10909,7 +10925,7 @@ if (!TEST_DATABASE_URL) {
         const piece = await tx.facture.create({ data: {
           clientId, clientRaisonSociale: 'TEST Client plafond', type, statut, factureOrigineId, estAvoirAnnulation,
           dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-10-08T00:00:00.000Z'),
-          totalHt, totalTva, totalTtc, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST plafond SQL',
+          totalHt, totalTva, totalTtc, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST plafond SQL', identiteEmetteurId: await identiteEmetteurFixture(),
         } });
         if (contenu !== 'aucun') {
           await tx.factureLigne.createMany({ data: taux.map(([t, ht, tva], ordre) => ({ factureId: piece.id, ordre, designation: `TEST plafond SQL ${t} %`, nature: 'PRESTATION', quantite: 1, prixUnitaireHt: Math.abs(ht), tauxTva: t, totalHt: ht, totalTtc: centimes(ht + tva) })) });
@@ -11339,7 +11355,7 @@ if (!TEST_DATABASE_URL) {
           await new Promise((suite) => setTimeout(suite, 1000));
           const origineEcritures = await tx.ecritureFacture.findMany({ where: { factureId: facture.id }, orderBy: { ordre: 'asc' } });
           const avoirConcurrent = await tx.facture.create({ data: {
-            type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero: 'AVDOUBLE-COURSE-2026', annee: 2026,
+            type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero: 'AVDOUBLE-COURSE-2026', annee: 2026, identiteEmetteurId: facture.identiteEmetteurId,
             statut: 'EMISE', dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-09-08T00:00:00.000Z'),
             clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
             origine: facture.origine, motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersion.id,
@@ -11385,7 +11401,7 @@ if (!TEST_DATABASE_URL) {
           await new Promise((suite) => setTimeout(suite, 1000));
           const origineEcritures = await tx.ecritureFacture.findMany({ where: { factureId: facture.id }, orderBy: { ordre: 'asc' } });
           const avoirConcurrent = await tx.facture.create({ data: {
-            type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero: 'AVCOURSE-PARTIEL-2026', annee: 2026,
+            type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero: 'AVCOURSE-PARTIEL-2026', annee: 2026, identiteEmetteurId: facture.identiteEmetteurId,
             statut: 'EMISE', dateEmission: new Date('2026-09-08T00:00:00.000Z'), dateEcheance: new Date('2026-09-08T00:00:00.000Z'),
             clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
             origine: facture.origine, motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersion.id,
@@ -12153,7 +12169,7 @@ if (!TEST_DATABASE_URL) {
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST adresse héritée', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST adresse héritée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       const mentions = await prisma.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } }); assert.ok(mentions);
       await prisma.$transaction(async tx => {
-        await tx.facture.update({ where: { id: brouillon.body.id }, data: { statut: 'EMISE', annee: 2026, numero: `TEST-HERITEE-${Date.now()}`, emisLe: new Date(), mentionsLegalesVersionId: mentions.id } });
+        await tx.facture.update({ where: { id: brouillon.body.id }, data: { statut: 'EMISE', annee: 2026, numero: `TEST-HERITEE-${Date.now()}`, emisLe: new Date(), mentionsLegalesVersionId: mentions.id, identiteEmetteurId: await identiteEmetteurFixture() } });
         const regles = await tx.regleComptable.findMany({ include: { compte: true } });
         const tva = await tx.regleTvaComptable.findUniqueOrThrow({ where: { taux: 20 }, include: { compte: true } });
         const parCle = new Map(regles.map(r => [r.cle, r]));
@@ -12741,7 +12757,7 @@ if (!TEST_DATABASE_URL) {
         await assert.rejects(() => prisma.facture.update({ where: { id: facture.id }, data }), /client, numéro, type, dates et montants sont immuables/, JSON.stringify(data));
       }
       // Une facture ne naît jamais « réglée », même écrite directement en base.
-      await assert.rejects(() => prisma.facture.create({ data: { clientId: client, clientRaisonSociale: 'TEST Client règlements base', type: 'FACTURE', statut: 'REGLEE', numero: `TEST-NEE-REGLEE-${Date.now()}`, dateEmission: new Date('2026-09-11T00:00:00.000Z'), dateEcheance: new Date('2026-09-11T00:00:00.000Z'), totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST garde' } }), /jamais créée « réglée »/);
+      await assert.rejects(async () => prisma.facture.create({ data: { identiteEmetteurId: await identiteEmetteurFixture(), clientId: client, clientRaisonSociale: 'TEST Client règlements base', type: 'FACTURE', statut: 'REGLEE', numero: `TEST-NEE-REGLEE-${Date.now()}`, dateEmission: new Date('2026-09-11T00:00:00.000Z'), dateEcheance: new Date('2026-09-11T00:00:00.000Z'), totalHt: 10, totalTva: 2, totalTtc: 12, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST garde' } }), /jamais créée « réglée »/);
       await assert.rejects(() => prisma.reglement.update({ where: { id: premier.body.id }, data: { montant: 10 } }), /Règlement figé/);
       await assert.rejects(() => prisma.reglement.update({ where: { id: premier.body.id }, data: { reference: 'réécrite' } }), /Règlement figé/);
       await assert.rejects(() => prisma.reglement.delete({ where: { id: premier.body.id } }), /Règlement figé/);
@@ -13962,6 +13978,529 @@ if (!TEST_DATABASE_URL) {
         VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', 30, -1)`, /coherence/, 'visitesCreees');
       await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours", "echeancesAvancees")
         VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', 30, -1)`, /coherence/, 'echeancesAvancees');
+    });
+  });
+
+  describe('Lot 6a-1 : identité de l’émetteur figée à l’émission, logo et gabarit des documents', () => {
+    let session = '';
+    let clientId = '';
+    const admin = () => ({ Authorization: `Bearer ${session}` });
+    const entete = (utilisateur) => ({ Authorization: `Bearer ${jwt.sign({ id: utilisateur.id }, process.env.JWT_SECRET)}` });
+    const IDENTITE_A = {
+      raisonSociale: 'TEST Émetteur A', nomCommercial: 'TEST Enseigne A', siret: '11111111100011', tvaIntra: 'FR11111111111',
+      adresse: '1 rue de la Copie', codePostal: '14000', ville: 'Caen', pays: 'France', telephone: '02 31 00 00 01',
+      email: 'contact-a@iris.test', siteWeb: 'https://a.iris.test', piedFacture: 'TEST Pied de page A', couleurPrimaire: '#0f766e',
+    };
+    const IDENTITE_B = { ...IDENTITE_A, raisonSociale: 'TEST Émetteur B', siret: '22222222200022', adresse: '2 avenue Nouvelle', piedFacture: 'TEST Pied de page B', couleurPrimaire: '#7c2d12' };
+    const definirSociete = async (champs) => {
+      const res = await request(app).put('/api/company').set(admin()).send(champs);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body;
+    };
+    // CRC des morceaux PNG (norme PNG, annexe D) : de quoi fabriquer de petites images valides.
+    const crc32 = (octets) => {
+      let crc = 0xffffffff;
+      for (const octet of octets) { crc ^= octet; for (let k = 0; k < 8; k++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1; }
+      return (crc ^ 0xffffffff) >>> 0;
+    };
+    const morceauPng = (type, donnees) => {
+      const longueur = Buffer.alloc(4); longueur.writeUInt32BE(donnees.length);
+      const corps = Buffer.concat([Buffer.from(type, 'latin1'), donnees]);
+      const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(corps));
+      return Buffer.concat([longueur, corps, crc]);
+    };
+    // RGBA 8 bits ; `filtre(n)` donne l'octet de filtre de la n-ième ligne écrite ; `entrelace`
+    // écrit les sept passes Adam7, sans ligne pour une passe vide (norme PNG) ; `morceaux` s'insère
+    // après l'IHDR.
+    const png = async ({ largeur = 4, hauteur = 2, idat = null, teinte = 0, filtre = () => 0, entrelace = false, morceaux = [] } = {}) => {
+      const { deflateSync } = await import('node:zlib');
+      const entete = Buffer.alloc(13); entete.writeUInt32BE(largeur, 0); entete.writeUInt32BE(hauteur, 4); entete[8] = 8; entete[9] = 6; entete[12] = entrelace ? 1 : 0;
+      const passes = entrelace ? [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] : [[0, 0, 1, 1]];
+      const lignes = [];
+      let rang = 0;
+      for (const [x0, y0, pasX, pasY] of passes) {
+        const l = Math.ceil((largeur - x0) / pasX), h = Math.ceil((hauteur - y0) / pasY);
+        if (l <= 0 || h <= 0) continue;
+        for (let y = 0; y < h; y++) { lignes.push(filtre(rang++)); for (let x = 0; x < l; x++) lignes.push((x * 40 + teinte) & 255, (y * 90) & 255, 120, 255); }
+      }
+      return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), morceauPng('IHDR', entete), ...morceaux, morceauPng('IDAT', idat ?? deflateSync(Buffer.from(lignes))), morceauPng('IEND', Buffer.alloc(0))]);
+    };
+    // JPEG 1 × 1 pixel minimal (marqueurs SOI, APP0, DQT, SOF2, DHT, SOS).
+    const JPEG = Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64');
+    const enDataUrl = (type, octets) => `data:${type};base64,${octets.toString('base64')}`;
+    const televerser = (fichier, auth = admin()) => request(app).put('/api/company/logo').set(auth).send({ fichier });
+    const creerBrouillon = async (designation, nombreLignes = 1) => {
+      const lignes = Array.from({ length: nombreLignes }, (_, i) => ({ designation: `${designation} ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }));
+      const jour = await aujourdhui();
+      const res = await request(app).post('/api/factures').set(admin()).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST émetteur figé', dateEmission: jour, dateEcheance: jour, lignes });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const emettre = (id) => request(app).post(`/api/factures/${id}/emettre`).set(admin());
+    // Jour civil de la société : la numérotation est chronologique, et une émission future est refusée.
+    const aujourdhui = async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const [annee, mois, jour] = jourCivilEntreprise(new Date(), fuseau).split('-');
+      return `${jour}-${mois}-${annee}`;
+    };
+    const creerEmise = async (designation, nombreLignes = 1) => {
+      const brouillon = await creerBrouillon(designation, nombreLignes);
+      const emise = await emettre(brouillon.id);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      return emise.body;
+    };
+    const documentPdf = async (id) => {
+      const res = await request(app).get(`/api/factures/${id}/document.pdf`).set(admin()).buffer(true).parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
+      assert.equal(res.status, 200, String(res.body));
+      const lecteur = new PDFParse({ data: res.body });
+      const { text } = await lecteur.getText();
+      await lecteur.destroy();
+      return { octets: res.body, texte: text };
+    };
+    const avecImage = (octets) => octets.includes(Buffer.from('/Subtype /Image'));
+    // Couleurs de tracé et de remplissage (opérateurs scn et SCN des flux du PDF, que PDFKit
+    // compresse), en hexadécimal : la couleur imprimée vient de la copie, jamais du réglage vivant.
+    const couleursPdf = async (octets) => {
+      const { inflateSync } = await import('node:zlib');
+      const texte = octets.toString('latin1');
+      const couleurs = new Set();
+      for (const flux of texte.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, texte.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        for (const [, ...rvb] of contenu.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) (?:scn|SCN)\b/g)) couleurs.add(`#${rvb.map((v) => Math.round(Number(v) * 255).toString(16).padStart(2, '0')).join('')}`);
+      }
+      return couleurs;
+    };
+    // Prérequis comptables de l'émission, posés s'ils manquent : le bloc reste exécutable seul.
+    const assurerFacturation = async () => {
+      const plan = async () => (await request(app).get('/api/comptabilite').set(admin())).body;
+      const compte = async (code, libelle, nature) => {
+        let trouve = (await plan()).comptes.find((item) => item.code === code);
+        if (!trouve) { const cree = await request(app).post('/api/comptabilite/comptes').set(admin()).send({ code, libelle, nature }); assert.equal(cree.status, 201, JSON.stringify(cree.body)); trouve = cree.body; }
+        if (!trouve.actif) await prisma.compteComptable.update({ where: { id: trouve.id }, data: { actif: true } });
+        return trouve;
+      };
+      const client = await compte('411960', 'TEST Clients émetteur figé', 'ACTIF');
+      const ventes = await compte('706960', 'TEST Prestations émetteur figé', 'PRODUIT');
+      const articles = await compte('707960', 'TEST Articles émetteur figé', 'PRODUIT');
+      const tva = await compte('445960', 'TEST TVA émetteur figé', 'TVA');
+      const { regles, reglesTva } = await plan();
+      for (const [cle, donnees] of [['CLIENT', { compteId: client.id }], ['VENTE_PRESTATION', { compteId: ventes.id }], ['VENTE_ARTICLE', { compteId: articles.id }], ['JOURNAL_VENTES', { journal: 'VE' }]]) {
+        const actuelle = regles.find((r) => r.cle === cle);
+        if (actuelle && (cle === 'JOURNAL_VENTES' ? Boolean(actuelle.journal) : actuelle.compte?.actif)) continue;
+        const version = actuelle ? { expectedValeur: cle === 'JOURNAL_VENTES' ? actuelle.journal : actuelle.compteId, expectedUpdatedAt: actuelle.updatedAt } : {};
+        const res = await request(app).put(`/api/comptabilite/regles/${cle}`).set(admin()).send({ ...donnees, ...version, motif: 'TEST prérequis du lot 6a-1' });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      }
+      const tva20 = reglesTva.find((r) => Number(r.taux) === 20);
+      if (!tva20?.compte?.actif) {
+        const res = await request(app).put('/api/comptabilite/tva/20').set(admin()).send({ compteId: tva.id, motif: 'TEST prérequis du lot 6a-1', ...(tva20 ? { expectedCompteId: tva20.compteId, expectedUpdatedAt: tva20.updatedAt } : {}) });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      }
+    };
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale: 'TEST Client émetteur figé' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      clientId = client.body.id;
+      const site = await request(app).post(`/api/clients/${clientId}/sites`).set(admin()).send({ nom: 'TEST Facturation', adresse: '3 rue du Client', codePostal: '75001', ville: 'Paris', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      await assurerFacturation();
+      assert.equal((await request(app).delete('/api/company/logo').set(admin())).status, 200);
+      await definirSociete(IDENTITE_A);
+    });
+
+    test('refuse l’émission sans identité complète, sans consommer de numéro, et le signale dans les prérequis', async () => {
+      const brouillon = await creerBrouillon('TEST Sans identité');
+      const annee = Number((await aujourdhui()).slice(6));
+      const sequenceAvant = await prisma.sequenceFacture.findUnique({ where: { annee } });
+      try {
+        // Ville faite de blancs écrite en base, sans passer par l'API qui les retire : la copie la refuse aussi.
+        await definirSociete({ siret: '' });
+        await prisma.companySettings.update({ where: { id: 'singleton' }, data: { ville: '  ' } });
+        const refus = await emettre(brouillon.id);
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /Identité de la société incomplète : renseignez SIRET, ville dans l’écran Société avant d’émettre\./);
+        const relue = await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.id } });
+        assert.equal(relue.statut, 'BROUILLON'); assert.equal(relue.numero, null); assert.equal(relue.identiteEmetteurId, null);
+        assert.deepEqual(await prisma.sequenceFacture.findUnique({ where: { annee } }), sequenceAvant);
+        const prerequis = await request(app).get('/api/facturation/prete-a-facturer').set(admin());
+        const controle = prerequis.body.controles.find((c) => c.cle === 'IDENTITE_EMETTEUR');
+        assert.deepEqual({ bloquant: controle.bloquant, pret: controle.pret, route: controle.route }, { bloquant: true, pret: false, route: '/societe' });
+        assert.match(controle.detail, /SIRET, ville/);
+        assert.equal(prerequis.body.pret, false);
+      } finally {
+        await definirSociete(IDENTITE_A);
+      }
+      const prerequis = await request(app).get('/api/facturation/prete-a-facturer').set(admin());
+      assert.equal(prerequis.body.controles.find((c) => c.cle === 'IDENTITE_EMETTEUR').pret, true);
+      assert.equal((await emettre(brouillon.id)).status, 200);
+    });
+
+    test('copie l’identité à l’émission : un changement ultérieur de la société ne change ni la copie ni le PDF', async () => {
+      const facture = await creerEmise('TEST Copie A');
+      assert.ok(facture.identiteEmetteurId);
+      const copie = await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: facture.identiteEmetteurId } });
+      assert.deepEqual(
+        { raisonSociale: copie.raisonSociale, nomCommercial: copie.nomCommercial, siret: copie.siret, tvaIntra: copie.tvaIntra, adresse: copie.adresse, codePostal: copie.codePostal, ville: copie.ville, pays: copie.pays, telephone: copie.telephone, email: copie.email, siteWeb: copie.siteWeb, piedDocument: copie.piedDocument, couleurPrimaire: copie.couleurPrimaire, logoId: copie.logoId },
+        { ...Object.fromEntries(Object.entries(IDENTITE_A).filter(([cle]) => cle !== 'piedFacture')), piedDocument: IDENTITE_A.piedFacture, logoId: null },
+      );
+      const journal = await prisma.journalFacture.findFirstOrThrow({ where: { factureId: facture.id, action: 'EMISSION' } });
+      assert.match(journal.detail, new RegExp(`identité de l’émetteur ${facture.identiteEmetteurId}`));
+      const avant = await documentPdf(facture.id);
+      for (const attendu of ['TEST Émetteur A', 'TEST Enseigne A', '1 rue de la Copie', '14000 Caen', 'SIRET 11111111100011', 'TVA intracommunautaire FR11111111111', 'Tél. 02 31 00 00 01', 'contact-a@iris.test', 'TEST Pied de page A', 'Page 1 / 1', facture.mentionsLegalesVersion.mentions]) {
+        assert.ok(avant.texte.includes(attendu), `${attendu} absent du PDF`);
+      }
+      // L'identité figurant en en-tête, le bloc « Émetteur » des pièces antérieures disparaît.
+      assert.doesNotMatch(avant.texte, /^Émetteur$/m);
+      assert.ok((await couleursPdf(avant.octets)).has(IDENTITE_A.couleurPrimaire), 'couleur copiée absente du PDF');
+      await definirSociete(IDENTITE_B);
+      const apres = await documentPdf(facture.id);
+      assert.ok(apres.texte.includes('TEST Émetteur A') && apres.texte.includes('TEST Pied de page A'));
+      assert.doesNotMatch(apres.texte, /TEST Émetteur B|22222222200022|TEST Pied de page B|2 avenue Nouvelle/);
+      const couleursApres = await couleursPdf(apres.octets);
+      assert.ok(couleursApres.has(IDENTITE_A.couleurPrimaire) && !couleursApres.has(IDENTITE_B.couleurPrimaire), `couleur vivante imprimée : ${[...couleursApres]}`);
+      assert.deepEqual(await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: facture.identiteEmetteurId } }), copie);
+      const suivante = await creerEmise('TEST Copie B');
+      assert.notEqual(suivante.identiteEmetteurId, facture.identiteEmetteurId);
+      assert.equal((await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: suivante.identiteEmetteurId } })).raisonSociale, 'TEST Émetteur B');
+      assert.ok((await documentPdf(suivante.id)).texte.includes('TEST Pied de page B'));
+      await definirSociete(IDENTITE_A);
+    });
+
+    // La copie appartient à la transaction de l'émission : un refus survenu après elle ne laisse
+    // aucune identité figée derrière lui.
+    test('une émission refusée après la copie de l’identité n’en laisse aucune trace', async () => {
+      const telephone = `02 31 ${String(Date.now()).slice(-6)}`;
+      try {
+        await definirSociete({ telephone });
+        const jour = await aujourdhui();
+        const brouillon = await request(app).post('/api/factures').set(admin()).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST émetteur figé', dateEmission: jour, dateEcheance: jour, lignes: [{ designation: 'TEST Taux sans compte', quantite: 1, prixUnitaireHt: 10, tauxTva: 7.77 }] });
+        assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        const refus = await emettre(brouillon.body.id);
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /Paramétrage comptable incomplet/);
+        assert.equal(await prisma.identiteEmetteur.count({ where: { telephone } }), 0);
+      } finally {
+        await definirSociete(IDENTITE_A);
+      }
+    });
+
+    test('deux pièces émises avec la même identité partagent la même copie, y compris en émissions simultanées', async () => {
+      const premiere = await creerEmise('TEST Partage 1');
+      const seconde = await creerEmise('TEST Partage 2');
+      assert.equal(seconde.identiteEmetteurId, premiere.identiteEmetteurId);
+      // Identité nouvelle, deux émissions lancées ensemble : une seule copie, partagée.
+      await definirSociete({ telephone: `02 31 ${String(Date.now()).slice(-6)}` });
+      const brouillons = [await creerBrouillon('TEST Simultanée 1'), await creerBrouillon('TEST Simultanée 2')];
+      const emissions = await Promise.all(brouillons.map((b) => emettre(b.id)));
+      assert.deepEqual(emissions.map((r) => r.status), [200, 200], JSON.stringify(emissions.map((r) => r.body)));
+      assert.equal(emissions[0].body.identiteEmetteurId, emissions[1].body.identiteEmetteurId);
+      const copie = await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: emissions[0].body.identiteEmetteurId } });
+      assert.equal(await prisma.identiteEmetteur.count({ where: { telephone: copie.telephone } }), 1);
+      await definirSociete(IDENTITE_A);
+    });
+
+    // Verrou partagé de la société : une émission attend un changement d'identité en cours, puis
+    // copie l'identité validée, et non celle lue avant ce changement.
+    test('l’émission attend un changement d’identité en cours et copie l’identité validée', async () => {
+      const brouillon = await creerBrouillon('TEST Verrou société');
+      let liberer;
+      const retenue = new Promise((resolve) => { liberer = resolve; });
+      let pidTenant = null;
+      const tenant = prisma.$transaction(async (tx) => {
+        [{ pid: pidTenant }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        await tx.$queryRaw`SELECT 1 FROM "CompanySettings" WHERE "id" = 'singleton' FOR UPDATE`;
+        await tx.$executeRaw`UPDATE "CompanySettings" SET "raisonSociale" = 'TEST Émetteur pendant le verrou' WHERE "id" = 'singleton'`;
+        await retenue;
+      }, { timeout: 20_000 });
+      try {
+        while (pidTenant === null) await new Promise((resolve) => setTimeout(resolve, 10));
+        const emission = emettre(brouillon.id).then((reponse) => reponse);
+        let bloquee = false;
+        for (let essai = 0; essai < 250 && !bloquee; essai++) {
+          const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidTenant}::int = ANY(pg_blocking_pids(pid))`;
+          bloquee = n > 0;
+          if (!bloquee) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        liberer();
+        await tenant;
+        const reponse = await emission;
+        assert.equal(bloquee, true, 'l’émission doit attendre le verrou de la société');
+        assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+        assert.equal((await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: reponse.body.identiteEmetteurId } })).raisonSociale, 'TEST Émetteur pendant le verrou');
+      } finally {
+        liberer();
+        await tenant.catch(() => undefined);
+        await definirSociete(IDENTITE_A);
+      }
+    });
+
+    test('un avoir, total ou partiel, copie l’identité du jour de sa création ; refusé sans identité complète, sans rien changer', async () => {
+      const source = await creerEmise('TEST Avoir partiel');
+      // Émise sous l'identité A : son avoir total, créé sous B, ne doit pas reprendre A.
+      const aAnnuler = await creerEmise('TEST Avoir total');
+      await definirSociete(IDENTITE_B);
+      try {
+        const partiel = await request(app).post(`/api/factures/${source.id}/avoirs`).set(admin()).send({ lignes: [{ designation: 'TEST Avoir partiel', quantite: 1, prixUnitaireHt: 5, tauxTva: 20 }] });
+        assert.equal(partiel.status, 201, JSON.stringify(partiel.body));
+        assert.notEqual(partiel.body.identiteEmetteurId, source.identiteEmetteurId);
+        assert.equal((await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: partiel.body.identiteEmetteurId } })).raisonSociale, 'TEST Émetteur B');
+        assert.ok((await documentPdf(partiel.body.id)).texte.includes('TEST Émetteur B'));
+        await definirSociete({ adresse: '' });
+        const avoirsAvant = await prisma.facture.count({ where: { type: 'AVOIR' } });
+        const refusTotal = await request(app).post(`/api/factures/${aAnnuler.id}/annuler`).set(admin());
+        assert.equal(refusTotal.status, 409, JSON.stringify(refusTotal.body));
+        assert.match(refusTotal.body.error, /renseignez adresse/);
+        assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: aAnnuler.id } })).statut, 'EMISE');
+        const refusPartiel = await request(app).post(`/api/factures/${aAnnuler.id}/avoirs`).set(admin()).send({ lignes: [{ designation: 'TEST Refus', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }] });
+        assert.equal(refusPartiel.status, 409, JSON.stringify(refusPartiel.body));
+        assert.equal(await prisma.facture.count({ where: { type: 'AVOIR' } }), avoirsAvant);
+        await definirSociete({ adresse: IDENTITE_B.adresse });
+        const total = await request(app).post(`/api/factures/${aAnnuler.id}/annuler`).set(admin());
+        assert.equal(total.status, 200, JSON.stringify(total.body));
+        assert.equal(total.body.avoir.identiteEmetteurId, partiel.body.identiteEmetteurId);
+        assert.notEqual(total.body.avoir.identiteEmetteurId, aAnnuler.identiteEmetteurId);
+        assert.ok((await documentPdf(total.body.avoir.id)).texte.includes('TEST Émetteur B'));
+      } finally {
+        await definirSociete(IDENTITE_A);
+      }
+    });
+
+    // Verrou exclusif de la société : un changement de logo attend un changement en cours, puis
+    // journalise et nettoie l'état validé, et non celui lu avant ce changement.
+    test('logo : le remplacement et le retrait attendent un changement de la société en cours', async () => {
+      const sousVerrou = async (action) => {
+        const intercale = { contenu: JPEG, typeMime: 'image/jpeg', empreinte: `TEST-${randomUUID()}`, taille: JPEG.length };
+        let liberer;
+        const retenue = new Promise((resolve) => { liberer = resolve; });
+        let pidTenant = null;
+        let logoIntercale = null;
+        const tenant = prisma.$transaction(async (tx) => {
+          [{ pid: pidTenant }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          await tx.$queryRaw`SELECT 1 FROM "CompanySettings" WHERE "id" = 'singleton' FOR UPDATE`;
+          logoIntercale = await tx.logoDocument.create({ data: intercale });
+          await tx.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: logoIntercale.id } });
+          await retenue;
+        }, { timeout: 20_000 });
+        try {
+          while (pidTenant === null || logoIntercale === null) await new Promise((resolve) => setTimeout(resolve, 10));
+          const requete = action().then((reponse) => reponse);
+          let bloquee = false;
+          for (let essai = 0; essai < 250 && !bloquee; essai++) {
+            const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidTenant}::int = ANY(pg_blocking_pids(pid))`;
+            bloquee = n > 0;
+            if (!bloquee) await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          liberer();
+          await tenant;
+          const reponse = await requete;
+          assert.equal(bloquee, true, 'le changement de logo doit attendre le verrou de la société');
+          assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
+          return { reponse, logoIntercale };
+        } finally {
+          liberer();
+          await tenant.catch(() => undefined);
+        }
+      };
+      try {
+        const nouveau = enDataUrl('image/png', await png({ teinte: 7 }));
+        const remplace = await sousVerrou(() => televerser(nouveau));
+        const entree = await prisma.journalAdministration.findFirstOrThrow({ where: { type: 'SOCIETE', action: 'LOGO_DOCUMENTS' }, orderBy: { createdAt: 'desc' } });
+        assert.equal(entree.avant.logoDocuments, `JPEG, 1 Ko, empreinte ${remplace.logoIntercale.empreinte.slice(0, 12)}`);
+        assert.equal(await prisma.logoDocument.count({ where: { id: remplace.logoIntercale.id } }), 0, 'logo intercalé, orphelin, non supprimé');
+        const retire = await sousVerrou(() => request(app).delete('/api/company/logo').set(admin()));
+        const entreeRetrait = await prisma.journalAdministration.findFirstOrThrow({ where: { type: 'SOCIETE', action: 'LOGO_DOCUMENTS_RETIRE' }, orderBy: { createdAt: 'desc' } });
+        assert.equal(entreeRetrait.avant.logoDocuments, `JPEG, 1 Ko, empreinte ${retire.logoIntercale.empreinte.slice(0, 12)}`);
+        assert.equal(await prisma.logoDocument.count({ where: { id: retire.logoIntercale.id } }), 0, 'logo intercalé, orphelin, non supprimé');
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+      }
+    });
+
+    test('en base : copie et logo immuables, aucune pièce ne quitte le brouillon sans identité figée', async () => {
+      const facture = await creerEmise('TEST Garde base');
+      const autre = await prisma.identiteEmetteur.create({ data: { empreinte: `TEST-${randomUUID()}`, raisonSociale: 'TEST Autre', siret: '3', adresse: 'x', codePostal: '1', ville: 'y', couleurPrimaire: '#000000' } });
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { identiteEmetteurId: autre.id } }), /mentions et liens figés/);
+      await assert.rejects(prisma.facture.update({ where: { id: facture.id }, data: { identiteEmetteurId: null } }), /mentions et liens figés/);
+      await assert.rejects(prisma.identiteEmetteur.update({ where: { id: facture.identiteEmetteurId }, data: { raisonSociale: 'TEST Réécrite' } }), /identité figée d’un émetteur est immuable/);
+      await assert.rejects(prisma.identiteEmetteur.delete({ where: { id: facture.identiteEmetteurId } }), /Foreign key constraint|violates foreign key/i);
+      await assert.rejects(prisma.$executeRawUnsafe('TRUNCATE "IdentiteEmetteur" CASCADE'), /vidage interdit/);
+      await assert.rejects(prisma.identiteEmetteur.create({ data: { empreinte: `TEST-${randomUUID()}`, raisonSociale: ' ', siret: '3', adresse: 'x', codePostal: '1', ville: 'y', couleurPrimaire: '#000000' } }), /IdentiteEmetteur_obligatoires_check/);
+      await assert.rejects(prisma.identiteEmetteur.create({ data: { empreinte: `TEST-${randomUUID()}`, raisonSociale: 'TEST', siret: '3', adresse: 'x', codePostal: '1', ville: 'y', couleurPrimaire: 'rouge' } }), /IdentiteEmetteur_couleur_check/);
+      const logo = await prisma.logoDocument.create({ data: { contenu: await png(), typeMime: 'image/png', empreinte: `TEST-${randomUUID()}`, taille: (await png()).length } });
+      await assert.rejects(prisma.logoDocument.update({ where: { id: logo.id }, data: { typeMime: 'image/jpeg' } }), /version de logo est immuable/);
+      await assert.rejects(prisma.logoDocument.create({ data: { contenu: JPEG, typeMime: 'image/gif', empreinte: `TEST-${randomUUID()}`, taille: JPEG.length } }), /LogoDocument_typeMime_check/);
+      await assert.rejects(prisma.logoDocument.create({ data: { contenu: JPEG, typeMime: 'image/jpeg', empreinte: `TEST-${randomUUID()}`, taille: JPEG.length + 1 } }), /LogoDocument_taille_check/);
+      await prisma.logoDocument.delete({ where: { id: logo.id } });
+      await prisma.identiteEmetteur.delete({ where: { id: autre.id } });
+      // Un brouillon qui passe à « émise » sans copie, ou un avoir créé émis sans copie, est refusé.
+      const brouillon = await creerBrouillon('TEST Garde émission');
+      await assert.rejects(prisma.$executeRaw`UPDATE "Facture" SET "statut" = 'EMISE', "numero" = ${`TEST-GARDE-${randomUUID()}`}, "annee" = 2026, "emisLe" = now() WHERE "id" = ${brouillon.id}`, /ne s’émet qu’avec l’identité de l’émetteur figée/);
+      await assert.rejects(prisma.facture.create({ data: { clientId, clientRaisonSociale: 'TEST Client émetteur figé', clientAdresse: 'x', type: 'AVOIR', statut: 'EMISE', factureOrigineId: facture.id, numero: `TEST-AV-${randomUUID()}`, annee: 2026, dateEmission: new Date('2026-09-10'), dateEcheance: new Date('2026-09-10'), totalHt: 1, totalTva: 0.2, totalTtc: 1.2, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST garde avoir', emisLe: new Date() } }), /ne s’émet qu’avec l’identité de l’émetteur figée/);
+      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.id } })).statut, 'BROUILLON');
+    });
+
+    test('logo : un PNG transparent et entrelacé, aux cinq filtres de ligne, est accepté et imprimé', async () => {
+      try {
+        const pose = await televerser(enDataUrl('image/png', await png({ largeur: 24, hauteur: 12, entrelace: true, filtre: (rang) => rang % 5 })));
+        assert.equal(pose.status, 200, JSON.stringify(pose.body));
+        const facture = await creerEmise('TEST Logo entrelacé');
+        // L'impression en décompresse les pixels de façon asynchrone : une exception y arrêterait la suite.
+        assert.equal(avecImage((await documentPdf(facture.id)).octets), true);
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+      }
+    });
+
+    test('une pièce émise avant ce lot, sans copie, s’imprime comme à l’origine', async () => {
+      const facture = await creerEmise('TEST Pièce antérieure');
+      await prisma.$executeRawUnsafe('ALTER TABLE "Facture" DISABLE TRIGGER "Facture_immutabilite_origine_emise"');
+      try {
+        await prisma.$executeRaw`UPDATE "Facture" SET "identiteEmetteurId" = NULL WHERE "id" = ${facture.id}`;
+      } finally {
+        await prisma.$executeRawUnsafe('ALTER TABLE "Facture" ENABLE TRIGGER "Facture_immutabilite_origine_emise"');
+      }
+      const { octets, texte } = await documentPdf(facture.id);
+      assert.match(texte, /^Émetteur$/m);
+      assert.ok(texte.includes(facture.mentionsLegalesVersion.mentions), 'mentions figées absentes');
+      assert.doesNotMatch(texte, /TEST Émetteur A|SIRET 11111111100011|TEST Pied de page A/);
+      assert.match(texte, /Page 1 \/ 1/);
+      assert.equal(avecImage(octets), false);
+      // Couleur par défaut, et non la couleur principale actuelle (#0f766e), qui est un réglage vivant.
+      const couleurs = await couleursPdf(octets);
+      assert.ok(couleurs.has('#1e3a8a') && !couleurs.has(IDENTITE_A.couleurPrimaire), `couleurs : ${[...couleurs]}`);
+      // Le statut d'une pièce antérieure évolue encore (réglée, annulée) : le garde ne vise que l'émission.
+      const total = await request(app).post(`/api/factures/${facture.id}/annuler`).set(admin());
+      assert.equal(total.status, 200, JSON.stringify(total.body));
+      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: facture.id } })).identiteEmetteurId, null);
+    });
+
+    test('logo : réservé au super administrateur, fichier vérifié, journalisé, retiré sans toucher aux pièces émises', async () => {
+      const administrateur = await prisma.user.upsert({ where: { email: 'emetteur6a.admin@iris.test' }, update: { role: 'ADMIN', actif: true, permissions: [] }, create: { email: 'emetteur6a.admin@iris.test', name: 'TEST Admin logo', role: 'ADMIN' } });
+      const technicien = await prisma.user.upsert({ where: { email: 'emetteur6a.technicien@iris.test' }, update: { role: 'TECHNICIEN', actif: true, permissions: [] }, create: { email: 'emetteur6a.technicien@iris.test', name: 'TEST Technicien logo', role: 'TECHNICIEN' } });
+      const fichierPng = await png();
+      try {
+        assert.equal((await televerser(enDataUrl('image/png', fichierPng), entete(administrateur))).status, 403);
+        assert.equal((await request(app).delete('/api/company/logo').set(entete(administrateur))).status, 403);
+        assert.equal((await request(app).get('/api/company/logo')).status, 401);
+        assert.equal((await request(app).get('/api/company/logo').set(entete(technicien))).status, 404);
+        // Une clé d'intégration, même autorisée à lire la société, n'atteint aucune route du logo.
+        const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé logo', scopes: ['company:read'] });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        try {
+          const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
+          assert.equal((await request(app).get('/api/company/logo').set(parCle)).status, 401);
+          assert.equal((await televerser(enDataUrl('image/png', fichierPng), parCle)).status, 401);
+          assert.equal((await request(app).delete('/api/company/logo').set(parCle)).status, 401);
+        } finally {
+          await prisma.apiAccessKey.deleteMany({ where: { nom: 'TEST clé logo' } });
+        }
+        // Fichiers refusés : sans data URL, GIF, contenu d'un autre format, PNG corrompu, trop grand.
+        const refus = [
+          // JPEG de 2 001 pixels de large (en-tête SOF modifié) : sa taille n'est lue que par le moteur PDF.
+          [enDataUrl('image/jpeg', (() => { const large = Buffer.from(JPEG); large.writeUInt16BE(2001, large.indexOf(Buffer.from([0xff, 0xc2])) + 7); return large; })()), /2 000 pixels/],
+          [undefined, /Joignez un fichier/], ['bonjour', /PNG ou JPEG/], [enDataUrl('image/gif', Buffer.from('GIF89a')), /PNG ou JPEG/],
+          [enDataUrl('image/png', JPEG), /ne correspond pas à son format/], [enDataUrl('image/png', await png({ idat: Buffer.from('pas du zlib') })), /illisible/],
+          [enDataUrl('image/png', (await png()).subarray(0, 40)), /illisible/], [enDataUrl('image/png', await png({ largeur: 2001, hauteur: 1 })), /2 000 pixels/],
+          [enDataUrl('image/png', Buffer.concat([await png(), Buffer.alloc(500 * 1024)])), /trop volumineux \(limite : 500 Ko\)/],
+          // Fichiers que le moteur PDF ne lirait qu'à l'impression, hors requête : filtre de ligne
+          // inconnu (exception asynchrone qui arrête le serveur), passe Adam7 vide d'une image
+          // étroite (le moteur y lit un filtre de trop, ici 200), tRNS d'une image RGBA (le moteur
+          // s'y désaligne et boucle sans fin dès la lecture de l'en-tête).
+          [enDataUrl('image/png', await png({ filtre: (rang) => (rang === 1 ? 5 : 0) })), /illisible/],
+          [enDataUrl('image/png', await png({ largeur: 3, hauteur: 3, entrelace: true, teinte: 200 })), /illisible/],
+          [enDataUrl('image/png', await png({ morceaux: [morceauPng('tRNS', Buffer.from([0, 0, 0, 0, 0xff, 0xff, 0xff, 0xf4, 0x7a, 0x7a, 0x7a, 0x7a]))] })), /illisible/],
+        ];
+        for (const [fichier, motif] of refus) {
+          const res = await televerser(fichier);
+          assert.equal(res.status, 400, `${String(fichier).slice(0, 40)} : ${JSON.stringify(res.body)}`);
+          assert.match(res.body.error, motif);
+        }
+        const tropLourd = await televerser(`data:image/png;base64,${'A'.repeat(1_100_000)}`);
+        assert.equal(tropLourd.status, 413); assert.equal(tropLourd.body.error, 'Logo trop volumineux (limite : 500 Ko).');
+        // La limite de 1 Mo ne vaut que pour le logo : l'identité de la société garde la limite commune.
+        const societeTropLourde = await request(app).put('/api/company').set(admin()).send({ piedFacture: 'x'.repeat(150_000) });
+        assert.equal(societeTropLourde.status, 413); assert.equal(societeTropLourde.body.error, 'Requête trop volumineuse.');
+        assert.equal((await prisma.companySettings.findUniqueOrThrow({ where: { id: 'singleton' } })).logoDocumentId, null);
+
+        const journalAvant = await prisma.journalAdministration.count({ where: { type: 'SOCIETE' } });
+        const pose = await televerser(enDataUrl('image/png', fichierPng));
+        assert.equal(pose.status, 200, JSON.stringify(pose.body));
+        const logoPng = await prisma.logoDocument.findUniqueOrThrow({ where: { id: pose.body.logoDocumentId } });
+        assert.equal(logoPng.typeMime, 'image/png'); assert.equal(logoPng.taille, fichierPng.length);
+        const lu = await request(app).get('/api/company/logo').set(entete(technicien)).buffer(true).parse((reponse, fin) => { const m = []; reponse.on('data', (x) => m.push(x)); reponse.on('end', () => fin(null, Buffer.concat(m))); });
+        assert.equal(lu.status, 200); assert.match(lu.headers['content-type'], /image\/png/); assert.ok(Buffer.compare(lu.body, fichierPng) === 0);
+        const entree = await prisma.journalAdministration.findFirstOrThrow({ where: { type: 'SOCIETE', action: 'LOGO_DOCUMENTS' }, orderBy: { createdAt: 'desc' } });
+        assert.deepEqual(entree.avant, { logoDocuments: null });
+        assert.match(entree.apres.logoDocuments, /^PNG, 1 Ko, empreinte [0-9a-f]{12}$/);
+        // Le même fichier une seconde fois : même version, aucune entrée de plus.
+        assert.equal((await televerser(enDataUrl('image/png', fichierPng))).body.logoDocumentId, logoPng.id);
+        assert.equal(await prisma.journalAdministration.count({ where: { type: 'SOCIETE' } }), journalAvant + 1);
+
+        // Remplacé avant toute émission, le PNG n'est imprimé par aucune pièce : il est supprimé.
+        const jpeg = await televerser(enDataUrl('image/jpeg', JPEG));
+        assert.equal(jpeg.status, 200, JSON.stringify(jpeg.body));
+        assert.equal(await prisma.logoDocument.count({ where: { id: logoPng.id } }), 0);
+        const facture = await creerEmise('TEST Avec logo');
+        const copie = await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: facture.identiteEmetteurId } });
+        assert.equal(copie.logoId, jpeg.body.logoDocumentId);
+        assert.equal(avecImage((await documentPdf(facture.id)).octets), true);
+
+        // Retiré, le logo reste celui de la pièce émise ; il n'est plus copié sur les suivantes.
+        const retrait = await request(app).delete('/api/company/logo').set(admin());
+        assert.equal(retrait.status, 200, JSON.stringify(retrait.body)); assert.equal(retrait.body.logoDocumentId, null);
+        assert.equal(await prisma.logoDocument.count({ where: { id: jpeg.body.logoDocumentId } }), 1);
+        const entreeRetrait = await prisma.journalAdministration.findFirstOrThrow({ where: { type: 'SOCIETE', action: 'LOGO_DOCUMENTS_RETIRE' }, orderBy: { createdAt: 'desc' } });
+        assert.match(entreeRetrait.avant.logoDocuments, /^JPEG, 1 Ko/); assert.deepEqual(entreeRetrait.apres, { logoDocuments: null });
+        assert.equal((await request(app).get('/api/company/logo').set(admin())).status, 404);
+        assert.equal(avecImage((await documentPdf(facture.id)).octets), true);
+        const sansLogo = await creerEmise('TEST Sans logo');
+        assert.equal((await prisma.identiteEmetteur.findUniqueOrThrow({ where: { id: sansLogo.identiteEmetteurId } })).logoId, null);
+        assert.equal(avecImage((await documentPdf(sansLogo.id)).octets), false);
+        // Un logo imprimé par une pièce ne se supprime pas.
+        await assert.rejects(prisma.logoDocument.delete({ where: { id: jpeg.body.logoDocumentId } }), /Foreign key constraint|violates foreign key/i);
+        // Un nouveau logo n'atteint ni la pièce émise avec le JPEG, ni celle émise sans logo.
+        assert.equal((await televerser(enDataUrl('image/png', fichierPng))).status, 200);
+        assert.ok((await documentPdf(facture.id)).octets.includes(Buffer.from('/DCTDecode')), 'le JPEG copié n’est plus imprimé');
+        assert.equal(avecImage((await documentPdf(sansLogo.id)).octets), false);
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+        await prisma.user.deleteMany({ where: { email: { in: ['emetteur6a.admin@iris.test', 'emetteur6a.technicien@iris.test'] } } });
+      }
+    });
+
+    // Le champ admet 2 000 caractères, et l'écran y invite aux mentions et conditions de règlement :
+    // une pièce émise ne doit pas en imprimer une version tronquée.
+    test('gabarit : un pied de page long s’imprime en entier sur chaque page', async () => {
+      const pied = `TEST Conditions de règlement : ${Array.from({ length: 200 }, (_, i) => `clause${i}`).join(' ')} TESTFINDUPIED`;
+      try {
+        await definirSociete({ piedFacture: pied });
+        const facture = await creerEmise('TEST Pied long', 70);
+        const { texte } = await documentPdf(facture.id);
+        const pages = Number(/Page 1 \/ (\d+)/.exec(texte)?.[1]);
+        assert.ok(pages >= 2, `pagination absente : ${pages}`);
+        assert.equal(texte.split('TESTFINDUPIED').length - 1, pages, 'pied de page tronqué');
+        assert.ok(texte.includes('TEST Pied long 70'));
+        // Un pied fait de centaines de retours à la ligne reste borné : il n'envahit pas la page.
+        await definirSociete({ piedFacture: 'TEST ligne\n'.repeat(180) });
+        const courte = await creerEmise('TEST Pied démesuré');
+        assert.match((await documentPdf(courte.id)).texte, /Page 1 \/ 1/);
+      } finally {
+        await definirSociete(IDENTITE_A);
+      }
+    });
+
+    test('gabarit : pied de page et pagination sur chaque page d’une pièce longue', async () => {
+      const facture = await creerEmise('TEST Ligne longue', 70);
+      const { texte } = await documentPdf(facture.id);
+      const pages = Number(/Page 1 \/ (\d+)/.exec(texte)?.[1]);
+      assert.ok(pages >= 2, `pagination absente : ${pages}`);
+      for (let page = 1; page <= pages; page++) assert.ok(texte.includes(`Page ${page} / ${pages}`), `page ${page} absente`);
+      assert.equal(texte.split('TEST Pied de page A').length - 1, pages);
+      assert.ok(texte.includes('TEST Ligne longue 70'));
     });
   });
 }
