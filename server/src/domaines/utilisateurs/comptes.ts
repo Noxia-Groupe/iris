@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import {
   ROLE_SUPERADMIN, ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL,
-  ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole,
+  ROLE_RESPONSABLE, ROLE_DIRECTEUR, ROLE_SYSTEME, COMPTE_SYSTEME_ID, isAdminRole, isSuperAdminRole,
 } from '../../droits/roles';
 import { DROITS_INTERDITS_TECHNICIEN, permissionsEffectives } from '../../droits/permissions';
 import { type AuthRequest, brancheHierarchique, requireAuth } from '../../http/auth';
@@ -119,6 +119,14 @@ export function enregistrerRoutesComptes(app: Express): void {
   // Users (administration réservée aux admins)
   // La liste des comptes EST la liste blanche d'autorisation Microsoft Entra ID : seuls les
   // emails présents ici peuvent se connecter. L'authentification locale est interdite.
+  // Le compte système (écritures automatiques) n'existe pas pour la gestion des comptes : aucune
+  // route ne le lit, ne le modifie ni ne le supprime (la base refuse aussi de le changer).
+  // La session est vérifiée d'abord : sans elle, ce compte ne se distingue pas des autres.
+  app.use('/api/users/:id', (req, res, next) => {
+    if (req.params.id !== COMPTE_SYSTEME_ID) return next();
+    requireAuth(req, res, () => void res.status(404).json({ error: 'Utilisateur introuvable.' }));
+  });
+
   app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     try {
       // Le rôle SUPERADMIN n'existe pas du point de vue d'un ADMIN : les comptes qui le
@@ -127,7 +135,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       // routes d'écriture le refusent déjà, cf. refuseSuperAdminTarget).
       const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
       const users = await prisma.user.findMany({
-        where: isSuper ? {} : { role: { not: ROLE_SUPERADMIN } },
+        where: { role: { notIn: isSuper ? [ROLE_SYSTEME] : [ROLE_SUPERADMIN, ROLE_SYSTEME] } },
         select: {
           id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true,
           responsableHierarchique: { select: { id: true, name: true, role: true } },

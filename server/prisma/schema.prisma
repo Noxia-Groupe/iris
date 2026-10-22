@@ -374,10 +374,10 @@ model Parametres {
   // Génération automatique des visites de maintenance (lot pilote 5) : chaque jour, la visite de
   // l'échéance d'un contrat actif est créée dès que l'échéance tombe dans ce nombre de jours
   // civils (0 : le jour même ; CHECK 0 à 365 en base). Vide (null), la génération automatique
-  // est désactivée ; les actions manuelles des contrats restent possibles. 30 jours par défaut
-  // (posé en question à Nelson, question (a) du lot pilote 5, passation section 3). Réglée par
-  // un administrateur, et journalisée.
-  anticipationVisitesJours Int?   @default(30)
+  // est désactivée ; les actions manuelles des contrats restent possibles. Vide au démarrage :
+  // la génération reste désactivée tant que la société ne l'a pas réglée (décision de Nelson du
+  // 22-10-2026). Réglée par un administrateur, et journalisée.
+  anticipationVisitesJours Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

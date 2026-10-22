@@ -324,3 +324,13 @@ Ordre de travail retenu par Claude Code (choix de mise en œuvre, non décidé p
 4. **Documents concernés** : « Tous type de document ». Lecture retenue : factures et avoirs, devis, rapport de chantier, compte rendu d'intervention, contrat de maintenance, la liste présentée à Nelson avant sa réponse.
 
 Découpage retenu par Claude Code (choix de mise en œuvre, non décidé par Nelson) : 6a-1, modèle commun et identité de l'émetteur figée sur les factures et les avoirs ; 6a-2, PDF du devis ; 6a-3, envoi par la messagerie et journal des envois ; 6a-4, PDF des autres documents et leur envoi ; 6b, Microsoft 365.
+
+## Décisions du 22-10-2026 (soir)
+
+*Rédigé le 22-10-2026.* Réponses de Nelson aux questions des lots pilotes 4 et 5 (passation, section 3), citées mot pour mot entre guillemets (message de la session de travail). Ce qui suit chaque citation est la lecture retenue par Claude Code, à corriger par Nelson si besoin :
+
+1. **Lot 4, (a) une seule conversion par affaire** : « je permet que les devis creer 2 choses. » Lecture retenue : une même affaire peut être convertie deux fois, par exemple en chantier et en contrat de maintenance, ou en intervention et en contrat ; le modèle (`DevisConversion.dossierId` unique) change. À appliquer par un lot dédié, qui posera comme choix par défaut les combinaisons admises et le cas d'un devis à la fois converti en chantier et en contrat ou en intervention.
+2. **Lot 4, (b) annulation d'un devis converti** : « Oui un devis converti en chantier s’annule avec lui. » Lecture retenue : la règle actuelle est gardée ; un devis converti en chantier s'annule avec son chantier, et une intervention ou un contrat issu d'un devis vit sa propre vie (déjà appliqué par #281).
+3. **Lot 5, (a) anticipation par défaut** : « Au demarrage la generation des visites doit etre desactivé ». Lecture retenue : une nouvelle instance démarre sans anticipation, la génération automatique désactivée, jusqu'au réglage par la société. Appliqué par #PR5B.
+4. **Lot 5, (b) échéances passées** : « Echeance passés : oui une maintenance obligatoire ne doit pas disparaitre ». Lecture retenue : la règle actuelle est gardée ; aucune échéance passée n'est sautée, sa visite est créée en retard (déjà appliqué par #293).
+5. **Lot 5, (c) auteur des écritures automatiques** : « Auteur des creations automatique : Le compte susteme car plus propre pour la tracabilité ». Lecture retenue : les écritures de la génération automatique (création de la visite, avancement de l'échéance, passage du jour) sont portées par un compte système qui ne se connecte jamais. Appliqué par #PR5B.

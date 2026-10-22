@@ -13491,6 +13491,8 @@ if (!TEST_DATABASE_URL) {
     // français que la société peut avoir (de 1 h à Tahiti à 23 h à Wallis) : une suite précédente
     // peut avoir changé ce fuseau.
     const JOUR_FICTIF = '2026-06-15';
+    // Compte système (décision de Nelson du 22-10-2026) : auteur des écritures automatiques.
+    const SYSTEME = { id: '00000000-0000-4000-8000-000000000001', nom: 'Iris (automatique)' };
     const INSTANT_FICTIF = new Date(`${JOUR_FICTIF}T11:00:00.000Z`);
     const regler = (anticipationVisitesJours) => request(app).put('/api/parametres').set(admin()).send({ anticipationVisitesJours });
     const creerContrat = async (titre, dateDebut, donnees = {}) => {
@@ -13522,14 +13524,16 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await regler(30)).status, 200);
     });
 
-    // Chaque test repart du réglage par défaut, sans passage du jour fictif, même s'il échoue : un
-    // échec ne fait pas échouer les suivants (alerte « n'a pas tourné », génération désactivée).
+    // Chaque test repart d'une anticipation de 30 jours, sans passage du jour fictif, même s'il
+    // échoue : un échec ne fait pas échouer les suivants (alerte « n'a pas tourné », génération
+    // désactivée). Le bloc rend ensuite la génération désactivée, comme au démarrage.
     afterEach(async () => {
       await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR_FICTIF } });
       await regler(30);
     });
+    after(async () => { await regler(''); });
 
-    test('passage automatique : une fois par jour civil, visites dans l’anticipation, sans compte auteur, échéance d’une visite terminée avancée', async () => {
+    test('passage automatique : une fois par jour civil, visites dans l’anticipation, au nom du compte système, échéance d’une visite terminée avancée', async () => {
       const dansAnticipation = await creerContrat('TEST Génération dans l’anticipation', '01-07-2026');
       // Bornes de l'anticipation de 30 jours depuis le 15-06 : le 15-07 en est, le 16-07 non.
       const borne = await creerContrat('TEST Génération à la borne', '15-07-2026');
@@ -13544,22 +13548,22 @@ if (!TEST_DATABASE_URL) {
       assert.ok(passage, 'premier passage du jour');
       assert.deepEqual(
         [passage.declenchement, passage.cleJourAutomatique, passage.jour.toISOString().slice(0, 10), passage.auteurId, passage.auteurNom, passage.anticipationJours, passage.statut],
-        ['AUTOMATIQUE', JOUR_FICTIF, JOUR_FICTIF, null, null, 30, 'REUSSIE'],
+        ['AUTOMATIQUE', JOUR_FICTIF, JOUR_FICTIF, SYSTEME.id, SYSTEME.nom, 30, 'REUSSIE'],
       );
       assert.deepEqual(passage.erreurs, [], JSON.stringify(passage.erreurs));
       assert.ok(passage.fin && passage.fin >= passage.debut);
 
-      // Échéance du 01-07, à 16 jours : créée, comme par l'action de l'écran, sans compte auteur.
+      // Échéance du 01-07, à 16 jours : créée, comme par l'action de l'écran, au nom du compte système.
       const [visite] = await visites(dansAnticipation.id);
       assert.ok(visite, 'visite créée');
       assert.deepEqual(
         [visite.titre, visite.statut, visite.echeanceContrat.toISOString().slice(0, 10), visite.dateSouhaitee.toISOString().slice(0, 10), visite.createdById, visite.clientId],
-        ['Maintenance préventive — TEST Génération dans l’anticipation', 'A_PLANIFIER', '2026-07-01', '2026-07-01', null, clientId],
+        ['Maintenance préventive — TEST Génération dans l’anticipation', 'A_PLANIFIER', '2026-07-01', '2026-07-01', SYSTEME.id, clientId],
       );
       assert.match(visite.reference, /^I\d{2}-\d{4}$/);
       assert.deepEqual(visite.couvertureContrat, { politiqueMainOeuvre: 'HORS_FORFAIT', politiqueMateriel: 'HORS_FORFAIT', noteCouverture: null });
       const creation = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: visite.id } });
-      assert.deepEqual([creation.cible, creation.action, creation.auteurId, creation.auteurNom, creation.motif], ['INTERVENTION', 'CREATION_CONTRAT', null, 'Génération automatique', 'Génération automatique : échéance du 01-07-2026.']);
+      assert.deepEqual([creation.cible, creation.action, creation.auteurId, creation.auteurNom, creation.motif], ['INTERVENTION', 'CREATION_CONTRAT', SYSTEME.id, SYSTEME.nom, 'Génération automatique : échéance du 01-07-2026.']);
       // Échéance du 15-07, à 30 jours : créée ; du 16-07, à 31 jours : rien.
       assert.deepEqual((await visites(borne.id)).map((v) => v.echeanceContrat.toISOString().slice(0, 10)), ['2026-07-15']);
       assert.equal((await visites(auDela.id)).length, 0);
@@ -13568,7 +13572,7 @@ if (!TEST_DATABASE_URL) {
       const suite = await visites(terminee.id);
       assert.deepEqual(suite.map((v) => [v.echeanceContrat.toISOString().slice(0, 10), v.statut]), [['2026-05-15', 'TERMINEE'], ['2026-06-15', 'A_PLANIFIER']]);
       const avancement = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { contratMaintenanceId: terminee.id, action: 'AVANCEMENT_ECHEANCE' } });
-      assert.deepEqual([avancement.auteurId, avancement.auteurNom], [null, 'Génération automatique']);
+      assert.deepEqual([avancement.auteurId, avancement.auteurNom], [SYSTEME.id, SYSTEME.nom]);
       assert.equal(avancement.motif, `Génération automatique : Intervention ${premiere.body.reference} terminée : échéance du 15-05-2026 au 15-06-2026.`);
       assert.ok(passage.visitesCreees >= 3 && passage.echeancesAvancees >= 1, JSON.stringify(passage));
 
@@ -13732,31 +13736,36 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).anticipationVisitesJours, 30);
     });
 
-    test('en base : seule la génération écrit au journal SAV sans compte auteur ; un passage est cohérent', async () => {
+    test('en base : toute nouvelle écriture du journal SAV a un compte auteur ; un passage est cohérent', async () => {
       const contrat = await creerContrat('TEST Génération contrainte', '01-01-2099');
       const visite = await request(app).post(`/api/contrats-maintenance/${contrat.id}/generer-intervention`).set(admin());
       assert.equal(visite.status, 201, JSON.stringify(visite.body));
       const id = visite.body.id;
-      const inserer = (action, auteurNom, cible = 'INTERVENTION') => prisma.$executeRaw`INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "contratMaintenanceId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif")
-        VALUES (${randomUUID()}, ${cible === 'INTERVENTION' ? id : null}, ${cible === 'CONTRAT' ? contrat.id : null}, ${cible}, ${cible === 'INTERVENTION' ? id : contrat.id}, ${action}, NULL, ${auteurNom}, 'TEST motif')`;
-      await assert.rejects(inserer('CORRECTION', 'Génération automatique'), /auteur_generation/);
-      await assert.rejects(inserer('CREATION_CONTRAT', 'Quelqu’un'), /auteur_generation/);
-      await assert.rejects(inserer('CREATION_CONTRAT', 'Génération automatique', 'CONTRAT'), /auteur_generation/);
-      await assert.rejects(inserer('SUSPENSION', 'Génération automatique', 'CONTRAT'), /auteur_generation/);
-      assert.equal(await inserer('CREATION_CONTRAT', 'Génération automatique'), 1);
-      assert.equal(await inserer('AVANCEMENT_ECHEANCE', 'Génération automatique', 'CONTRAT'), 1);
+      const inserer = (action, auteurId, auteurNom, cible = 'INTERVENTION') => prisma.$executeRaw`INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "contratMaintenanceId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif")
+        VALUES (${randomUUID()}, ${cible === 'INTERVENTION' ? id : null}, ${cible === 'CONTRAT' ? contrat.id : null}, ${cible}, ${cible === 'INTERVENTION' ? id : contrat.id}, ${action}, ${auteurId}, ${auteurNom}, 'TEST motif')`;
+      // Plus aucune exception : même la génération automatique écrit au nom du compte système.
+      await assert.rejects(inserer('CORRECTION', null, 'Génération automatique'), /auteur_check/);
+      await assert.rejects(inserer('CREATION_CONTRAT', null, 'Génération automatique'), /auteur_check/);
+      await assert.rejects(inserer('AVANCEMENT_ECHEANCE', null, 'Génération automatique', 'CONTRAT'), /auteur_check/);
+      assert.equal(await inserer('CREATION_CONTRAT', SYSTEME.id, SYSTEME.nom), 1);
+      assert.equal(await inserer('AVANCEMENT_ECHEANCE', SYSTEME.id, SYSTEME.nom, 'CONTRAT'), 1);
 
       const passage = (declenchement, cle, auteurId, auteurNom, statut = 'REUSSIE') => prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "cleJourAutomatique", "auteurId", "auteurNom", "anticipationJours", "statut")
         VALUES (${randomUUID()}, DATE '2001-02-03', ${declenchement}, ${cle}, ${auteurId}, ${auteurNom}, 30, ${statut})`;
-      await assert.rejects(passage('AUTOMATIQUE', '2001-02-04', null, null), /coherence/);
-      await assert.rejects(passage('AUTOMATIQUE', null, null, null), /coherence/);
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-04', SYSTEME.id, SYSTEME.nom), /coherence/);
+      await assert.rejects(passage('AUTOMATIQUE', null, SYSTEME.id, SYSTEME.nom), /coherence/);
+      // Un passage automatique est au nom du compte système, et seulement de lui ; un passage manuel,
+      // d'un administrateur, jamais du compte système.
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', null, null), /coherence/);
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', SYSTEME.id, null), /coherence/);
       await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', 'un-compte', 'Quelqu’un'), /coherence/);
       await assert.rejects(passage('MANUEL', null, null, null), /coherence/);
+      await assert.rejects(passage('MANUEL', null, SYSTEME.id, SYSTEME.nom), /coherence/);
       await assert.rejects(passage('MANUEL', '2001-02-03', 'un-compte', 'Quelqu’un'), /coherence/);
       await assert.rejects(passage('MANUEL', null, 'un-compte', 'Quelqu’un', 'INCONNU'), /coherence/);
       assert.equal(await passage('MANUEL', null, 'un-compte', 'Quelqu’un'), 1);
-      assert.equal(await passage('AUTOMATIQUE', '2001-02-03', null, null), 1);
-      await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', null, null), /cleJourAutomatique|unique/i);
+      assert.equal(await passage('AUTOMATIQUE', '2001-02-03', SYSTEME.id, SYSTEME.nom), 1);
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', SYSTEME.id, SYSTEME.nom), /cleJourAutomatique|unique/i);
       await prisma.executionGenerationVisites.deleteMany({ where: { jour: new Date('2001-02-03T00:00:00.000Z') } });
     });
 
@@ -13892,12 +13901,44 @@ if (!TEST_DATABASE_URL) {
     });
 
     // L'alerte d'absence porte sur le dernier passage AUTOMATIQUE : un passage manuel ne la masque pas.
+    // Décisions de Nelson du 22-10-2026, questions (a) et (c) du lot pilote 5.
+    test('génération désactivée au démarrage ; compte système sans session, hors de la gestion des comptes, figé en base', async () => {
+      // (a) Une ligne de paramètres neuve n'a pas d'anticipation : la génération est désactivée.
+      const [{ defaut }] = await prisma.$queryRaw`SELECT column_default AS defaut FROM information_schema.columns WHERE table_name = 'Parametres' AND column_name = 'anticipationVisitesJours'`;
+      assert.equal(defaut, null);
+      // (c) Le compte système : inactif, sans mot de passe ni droit, d'une adresse réservée.
+      const compte = await prisma.user.findUniqueOrThrow({ where: { id: SYSTEME.id } });
+      assert.deepEqual([compte.email, compte.name, compte.role, compte.actif, compte.password, compte.permissions, compte.accesFinance, compte.estCommercial],
+        ['systeme@iris.invalid', SYSTEME.nom, 'SYSTEME', false, null, [], false, false]);
+      // Aucune session à son nom, même avec un jeton correctement signé.
+      const jeton = { Authorization: `Bearer ${jwt.sign({ id: SYSTEME.id }, process.env.JWT_SECRET)}` };
+      assert.equal((await request(app).get('/api/me').set(jeton)).status, 401);
+      // Absent de la liste des comptes ; introuvable pour toute route d'un compte, après la session.
+      const liste = await request(app).get('/api/users').set(admin());
+      assert.equal(liste.status, 200);
+      assert.ok(liste.body.length > 0 && !liste.body.some((u) => u.id === SYSTEME.id || u.role === 'SYSTEME'));
+      assert.equal((await request(app).patch(`/api/users/${SYSTEME.id}/actif`).send({ actif: true })).status, 401);
+      for (const [methode, chemin, corps] of [
+        ['patch', '/actif', { actif: true }], ['patch', '/role', { role: 'ADMIN' }], ['delete', '', {}], ['patch', '/est-commercial', { estCommercial: true }],
+        ['put', '/permissions', { permissions: [] }], ['patch', '/acces-finance', { accesFinance: true }], ['patch', '/responsable-hierarchique', { responsableHierarchiqueId: null }],
+      ]) {
+        const res = await request(app)[methode](`/api/users/${SYSTEME.id}${chemin}`).set(admin()).send(corps);
+        assert.equal(res.status, 404, `${methode} ${chemin} : ${JSON.stringify(res.body)}`);
+      }
+      // La base refuse de le modifier ou de le supprimer, et de donner son type à un autre compte.
+      await assert.rejects(prisma.user.update({ where: { id: SYSTEME.id }, data: { actif: true } }), /Compte système/);
+      await assert.rejects(prisma.user.delete({ where: { id: SYSTEME.id } }), /Compte système/);
+      await assert.rejects(prisma.user.create({ data: { email: 'systeme.bis@iris.test', name: 'TEST Système bis', role: 'SYSTEME' } }), /role_systeme/);
+      await assert.rejects(prisma.user.update({ where: { id: comptes.conducteur.id }, data: { role: 'SYSTEME' } }), /role_systeme/);
+      assert.deepEqual(await prisma.user.findUniqueOrThrow({ where: { id: SYSTEME.id } }), compte);
+    });
+
     test('alerte d’absence : un passage manuel réussi ne remplace pas le passage automatique manquant', async () => {
       const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
       const aujourdhui = jourCivilEntreprise(new Date(), fuseau);
       const ilYATroisJours = new Date(new Date(`${aujourdhui}T00:00:00.000Z`).getTime() - 3 * 86_400_000);
       const cle = ilYATroisJours.toISOString().slice(0, 10);
-      await prisma.executionGenerationVisites.create({ data: { jour: ilYATroisJours, declenchement: 'AUTOMATIQUE', cleJourAutomatique: cle, anticipationJours: 30, statut: 'REUSSIE', fin: ilYATroisJours } });
+      await prisma.executionGenerationVisites.create({ data: { jour: ilYATroisJours, declenchement: 'AUTOMATIQUE', cleJourAutomatique: cle, auteurId: SYSTEME.id, auteurNom: SYSTEME.nom, anticipationJours: 30, statut: 'REUSSIE', fin: ilYATroisJours } });
       try {
         assert.equal((await lancer()).status, 201);
         const lu = (await etat()).body;
@@ -13914,7 +13955,7 @@ if (!TEST_DATABASE_URL) {
       const { etatGenerationVisites } = await import('../dist/index.js');
       const fuseauInitial = (await request(app).get('/api/company').set(admin())).body.fuseauHoraire;
       assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: 'Europe/Paris' })).status, 200);
-      await prisma.executionGenerationVisites.create({ data: { jour: new Date('2026-06-13T00:00:00.000Z'), declenchement: 'AUTOMATIQUE', cleJourAutomatique: '2026-06-13', anticipationJours: 30, statut: 'REUSSIE', fin: new Date() } });
+      await prisma.executionGenerationVisites.create({ data: { jour: new Date('2026-06-13T00:00:00.000Z'), declenchement: 'AUTOMATIQUE', cleJourAutomatique: '2026-06-13', auteurId: SYSTEME.id, auteurNom: SYSTEME.nom, anticipationJours: 30, statut: 'REUSSIE', fin: new Date() } });
       try {
         // 23 h 30 à Paris le 14-06 (21 h 30 UTC) : le passage d'hier suffit.
         assert.equal((await etatGenerationVisites(new Date('2026-06-14T21:30:00.000Z'))).alerte, null);
@@ -13967,7 +14008,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(visite.status, 201, JSON.stringify(visite.body));
       for (const action of ['CREATION', 'AVANCEMENT_ECHEANCE']) {
         await assert.rejects(prisma.$executeRaw`INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif")
-          VALUES (${randomUUID()}, ${visite.body.id}, 'INTERVENTION', ${visite.body.id}, ${action}, NULL, 'Génération automatique', 'TEST motif')`, /auteur_generation/, action);
+          VALUES (${randomUUID()}, ${visite.body.id}, 'INTERVENTION', ${visite.body.id}, ${action}, NULL, 'Génération automatique', 'TEST motif')`, /auteur_check/, action);
       }
       for (const anticipation of [-1, 366]) {
         await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours")

@@ -112,7 +112,8 @@ test('l’administration règle l’anticipation, lance la génération et retro
       .filter({ hasText: 'Anticipation des visites (jours) : 10' }).first();
     await expect(ligneJournal).toBeVisible();
   } finally {
-    const retour = await request.put(`${api}/parametres`, { headers, data: { anticipationVisitesJours: 30 } });
+    // Génération rendue désactivée, comme au démarrage d'une instance (décision du 22-10-2026).
+    const retour = await request.put(`${api}/parametres`, { headers, data: { anticipationVisitesJours: '' } });
     expect(retour.ok(), await retour.text()).toBeTruthy();
   }
   expect(fenetres).toEqual([]);
