@@ -4,6 +4,7 @@
 >
 > Depuis le 20-10-2026, Nelson ne fusionne aucune PR : Claude Code fusionne toutes ses PR, montants et propositions compris, avec une CI verte et un audit interne fusionnable sur la même SHA ([CLAUDE.md](../CLAUDE.md#mode-de-livraison)). La mise en production reste à Nelson. PR ouvertes au 22-10-2026, hors cette passation :
 > - [#250](https://github.com/Noxia-Groupe/iris/pull/250) (#240, pool de connexions de la modification d'un devis) : en brouillon, en pause jusqu'à la fin du pilote (règle du 19-10-2026).
+> - [#298](https://github.com/Noxia-Groupe/iris/pull/298) (#295, #296) : tests restants des audits de #294 et #293, ouverte le 22-10-2026.
 >
 > Le détail est tenu dans chaque PR, corps et commentaires.
 >
@@ -134,8 +135,8 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
   - Vérifier le branding et les modèles de documents réellement disponibles avant de clôturer le volet personnalisation.
   - Identité de l'application (lot P0, #280, non validé pour mise en service ; décision de Nelson du 21-10-2026) :
     - la page de connexion ([Login.tsx](../client/src/pages/Login.tsx)) et le planning public ([PlanningPublic.tsx](../client/src/pages/PlanningPublic.tsx)) affichent « IRIS », le nom de l'application ;
-    - icônes neutres de l'application (`client/public/icone.svg` et ses rendus) ; les trois bleus de l'ancienne marque remplacés par la palette standard de Tailwind, les deux gris neutres et la police de l'ancienne charte gardés ;
-    - aucun nom de société ni aucun des trois bleus de l'ancienne marque dans le code livré, hors les deux migrations déjà appliquées (`20260703090000`, `20260904210000`), sous la garde statique `client/tests/identite.test.ts` ; barèmes et primes insérés par migration vidés, sauf valeur différente de celle insérée (la migration de #280 ne cite ces valeurs que pour les reconnaître) ;
+    - icônes neutres de l'application (`client/public/icone.svg` et ses rendus) ; les trois bleus de l'ancienne marque remplacés par trois bleus de la palette standard de Tailwind 3, les deux gris neutres et la police de l'ancienne charte gardés ;
+    - ni le nom de l'ancienne société, sous aucune graphie, ni aucun des trois bleus de l'ancienne marque dans le code livré, hors les deux migrations déjà appliquées (`20260703090000`, `20260904210000`), sous la garde statique `client/tests/identite.test.ts` ; barèmes et primes insérés par migration vidés, sauf valeur différente de celle insérée (la migration de #280 ne cite ces valeurs que pour les reconnaître) ;
     - le menu, lui, affiche le nom de la société (#118) ;
     - choix par défaut en section 4.
   - La police est chargée depuis Google Fonts ; choix : l'héberger avec l'application.

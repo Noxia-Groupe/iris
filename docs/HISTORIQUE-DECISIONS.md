@@ -312,3 +312,4 @@ Ordre de travail retenu par Claude Code (choix de mise en œuvre, non décidé p
 
 - Lots pilotes 4 et 5 implémentés, non validés pour mise en service ; le lot 6 (envoi des documents) reste à livrer ; deux questions de la section 3 de la passation en touchent le périmètre (repli des PDF envoyés à la main, périmètre de P5).
 - #250 (#240) : toujours en pause, en brouillon, jusqu'à la fin du pilote.
+- #298 : tests de #295 et de #296 (N1, N2), ouverte le 22-10-2026.
