@@ -13900,7 +13900,6 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await visites(contrat.id)).length, 1);
     });
 
-    // L'alerte d'absence porte sur le dernier passage AUTOMATIQUE : un passage manuel ne la masque pas.
     // Décisions de Nelson du 22-10-2026, questions (a) et (c) du lot pilote 5.
     test('génération désactivée au démarrage ; compte système sans session, hors de la gestion des comptes, figé en base', async () => {
       // (a) Une ligne de paramètres neuve n'a pas d'anticipation : la génération est désactivée.
@@ -13930,9 +13929,25 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.user.delete({ where: { id: SYSTEME.id } }), /Compte système/);
       await assert.rejects(prisma.user.create({ data: { email: 'systeme.bis@iris.test', name: 'TEST Système bis', role: 'SYSTEME' } }), /role_systeme/);
       await assert.rejects(prisma.user.update({ where: { id: comptes.conducteur.id }, data: { role: 'SYSTEME' } }), /role_systeme/);
+      // Son adresse mise par erreur dans SUPERADMIN_EMAILS : signalée au démarrage, sans nouvel essai ni promotion.
+      const emails = process.env.SUPERADMIN_EMAILS;
+      const erreurs = mock.method(console, 'error', () => {});
+      const avertissements = mock.method(console, 'warn', () => {});
+      let appels = [];
+      try {
+        process.env.SUPERADMIN_EMAILS = `${emails},Systeme@iris.invalid`;
+        await ensureSuperAdmins();
+      } finally {
+        process.env.SUPERADMIN_EMAILS = emails;
+        appels = [...erreurs.mock.calls, ...avertissements.mock.calls].map((appel) => String(appel.arguments[0]));
+        erreurs.mock.restore();
+        avertissements.mock.restore();
+      }
+      assert.deepEqual(appels, ['[DÉMARRAGE] systeme@iris.invalid est l\'adresse réservée du compte système : retirez-la de SUPERADMIN_EMAILS, ce compte n\'est jamais promu.']);
       assert.deepEqual(await prisma.user.findUniqueOrThrow({ where: { id: SYSTEME.id } }), compte);
     });
 
+    // L'alerte d'absence porte sur le dernier passage AUTOMATIQUE : un passage manuel ne la masque pas.
     test('alerte d’absence : un passage manuel réussi ne remplace pas le passage automatique manquant', async () => {
       const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
       const aujourdhui = jourCivilEntreprise(new Date(), fuseau);
