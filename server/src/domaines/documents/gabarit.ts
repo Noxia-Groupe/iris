@@ -29,13 +29,24 @@ const HAUTEUR_PIED_MAX = 300;
 const LARGEUR_LOGO = 160;
 const HAUTEUR_LOGO = 64;
 
+// Caractères de la page de code 1252 hors Latin-1 que PDFKit sait encoder (€, ’, œ, …, —).
+const WIN_ANSI_HORS_LATIN1 = new Set([0x20ac, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x017d,
+  0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x017e, 0x0178]);
+const encodableWinAnsi = (code: number) => code === 0x0a || (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff) || WIN_ANSI_HORS_LATIN1.has(code);
+
 // Les polices standards PDFKit sont WinAnsi : normaliser les caractères typographiques non encodables avant impression.
+// Un autre caractère (Ω, ≥, ⌀, ł, émoji, tabulation…) serait écrit par PDFKit avec plus ou moins de deux
+// chiffres hexadécimaux et décalerait toute la suite de la ligne, montants compris : il devient sa
+// lettre de base quand elle existe (č → c), sinon « ? ».
 export function texteWinAnsi(texte: string) {
   return [...String(texte)].map((caractere) => {
-    const code = caractere.codePointAt(0);
-    if (code === 0x2007 || code === 0x2009 || code === 0x202f) return ' ';
+    const code = caractere.codePointAt(0)!;
+    if (code === 0x2007 || code === 0x2009 || code === 0x202f || code === 0x09) return ' ';
     if (code === 0x2011) return '-';
-    return caractere;
+    if (code === 0x0d) return '';
+    if (encodableWinAnsi(code)) return caractere;
+    const base = caractere.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+    return base && [...base].every((lettre) => encodableWinAnsi(lettre.codePointAt(0)!)) ? base : '?';
   }).join('');
 }
 

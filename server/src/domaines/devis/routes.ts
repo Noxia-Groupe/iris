@@ -98,36 +98,47 @@ const signerDevis: express.RequestHandler = async (req, res) => { try {
     // Lot 6a-2 : le devis signé, figé, s'imprimera depuis ces copies, et non depuis la société et
     // la fiche client vivantes. Sans identité complète, la signature est refusée sans rien écrire.
     const identiteEmetteurId = await figerIdentiteEmetteur(tx, 'd’enregistrer la signature d’un devis');
+    // Le fuseau, qui date le devis imprimé, est lu sous le verrou partagé de la société pris ci-dessus.
+    const { fuseauHoraire } = await tx.companySettings.findUniqueOrThrow({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
     const client = await tx.client.findUniqueOrThrow({ where: { id: devis.clientId }, select: { raisonSociale: true } });
     const siteFacturation = await tx.clientSite.findFirst({ where: { clientId: devis.clientId }, orderBy: SITE_FACTURATION_ORDRE });
     await tx.devis.update({ where: { id: devis.id }, data: { statut: 'ACCEPTE' } });
     const auteur = (req as AuthRequest).user;
     if (!auteur) throw new DevisConflitError('Une session humaine active est obligatoire pour signer un devis.');
     return tx.devisSignature.create({
-      data: { devisId: devis.id, enregistreParId: auteur.id, signataire, empreinte, identiteEmetteurId, clientRaisonSociale: client.raisonSociale.trim(), clientAdresse: siteFacturation ? formaterAdresseFacturation(siteFacturation) : null },
+      data: { devisId: devis.id, enregistreParId: auteur.id, signataire, empreinte, identiteEmetteurId, clientRaisonSociale: client.raisonSociale.trim(), clientAdresse: siteFacturation ? formaterAdresseFacturation(siteFacturation) : null, fuseauHoraire: fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT },
       select: { id: true, signataire: true, empreinte: true, signeLe: true, enregistreParId: true },
     });
   });
   res.status(201).json(signature);
 } catch (error) { devisErreur(res, error); } };
 
-// Un devis signé s'imprime depuis les copies prises à sa signature ; un devis non signé, encore
-// modifiable, avec l'identité de la société et la fiche client actuelles. Une signature
-// antérieure au lot 6a-2 n'a pas de copie : son devis s'imprime comme un devis non signé.
+// Un devis signé s'imprime depuis les copies prises à sa signature ; un devis non signé (brouillon,
+// envoyé, ou refusé ou annulé avant signature), avec l'identité de la société et la fiche client
+// actuelles. Une signature antérieure au lot 6a-2 n'a pas de copie : son devis s'imprime comme un
+// devis non signé.
+// Toutes les lectures se font dans un même instantané (REPEATABLE READ) : un devis modifié pendant
+// l'impression ne mêle jamais ses anciens totaux à ses nouvelles lignes, ni l'identité à un autre logo.
 const imprimerDevis: express.RequestHandler = async (req, res) => { try {
-  const devis = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: {
-    lignes: { orderBy: { ordre: 'asc' } },
-    signature: { include: { identiteEmetteur: { include: { logo: { select: { contenu: true } } } } } },
-    client: { select: { raisonSociale: true, sites: { orderBy: SITE_FACTURATION_ORDRE, take: 1 } } },
-  } });
-  if (!devis) return void res.status(404).json({ error: 'Devis introuvable.' });
-  const copie = devis.signature?.identiteEmetteur ? devis.signature : null;
-  const identite = copie?.identiteEmetteur ?? await identiteActuelleImprimee(prisma, 'd’imprimer un devis');
-  const client = copie
-    ? { raisonSociale: copie.clientRaisonSociale!, adresse: copie.clientAdresse }
-    : { raisonSociale: devis.client.raisonSociale, adresse: devis.client.sites[0] ? formaterAdresseFacturation(devis.client.sites[0]) : null };
-  const fuseau = (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
-  const pdf = await rendreDocumentDevisPdf({ devis, identite, client, fuseau });
+  const lu = await transactionVerifiee(async tx => {
+    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: {
+      lignes: { orderBy: { ordre: 'asc' } },
+      signature: { include: { identiteEmetteur: { include: { logo: { select: { contenu: true } } } } } },
+      client: { select: { raisonSociale: true, sites: { orderBy: SITE_FACTURATION_ORDRE, take: 1 } } },
+    } });
+    if (!devis) return null;
+    const copie = devis.signature?.identiteEmetteur ? devis.signature : null;
+    const identite = copie?.identiteEmetteur ?? await identiteActuelleImprimee(tx, 'd’imprimer un devis');
+    const client = copie
+      ? { raisonSociale: copie.clientRaisonSociale!, adresse: copie.clientAdresse }
+      : { raisonSociale: devis.client.raisonSociale, adresse: devis.client.sites[0] ? formaterAdresseFacturation(devis.client.sites[0]) : null };
+    // Les dates d'un devis signé (création, signature) se lisent dans le fuseau copié à sa signature.
+    const societe = copie ? null : await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
+    return { devis, identite, client, fuseau: copie?.fuseauHoraire || societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT };
+  }, { isolationLevel: 'RepeatableRead' });
+  if (!lu) return void res.status(404).json({ error: 'Devis introuvable.' });
+  const { devis } = lu;
+  const pdf = await rendreDocumentDevisPdf(lu);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${devis.numero}-v${devis.version}.pdf"`);
   res.setHeader('Content-Length', pdf.length);

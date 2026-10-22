@@ -569,6 +569,8 @@ model DevisSignature {
   identiteEmetteur    IdentiteEmetteur? @relation(fields: [identiteEmetteurId], references: [id], onDelete: Restrict)
   clientRaisonSociale String?
   clientAdresse       String?
+  // Fuseau de la société à la signature : il date le devis signé imprimé (création, signature).
+  fuseauHoraire       String?
 
   @@index([enregistreParId])
   @@index([identiteEmetteurId])

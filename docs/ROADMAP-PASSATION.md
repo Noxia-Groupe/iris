@@ -66,7 +66,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - lignes reprises du catalogue et copiées figées, prix d'achat prévu réservé à l'administration ;
     - devis signé figé en base (#161) ;
     - conversion en intervention ou en contrat (lot pilote 4, #281 ; non validée pour mise en service) ;
-    - PDF du devis sur le modèle commun, depuis l'écran Devis ; un devis signé s'imprime depuis l'identité de l'émetteur et le client copiés à sa signature (lot 6a-2, #301 ; non validé pour mise en service).
+    - PDF du devis sur le modèle commun, depuis l'écran Devis ; un devis signé s'imprime depuis l'identité de l'émetteur, le client et le fuseau de la société copiés à sa signature (lot 6a-2, #301 ; non validé pour mise en service).
   - Absent :
     - envoi d'un devis (lot pilote 6, PR 6a-3) ;
     - paiement ou rapprochement de l'acompte.
@@ -503,10 +503,11 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 
 **PDF du devis** (lot 6a-2, #301), choix par défaut, à confirmer :
 - Tout devis, quel que soit son statut, a son PDF (`GET /api/devis/:id/document.pdf`), pour les porteurs du droit de lecture des devis, en session seulement, comme le PDF des factures : ni technicien, ni clé d'intégration.
-- Un devis signé, figé en base (#161), s'imprime depuis des copies prises à sa signature : l'identité de l'émetteur (la ligne figée du lot 6a-1, avec son logo, sa couleur et son pied de page), la raison sociale du client et son adresse de facturation (même choix du site que la facture ; absente si le client n'a aucun site). La base exige ces copies pour toute nouvelle signature et les fige avec elle.
+- Un devis signé, figé en base (#161), s'imprime depuis des copies prises à sa signature : l'identité de l'émetteur (la ligne figée du lot 6a-1, avec son logo, sa couleur et son pied de page), la raison sociale du client et son adresse de facturation (même choix du site que la facture ; absente si le client n'a aucun site), ainsi que le fuseau de la société, qui date le devis imprimé (création de la version, signature). La base exige ces copies pour toute nouvelle signature et les fige avec elle.
 - Enregistrer une signature exige donc l'identité complète de la société (mêmes champs que pour émettre une facture) ; sinon, refus 409 qui nomme les champs manquants, sans rien écrire.
-- Un devis non signé, encore modifiable, s'imprime avec l'identité de la société et la fiche client actuelles, et le même refus si l'identité est incomplète. Une signature enregistrée avant ce lot n'a pas de copie : son devis s'imprime de la même façon (sans objet tant qu'aucune donnée réelle n'existe).
+- Un devis non signé (brouillon ou envoyé, mais aussi refusé ou annulé avant toute signature) s'imprime avec l'identité de la société et la fiche client actuelles, et le même refus si l'identité est incomplète. Une signature enregistrée avant ce lot n'a pas de copie : son devis s'imprime de la même façon (sans objet tant qu'aucune donnée réelle n'existe).
 - Le PDF imprime le numéro, la version, la date de création du devis (jour de la société), le client, l'objet, les lignes (référence et unité comprises), la ventilation de la TVA par taux, recalculée depuis les lignes avec l'arrondi du devis, le taux d'acompte demandé, puis un cadre « Bon pour accord » à remplir, ou, pour un devis signé, le signataire, la date et l'empreinte du contenu signé. Jamais le prix d'achat prévu, ni le motif d'une annulation. Un devis annulé ou refusé l'annonce en tête, sans cadre à remplir.
+- Le modèle commun imprime dans les polices standard du PDF (jeu de caractères WinAnsi) : un caractère hors de ce jeu (Ω, ≥, ł, émoji…) devient sa lettre de base (č → c) ou « ? », sur tous les documents, factures comprises, au lieu de brouiller la suite de la ligne. Embarquer une police Unicode reste possible, à arbitrer.
 
 ## 5. Préalables à la mise en service et contrat d'une PR
 

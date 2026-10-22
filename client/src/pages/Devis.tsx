@@ -199,7 +199,10 @@ export default function Devis() {
     const a = document.createElement('a');
     a.href = url; a.download = `${d.numero}-v${d.version}.pdf`; a.click();
     URL.revokeObjectURL(url);
-  } catch (e) { setError(e instanceof Error ? e.message : 'Document indisponible.'); } };
+  } catch (e) {
+    // Le message s'affiche en haut de l'écran : le bouton, dans la liste, peut en être loin (téléphone).
+    setError(e instanceof Error ? e.message : 'Document indisponible.'); window.scrollTo({ top: 0, behavior: 'smooth' });
+  } };
   const updateLine = (index: number, key: keyof Ligne, value: string) => setForm(f => ({ ...f, lignes: f.lignes.map((ligne, i) => i === index ? { ...ligne, [key]: key === 'designation' || key === 'nature' || key === 'unite' || key === 'prixAchatUnitaireHt' ? value : Number(value) } as Ligne : ligne) }));
   const addLine = () => setForm(f => ({ ...f, lignes: [...f.lignes, { ...ligneVide }] }));
   const removeLine = (index: number) => setForm(f => ({ ...f, lignes: f.lignes.filter((_, i) => i !== index) }));
@@ -208,7 +211,7 @@ export default function Devis() {
 
   return <div className="max-w-6xl mx-auto space-y-6">
     <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between sm:items-center"><div><h1 className="text-2xl font-bold">Devis</h1><p className="text-gray-500">Éditables jusqu’à la signature du client, puis révisables par nouvelle version.</p></div><button className="btn border flex items-center gap-2" onClick={() => void load()}><RefreshCw size={16}/> Actualiser</button></div>
-    {error && <p className="text-red-600">{error}</p>}
+    {error && <p role="alert" className="text-red-600">{error}</p>}
     {devisASigner && <form role="dialog" aria-label="Signature client" onSubmit={signer} className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3">
       <div><h2 className="font-semibold">Signature client</h2><p className="text-sm text-gray-600">Le client confirme le devis figé. L’employé connecté enregistre son acceptation.</p></div>
       <label className="text-sm font-medium block">Enregistré par<input aria-label="Enregistré par" readOnly className="mt-1 w-full border rounded px-3 py-2 bg-gray-100" value={utilisateur?.name || 'Session interne active'}/></label>
