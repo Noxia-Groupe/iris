@@ -39,6 +39,18 @@ export function texteWinAnsi(texte: string) {
   }).join('');
 }
 
+// Coupe un texte en lignes d'au plus `largeur` caractères, pour les colonnes à chasse fixe des
+// tableaux de lignes ; un mot trop long est coupé.
+export function replierTexte(texte: string, largeur: number) {
+  const lignes: string[] = []; let courante = '';
+  for (let mot of String(texte).split(/\s+/).filter(Boolean)) {
+    while (mot.length > largeur) { if (courante) { lignes.push(courante); courante = ''; } lignes.push(mot.slice(0, largeur)); mot = mot.slice(largeur); }
+    const essai = courante ? `${courante} ${mot}` : mot;
+    if (essai.length <= largeur) courante = essai; else { lignes.push(courante); courante = mot; }
+  }
+  if (courante || !lignes.length) lignes.push(courante); return lignes;
+}
+
 function lignesIdentite(identite: IdentiteImprimee) {
   const localite = [identite.codePostal, identite.ville].filter(Boolean).join(' ');
   return [

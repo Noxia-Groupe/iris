@@ -1,5 +1,5 @@
 import { formatMontantFacture, formatDateFacture, ventilationFacture } from './metier';
-import { ouvrirDocumentPdf, type IdentiteImprimee } from '../documents/gabarit';
+import { ouvrirDocumentPdf, replierTexte, type IdentiteImprimee } from '../documents/gabarit';
 
 // Une facture émise s'imprime uniquement depuis ses copies figées : client, mentions légales et,
 // depuis le lot 6a-1, identité de l'émetteur avec son logo, sa couleur et son pied de page. Aucun
@@ -9,15 +9,6 @@ export async function rendreDocumentFacturePdf(facture: any): Promise<Buffer> {
   const identite: IdentiteImprimee | null = facture.identiteEmetteur ?? null;
   const document = ouvrirDocumentPdf({ titre: `Facture ${facture.numero}`, identite });
   const { pdf, ligne, couleur } = document;
-  const replier = (texte: string, largeur: number) => {
-    const lignes: string[] = []; let courante = '';
-    for (let mot of String(texte).split(/\s+/).filter(Boolean)) {
-      while (mot.length > largeur) { if (courante) { lignes.push(courante); courante = ''; } lignes.push(mot.slice(0, largeur)); mot = mot.slice(largeur); }
-      const essai = courante ? `${courante} ${mot}` : mot;
-      if (essai.length <= largeur) courante = essai; else { lignes.push(courante); courante = mot; }
-    }
-    if (courante || !lignes.length) lignes.push(courante); return lignes;
-  };
   const legal = facture.mentionsLegalesVersion;
   // Une valeur large ne doit jamais se coller à la colonne précédente : on garde au moins un séparateur.
   const colonne = (valeur: string, largeur: number) => (valeur.length >= largeur ? ` ${valeur}` : valeur.padStart(largeur));
@@ -46,7 +37,7 @@ export async function rendreDocumentFacturePdf(facture: any): Promise<Buffer> {
   pdf.font('Courier');
   ligne(colonnes('Désignation', 'Qté', 'PU HT', 'TVA', 'Total HT'), { taille: 9 });
   for (const item of facture.lignes) {
-    const [premiere, ...suite] = replier(String(item.designation), 36);
+    const [premiere, ...suite] = replierTexte(String(item.designation), 36);
     ligne(colonnes(premiere, String(item.quantite), formatMontantFacture(item.prixUnitaireHt), `${Number(item.tauxTva)} %`, formatMontantFacture(item.totalHt)), { taille: 9 });
     for (const reste of suite) ligne(reste, { taille: 9 });
   }

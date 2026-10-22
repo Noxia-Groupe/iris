@@ -15,6 +15,8 @@ import { decimalToNumber, centimes } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
+import { SITE_FACTURATION_ORDRE, formaterAdresseFacturation } from '../factures/metier';
+import { IdentiteEmetteurIncompleteError, figerIdentiteEmetteur, identiteActuelleImprimee } from '../documents/identite';
 import { type CatalogueFamily, catalogueFamily, catalogueModels } from '../catalogue/metier';
 import { sanitizeTypes, refusTitulaire, refusCommercial } from '../chantiers/metier';
 import { SaisieInterventionInvalide, creerInterventionNumerotee, estEncadrementCoutIntervention, exposerIntervention, lireDetailsIntervention } from '../interventions/metier';
@@ -23,11 +25,13 @@ import {
   DevisSaisieError, DevisConflitError, DevisDroitError, devisPayload, NATURE_DEVIS_PAR_FAMILLE, devisPourLecteur, resoudreLignesDevis,
   devisInclude, contenuDevisSigne, copieLigneDevis, verrouillerDevis, acompteDevisPayload, nouveauNumeroDevis,
 } from './metier';
+import { rendreDocumentDevisPdf } from './document';
 
 function devisErreur(res: express.Response, error: unknown) {
   if (error instanceof DevisSaisieError) return res.status(400).json({ error: error.message });
   if (error instanceof DevisConflitError) return res.status(409).json({ error: error.message });
   if (error instanceof DevisDroitError) return res.status(403).json({ error: error.message });
+  if (error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
   if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
@@ -91,12 +95,43 @@ const signerDevis: express.RequestHandler = async (req, res) => { try {
     if (devis.conversion) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être signé.');
     if (devis.statut === 'ANNULE' || devis.statut === 'REFUSE') throw new DevisConflitError('Ce devis ne peut plus être signé dans son état actuel.');
     const empreinte = crypto.createHash('sha256').update(JSON.stringify(contenuDevisSigne(devis)), 'utf8').digest('hex');
+    // Lot 6a-2 : le devis signé, figé, s'imprimera depuis ces copies, et non depuis la société et
+    // la fiche client vivantes. Sans identité complète, la signature est refusée sans rien écrire.
+    const identiteEmetteurId = await figerIdentiteEmetteur(tx, 'd’enregistrer la signature d’un devis');
+    const client = await tx.client.findUniqueOrThrow({ where: { id: devis.clientId }, select: { raisonSociale: true } });
+    const siteFacturation = await tx.clientSite.findFirst({ where: { clientId: devis.clientId }, orderBy: SITE_FACTURATION_ORDRE });
     await tx.devis.update({ where: { id: devis.id }, data: { statut: 'ACCEPTE' } });
     const auteur = (req as AuthRequest).user;
     if (!auteur) throw new DevisConflitError('Une session humaine active est obligatoire pour signer un devis.');
-    return tx.devisSignature.create({ data: { devisId: devis.id, enregistreParId: auteur.id, signataire, empreinte }, select: { id: true, signataire: true, empreinte: true, signeLe: true, enregistreParId: true } });
+    return tx.devisSignature.create({
+      data: { devisId: devis.id, enregistreParId: auteur.id, signataire, empreinte, identiteEmetteurId, clientRaisonSociale: client.raisonSociale.trim(), clientAdresse: siteFacturation ? formaterAdresseFacturation(siteFacturation) : null },
+      select: { id: true, signataire: true, empreinte: true, signeLe: true, enregistreParId: true },
+    });
   });
   res.status(201).json(signature);
+} catch (error) { devisErreur(res, error); } };
+
+// Un devis signé s'imprime depuis les copies prises à sa signature ; un devis non signé, encore
+// modifiable, avec l'identité de la société et la fiche client actuelles. Une signature
+// antérieure au lot 6a-2 n'a pas de copie : son devis s'imprime comme un devis non signé.
+const imprimerDevis: express.RequestHandler = async (req, res) => { try {
+  const devis = await prisma.devis.findUnique({ where: { id: paramId(req) }, include: {
+    lignes: { orderBy: { ordre: 'asc' } },
+    signature: { include: { identiteEmetteur: { include: { logo: { select: { contenu: true } } } } } },
+    client: { select: { raisonSociale: true, sites: { orderBy: SITE_FACTURATION_ORDRE, take: 1 } } },
+  } });
+  if (!devis) return void res.status(404).json({ error: 'Devis introuvable.' });
+  const copie = devis.signature?.identiteEmetteur ? devis.signature : null;
+  const identite = copie?.identiteEmetteur ?? await identiteActuelleImprimee(prisma, 'd’imprimer un devis');
+  const client = copie
+    ? { raisonSociale: copie.clientRaisonSociale!, adresse: copie.clientAdresse }
+    : { raisonSociale: devis.client.raisonSociale, adresse: devis.client.sites[0] ? formaterAdresseFacturation(devis.client.sites[0]) : null };
+  const fuseau = (await getCompanySettings()).fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT;
+  const pdf = await rendreDocumentDevisPdf({ devis, identite, client, fuseau });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${devis.numero}-v${devis.version}.pdf"`);
+  res.setHeader('Content-Length', pdf.length);
+  res.send(pdf);
 } catch (error) { devisErreur(res, error); } };
 
 // Cycle de vie d'un devis. `ANNULE` ne figure dans aucune liste de destinations : on n'y
@@ -343,6 +378,8 @@ export function enregistrerRoutesDevis(app: Express): void {
   routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision, [requirePermission('devis:write')]);
   // La signature engage une personne identifiée : aucune clé d'intégration ne peut l'émettre.
   app.post('/api/devis/:id/signature', requireAuth, requirePermission('devis:write'), signerDevis);
+  // PDF du devis (lot 6a-2) : porteurs du droit devis, en session seulement, comme le PDF des factures.
+  app.get('/api/devis/:id/document.pdf', requireAuth, requirePermission('devis:read'), imprimerDevis);
 
   routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requirePermission('devis:write')]);
 
