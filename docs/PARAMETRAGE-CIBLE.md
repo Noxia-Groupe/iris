@@ -167,8 +167,8 @@ Les noms décrivent l'organisation, pour ne pas se confondre avec les catégorie
 
 ### 4.4 Règles d'organisation hors des droits, à cadrer
 
-Elles n'existent pas dans le code. Elles sont posées ici sans valeur :
-- les **destinataires des alertes et des notifications**, par exemple l'alerte d'échec de la génération des visites, livrée par le lot 5 (#293) et affichée aux seuls administrateurs ;
+Elles n'existent pas dans le code comme réglages. Elles sont posées ici sans valeur :
+- les **destinataires des alertes et des notifications**, par exemple l'alerte de la génération des visites, livrée par le lot 5 (#293), que le code réserve aux administrateurs (choix par défaut, à confirmer, passation section 4) ;
 - une **validation interne en deux temps** d'un devis avant envoi : c'est une étape de circuit, et non une permission (B-05) ;
 - les **agences ou établissements**, pour une société d'une certaine taille : un lot dédié, si une société en a besoin ([`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), décision 1).
 

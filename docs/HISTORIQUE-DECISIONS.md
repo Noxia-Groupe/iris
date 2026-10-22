@@ -298,7 +298,7 @@ Ordre de travail retenu par Claude Code (choix de mise en œuvre, non décidé p
 - #277 : passation du 20-10-2026 au soir, lot pilote 3 implémenté, propositions 3 et 4 validées.
 - #278 : décisions de Nelson du 21-10-2026 reportées dans la passation et cet historique.
 - #279 : planning du technicien étendu aux affectations des chantiers dont il est titulaire (décision « Des 2 »).
-- #280 (lot P0) : Iris sans valeurs de société ; « IRIS » sur la connexion et le planning public ; icônes et couleurs neutres ; barèmes et primes insérés par migration vidés, sauf valeur saisie, sans effet sur aucun montant ; rapport de chantier en A4 ; réseau Docker interne renommé `iris-network`.
+- #280 (lot P0) : Iris sans valeurs de société ; « IRIS » sur la connexion et le planning public ; icônes et couleurs neutres ; barèmes et primes insérés par migration vidés, sauf valeur saisie différente de celle insérée, sans effet sur aucun montant ; rapport de chantier en A4 ; réseau Docker interne renommé `iris-network`.
 - #282 (#179) : directeur commercial, assistante commerciale et comptable refusés, comme le commercial, sur le planning et les écritures des référentiels.
 - #283 (#181, lot D0) : réattributions de chantier et encaissement journalisés.
 - #281 (lot pilote 4) : un devis signé crée son intervention ou son contrat de maintenance ; questions (a) et (b) posées à Nelson (passation, section 3). Tests restants de son sixième audit : #294.

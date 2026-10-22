@@ -108,7 +108,7 @@ La zone exportée en PDF (`ref={printRef}`, 677-1014) garde le même conteneur. 
 3. PR B, Admin.
 4. PR C, fiche chantier.
 
-Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour le serveur : périmètre, plages déplacées, preuves, audit. Un lot fonctionnel qui ne touche pas ces écrans peut avancer en parallèle. Pour la PR C, l'ordre est celui de l'état en tête de ce document : elle vient après le lot pilote 6 et la matrice D1a.
+Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour le serveur : périmètre, plages déplacées, preuves, audit. Pour la PR C, l'ordre est celui de l'état en tête de ce document : elle vient après le lot pilote 6 et la matrice D1a.
 
 ## Hors périmètre de ces PR (à proposer à part si utile)
 
