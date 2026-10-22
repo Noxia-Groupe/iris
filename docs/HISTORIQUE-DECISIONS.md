@@ -288,3 +288,28 @@ Fusionnés par Claude Code : #246 sur autorisation de Nelson, #249 et #255 par l
 4. **#179, #181 et le lot P0 du paramétrage avant la fin du pilote ?** « Oui a traiter avant, il ne doit plus y avoir de noxia groupe dans l’application, c’est une application ouverte a toute les entreprise. La page de connexion doit etre au nom de l’application c’est a dire IRIS. » #179 et #181 passent avant la fin du pilote. Pour le lot P0, la question posée dans le message disait « avant la fin du pilote », mais celle de la passation précisait « et donc avant le premier jour, ces deux pages étant visibles dès la mise en service ». Lecture retenue, à corriger par Nelson si besoin : la page de connexion devant porter le nom de l'application dès la mise en service, P0 passe avant le premier jour. Chacun dans sa PR.
 
 Ordre de travail retenu par Claude Code (choix de mise en œuvre, non décidé par Nelson) : planning étendu, lot P0, #179, #181, puis les lots 4, 5 et 6. Placer #179 et #181 avant les lots 4 à 6 lit « à traiter avant » comme levant, pour ces deux correctifs, la première clause de la règle du pilote du 19-10-2026. Viennent ensuite la matrice D1a, qui enregistre le comportement corrigé par #179 et #181, et la PR C du découpage des écrans (fiche chantier).
+
+## Lots des 21 et 22-10-2026
+
+*Rédigé le 22-10-2026.* Fusions faites par Claude Code selon la décision de Nelson du 20-10-2026, chacune avec une CI verte et un audit interne fusionnable sur la même SHA. Aucune n'est validée pour mise en service.
+
+### Lots fusionnés
+
+- #277 : passation du 20-10-2026 au soir, lot pilote 3 implémenté, propositions 3 et 4 validées.
+- #278 : décisions de Nelson du 21-10-2026 reportées dans la passation et cet historique.
+- #279 : planning du technicien étendu aux affectations des chantiers dont il est titulaire (décision « Des 2 »).
+- #280 (lot P0) : Iris sans valeurs de société ; « IRIS » sur la connexion et le planning public ; icônes neutres ; trois bleus de la palette standard à la place de ceux de l'ancienne marque, ses deux gris et sa police gardés ; barèmes et primes insérés par migration vidés, sauf valeur saisie différente de celle insérée, sans effet sur aucun montant ; rapport de chantier en A4 ; réseau Docker interne renommé `iris-network`.
+- #282 (#179) : directeur commercial, assistante commerciale et comptable refusés, comme le commercial, sur le planning et les écritures des référentiels.
+- #283 (#181, lot D0) : réattributions de chantier et encaissement journalisés.
+- #281 (lot pilote 4) : un devis signé crée son intervention ou son contrat de maintenance ; questions (a) et (b) posées à Nelson (passation, section 3). Tests restants de son sixième audit : #294.
+- #293 (lot pilote 5) : génération automatique quotidienne des visites de maintenance, avec une anticipation paramétrable et une alerte ; questions (a) à (c) posées à Nelson (passation, section 3).
+
+### Suivis ouverts pendant ces lots
+
+Étiquette `suivi-audit` : #284 (E2E `dates-societe`, audit de #280), #285 et #286 (chantiers ; suppression d'un compte), #287 et #288 (E2E de la signature au doigt et de `entetes-mobile`), #289 (statut d'un chantier écrit sans contrôle par l'API), #290 (test sentinelle du planning), #291 (tests de verrou, audit de #283), #292 (tests du sixième audit de #281, fermée par #294), #295 (clé du formulaire de conversion, audit de #294), #296 (notes du troisième audit de #293) et #299 (teinte de survol dérivée de l'ancien accent, audit de #297).
+
+### En cours au 22-10-2026
+
+- Lots pilotes 4 et 5 implémentés, non validés pour mise en service ; le lot 6 (envoi des documents) reste à livrer ; deux questions de la section 3 de la passation en touchent le périmètre (repli des PDF envoyés à la main, périmètre de P5).
+- #250 (#240) : toujours en pause, en brouillon, jusqu'à la fin du pilote.
+- #298 : tests de #295 et de #296 (N1, N2), ouverte le 22-10-2026.

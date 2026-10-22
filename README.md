@@ -234,7 +234,7 @@ remplacer — voir [`docs/ACCES-SANS-MICROSOFT.md`](docs/ACCES-SANS-MICROSOFT.md
 
 ### Configuration Entra ID à réaliser
 - Type d'application : **Single-page application (SPA)**.
-- URI de redirection : `https://<domaine-de-l-instance>/auth/callback` (par exemple `https://iris.noxia-groupe.fr/auth/callback`), et non l'origine seule.
+- URI de redirection : `https://<domaine-de-l-instance>/auth/callback` (par exemple `https://iris.exemple.test/auth/callback`), et non l'origine seule.
 - Renseigner ensuite `AZURE_TENANT_ID` (GUID de l'annuaire) et `AZURE_CLIENT_ID` (GUID de l'application) uniquement dans `server/.env` sur le VPS ; ces valeurs sont publiques par nature pour une SPA. Procédure complète : [`docs/CONFIGURATION-ENVIRONNEMENT.md`](docs/CONFIGURATION-ENVIRONNEMENT.md#microsoft-entra-id-microsoft-365).
 - Ne pas créer de secret client pour ce flux SPA. Aucun secret Microsoft ne doit être ajouté au dépôt.
 

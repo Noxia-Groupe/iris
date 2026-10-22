@@ -2,7 +2,7 @@
 
 **Proposition du 18-10-2026.** Le même jour, Nelson en a validé le principe et les fichiers à plat, et il a délégué le traitement des petites anomalies. Les autres choix, dont l'ordre des PR, sont des choix techniques de Claude Code (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
 
-Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 21-10-2026** : PR A (#213) et PR B (#214) implémentées. PR C à faire : #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée (`b684fae`) ; la PR C vient après le lot pilote 3b, prochaine PR fonctionnelle selon la règle du pilote du 19-10-2026 (ordre choisi par Claude Code). Depuis le 21-10-2026, elle suit les lots 4 à 6 et la matrice D1a (ordre retenu par Claude Code, [passation](ROADMAP-PASSATION.md#ordre-de-travail-proposé-à-confirmer-par-nelson)). Les numéros de ligne de ce document se rapportent au relevé du 18-10-2026 : chaque PR de découpage revérifie ses plages sur son `main`.
+Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 22-10-2026** : PR A (#213) et PR B (#214) implémentées. PR C à faire, après le lot pilote 6 et la matrice D1a (ordre retenu par Claude Code le 21-10-2026, [passation](ROADMAP-PASSATION.md#ordre-de-travail-proposé-à-confirmer-par-nelson)) ; #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée (`b684fae`). Les numéros de ligne de ce document se rapportent au relevé du 18-10-2026 : chaque PR de découpage revérifie ses plages sur son `main`.
 
 | Écran | Lignes | Composants internes déjà séparés |
 |---|---|---|
@@ -79,7 +79,7 @@ Restent dans la page :
 
 L'onglet Utilisateurs recevra une vingtaine de props : c'est le prix d'un déplacement sans changement d'état.
 
-### PR C : fiche chantier (1 477 → environ 750 lignes) — à faire, après le lot pilote 3b (#208 fusionnée)
+### PR C : fiche chantier (1 477 → environ 750 lignes) — à faire, après le lot pilote 6 et la matrice D1a (#208 fusionnée)
 
 | Nouveau fichier | Contenu déplacé (lignes de `ChantierDetail.tsx`) |
 |---|---|
@@ -108,7 +108,7 @@ La zone exportée en PDF (`ref={printRef}`, 677-1014) garde le même conteneur. 
 3. PR B, Admin.
 4. PR C, fiche chantier.
 
-Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour le serveur : périmètre, plages déplacées, preuves, audit. Le lot pilote 3b (« Ma journée » du technicien) peut avancer en parallèle s'il ne touche pas ces écrans. Sinon, il passe après la PR concernée.
+Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour le serveur : périmètre, plages déplacées, preuves, audit. Pour la PR C, l'ordre est celui de l'état en tête de ce document : elle vient après le lot pilote 6 et la matrice D1a.
 
 ## Hors périmètre de ces PR (à proposer à part si utile)
 
