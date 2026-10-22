@@ -2,7 +2,7 @@
 
 -- Anticipation, en jours civils, de la création d'une visite avant son échéance. Vide (NULL),
 -- la génération automatique est désactivée. La ligne de paramètres existante reçoit la valeur
--- par défaut, 30 jours (choix par défaut, à confirmer).
+-- par défaut, 30 jours (posé en question à Nelson, question (a) du lot pilote 5).
 ALTER TABLE "Parametres" ADD COLUMN "anticipationVisitesJours" INTEGER DEFAULT 30;
 ALTER TABLE "Parametres" ADD CONSTRAINT "Parametres_anticipationVisitesJours_check"
   CHECK ("anticipationVisitesJours" IS NULL OR "anticipationVisitesJours" BETWEEN 0 AND 365);

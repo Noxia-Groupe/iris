@@ -13655,6 +13655,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await regler(' 45 ')).body.anticipationVisitesJours, 45);
       const entree = await prisma.journalAdministration.findFirstOrThrow({ where: { domaine: 'REGLAGES', type: 'PARAMETRES' }, orderBy: { createdAt: 'desc' } });
       assert.deepEqual([entree.avant, entree.apres], [{ anticipationVisitesJours: 0 }, { anticipationVisitesJours: 45 }]);
+      // Bornes incluses (ajout du second audit) : 365 est accepté, par l'API comme par la base.
+      assert.equal((await regler(365)).body.anticipationVisitesJours, 365);
+      assert.equal(await prisma.$executeRaw`UPDATE "Parametres" SET "anticipationVisitesJours" = 365 WHERE "id" = 'singleton'`, 1);
       await assert.rejects(prisma.$executeRaw`UPDATE "Parametres" SET "anticipationVisitesJours" = 366 WHERE "id" = 'singleton'`);
       await assert.rejects(prisma.$executeRaw`UPDATE "Parametres" SET "anticipationVisitesJours" = -1 WHERE "id" = 'singleton'`);
 
@@ -13751,21 +13754,24 @@ if (!TEST_DATABASE_URL) {
       const attente = new Promise((resolve) => { liberer = resolve; });
       const verrouPris = new Promise((resolve) => { pret = resolve; });
       const verrou = prisma.$transaction(async (tx) => {
+        const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
         await tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" IN (${avance.id}, ${suspendu.id}) FOR UPDATE`;
-        pret();
+        pret(pid);
         await attente;
         // « Échéance suivante » et suspension engagées pendant le passage, dans la transaction qui tient le verrou.
         await tx.contratMaintenance.update({ where: { id: avance.id }, data: { prochaineEcheance: new Date('2099-01-01T00:00:00.000Z') } });
         await tx.journalSaisieChantier.create({ data: { contratMaintenanceId: avance.id, cible: 'CONTRAT', cibleId: avance.id, action: 'AVANCEMENT_ECHEANCE', auteurId: secours.id, auteurNom: secours.name, motif: 'TEST avancement concurrent' } });
         await tx.contratMaintenance.update({ where: { id: suspendu.id }, data: { statut: 'SUSPENDU' } });
       }, { timeout: 15000 });
-      await verrouPris;
+      const pidVerrou = await verrouPris;
       let passage;
       try {
         passage = lancer().then((reponse) => reponse);
         let bloque = false;
         for (let tour = 0; tour < 250 && !bloque; tour++) {
-          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`;
+          // Seule compte une session que la transaction du verrou bloque : une autre session en
+          // attente d'un verrou dans la même base ne doit pas libérer la transaction trop tôt.
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE ${pidVerrou}::int = ANY(pg_blocking_pids(pid))`;
           bloque = sessions.length > 0;
           if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
         }
@@ -13779,6 +13785,61 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.journalSaisieChantier.count({ where: { contratMaintenanceId: avance.id, action: 'AVANCEMENT_ECHEANCE' } }), 1, 'aucun second avancement');
       assert.equal(await echeance(avance.id), '2099-01-01');
       assert.equal((await visites(suspendu.id)).length, 0, 'aucune visite pour un contrat suspendu entre-temps');
+    });
+
+    // Ajout du second audit interne de #293 : le verrou du contrat est pris dans la transaction du
+    // passage et tenu jusqu'à sa fin. Un verrou relâché aussitôt pris (pris hors de la transaction)
+    // laisserait une action de l'écran avancer l'échéance entre la relecture et l'écriture.
+    test('le passage tient le verrou du contrat jusqu’à la fin de sa transaction', async () => {
+      const aujourdhui = jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
+      const [a, m, j] = aujourdhui.split('-');
+      const contrat = await creerContrat('TEST Génération verrou tenu', `${j}-${m}-${a}`);
+      const CLE = 293293;
+      // La création de la visite de ce contrat attend un verrou consultatif tenu par le test : le
+      // passage est alors retenu au milieu de la transaction du contrat. Le déclencheur porte un nom
+      // qui le fait passer avant « Intervention_dateDemande_contrat » (ordre alphabétique), lequel
+      // prend un verrou partagé sur le contrat : seul le verrou du passage est alors en jeu.
+      await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION test_retenir_generation() RETURNS trigger AS $$
+        BEGIN
+          IF NEW."titre" = 'Maintenance préventive — TEST Génération verrou tenu' THEN PERFORM pg_advisory_xact_lock(${CLE}); END IF;
+          RETURN NEW;
+        END; $$ LANGUAGE plpgsql`);
+      await prisma.$executeRawUnsafe('CREATE TRIGGER "A_test_retenir_generation" BEFORE INSERT ON "Intervention" FOR EACH ROW EXECUTE FUNCTION test_retenir_generation()');
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const retenuePrise = new Promise((resolve) => { pret = resolve; });
+      const retenue = prisma.$transaction(async (tx) => {
+        const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${CLE})::text`;
+        pret(pid);
+        await attente;
+      }, { timeout: 20000 });
+      let passage;
+      try {
+        const pidRetenue = await retenuePrise;
+        passage = lancer().then((reponse) => reponse);
+        let retenu = false;
+        for (let tour = 0; tour < 500 && !retenu; tour++) {
+          const sessions = await prisma.$queryRaw`SELECT 1 FROM pg_stat_activity WHERE ${pidRetenue}::int = ANY(pg_blocking_pids(pid))`;
+          retenu = sessions.length > 0;
+          if (!retenu) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(retenu, true, 'le passage doit être retenu à la création de la visite');
+        await assert.rejects(
+          prisma.$transaction((tx) => tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${contrat.id} FOR UPDATE NOWAIT`),
+          /55P03|could not obtain lock/,
+          'le contrat reste verrouillé par la transaction du passage',
+        );
+      } finally {
+        liberer();
+        await retenue;
+        if (passage) await passage;
+        await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS "A_test_retenir_generation" ON "Intervention"');
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS test_retenir_generation()');
+      }
+      const res = await passage;
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal((await visites(contrat.id)).length, 1);
     });
 
     // L'alerte d'absence porte sur le dernier passage AUTOMATIQUE : un passage manuel ne la masque pas.
@@ -13795,6 +13856,24 @@ if (!TEST_DATABASE_URL) {
         assert.match(lu.alerte ?? '', /n’a pas tourné depuis le/);
       } finally {
         await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: cle } });
+      }
+    });
+
+    // Ajout du second audit interne de #293 : l'alerte d'absence compte, elle aussi, les jours au
+    // fuseau de la société (peu après minuit à Paris, c'est encore la veille en UTC).
+    test('alerte d’absence : jours comptés au fuseau de la société, peu après minuit', async () => {
+      const { etatGenerationVisites } = await import('../dist/index.js');
+      const fuseauInitial = (await request(app).get('/api/company').set(admin())).body.fuseauHoraire;
+      assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: 'Europe/Paris' })).status, 200);
+      await prisma.executionGenerationVisites.create({ data: { jour: new Date('2026-06-13T00:00:00.000Z'), declenchement: 'AUTOMATIQUE', cleJourAutomatique: '2026-06-13', anticipationJours: 30, statut: 'REUSSIE', fin: new Date() } });
+      try {
+        // 23 h 30 à Paris le 14-06 (21 h 30 UTC) : le passage d'hier suffit.
+        assert.equal((await etatGenerationVisites(new Date('2026-06-14T21:30:00.000Z'))).alerte, null);
+        // 00 h 30 à Paris le 15-06 (22 h 30 UTC le 14-06) : aucun passage depuis avant-hier.
+        assert.match((await etatGenerationVisites(new Date('2026-06-14T22:30:00.000Z'))).alerte ?? '', /n’a pas tourné depuis le 13-06-2026/);
+      } finally {
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: '2026-06-13' } });
+        await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: fuseauInitial || 'Europe/Paris' });
       }
     });
 
@@ -13845,6 +13924,11 @@ if (!TEST_DATABASE_URL) {
         await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours")
           VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', ${anticipation})`, /coherence/, String(anticipation));
       }
+      // Ajout du second audit : compteurs négatifs refusés.
+      await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours", "visitesCreees")
+        VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', 30, -1)`, /coherence/, 'visitesCreees');
+      await assert.rejects(prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "auteurId", "auteurNom", "anticipationJours", "echeancesAvancees")
+        VALUES (${randomUUID()}, DATE '2001-02-03', 'MANUEL', 'un-compte', 'Quelqu’un', 30, -1)`, /coherence/, 'echeancesAvancees');
     });
   });
 }

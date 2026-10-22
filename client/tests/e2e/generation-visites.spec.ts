@@ -103,6 +103,14 @@ test('l’administration règle l’anticipation, lance la génération et retro
 
     await page.goto('/interventions', { waitUntil: 'networkidle' });
     await expect(page.getByText(`Maintenance préventive — ${titre}`)).toBeVisible();
+
+    // Le journal des paramètres et des droits nomme le réglage par son libellé, et non par le
+    // nom technique du champ (note du second audit de #293).
+    await page.goto('/admin', { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'Journal', exact: true }).click();
+    const ligneJournal = page.getByRole('table', { name: 'Entrées du journal' }).locator('tr', { hasText: 'Anticipation des visites (jours) : 2' })
+      .filter({ hasText: 'Anticipation des visites (jours) : 10' }).first();
+    await expect(ligneJournal).toBeVisible();
   } finally {
     const retour = await request.put(`${api}/parametres`, { headers, data: { anticipationVisitesJours: 30 } });
     expect(retour.ok(), await retour.text()).toBeTruthy();
@@ -113,7 +121,7 @@ test('l’administration règle l’anticipation, lance la génération et retro
 // L'alerte (dernier passage en échec, interrompu, ou absent depuis avant-hier) est calculée par le
 // serveur, qui la teste ; ici, l'écran la montre à l'administration, en tête des contrats et des
 // interventions, avec un lien vers les contrats.
-test('l’alerte de la génération s’affiche à l’administration sur les interventions et les contrats', async ({ allerSurPageAdmin, page }) => {
+test('l’alerte de la génération s’affiche à l’administration sur les interventions et les contrats', async ({ allerSurPageAdmin, creerClient, request, session, page }) => {
   const texte = 'La génération des visites du 14-10-2026 est en échec (1 erreur) : des visites peuvent manquer. Relancez-la une fois la cause corrigée.';
   await page.route('**/api/contrats-maintenance/generation-visites', async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
@@ -126,6 +134,19 @@ test('l’alerte de la génération s’affiche à l’administration sur les in
   await alerte.getByRole('link', { name: 'Contrats de maintenance' }).click();
   await expect(page).toHaveURL(/\/contrats-maintenance$/);
   await expect(page.getByRole('region', { name: 'Génération automatique des visites' }).getByRole('alert')).toHaveText(texte);
+
+  // La fiche d'une intervention ne lit ni ne montre l'alerte : elle reste en tête de la liste
+  // (note du second audit de #293).
+  const client = await creerClient('generation-alerte', false);
+  const titre = `SAV sans alerte ${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const creation = await request.post(`${api}/interventions`, { headers: { Authorization: `Bearer ${session.token}` }, data: { clientId: client.id, titre } });
+  expect(creation.status(), await creation.text()).toBe(201);
+  const lectures: string[] = [];
+  page.on('request', (requete) => { if (requete.url().includes('/generation-visites')) lectures.push(requete.url()); });
+  await page.goto(`/interventions/${(await creation.json() as { id: string }).id}`, { waitUntil: 'networkidle' });
+  await expect(page.getByText(titre).first()).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: texte })).toHaveCount(0);
+  expect(lectures).toEqual([]);
 });
 
 test('un conducteur de travaux ne lit pas l’état de la génération des visites', async ({ request, session, browser }) => {
@@ -176,4 +197,16 @@ test('le panneau détaille le dernier passage, dates JJ-MM-AAAA, sans déborder 
   await expect(panneau.getByRole('listitem').filter({ hasText: serie })).toContainText('Client désactivé');
   await expect(panneau.getByRole('listitem').filter({ hasText: 'Contrat en échec' })).toContainText('Contrat non traité');
   expect(await page.evaluate(() => { const p = document.querySelector('main')!; return p.scrollWidth - p.clientWidth; })).toBeLessThanOrEqual(0);
+
+  // Un passage lancé à la main qui échoue n'affiche pas « Génération terminée » : le panneau
+  // montre son bilan, en échec (note du second audit de #293). Réponse du serveur interceptée.
+  const relance = { ...execution, id: 'e2e-relance', visitesCreees: 4 };
+  await page.route('**/api/contrats-maintenance/generation-visites', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const etat = await (await route.fetch({ method: 'GET' })).json();
+    await route.fulfill({ status: 201, json: { etat: { ...etat, anticipationVisitesJours: 30, derniereExecution: relance }, execution: relance } });
+  });
+  await panneau.getByRole('button', { name: 'Lancer la génération maintenant' }).click();
+  await expect(panneau).toContainText(': 4 visites créées, 1 échéance avancée, en échec.');
+  await expect(panneau.getByText(/^Génération terminée/)).toHaveCount(0);
 });

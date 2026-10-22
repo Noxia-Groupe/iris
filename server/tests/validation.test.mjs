@@ -600,6 +600,16 @@ test('peutVoirFinance : jamais pour un technicien, même avec un accès financie
   assert.equal(peutVoirFinance({ role: 'SUPERADMIN', accesFinance: false }), true);
 });
 
+// Ajout du second audit interne de #293 : l'auteur du journal SAV.
+describe('Lot pilote 5 : auteur du journal SAV', () => {
+  test('seule la génération automatique écrit sans compte ; une requête sans compte est refusée', async () => {
+    const { auteurJournalSav, AUTEUR_GENERATION_AUTOMATIQUE } = await import('../dist/src/domaines/interventions/metier.js');
+    assert.deepEqual(auteurJournalSav(null), { auteurId: null, auteurNom: AUTEUR_GENERATION_AUTOMATIQUE });
+    assert.deepEqual(auteurJournalSav({ user: { id: 'compte', name: 'Nom' } }), { auteurId: 'compte', auteurNom: 'Nom' });
+    assert.throws(() => auteurJournalSav({}), /sans compte auteur/);
+  });
+});
+
 // Lot pilote 5 : alerte de la génération automatique des visites, montrée aux administrateurs.
 describe('Alerte de la génération automatique des visites', () => {
   const instant = new Date('2026-06-15T10:00:00.000Z');
@@ -622,7 +632,7 @@ describe('Alerte de la génération automatique des visites', () => {
   });
 
   test('un passage resté en cours plus d’une heure est signalé interrompu ; en cours depuis moins, rien', () => {
-    const recent = passage({ statut: 'EN_COURS', debut: new Date('2026-06-15T09:30:00.000Z') });
+    const recent = passage({ statut: 'EN_COURS', debut: new Date('2026-06-15T09:01:00.000Z') });
     assert.equal(alerteGenerationVisites(etat({ derniere: recent, derniereAutomatique: recent })), null);
     const ancien = passage({ statut: 'EN_COURS', debut: new Date('2026-06-15T08:59:00.000Z') });
     assert.match(alerteGenerationVisites(etat({ derniere: ancien, derniereAutomatique: ancien })), /du 15-06-2026 s’est interrompue/);
