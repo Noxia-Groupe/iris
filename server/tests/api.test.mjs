@@ -13645,6 +13645,28 @@ if (!TEST_DATABASE_URL) {
       assert.equal(relance.body.etat.alerte, null);
     });
 
+    // Note N6 du second audit interne de #293 : si la liste des contrats ne peut pas être lue, le
+    // passage est en échec, avec une erreur sans détail technique, et son enregistrement est clos.
+    // La table est renommée le temps du passage : les suites lancées en parallèle (migrations,
+    // serveur, environnement) ne la lisent pas, et celle-ci est séquentielle.
+    test('lecture impossible des contrats : passage en échec, erreur sans détail technique, puis relance réussie', async () => {
+      await prisma.$executeRawUnsafe('ALTER TABLE "ContratMaintenance" RENAME TO "ContratMaintenance_test_lecture"');
+      let echec;
+      try {
+        echec = await lancer();
+      } finally {
+        await prisma.$executeRawUnsafe('ALTER TABLE "ContratMaintenance_test_lecture" RENAME TO "ContratMaintenance"');
+      }
+      assert.equal(echec.status, 201, JSON.stringify(echec.body));
+      assert.equal(echec.body.execution.statut, 'ECHEC');
+      assert.deepEqual(echec.body.execution.erreurs, [{ contratId: null, titre: null, message: 'Lecture des contrats impossible : erreur technique, détaillée dans le journal du serveur.' }]);
+      assert.deepEqual([echec.body.execution.visitesCreees, echec.body.execution.echeancesAvancees], [0, 0]);
+      assert.ok(echec.body.execution.fin, 'le passage est clos');
+      assert.match(echec.body.etat.alerte, /est en échec \(1 erreur\)/);
+      const relance = await lancer();
+      assert.deepEqual([relance.status, relance.body.execution.statut, relance.body.etat.alerte], [201, 'REUSSIE', null]);
+    });
+
     test('anticipation : bornes, désactivation, journal des réglages, et contrainte en base', async () => {
       for (const valeur of [-1, 366, 1.5, 'abc', '12a', ' 7 8', true]) {
         const refus = await regler(valeur);
