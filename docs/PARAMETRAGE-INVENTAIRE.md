@@ -3,6 +3,8 @@
 > Annexe de la proposition [`PARAMETRAGE-CIBLE.md`](PARAMETRAGE-CIBLE.md) (chantier technique 4, 17-10-2026). Photographie du code à une date donnée, et non documentation tenue à jour. Le découpage du serveur par domaine (chantier 2) déplace les lignes citées, mais garde les noms des fonctions et des constantes. Depuis, #216 a remplacé `isLastSuperAdmin` par `estDernierSuperAdminActif`, et #282 refuse au directeur commercial, à l'assistante commerciale et au comptable les écritures des référentiels d'achats et leur ferme l'Administration (point 6 de la section 7, B-19). #283 journalise la réattribution du titulaire et du commercial et la case « Encaissé » (B-15, B-16, B-17).
 >
 > **Commit analysé : `84e27a1`** (`main`, « Merge #175 »).
+>
+> **Suites depuis l'analyse** (au 22-10-2026), sans retoucher la photographie : B-61, B-72 et B-74 traités par le lot P0 (#280 : rapport en A4 ; « IRIS » sur la connexion et le planning public, icônes et couleurs neutres ; barèmes et primes insérés par migration vidés, sauf valeur saisie) ; B-32 par le lot pilote 5 (#293 : génération automatique quotidienne, anticipation `Parametres.anticipationVisitesJours`).
 > Toutes les références `fichier:ligne` portent sur ce commit. Abréviations :
 > `idx` = `server/index.ts` · `schema` = `server/prisma/schema.prisma` · `mig/<dossier>` = `server/prisma/migrations/<dossier>/migration.sql` · `cli/` = `client/src/`.
 >
