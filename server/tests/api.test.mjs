@@ -308,6 +308,14 @@ if (!TEST_DATABASE_URL) {
   };
 
   before(async () => {
+    // Le test « lecture impossible des contrats » renomme la table des contrats le temps d'un
+    // passage : une exécution interrompue à ce moment-là ne doit pas la laisser renommée
+    // (ajout du troisième audit interne de #293).
+    await prisma.$executeRawUnsafe(`DO $$ BEGIN
+      IF to_regclass('"ContratMaintenance_test_lecture"') IS NOT NULL AND to_regclass('"ContratMaintenance"') IS NULL THEN
+        ALTER TABLE "ContratMaintenance_test_lecture" RENAME TO "ContratMaintenance";
+      END IF;
+    END $$`);
     await initDb();
     await ensureSuperAdmins();
     // Le test du dernier super administrateur désactive le compte de secours le temps d'un test :
@@ -13847,8 +13855,11 @@ if (!TEST_DATABASE_URL) {
           if (!retenu) await new Promise((resolve) => setTimeout(resolve, 20));
         }
         assert.equal(retenu, true, 'le passage doit être retenu à la création de la visite');
+        // FOR KEY SHARE n'entre en conflit qu'avec FOR UPDATE : la sonde prouve que le passage
+        // tient le verrou exclusif du contrat, et non un simple verrou partagé (ajout du troisième
+        // audit interne de #293).
         await assert.rejects(
-          prisma.$transaction((tx) => tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${contrat.id} FOR UPDATE NOWAIT`),
+          prisma.$transaction((tx) => tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${contrat.id} FOR KEY SHARE NOWAIT`),
           /55P03|could not obtain lock/,
           'le contrat reste verrouillé par la transaction du passage',
         );

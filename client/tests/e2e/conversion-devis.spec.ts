@@ -85,9 +85,13 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
     await expect(ligne(objetIntervention).getByRole('button', { name: action, exact: true })).toHaveCount(0);
   }
 
-  // Contrat : actif, avec sa périodicité, visible dans la liste des contrats.
+  // Contrat : actif, avec sa périodicité, visible dans la liste des contrats. Passer de
+  // l'intervention au contrat du même devis repart aussi d'un formulaire neuf.
+  await ligne(objetContrat).getByRole('button', { name: 'Créer l’intervention' }).click();
+  await page.getByRole('dialog', { name: 'Créer l’intervention du devis' }).getByLabel('Titre').fill('Titre saisi pour l’intervention');
   await ligne(objetContrat).getByRole('button', { name: 'Créer le contrat' }).click();
   const formulaireContrat = page.getByRole('dialog', { name: 'Créer le contrat du devis' });
+  await expect(formulaireContrat.getByLabel('Titre')).toHaveValue(objetContrat);
   // Date de début préremplie au jour civil de la société ; titre propre au contrat.
   await expect(formulaireContrat.getByLabel('Date de début')).toHaveValue(dateDuJour());
   await formulaireContrat.getByLabel('Titre').fill(`${objetContrat} — contrat`);
