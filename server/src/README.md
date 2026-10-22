@@ -59,6 +59,8 @@ server/
     domaines/planning/        routes.ts (événements, types, partage, lien public), metier.ts
                               (module actif, validation des événements)
     domaines/factures/        routes.ts, metier.ts (sélection, adresse, avoirs), pdf.ts
+    domaines/documents/       gabarit.ts (modèle PDF commun), identite.ts (identité de
+                              l'émetteur figée à l'émission), logo.ts (validation), routes.ts (logo)
     domaines/reglements/      routes.ts, metier.ts (moyens, soldes, statut)
     domaines/comptabilite/    routes.ts (plan comptable, import, règles, TVA), metier.ts (clés
                               et natures, verrou, écritures d'une pièce, libellé d'un compte)
@@ -86,6 +88,7 @@ Domaines :
 | `contrats` | contrats de maintenance et visites (**déplacé**) |
 | `planning` | affectations, types d'événement, partage public (**déplacé**) |
 | `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**) |
+| `documents` | modèle PDF commun, identité de l'émetteur figée à l'émission, logo des documents (lot 6a-1) |
 | `reglements` | encaissements et affectations (**déplacé**) |
 | `comptabilite` | plan comptable, règles, TVA, import, écritures (**déplacé**) |
 | `statistiques` | tableaux de bord et statistiques (**déplacé**) |

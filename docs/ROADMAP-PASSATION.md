@@ -67,7 +67,7 @@ Statuts : **livré**, **partiel**, **absent** ou, pour le commissionnement, **fe
     - devis signé figé en base (#161) ;
     - conversion en intervention ou en contrat (lot pilote 4, #281 ; non validée pour mise en service).
   - Absent :
-    - PDF et envoi d'un devis (lot pilote 6) ;
+    - PDF et envoi d'un devis (lot pilote 6, PR 6a-2 et 6a-3) ;
     - paiement ou rapprochement de l'acompte.
   - Un devis envoyé non signé reste modifiable (question).
 - **Travaux : chantiers, heures, achats, rentabilité — livré, place dans le pilote en question.**
@@ -179,7 +179,7 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 | 3. Parcours technicien sur téléphone | **Implémenté** : prérequis et droits (3a), parcours sur téléphone (3b-1 à 3b-4) et planning limité du technicien. Non validé pour mise en service. Le découpage du serveur qui devait le précéder est terminé (chantier technique 2, plus bas) | #166 (3a), #255 (3b-1), #257 (3b-2), #268 (3b-3), #272 (3b-4), #275 (planning limité) |
 | 4. Conversion des devis (A7) | **Implémenté** : intervention et contrat depuis un devis signé ; règles (a) et (b) posées en question (section 3). Non validé pour mise en service | #281 |
 | 5. Génération automatique des visites (A9) | **Implémenté** : passage quotidien côté serveur, anticipation paramétrable, alerte et passage manuel ; questions (a) à (c) posées (section 3). Non validé pour mise en service | #293 |
-| 6. Envoi des documents (A10) | Décidé ; **avant le premier jour** (décision de Nelson du 21-10-2026) | — |
+| 6. Envoi des documents (A10) | **Partiel** : décisions du 22-10-2026 (repli par la messagerie, option B de P5, deux temps, tous les documents) ; 6a-1 **implémenté** (modèle PDF commun, identité et logo de l'émetteur figés sur les factures et les avoirs), non validé pour mise en service ; 6a-2 à 6a-4 et 6b prévus. **Avant le premier jour** (décision de Nelson du 21-10-2026) | lot 6a-1 |
 
 1. **Règlements (A3).**
    - Périmètre : saisie manuelle des encaissements, affectés aux factures (règlements partiels, reste dû, facture partiellement réglée). Banque et rapprochement viennent plus tard. Montants : exigence maximale (règle 2).
@@ -213,7 +213,12 @@ Décisions de Nelson du 16-10-2026. Méthode : le périmètre du pilote est la b
 4. **Conversion des devis (A7)** : « devis → intervention » et « devis → contrat », en plus de « devis → chantier ». Statuts et données transférées : à cadrer dans la PR du lot. Ne pas les déclarer livrées simplement parce que ces modules existent. **Implémenté** par #281 (choix par défaut en section 4, questions (a) et (b) en section 3).
 5. **Génération automatique des visites de maintenance (A9)** : génération quotidienne côté serveur, avec une anticipation paramétrable et une alerte en cas d'échec, sans IA. **Implémenté** par #293 (choix par défaut en section 4, questions (a) à (c) en section 3).
 6. **Envoi des documents (A10)** : mode d'envoi choisi dans les paramètres généraux, Microsoft 365 par défaut.
-   - Si Microsoft 365 n'est pas prêt au premier jour, le pilote télécharge le PDF et l'envoie à la main, comme aujourd'hui (recommandation initiale, à confirmer).
+   - Décisions de Nelson du 22-10-2026 ([historique](HISTORIQUE-DECISIONS.md#décisions-du-22-10-2026)) :
+     - si Microsoft 365 n'est pas prêt, repli « du style mailto » : la messagerie s'ouvre avec le destinataire, l'objet et le texte remplis ; un lien `mailto:` ne joint aucun fichier, le PDF est téléchargé en même temps et joint à la main ;
+     - P5, option B : seul ce que l'envoi exige accompagne le lot 6 (modèle PDF commun ; identité et logo de l'émetteur copiés à l'émission des factures et des avoirs) ; libellés des visites, export comptable et modèles personnalisables après le premier jour ;
+     - deux temps : envoi manuel avec ses PDF et son journal (6a), puis Microsoft 365 (6b) ;
+     - tous les documents : factures et avoirs, devis, rapport de chantier, compte rendu d'intervention, contrat de maintenance.
+   - Découpage retenu par Claude Code : 6a-1, modèle commun et identité figée (**implémenté**, choix par défaut en section 4) ; 6a-2, PDF du devis ; 6a-3, envoi par la messagerie et journal des envois ; 6a-4, PDF des autres documents et leur envoi ; 6b, Microsoft 365.
    - Journal des envois : choix par défaut, à confirmer.
    - Ne pas déclarer l'envoi Outlook ni la synchronisation réalisés du seul fait du SSO.
 
@@ -303,8 +308,6 @@ Deux règles permanentes de conception sont ajoutées le même jour à [CLAUDE.m
 ## 3. Questions ouvertes pour Nelson
 
 Tri du 16-10-2026 : les questions bloquantes (A) sont tranchées plus haut (pilote, lots (i) et (k)). Restent ouvertes :
-- **Pilote** : les lots 4 à 6 sont à livrer avant le premier jour (décision de Nelson du 21-10-2026). Si Microsoft 365 n'est pas prêt, le pilote envoie-t-il ses PDF à la main ?
-- **Lot P5 du paramétrage et lot 6** : le lot 6 passe avant le premier jour (décision du 21-10-2026). P5 (modèle du PDF, libellés, export comptable, identité de l'émetteur copiée et figée à l'émission) l'accompagne-t-il en entier, ou seulement ce que l'envoi exige, le reste venant après le premier jour sauf exigence du cabinet (décision 6 de la proposition de paramétrage) ?
 - **Travaux dans le pilote** : les écrans des chantiers (heures, achats, rentabilité, facture d'affaire) restent-ils ouverts au pilote en l'état, sans lot préalable ?
 - **Lot (i), fait générateur** : réglage unique dans les paramètres généraux (A5, 16-10-2026) ou réglage par plan (14-10-2026) ? Lecture retenue : le réglage général remplace le réglage par plan.
 - **Lot (i), jour de coupure** (montants) : la décision du 14-10-2026 le place dans les options du plan (par exemple le 20). Suit-il le fait générateur dans les paramètres généraux, ou reste-t-il propre à chaque plan ? Un fait générateur survenu le jour même (le 20) se rattache-t-il encore au mois ? « Sinon fin de chantier à mois + 1 » désigne-t-il seulement les faits générateurs postérieurs à la coupure, ou aussi un mode où toute commission se rattache au mois suivant ?
@@ -487,6 +490,14 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 **Variables d'environnement** (#263) : `server/tests/environnement.test.mjs` relève dans le texte des sources les variables lues, exception documentée à la règle « un test appelle le code » de `server/tests/README.md`. **Appliqué** (#263).
 
 **Envoi des documents** (lot pilote 6) : journal des envois, choix par défaut, à confirmer, à préciser dans la PR du lot.
+
+**Identité de l'émetteur et modèle des documents** (lot 6a-1, option B de P5 retenue le 22-10-2026), choix par défaut, à confirmer, les champs imprimés par le cabinet :
+- Émettre une facture ou créer un avoir exige raison sociale, SIRET, adresse, code postal et ville ; l'écran Prêt à facturer le signale, et l'émission refusée ne consomme aucun numéro. Le format du SIRET n'est pas vérifié.
+- À l'émission, la pièce copie aussi le nom commercial, la TVA intracommunautaire, le pays, le téléphone, l'e-mail, le site, le pied de page (« Pied de page des documents »), la couleur principale et le logo. La copie ne change jamais, et deux pièces de même identité la partagent ; la base refuse toute pièce qui quitte le brouillon sans copie.
+- Un avoir, total ou partiel, copie l'identité du jour de sa création, et non celle de sa facture.
+- Une pièce émise avant ce lot n'a pas de copie : elle s'imprime comme à l'origine (émetteur tiré du texte des mentions légales figées), mais dans la couleur par défaut, et non plus dans la couleur principale actuelle, qui est un paramètre vivant.
+- Logo : PNG ou JPEG, 500 Ko et 2 000 pixels de côté au plus, téléversé par le super administrateur comme l'identité, journalisé ; un logo remplacé n'est supprimé que si aucune pièce ne l'imprime. Le champ « URL du logo » quitte l'écran Société ; `logoUrl` reste lisible par l'API.
+- Le PDF porte en tête le logo et l'identité, et sur chaque page le pied de page et la pagination.
 
 ## 5. Préalables à la mise en service et contrat d'une PR
 

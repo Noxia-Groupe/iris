@@ -429,6 +429,10 @@ model CompanySettings {
   email             String?
   siteWeb           String?
   logoUrl           String?
+  // Logo imprimé sur les documents (lot 6a-1) : version téléversée, copiée avec l'identité à
+  // l'émission d'une pièce. `logoUrl` reste lisible par l'API sans servir aux documents.
+  logoDocumentId    String?
+  logoDocument      LogoDocument? @relation(fields: [logoDocumentId], references: [id], onDelete: Restrict)
   couleurPrimaire   String?  @default("#1e3a8a")
   couleurSecondaire String?  @default("#f59e0b")
   prefixeFacture    String?
@@ -614,6 +618,10 @@ model Facture {
   motifHorsAffaire     String?
   mentionsLegalesVersionId String?
   mentionsLegalesVersion   MentionsLegalesVersion? @relation(fields: [mentionsLegalesVersionId], references: [id], onDelete: Restrict)
+  // Identité de l'émetteur copiée à l'émission (lot 6a-1, décision 6) ; absente des pièces
+  // émises avant ce lot, qui gardent leur impression d'origine.
+  identiteEmetteurId String?
+  identiteEmetteur   IdentiteEmetteur? @relation(fields: [identiteEmetteurId], references: [id], onDelete: Restrict)
   lignes        FactureLigne[]
   // Ventilation par taux figée à la création des nouveaux documents. Les factures
   // historiques restent lisibles sans ligne de ventilation et utilisent le fallback dérivé.
@@ -635,6 +643,7 @@ model Facture {
   @@index([interventionId])
   @@index([contratMaintenanceId])
   @@index([mentionsLegalesVersionId])
+  @@index([identiteEmetteurId])
 }
 
 // Règlement client saisi à la main (décision A3 du 16-10-2026) : la banque viendra plus tard.
@@ -747,6 +756,46 @@ model MentionsLegalesVersion {
   publieeLe DateTime?
   createdAt DateTime  @default(now())
   factures  Facture[]
+}
+
+// Logo des documents : une version téléversée ne change jamais (garde SQL), et l'empreinte
+// SHA-256 de son contenu évite de stocker deux fois le même fichier.
+model LogoDocument {
+  id        String   @id @default(uuid())
+  contenu   Bytes
+  typeMime  String   // image/png | image/jpeg
+  empreinte String   @unique
+  taille    Int
+  createdAt DateTime @default(now())
+  societes  CompanySettings[]
+  identites IdentiteEmetteur[]
+}
+
+// Identité de l'émetteur telle qu'imprimée sur une pièce, copiée à son émission (décision 6 de
+// la proposition de paramétrage). Une ligne ne change jamais (garde SQL) ; les pièces émises avec
+// la même identité partagent la même ligne, retrouvée par l'empreinte de son contenu.
+model IdentiteEmetteur {
+  id              String   @id @default(uuid())
+  empreinte       String   @unique
+  raisonSociale   String
+  nomCommercial   String?
+  siret           String
+  tvaIntra        String?
+  adresse         String
+  codePostal      String
+  ville           String
+  pays            String?
+  telephone       String?
+  email           String?
+  siteWeb         String?
+  piedDocument    String?
+  couleurPrimaire String
+  logoId          String?
+  logo            LogoDocument? @relation(fields: [logoId], references: [id], onDelete: Restrict)
+  createdAt       DateTime @default(now())
+  factures        Facture[]
+
+  @@index([logoId])
 }
 
 model SequenceFacture {

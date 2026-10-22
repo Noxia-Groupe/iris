@@ -20,6 +20,7 @@ import {
   lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee,
 } from './metier';
 import { rendreDocumentFacturePdf } from './pdf';
+import { champsIdentiteManquants, figerIdentiteEmetteur, IdentiteEmetteurIncompleteError } from '../documents/identite';
 import { avecSoldes, synchroniserStatutReglement } from '../reglements/metier';
 
 export function enregistrerRoutesFactures(app: Express): void {
@@ -73,12 +74,14 @@ export function enregistrerRoutesFactures(app: Express): void {
 
   app.get('/api/factures/:id/document.pdf', requireAuth, requireAdmin, async (req, res) => {
     try {
-      const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: factureInclude });
+      const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: { ...factureInclude, identiteEmetteur: { include: { logo: { select: { contenu: true } } } } } });
       if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
       if (!['EMISE', 'REGLEE', 'ANNULEE'].includes(facture.statut)) return res.status(409).json({ error: 'Le document est disponible uniquement pour une facture émise.' });
       if (!facture.mentionsLegalesVersion) return res.status(409).json({ error: 'Les mentions légales figées sont introuvables.' });
       if (!facture.clientAdresse) return res.status(409).json({ error: 'L’adresse de facturation figée est absente de cette facture : le document ne peut pas être imprimé sans cette mention obligatoire.' });
-      const pdf = await rendreDocumentFacturePdf(decimalToNumber(facture), await getCompanySettings());
+      // L'identité figée garde son logo en octets : elle échappe à la conversion des montants.
+      const { identiteEmetteur, ...piece } = facture;
+      const pdf = await rendreDocumentFacturePdf({ ...decimalToNumber(piece), identiteEmetteur });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${facture.numero}.pdf"`);
       res.setHeader('Content-Length', pdf.length);
@@ -201,10 +204,12 @@ export function enregistrerRoutesFactures(app: Express): void {
       // pièces déjà émises relit leurs écritures figées. Le 0 % n'exige aucun compte TVA.
       const tvaOk = tauxCouverts.size > 0 && tauxManquants.length === 0;
       const prefixe = (settings.prefixeFacture || '').trim();
+      const identiteManquante = champsIdentiteManquants(settings);
       const controles = [
         { cle: 'PLAN_COMPTABLE', bloquant: true, pret: comptes > 0, libelle: 'Plan comptable', detail: comptes > 0 ? `${comptes} compte(s) actif(s).` : 'Importez ou créez au moins un compte.', route: '/comptabilite' },
         { cle: 'REGLES_COMPTABLES', bloquant: true, pret: reglesOk, libelle: 'Règles comptables', detail: reglesOk ? 'Les règles client, ventes et journal sont renseignées.' : 'Renseignez les comptes client, ventes et le journal.', route: '/comptabilite' },
         { cle: 'TVA', bloquant: tauxManquants.length > 0, pret: tvaOk, libelle: 'Règles TVA', detail: tauxManquants.length ? `Aucun compte TVA pour ${tauxManquants.map(taux => `${taux} %`).join(', ')} — ce taux a déjà été facturé ; l’émission d’une nouvelle facture à ce taux sera refusée (l’export historique reste disponible).` : !tauxCouverts.size ? 'Aucun compte TVA associé. Une entreprise qui ne facture qu’à 0 % (autoliquidation BTP) n’en a pas besoin ; sinon, associez un compte avant la première facture à un taux non nul.' : `${tauxCouverts.size} taux configuré(s) ; tous les taux déjà facturés sont couverts.`, route: '/comptabilite' },
+        { cle: 'IDENTITE_EMETTEUR', bloquant: true, pret: identiteManquante.length === 0, libelle: 'Identité de la société', detail: identiteManquante.length ? `À renseigner avant d’émettre : ${identiteManquante.join(', ')}. Elle est copiée sur chaque pièce à son émission.` : 'Raison sociale, SIRET et adresse sont renseignés ; ils sont copiés sur chaque pièce à son émission.', route: '/societe' },
         { cle: 'MENTIONS_LEGALES', bloquant: true, pret: Boolean(mentions), libelle: 'Mentions légales et CGV', detail: mentions ? 'Une version publiée est active.' : 'Publiez une version légale validée.', route: '/mentions-legales' },
         { cle: 'PREFIXE_FACTURE', bloquant: false, pret: Boolean(prefixe), libelle: 'Préfixe de facture', detail: prefixe ? `Préfixe actuel : ${prefixe}.` : 'Aucun préfixe défini : les numéros utiliseront « F » par défaut.', route: null },
         { cle: 'ADRESSES_CLIENTS', bloquant: false, pret: clientsSansSite === 0, libelle: 'Adresses de facturation', detail: clientsSansSite === 0 ? 'Tous les clients actifs portent au moins un site.' : `${clientsSansSite} client(s) actif(s) sans aucun site : l’émission de leurs factures sera refusée.`, route: '/clients' },
@@ -292,15 +297,17 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
         if (!mentions) return { erreur: 'LEGAL_MENTIONS_MISSING' as const };
         const siteFacturation = await tx.clientSite.findFirst({ where: { clientId: facture.clientId }, orderBy: SITE_FACTURATION_ORDRE });
         if (!siteFacturation) return { erreur: 'CLIENT_ADRESSE_MISSING' as const };
+        // Avant le numéro : un refus ne consomme aucun numéro de la séquence.
+        const identiteEmetteurId = await figerIdentiteEmetteur(tx);
         const ecritures = await ecrituresPourPiece(tx, facture);
         const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
         const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
         const prefixe = (identite?.prefixeFacture || 'F').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || 'F';
         const numero = `${prefixe}${annee}-${String(sequence.dernierNumero).padStart(4, '0')}`;
-        const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date(), mentionsLegalesVersionId: mentions.id, clientAdresse: formaterAdresseFacturation(siteFacturation) }, include: factureInclude });
+        const maj = await tx.facture.update({ where: { id: facture.id }, data: { statut: 'EMISE', annee, numero, emisLe: new Date(), mentionsLegalesVersionId: mentions.id, identiteEmetteurId, clientAdresse: formaterAdresseFacturation(siteFacturation) }, include: factureInclude });
         await tx.ecritureFacture.createMany({ data: ecritures.map(e => ({ ...e, factureId: facture.id })) });
         await tx.facture.update({ where: { id: facture.id }, data: { ecrituresScellees: true } });
-        await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: (req as AuthRequest).user!.id, action: 'EMISSION', detail: `Numéro ${numero}, version légale ${mentions.id}` } });
+        await tx.journalFacture.create({ data: { factureId: facture.id, acteurId: (req as AuthRequest).user!.id, action: 'EMISSION', detail: `Numéro ${numero}, version légale ${mentions.id}, identité de l’émetteur ${identiteEmetteurId}` } });
         return { facture: { ...maj, ecrituresScellees: true } };
       });
       if ('erreur' in resultat) {
@@ -312,7 +319,7 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
       }
       res.json(decimalToNumber(resultat.facture));
     } catch (error) {
-      if (error instanceof ImputationIncompletError) return res.status(409).json({ error: error.message });
+      if (error instanceof ImputationIncompletError || error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
       if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Numérotation de facture déjà attribuée, veuillez réessayer.' });
       res.status(500).json({ error: 'Émission de facture impossible.' });
     }
@@ -341,6 +348,8 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
         // facture. Le garde SQL `facture_statut_reglements` porte la même règle.
         const reglee = await tx.affectationReglement.count({ where: { factureId: facture.id, reglement: { statut: 'ENREGISTRE' } } });
         if (reglee) return { erreur: 'PAYMENTS_EXIST' as const };
+        // L'avoir naît émis : il copie l'identité de l'émetteur du jour, avant toute écriture.
+        const identiteEmetteurId = await figerIdentiteEmetteur(tx);
         const ecritures = await ecrituresPourPiece(tx, facture, facture.id);
         const now = new Date();
         const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
@@ -356,7 +365,7 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
           type: 'AVOIR', estAvoirAnnulation: true, factureOrigineId: facture.id, numero, annee, statut: 'EMISE', dateEmission: dateAvoir, dateEcheance: dateAvoir,
           clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
           origine: facture.origine, chantierId: facture.chantierId, interventionId: facture.interventionId, contratMaintenanceId: facture.contratMaintenanceId,
-          motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
+          motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId, identiteEmetteurId,
           totalHt: facture.totalHt, totalTva: facture.totalTva, totalTtc: facture.totalTtc, createdById: req.user!.id, emisLe: now,
           lignes: { create: facture.lignes.map(({ id: _id, factureId: _factureId, ...ligne }) => ligne) },
           ventilationTva: { create: facture.ventilationTva.length ? facture.ventilationTva.map(({ id: _id, factureId: _factureId, ...v }) => v) : ventilationTvaDerivee(facture.lignes) },
@@ -375,7 +384,7 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
       }
       return res.json(decimalToNumber({ ...resultat.facture, avoir: resultat.avoir }));
     } catch (error) {
-      if (error instanceof ImputationIncompletError) return res.status(409).json({ error: error.message });
+      if (error instanceof ImputationIncompletError || error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
       if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir déjà créé ou numéro déjà attribué, veuillez relire la facture.' });
       return res.status(500).json({ error: 'Annulation de facture impossible.' });
     }
@@ -419,6 +428,7 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
           const tvaPrecedente = avoirsPrecedents.reduce((somme, avoir) => somme + (ventilationFacture(avoir).find(v => v.tauxTva === ventilation.tauxTva)?.totalTva || 0), 0);
           if (centimes(precedent + ventilation.totalHt) > source.totalHt || centimes(tvaPrecedente + ventilation.totalTva) > source.totalTva || centimes(precedent + ventilation.totalHt + tvaPrecedente + ventilation.totalTva) > source.totalTtc) throw new AvoirPlafondError(`Cet avoir dépasse le plafond restant pour la TVA à ${ventilation.tauxTva} % de la facture d’origine.`);
         }
+        const identiteEmetteurId = await figerIdentiteEmetteur(tx);
         const ecritures = await ecrituresPourPiece(tx, { lignes, ventilationTva, totalTtc }, facture.id);
         const now = new Date();
         const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeAvoir: true, fuseauHoraire: true } });
@@ -432,7 +442,7 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
           type: 'AVOIR', estAvoirAnnulation: false, factureOrigineId: facture.id, numero, annee, statut: 'EMISE', dateEmission: dateAvoir, dateEcheance: dateAvoir,
           clientId: facture.clientId, clientRaisonSociale: facture.clientRaisonSociale, clientAdresse: facture.clientAdresse,
           origine: facture.origine, chantierId: facture.chantierId, interventionId: facture.interventionId, contratMaintenanceId: facture.contratMaintenanceId,
-          motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId,
+          motifHorsAffaire: facture.motifHorsAffaire, mentionsLegalesVersionId: facture.mentionsLegalesVersionId, identiteEmetteurId,
           totalHt, totalTva, totalTtc, createdById: req.user!.id, emisLe: now, lignes: { create: lignes }, ventilationTva: { create: ventilationTva },
           ecrituresComptables: { create: ecritures },
         }, include: factureInclude });
@@ -445,7 +455,7 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
       if ('erreur' in resultat) return res.status(resultat.erreur === 'NOT_FOUND' ? 404 : 409).json({ error: resultat.erreur === 'NOT_FOUND' ? 'Facture introuvable.' : 'Seule une facture émise ou réglée peut recevoir un avoir partiel.' });
       return res.status(201).json(decimalToNumber(resultat.avoir));
     } catch (error) {
-      if (error instanceof ImputationIncompletError) return res.status(409).json({ error: error.message });
+      if (error instanceof ImputationIncompletError || error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
       if (error instanceof FactureInvalideError) return res.status(400).json({ error: error.message });
       if (error instanceof AvoirPlafondError) return res.status(409).json({ error: error.message });
       if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Avoir total déjà créé ou numéro déjà attribué, veuillez relire la facture.' });

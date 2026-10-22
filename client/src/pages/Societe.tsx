@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Building2, Search, Save, Palette } from 'lucide-react';
 import { apiFetch } from '../api';
 import { useSociete } from '../companyTimezoneContext';
+import LogoDocuments from '../components/LogoDocuments';
 
 /**
  * Identité de la société exploitant cette instance Iris.
@@ -14,7 +15,7 @@ import { useSociete } from '../companyTimezoneContext';
 type Societe = {
   raisonSociale: string | null; nomCommercial: string | null; siret: string | null; tvaIntra: string | null;
   adresse: string | null; codePostal: string | null; ville: string | null; pays: string | null;
-  telephone: string | null; email: string | null; siteWeb: string | null; logoUrl: string | null;
+  telephone: string | null; email: string | null; siteWeb: string | null; logoUrl: string | null; logoDocumentId: string | null;
   couleurPrimaire: string | null; couleurSecondaire: string | null;
   prefixeFacture: string | null; prefixeAvoir: string | null; piedFacture: string | null;
 };
@@ -36,7 +37,6 @@ const CHAMPS_TEXTE: Array<{ cle: keyof Societe; libelle: string; type?: string; 
   { cle: 'telephone', libelle: 'Téléphone', type: 'tel' },
   { cle: 'email', libelle: 'E-mail', type: 'email' },
   { cle: 'siteWeb', libelle: 'Site web', placeholder: 'https://' },
-  { cle: 'logoUrl', libelle: 'URL du logo', placeholder: 'https://…/logo.png' },
   { cle: 'prefixeFacture', libelle: 'Préfixe de facture', placeholder: 'FA' },
   { cle: 'prefixeAvoir', libelle: 'Préfixe d’avoir', placeholder: 'AV' },
 ];
@@ -161,7 +161,19 @@ const Societe = ({ modifiable }: { modifiable: boolean }) => {
         </section>
       )}
 
+      <div className="bg-white border border-gray-100 rounded-xl p-5">
+        <LogoDocuments
+          logoDocumentId={societe.logoDocumentId}
+          modifiable={modifiable}
+          apresChangement={(donnees) => setSociete((s) => (s ? { ...s, logoDocumentId: donnees.logoDocumentId } : s))}
+        />
+      </div>
+
       <form onSubmit={enregistrer} className="bg-white border border-gray-100 rounded-xl p-5 space-y-5">
+        <p className="text-sm text-gray-600">
+          Raison sociale, SIRET, adresse, code postal et ville sont exigés pour émettre une facture. À son émission, chaque pièce
+          copie l’identité, le logo, la couleur principale et le pied de page : les modifier ensuite ne change pas les pièces déjà émises.
+        </p>
         <div className="grid md:grid-cols-2 gap-4">
           {CHAMPS_TEXTE.map(({ cle, libelle, type, placeholder }) => (
             <div className="form-group" key={cle}>
@@ -179,7 +191,7 @@ const Societe = ({ modifiable }: { modifiable: boolean }) => {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Pied de facture (mentions légales, conditions de règlement)</label>
+          <label className="form-label">Pied de page des documents (mentions légales, conditions de règlement)</label>
           <textarea
             value={societe.piedFacture ?? ''}
             disabled={!modifiable}
