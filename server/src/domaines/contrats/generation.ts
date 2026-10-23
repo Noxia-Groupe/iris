@@ -1,6 +1,7 @@
 import { Prisma, type ExecutionGenerationVisites } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import type { AuthRequest } from '../../http/auth';
+import { COMPTE_SYSTEME_ID, NOM_COMPTE_SYSTEME } from '../../droits/roles';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, dateFrancaise, jourCivilEntreprise } from '../../commun/dates';
 import { getParametres } from '../parametres/metier';
 import { avancerEcheanceContrat, creerVisiteContrat, verrouillerContratMaintenance, visiteDeLEcheance } from './metier';
@@ -81,7 +82,7 @@ export async function executerGenerationVisites(
   try {
     execution = await prisma.executionGenerationVisites.create({ data: {
       jour: jourEnDate(jour), declenchement: declenchement.type, anticipationJours: anticipation,
-      cleJourAutomatique: req ? null : jour, auteurId: req ? req.user!.id : null, auteurNom: req ? req.user!.name : null,
+      cleJourAutomatique: req ? null : jour, auteurId: req ? req.user!.id : COMPTE_SYSTEME_ID, auteurNom: req ? req.user!.name : NOM_COMPTE_SYSTEME,
     } });
   } catch (error) {
     if (!req && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return null;

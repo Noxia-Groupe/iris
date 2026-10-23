@@ -6,7 +6,7 @@ import { permissionsEffectives } from '../../droits/permissions';
 import { type AuthRequest, JWT_SECRET, requireAuth } from '../../http/auth';
 import { AZURE_TENANT_ID, AZURE_CLIENT_ID, SSO_CONFIGURED, resolveAuthorizedSsoUser, verifyMicrosoftIdentity } from './sso';
 import {
-  BREAK_GLASS_EMAIL, BREAK_GLASS_TOKEN, BREAK_GLASS_MIN_LONGUEUR, BREAK_GLASS_ACTIF, secretIdentique, essaisSecours, tropDEssaisSecours,
+  BREAK_GLASS_EMAIL, BREAK_GLASS_TOKEN, BREAK_GLASS_MIN_LONGUEUR, BREAK_GLASS_ACTIF, BREAK_GLASS_ADRESSE_RESERVEE, secretIdentique, essaisSecours, tropDEssaisSecours,
 } from './secours';
 
 export function enregistrerRoutesAuthentification(app: Express): void {
@@ -49,7 +49,9 @@ export function enregistrerRoutesAuthentification(app: Express): void {
     }
   });
 
-  if (BREAK_GLASS_TOKEN && !BREAK_GLASS_ACTIF) {
+  if (BREAK_GLASS_ADRESSE_RESERVEE) {
+    console.warn(`[SECOURS] Accès de secours INACTIF : ${BREAK_GLASS_EMAIL} est l'adresse réservée du compte système, qui ne se connecte jamais.`);
+  } else if (BREAK_GLASS_TOKEN && !BREAK_GLASS_ACTIF) {
     // Un secret trop court est refusé plutôt qu'accepté en silence : le croire actif alors
     // qu'il ne l'est pas serait le pire des deux mondes le jour où on en a besoin.
     console.warn(

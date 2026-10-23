@@ -3,7 +3,7 @@ import express from 'express';
 import { Prisma } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../db';
-import { ROLE_RESPONSABLE } from '../droits/roles';
+import { ROLE_RESPONSABLE, ROLE_SYSTEME } from '../droits/roles';
 
 // --- Sécurité : résolution du secret JWT ---
 // En production, le secret est OBLIGATOIRE : on refuse de démarrer sinon.
@@ -61,7 +61,9 @@ export const requireAuth: express.RequestHandler = async (req, res, next) => {
   }
   try {
     const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, name: true, role: true, accesFinance: true, permissions: true, actif: true } });
-    if (!user) {
+    // Le compte système, inactif, ne reçoit jamais de jeton ; le refuser ici aussi garde la porte
+    // fermée même si une modification le réactivait.
+    if (!user || user.role === ROLE_SYSTEME) {
       res.status(401).json({ error: 'Compte introuvable ou révoqué' });
       return;
     }

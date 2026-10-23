@@ -1,6 +1,7 @@
 import '../../env';
 import crypto from 'crypto';
 import { normalizeEmail } from './sso';
+import { EMAIL_COMPTE_SYSTEME } from '../../droits/roles';
 
 // --- Accès de secours (« break-glass ») du super administrateur ---
 // Microsoft Entra ID est la porte d'entrée normale, et la seule pour les comptes de la
@@ -21,7 +22,9 @@ import { normalizeEmail } from './sso';
 export const BREAK_GLASS_EMAIL = normalizeEmail(process.env.BREAK_GLASS_EMAIL || '');
 export const BREAK_GLASS_TOKEN = process.env.BREAK_GLASS_TOKEN || '';
 export const BREAK_GLASS_MIN_LONGUEUR = 32;
-export const BREAK_GLASS_ACTIF = !!BREAK_GLASS_EMAIL && BREAK_GLASS_TOKEN.length >= BREAK_GLASS_MIN_LONGUEUR;
+// L'adresse réservée du compte système n'ouvre jamais l'accès de secours : ce compte ne se connecte pas.
+export const BREAK_GLASS_ADRESSE_RESERVEE = BREAK_GLASS_EMAIL === EMAIL_COMPTE_SYSTEME;
+export const BREAK_GLASS_ACTIF = !!BREAK_GLASS_EMAIL && !BREAK_GLASS_ADRESSE_RESERVEE && BREAK_GLASS_TOKEN.length >= BREAK_GLASS_MIN_LONGUEUR;
 
 // Comparaison à temps constant. On compare les EMPREINTES et non les secrets eux-mêmes :
 // timingSafeEqual exige deux tampons de même longueur, et hacher d'abord évite à la fois
