@@ -67,6 +67,12 @@ export async function identiteActuelleImprimee(db: Prisma.TransactionClient | Pr
   return { ...copie, logo: societe?.logoDocument ? { contenu: societe.logoDocument.contenu } : null };
 }
 
+// Raison sociale actuelle, telle que l'imprime un document non figé : mêmes champs exigés et même
+// normalisation que l'impression (lot 6a-3 : objet et texte de l'envoi d'un tel document).
+export async function raisonSocialeActuelleImprimee(db: Prisma.TransactionClient | PrismaClient, avant: string): Promise<string> {
+  return copieIdentite(await db.companySettings.findUnique({ where: { id: 'singleton' } }), avant).raisonSociale;
+}
+
 // Lit l'identité de la société dans la transaction de l'émission et retourne la ligne figée qui la
 // porte : celle qui existe déjà pour un contenu identique, ou une nouvelle. Deux émissions
 // simultanées d'une même identité nouvelle se rejoignent sur l'index unique de l'empreinte : la

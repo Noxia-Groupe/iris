@@ -33,7 +33,9 @@ USE / <anonymous>#aad6e7e7a45c
 GET /api/factures/chronologie requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d089685a5f45
 GET /api/factures/a-regler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#da27e52f58a3
 GET /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#bb316d5281c8
-GET /api/factures/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#21a2ee87a500
+GET /api/factures/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7234cd775819
+GET /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#3c864ba42010
+POST /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9623ed8b265a
 GET /api/factures/:id/journal requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
 GET /api/factures/:id/tracabilite requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4d3a959b39f5
 POST /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d1503c57bcdd
@@ -206,6 +208,8 @@ POST /api/devis/:id/revisions requireAuth#07b983da0ce5 > <anonymous>{permission=
 POST /api/v1/devis/:id/revisions <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerRevision#7b32048f7b7c
 POST /api/devis/:id/signature requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#279483881390
 GET /api/devis/:id/document.pdf requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > imprimerDevis#b0e632f75b6b
+GET /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > lireEnvoisDevis#2f968ae9a8f2
+POST /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > envoyerDevis#861d65186527
 PUT /api/devis/:id/statut requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > changerStatutDevis#6c8a59009904
 PUT /api/v1/devis/:id/statut <anonymous>{scope="devis:write"}#4aeb6d464b38 > changerStatutDevis#6c8a59009904
 POST /api/devis/:id/convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > convertirDevis#259f89bfa325
