@@ -14903,6 +14903,42 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Audit n° 10 : chaque statut s'imprime avec sa seule mention. Le devis envoyé, celui que reçoit
+    // le client, garde son cadre « Bon pour accord » et n'est annoncé ni refusé ni annulé ; un devis
+    // signé, accepté ou en attente d'acompte, garde sa signature sans autre mention.
+    test('statuts : chaque statut avec sa seule mention, le devis envoyé avec son cadre', async () => {
+      const client = await creerClient(`TEST Client mentions de statut ${Date.now()}`);
+      const statut = async (id, valeur) => assert.equal((await request(app).put(`/api/devis/${id}/statut`).set(admin()).send({ statut: valeur })).status, 200);
+      const brouillon = await creerDevis(client.id, 'TEST Mention brouillon');
+      const envoye = await creerDevis(client.id, 'TEST Mention envoyé');
+      await statut(envoye.id, 'ENVOYE');
+      const accepte = await creerDevis(client.id, 'TEST Mention accepté');
+      assert.equal((await signer(accepte.id)).status, 201);
+      const attente = await creerDevis(client.id, 'TEST Mention attente', undefined, { acompteExige: true, tauxAcompte: 30 });
+      assert.equal((await signer(attente.id)).status, 201);
+      await statut(attente.id, 'EN_ATTENTE_ACOMPTE');
+      const refuse = await creerDevis(client.id, 'TEST Mention refusé');
+      await statut(refuse.id, 'ENVOYE');
+      await statut(refuse.id, 'REFUSE');
+      const annule = await creerDevis(client.id, 'TEST Mention annulé');
+      assert.equal((await request(app).post(`/api/devis/${annule.id}/annulation`).set(admin()).send({ motif: 'TEST motif' })).status, 200);
+      const mentions = (texte) => ({
+        refuse: texte.includes('Devis refusé.'), annule: texte.includes('DEVIS ANNULÉ'),
+        cadre: texte.includes('Date, nom et signature du client :'), signature: texte.includes('Accepté par TEST Signataire client'),
+      });
+      for (const [devis, attendu] of [
+        [brouillon, { refuse: false, annule: false, cadre: true, signature: false }],
+        [envoye, { refuse: false, annule: false, cadre: true, signature: false }],
+        [accepte, { refuse: false, annule: false, cadre: false, signature: true }],
+        [attente, { refuse: false, annule: false, cadre: false, signature: true }],
+        [refuse, { refuse: true, annule: false, cadre: false, signature: false }],
+        [annule, { refuse: false, annule: true, cadre: false, signature: false }],
+      ]) {
+        const { texte } = await texteDevis(devis.id);
+        assert.deepEqual(mentions(texte), attendu, `${devis.objet}\n${texte}`);
+      }
+    });
+
     test('gabarit : un devis long a son pied de page et sa pagination sur chaque page, et un seul cadre de signature', async () => {
       const client = await creerClient(`TEST Client devis long ${Date.now()}`);
       const lignes = Array.from({ length: 70 }, (_, i) => ({ designation: `TEST Ligne de devis ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }));
@@ -15335,6 +15371,26 @@ if (!TEST_DATABASE_URL) {
       assert.ok(nonSigne.includes('1 rue Jumelle') && !nonSigne.includes('9 rue Jumelle'), nonSigne);
       assert.equal((await signer(devis.id)).status, 201);
       assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '1 rue Jumelle\n31000 Toulouse');
+    });
+
+    // Audit n° 10 : sans site de facturation, le site principal passe avant le siège social, puis le
+    // nom dans l'ordre alphabétique, avant l'identifiant : l'ordre de la facture, critère par critère.
+    test('client : site principal avant le siège, puis le nom, quels que soient les identifiants', async () => {
+      const principal = await creerClient(`TEST Client principal et siège ${Date.now()}`, false);
+      const suite = randomUUID().slice(8);
+      await prisma.clientSite.create({ data: { id: `00000000${suite}`, clientId: principal.id, nom: 'A Siège', adresse: '1 rue du Siège', codePostal: '31000', ville: 'Toulouse', estSiegeSocial: true } });
+      await prisma.clientSite.create({ data: { id: `ffffffff${suite}`, clientId: principal.id, nom: 'B Principal', adresse: '2 rue Principale', codePostal: '31000', ville: 'Toulouse', principal: true } });
+      const nommes = await creerClient(`TEST Client sites nommés ${Date.now()}`, false);
+      const suiteNoms = randomUUID().slice(8);
+      await prisma.clientSite.create({ data: { id: `00000000${suiteNoms}`, clientId: nommes.id, nom: 'B Chantier', adresse: '9 rue Seconde', codePostal: '31000', ville: 'Toulouse' } });
+      await prisma.clientSite.create({ data: { id: `ffffffff${suiteNoms}`, clientId: nommes.id, nom: 'A Chantier', adresse: '8 rue Première', codePostal: '31000', ville: 'Toulouse' } });
+      for (const [client, choisie, ecartee] of [[principal, '2 rue Principale', '1 rue du Siège'], [nommes, '8 rue Première', '9 rue Seconde']]) {
+        const devis = await creerDevis(client.id, 'TEST Devis ordre des sites');
+        const nonSigne = (await texteDevis(devis.id)).texte;
+        assert.ok(nonSigne.includes(choisie) && !nonSigne.includes(ecartee), nonSigne);
+        assert.equal((await signer(devis.id)).status, 201);
+        assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, `${choisie}\n31000 Toulouse`);
+      }
     });
 
     // Audit n° 7 : un objet et un signataire longs (300 et 200 caractères au plus) s'impriment en
