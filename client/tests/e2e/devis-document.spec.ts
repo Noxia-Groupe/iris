@@ -144,7 +144,8 @@ test('PDF du devis : une erreur sans corps JSON affiche « Document indisponible
 
 // Audit n° 4 : tout devis a son PDF, quel que soit son statut, y compris annulé ou refusé.
 // Audit n° 10 : aussi le devis envoyé, celui que reçoit le client, et le devis signé en attente d'acompte.
-test('PDF du devis : un devis envoyé, en attente d’acompte, annulé ou refusé garde son bouton et se télécharge', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+// Audit n° 11 : aussi le devis converti, dont le chantier est ouvert.
+test('PDF du devis : un devis envoyé, en attente d’acompte, converti, annulé ou refusé garde son bouton et se télécharge', async ({ allerSurPageAdmin, creerClient, request, session }) => {
   const headers = auth(session.token);
   const client = await creerClient('devis PDF statuts');
   const creer = async (objet: string, extra: Record<string, unknown> = {}) => {
@@ -167,9 +168,14 @@ test('PDF du devis : un devis envoyé, en attente d’acompte, annulé ou refus�
   const signature = await request.post(`${api}/devis/${attente.id}/signature`, { headers, data: { signataire: 'Client E2E', confirme: true } });
   expect(signature.status(), await signature.text()).toBe(201);
   await passer(attente.id, 'EN_ATTENTE_ACOMPTE');
+  const converti = await creer('E2E PDF devis converti');
+  const signatureConverti = await request.post(`${api}/devis/${converti.id}/signature`, { headers, data: { signataire: 'Client E2E', confirme: true } });
+  expect(signatureConverti.status(), await signatureConverti.text()).toBe(201);
+  const conversion = await request.post(`${api}/devis/${converti.id}/convertir`, { headers, data: { cible: 'CHANTIER' } });
+  expect(conversion.status(), await conversion.text()).toBe(201);
 
   const page = await allerSurPageAdmin('/devis');
-  for (const devis of [annule, refuse, envoye, attente]) {
+  for (const devis of [annule, refuse, envoye, attente, converti]) {
     const telechargement = page.waitForEvent('download');
     await page.getByRole('button', { name: `PDF du devis ${devis.numero} version 1` }).click();
     expect((await telechargement).suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);

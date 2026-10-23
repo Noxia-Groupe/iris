@@ -15048,6 +15048,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devisSansSite.id } })).clientAdresse, null);
       const texteSansSite = (await texteDevis(devisSansSite.id)).texte;
       assert.ok(texteSansSite.includes(sansSite.raisonSociale) && texteSansSite.includes('Accepté par TEST Signataire client'));
+      // Audit n° 11 : sans adresse copiée, la raison sociale imprimée reste celle de la copie.
+      assert.equal((await request(app).put(`/api/clients/${sansSite.id}`).set(admin()).send({ raisonSociale: `${sansSite.raisonSociale} renommé` })).status, 200);
+      const sansSiteRenomme = (await texteDevis(devisSansSite.id)).texte;
+      assert.equal(sansSiteRenomme, texteSansSite);
     });
 
     test('en base : copies exigées à la signature et figées ; une signature antérieure s’imprime avec l’identité actuelle', async () => {
@@ -15180,6 +15184,24 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Audit n° 11 : un devis converti (chantier ouvert) garde son PDF, imprimé depuis ses copies ;
+    // aucun test n'imprimait jusqu'ici un devis converti.
+    test('devis converti : son PDF reste disponible, imprimé depuis ses copies', async () => {
+      const client = await creerClient(`TEST Client devis converti ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis converti en chantier');
+      assert.equal((await signer(devis.id)).status, 201);
+      const conversion = await request(app).post(`/api/devis/${devis.id}/convertir`).set(admin()).send({ cible: 'CHANTIER' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      try {
+        await definirSociete(SOCIETE_B);
+        const { texte } = await texteDevis(devis.id);
+        assert.ok(texte.includes('TEST Émetteur devis A') && !texte.includes('TEST Émetteur devis B'), texte);
+        assert.ok(texte.includes('Accepté par TEST Signataire client') && !texte.includes('Date, nom et signature du client'), texte);
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
+
     test('gabarit : un devis long a son pied de page et sa pagination sur chaque page, et un seul cadre de signature', async () => {
       const client = await creerClient(`TEST Client devis long ${Date.now()}`);
       const lignes = Array.from({ length: 70 }, (_, i) => ({ designation: `TEST Ligne de devis ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }));
@@ -15291,7 +15313,9 @@ if (!TEST_DATABASE_URL) {
       assert.match(texte, /^TEST Fourniture\s+2 u v\s+10,00 €\s+20 %\s+20,00 €$/m, texte);
       assert.match(texte, /^TEST Accessoire\s+3 x y\s+10,00 €\s+20 %\s+30,00 €$/m, texte);
       assert.ok(texte.includes('Objet : TEST Objet 10\n20 fin'), texte);
-      assert.ok(!texte.includes('1020'), texte);
+      // Audit n° 11 : le nom du client, horodaté, et le numéro du devis (A26-1020 sur une base
+      // conservée) peuvent contenir « 1020 » ; ils sont retirés du texte examiné.
+      assert.ok(!texte.replaceAll(client.raisonSociale, '').replaceAll(devis.numero, '').includes('1020'), texte);
     });
 
     test('gabarit : les colonnes du devis se calent sur le texte imprimé, accents décomposés et équivalents compris', async () => {
@@ -15362,9 +15386,14 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    test('concurrence : le PDF d’un devis non signé lit l’identité et son logo dans un même état', async () => {
+    test('concurrence : le PDF d’un devis non signé lit l’identité, son logo et le fuseau dans un même état', async () => {
       const client = await creerClient(`TEST Client logo concurrent ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Devis dont le logo est retiré pendant l’impression');
+      // Audit n° 11 : créé le 15-01-2026 à 23 h 30 UTC, le 16-01-2026 à Paris, encore le 15-01-2026 à
+      // Tahiti. Le retrait change aussi le fuseau : la date imprimée suit l'état de l'identité.
+      await prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2026-01-15T23:30:00Z') } });
+      const fuseauInitial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      await prisma.companySettings.update({ where: { id: 'singleton' }, data: { fuseauHoraire: 'Europe/Paris' } });
       // Logo propre à ce test (octets uniques) : aucune pièce ne l'imprime, son retrait peut le supprimer.
       const contenu = Buffer.concat([Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64'), Buffer.from(randomUUID())]);
       const logo = await prisma.logoDocument.create({ data: { contenu, typeMime: 'image/jpeg', empreinte: createHash('sha256').update(contenu).digest('hex'), taille: contenu.length } });
@@ -15379,7 +15408,7 @@ if (!TEST_DATABASE_URL) {
           await tx.$executeRawUnsafe('LOCK TABLE "LogoDocument" IN ACCESS EXCLUSIVE MODE');
           signalerVerrou();
           await libere;
-          await tx.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: null, raisonSociale: SOCIETE_B.raisonSociale } });
+          await tx.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: null, raisonSociale: SOCIETE_B.raisonSociale, fuseauHoraire: 'Pacific/Tahiti' } });
           await tx.logoDocument.delete({ where: { id: logo.id } });
         }, { timeout: 20_000 });
         await verrouPris;
@@ -15396,10 +15425,12 @@ if (!TEST_DATABASE_URL) {
         const avecLogo = octets.includes(Buffer.from('/Subtype /Image'));
         // L'ancienne identité avec son logo, ou la nouvelle sans logo : jamais l'une avec l'état de l'autre.
         assert.ok(texte.includes(SOCIETE_A.raisonSociale) ? avecLogo : !avecLogo, `identité et logo de deux états différents (logo imprimé : ${avecLogo})\n${texte}`);
+        // L'ancienne identité avec la date au fuseau de Paris, ou la nouvelle avec celle de Tahiti.
+        assert.ok(texte.includes(`établi le ${texte.includes(SOCIETE_A.raisonSociale) ? '16-01-2026' : '15-01-2026'}`), `identité et fuseau de deux états différents\n${texte}`);
       } finally {
         liberer();
         await autre.$disconnect();
-        await prisma.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: null, raisonSociale: SOCIETE_A.raisonSociale } });
+        await prisma.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: null, raisonSociale: SOCIETE_A.raisonSociale, fuseauHoraire: fuseauInitial } });
         await prisma.logoDocument.deleteMany({ where: { id: logo.id } });
       }
     });
@@ -15662,6 +15693,34 @@ if (!TEST_DATABASE_URL) {
       assert.ok(!(await texteDevis(devis.id)).octets.includes(Buffer.from('/Subtype /Image')), 'logo retiré encore imprimé');
     });
 
+    // Audit n° 11 : un devis signé garde le logo copié à sa signature quand la société en change, et
+    // un devis signé sans logo n'en reçoit pas après coup. Le retrait du logo, seul testé jusqu'ici,
+    // laissait passer un logo actuel imprimé à la place de la copie. Chaque logo porte un marqueur
+    // propre après sa fin d'image : PDFKit recopie le JPEG tel quel dans le PDF.
+    test('devis signé : logo copié gardé quand la société en change, aucun logo ajouté après coup', async () => {
+      const client = await creerClient(`TEST Client logos successifs ${Date.now()}`);
+      const base = Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64');
+      const [marqueA, marqueB] = [`TEST-LOGO-A-${randomUUID()}`, `TEST-LOGO-B-${randomUUID()}`];
+      const televerser = async (marque) => {
+        const res = await request(app).put('/api/company/logo').set(admin()).send({ fichier: `data:image/jpeg;base64,${Buffer.concat([base, Buffer.from(marque)]).toString('base64')}` });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      };
+      const sansLogo = await creerDevis(client.id, 'TEST Devis signé sans logo');
+      const avecLogo = await creerDevis(client.id, 'TEST Devis signé avec le logo A');
+      try {
+        assert.equal((await request(app).delete('/api/company/logo').set(admin())).status, 200);
+        assert.equal((await signer(sansLogo.id)).status, 201);
+        await televerser(marqueA);
+        assert.equal((await signer(avecLogo.id)).status, 201);
+        await televerser(marqueB);
+        const signeA = (await texteDevis(avecLogo.id)).octets;
+        assert.ok(signeA.includes(Buffer.from(marqueA)) && !signeA.includes(Buffer.from(marqueB)), 'logo actuel imprimé à la place du logo copié');
+        assert.ok(!(await texteDevis(sansLogo.id)).octets.includes(Buffer.from('/Subtype /Image')), 'logo ajouté après la signature imprimé');
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+      }
+    });
+
     test('signature : les refus d’état passent avant celui de l’identité incomplète', async () => {
       const client = await creerClient(`TEST Client refus avant identité ${Date.now()}`);
       const signe = await creerDevis(client.id, 'TEST Devis déjà signé');
@@ -15752,7 +15811,10 @@ if (!TEST_DATABASE_URL) {
       const client = await creerClient(`TEST Client achat devis ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Devis au prix d’achat', [{ designation: 'TEST Fourniture achetée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, prixAchatUnitaireHt: 6543.21 }]);
       const { texte } = await texteDevis(devis.id);
-      assert.ok(texte.includes('TEST Fourniture achetée') && !/6\s?543|543[,.]21/.test(texte), texte);
+      // Audit n° 11 : le nom du client, horodaté, et le numéro du devis peuvent contenir « 6543 »
+      // (« … 1792744654303 ») ; ils sont retirés du texte examiné.
+      const examine = texte.replaceAll(client.raisonSociale, '').replaceAll(devis.numero, '');
+      assert.ok(texte.includes('TEST Fourniture achetée') && !/6\s?543|543[,.]21/.test(examine), texte);
     });
 
     test('empreinte de l’identité figée : formule du lot 6a-1 inchangée par la mise en commun', async () => {
