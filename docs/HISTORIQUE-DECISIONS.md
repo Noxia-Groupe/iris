@@ -349,9 +349,9 @@ Découpage retenu par Claude Code (choix de mise en œuvre, non décidé par Nel
 *Rédigé le 23-10-2026.* Question posée par Claude Code après le dix-huitième audit de #301, les audits 14 à 18 n'ayant plus relevé de défaut dans le code, seulement des cas que les tests ne couvraient pas : faut-il fusionner quand un audit ne relève que des tests manquants hors montants, et verser ces tests à une PR de suivi ? Réponse de Nelson, citée mot pour mot (message de la session de travail) : « Oui fusionne si ce n’eqt que des test manquant il faut eviter de tourner en rond et de provoquer des test de plus en olus longtemps et qui ne provoque pas d’erreur. Si pas d’erreur on continue ».
 
 Lecture retenue par Claude Code, à corriger par Nelson si besoin, appliquée dès le dix-neuvième audit de #301 et consignée dans la règle 3 de la méthode (`CLAUDE.md`, `.agents/AGENTS.md`) :
-- une remarque d'audit qui ne signale qu'un test manquant (cas non couvert, mutant survivant), sans erreur constatée dans le code, la documentation ou un test existant, ne retarde pas la fusion, même sur un parcours de la règle 2 ;
-- elle devient une issue `suivi-audit`, qui reprend le test proposé, sans nouvelle boucle d'audit (première application : #308) ;
-- une erreur réelle reste corrigée et retestée avant fusion, avec un nouvel audit sur la nouvelle SHA ;
+- une remarque d'audit qui ne signale qu'un test manquant (cas non couvert, mutant survivant), sans erreur constatée dans le code, la documentation ou un test existant, ne retarde pas la fusion, même sur un autre parcours de la règle 2 que les montants ; la question excluant les montants, un test manquant qui touche un montant reste ajouté et retesté avant fusion ;
+- elle devient une issue `suivi-audit`, qui reprend le test proposé, versé ensuite par une PR de suivi, sans nouvelle boucle d'audit (première application : #308) ;
+- une erreur constatée suit la règle 3 : corrigée et retestée avant fusion, avec un nouvel audit sur la nouvelle SHA, si elle est bloquante ou touche un parcours de la règle 2 ;
 - la fusion exige toujours une CI verte et un audit sur la même SHA.
 
 ## Lots des 22 et 23-10-2026
@@ -372,6 +372,6 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin, appliquée d�
 
 ### En cours au 23-10-2026
 
-- Lots pilotes 4 et 5, et lots 6a-1 et 6a-2, implémentés, non validés pour mise en service. Restent du lot 6 : l'envoi par la messagerie et son journal (6a-3), les PDF des autres documents (6a-4) et Microsoft 365 (6b).
-- Lots dédiés prévus par les décisions des 22 et 23-10-2026 : deux conversions par affaire (lot 4) ; identité minimale du client pour signer un devis et émettre une facture, avec la case « pas de SIRET » (lecture retenue, à confirmer).
+- Lots pilotes 4 et 5, et lots 6a-1 et 6a-2, implémentés, non validés pour mise en service. Restent du lot 6 : l'envoi par la messagerie et son journal (6a-3), les PDF des autres documents et leur envoi (6a-4) et Microsoft 365 (6b).
+- Lots dédiés prévus par les décisions des 22 et 23-10-2026 : deux conversions par affaire (lot 4, lecture retenue des réponses du 22-10-2026) ; identité minimale du client pour signer un devis et émettre une facture, avec la case « pas de SIRET » (lecture retenue, à confirmer).
 - #250 (#240) : toujours en pause, en brouillon, jusqu'à la fin du pilote.
