@@ -14737,6 +14737,9 @@ if (!TEST_DATABASE_URL) {
         [{}, /doivent être copiés à la signature/],
         [{ identiteEmetteurId: identite }, /doivent être copiés à la signature/],
         [{ clientRaisonSociale: 'TEST Client' }, /doivent être copiés à la signature/],
+        // Audit n° 5 : chaque copie manquante est refusée seule, les deux autres présentes.
+        [{ clientRaisonSociale: 'TEST Client', fuseauHoraire: 'Europe/Paris' }, /doivent être copiés à la signature/],
+        [{ identiteEmetteurId: identite, fuseauHoraire: 'Europe/Paris' }, /doivent être copiés à la signature/],
         [{ identiteEmetteurId: identite, clientRaisonSociale: '   ', fuseauHoraire: 'Europe/Paris' }, /doivent être copiés à la signature/],
         [{ identiteEmetteurId: identite, clientRaisonSociale: 'TEST Client' }, /doivent être copiés à la signature/],
         [{ identiteEmetteurId: identite, clientRaisonSociale: 'TEST Client', fuseauHoraire: ' ' }, /doivent être copiés à la signature/],
@@ -15090,12 +15093,13 @@ if (!TEST_DATABASE_URL) {
         await tx.$queryRaw`SELECT 1 FROM "CompanySettings" WHERE "id" = 'singleton' FOR UPDATE`;
         await tx.$executeRaw`UPDATE "CompanySettings" SET "raisonSociale" = 'TEST Émetteur devis pendant le verrou', "fuseauHoraire" = 'Pacific/Tahiti' WHERE "id" = 'singleton'`;
         await retenue;
-      }, { timeout: 20_000 });
+      }, { timeout: 40_000 });
       try {
         while (pidTenant === null) await new Promise((resolve) => setTimeout(resolve, 10));
         const signature = signer(devis.id).then((reponse) => reponse);
         let bloquee = false;
-        for (let essai = 0; essai < 250 && !bloquee; essai++) {
+        // Jusqu'à 20 s : sous forte charge, la signature peut tarder à atteindre le verrou (audit n° 5).
+        for (let essai = 0; essai < 1000 && !bloquee; essai++) {
           const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidTenant}::int = ANY(pg_blocking_pids(pid))`;
           bloquee = n > 0;
           if (!bloquee) await new Promise((resolve) => setTimeout(resolve, 20));
@@ -15145,6 +15149,20 @@ if (!TEST_DATABASE_URL) {
         { nom: 'B Facturation', adresse: '2 rue Facturée', codePostal: '31000', ville: 'Toulouse', estSiteFacturation: true },
       ]) assert.equal((await request(app).post(`/api/clients/${client.id}/sites`).set(admin()).send(site)).status, 201);
       const devis = await creerDevis(client.id, 'TEST Devis site de facturation tardif');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes('2 rue Facturée') && !nonSigne.includes('1 rue du Chantier'), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '2 rue Facturée\n31000 Toulouse');
+    });
+
+    // Audit n° 5 : sans tri, la lecture rend les sites dans l'ordre d'écriture ou des identifiants,
+    // aléatoires : l'autre site est ici le premier écrit et le premier par identifiant.
+    test('client actuel : le site de facturation, quels que soient l’ordre d’écriture et les identifiants', async () => {
+      const client = await creerClient(`TEST Client sites ordonnés ${Date.now()}`, false);
+      const suite = randomUUID().slice(8);
+      await prisma.clientSite.create({ data: { id: `00000000${suite}`, clientId: client.id, nom: 'A Chantier', adresse: '1 rue du Chantier', codePostal: '33000', ville: 'Bordeaux' } });
+      await prisma.clientSite.create({ data: { id: `ffffffff${suite}`, clientId: client.id, nom: 'B Facturation', adresse: '2 rue Facturée', codePostal: '31000', ville: 'Toulouse', estSiteFacturation: true } });
+      const devis = await creerDevis(client.id, 'TEST Devis sites ordonnés');
       const nonSigne = (await texteDevis(devis.id)).texte;
       assert.ok(nonSigne.includes('2 rue Facturée') && !nonSigne.includes('1 rue du Chantier'), nonSigne);
       assert.equal((await signer(devis.id)).status, 201);
@@ -15212,6 +15230,19 @@ if (!TEST_DATABASE_URL) {
       const { texte } = await texteDevis(devis.id);
       assert.ok(texte.includes('TVA 20 % sur 0,09 € : 0,02 €') && texte.includes('TVA totale : 0,02 €'), texte);
       assert.ok(!texte.includes('Acompte'), `acompte imprimé pour un devis qui n’en exige pas :\n${texte}`);
+    });
+
+    // Audit n° 5 : un taux de TVA, une quantité ou un taux d'acompte décimaux s'impriment tels qu'ils
+    // sont enregistrés, sans arrondi (5,5 % n'est jamais imprimé 6 %, ni 1,125 m comme 1,1 m).
+    test('décimales : taux de TVA, quantité et taux d’acompte imprimés sans arrondi', async () => {
+      const client = await creerClient(`TEST Client décimales devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis décimal', [
+        { designation: 'TEST Fourniture au taux réduit', quantite: 1.125, unite: 'm', prixUnitaireHt: 8, tauxTva: 5.5 },
+      ], { acompteExige: true, tauxAcompte: 12.5 });
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Fourniture au taux réduit\s+1,125 m\s+8,00 €\s+5,5 %\s+9,00 €$/m, texte);
+      assert.ok(texte.includes('TVA 5,5 % sur 9,00 € : 0,50 €') && texte.includes('TVA totale : 0,50 €'), texte);
+      assert.ok(texte.includes('Acompte demandé : 12,5 %'), texte);
     });
 
     test('prix d’achat prévu : absent du PDF sous toutes ses écritures', async () => {

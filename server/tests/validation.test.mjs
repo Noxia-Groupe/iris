@@ -676,4 +676,25 @@ describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
     assert.deepEqual(replierTexte('10\r20 m', 9), ['10 20 m']);
     assert.deepEqual(replierTexte('10\r\n20 m', 9), ['10 20 m']);
   });
+
+  // Audit n° 5 : chaque équivalent et chaque invisible de la table, un par un, entre deux lettres.
+  test('chaque équivalent de même sens et chaque invisible documentés', async () => {
+    const { texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');
+    const entre = (code) => texteWinAnsi(`a${String.fromCodePoint(code)}b`);
+    const espaces = [0x09, ...Array.from({ length: 11 }, (_, rang) => 0x2000 + rang), 0x202f, 0x205f, 0x3000];
+    for (const code of espaces) assert.equal(entre(code), 'a b', `U+${code.toString(16)}`);
+    for (const code of [0x2010, 0x2011, 0x2012, 0x2212]) assert.equal(entre(code), 'a-b', `U+${code.toString(16)}`);
+    assert.equal(entre(0x2264), 'a<=b');
+    assert.equal(entre(0x2265), 'a>=b');
+    // Même glyphe, même sens (audit n° 5, N2) : 10 μF s'imprime 10 µF, l'apostrophe modificative ’.
+    assert.equal(entre(0x03bc), 'a\u00b5b');
+    assert.equal(entre(0x02bc), 'a\u2019b');
+    // Séparateurs de ligne et de paragraphe, fins de ligne Windows et anciennes : un saut de ligne.
+    for (const code of [0x0a, 0x0d, 0x2028, 0x2029]) assert.equal(entre(code), 'a\nb', `U+${code.toString(16)}`);
+    assert.equal(texteWinAnsi('a\r\nb'), 'a\nb');
+    for (const code of [0xad, 0x200b, 0x200c, 0x200d, 0x2060, 0xfeff]) assert.equal(entre(code), 'ab', `U+${code.toString(16)}`);
+    // Les autres caractères de mise en forme invisibles deviennent « ? », comme le dit la passation.
+    for (const code of [0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2062, 0xfe0f]) assert.equal(entre(code), 'a?b', `U+${code.toString(16)}`);
+    assert.equal(texteWinAnsi('©\ufe0f'), '©?');
+  });
 });

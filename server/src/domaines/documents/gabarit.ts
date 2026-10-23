@@ -43,15 +43,19 @@ const compatibiliteSansPerte = (code: number) => (code >= 0xfb00 && code <= 0xfb
 const ACCENTS_COMBINANTS = /[\u0300-\u0304\u0306-\u0333\u0339-\u033e\u0340-\u036f]/g;
 
 // Équivalents imprimables de même sens : espaces typographiques, traits d'union et signe moins,
-// inégalités larges, séparateurs de ligne. Les caractères invisibles (espace sans chasse, liants,
-// marque d'ordre des octets, trait d'union conditionnel) ne s'impriment pas : ils n'apparaissent
-// pas non plus à la saisie. Une fin de ligne Windows (\r\n) ou ancienne (\r seul) est un saut de
+// inégalités larges, mu grec et apostrophe modificative, séparateurs de ligne. Ces six caractères
+// invisibles (espace sans chasse, liants, marque d'ordre des octets, trait d'union conditionnel) ne
+// s'impriment pas : ils n'apparaissent pas non plus à la saisie. Les autres caractères de mise en forme invisibles (marques de direction,
+// sélecteurs de variante…) deviennent « ? » : une marque de direction peut réordonner le texte
+// affiché à la saisie. Une fin de ligne Windows (\r\n) ou ancienne (\r seul) est un saut de
 // ligne (texteWinAnsi) : retirer un \r seul collerait deux mots (« 10\r20 » imprimé « 1020 »).
 const EQUIVALENTS_WIN_ANSI = new Map<number, string>([
   [0x09, ' '], [0x202f, ' '], [0x205f, ' '], [0x3000, ' '],
   ...Array.from({ length: 11 }, (_, rang): [number, string] => [0x2000 + rang, ' ']),
   [0x2010, '-'], [0x2011, '-'], [0x2012, '-'], [0x2212, '-'],
   [0x2264, '<='], [0x2265, '>='],
+  // Même glyphe, même sens : mu grec et signe micro (μF), apostrophe modificative et apostrophe.
+  [0x03bc, '\u00b5'], [0x02bc, '\u2019'],
   [0x2028, '\n'], [0x2029, '\n'],
   [0xad, ''], [0x200b, ''], [0x200c, ''], [0x200d, ''], [0x2060, ''], [0xfeff, ''],
 ]);
