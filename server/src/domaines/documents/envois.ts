@@ -50,7 +50,8 @@ export async function propositionDestinataire(db: Prisma.TransactionClient, clie
 }
 
 // Objet et texte du courriel (choix par défaut, à confirmer) : aucune mention légale ajoutée, le
-// document joint porte les siennes. La raison sociale est celle que le PDF imprime.
+// document joint porte les siennes. La raison sociale est celle que le PDF imprime, sauf pour une pièce
+// émise avant le lot 6a-1 (texteEnvoiFacture).
 type DocumentEnvoye = { nature: 'DEVIS'; numero: string; version: number } | { nature: 'FACTURE' | 'AVOIR'; numero: string };
 export function texteEnvoi(document: DocumentEnvoye, raisonSociale: string): { objet: string; corps: string } {
   const designation = document.nature === 'DEVIS' ? `Devis ${document.numero} version ${document.version}`
@@ -82,8 +83,9 @@ export const FACTURE_A_ENVOYER = {
 } as const;
 type FactureAEnvoyer = { type: string; numero: string | null; identiteEmetteur: { raisonSociale: string } | null };
 
-// Une pièce émise s'imprime depuis son identité figée ; une pièce émise avant le lot 6a-1, qui n'en a
-// pas, prend l'identité actuelle (sans objet tant qu'aucune donnée réelle n'existe).
+// Une pièce émise s'imprime depuis son identité figée. Une pièce émise avant le lot 6a-1 n'en a pas :
+// son PDF tire l'émetteur des mentions légales figées, mais l'objet et le texte prennent l'identité
+// actuelle, refusée si elle est incomplète (sans objet tant qu'aucune donnée réelle n'existe).
 export async function texteEnvoiFacture(db: Prisma.TransactionClient, facture: FactureAEnvoyer) {
   const avoir = facture.type === 'AVOIR';
   const raisonSociale = facture.identiteEmetteur?.raisonSociale ?? await raisonSocialeActuelleImprimee(db, avoir ? 'd’envoyer un avoir' : 'd’envoyer une facture');
