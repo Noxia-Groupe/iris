@@ -54,6 +54,13 @@ export async function preparerDonnees(api) {
   const suffixe = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
   const nom = (libelle) => `Relevé ${libelle} ${suffixe}`;
 
+  // Identité de la société : sans elle, une facture ne s'émet pas (lot 6a-1) et un devis ne se signe
+  // pas (lot 6a-2). Seuls les champs exigés et vides sont complétés, comme dans les fixtures E2E.
+  const societe = await appel('GET', '/company');
+  const identite = { raisonSociale: 'Société du relevé', siret: '12345678900011', adresse: '1 rue des Tests', codePostal: '14000', ville: 'Caen' };
+  const manquants = Object.fromEntries(Object.entries(identite).filter(([cle]) => !String(societe[cle] ?? '').trim()));
+  if (Object.keys(manquants).length) await appel('PUT', '/company', manquants);
+
   // Comptes.
   const compte = (cle, libelle, role) => appel('POST', '/users', { email: `releve.${cle}.${suffixe}@iris.test`, name: nom(libelle), role });
   const conducteur = await compte('conducteur', 'Conducteur', 'CONDUCTEUR_TRAVAUX');

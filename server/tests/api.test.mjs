@@ -14517,6 +14517,28 @@ if (!TEST_DATABASE_URL) {
       const { texte } = await documentPdf(facture.id);
       assert.match(texte, /^TEST Désignation de trente-quatre 1\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
     });
+
+    // Audit n° 7 : la mise en page de la facture reste celle de main, colonne par colonne (largeurs 38,
+    // 9, 16, 8 et 16 ; désignation repliée à 36 caractères), relevée dans le flux du PDF, que
+    // l'extraction du texte ne restitue pas : le PDF d'une facture déjà émise ne bouge pas.
+    test('gabarit : colonnes de la facture inchangées, relevées dans le flux du PDF', async () => {
+      const { inflateSync } = await import('node:zlib');
+      // 36 caractères avec le rang ajouté par creerBrouillon : la largeur exacte du repli.
+      const facture = await creerEmise('TEST Désignation de trente-quatre!');
+      const res = await request(app).get(`/api/factures/${facture.id}/document.pdf`).set(admin()).buffer(true).parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
+      assert.equal(res.status, 200);
+      const octets = res.body, brut = octets.toString('latin1'), lignes = [];
+      for (const flux of brut.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        for (const [, morceaux] of contenu.matchAll(/\[([^\]]*)\] TJ/g)) lignes.push([...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join(''));
+      }
+      // Formule des colonnes de main (factures/pdf.ts avant le lot 6a-2), euro en WinAnsi (0x80).
+      const colonnes = (a, b, c, d, e) => a.padEnd(38) + b.padStart(9) + c.padStart(16) + d.padStart(8) + e.padStart(16);
+      assert.ok(lignes.includes(colonnes('D\xe9signation', 'Qt\xe9', 'PU HT', 'TVA', 'Total HT')), JSON.stringify(lignes));
+      assert.ok(lignes.includes(colonnes('TEST D\xe9signation de trente-quatre! 1', '1', '10,00 \x80', '20 %', '10,00 \x80')), JSON.stringify(lignes));
+    });
   });
 
   describe('Lot 6a-2 : PDF du devis sur le modèle commun, copies figées à la signature', () => {
@@ -14528,7 +14550,7 @@ if (!TEST_DATABASE_URL) {
       adresse: '3 rue du Devis', codePostal: '14000', ville: 'Caen', pays: 'France', telephone: '02 31 00 00 03',
       email: 'devis-a@iris.test', siteWeb: '', piedFacture: 'TEST Pied devis A', couleurPrimaire: '#0f766e',
     };
-    const SOCIETE_B = { ...SOCIETE_A, raisonSociale: 'TEST Émetteur devis B', siret: '44444444400044', adresse: '4 avenue Changée', piedFacture: 'TEST Pied devis B', couleurPrimaire: '#7c2d12' };
+    const SOCIETE_B = { ...SOCIETE_A, raisonSociale: 'TEST Émetteur devis B', nomCommercial: 'TEST Enseigne devis B', siret: '44444444400044', adresse: '4 avenue Changée', piedFacture: 'TEST Pied devis B', couleurPrimaire: '#7c2d12' };
     const EMAILS = ['devis6a2.commercial@iris.test', 'devis6a2.technicien@iris.test', 'devis6a2.lecteur@iris.test', 'devis6a2.directeur@iris.test'];
     const definirSociete = async (champs) => {
       const res = await request(app).put('/api/company').set(admin()).send(champs);
@@ -14615,6 +14637,8 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await request(app).put(`/api/clients/${client.id}`).set(admin()).send({ raisonSociale: `${client.raisonSociale} renommé` })).status, 200);
         const relu = await texteDevis(devis.id);
         assert.ok(relu.texte.includes('TEST Émetteur devis B') && relu.texte.includes('TEST Pied devis B') && !relu.texte.includes('TEST Émetteur devis A'));
+        // Audit n° 7 : le nom commercial actuel, distinct de la raison sociale, est imprimé lui aussi.
+        assert.ok(relu.texte.includes('TEST Enseigne devis B'), relu.texte);
         assert.ok(relu.texte.includes(`${client.raisonSociale} renommé`));
         assert.ok((await couleursPdf(relu.octets)).has('#7c2d12'));
       } finally {
@@ -14690,7 +14714,9 @@ if (!TEST_DATABASE_URL) {
         assert.equal(await prisma.identiteEmetteur.count({ where: { siret: SOCIETE_A.siret, logoId: copie.identiteEmetteur.logoId } }), 1);
 
         const avant = await texteDevis(devis.id);
-        for (const attendu of ['TEST Émetteur devis A', 'Bon pour accord', `Accepté par TEST Signataire client le ${await jourSociete(copie.signeLe)}.`, `Empreinte du contenu signé (SHA-256) : ${copie.empreinte}`]) {
+        // Audit n° 7 : le client imprimé est sa copie, raison sociale et adresse comprises ; sans cette
+        // vérification, un PDF signé sans adresse resterait identique à lui-même après le changement.
+        for (const attendu of ['TEST Émetteur devis A', client.raisonSociale, '5 rue du Client', '75002 Paris', 'Bon pour accord', `Accepté par TEST Signataire client le ${await jourSociete(copie.signeLe)}.`, `Empreinte du contenu signé (SHA-256) : ${copie.empreinte}`]) {
           assert.ok(avant.texte.includes(attendu), `absent du PDF : ${attendu}`);
         }
         assert.ok(!avant.texte.includes('Date, nom et signature du client'));
@@ -14704,6 +14730,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await request(app).put(`/api/clients/${client.id}/sites/${site.id}`).set(admin()).send({ nom: site.nom, adresse: '9 rue Déménagée', codePostal: '69001', ville: 'Lyon', estSiteFacturation: true })).status, 200);
         const apres = await texteDevis(devis.id);
         assert.equal(apres.texte, avant.texte);
+        assert.ok(!apres.texte.includes('9 rue Déménagée') && !apres.texte.includes(`${client.raisonSociale} renommé`), apres.texte);
         assert.ok((await couleursPdf(apres.octets)).has('#0f766e') && !(await couleursPdf(apres.octets)).has('#7c2d12'));
         assert.ok(apres.octets.includes(Buffer.from('/Subtype /Image')), 'le logo copié reste imprimé');
 
@@ -15205,6 +15232,36 @@ if (!TEST_DATABASE_URL) {
       assert.ok(nonSigne.includes('2 rue Facturée') && !nonSigne.includes('1 rue du Chantier'), nonSigne);
       assert.equal((await signer(devis.id)).status, 201);
       assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '2 rue Facturée\n31000 Toulouse');
+    });
+
+    // Audit n° 7 (N2 du sixième audit) : deux sites identiques sur tous les autres critères (ni
+    // facturation, ni siège, même nom ; la base n'admet qu'un site de facturation et un siège par
+    // client) sont départagés par l'identifiant, le plus petit d'abord, quel que soit l'ordre d'écriture.
+    test('client : deux sites identiques, départagés par le plus petit identifiant', async () => {
+      const client = await creerClient(`TEST Client sites jumeaux ${Date.now()}`, false);
+      const suite = randomUUID().slice(8);
+      await prisma.clientSite.create({ data: { id: `ffffffff${suite}`, clientId: client.id, nom: 'Chantier', adresse: '9 rue Jumelle', codePostal: '31000', ville: 'Toulouse' } });
+      await prisma.clientSite.create({ data: { id: `00000000${suite}`, clientId: client.id, nom: 'Chantier', adresse: '1 rue Jumelle', codePostal: '31000', ville: 'Toulouse' } });
+      const devis = await creerDevis(client.id, 'TEST Devis sites jumeaux');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes('1 rue Jumelle') && !nonSigne.includes('9 rue Jumelle'), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '1 rue Jumelle\n31000 Toulouse');
+    });
+
+    // Audit n° 7 : un objet et un signataire longs (300 et 200 caractères au plus) s'impriment en
+    // entier, repliés à la largeur de la page, jamais tronqués.
+    test('objet et signataire longs : imprimés en entier', async () => {
+      const client = await creerClient(`TEST Client textes longs ${Date.now()}`);
+      const objet = `TEST Objet long ${'mot '.repeat(68)}FINOBJET`;
+      const devis = await creerDevis(client.id, objet);
+      const signataire = `TEST Signataire ${'Nom '.repeat(40)}FINSIGNATAIRE`;
+      const signature = await request(app).post(`/api/devis/${devis.id}/signature`).set(admin()).send({ signataire, confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      const { texte } = await texteDevis(devis.id);
+      const aplati = texte.replace(/\s+/g, ' ');
+      assert.ok(aplati.includes(`Objet : ${objet}`), texte);
+      assert.ok(aplati.includes(`Accepté par ${signataire} le `), texte);
     });
 
     test('devis non signé : le logo actuel est imprimé, puis plus après son retrait', async () => {

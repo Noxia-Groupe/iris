@@ -62,6 +62,9 @@ test('PDF du devis : bouton d’un devis signé, ouvert au commercial, sans déb
   const devis = await cree.json() as { id: string; numero: string };
   const signe = await request.post(`${api}/devis/${devis.id}/signature`, { headers, data: { signataire: 'Client E2E', confirme: true } });
   expect(signe.status(), await signe.text()).toBe(201);
+  // Audit n° 7 : sa révision (version 2) a son propre bouton et son propre fichier.
+  const revision = await request.post(`${api}/devis/${devis.id}/revisions`, { headers });
+  expect(revision.status(), await revision.text()).toBe(201);
   const reponse = await request.post(`${api}/users`, { headers, data: { email: `devis.pdf.${suffixe}@iris.test`, name: `Commercial PDF ${suffixe}`, role: 'COMMERCIAL' } });
   expect(reponse.ok(), await reponse.text()).toBeTruthy();
   const commercial = await reponse.json() as { id: string };
@@ -80,6 +83,9 @@ test('PDF du devis : bouton d’un devis signé, ouvert au commercial, sans déb
     const telechargement = page.waitForEvent('download');
     await bouton.click();
     expect((await telechargement).suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
+    const telechargementRevision = page.waitForEvent('download');
+    await page.getByRole('button', { name: `PDF du devis ${devis.numero} version 2`, exact: true }).click();
+    expect((await telechargementRevision).suggestedFilename()).toBe(`${devis.numero}-v2.pdf`);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
     // La liste masque ce qui déborde (overflow-hidden) : chaque action du devis, PDF compris, reste
     // entière dans la largeur de l'écran, au lieu d'être coupée sans défilement.

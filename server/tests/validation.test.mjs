@@ -698,4 +698,24 @@ describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
     for (const code of [0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2062, 0xfe0f]) assert.equal(entre(code), 'a?b', `U+${code.toString(16)}`);
     assert.equal(texteWinAnsi('©\ufe0f'), '©?');
   });
+
+  // Audit n° 7 : le jeu des polices standard (WinAnsi : ASCII imprimable, Latin-1 et les 27 caractères
+  // de la page de code 1252 de 0x80 à 0x9F) s'imprime tel quel, et lui seul. Un caractère retiré du
+  // jeu par erreur (–, •, Ÿ, ~, ÿ…) changerait le PDF des factures déjà émises ; un caractère ajouté
+  // à tort brouillerait la ligne. Le trait d'union conditionnel (U+00AD) est retiré, comme documenté.
+  test('les caractères du jeu WinAnsi s’impriment tels quels, et eux seuls', async () => {
+    const { texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');
+    const page1252 = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
+    const attendus = [0x0a, ...Array.from({ length: 0x5f }, (_, rang) => 0x20 + rang),
+      ...Array.from({ length: 0x60 }, (_, rang) => 0xa0 + rang).filter((code) => code !== 0xad),
+      ...[...page1252].map((caractere) => caractere.codePointAt(0))].sort((a, b) => a - b);
+    assert.equal(new Set(attendus).size, 1 + 95 + 95 + 27);
+    const inchanges = [];
+    for (let code = 0; code <= 0xffff; code++) {
+      if (code >= 0xd800 && code <= 0xdfff) continue;
+      const caractere = String.fromCodePoint(code);
+      if (texteWinAnsi(`a${caractere}b`) === `a${caractere}b`) inchanges.push(code);
+    }
+    assert.deepEqual(inchanges, attendus);
+  });
 });
