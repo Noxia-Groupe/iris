@@ -13999,6 +13999,18 @@ if (!TEST_DATABASE_URL) {
       const sessionAbsente = await request(app).get('/api/me').set({ Authorization: `Bearer ${jwt.sign({ id: randomUUID() }, process.env.JWT_SECRET)}` });
       assert.deepEqual([sessionSysteme.status, sessionSysteme.body], [401, { error: 'Compte introuvable ou révoqué' }]);
       assert.deepEqual([sessionSysteme.status, sessionSysteme.body], [sessionAbsente.status, sessionAbsente.body]);
+      // Neuvième audit de #302 : requireAuth refuse le type SYSTEME par lui-même, et non seulement parce que
+      // le compte est inactif, comme l'annonce son commentaire (« même si une modification le réactivait »).
+      // Le déclencheur, qui interdit cette réactivation, est neutralisé le temps de l'essai.
+      await prisma.$executeRawUnsafe('ALTER TABLE "User" DISABLE TRIGGER "compte_systeme_fige"');
+      try {
+        await prisma.$executeRaw`UPDATE "User" SET "actif" = true WHERE "id" = ${SYSTEME.id}`;
+        const sessionReactivee = await request(app).get('/api/me').set(jeton);
+        assert.deepEqual([sessionReactivee.status, sessionReactivee.body], [401, { error: 'Compte introuvable ou révoqué' }]);
+      } finally {
+        await prisma.$executeRaw`UPDATE "User" SET "actif" = false WHERE "id" = ${SYSTEME.id}`;
+        await prisma.$executeRawUnsafe('ALTER TABLE "User" ENABLE TRIGGER "compte_systeme_fige"');
+      }
       // Connexion Microsoft (cinquième audit de #302) : l'adresse réservée, même présentée par un jeton
       // Microsoft vérifié, ne désigne aucun compte autorisé, le compte étant inactif. Témoin : un compte
       // actif est trouvé par la même lecture.
@@ -14069,6 +14081,8 @@ if (!TEST_DATABASE_URL) {
       for (const data of [{ name: 'TEST Autre nom' }, { email: 'systeme.autre@iris.test' }, { permissions: ['devis:read'] }, { accesFinance: true }, { responsableHierarchiqueId: comptes.conducteur.id }, { theme: 'dark' }]) {
         await assert.rejects(prisma.user.update({ where: { id: SYSTEME.id }, data }), /Compte système/, JSON.stringify(data));
       }
+      // Neuvième audit de #302 : même une mise à jour sans changement de valeur (passation, section 5).
+      await assert.rejects(prisma.$executeRaw`UPDATE "User" SET "actif" = "actif" WHERE "id" = ${SYSTEME.id}`, /Compte système/);
       await assert.rejects(prisma.user.delete({ where: { id: SYSTEME.id } }), /Compte système/);
       await assert.rejects(prisma.user.create({ data: { email: 'systeme.bis@iris.test', name: 'TEST Système bis', role: 'SYSTEME' } }), /role_systeme/);
       // Huitième audit de #302 : même un second compte en tout point semblable au compte système (inactif,
