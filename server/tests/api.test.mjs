@@ -203,7 +203,7 @@ if (!TEST_DATABASE_URL) {
     await prisma.facture.deleteMany({ where: { type: 'FACTURE', client: { raisonSociale: { startsWith: 'TEST ' } } } });
     // Identités figées et logos que plus aucune pièce ni réglage ne référence (lot 6a-1).
     await prisma.companySettings.updateMany({ data: { logoDocumentId: null } });
-    await prisma.$executeRaw`DELETE FROM "IdentiteEmetteur" i WHERE NOT EXISTS (SELECT 1 FROM "Facture" f WHERE f."identiteEmetteurId" = i."id")`;
+    await prisma.$executeRaw`DELETE FROM "IdentiteEmetteur" i WHERE NOT EXISTS (SELECT 1 FROM "Facture" f WHERE f."identiteEmetteurId" = i."id") AND NOT EXISTS (SELECT 1 FROM "DevisSignature" s WHERE s."identiteEmetteurId" = i."id")`;
     await prisma.$executeRaw`DELETE FROM "LogoDocument" l WHERE NOT EXISTS (SELECT 1 FROM "IdentiteEmetteur" i WHERE i."logoId" = l."id")`;
     await prisma.mentionsLegalesVersion.deleteMany({});
     try {
@@ -14742,6 +14742,1378 @@ if (!TEST_DATABASE_URL) {
       for (let page = 1; page <= pages; page++) assert.ok(texte.includes(`Page ${page} / ${pages}`), `page ${page} absente`);
       assert.equal(texte.split('TEST Pied de page A').length - 1, pages);
       assert.ok(texte.includes('TEST Ligne longue 70'));
+    });
+
+    // Audit n° 4 du lot 6a-2 : un retour chariot seul, que main imprimait comme une espace dans une
+    // désignation de facture, ne colle pas deux mots (« 10\r20 » imprimé « 1020 »).
+    test('gabarit : un retour chariot seul sépare les mots d’une désignation de facture', async () => {
+      const facture = await creerEmise('TEST Lot 10\r20 m');
+      const { texte } = await documentPdf(facture.id);
+      assert.match(texte, /^TEST Lot 10 20 m 1\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+    });
+
+    // Lot 6a-2 : le repli des désignations, mis en commun avec le devis, garde la largeur de la facture.
+    test('gabarit : une désignation de 35 caractères tient sur la ligne de ses montants', async () => {
+      const facture = await creerEmise('TEST Désignation de trente-quatre');
+      const { texte } = await documentPdf(facture.id);
+      assert.match(texte, /^TEST Désignation de trente-quatre 1\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+    });
+
+    // Audit n° 14 : la facture replie elle aussi sur le texte imprimé (replierTexte commun). Saisie avec
+    // un accent décomposé, cette désignation a 37 caractères, mais 36 une fois imprimée : elle tient sur
+    // la ligne de ses montants, comme sa forme composée ; le repli de main renvoyait le rang à la ligne.
+    test('gabarit : la désignation d’une facture se replie sur le texte imprimé, accent décomposé compris', async () => {
+      const facture = await creerEmise('TEST De\u0301signation de trente-quatre!');
+      const { texte } = await documentPdf(facture.id);
+      assert.match(texte, /^TEST Désignation de trente-quatre! 1\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+    });
+
+    // Audit n° 7 : la mise en page de la facture reste celle de main, colonne par colonne (largeurs 38,
+    // 9, 16, 8 et 16 ; désignation repliée à 36 caractères), relevée dans le flux du PDF, que
+    // l'extraction du texte ne restitue pas : le PDF d'une facture déjà émise ne bouge pas.
+    test('gabarit : colonnes de la facture inchangées, relevées dans le flux du PDF', async () => {
+      const { inflateSync } = await import('node:zlib');
+      // 36 caractères avec le rang ajouté par creerBrouillon : la largeur exacte du repli.
+      const facture = await creerEmise('TEST Désignation de trente-quatre!');
+      const res = await request(app).get(`/api/factures/${facture.id}/document.pdf`).set(admin()).buffer(true).parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
+      assert.equal(res.status, 200);
+      const octets = res.body, brut = octets.toString('latin1'), lignes = [];
+      for (const flux of brut.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        for (const [, morceaux] of contenu.matchAll(/\[([^\]]*)\] TJ/g)) lignes.push([...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join(''));
+      }
+      // Formule des colonnes de main (factures/pdf.ts avant le lot 6a-2), euro en WinAnsi (0x80).
+      const colonnes = (a, b, c, d, e) => a.padEnd(38) + b.padStart(9) + c.padStart(16) + d.padStart(8) + e.padStart(16);
+      assert.ok(lignes.includes(colonnes('D\xe9signation', 'Qt\xe9', 'PU HT', 'TVA', 'Total HT')), JSON.stringify(lignes));
+      assert.ok(lignes.includes(colonnes('TEST D\xe9signation de trente-quatre! 1', '1', '10,00 \x80', '20 %', '10,00 \x80')), JSON.stringify(lignes));
+    });
+  });
+
+  describe('Lot 6a-2 : PDF du devis sur le modèle commun, copies figées à la signature', () => {
+    let session = '';
+    const admin = () => ({ Authorization: `Bearer ${session}` });
+    const entete = (utilisateur) => ({ Authorization: `Bearer ${jwt.sign({ id: utilisateur.id }, process.env.JWT_SECRET)}` });
+    const SOCIETE_A = {
+      raisonSociale: 'TEST Émetteur devis A', nomCommercial: '', siret: '33333333300033', tvaIntra: 'FR33333333333',
+      adresse: '3 rue du Devis', codePostal: '14000', ville: 'Caen', pays: 'France', telephone: '02 31 00 00 03',
+      email: 'devis-a@iris.test', siteWeb: '', piedFacture: 'TEST Pied devis A', couleurPrimaire: '#0f766e',
+    };
+    const SOCIETE_B = { ...SOCIETE_A, raisonSociale: 'TEST Émetteur devis B', nomCommercial: 'TEST Enseigne devis B', siret: '44444444400044', adresse: '4 avenue Changée', piedFacture: 'TEST Pied devis B', couleurPrimaire: '#7c2d12' };
+    const EMAILS = ['devis6a2.commercial@iris.test', 'devis6a2.technicien@iris.test', 'devis6a2.lecteur@iris.test', 'devis6a2.directeur@iris.test'];
+    const definirSociete = async (champs) => {
+      const res = await request(app).put('/api/company').set(admin()).send(champs);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    const creerClient = async (raisonSociale, site = true) => {
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      if (site) {
+        const cree = await request(app).post(`/api/clients/${client.body.id}/sites`).set(admin()).send({ nom: 'TEST Facturation devis', adresse: '5 rue du Client', codePostal: '75002', ville: 'Paris', estSiteFacturation: true });
+        assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      }
+      return client.body;
+    };
+    const creerDevis = async (clientId, objet, lignes = [{ designation: 'TEST Main-d’œuvre', quantite: 2, prixUnitaireHt: 50, tauxTva: 20 }], extra = {}) => {
+      const res = await request(app).post('/api/devis').set(admin()).send({ clientId, objet, lignes, ...extra });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const signer = (id, auth = admin()) => request(app).post(`/api/devis/${id}/signature`).set(auth).send({ signataire: 'TEST Signataire client', confirme: true });
+    const pdfDevis = (id, auth = admin()) => request(app).get(`/api/devis/${id}/document.pdf`).set(auth).buffer(true)
+      .parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
+    const texteDevis = async (id, auth = admin()) => {
+      const res = await pdfDevis(id, auth);
+      assert.equal(res.status, 200, String(res.body));
+      assert.equal(res.headers['content-type'], 'application/pdf');
+      const lecteur = new PDFParse({ data: res.body });
+      const { text } = await lecteur.getText();
+      await lecteur.destroy();
+      return { octets: res.body, texte: text, disposition: res.headers['content-disposition'] };
+    };
+    const couleursPdf = async (octets) => {
+      const { inflateSync } = await import('node:zlib');
+      const texte = octets.toString('latin1');
+      const couleurs = new Set();
+      for (const flux of texte.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, texte.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        for (const [, ...rvb] of contenu.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) (?:scn|SCN)\b/g)) couleurs.add(`#${rvb.map((v) => Math.round(Number(v) * 255).toString(16).padStart(2, '0')).join('')}`);
+      }
+      return couleurs;
+    };
+    const jourSociete = async (instant = new Date()) => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      return jourCivilEntreprise(instant, fuseau).split('-').reverse().join('-');
+    };
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      assert.equal((await request(app).delete('/api/company/logo').set(admin())).status, 200);
+      await definirSociete(SOCIETE_A);
+    });
+
+    test('devis non signé : identité et client actuels, lignes, ventilation, acompte et cadre du bon pour accord, sans prix d’achat', async () => {
+      const suffixe = Date.now();
+      const client = await creerClient(`TEST Client devis imprimé ${suffixe}`);
+      const fiche = await request(app).post('/api/catalogue/prestations').set(admin()).send({ reference: `TEST-REF-DEVIS-${suffixe}`, nom: `TEST Pose catalogue ${suffixe}`, unite: 'forfait', prixVenteHt: '250', tauxTva: '10', prixAchatHt: '90' });
+      assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+      const devis = await creerDevis(client.id, 'TEST Objet du devis imprimé', [
+        { designation: 'TEST Main-d’œuvre de dépannage', quantite: 2.5, unite: 'h', prixUnitaireHt: 48, tauxTva: 20, prixAchatUnitaireHt: 7.77 },
+        { designation: `TEST Pose catalogue ${suffixe}`, quantite: 1, unite: 'forfait', prixUnitaireHt: 250, tauxTva: 10, catalogueFamille: 'prestations', catalogueId: fiche.body.id },
+      ], { acompteExige: true, tauxAcompte: 30 });
+      const { octets, texte, disposition } = await texteDevis(devis.id);
+      assert.equal(disposition, `inline; filename="${devis.numero}-v1.pdf"`);
+      for (const attendu of [
+        `DEVIS ${devis.numero}`, `Version 1 · établi le ${await jourSociete(new Date(devis.createdAt))}`,
+        'TEST Émetteur devis A', 'SIRET 33333333300033', 'TVA intracommunautaire FR33333333333', '3 rue du Devis', 'TEST Pied devis A', 'Page 1 / 1',
+        client.raisonSociale, '5 rue du Client', '75002 Paris', 'Objet : TEST Objet du devis imprimé',
+        'TEST Main-d’œuvre de dépannage', '2,5 h', '48,00 €', `Réf. TEST-REF-DEVIS-${suffixe}`, '1 forfait',
+        'Total HT : 370,00 €', 'TVA 10 % sur 250,00 € : 25,00 €', 'TVA 20 % sur 120,00 € : 24,00 €', 'TVA totale : 49,00 €', 'Total TTC : 419,00 €',
+        'Acompte demandé : 30 %', 'Bon pour accord', 'Date, nom et signature du client :',
+      ]) assert.ok(texte.includes(attendu), `absent du PDF : ${attendu}\n${texte}`);
+      assert.ok(texte.indexOf('TVA 10 %') < texte.indexOf('TVA 20 %'), 'ventilation par taux croissant');
+      // Audit n° 6 : les lignes s'impriment dans l'ordre du devis, celui du contenu signé.
+      assert.ok(texte.indexOf('TEST Pose catalogue') > texte.indexOf('TEST Main-d’œuvre de dépannage'), `ordre des lignes\n${texte}`);
+      assert.ok(!texte.includes('7,77') && !texte.includes('90,00'), 'prix d’achat imprimé');
+      assert.ok(!/Accepté par|ANNULÉ|refusé/.test(texte));
+      assert.ok((await couleursPdf(octets)).has('#0f766e'), 'couleur de la société');
+
+      // Non signé, le devis suit la société et la fiche client actuelles.
+      try {
+        await definirSociete(SOCIETE_B);
+        assert.equal((await request(app).put(`/api/clients/${client.id}`).set(admin()).send({ raisonSociale: `${client.raisonSociale} renommé` })).status, 200);
+        const relu = await texteDevis(devis.id);
+        assert.ok(relu.texte.includes('TEST Émetteur devis B') && relu.texte.includes('TEST Pied devis B') && !relu.texte.includes('TEST Émetteur devis A'));
+        // Audit n° 7 : le nom commercial actuel, distinct de la raison sociale, est imprimé lui aussi.
+        assert.ok(relu.texte.includes('TEST Enseigne devis B'), relu.texte);
+        assert.ok(relu.texte.includes(`${client.raisonSociale} renommé`));
+        assert.ok((await couleursPdf(relu.octets)).has('#7c2d12'));
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
+
+    test('droits : le droit de lecture des devis, en session ; ni technicien, ni clé d’intégration, ni visiteur', async () => {
+      const client = await creerClient(`TEST Client droits devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Droits du PDF');
+      const [commercial, technicien, lecteur, directeur] = await Promise.all([
+        prisma.user.create({ data: { email: EMAILS[0], name: 'TEST Commercial PDF devis', role: 'COMMERCIAL' } }),
+        prisma.user.create({ data: { email: EMAILS[1], name: 'TEST Technicien PDF devis', role: 'TECHNICIEN', permissions: ['devis:read'] } }),
+        // Le droit de lecture seul, accordé à un directeur, suffit.
+        prisma.user.create({ data: { email: EMAILS[2], name: 'TEST Lecteur PDF devis', role: 'DIRECTEUR', permissions: ['devis:read'] } }),
+        prisma.user.create({ data: { email: EMAILS[3], name: 'TEST Directeur PDF devis', role: 'DIRECTEUR' } }),
+      ]);
+      try {
+        assert.ok((await texteDevis(devis.id, entete(commercial))).texte.includes(`DEVIS ${devis.numero}`));
+        assert.ok((await texteDevis(devis.id, entete(lecteur))).texte.includes(`DEVIS ${devis.numero}`));
+        assert.equal((await pdfDevis(devis.id, entete(technicien))).status, 403);
+        assert.equal((await pdfDevis(devis.id, entete(directeur))).status, 403);
+        assert.equal((await request(app).get(`/api/devis/${devis.id}/document.pdf`)).status, 401);
+        assert.equal((await pdfDevis(randomUUID())).status, 404);
+        const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé PDF devis', scopes: ['devis:read'] });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        try {
+          const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
+          assert.equal((await request(app).get('/api/v1/devis').set(parCle)).status, 200, 'la clé lit bien les devis');
+          assert.equal((await request(app).get(`/api/devis/${devis.id}/document.pdf`).set(parCle)).status, 401);
+          assert.equal((await request(app).get(`/api/v1/devis/${devis.id}/document.pdf`).set(parCle)).status, 404);
+        } finally {
+          await prisma.apiAccessKey.deleteMany({ where: { nom: 'TEST clé PDF devis' } });
+        }
+      } finally {
+        await prisma.user.deleteMany({ where: { email: { in: EMAILS } } });
+      }
+    });
+
+    // Audit n° 8 : les copies prises à la signature ne servent qu'au PDF, réservé aux sessions. Les
+    // réponses JSON gardent la signature d'avant ce lot : une clé « devis:read », à qui l'adresse
+    // d'un client est fermée (scope « clients:read »), ne la lit pas dans la liste des devis.
+    test('API JSON : la signature exposée garde ses champs d’avant le lot, sans les copies', async () => {
+      const client = await creerClient(`TEST Client copies non exposées ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Copies non exposées');
+      assert.equal((await signer(devis.id)).status, 201);
+      const champs = ['devisId', 'empreinte', 'enregistreParId', 'id', 'signataire', 'signeLe'];
+      const enSession = (await request(app).get('/api/devis').set(admin())).body.find((d) => d.id === devis.id);
+      assert.deepEqual(Object.keys(enSession.signature).sort(), champs, JSON.stringify(enSession.signature));
+      const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé copies devis', scopes: ['devis:read'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      try {
+        const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
+        const liste = await request(app).get('/api/v1/devis').set(parCle);
+        assert.equal(liste.status, 200);
+        const lu = liste.body.find((d) => d.id === devis.id);
+        assert.deepEqual(Object.keys(lu.signature).sort(), champs, JSON.stringify(lu.signature));
+        assert.ok(!JSON.stringify(lu).includes('5 rue du Client'), 'adresse de facturation lue par une clé « devis:read »');
+        assert.equal((await request(app).get(`/api/v1/clients/${client.id}`).set(parCle)).status, 403);
+      } finally {
+        await prisma.apiAccessKey.deleteMany({ where: { nom: 'TEST clé copies devis' } });
+      }
+    });
+
+    // Audit n° 9 : les réponses des écritures (signature, statut, acompte, annulation) gardent elles
+    // aussi la signature d'avant ce lot. Une clé « devis:write », à qui l'adresse d'un client est
+    // fermée, ne la lit pas dans la réponse d'un changement de statut.
+    test('API JSON : les réponses des écritures n’exposent pas les copies de la signature', async () => {
+      const client = await creerClient(`TEST Client copies des écritures ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Copies non exposées en écriture', undefined, { acompteExige: true, tauxAcompte: 30 });
+      const champs = ['devisId', 'empreinte', 'enregistreParId', 'id', 'signataire', 'signeLe'];
+      const signature = await signer(devis.id);
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.deepEqual(Object.keys(signature.body).sort(), ['empreinte', 'enregistreParId', 'id', 'signataire', 'signeLe'], JSON.stringify(signature.body));
+      const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé copies écritures', scopes: ['devis:write'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      try {
+        const statut = await request(app).put(`/api/v1/devis/${devis.id}/statut`).set({ Authorization: `Bearer ${cle.body.apiKey}` }).send({ statut: 'EN_ATTENTE_ACOMPTE' });
+        assert.equal(statut.status, 200, JSON.stringify(statut.body));
+        assert.deepEqual(Object.keys(statut.body.signature).sort(), champs, JSON.stringify(statut.body.signature));
+        assert.ok(!JSON.stringify(statut.body).includes('5 rue du Client'), 'adresse de facturation lue par une clé « devis:write »');
+      } finally {
+        await prisma.apiAccessKey.deleteMany({ where: { nom: 'TEST clé copies écritures' } });
+      }
+      const acompte = await request(app).post(`/api/devis/${devis.id}/acompte`).set(admin()).send({ recuLe: '2026-01-15', montant: '36', reference: 'TEST acompte des copies' });
+      assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
+      assert.deepEqual(Object.keys(acompte.body.signature).sort(), champs, JSON.stringify(acompte.body.signature));
+      const annulation = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST motif des copies' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual(Object.keys(annulation.body.devis.signature).sort(), champs, JSON.stringify(annulation.body.devis.signature));
+    });
+
+    test('identité incomplète : PDF du devis non signé et signature refusés, sans rien écrire', async () => {
+      const client = await creerClient(`TEST Client identité devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Sans identité');
+      try {
+        await definirSociete({ siret: '', ville: '' });
+        const pdf = await pdfDevis(devis.id);
+        assert.equal(pdf.status, 409);
+        assert.match(JSON.parse(pdf.body.toString()).error, /^Identité de la société incomplète : renseignez SIRET, ville dans l’écran Société avant d’imprimer un devis\.$/);
+        // Audit n° 18 : un devis introuvable reste introuvable (404), même sans identité complète.
+        assert.equal((await pdfDevis(randomUUID())).status, 404);
+        const signature = await signer(devis.id);
+        assert.equal(signature.status, 409, JSON.stringify(signature.body));
+        assert.match(signature.body.error, /^Identité de la société incomplète : renseignez SIRET, ville dans l’écran Société avant d’enregistrer la signature d’un devis\.$/);
+        const relu = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, include: { signature: true } });
+        assert.equal(relu.statut, 'BROUILLON'); assert.equal(relu.signature, null);
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+      assert.equal((await signer(devis.id)).status, 201);
+    });
+
+    test('signature : identité et client copiés ; le PDF du devis signé ne change plus, sa révision suit la société', async () => {
+      const client = await creerClient(`TEST Client devis signé ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé figé');
+      const logo = Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64');
+      try {
+        assert.equal((await request(app).put('/api/company/logo').set(admin()).send({ fichier: `data:image/jpeg;base64,${logo.toString('base64')}` })).status, 200);
+        const signature = await signer(devis.id);
+        assert.equal(signature.status, 201, JSON.stringify(signature.body));
+        const copie = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id }, include: { identiteEmetteur: true } });
+        assert.equal(copie.identiteEmetteur.raisonSociale, 'TEST Émetteur devis A');
+        assert.ok(copie.identiteEmetteur.logoId, 'logo copié');
+        assert.equal(copie.clientRaisonSociale, client.raisonSociale);
+        assert.equal(copie.clientAdresse, '5 rue du Client\n75002 Paris');
+        // Même identité qu'une pièce émise le même jour : une seule copie partagée.
+        assert.equal(await prisma.identiteEmetteur.count({ where: { siret: SOCIETE_A.siret, logoId: copie.identiteEmetteur.logoId } }), 1);
+
+        const avant = await texteDevis(devis.id);
+        // Audit n° 7 : le client imprimé est sa copie, raison sociale et adresse comprises ; sans cette
+        // vérification, un PDF signé sans adresse resterait identique à lui-même après le changement.
+        for (const attendu of ['TEST Émetteur devis A', client.raisonSociale, '5 rue du Client', '75002 Paris', 'Bon pour accord', `Accepté par TEST Signataire client le ${await jourSociete(copie.signeLe)}.`, `Empreinte du contenu signé (SHA-256) : ${copie.empreinte}`]) {
+          assert.ok(avant.texte.includes(attendu), `absent du PDF : ${attendu}`);
+        }
+        assert.ok(!avant.texte.includes('Date, nom et signature du client'));
+        assert.ok(avant.octets.includes(Buffer.from('/Subtype /Image')), 'logo imprimé');
+
+        // Société, logo et fiche client changent : le PDF du devis signé reste le même.
+        await definirSociete(SOCIETE_B);
+        assert.equal((await request(app).delete('/api/company/logo').set(admin())).status, 200);
+        assert.equal((await request(app).put(`/api/clients/${client.id}`).set(admin()).send({ raisonSociale: `${client.raisonSociale} renommé` })).status, 200);
+        const site = await prisma.clientSite.findFirstOrThrow({ where: { clientId: client.id } });
+        assert.equal((await request(app).put(`/api/clients/${client.id}/sites/${site.id}`).set(admin()).send({ nom: site.nom, adresse: '9 rue Déménagée', codePostal: '69001', ville: 'Lyon', estSiteFacturation: true })).status, 200);
+        const apres = await texteDevis(devis.id);
+        assert.equal(apres.texte, avant.texte);
+        assert.ok(!apres.texte.includes('9 rue Déménagée') && !apres.texte.includes(`${client.raisonSociale} renommé`), apres.texte);
+        assert.ok((await couleursPdf(apres.octets)).has('#0f766e') && !(await couleursPdf(apres.octets)).has('#7c2d12'));
+        assert.ok(apres.octets.includes(Buffer.from('/Subtype /Image')), 'le logo copié reste imprimé');
+
+        // La révision, brouillon non signé, suit la société et le client actuels.
+        const revision = await request(app).post(`/api/devis/${devis.id}/revisions`).set(admin());
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        const texteRevision = (await texteDevis(revision.body.id)).texte;
+        for (const attendu of [`DEVIS ${devis.numero}`, 'Version 2', 'TEST Émetteur devis B', `${client.raisonSociale} renommé`, '9 rue Déménagée', 'Date, nom et signature du client :']) {
+          assert.ok(texteRevision.includes(attendu), `absent de la révision : ${attendu}`);
+        }
+        assert.equal((await pdfDevis(revision.body.id)).headers['content-disposition'], `inline; filename="${devis.numero}-v2.pdf"`);
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+        await definirSociete(SOCIETE_A);
+      }
+
+      // Client sans site : la signature copie son nom sans adresse.
+      const sansSite = await creerClient(`TEST Client sans site devis ${Date.now()}`, false);
+      const devisSansSite = await creerDevis(sansSite.id, 'TEST Client sans adresse');
+      assert.equal((await signer(devisSansSite.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devisSansSite.id } })).clientAdresse, null);
+      const texteSansSite = (await texteDevis(devisSansSite.id)).texte;
+      assert.ok(texteSansSite.includes(sansSite.raisonSociale) && texteSansSite.includes('Accepté par TEST Signataire client'));
+      // Audit n° 11 : sans adresse copiée, la raison sociale imprimée reste celle de la copie.
+      assert.equal((await request(app).put(`/api/clients/${sansSite.id}`).set(admin()).send({ raisonSociale: `${sansSite.raisonSociale} renommé` })).status, 200);
+      const sansSiteRenomme = (await texteDevis(devisSansSite.id)).texte;
+      assert.equal(sansSiteRenomme, texteSansSite);
+    });
+
+    test('en base : copies exigées à la signature et figées ; une signature antérieure s’imprime avec l’identité actuelle', async () => {
+      const client = await creerClient(`TEST Client garde devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Garde des copies');
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      const base = { devisId: devis.id, enregistreParId: auteur.id, signataire: 'TEST SQL', empreinte: '0'.repeat(64) };
+      const identite = (await prisma.identiteEmetteur.findFirstOrThrow({ where: { siret: SOCIETE_A.siret } })).id;
+      for (const [donnees, motif] of [
+        [{}, /doivent être copiés à la signature/],
+        [{ identiteEmetteurId: identite }, /doivent être copiés à la signature/],
+        [{ clientRaisonSociale: 'TEST Client' }, /doivent être copiés à la signature/],
+        // Audit n° 5 : chaque copie manquante est refusée seule, les deux autres présentes.
+        [{ clientRaisonSociale: 'TEST Client', fuseauHoraire: 'Europe/Paris' }, /doivent être copiés à la signature/],
+        [{ identiteEmetteurId: identite, fuseauHoraire: 'Europe/Paris' }, /doivent être copiés à la signature/],
+        [{ identiteEmetteurId: identite, clientRaisonSociale: '   ', fuseauHoraire: 'Europe/Paris' }, /doivent être copiés à la signature/],
+        [{ identiteEmetteurId: identite, clientRaisonSociale: 'TEST Client' }, /doivent être copiés à la signature/],
+        [{ identiteEmetteurId: identite, clientRaisonSociale: 'TEST Client', fuseauHoraire: ' ' }, /doivent être copiés à la signature/],
+        [{ identiteEmetteurId: identite, clientRaisonSociale: 'TEST Client', fuseauHoraire: 'Europe/Paris', clientAdresse: ' ' }, /adresse du client vide/],
+      ]) await assert.rejects(prisma.devisSignature.create({ data: { ...base, ...donnees } }), motif, JSON.stringify(donnees));
+      assert.equal(await prisma.devisSignature.count({ where: { devisId: devis.id } }), 0);
+
+      assert.equal((await signer(devis.id)).status, 201);
+      for (const data of [{ identiteEmetteurId: null }, { clientRaisonSociale: 'TEST Autre client' }, { clientAdresse: null }, { fuseauHoraire: 'Pacific/Tahiti' }]) {
+        await assert.rejects(prisma.devisSignature.update({ where: { devisId: devis.id }, data }), /Signature de devis figée/, JSON.stringify(data));
+      }
+      const copie = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } });
+      await assert.rejects(prisma.identiteEmetteur.delete({ where: { id: copie.identiteEmetteurId } }), /Foreign key constraint|violates foreign key/i);
+      // La date de création, imprimée « établi le », est figée avec le devis signé.
+      await assert.rejects(prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2020-01-01T00:00:00Z') } }), /Devis signé : client, objet, date, montants/);
+      // Audit n° 6 : redéfini par ce lot, le garde de #161 fige toujours chacune de ses colonnes et
+      // refuse toujours la suppression d'un devis signé.
+      const autreClient = await creerClient(`TEST Autre client garde devis ${Date.now()}`, false);
+      for (const data of [{ dossierId: randomUUID() }, { numero: 'A99-9999' }, { version: 99 }, { clientId: autreClient.id }, { objet: 'TEST Autre objet' },
+        { totalHt: 1 }, { totalTva: 1 }, { totalTtc: 1 }, { acompteExige: true }, { tauxAcompte: 50 }]) {
+        await assert.rejects(prisma.devis.update({ where: { id: devis.id }, data }), /Devis signé : client, objet, date, montants/, JSON.stringify(data));
+      }
+      await assert.rejects(prisma.devis.delete({ where: { id: devis.id } }), /Devis signé : il ne se supprime pas/);
+
+      // Signature enregistrée avant ce lot (sans copie, garde désactivé le temps de l'écrire) : le
+      // devis s'imprime avec l'identité et la fiche client actuelles, signature comprise.
+      const ancien = await creerDevis(client.id, 'TEST Signature antérieure');
+      // Audit n° 8 : créé le 15-01-2026 à 23 h 30 UTC, encore le 15-01-2026 à Tahiti, fuseau actuel de
+      // la société : sans copie, le devis se date dans le fuseau actuel, et non dans celui par défaut.
+      await prisma.devis.update({ where: { id: ancien.id }, data: { createdAt: new Date('2026-01-15T23:30:00Z') } });
+      await prisma.$transaction([
+        prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" DISABLE TRIGGER "devis_signature_copies"'),
+        prisma.devisSignature.create({ data: { ...base, devisId: ancien.id } }),
+        prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" ENABLE TRIGGER "devis_signature_copies"'),
+      ]);
+      const fuseauInitial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      try {
+        await definirSociete({ ...SOCIETE_B, fuseauHoraire: 'Pacific/Tahiti' });
+        const texte = (await texteDevis(ancien.id)).texte;
+        assert.ok(texte.includes('TEST Émetteur devis B') && texte.includes(client.raisonSociale) && texte.includes('Accepté par TEST SQL'));
+        assert.ok(texte.includes('Version 1 · établi le 15-01-2026'), texte);
+      } finally {
+        await definirSociete({ ...SOCIETE_A, fuseauHoraire: fuseauInitial });
+      }
+    });
+
+    test('statuts : un devis refusé ou annulé le dit, sans cadre de signature', async () => {
+      const client = await creerClient(`TEST Client statuts devis ${Date.now()}`);
+      const refuse = await creerDevis(client.id, 'TEST Devis refusé');
+      for (const statut of ['ENVOYE', 'REFUSE']) assert.equal((await request(app).put(`/api/devis/${refuse.id}/statut`).set(admin()).send({ statut })).status, 200);
+      const texteRefuse = (await texteDevis(refuse.id)).texte;
+      assert.ok(texteRefuse.includes('Devis refusé.') && !texteRefuse.includes('Bon pour accord'));
+
+      const annule = await creerDevis(client.id, 'TEST Devis annulé');
+      assert.equal((await request(app).post(`/api/devis/${annule.id}/annulation`).set(admin()).send({ motif: 'TEST motif interne' })).status, 200);
+      const texteAnnule = (await texteDevis(annule.id)).texte;
+      assert.ok(texteAnnule.includes('DEVIS ANNULÉ — cette offre n’est plus valable.') && !texteAnnule.includes('Bon pour accord'));
+      assert.ok(!texteAnnule.includes('TEST motif interne'), 'motif interne imprimé');
+
+      const signeAnnule = await creerDevis(client.id, 'TEST Devis signé puis annulé');
+      assert.equal((await signer(signeAnnule.id)).status, 201);
+      assert.equal((await request(app).post(`/api/devis/${signeAnnule.id}/annulation`).set(admin()).send({ motif: 'TEST motif interne' })).status, 200);
+      const texteSigneAnnule = (await texteDevis(signeAnnule.id)).texte;
+      assert.ok(texteSigneAnnule.includes('DEVIS ANNULÉ') && texteSigneAnnule.includes('Accepté par TEST Signataire client'));
+
+      // Audit n° 6 : signé puis annulé, ou signé et en attente d'acompte, le devis reste imprimé
+      // depuis ses copies, quel que soit son statut.
+      const signeAcompte = await creerDevis(client.id, 'TEST Devis signé en attente d’acompte', undefined, { acompteExige: true, tauxAcompte: 30 });
+      assert.equal((await signer(signeAcompte.id)).status, 201);
+      assert.equal((await request(app).put(`/api/devis/${signeAcompte.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' })).status, 200);
+      try {
+        await definirSociete(SOCIETE_B);
+        for (const id of [signeAnnule.id, signeAcompte.id]) {
+          const texte = (await texteDevis(id)).texte;
+          assert.ok(texte.includes('TEST Émetteur devis A') && !texte.includes('TEST Émetteur devis B'), `identité vivante imprimée :\n${texte}`);
+        }
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
+
+    // Audit n° 10 : chaque statut s'imprime avec sa seule mention. Le devis envoyé, celui que reçoit
+    // le client, garde son cadre « Bon pour accord » et n'est annoncé ni refusé ni annulé ; un devis
+    // signé, accepté ou en attente d'acompte, garde sa signature sans autre mention.
+    test('statuts : chaque statut avec sa seule mention, le devis envoyé avec son cadre', async () => {
+      const client = await creerClient(`TEST Client mentions de statut ${Date.now()}`);
+      const statut = async (id, valeur) => assert.equal((await request(app).put(`/api/devis/${id}/statut`).set(admin()).send({ statut: valeur })).status, 200);
+      const brouillon = await creerDevis(client.id, 'TEST Mention brouillon');
+      const envoye = await creerDevis(client.id, 'TEST Mention envoyé');
+      await statut(envoye.id, 'ENVOYE');
+      const accepte = await creerDevis(client.id, 'TEST Mention accepté');
+      assert.equal((await signer(accepte.id)).status, 201);
+      const attente = await creerDevis(client.id, 'TEST Mention attente', undefined, { acompteExige: true, tauxAcompte: 30 });
+      assert.equal((await signer(attente.id)).status, 201);
+      await statut(attente.id, 'EN_ATTENTE_ACOMPTE');
+      const refuse = await creerDevis(client.id, 'TEST Mention refusé');
+      await statut(refuse.id, 'ENVOYE');
+      await statut(refuse.id, 'REFUSE');
+      const annule = await creerDevis(client.id, 'TEST Mention annulé');
+      assert.equal((await request(app).post(`/api/devis/${annule.id}/annulation`).set(admin()).send({ motif: 'TEST motif' })).status, 200);
+      const mentions = (texte) => ({
+        refuse: texte.includes('Devis refusé.'), annule: texte.includes('DEVIS ANNULÉ'),
+        cadre: texte.includes('Date, nom et signature du client :'), signature: texte.includes('Accepté par TEST Signataire client'),
+      });
+      for (const [devis, attendu] of [
+        [brouillon, { refuse: false, annule: false, cadre: true, signature: false }],
+        [envoye, { refuse: false, annule: false, cadre: true, signature: false }],
+        [accepte, { refuse: false, annule: false, cadre: false, signature: true }],
+        [attente, { refuse: false, annule: false, cadre: false, signature: true }],
+        [refuse, { refuse: true, annule: false, cadre: false, signature: false }],
+        [annule, { refuse: false, annule: true, cadre: false, signature: false }],
+      ]) {
+        const { texte } = await texteDevis(devis.id);
+        assert.deepEqual(mentions(texte), attendu, `${devis.objet}\n${texte}`);
+      }
+    });
+
+    // Audit n° 11 : un devis converti (chantier ouvert) garde son PDF, imprimé depuis ses copies ;
+    // aucun test n'imprimait jusqu'ici un devis converti.
+    test('devis converti : son PDF reste disponible, imprimé depuis ses copies', async () => {
+      const client = await creerClient(`TEST Client devis converti ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis converti en chantier');
+      assert.equal((await signer(devis.id)).status, 201);
+      const conversion = await request(app).post(`/api/devis/${devis.id}/convertir`).set(admin()).send({ cible: 'CHANTIER' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      try {
+        await definirSociete(SOCIETE_B);
+        const { texte } = await texteDevis(devis.id);
+        assert.ok(texte.includes('TEST Émetteur devis A') && !texte.includes('TEST Émetteur devis B'), texte);
+        assert.ok(texte.includes('Accepté par TEST Signataire client') && !texte.includes('Date, nom et signature du client'), texte);
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
+
+    test('gabarit : un devis long a son pied de page et sa pagination sur chaque page, et un seul cadre de signature', async () => {
+      const client = await creerClient(`TEST Client devis long ${Date.now()}`);
+      const lignes = Array.from({ length: 70 }, (_, i) => ({ designation: `TEST Ligne de devis ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }));
+      const devis = await creerDevis(client.id, 'TEST Devis long', lignes);
+      const { texte } = await texteDevis(devis.id);
+      const pages = Number(/Page 1 \/ (\d+)/.exec(texte)?.[1]);
+      assert.ok(pages >= 2, `pagination absente : ${pages}`);
+      for (let page = 1; page <= pages; page++) assert.ok(texte.includes(`Page ${page} / ${pages}`), `page ${page} absente`);
+      assert.equal(texte.split('TEST Pied devis A').length - 1, pages);
+      assert.ok(texte.includes('TEST Ligne de devis 70') && texte.includes('Total TTC : 840,00 €'));
+      assert.equal(texte.split('Date, nom et signature du client').length - 1, 1);
+    });
+
+    test('caractères hors WinAnsi : remplacés un à un, sans brouiller la suite de la ligne ni ses montants', async () => {
+      const client = await creerClient(`TEST Client Dvořák ∞ ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Objet Ω\tfin', [
+        { designation: 'TEST Résist. 10 Ω ∞ 3 ⌀ 🔧 ok', quantite: 1, prixUnitaireHt: 12.34, tauxTva: 20 },
+        { designation: 'TEST Main-d’œuvre … — « fin »', quantite: 1, prixUnitaireHt: 56.78, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      const ligneDe = (debut) => texte.split('\n').find((l) => l.startsWith(debut)) ?? '';
+      assert.match(ligneDe('TEST Résist.'), /^TEST Résist\. 10 \? \? 3 \? \? ok\s+1\s+12,34 €\s+20 %\s+12,34 €$/, texte);
+      assert.match(ligneDe('TEST Main-d’œuvre'), /^TEST Main-d’œuvre … — « fin »\s+1\s+56,78 €\s+20 %\s+56,78 €$/, texte);
+      assert.ok(texte.includes('Objet : TEST Objet ? fin'), texte);
+      assert.ok(texte.includes('TEST Client Dvorák ?'), texte);
+    });
+
+    test('caractères hors WinAnsi : un remplacement ne change jamais le sens, un accent combinant est recomposé', async () => {
+      const client = await creerClient(`TEST Client sens des caractères ${Date.now()}`);
+      // Exposant, chiffre cerclé, barre de négation : « ? », jamais un autre texte lisible (10⁶ n'est pas
+      // 106, ≠ n'est pas =). Accent combinant d'un texte copié : recomposé. Ligature et signe ångström
+      // gardent leurs lettres.
+      const devis = await creerDevis(client.id, 'TEST Cafe\u0301 cre\u0300me', [
+        { designation: 'TEST 10\u2076 \u2260 10\u2074 \u2460 \u226e ok', quantite: 1, prixUnitaireHt: 12.34, tauxTva: 20 },
+        { designation: 'TEST \ufb01ltre 10 \u212b fin', quantite: 1, prixUnitaireHt: 56.78, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      const ligneDe = (debut) => texte.split('\n').find((l) => l.startsWith(debut)) ?? '';
+      assert.match(ligneDe('TEST 10'), /^TEST 10\? \? 10\? \? \? ok\s+1\s+12,34 €\s+20 %\s+12,34 €$/, texte);
+      assert.match(ligneDe('TEST filtre'), /^TEST filtre 10 Å fin\s+1\s+56,78 €\s+20 %\s+56,78 €$/, texte);
+      assert.ok(texte.includes('Objet : TEST Café crème'), texte);
+    });
+
+    test('caractères hors WinAnsi : une barre au-dessus (négation, décimale périodique) n’est pas effacée', async () => {
+      const client = await creerClient(`TEST Client barre au-dessus ${Date.now()}`);
+      // « A̅ » (non A), « 0,3̅ » (0,333…) : effacer la barre imprimerait « A » ou « 0,3 », un autre texte.
+      const devis = await creerDevis(client.id, 'TEST Barre au-dessus', [
+        { designation: 'TEST Entrée A\u0305 0,3\u0305 B\u033f ok', quantite: 1, prixUnitaireHt: 12.34, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      const ligne = texte.split('\n').find((l) => l.startsWith('TEST Entrée')) ?? '';
+      assert.match(ligne, /^TEST Entrée A\? 0,3\? B\? ok\s+1\s+12,34 €\s+20 %\s+12,34 €$/, texte);
+    });
+
+    test('gabarit : une désignation longue se replie à la largeur de sa colonne, ses montants sur la première ligne', async () => {
+      const client = await creerClient(`TEST Client repli devis ${Date.now()}`);
+      // 42 caractères : la colonne en tient 31, le reste passe à la ligne suivante, sans décaler les montants.
+      const devis = await creerDevis(client.id, 'TEST Repli des désignations', [{ designation: 'TEST Désignation longue de devis à replier', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }]);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Désignation longue de\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+      assert.match(texte, /^devis à replier$/m, texte);
+    });
+
+    test('caractères hors WinAnsi : pleine chasse, trait et espace insécables, accent isolé, retour chariot', async () => {
+      const client = await creerClient(`TEST Client caractères copiés ${Date.now()}`);
+      // Texte copié : formes pleine chasse (Ａ１), trait insécable, espace fine insécable (aussi celle
+      // des milliers des montants), accent combinant sans forme composée (q́), fin de ligne Windows.
+      const devis = await creerDevis(client.id, 'TEST Objet\r\nsuite', [
+        { designation: 'TEST \uff21\uff11 a\u2011b q\u0301 1\u202f2 fin', quantite: 1, prixUnitaireHt: 1234, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST A1 a-b q 1 2 fin\s+1\s+1 234,00 €\s+20 %\s+1 234,00 €$/m, texte);
+      assert.ok(texte.includes('Objet : TEST Objet\nsuite'), texte);
+      assert.ok(texte.includes('Total HT : 1 234,00 €'), texte);
+    });
+
+    test('caractères hors WinAnsi : équivalents de même sens, invisibles retirés, colonnes mesurées sur le texte imprimé', async () => {
+      const client = await creerClient(`TEST Client équivalents ${Date.now()}`);
+      // Signe moins, cadratin d'espace, trait d'union, inégalités larges ; espace sans chasse, marque
+      // d'ordre des octets et trait d'union conditionnel, invisibles à la saisie. Imprimée, la
+      // désignation tient dans ses 31 colonnes ; mesurée avant impression, elle les dépasserait.
+      const devis = await creerDevis(client.id, 'TEST Équivalents', [
+        { designation: 'TEST \u2212 5\u2003a\u2010b \u2264 3 \u2265 1 x\u200by\ufeffz co\u00adop', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+        // Même texte, accents décomposés ou composés (désignation et unité) : deux lignes identiques.
+        // Le calage des colonnes, que l'extraction du texte ne restitue pas, est vérifié par les tests
+        // unitaires du gabarit (validation.test.mjs).
+        { designation: 'TEST Cafe\u0301 noir', unite: 'pie\u0300ce', quantite: 2, prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST Café noir', unite: 'pièce', quantite: 2, prixUnitaireHt: 10, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST - 5 a-b <= 3 >= 1 xyz coop\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+      const cafes = texte.split('\n').filter((l) => l.startsWith('TEST Café noir'));
+      assert.equal(cafes.length, 2, texte);
+      assert.equal(cafes[0], cafes[1]);
+    });
+
+    test('caractères hors WinAnsi : un retour chariot seul sépare deux mots ; une cellule du tableau reste sur sa ligne', async () => {
+      const client = await creerClient(`TEST Client fins de ligne ${Date.now()}`);
+      // Fin de ligne ancienne (\r seul, possible par l'API) : « 10\r20 » ne s'imprime jamais « 1020 ».
+      // Saut de ligne dans une unité (U+2028 collé dans le champ, \n ou \r par l'API) : les montants
+      // restent sur la ligne de leur désignation.
+      const devis = await creerDevis(client.id, 'TEST Objet 10\r20 fin', [
+        { designation: 'TEST Pose 10\r20 m', quantite: 1, unite: 'm\u2028l', prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST Fourniture', quantite: 2, unite: 'u\nv', prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST Accessoire', quantite: 3, unite: 'x\ry', prixUnitaireHt: 10, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Pose 10 20 m\s+1 m l\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+      assert.match(texte, /^TEST Fourniture\s+2 u v\s+10,00 €\s+20 %\s+20,00 €$/m, texte);
+      assert.match(texte, /^TEST Accessoire\s+3 x y\s+10,00 €\s+20 %\s+30,00 €$/m, texte);
+      assert.ok(texte.includes('Objet : TEST Objet 10\n20 fin'), texte);
+      // Audit n° 11 : le nom du client, horodaté, et le numéro du devis (A26-1020 sur une base
+      // conservée) peuvent contenir « 1020 » ; ils sont retirés du texte examiné.
+      assert.ok(!texte.replaceAll(client.raisonSociale, '').replaceAll(devis.numero, '').includes('1020'), texte);
+    });
+
+    test('gabarit : les colonnes du devis se calent sur le texte imprimé, accents décomposés et équivalents compris', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const client = await creerClient(`TEST Client colonnes devis ${Date.now()}`);
+      // Désignation et unité dont le texte saisi est plus long ou plus court que le texte imprimé.
+      const devis = await creerDevis(client.id, 'TEST Colonnes du devis', [
+        { designation: 'TEST Cafe\u0301 noir', unite: 'pie\u0300ce', quantite: 2, prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST x\u200by \u2264 3', unite: 'm\u2264', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+      ]);
+      const res = await pdfDevis(devis.id);
+      assert.equal(res.status, 200);
+      // Lignes du tableau telles que le PDF les écrit (Courier, opérateur TJ) : l'extraction du texte
+      // fusionne les espaces, ce relevé les garde.
+      const octets = res.body, brut = octets.toString('latin1'), lignes = [];
+      for (const flux of brut.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        for (const [, morceaux] of contenu.matchAll(/\[([^\]]*)\] TJ/g)) lignes.push([...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join(''));
+      }
+      const entete = lignes.find((l) => l.startsWith('D\xe9signation'));
+      const cafe = lignes.find((l) => l.startsWith('TEST Caf\xe9 noir'));
+      const egal = lignes.find((l) => l.startsWith('TEST xy <= 3'));
+      assert.ok(entete && cafe && egal, JSON.stringify(lignes));
+      // Chaque colonne finit au même endroit que son titre : même longueur de ligne que l'en-tête.
+      assert.equal(cafe.length, entete.length, JSON.stringify([entete, cafe]));
+      assert.equal(egal.length, entete.length, JSON.stringify([entete, egal]));
+      assert.equal(cafe.indexOf('2 pi\xe8ce') + '2 pi\xe8ce'.length, entete.indexOf('Qt\xe9') + 'Qt\xe9'.length);
+      assert.equal(egal.indexOf('1 m<=') + '1 m<='.length, entete.indexOf('Qt\xe9') + 'Qt\xe9'.length);
+      // Audit n° 8 : ces colonnes ne s'alignent qu'en chasse fixe ; le tableau s'imprime en Courier.
+      assert.ok(octets.includes(Buffer.from('/BaseFont /Courier')), 'tableau des lignes hors de la police à chasse fixe');
+    });
+
+    test('concurrence : le PDF d’un devis non signé lit ses lignes et ses totaux dans un même état', async () => {
+      const client = await creerClient(`TEST Client devis concurrent ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis modifié pendant l’impression', [{ designation: 'TEST Ligne avant', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }]);
+      const autre = new PrismaClient();
+      let liberer; const libere = new Promise((resoudre) => { liberer = resoudre; });
+      let signalerVerrou; const verrouPris = new Promise((resoudre) => { signalerVerrou = resoudre; });
+      try {
+        // Une modification concurrente tient la table des lignes : l'impression lit le devis, puis
+        // attend ses lignes, que la modification remplace avec les totaux avant de valider.
+        const modification = autre.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe('LOCK TABLE "DevisLigne" IN ACCESS EXCLUSIVE MODE');
+          signalerVerrou();
+          await libere;
+          await tx.devisLigne.updateMany({ where: { devisId: devis.id }, data: { designation: 'TEST Ligne après', prixUnitaireHt: 200, totalHt: 200, totalTtc: 240 } });
+          await tx.devis.update({ where: { id: devis.id }, data: { totalHt: 200, totalTva: 40, totalTtc: 240 } });
+        }, { timeout: 20_000 });
+        await verrouPris;
+        const impression = texteDevis(devis.id);
+        let attente = 0;
+        for (let essai = 0; essai < 400 && !attente; essai++) {
+          [{ attente }] = await prisma.$queryRaw`SELECT count(*)::int AS attente FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%DevisLigne%'`;
+          if (!attente) await new Promise((resoudre) => setTimeout(resoudre, 25));
+        }
+        assert.ok(attente, 'l’impression n’a pas attendu le verrou des lignes');
+        liberer();
+        await modification;
+        const { texte } = await impression;
+        const ancien = ['TEST Ligne avant', 'Total HT : 100,00 €', 'TVA 20 % sur 100,00 € : 20,00 €', 'Total TTC : 120,00 €'].map((t) => texte.includes(t));
+        const nouveau = ['TEST Ligne après', 'Total HT : 200,00 €', 'TVA 20 % sur 200,00 € : 40,00 €', 'Total TTC : 240,00 €'].map((t) => texte.includes(t));
+        assert.ok(ancien.every(Boolean) || nouveau.every(Boolean), `lignes et totaux de deux états différents :\n${texte}`);
+      } finally {
+        liberer();
+        await autre.$disconnect();
+      }
+    });
+
+    test('concurrence : le PDF d’un devis non signé lit l’identité, son logo et le fuseau dans un même état', async () => {
+      const client = await creerClient(`TEST Client logo concurrent ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis dont le logo est retiré pendant l’impression');
+      // Audit n° 11 : créé le 15-01-2026 à 23 h 30 UTC, le 16-01-2026 à Paris, encore le 15-01-2026 à
+      // Tahiti. Le retrait change aussi le fuseau : la date imprimée suit l'état de l'identité.
+      await prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2026-01-15T23:30:00Z') } });
+      const fuseauInitial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      await prisma.companySettings.update({ where: { id: 'singleton' }, data: { fuseauHoraire: 'Europe/Paris' } });
+      // Logo propre à ce test (octets uniques) : aucune pièce ne l'imprime, son retrait peut le supprimer.
+      const contenu = Buffer.concat([Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64'), Buffer.from(randomUUID())]);
+      const logo = await prisma.logoDocument.create({ data: { contenu, typeMime: 'image/jpeg', empreinte: createHash('sha256').update(contenu).digest('hex'), taille: contenu.length } });
+      await prisma.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: logo.id } });
+      const autre = new PrismaClient();
+      let liberer; const libere = new Promise((resoudre) => { liberer = resoudre; });
+      let signalerVerrou; const verrouPris = new Promise((resoudre) => { signalerVerrou = resoudre; });
+      try {
+        // Un retrait concurrent tient la table des logos : l'impression lit le devis et la société, puis
+        // attend le logo, que le retrait supprime avec un changement d'identité avant de valider.
+        const retrait = autre.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe('LOCK TABLE "LogoDocument" IN ACCESS EXCLUSIVE MODE');
+          signalerVerrou();
+          await libere;
+          await tx.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: null, raisonSociale: SOCIETE_B.raisonSociale, fuseauHoraire: 'Pacific/Tahiti' } });
+          await tx.logoDocument.delete({ where: { id: logo.id } });
+        }, { timeout: 20_000 });
+        await verrouPris;
+        const impression = texteDevis(devis.id);
+        let attente = 0;
+        for (let essai = 0; essai < 400 && !attente; essai++) {
+          [{ attente }] = await prisma.$queryRaw`SELECT count(*)::int AS attente FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%LogoDocument%'`;
+          if (!attente) await new Promise((resoudre) => setTimeout(resoudre, 25));
+        }
+        assert.ok(attente, 'l’impression n’a pas attendu le verrou des logos');
+        liberer();
+        await retrait;
+        const { texte, octets } = await impression;
+        const avecLogo = octets.includes(Buffer.from('/Subtype /Image'));
+        // L'ancienne identité avec son logo, ou la nouvelle sans logo : jamais l'une avec l'état de l'autre.
+        assert.ok(texte.includes(SOCIETE_A.raisonSociale) ? avecLogo : !avecLogo, `identité et logo de deux états différents (logo imprimé : ${avecLogo})\n${texte}`);
+        // L'ancienne identité avec la date au fuseau de Paris, ou la nouvelle avec celle de Tahiti.
+        assert.ok(texte.includes(`établi le ${texte.includes(SOCIETE_A.raisonSociale) ? '16-01-2026' : '15-01-2026'}`), `identité et fuseau de deux états différents\n${texte}`);
+      } finally {
+        liberer();
+        await autre.$disconnect();
+        await prisma.companySettings.update({ where: { id: 'singleton' }, data: { logoDocumentId: null, raisonSociale: SOCIETE_A.raisonSociale, fuseauHoraire: fuseauInitial } });
+        await prisma.logoDocument.deleteMany({ where: { id: logo.id } });
+      }
+    });
+
+    test('dates : un devis signé garde le fuseau de sa signature ; un devis non signé suit celui de la société', async () => {
+      const jourA = (instant, fuseau) => jourCivilEntreprise(new Date(instant), fuseau).split('-').reverse().join('-');
+      const client = await creerClient(`TEST Client devis daté ${Date.now()}`);
+      const signe = await creerDevis(client.id, 'TEST Devis daté signé');
+      const nonSigne = await creerDevis(client.id, 'TEST Devis daté non signé');
+      // Créés le 15-01-2026 à 23 h 30 UTC : le 16-01-2026 à Paris, encore le 15-01-2026 à Tahiti.
+      await prisma.devis.updateMany({ where: { id: { in: [signe.id, nonSigne.id] } }, data: { createdAt: new Date('2026-01-15T23:30:00Z') } });
+      const initial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      try {
+        await definirSociete({ fuseauHoraire: 'Europe/Paris' });
+        assert.equal((await signer(signe.id)).status, 201);
+        const { signeLe } = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: signe.id } });
+        const avant = (await texteDevis(signe.id)).texte;
+        assert.ok(avant.includes('Version 1 · établi le 16-01-2026') && avant.includes(`Accepté par TEST Signataire client le ${jourA(signeLe, 'Europe/Paris')}.`), avant);
+        assert.ok((await texteDevis(nonSigne.id)).texte.includes('établi le 16-01-2026'));
+        await definirSociete({ fuseauHoraire: 'Pacific/Tahiti' });
+        assert.equal((await texteDevis(signe.id)).texte, avant);
+        assert.ok((await texteDevis(nonSigne.id)).texte.includes('établi le 15-01-2026'));
+      } finally {
+        await definirSociete({ fuseauHoraire: initial });
+      }
+    });
+
+    test('fuseau copié : celui de la société à la signature, même hors du fuseau par défaut', async () => {
+      const client = await creerClient(`TEST Client fuseau copié ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé à Tahiti');
+      // Créé le 15-01-2026 à 23 h 30 UTC : encore le 15-01-2026 à Tahiti, déjà le 16-01-2026 à Paris.
+      await prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2026-01-15T23:30:00Z') } });
+      const initial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      try {
+        await definirSociete({ fuseauHoraire: 'Pacific/Tahiti' });
+        assert.equal((await signer(devis.id)).status, 201);
+        assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).fuseauHoraire, 'Pacific/Tahiti');
+        await definirSociete({ fuseauHoraire: 'Europe/Paris' });
+        assert.ok((await texteDevis(devis.id)).texte.includes('Version 1 · établi le 15-01-2026'));
+      } finally {
+        await definirSociete({ fuseauHoraire: initial });
+      }
+    });
+
+    test('fuseau copié : la date de signature imprimée se lit aussi dans le fuseau de la signature', async () => {
+      const client = await creerClient(`TEST Client date de signature ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé à Tahiti, date de signature');
+      const initial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      try {
+        await definirSociete({ fuseauHoraire: 'Pacific/Tahiti' });
+        assert.equal((await signer(devis.id)).status, 201);
+        // Signature placée le 16-01-2026 à 5 h UTC (garde suspendu le temps de l'écrire) : encore le
+        // 15-01-2026 à Tahiti, déjà le 16-01-2026 à Paris et en UTC. L'heure réelle de la signature
+        // ne permet pas ce test : à certaines heures, tous les fuseaux français ont le même jour.
+        await prisma.$transaction([
+          prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" DISABLE TRIGGER "devis_signature_figee"'),
+          prisma.devisSignature.update({ where: { devisId: devis.id }, data: { signeLe: new Date('2026-01-16T05:00:00Z') } }),
+          prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" ENABLE TRIGGER "devis_signature_figee"'),
+        ]);
+        const avant = (await texteDevis(devis.id)).texte;
+        assert.ok(avant.includes('Accepté par TEST Signataire client le 15-01-2026.'), avant);
+        await definirSociete({ fuseauHoraire: 'Europe/Paris' });
+        assert.equal((await texteDevis(devis.id)).texte, avant);
+      } finally {
+        await definirSociete({ fuseauHoraire: initial });
+      }
+    });
+
+    test('signature : attend un changement de la société en cours, puis copie son identité et son fuseau validés', async () => {
+      const client = await creerClient(`TEST Client signature verrou ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé pendant un changement de la société');
+      const initial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      await definirSociete({ fuseauHoraire: 'Europe/Paris' });
+      let liberer;
+      const retenue = new Promise((resolve) => { liberer = resolve; });
+      let pidTenant = null;
+      // Un changement de la société (identité et fuseau) tient le verrou exclusif de la société.
+      const tenant = prisma.$transaction(async (tx) => {
+        [{ pid: pidTenant }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        await tx.$queryRaw`SELECT 1 FROM "CompanySettings" WHERE "id" = 'singleton' FOR UPDATE`;
+        await tx.$executeRaw`UPDATE "CompanySettings" SET "raisonSociale" = 'TEST Émetteur devis pendant le verrou', "fuseauHoraire" = 'Pacific/Tahiti' WHERE "id" = 'singleton'`;
+        await retenue;
+      }, { timeout: 40_000 });
+      try {
+        while (pidTenant === null) await new Promise((resolve) => setTimeout(resolve, 10));
+        const signature = signer(devis.id).then((reponse) => reponse);
+        let bloquee = false;
+        // Jusqu'à 20 s : sous forte charge, la signature peut tarder à atteindre le verrou (audit n° 5).
+        for (let essai = 0; essai < 1000 && !bloquee; essai++) {
+          const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidTenant}::int = ANY(pg_blocking_pids(pid))`;
+          bloquee = n > 0;
+          if (!bloquee) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        liberer();
+        await tenant;
+        const reponse = await signature;
+        assert.equal(bloquee, true, 'la signature doit attendre le verrou de la société');
+        assert.equal(reponse.status, 201, JSON.stringify(reponse.body));
+        // Identité et fuseau d'un même état de la société : jamais la nouvelle identité avec l'ancien fuseau.
+        const copie = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id }, include: { identiteEmetteur: true } });
+        assert.equal(copie.identiteEmetteur.raisonSociale, 'TEST Émetteur devis pendant le verrou');
+        assert.equal(copie.fuseauHoraire, 'Pacific/Tahiti');
+      } finally {
+        liberer();
+        await tenant.catch(() => undefined);
+        await definirSociete({ ...SOCIETE_A, fuseauHoraire: initial });
+      }
+    });
+
+    test('client copié : même site que la facture ; une signature sans adresse n’en reçoit pas après coup', async () => {
+      const client = await creerClient(`TEST Client deux sites devis ${Date.now()}`, false);
+      // Le site de facturation, créé le premier et nommé après l'autre, est celui qui doit être choisi.
+      for (const site of [
+        { nom: 'Z Facturation', adresse: '8 rue Facturée', codePostal: '31000', ville: 'Toulouse', estSiteFacturation: true },
+        { nom: 'A Chantier', adresse: '1 rue du Chantier', codePostal: '33000', ville: 'Bordeaux' },
+      ]) assert.equal((await request(app).post(`/api/clients/${client.id}/sites`).set(admin()).send(site)).status, 201);
+      const devis = await creerDevis(client.id, 'TEST Devis deux sites');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes('8 rue Facturée') && !nonSigne.includes('1 rue du Chantier'), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '8 rue Facturée\n31000 Toulouse');
+
+      const sansSite = await creerClient(`TEST Client sans site puis site ${Date.now()}`, false);
+      const devisSansSite = await creerDevis(sansSite.id, 'TEST Devis signé sans adresse');
+      assert.equal((await signer(devisSansSite.id)).status, 201);
+      assert.equal((await request(app).post(`/api/clients/${sansSite.id}/sites`).set(admin()).send({ nom: 'TEST Site tardif', adresse: '7 rue Tardive', codePostal: '44000', ville: 'Nantes', estSiteFacturation: true })).status, 201);
+      assert.ok(!(await texteDevis(devisSansSite.id)).texte.includes('7 rue Tardive'), 'adresse ajoutée après la signature imprimée');
+    });
+
+    test('client copié : le site de facturation, même créé après un autre site', async () => {
+      const client = await creerClient(`TEST Client site de facturation tardif ${Date.now()}`, false);
+      // Le site de facturation est créé après l'autre et nommé après lui : ni l'ordre d'écriture ni
+      // le nom ne doivent le désigner.
+      for (const site of [
+        { nom: 'A Chantier', adresse: '1 rue du Chantier', codePostal: '33000', ville: 'Bordeaux' },
+        { nom: 'B Facturation', adresse: '2 rue Facturée', codePostal: '31000', ville: 'Toulouse', estSiteFacturation: true },
+      ]) assert.equal((await request(app).post(`/api/clients/${client.id}/sites`).set(admin()).send(site)).status, 201);
+      const devis = await creerDevis(client.id, 'TEST Devis site de facturation tardif');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes('2 rue Facturée') && !nonSigne.includes('1 rue du Chantier'), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '2 rue Facturée\n31000 Toulouse');
+    });
+
+    // Audit n° 5 : sans tri, la lecture rend les sites dans l'ordre d'écriture ou des identifiants,
+    // aléatoires : l'autre site est ici le premier écrit et le premier par identifiant.
+    // Audit n° 6 : comme la facture, le devis prend le site principal d'un client qui n'a aucun site
+    // marqué facturation, avec son complément d'adresse et son pays.
+    test('client : sans site marqué facturation, le site principal, complément et pays compris', async () => {
+      const client = await creerClient(`TEST Client site principal ${Date.now()}`, false);
+      const site = await request(app).post(`/api/clients/${client.id}/sites`).set(admin()).send({ nom: 'TEST Siège', adresse: '12 rue Principale', complementAdresse: 'Bâtiment B', codePostal: '1000', ville: 'Bruxelles', pays: 'Belgique', principal: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      const devis = await creerDevis(client.id, 'TEST Devis site principal');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(['12 rue Principale', 'Bâtiment B', '1000 Bruxelles', 'Belgique'].every((t) => nonSigne.includes(t)), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '12 rue Principale\nBâtiment B\n1000 Bruxelles\nBelgique');
+    });
+
+    // Audit n° 8 : un client sans site n'a pas de ligne d'adresse, ni signé ni non signé (jamais
+    // « null » ni une ligne vide entre son nom et l'objet).
+    test('client sans site : aucune ligne d’adresse imprimée, signé ou non', async () => {
+      const client = await creerClient(`TEST Client sans adresse imprimée ${Date.now()}`, false);
+      const nonSigne = await creerDevis(client.id, 'TEST Devis sans adresse non signé');
+      const signe = await creerDevis(client.id, 'TEST Devis sans adresse signé');
+      assert.equal((await signer(signe.id)).status, 201);
+      for (const [devis, objet] of [[nonSigne, 'TEST Devis sans adresse non signé'], [signe, 'TEST Devis sans adresse signé']]) {
+        const lignes = (await texteDevis(devis.id)).texte.split('\n').map((l) => l.trim()).filter(Boolean);
+        const rang = lignes.indexOf(client.raisonSociale);
+        assert.ok(rang > 0 && lignes[rang - 1] === 'Client', JSON.stringify(lignes));
+        assert.equal(lignes[rang + 1], `Objet : ${objet}`, JSON.stringify(lignes));
+        assert.ok(!lignes.some((l) => /\bnull\b|\bundefined\b/.test(l)), JSON.stringify(lignes));
+      }
+    });
+
+    // Audit n° 8 : seule sur sa ligne, une référence du catalogue (80 caractères au plus) tient sur
+    // une seule ligne, sous sa désignation.
+    test('référence de 80 caractères : imprimée sur une seule ligne', async () => {
+      const client = await creerClient(`TEST Client référence longue ${Date.now()}`);
+      const reference = `TEST-${Date.now()}-`.padEnd(80, 'R');
+      const fiche = await request(app).post('/api/catalogue/prestations').set(admin()).send({ reference, nom: `TEST Pose référence longue ${Date.now()}`, unite: 'u', prixVenteHt: '10', tauxTva: '20' });
+      assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+      const devis = await creerDevis(client.id, 'TEST Devis référence longue', [{ designation: 'TEST Pose référence longue', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, catalogueFamille: 'prestations', catalogueId: fiche.body.id }]);
+      const lignes = (await texteDevis(devis.id)).texte.split('\n').map((l) => l.trim());
+      assert.ok(lignes.includes(`Réf. ${reference}`), JSON.stringify(lignes));
+    });
+
+    // Audit n° 12 : la référence suit la désignation entière, jamais entre sa première ligne et sa
+    // suite ; une ligne sans référence n'en imprime aucune.
+    test('référence : imprimée sous la désignation repliée entière, avant la ligne suivante', async () => {
+      const client = await creerClient(`TEST Client référence et repli ${Date.now()}`);
+      const reference = `TEST-REPLI-${Date.now()}`;
+      const fiche = await request(app).post('/api/catalogue/prestations').set(admin()).send({ reference, nom: `TEST Pose repliée ${Date.now()}`, unite: 'u', prixVenteHt: '10', tauxTva: '20' });
+      assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+      // 42 caractères : la colonne en tient 31, « devis à replier » passe à la ligne suivante.
+      const devis = await creerDevis(client.id, 'TEST Devis référence et repli', [
+        { designation: 'TEST Désignation longue de devis à replier', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, catalogueFamille: 'prestations', catalogueId: fiche.body.id },
+        { designation: 'TEST Ligne suivante sans référence', quantite: 1, prixUnitaireHt: 5, tauxTva: 20 },
+      ]);
+      const lignes = (await texteDevis(devis.id)).texte.split('\n').map((l) => l.trim());
+      const rang = (debut) => lignes.findIndex((l) => l.startsWith(debut));
+      const [premiere, suite, ref, suivante] = [rang('TEST Désignation longue de'), rang('devis à replier'), rang(`Réf. ${reference}`), rang('TEST Ligne suivante')];
+      assert.ok(premiere >= 0 && suite === premiere + 1 && ref === suite + 1 && suivante === ref + 1, JSON.stringify(lignes));
+      assert.equal(lignes.filter((l) => l.startsWith('Réf.')).length, 1, JSON.stringify(lignes));
+    });
+
+    test('client actuel : le site de facturation, quels que soient l’ordre d’écriture et les identifiants', async () => {
+      const client = await creerClient(`TEST Client sites ordonnés ${Date.now()}`, false);
+      const suite = randomUUID().slice(8);
+      await prisma.clientSite.create({ data: { id: `00000000${suite}`, clientId: client.id, nom: 'A Chantier', adresse: '1 rue du Chantier', codePostal: '33000', ville: 'Bordeaux' } });
+      await prisma.clientSite.create({ data: { id: `ffffffff${suite}`, clientId: client.id, nom: 'B Facturation', adresse: '2 rue Facturée', codePostal: '31000', ville: 'Toulouse', estSiteFacturation: true } });
+      const devis = await creerDevis(client.id, 'TEST Devis sites ordonnés');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes('2 rue Facturée') && !nonSigne.includes('1 rue du Chantier'), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '2 rue Facturée\n31000 Toulouse');
+    });
+
+    // Audit n° 7 (N2 du sixième audit) : deux sites identiques sur tous les autres critères (ni
+    // facturation, ni siège, même nom ; la base n'admet qu'un site de facturation et un siège par
+    // client) sont départagés par l'identifiant, le plus petit d'abord, quel que soit l'ordre d'écriture.
+    test('client : deux sites identiques, départagés par le plus petit identifiant', async () => {
+      const client = await creerClient(`TEST Client sites jumeaux ${Date.now()}`, false);
+      const suite = randomUUID().slice(8);
+      await prisma.clientSite.create({ data: { id: `ffffffff${suite}`, clientId: client.id, nom: 'Chantier', adresse: '9 rue Jumelle', codePostal: '31000', ville: 'Toulouse' } });
+      await prisma.clientSite.create({ data: { id: `00000000${suite}`, clientId: client.id, nom: 'Chantier', adresse: '1 rue Jumelle', codePostal: '31000', ville: 'Toulouse' } });
+      const devis = await creerDevis(client.id, 'TEST Devis sites jumeaux');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes('1 rue Jumelle') && !nonSigne.includes('9 rue Jumelle'), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '1 rue Jumelle\n31000 Toulouse');
+    });
+
+    // Audit n° 10 : sans site de facturation, le site principal passe avant le siège social, puis le
+    // nom dans l'ordre alphabétique, avant l'identifiant : l'ordre de la facture, critère par critère.
+    test('client : site principal avant le siège, puis le nom, quels que soient les identifiants', async () => {
+      const principal = await creerClient(`TEST Client principal et siège ${Date.now()}`, false);
+      const suite = randomUUID().slice(8);
+      await prisma.clientSite.create({ data: { id: `00000000${suite}`, clientId: principal.id, nom: 'A Siège', adresse: '1 rue du Siège', codePostal: '31000', ville: 'Toulouse', estSiegeSocial: true } });
+      await prisma.clientSite.create({ data: { id: `ffffffff${suite}`, clientId: principal.id, nom: 'B Principal', adresse: '2 rue Principale', codePostal: '31000', ville: 'Toulouse', principal: true } });
+      const nommes = await creerClient(`TEST Client sites nommés ${Date.now()}`, false);
+      const suiteNoms = randomUUID().slice(8);
+      await prisma.clientSite.create({ data: { id: `00000000${suiteNoms}`, clientId: nommes.id, nom: 'B Chantier', adresse: '9 rue Seconde', codePostal: '31000', ville: 'Toulouse' } });
+      await prisma.clientSite.create({ data: { id: `ffffffff${suiteNoms}`, clientId: nommes.id, nom: 'A Chantier', adresse: '8 rue Première', codePostal: '31000', ville: 'Toulouse' } });
+      for (const [client, choisie, ecartee] of [[principal, '2 rue Principale', '1 rue du Siège'], [nommes, '8 rue Première', '9 rue Seconde']]) {
+        const devis = await creerDevis(client.id, 'TEST Devis ordre des sites');
+        const nonSigne = (await texteDevis(devis.id)).texte;
+        assert.ok(nonSigne.includes(choisie) && !nonSigne.includes(ecartee), nonSigne);
+        assert.equal((await signer(devis.id)).status, 201);
+        assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, `${choisie}\n31000 Toulouse`);
+      }
+    });
+
+    // Audit n° 14 : le client s'imprime par sa raison sociale, celle que copie la signature, et non
+    // par son nom commercial ; aucun client de test n'en avait un.
+    test('client : sa raison sociale, et non son nom commercial, imprimée et copiée à la signature', async () => {
+      const suffixe = Date.now();
+      const client = await creerClient(`TEST Client raison sociale ${suffixe}`);
+      const enseigne = `TEST Enseigne du client ${suffixe}`;
+      assert.equal((await request(app).put(`/api/clients/${client.id}`).set(admin()).send({ nomCommercial: enseigne })).status, 200);
+      const devis = await creerDevis(client.id, 'TEST Devis du client à enseigne');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes(client.raisonSociale) && !nonSigne.includes(enseigne), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientRaisonSociale, client.raisonSociale);
+      const signe = (await texteDevis(devis.id)).texte;
+      assert.ok(signe.includes(client.raisonSociale) && !signe.includes(enseigne), signe);
+    });
+
+    // Audit n° 7 : un objet et un signataire longs (300 et 200 caractères au plus) s'impriment en
+    // entier, repliés à la largeur de la page, jamais tronqués.
+    test('objet et signataire longs : imprimés en entier', async () => {
+      const client = await creerClient(`TEST Client textes longs ${Date.now()}`);
+      const objet = `TEST Objet long ${'mot '.repeat(68)}FINOBJET`;
+      const devis = await creerDevis(client.id, objet);
+      const signataire = `TEST Signataire ${'Nom '.repeat(40)}FINSIGNATAIRE`;
+      const signature = await request(app).post(`/api/devis/${devis.id}/signature`).set(admin()).send({ signataire, confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      const { texte } = await texteDevis(devis.id);
+      const aplati = texte.replace(/\s+/g, ' ');
+      assert.ok(aplati.includes(`Objet : ${objet}`), texte);
+      assert.ok(aplati.includes(`Accepté par ${signataire} le `), texte);
+    });
+
+    test('devis non signé : le logo actuel est imprimé, puis plus après son retrait', async () => {
+      const client = await creerClient(`TEST Client logo devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis logo actuel');
+      const logo = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+      try {
+        assert.equal((await request(app).put('/api/company/logo').set(admin()).send({ fichier: `data:image/jpeg;base64,${logo}` })).status, 200);
+        assert.ok((await texteDevis(devis.id)).octets.includes(Buffer.from('/Subtype /Image')), 'logo actuel absent');
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+      }
+      assert.ok(!(await texteDevis(devis.id)).octets.includes(Buffer.from('/Subtype /Image')), 'logo retiré encore imprimé');
+    });
+
+    // Audit n° 11 : un devis signé garde le logo copié à sa signature quand la société en change, et
+    // un devis signé sans logo n'en reçoit pas après coup. Le retrait du logo, seul testé jusqu'ici,
+    // laissait passer un logo actuel imprimé à la place de la copie. Chaque logo porte un marqueur
+    // propre après sa fin d'image : PDFKit recopie le JPEG tel quel dans le PDF.
+    test('devis signé : logo copié gardé quand la société en change, aucun logo ajouté après coup', async () => {
+      const client = await creerClient(`TEST Client logos successifs ${Date.now()}`);
+      const base = Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64');
+      const [marqueA, marqueB] = [`TEST-LOGO-A-${randomUUID()}`, `TEST-LOGO-B-${randomUUID()}`];
+      const televerser = async (marque) => {
+        const res = await request(app).put('/api/company/logo').set(admin()).send({ fichier: `data:image/jpeg;base64,${Buffer.concat([base, Buffer.from(marque)]).toString('base64')}` });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      };
+      const sansLogo = await creerDevis(client.id, 'TEST Devis signé sans logo');
+      const avecLogo = await creerDevis(client.id, 'TEST Devis signé avec le logo A');
+      try {
+        assert.equal((await request(app).delete('/api/company/logo').set(admin())).status, 200);
+        assert.equal((await signer(sansLogo.id)).status, 201);
+        await televerser(marqueA);
+        assert.equal((await signer(avecLogo.id)).status, 201);
+        await televerser(marqueB);
+        const signeA = (await texteDevis(avecLogo.id)).octets;
+        assert.ok(signeA.includes(Buffer.from(marqueA)) && !signeA.includes(Buffer.from(marqueB)), 'logo actuel imprimé à la place du logo copié');
+        assert.ok(!(await texteDevis(sansLogo.id)).octets.includes(Buffer.from('/Subtype /Image')), 'logo ajouté après la signature imprimé');
+      } finally {
+        await request(app).delete('/api/company/logo').set(admin());
+      }
+    });
+
+    test('signature : les refus d’état passent avant celui de l’identité incomplète', async () => {
+      const client = await creerClient(`TEST Client refus avant identité ${Date.now()}`);
+      const signe = await creerDevis(client.id, 'TEST Devis déjà signé');
+      assert.equal((await signer(signe.id)).status, 201);
+      const annule = await creerDevis(client.id, 'TEST Devis annulé avant signature');
+      assert.equal((await request(app).post(`/api/devis/${annule.id}/annulation`).set(admin()).send({ motif: 'TEST motif' })).status, 200);
+      try {
+        await definirSociete({ siret: '' });
+        const deja = await signer(signe.id);
+        assert.equal(deja.status, 409); assert.equal(deja.body.error, 'Ce devis est déjà signé.');
+        const etat = await signer(annule.id);
+        assert.equal(etat.status, 409); assert.equal(etat.body.error, 'Ce devis ne peut plus être signé dans son état actuel.');
+        // Le devis signé s'imprime depuis ses copies, même quand l'identité actuelle est incomplète.
+        assert.ok((await texteDevis(signe.id)).texte.includes('Accepté par TEST Signataire client'));
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
+
+    test('dates : jour de la société pour la création de la version et pour la signature', async () => {
+      const jourA = (instant, fuseau) => jourCivilEntreprise(new Date(instant), fuseau).split('-').reverse().join('-');
+      const client = await creerClient(`TEST Client jour devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis au jour de la société');
+      // Créé le 15-01-2026 à 23 h 30 UTC : le 16-01-2026 à Paris, encore le 15-01-2026 à Tahiti.
+      await prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2026-01-15T23:30:00Z') } });
+      const initial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      try {
+        await definirSociete({ fuseauHoraire: 'Pacific/Tahiti' });
+        assert.ok((await texteDevis(devis.id)).texte.includes('Version 1 · établi le 15-01-2026'));
+        await definirSociete({ fuseauHoraire: 'Europe/Paris' });
+        assert.ok((await texteDevis(devis.id)).texte.includes('Version 1 · établi le 16-01-2026'));
+        assert.equal((await signer(devis.id)).status, 201);
+        const { signeLe } = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } });
+        const texte = (await texteDevis(devis.id)).texte;
+        assert.ok(texte.includes(`Accepté par TEST Signataire client le ${jourA(signeLe, 'Europe/Paris')}.`), texte);
+      } finally {
+        await definirSociete({ fuseauHoraire: initial });
+      }
+    });
+
+    // Audit n° 6 : une ligne au taux de 0 % garde sa base dans la ventilation, qui reconstitue le total HT.
+    test('ventilation : un taux de 0 % garde sa base HT', async () => {
+      const client = await creerClient(`TEST Client taux nul devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis au taux nul', [
+        { designation: 'TEST Prestation au taux nul', quantite: 1, prixUnitaireHt: 40, tauxTva: 0 },
+        { designation: 'TEST Fourniture taxée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      for (const attendu of ['TVA 0 % sur 40,00 € : 0,00 €', 'TVA 20 % sur 10,00 € : 2,00 €', 'TVA totale : 2,00 €', 'Total HT : 50,00 €']) assert.ok(texte.includes(attendu), `absent du PDF : ${attendu}\n${texte}`);
+    });
+
+    // Audit n° 8 : la ventilation suit l'ordre des taux, pas celui de leur écriture (5,5 % avant 20 %).
+    test('ventilation : taux dans l’ordre croissant de leur valeur', async () => {
+      const client = await creerClient(`TEST Client ordre des taux ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis ordre des taux', [
+        { designation: 'TEST Ligne à 20 %', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST Ligne à 5,5 %', quantite: 1, prixUnitaireHt: 10, tauxTva: 5.5 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      assert.ok(texte.includes('TVA 5,5 % sur 10,00 € : 0,55 €') && texte.includes('TVA 20 % sur 10,00 € : 2,00 €'), texte);
+      assert.ok(texte.indexOf('TVA 5,5 %') < texte.indexOf('TVA 20 %'), texte);
+    });
+
+    test('ventilation : TVA arrondie sur la base cumulée du taux, comme la TVA du devis', async () => {
+      const client = await creerClient(`TEST Client arrondi devis ${Date.now()}`);
+      // Trois lignes de 0,03 € à 20 % : 0,01 € de TVA chacune ligne à ligne, 0,02 € sur la base cumulée.
+      const devis = await creerDevis(client.id, 'TEST Devis arrondi', Array.from({ length: 3 }, (_, i) => ({ designation: `TEST Petite ligne ${i + 1}`, quantite: 1, prixUnitaireHt: 0.03, tauxTva: 20 })));
+      assert.equal(devis.totalTva, 0.02);
+      const { texte } = await texteDevis(devis.id);
+      assert.ok(texte.includes('TVA 20 % sur 0,09 € : 0,02 €') && texte.includes('TVA totale : 0,02 €'), texte);
+      assert.ok(!texte.includes('Acompte'), `acompte imprimé pour un devis qui n’en exige pas :\n${texte}`);
+    });
+
+    // Audit n° 5 : un taux de TVA, une quantité ou un taux d'acompte décimaux s'impriment tels qu'ils
+    // sont enregistrés, sans arrondi (5,5 % n'est jamais imprimé 6 %, ni 1,125 m comme 1,1 m).
+    test('décimales : taux de TVA, quantité et taux d’acompte imprimés sans arrondi', async () => {
+      const client = await creerClient(`TEST Client décimales devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis décimal', [
+        { designation: 'TEST Fourniture au taux réduit', quantite: 1.125, unite: 'm', prixUnitaireHt: 8, tauxTva: 5.5 },
+      ], { acompteExige: true, tauxAcompte: 12.5 });
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Fourniture au taux réduit\s+1,125 m\s+8,00 €\s+5,5 %\s+9,00 €$/m, texte);
+      assert.ok(texte.includes('TVA 5,5 % sur 9,00 € : 0,50 €') && texte.includes('TVA totale : 0,50 €'), texte);
+      assert.ok(texte.includes('Acompte demandé : 12,5 %'), texte);
+    });
+
+    // Audit n° 13 : la saisie admet deux décimales pour un taux de TVA ou d'acompte (1,75 %, 12,25 %).
+    // Imprimés avec une seule décimale, ils deviendraient 1,8 % et 12,3 %.
+    test('décimales : taux de TVA et taux d’acompte à deux décimales imprimés sans arrondi', async () => {
+      const client = await creerClient(`TEST Client deux décimales devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis à deux décimales', [
+        { designation: 'TEST Fourniture au second taux', quantite: 1, prixUnitaireHt: 8, tauxTva: 1.75 },
+      ], { acompteExige: true, tauxAcompte: 12.25 });
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Fourniture au second taux\s+1\s+8,00 €\s+1,75 %\s+8,00 €$/m, texte);
+      assert.ok(texte.includes('TVA 1,75 % sur 8,00 € : 0,14 €') && texte.includes('TVA totale : 0,14 €'), texte);
+      assert.ok(texte.includes('Acompte demandé : 12,25 %'), texte);
+    });
+
+    test('prix d’achat prévu : absent du PDF sous toutes ses écritures', async () => {
+      const client = await creerClient(`TEST Client achat devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis au prix d’achat', [{ designation: 'TEST Fourniture achetée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, prixAchatUnitaireHt: 6543.21 }]);
+      const { texte } = await texteDevis(devis.id);
+      // Audit n° 11 : le nom du client, horodaté, et le numéro du devis peuvent contenir « 6543 »
+      // (« … 1792744654303 ») ; ils sont retirés du texte examiné.
+      const examine = texte.replaceAll(client.raisonSociale, '').replaceAll(devis.numero, '');
+      assert.ok(texte.includes('TEST Fourniture achetée') && !/6\s?543|543[,.]21/.test(examine), texte);
+    });
+
+    test('empreinte de l’identité figée : formule du lot 6a-1 inchangée par la mise en commun', async () => {
+      const client = await creerClient(`TEST Client empreinte devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis empreinte identité');
+      assert.equal((await signer(devis.id)).status, 201);
+      const { identiteEmetteur } = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id }, include: { identiteEmetteur: true } });
+      // Ordre des clés du lot 6a-1 (#300) : le changer ferait créer une seconde copie d'une identité déjà figée.
+      const copie = {
+        raisonSociale: SOCIETE_A.raisonSociale, nomCommercial: null, siret: SOCIETE_A.siret, tvaIntra: SOCIETE_A.tvaIntra,
+        adresse: SOCIETE_A.adresse, codePostal: SOCIETE_A.codePostal, ville: SOCIETE_A.ville, pays: SOCIETE_A.pays,
+        telephone: SOCIETE_A.telephone, email: SOCIETE_A.email, siteWeb: null, piedDocument: SOCIETE_A.piedFacture,
+        couleurPrimaire: SOCIETE_A.couleurPrimaire, logoId: null,
+      };
+      assert.equal(identiteEmetteur.empreinte, createHash('sha256').update(JSON.stringify(Object.entries(copie))).digest('hex'));
+    });
+
+    test('cadre du bon pour accord : jamais dans la marge basse, quelle que soit la longueur du devis', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const client = await creerClient(`TEST Client cadre devis ${Date.now()}`);
+      const sansSite = await creerClient(`TEST Client cadre sans site ${Date.now()}`, false);
+      const cadres = [];
+      // Audit n° 6 : l'en-tête (adresse du client, ligne d'acompte) décale le cadre ; chaque variante
+      // parcourt sa propre plage de longueurs.
+      const variantes = [
+        { clientId: client.id, extra: {}, de: 30, a: 60 },
+        { clientId: client.id, extra: { acompteExige: true, tauxAcompte: 30 }, de: 24, a: 36 },
+        { clientId: sansSite.id, extra: {}, de: 24, a: 36 },
+      ];
+      for (const { clientId, extra, de, a } of variantes) for (let n = de; n <= a; n++) {
+        const devis = await creerDevis(clientId, `TEST Devis cadre ${n}`, Array.from({ length: n }, (_, i) => ({ designation: `TEST Ligne ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 })), extra);
+        const res = await pdfDevis(devis.id);
+        assert.equal(res.status, 200);
+        const octets = res.body, texte = octets.toString('latin1');
+        for (const flux of texte.matchAll(/stream\r?\n/g)) {
+          const debut = flux.index + flux[0].length;
+          let contenu;
+          try { contenu = inflateSync(octets.subarray(debut, texte.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+          for (const [, haut, hauteur] of contenu.matchAll(/[\d.]+ ([\d.]+) 240 ([\d.]+) re/g)) cadres.push([n, Number(haut) + Number(hauteur), extra.acompteExige ? 'acompte' : clientId === sansSite.id ? 'sans adresse' : 'adresse']);
+        }
+      }
+      assert.equal(cadres.length, 31 + 13 + 13, JSON.stringify(cadres));
+      // Page A4 de 842 points, moins la marge basse du gabarit (84 points avec un pied d'une ligne).
+      for (const [n, bas, variante] of cadres) assert.ok(bas <= 842 - 84, `cadre dans la marge basse avec ${n} lignes (${variante}) : bas à ${bas}`);
+    });
+
+    // Audit n° 14 : un pied de page de plusieurs lignes agrandit la marge basse ; le cadre passe alors
+    // à la page suivante plutôt que de recouvrir le pied. Le test précédent n'éprouve qu'un pied d'une
+    // ligne, où la marge vaut son minimum (84 points).
+    test('cadre du bon pour accord : jamais sur un pied de page de plusieurs lignes', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const client = await creerClient(`TEST Client cadre pied long ${Date.now()}`);
+      const cadres = [];
+      try {
+        await definirSociete({ piedFacture: Array.from({ length: 8 }, (_, i) => `TEST Pied long ${i + 1}`).join('\n') });
+        for (let n = 18; n <= 36; n++) {
+          const devis = await creerDevis(client.id, `TEST Devis cadre pied long ${n}`, Array.from({ length: n }, (_, i) => ({ designation: `TEST Ligne ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 })));
+          const res = await pdfDevis(devis.id);
+          assert.equal(res.status, 200);
+          const octets = res.body, brut = octets.toString('latin1');
+          for (const flux of brut.matchAll(/stream\r?\n/g)) {
+            const debut = flux.index + flux[0].length;
+            let contenu;
+            try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+            const cadre = /[\d.]+ ([\d.]+) 240 ([\d.]+) re/.exec(contenu);
+            if (!cadre) continue;
+            // Ligne la plus haute du pied (corps de 7 points), en ordonnée du PDF, comptée depuis le bas.
+            const pied = Math.max(...[...contenu.matchAll(/1 0 0 1 [\d.]+ ([\d.]+) Tm\s*\/F\d+ 7 Tf/g)].map(([, y]) => Number(y)));
+            assert.ok(Number.isFinite(pied), `pied de page introuvable avec ${n} lignes`);
+            // Le gabarit écrit le pied 18 points sous le haut de sa marge : le cadre doit finir au-dessus
+            // de cette marge (première ligne du pied, moins son corps et ces 18 points).
+            cadres.push([n, Number(cadre[1]) + Number(cadre[2]), 842 - pied - 7 - 18]);
+          }
+        }
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+      assert.equal(cadres.length, 19, JSON.stringify(cadres));
+      for (const [n, bas, haut] of cadres) assert.ok(bas <= haut, `cadre dans la marge du pied avec ${n} lignes : bas à ${bas}, marge à ${haut}`);
+    });
+
+    // Audit n° 14 : le contenu d'un devis signé (lignes, unités, ventilation, totaux, acompte) est celui
+    // du document accepté ; les tests du devis signé ne vérifiaient que son en-tête et sa signature.
+    test('devis signé : lignes, ventilation, totaux et acompte imprimés', async () => {
+      const client = await creerClient(`TEST Client contenu signé ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé complet', [
+        { designation: 'TEST Main-d’œuvre signée', quantite: 2.5, unite: 'h', prixUnitaireHt: 48, tauxTva: 20 },
+        { designation: 'TEST Fourniture signée', quantite: 1, unite: 'u', prixUnitaireHt: 250, tauxTva: 10 },
+      ], { acompteExige: true, tauxAcompte: 30 });
+      assert.equal((await signer(devis.id)).status, 201);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Main-d’œuvre signée\s+2,5 h\s+48,00 €\s+20 %\s+120,00 €$/m, texte);
+      assert.match(texte, /^TEST Fourniture signée\s+1 u\s+250,00 €\s+10 %\s+250,00 €$/m, texte);
+      for (const attendu of ['Total HT : 370,00 €', 'TVA 10 % sur 250,00 € : 25,00 €', 'TVA 20 % sur 120,00 € : 24,00 €', 'TVA totale : 49,00 €', 'Total TTC : 419,00 €', 'Acompte demandé : 30 %', 'Accepté par TEST Signataire client']) {
+        assert.ok(texte.includes(attendu), `absent du devis signé : ${attendu}\n${texte}`);
+      }
+    });
+
+    // Audit n° 15 : un devis signé imprime toute l'identité copiée (nom commercial, adresse, SIRET,
+    // TVA, téléphone, courriel, pied de page), les références du catalogue et la suite des
+    // désignations repliées. Ces éléments n'étaient vérifiés que sur des devis non signés : imprimé
+    // sans eux, un devis signé passait toute la suite.
+    test('devis signé : identité copiée entière, pied de page, références et désignations repliées imprimés', async () => {
+      const suffixe = Date.now();
+      const client = await creerClient(`TEST Client signé identité entière ${suffixe}`);
+      const reference = `TEST-REF-SIGNE-${suffixe}`;
+      const fiche = await request(app).post('/api/catalogue/prestations').set(admin()).send({ reference, nom: `TEST Pose signée ${suffixe}`, unite: 'u', prixVenteHt: '10', tauxTva: '20' });
+      assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+      // 42 caractères : la colonne en tient 31, « devis à replier » passe à la ligne suivante.
+      const devis = await creerDevis(client.id, 'TEST Devis signé, identité entière', [
+        { designation: 'TEST Désignation longue de devis à replier', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, catalogueFamille: 'prestations', catalogueId: fiche.body.id },
+        { designation: 'TEST Ligne signée suivante', quantite: 1, prixUnitaireHt: 5, tauxTva: 20 },
+      ]);
+      // Identité de la signature : chaque champ imprimé diffère de celle qui la remplace ensuite.
+      const SIGNEE = { ...SOCIETE_B, tvaIntra: 'FR44444444444', telephone: '02 31 00 00 04', email: 'devis-signe@iris.test' };
+      try {
+        await definirSociete(SIGNEE);
+        assert.equal((await signer(devis.id)).status, 201);
+        await definirSociete(SOCIETE_A);
+        const { texte } = await texteDevis(devis.id);
+        for (const attendu of [`DEVIS ${devis.numero}`, 'Objet : TEST Devis signé, identité entière', 'TEST Émetteur devis B', 'TEST Enseigne devis B', '4 avenue Changée', '14000 Caen', 'SIRET 44444444400044',
+          'TVA intracommunautaire FR44444444444', 'Tél. 02 31 00 00 04', 'devis-signe@iris.test', 'TEST Pied devis B']) {
+          assert.ok(texte.includes(attendu), `absent du devis signé : ${attendu}\n${texte}`);
+        }
+        assert.ok(!/TEST Émetteur devis A|3 rue du Devis|SIRET 33333333300033|FR33333333333|devis-a@iris\.test|TEST Pied devis A/.test(texte), texte);
+        const lignes = texte.split('\n').map((l) => l.trim());
+        const rang = (debut) => lignes.findIndex((l) => l.startsWith(debut));
+        const [premiere, suite, ref, suivante] = [rang('TEST Désignation longue de'), rang('devis à replier'), rang(`Réf. ${reference}`), rang('TEST Ligne signée suivante')];
+        assert.ok(premiere >= 0 && suite === premiere + 1 && ref === suite + 1 && suivante === ref + 1, JSON.stringify(lignes));
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
+
+    // Audit n° 15 : seul le tableau des lignes s'imprime en Courier, pour caler ses colonnes ; les
+    // totaux, la ventilation et le cadre du bon pour accord reprennent la police du document.
+    test('gabarit : seul le tableau des lignes en Courier, les totaux et le cadre en Helvetica', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const client = await creerClient(`TEST Client polices devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Polices du devis');
+      const res = await pdfDevis(devis.id);
+      assert.equal(res.status, 200);
+      const octets = res.body, brut = octets.toString('latin1');
+      // Ressources de police de la page (/F1…) et leur police de base.
+      const polices = {};
+      for (const [, nom, objet] of brut.matchAll(/\/(F\d+) (\d+) 0 R/g)) {
+        const base = new RegExp(`(?:^|\\n)${objet} 0 obj\\s*<<[^>]*?/BaseFont /([\\w-]+)`).exec(brut);
+        if (base) polices[nom] = base[1];
+      }
+      const ecrits = [];
+      for (const flux of brut.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        let police = null;
+        for (const [, ressource, morceaux] of contenu.matchAll(/\/(F\d+) [\d.]+ Tf|\[([^\]]*)\] TJ/g)) {
+          if (ressource) police = polices[ressource];
+          else ecrits.push([police, [...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join('')]);
+        }
+      }
+      const police = (debut) => ecrits.find(([, texte]) => texte.startsWith(debut))?.[0];
+      assert.equal(police('D\xe9signation'), 'Courier', JSON.stringify(ecrits));
+      for (const debut of ['Total HT', 'TVA 20 %', 'TVA totale', 'Total TTC', 'Bon pour accord']) assert.equal(police(debut), 'Helvetica', `${debut}\n${JSON.stringify(ecrits)}`);
+    });
+
+    // Audit n° 17 : le titre du devis s'imprime dans la couleur de la société, celle copiée à la
+    // signature pour un devis signé ; le filet de l'en-tête, seul, ne suffit pas à le vérifier.
+    test('gabarit : le titre du devis dans la couleur de la société, celle de la signature une fois signé', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const couleurDuTitre = (octets, numero) => {
+        const brut = octets.toString('latin1');
+        for (const flux of brut.matchAll(/stream\r?\n/g)) {
+          const debut = flux.index + flux[0].length;
+          let contenu;
+          try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+          let remplissage = null;
+          for (const [, r, v, b, morceaux] of contenu.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) scn\b|\[([^\]]*)\] TJ/g)) {
+            if (r !== undefined) remplissage = `#${[r, v, b].map((c) => Math.round(Number(c) * 255).toString(16).padStart(2, '0')).join('')}`;
+            else if ([...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join('').startsWith(`DEVIS ${numero}`)) return remplissage;
+          }
+        }
+        return undefined;
+      };
+      const client = await creerClient(`TEST Client couleur du titre ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Couleur du titre');
+      assert.equal(couleurDuTitre((await pdfDevis(devis.id)).body, devis.numero), SOCIETE_A.couleurPrimaire);
+      assert.equal((await signer(devis.id)).status, 201);
+      try {
+        await definirSociete(SOCIETE_B);
+        assert.equal(couleurDuTitre((await pdfDevis(devis.id)).body, devis.numero), SOCIETE_A.couleurPrimaire, 'couleur copiée à la signature');
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
+
+    // Audit n° 18 : après le titre, et après la mention d'un devis annulé, le corps du devis revient
+    // au noir ; l'adresse actuelle du client garde ses lignes, comme la copie d'un devis signé.
+    test('gabarit : le corps du devis en noir après le titre et la mention d’annulation, l’adresse du client sur ses lignes', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const couleurs = (octets) => {
+        const brut = octets.toString('latin1'), releve = [];
+        for (const flux of brut.matchAll(/stream\r?\n/g)) {
+          const debut = flux.index + flux[0].length;
+          let contenu;
+          try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+          let remplissage = null;
+          for (const [, r, v, b, morceaux] of contenu.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) scn\b|\[([^\]]*)\] TJ/g)) {
+            if (r !== undefined) remplissage = `#${[r, v, b].map((c) => Math.round(Number(c) * 255).toString(16).padStart(2, '0')).join('')}`;
+            else releve.push([[...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join(''), remplissage]);
+          }
+        }
+        return (debut) => releve.find(([texte]) => texte.startsWith(debut))?.[1];
+      };
+      const client = await creerClient(`TEST Client corps en noir ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Corps en noir');
+      const { octets, texte } = await texteDevis(devis.id);
+      const couleurDe = couleurs(octets);
+      for (const debut of ['Version 1', 'Client', 'Objet : TEST Corps en noir', 'Total TTC']) assert.equal(couleurDe(debut), '#000000', debut);
+      assert.ok(texte.includes('5 rue du Client\n75002 Paris'), texte);
+      assert.equal((await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST motif' })).status, 200);
+      const annule = couleurs((await pdfDevis(devis.id)).body);
+      assert.equal(annule('DEVIS ANNUL'), '#b91c1c');
+      for (const debut of ['Client', 'Objet : TEST Corps en noir', 'Total TTC']) assert.equal(annule(debut), '#000000', `${debut}, après la mention d’annulation`);
+    });
+
+    // Audit n° 18 : un devis brouillon s'imprime comme un devis envoyé, sans mention « brouillon »
+    // (décision de Nelson du 23-10-2026) ; un devis signé, accepté ou en attente d'acompte, sans
+    // autre mention. Le texte imprimé ne change pas avec ces statuts.
+    test('statuts : brouillon imprimé comme envoyé, accepté comme en attente d’acompte, mot pour mot', async () => {
+      const client = await creerClient(`TEST Client statut sans mention ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Statut sans mention', undefined, { acompteExige: true, tauxAcompte: 30 });
+      const statut = async (valeur) => assert.equal((await request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: valeur })).status, 200);
+      const brouillon = (await texteDevis(devis.id)).texte;
+      assert.ok(!/brouillon/i.test(brouillon), brouillon);
+      await statut('ENVOYE');
+      assert.equal((await texteDevis(devis.id)).texte, brouillon);
+      assert.equal((await signer(devis.id)).status, 201);
+      const accepte = (await texteDevis(devis.id)).texte;
+      await statut('EN_ATTENTE_ACOMPTE');
+      assert.equal((await texteDevis(devis.id)).texte, accepte);
     });
   });
 }

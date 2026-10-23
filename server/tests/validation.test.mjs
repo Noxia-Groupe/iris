@@ -654,3 +654,101 @@ describe('Alerte de la génération automatique des visites', () => {
     assert.equal(alerteGenerationVisites(etat({ anticipation: null, derniere: echec, derniereAutomatique: passage({ jour: jour('2026-01-01') }) })), null);
   });
 });
+
+// Lot 6a-2, troisième audit (N3) : les tableaux à chasse fixe des documents (devis, factures) se
+// calent sur le texte tel qu'il s'imprime ; un accent à recomposer ou un caractère invisible ne
+// décale pas les colonnes.
+describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
+  test('chaque cellule est mesurée telle qu’elle s’imprime ; une valeur trop large garde un séparateur', async () => {
+    const { ligneColonnes } = await import('../dist/src/domaines/documents/gabarit.js');
+    const largeurs = [10, 8, 6];
+    assert.equal(ligneColonnes(['Café', '2 pièce', '1 234'], largeurs), 'Café       2 pièce 1 234');
+    assert.equal(ligneColonnes(['Café', '2 pièce', '1 234'], largeurs), 'Café       2 pièce 1 234');
+    // Une valeur aussi large que sa colonne garde elle aussi son séparateur.
+    assert.equal(ligneColonnes(['A', '12345678', 'x'], largeurs), 'A          12345678     x');
+    // Audit n° 4 : une cellule reste sur sa ligne, même avec un saut de ligne saisi (\n, \r, U+2028).
+    for (const unite of ['m\nl', 'm\rl', 'm\r\nl', 'm\u2028l']) assert.equal(ligneColonnes(['A', unite, 'x'], largeurs), 'A              m l     x');
+  });
+
+  test('le repli d’une désignation se mesure sur le texte imprimé', async () => {
+    const { replierTexte } = await import('../dist/src/domaines/documents/gabarit.js');
+    // L'espace sans chasse et la marque d'ordre des octets, invisibles, ne coupent pas un mot.
+    assert.deepEqual(replierTexte('Café x﻿y co­op', 6), ['Café', 'xy', 'coop']);
+    assert.deepEqual(replierTexte('Café noir', 9), ['Café noir']);
+    // Audit n° 4 : un retour chariot seul sépare deux mots, comme une fin de ligne Windows.
+    assert.deepEqual(replierTexte('10\r20 m', 9), ['10 20 m']);
+    assert.deepEqual(replierTexte('10\r\n20 m', 9), ['10 20 m']);
+  });
+
+  // Audit n° 18 : toutes les fins de ligne d'un texte sont converties, et non la première seule ;
+  // une cellule reste sur sa ligne, quel que soit le nombre de sauts de ligne saisis.
+  test('chaque fin de ligne d’un texte est convertie, et non la première seule', async () => {
+    const { ligneColonnes, replierTexte, texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');
+    assert.equal(texteWinAnsi('10\r20\r30'), '10\n20\n30');
+    assert.equal(texteWinAnsi('10\r\n20\r\n30'), '10\n20\n30');
+    assert.deepEqual(replierTexte('10\r20\r30 m', 12), ['10 20 30 m']);
+    for (const unite of ['m\nl\nk', 'm\r\nl\rk']) assert.equal(ligneColonnes(['A', unite, 'x'], [10, 8, 6]), 'A            m l k     x');
+  });
+
+  // Audit n° 5 : chaque équivalent et chaque invisible de la table, un par un, entre deux lettres.
+  test('chaque équivalent de même sens et chaque invisible documentés', async () => {
+    const { texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');
+    const entre = (code) => texteWinAnsi(`a${String.fromCodePoint(code)}b`);
+    const espaces = [0x09, ...Array.from({ length: 11 }, (_, rang) => 0x2000 + rang), 0x202f, 0x205f, 0x3000];
+    for (const code of espaces) assert.equal(entre(code), 'a b', `U+${code.toString(16)}`);
+    for (const code of [0x2010, 0x2011, 0x2012, 0x2212]) assert.equal(entre(code), 'a-b', `U+${code.toString(16)}`);
+    assert.equal(entre(0x2264), 'a<=b');
+    assert.equal(entre(0x2265), 'a>=b');
+    // Même glyphe, même sens (audit n° 5, N2) : 10 μF s'imprime 10 µF, l'apostrophe modificative ’.
+    assert.equal(entre(0x03bc), 'a\u00b5b');
+    assert.equal(entre(0x02bc), 'a\u2019b');
+    // Séparateurs de ligne et de paragraphe, fins de ligne Windows et anciennes : un saut de ligne.
+    for (const code of [0x0a, 0x0d, 0x2028, 0x2029]) assert.equal(entre(code), 'a\nb', `U+${code.toString(16)}`);
+    assert.equal(texteWinAnsi('a\r\nb'), 'a\nb');
+    // Audit n° 6 : le gluon de graphèmes (U+034F), invisible, est le septième caractère retiré.
+    for (const code of [0xad, 0x034f, 0x200b, 0x200c, 0x200d, 0x2060, 0xfeff]) assert.equal(entre(code), 'ab', `U+${code.toString(16)}`);
+    // Les autres caractères de mise en forme invisibles deviennent « ? », comme le dit la passation.
+    for (const code of [0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2062, 0xfe0f]) assert.equal(entre(code), 'a?b', `U+${code.toString(16)}`);
+    assert.equal(texteWinAnsi('©\ufe0f'), '©?');
+  });
+
+  // Audit n° 7 : le jeu des polices standard (WinAnsi : ASCII imprimable, Latin-1 et les 27 caractères
+  // de la page de code 1252 de 0x80 à 0x9F) s'imprime tel quel, et lui seul. Un caractère retiré du
+  // jeu par erreur (–, •, Ÿ, ~, ÿ…) changerait le PDF des factures déjà émises ; un caractère ajouté
+  // à tort brouillerait la ligne. Le trait d'union conditionnel (U+00AD) est retiré, comme documenté.
+  test('les caractères du jeu WinAnsi s’impriment tels quels, et eux seuls', async () => {
+    const { texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');
+    const page1252 = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
+    const attendus = [0x0a, ...Array.from({ length: 0x5f }, (_, rang) => 0x20 + rang),
+      ...Array.from({ length: 0x60 }, (_, rang) => 0xa0 + rang).filter((code) => code !== 0xad),
+      ...[...page1252].map((caractere) => caractere.codePointAt(0))].sort((a, b) => a - b);
+    assert.equal(new Set(attendus).size, 1 + 95 + 95 + 27);
+    const inchanges = [];
+    for (let code = 0; code <= 0xffff; code++) {
+      if (code >= 0xd800 && code <= 0xdfff) continue;
+      const caractere = String.fromCodePoint(code);
+      if (texteWinAnsi(`a${caractere}b`) === `a${caractere}b`) inchanges.push(code);
+    }
+    assert.deepEqual(inchanges, attendus);
+  });
+});
+
+// Audit n° 8 : bornes de la table des remplacements. Une ligature ou une forme pleine chasse aux
+// extrémités de leur plage garde ses lettres ; un accent aux extrémités des plages retirées
+// s'efface (lettre de base) ; les surimpressions et les barres au-dessus, gardées, deviennent « ? ».
+describe('Lot 6a-2 : bornes des remplacements hors WinAnsi', () => {
+  test('ligatures, pleine chasse et accents aux bornes de leurs plages', async () => {
+    const { texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');
+    for (const [saisi, imprime] of [['ﬀ', 'ff'], ['ﬆ', 'st'], ['！', '!'], ['～', '~'], ['｟', '?']]) {
+      assert.equal(texteWinAnsi(saisi), imprime, `U+${saisi.codePointAt(0).toString(16)}`);
+    }
+    // Accent retiré, en forme composée (ā, ă) comme isolée après une lettre sans forme composée.
+    assert.equal(texteWinAnsi('āă'), 'aa');
+    for (const code of [0x0300, 0x0304, 0x0306, 0x0333, 0x0339, 0x033e, 0x0340, 0x036f]) {
+      assert.equal(texteWinAnsi(`x${String.fromCodePoint(code)}`), 'x', `U+${code.toString(16)}`);
+    }
+    for (const code of [0x0305, 0x0334, 0x0338, 0x033f, 0x0370]) {
+      assert.equal(texteWinAnsi(`x${String.fromCodePoint(code)}`), 'x?', `U+${code.toString(16)}`);
+    }
+  });
+});

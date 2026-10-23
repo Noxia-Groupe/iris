@@ -47,7 +47,7 @@ server/
     domaines/clients/         routes.ts, metier.ts (validation des saisies), equipements.ts
                               (parc d'équipements)
     domaines/catalogue/       routes.ts, metier.ts (familles, validation, fiche selon le lecteur)
-    domaines/devis/           routes.ts, metier.ts (numéro, saisie, lignes, verrous)
+    domaines/devis/           routes.ts, metier.ts (numéro, saisie, lignes, verrous), document.ts (PDF)
     domaines/chantiers/       routes.ts, saisies.ts (achats, heures, encaissé), suivi.ts
                               (indicateurs et sérialisation), droits.ts (rentabilité, montants,
                               clôture), metier.ts (types, titulaire, commercial)
@@ -82,7 +82,7 @@ Domaines :
 | `parametres` | paramètres métier, rémunération, registre des entreprises (**déplacé**) |
 | `clients` | clients, contacts, sites, parc d'équipements (**déplacé**) |
 | `catalogue` | prestations, articles, équipements (**déplacé**) |
-| `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**) |
+| `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**), PDF du devis (lot 6a-2) |
 | `chantiers` | affaires, achats, heures, métriques et suivi (**déplacé**) |
 | `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**) |
 | `contrats` | contrats de maintenance et visites (**déplacé**) |

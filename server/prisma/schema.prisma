@@ -564,8 +564,17 @@ model DevisSignature {
   signataire       String
   empreinte        String
   signeLe          DateTime @default(now())
+  // Copies prises à la signature (lot 6a-2) : le PDF d'un devis signé ne lit aucune donnée
+  // vivante. Absentes des signatures antérieures ; exigées en base pour les nouvelles.
+  identiteEmetteurId  String?
+  identiteEmetteur    IdentiteEmetteur? @relation(fields: [identiteEmetteurId], references: [id], onDelete: Restrict)
+  clientRaisonSociale String?
+  clientAdresse       String?
+  // Fuseau de la société à la signature : il date le devis signé imprimé (création, signature).
+  fuseauHoraire       String?
 
   @@index([enregistreParId])
+  @@index([identiteEmetteurId])
 }
 
 // Conversion irréversible et traçable d’un devis accepté. Les autres cibles (intervention,
@@ -795,6 +804,7 @@ model IdentiteEmetteur {
   logo            LogoDocument? @relation(fields: [logoId], references: [id], onDelete: Restrict)
   createdAt       DateTime @default(now())
   factures        Facture[]
+  signaturesDevis DevisSignature[]
 
   @@index([logoId])
 }

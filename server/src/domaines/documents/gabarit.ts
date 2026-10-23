@@ -29,14 +29,82 @@ const HAUTEUR_PIED_MAX = 300;
 const LARGEUR_LOGO = 160;
 const HAUTEUR_LOGO = 64;
 
+// Caractères de la page de code 1252 hors Latin-1 que PDFKit sait encoder (€, ’, œ, …, —).
+const WIN_ANSI_HORS_LATIN1 = new Set([0x20ac, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x017d,
+  0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x017e, 0x0178]);
+const encodableWinAnsi = (code: number) => code === 0x0a || (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff) || WIN_ANSI_HORS_LATIN1.has(code);
+// Seules décompositions de compatibilité sans changement de sens : ligatures (ﬁ → fi) et formes
+// pleine chasse (Ａ１ → A1). Les autres (10⁶ → 106, ① → 1, ㎡ → m2) changeraient le texte imprimé.
+const compatibiliteSansPerte = (code: number) => (code >= 0xfb00 && code <= 0xfb06) || (code >= 0xff01 && code <= 0xff5e);
+// Accents combinants, sauf les surimpressions U+0334 à U+0338 et les barres au-dessus U+0305 et
+// U+033F, qui ne sont l'accent d'aucune langue : retirer la barre de « ≠ » ou de « ≮ » imprimerait
+// « = » ou « < », celle de « A̅ » (non A) ou de « 0,3̅ » (0,333…) imprimerait « A » ou « 0,3 », un
+// autre texte que celui saisi.
+const ACCENTS_COMBINANTS = /[\u0300-\u0304\u0306-\u0333\u0339-\u033e\u0340-\u036f]/g;
+
+// Équivalents imprimables de même sens : espaces typographiques, traits d'union et signe moins,
+// inégalités larges, mu grec et apostrophe modificative, séparateurs de ligne. Ces sept caractères
+// invisibles (espace sans chasse, liants, gluon de graphèmes, marque d'ordre des octets, trait
+// d'union conditionnel) ne s'impriment pas : ils n'apparaissent pas non plus à la saisie. Le gluon
+// de graphèmes (U+034F), marque combinante, serait aussi retiré comme un accent isolé : il figure
+// ici pour que la table les nomme tous. Les autres caractères de mise en forme invisibles (marques
+// de direction, sélecteurs de variante…) deviennent « ? » : une marque de direction peut
+// réordonner le texte affiché à la saisie. Une fin de ligne Windows (\r\n) ou ancienne (\r seul)
+// est un saut de ligne (texteWinAnsi) : retirer un \r seul collerait deux mots (« 10\r20 » imprimé
+// « 1020 »).
+const EQUIVALENTS_WIN_ANSI = new Map<number, string>([
+  [0x09, ' '], [0x202f, ' '], [0x205f, ' '], [0x3000, ' '],
+  ...Array.from({ length: 11 }, (_, rang): [number, string] => [0x2000 + rang, ' ']),
+  [0x2010, '-'], [0x2011, '-'], [0x2012, '-'], [0x2212, '-'],
+  [0x2264, '<='], [0x2265, '>='],
+  // Même glyphe, même sens : mu grec et signe micro (μF), apostrophe modificative et apostrophe.
+  [0x03bc, '\u00b5'], [0x02bc, '\u2019'],
+  [0x2028, '\n'], [0x2029, '\n'],
+  [0xad, ''], [0x034f, ''], [0x200b, ''], [0x200c, ''], [0x200d, ''], [0x2060, ''], [0xfeff, ''],
+]);
+
 // Les polices standards PDFKit sont WinAnsi : normaliser les caractères typographiques non encodables avant impression.
+// Un autre caractère (Ω, ⌀, ł, émoji…) serait écrit par PDFKit avec plus ou moins de deux
+// chiffres hexadécimaux et décalerait toute la suite de la ligne, montants compris : il devient sa
+// lettre de base quand elle existe (č → c), sinon « ? ». Le texte est d'abord recomposé (NFC) : un
+// « e » suivi d'un accent combinant, fréquent dans un texte copié, s'imprime « é », et non « e? ».
 export function texteWinAnsi(texte: string) {
-  return [...String(texte)].map((caractere) => {
-    const code = caractere.codePointAt(0);
-    if (code === 0x2007 || code === 0x2009 || code === 0x202f) return ' ';
-    if (code === 0x2011) return '-';
-    return caractere;
+  return [...String(texte).normalize('NFC').replace(/\r\n?/g, '\n')].map((caractere) => {
+    const code = caractere.codePointAt(0)!;
+    const equivalent = EQUIVALENTS_WIN_ANSI.get(code);
+    if (equivalent !== undefined) return equivalent;
+    if (encodableWinAnsi(code)) return caractere;
+    const base = caractere.normalize(compatibiliteSansPerte(code) ? 'NFKD' : 'NFD').replace(ACCENTS_COMBINANTS, '');
+    // Accent combinant resté seul (sur une lettre sans forme composée) : la lettre est déjà imprimée.
+    if (!base) return '';
+    return [...base].every((lettre) => encodableWinAnsi(lettre.codePointAt(0)!)) ? base : '?';
   }).join('');
+}
+
+// Ligne d'un tableau à chasse fixe : la première cellule calée à gauche, les suivantes à droite,
+// chacune mesurée telle qu'elle s'imprime. Une valeur trop large ne se colle jamais à la colonne
+// précédente : elle garde au moins un séparateur. Une cellule tient sur sa ligne : un saut de ligne
+// saisi (dans une unité, par exemple) y devient une espace, sinon les montants qui le suivent
+// passeraient à la ligne suivante.
+export function ligneColonnes(cellules: string[], largeurs: number[]) {
+  return cellules.map((brute, rang) => {
+    const valeur = texteWinAnsi(brute).replace(/\n/g, ' ');
+    if (rang === 0) return valeur.padEnd(largeurs[0]);
+    return valeur.length >= largeurs[rang] ? ` ${valeur}` : valeur.padStart(largeurs[rang]);
+  }).join('');
+}
+
+// Coupe un texte en lignes d'au plus `largeur` caractères, pour les colonnes à chasse fixe des
+// tableaux de lignes ; un mot trop long est coupé. La largeur se mesure sur le texte tel qu'il
+// s'imprime : un accent à recomposer, une ligature ou un émoji ne décalent pas les colonnes.
+export function replierTexte(texte: string, largeur: number) {
+  const lignes: string[] = []; let courante = '';
+  for (let mot of texteWinAnsi(texte).split(/\s+/).filter(Boolean)) {
+    while (mot.length > largeur) { if (courante) { lignes.push(courante); courante = ''; } lignes.push(mot.slice(0, largeur)); mot = mot.slice(largeur); }
+    const essai = courante ? `${courante} ${mot}` : mot;
+    if (essai.length <= largeur) courante = essai; else { lignes.push(courante); courante = mot; }
+  }
+  if (courante || !lignes.length) lignes.push(courante); return lignes;
 }
 
 function lignesIdentite(identite: IdentiteImprimee) {
