@@ -13972,6 +13972,12 @@ if (!TEST_DATABASE_URL) {
       const sessionAbsente = await request(app).get('/api/me').set({ Authorization: `Bearer ${jwt.sign({ id: randomUUID() }, process.env.JWT_SECRET)}` });
       assert.deepEqual([sessionSysteme.status, sessionSysteme.body], [401, { error: 'Compte introuvable ou révoqué' }]);
       assert.deepEqual([sessionSysteme.status, sessionSysteme.body], [sessionAbsente.status, sessionAbsente.body]);
+      // Connexion Microsoft (cinquième audit de #302) : l'adresse réservée, même présentée par un jeton
+      // Microsoft vérifié, ne désigne aucun compte autorisé, le compte étant inactif. Témoin : un compte
+      // actif est trouvé par la même lecture.
+      const { resolveAuthorizedSsoUser } = await import('../dist/src/domaines/authentification/sso.js');
+      assert.equal(await resolveAuthorizedSsoUser(' Systeme@IRIS.invalid '), null);
+      assert.equal((await resolveAuthorizedSsoUser(comptes.conducteur.email.toUpperCase()))?.id, comptes.conducteur.id);
       // Absent de la liste des comptes, pour le super administrateur comme pour un simple
       // administrateur ; introuvable pour toute route d'un compte, après la session.
       for (const auth of [admin(), entete('admin')]) {

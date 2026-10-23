@@ -217,3 +217,24 @@ test('le panneau détaille le dernier passage, dates JJ-MM-AAAA, sans déborder 
   await expect(panneau).toContainText(': 4 visites créées, 1 échéance avancée, en échec.');
   await expect(panneau.getByText(/^Génération terminée/)).toHaveCount(0);
 });
+
+// Cinquième audit interne de #302 : un passage automatique, désormais au nom du compte système, reste
+// affiché « automatique » sans le nom de ce compte, comme l'annonce la PR (note N2 du second audit).
+// Réponse du serveur interceptée, comme pour le passage manuel ci-dessus.
+test('un passage automatique s’affiche « automatique », sans le nom du compte système', async ({ allerSurPageAdmin, page }) => {
+  const execution = {
+    id: 'e2e-auto', jour: '2026-10-14T00:00:00.000Z', declenchement: 'AUTOMATIQUE', cleJourAutomatique: '2026-10-14',
+    auteurId: '00000000-0000-4000-8000-000000000001', auteurNom: 'Iris (automatique)', anticipationJours: 30,
+    debut: '2026-10-14T05:07:09.000Z', fin: '2026-10-14T05:08:00.000Z', statut: 'REUSSIE', visitesCreees: 2, echeancesAvancees: 0,
+    contratsIgnores: [], erreurs: [],
+  };
+  await page.route('**/api/contrats-maintenance/generation-visites', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const reponse = await route.fetch();
+    await route.fulfill({ response: reponse, json: { ...(await reponse.json()), anticipationVisitesJours: 30, derniereExecution: execution } });
+  });
+  await allerSurPageAdmin('/contrats-maintenance');
+  const panneau = page.getByRole('region', { name: 'Génération automatique des visites' });
+  await expect(panneau).toContainText('Dernier passage : 14-10-2026 07:07:09 (automatique, échéances jusqu’à 30 jours après le 14-10-2026) : 2 visites créées, 0 échéance avancée.');
+  await expect(panneau.getByText('Iris (automatique)', { exact: false })).toHaveCount(0);
+});
