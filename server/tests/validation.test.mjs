@@ -719,3 +719,23 @@ describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
     assert.deepEqual(inchanges, attendus);
   });
 });
+
+// Audit n° 8 : bornes de la table des remplacements. Une ligature ou une forme pleine chasse aux
+// extrémités de leur plage garde ses lettres ; un accent aux extrémités des plages retirées
+// s'efface (lettre de base) ; les surimpressions et les barres au-dessus, gardées, deviennent « ? ».
+describe('Lot 6a-2 : bornes des remplacements hors WinAnsi', () => {
+  test('ligatures, pleine chasse et accents aux bornes de leurs plages', async () => {
+    const { texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');
+    for (const [saisi, imprime] of [['ﬀ', 'ff'], ['ﬆ', 'st'], ['！', '!'], ['～', '~'], ['｟', '?']]) {
+      assert.equal(texteWinAnsi(saisi), imprime, `U+${saisi.codePointAt(0).toString(16)}`);
+    }
+    // Accent retiré, en forme composée (ā, ă) comme isolée après une lettre sans forme composée.
+    assert.equal(texteWinAnsi('āă'), 'aa');
+    for (const code of [0x0300, 0x0304, 0x0306, 0x0333, 0x0339, 0x033e, 0x0340, 0x036f]) {
+      assert.equal(texteWinAnsi(`x${String.fromCodePoint(code)}`), 'x', `U+${code.toString(16)}`);
+    }
+    for (const code of [0x0305, 0x0334, 0x0338, 0x033f, 0x0370]) {
+      assert.equal(texteWinAnsi(`x${String.fromCodePoint(code)}`), 'x?', `U+${code.toString(16)}`);
+    }
+  });
+});

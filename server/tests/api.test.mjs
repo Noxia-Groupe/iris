@@ -14678,6 +14678,31 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Audit n° 8 : les copies prises à la signature ne servent qu'au PDF, réservé aux sessions. Les
+    // réponses JSON gardent la signature d'avant ce lot : une clé « devis:read », à qui l'adresse
+    // d'un client est fermée (scope « clients:read »), ne la lit pas dans la liste des devis.
+    test('API JSON : la signature exposée garde ses champs d’avant le lot, sans les copies', async () => {
+      const client = await creerClient(`TEST Client copies non exposées ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Copies non exposées');
+      assert.equal((await signer(devis.id)).status, 201);
+      const champs = ['devisId', 'empreinte', 'enregistreParId', 'id', 'signataire', 'signeLe'];
+      const enSession = (await request(app).get('/api/devis').set(admin())).body.find((d) => d.id === devis.id);
+      assert.deepEqual(Object.keys(enSession.signature).sort(), champs, JSON.stringify(enSession.signature));
+      const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé copies devis', scopes: ['devis:read'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      try {
+        const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
+        const liste = await request(app).get('/api/v1/devis').set(parCle);
+        assert.equal(liste.status, 200);
+        const lu = liste.body.find((d) => d.id === devis.id);
+        assert.deepEqual(Object.keys(lu.signature).sort(), champs, JSON.stringify(lu.signature));
+        assert.ok(!JSON.stringify(lu).includes('5 rue du Client'), 'adresse de facturation lue par une clé « devis:read »');
+        assert.equal((await request(app).get(`/api/v1/clients/${client.id}`).set(parCle)).status, 403);
+      } finally {
+        await prisma.apiAccessKey.deleteMany({ where: { nom: 'TEST clé copies devis' } });
+      }
+    });
+
     test('identité incomplète : PDF du devis non signé et signature refusés, sans rien écrire', async () => {
       const client = await creerClient(`TEST Client identité devis ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Sans identité');
@@ -14796,17 +14821,22 @@ if (!TEST_DATABASE_URL) {
       // Signature enregistrée avant ce lot (sans copie, garde désactivé le temps de l'écrire) : le
       // devis s'imprime avec l'identité et la fiche client actuelles, signature comprise.
       const ancien = await creerDevis(client.id, 'TEST Signature antérieure');
+      // Audit n° 8 : créé le 15-01-2026 à 23 h 30 UTC, encore le 15-01-2026 à Tahiti, fuseau actuel de
+      // la société : sans copie, le devis se date dans le fuseau actuel, et non dans celui par défaut.
+      await prisma.devis.update({ where: { id: ancien.id }, data: { createdAt: new Date('2026-01-15T23:30:00Z') } });
       await prisma.$transaction([
         prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" DISABLE TRIGGER "devis_signature_copies"'),
         prisma.devisSignature.create({ data: { ...base, devisId: ancien.id } }),
         prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" ENABLE TRIGGER "devis_signature_copies"'),
       ]);
+      const fuseauInitial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
       try {
-        await definirSociete(SOCIETE_B);
+        await definirSociete({ ...SOCIETE_B, fuseauHoraire: 'Pacific/Tahiti' });
         const texte = (await texteDevis(ancien.id)).texte;
         assert.ok(texte.includes('TEST Émetteur devis B') && texte.includes(client.raisonSociale) && texte.includes('Accepté par TEST SQL'));
+        assert.ok(texte.includes('Version 1 · établi le 15-01-2026'), texte);
       } finally {
-        await definirSociete(SOCIETE_A);
+        await definirSociete({ ...SOCIETE_A, fuseauHoraire: fuseauInitial });
       }
     });
 
@@ -14987,6 +15017,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(egal.length, entete.length, JSON.stringify([entete, egal]));
       assert.equal(cafe.indexOf('2 pi\xe8ce') + '2 pi\xe8ce'.length, entete.indexOf('Qt\xe9') + 'Qt\xe9'.length);
       assert.equal(egal.indexOf('1 m<=') + '1 m<='.length, entete.indexOf('Qt\xe9') + 'Qt\xe9'.length);
+      // Audit n° 8 : ces colonnes ne s'alignent qu'en chasse fixe ; le tableau s'imprime en Courier.
+      assert.ok(octets.includes(Buffer.from('/BaseFont /Courier')), 'tableau des lignes hors de la police à chasse fixe');
     });
 
     test('concurrence : le PDF d’un devis non signé lit ses lignes et ses totaux dans un même état', async () => {
@@ -15222,6 +15254,34 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '12 rue Principale\nBâtiment B\n1000 Bruxelles\nBelgique');
     });
 
+    // Audit n° 8 : un client sans site n'a pas de ligne d'adresse, ni signé ni non signé (jamais
+    // « null » ni une ligne vide entre son nom et l'objet).
+    test('client sans site : aucune ligne d’adresse imprimée, signé ou non', async () => {
+      const client = await creerClient(`TEST Client sans adresse imprimée ${Date.now()}`, false);
+      const nonSigne = await creerDevis(client.id, 'TEST Devis sans adresse non signé');
+      const signe = await creerDevis(client.id, 'TEST Devis sans adresse signé');
+      assert.equal((await signer(signe.id)).status, 201);
+      for (const [devis, objet] of [[nonSigne, 'TEST Devis sans adresse non signé'], [signe, 'TEST Devis sans adresse signé']]) {
+        const lignes = (await texteDevis(devis.id)).texte.split('\n').map((l) => l.trim()).filter(Boolean);
+        const rang = lignes.indexOf(client.raisonSociale);
+        assert.ok(rang > 0 && lignes[rang - 1] === 'Client', JSON.stringify(lignes));
+        assert.equal(lignes[rang + 1], `Objet : ${objet}`, JSON.stringify(lignes));
+        assert.ok(!lignes.some((l) => /\bnull\b|\bundefined\b/.test(l)), JSON.stringify(lignes));
+      }
+    });
+
+    // Audit n° 8 : seule sur sa ligne, une référence du catalogue (80 caractères au plus) tient sur
+    // une seule ligne, sous sa désignation.
+    test('référence de 80 caractères : imprimée sur une seule ligne', async () => {
+      const client = await creerClient(`TEST Client référence longue ${Date.now()}`);
+      const reference = `TEST-${Date.now()}-`.padEnd(80, 'R');
+      const fiche = await request(app).post('/api/catalogue/prestations').set(admin()).send({ reference, nom: `TEST Pose référence longue ${Date.now()}`, unite: 'u', prixVenteHt: '10', tauxTva: '20' });
+      assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+      const devis = await creerDevis(client.id, 'TEST Devis référence longue', [{ designation: 'TEST Pose référence longue', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, catalogueFamille: 'prestations', catalogueId: fiche.body.id }]);
+      const lignes = (await texteDevis(devis.id)).texte.split('\n').map((l) => l.trim());
+      assert.ok(lignes.includes(`Réf. ${reference}`), JSON.stringify(lignes));
+    });
+
     test('client actuel : le site de facturation, quels que soient l’ordre d’écriture et les identifiants', async () => {
       const client = await creerClient(`TEST Client sites ordonnés ${Date.now()}`, false);
       const suite = randomUUID().slice(8);
@@ -15326,6 +15386,18 @@ if (!TEST_DATABASE_URL) {
       ]);
       const { texte } = await texteDevis(devis.id);
       for (const attendu of ['TVA 0 % sur 40,00 € : 0,00 €', 'TVA 20 % sur 10,00 € : 2,00 €', 'TVA totale : 2,00 €', 'Total HT : 50,00 €']) assert.ok(texte.includes(attendu), `absent du PDF : ${attendu}\n${texte}`);
+    });
+
+    // Audit n° 8 : la ventilation suit l'ordre des taux, pas celui de leur écriture (5,5 % avant 20 %).
+    test('ventilation : taux dans l’ordre croissant de leur valeur', async () => {
+      const client = await creerClient(`TEST Client ordre des taux ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis ordre des taux', [
+        { designation: 'TEST Ligne à 20 %', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST Ligne à 5,5 %', quantite: 1, prixUnitaireHt: 10, tauxTva: 5.5 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      assert.ok(texte.includes('TVA 5,5 % sur 10,00 € : 0,55 €') && texte.includes('TVA 20 % sur 10,00 € : 2,00 €'), texte);
+      assert.ok(texte.indexOf('TVA 5,5 %') < texte.indexOf('TVA 20 %'), texte);
     });
 
     test('ventilation : TVA arrondie sur la base cumulée du taux, comme la TVA du devis', async () => {
