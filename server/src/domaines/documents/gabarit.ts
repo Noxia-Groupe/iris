@@ -44,15 +44,16 @@ const ACCENTS_COMBINANTS = /[\u0300-\u0304\u0306-\u0333\u0339-\u033e\u0340-\u036
 
 // Équivalents imprimables de même sens : espaces typographiques, traits d'union et signe moins,
 // inégalités larges, séparateurs de ligne. Les caractères invisibles (espace sans chasse, liants,
-// marque d'ordre des octets, trait d'union conditionnel, retour chariot) ne s'impriment pas : ils
-// n'apparaissent pas non plus à la saisie.
+// marque d'ordre des octets, trait d'union conditionnel) ne s'impriment pas : ils n'apparaissent
+// pas non plus à la saisie. Une fin de ligne Windows (\r\n) ou ancienne (\r seul) est un saut de
+// ligne (texteWinAnsi) : retirer un \r seul collerait deux mots (« 10\r20 » imprimé « 1020 »).
 const EQUIVALENTS_WIN_ANSI = new Map<number, string>([
   [0x09, ' '], [0x202f, ' '], [0x205f, ' '], [0x3000, ' '],
   ...Array.from({ length: 11 }, (_, rang): [number, string] => [0x2000 + rang, ' ']),
   [0x2010, '-'], [0x2011, '-'], [0x2012, '-'], [0x2212, '-'],
   [0x2264, '<='], [0x2265, '>='],
   [0x2028, '\n'], [0x2029, '\n'],
-  [0x0d, ''], [0xad, ''], [0x200b, ''], [0x200c, ''], [0x200d, ''], [0x2060, ''], [0xfeff, ''],
+  [0xad, ''], [0x200b, ''], [0x200c, ''], [0x200d, ''], [0x2060, ''], [0xfeff, ''],
 ]);
 
 // Les polices standards PDFKit sont WinAnsi : normaliser les caractères typographiques non encodables avant impression.
@@ -61,7 +62,7 @@ const EQUIVALENTS_WIN_ANSI = new Map<number, string>([
 // lettre de base quand elle existe (č → c), sinon « ? ». Le texte est d'abord recomposé (NFC) : un
 // « e » suivi d'un accent combinant, fréquent dans un texte copié, s'imprime « é », et non « e? ».
 export function texteWinAnsi(texte: string) {
-  return [...String(texte).normalize('NFC')].map((caractere) => {
+  return [...String(texte).normalize('NFC').replace(/\r\n?/g, '\n')].map((caractere) => {
     const code = caractere.codePointAt(0)!;
     const equivalent = EQUIVALENTS_WIN_ANSI.get(code);
     if (equivalent !== undefined) return equivalent;
@@ -75,10 +76,12 @@ export function texteWinAnsi(texte: string) {
 
 // Ligne d'un tableau à chasse fixe : la première cellule calée à gauche, les suivantes à droite,
 // chacune mesurée telle qu'elle s'imprime. Une valeur trop large ne se colle jamais à la colonne
-// précédente : elle garde au moins un séparateur.
+// précédente : elle garde au moins un séparateur. Une cellule tient sur sa ligne : un saut de ligne
+// saisi (dans une unité, par exemple) y devient une espace, sinon les montants qui le suivent
+// passeraient à la ligne suivante.
 export function ligneColonnes(cellules: string[], largeurs: number[]) {
   return cellules.map((brute, rang) => {
-    const valeur = texteWinAnsi(brute);
+    const valeur = texteWinAnsi(brute).replace(/\n/g, ' ');
     if (rang === 0) return valeur.padEnd(largeurs[0]);
     return valeur.length >= largeurs[rang] ? ` ${valeur}` : valeur.padStart(largeurs[rang]);
   }).join('');

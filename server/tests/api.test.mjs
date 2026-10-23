@@ -14503,6 +14503,14 @@ if (!TEST_DATABASE_URL) {
       assert.ok(texte.includes('TEST Ligne longue 70'));
     });
 
+    // Audit n° 4 du lot 6a-2 : un retour chariot seul, que main imprimait comme une espace dans une
+    // désignation de facture, ne colle pas deux mots (« 10\r20 » imprimé « 1020 »).
+    test('gabarit : un retour chariot seul sépare les mots d’une désignation de facture', async () => {
+      const facture = await creerEmise('TEST Lot 10\r20 m');
+      const { texte } = await documentPdf(facture.id);
+      assert.match(texte, /^TEST Lot 10 20 m 1\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+    });
+
     // Lot 6a-2 : le repli des désignations, mis en commun avec le devis, garde la largeur de la facture.
     test('gabarit : une désignation de 35 caractères tient sur la ligne de ses montants', async () => {
       const facture = await creerEmise('TEST Désignation de trente-quatre');
@@ -14878,6 +14886,54 @@ if (!TEST_DATABASE_URL) {
       assert.equal(cafes[0], cafes[1]);
     });
 
+    test('caractères hors WinAnsi : un retour chariot seul sépare deux mots ; une cellule du tableau reste sur sa ligne', async () => {
+      const client = await creerClient(`TEST Client fins de ligne ${Date.now()}`);
+      // Fin de ligne ancienne (\r seul, possible par l'API) : « 10\r20 » ne s'imprime jamais « 1020 ».
+      // Saut de ligne dans une unité (U+2028 collé dans le champ, \n ou \r par l'API) : les montants
+      // restent sur la ligne de leur désignation.
+      const devis = await creerDevis(client.id, 'TEST Objet 10\r20 fin', [
+        { designation: 'TEST Pose 10\r20 m', quantite: 1, unite: 'm\u2028l', prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST Fourniture', quantite: 2, unite: 'u\nv', prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST Accessoire', quantite: 3, unite: 'x\ry', prixUnitaireHt: 10, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Pose 10 20 m\s+1 m l\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+      assert.match(texte, /^TEST Fourniture\s+2 u v\s+10,00 €\s+20 %\s+20,00 €$/m, texte);
+      assert.match(texte, /^TEST Accessoire\s+3 x y\s+10,00 €\s+20 %\s+30,00 €$/m, texte);
+      assert.ok(texte.includes('Objet : TEST Objet 10\n20 fin'), texte);
+      assert.ok(!texte.includes('1020'), texte);
+    });
+
+    test('gabarit : les colonnes du devis se calent sur le texte imprimé, accents décomposés et équivalents compris', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const client = await creerClient(`TEST Client colonnes devis ${Date.now()}`);
+      // Désignation et unité dont le texte saisi est plus long ou plus court que le texte imprimé.
+      const devis = await creerDevis(client.id, 'TEST Colonnes du devis', [
+        { designation: 'TEST Cafe\u0301 noir', unite: 'pie\u0300ce', quantite: 2, prixUnitaireHt: 10, tauxTva: 20 },
+        { designation: 'TEST x\u200by \u2264 3', unite: 'm\u2264', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+      ]);
+      const res = await pdfDevis(devis.id);
+      assert.equal(res.status, 200);
+      // Lignes du tableau telles que le PDF les écrit (Courier, opérateur TJ) : l'extraction du texte
+      // fusionne les espaces, ce relevé les garde.
+      const octets = res.body, brut = octets.toString('latin1'), lignes = [];
+      for (const flux of brut.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        for (const [, morceaux] of contenu.matchAll(/\[([^\]]*)\] TJ/g)) lignes.push([...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join(''));
+      }
+      const entete = lignes.find((l) => l.startsWith('D\xe9signation'));
+      const cafe = lignes.find((l) => l.startsWith('TEST Caf\xe9 noir'));
+      const egal = lignes.find((l) => l.startsWith('TEST xy <= 3'));
+      assert.ok(entete && cafe && egal, JSON.stringify(lignes));
+      // Chaque colonne finit au même endroit que son titre : même longueur de ligne que l'en-tête.
+      assert.equal(cafe.length, entete.length, JSON.stringify([entete, cafe]));
+      assert.equal(egal.length, entete.length, JSON.stringify([entete, egal]));
+      assert.equal(cafe.indexOf('2 pi\xe8ce') + '2 pi\xe8ce'.length, entete.indexOf('Qt\xe9') + 'Qt\xe9'.length);
+      assert.equal(egal.indexOf('1 m<=') + '1 m<='.length, entete.indexOf('Qt\xe9') + 'Qt\xe9'.length);
+    });
+
     test('concurrence : le PDF d’un devis non signé lit ses lignes et ses totaux dans un même état', async () => {
       const client = await creerClient(`TEST Client devis concurrent ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Devis modifié pendant l’impression', [{ designation: 'TEST Ligne avant', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }]);
@@ -14993,6 +15049,70 @@ if (!TEST_DATABASE_URL) {
         assert.ok((await texteDevis(devis.id)).texte.includes('Version 1 · établi le 15-01-2026'));
       } finally {
         await definirSociete({ fuseauHoraire: initial });
+      }
+    });
+
+    test('fuseau copié : la date de signature imprimée se lit aussi dans le fuseau de la signature', async () => {
+      const client = await creerClient(`TEST Client date de signature ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé à Tahiti, date de signature');
+      const initial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      try {
+        await definirSociete({ fuseauHoraire: 'Pacific/Tahiti' });
+        assert.equal((await signer(devis.id)).status, 201);
+        // Signature placée le 16-01-2026 à 5 h UTC (garde suspendu le temps de l'écrire) : encore le
+        // 15-01-2026 à Tahiti, déjà le 16-01-2026 à Paris et en UTC. L'heure réelle de la signature
+        // ne permet pas ce test : à certaines heures, tous les fuseaux français ont le même jour.
+        await prisma.$transaction([
+          prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" DISABLE TRIGGER "devis_signature_figee"'),
+          prisma.devisSignature.update({ where: { devisId: devis.id }, data: { signeLe: new Date('2026-01-16T05:00:00Z') } }),
+          prisma.$executeRawUnsafe('ALTER TABLE "DevisSignature" ENABLE TRIGGER "devis_signature_figee"'),
+        ]);
+        const avant = (await texteDevis(devis.id)).texte;
+        assert.ok(avant.includes('Accepté par TEST Signataire client le 15-01-2026.'), avant);
+        await definirSociete({ fuseauHoraire: 'Europe/Paris' });
+        assert.equal((await texteDevis(devis.id)).texte, avant);
+      } finally {
+        await definirSociete({ fuseauHoraire: initial });
+      }
+    });
+
+    test('signature : attend un changement de la société en cours, puis copie son identité et son fuseau validés', async () => {
+      const client = await creerClient(`TEST Client signature verrou ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé pendant un changement de la société');
+      const initial = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      await definirSociete({ fuseauHoraire: 'Europe/Paris' });
+      let liberer;
+      const retenue = new Promise((resolve) => { liberer = resolve; });
+      let pidTenant = null;
+      // Un changement de la société (identité et fuseau) tient le verrou exclusif de la société.
+      const tenant = prisma.$transaction(async (tx) => {
+        [{ pid: pidTenant }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        await tx.$queryRaw`SELECT 1 FROM "CompanySettings" WHERE "id" = 'singleton' FOR UPDATE`;
+        await tx.$executeRaw`UPDATE "CompanySettings" SET "raisonSociale" = 'TEST Émetteur devis pendant le verrou', "fuseauHoraire" = 'Pacific/Tahiti' WHERE "id" = 'singleton'`;
+        await retenue;
+      }, { timeout: 20_000 });
+      try {
+        while (pidTenant === null) await new Promise((resolve) => setTimeout(resolve, 10));
+        const signature = signer(devis.id).then((reponse) => reponse);
+        let bloquee = false;
+        for (let essai = 0; essai < 250 && !bloquee; essai++) {
+          const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidTenant}::int = ANY(pg_blocking_pids(pid))`;
+          bloquee = n > 0;
+          if (!bloquee) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        liberer();
+        await tenant;
+        const reponse = await signature;
+        assert.equal(bloquee, true, 'la signature doit attendre le verrou de la société');
+        assert.equal(reponse.status, 201, JSON.stringify(reponse.body));
+        // Identité et fuseau d'un même état de la société : jamais la nouvelle identité avec l'ancien fuseau.
+        const copie = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id }, include: { identiteEmetteur: true } });
+        assert.equal(copie.identiteEmetteur.raisonSociale, 'TEST Émetteur devis pendant le verrou');
+        assert.equal(copie.fuseauHoraire, 'Pacific/Tahiti');
+      } finally {
+        liberer();
+        await tenant.catch(() => undefined);
+        await definirSociete({ ...SOCIETE_A, fuseauHoraire: initial });
       }
     });
 

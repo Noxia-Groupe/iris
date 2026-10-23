@@ -132,3 +132,29 @@ test('PDF du devis : une erreur sans corps JSON affiche « Document indisponible
   await page.getByRole('button', { name: `PDF du devis ${devis.numero} version 1` }).click();
   await expect(page.getByRole('alert')).toHaveText('Document indisponible.');
 });
+
+// Audit n° 4 : tout devis a son PDF, quel que soit son statut, y compris annulé ou refusé.
+test('PDF du devis : un devis annulé ou refusé garde son bouton et se télécharge', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const headers = auth(session.token);
+  const client = await creerClient('devis PDF statuts');
+  const creer = async (objet: string) => {
+    const cree = await request.post(`${api}/devis`, { headers, data: { clientId: client.id, objet: `${objet} ${Date.now()}`, lignes: [{ designation: 'Diagnostic', quantite: 1, prixUnitaireHt: 80, tauxTva: 20 }] } });
+    expect(cree.status(), await cree.text()).toBe(201);
+    return await cree.json() as { id: string; numero: string };
+  };
+  const annule = await creer('E2E PDF devis annulé');
+  const annulation = await request.post(`${api}/devis/${annule.id}/annulation`, { headers, data: { motif: 'Annulé pour le test du PDF' } });
+  expect(annulation.status(), await annulation.text()).toBe(200);
+  const refuse = await creer('E2E PDF devis refusé');
+  for (const statut of ['ENVOYE', 'REFUSE']) {
+    const changement = await request.put(`${api}/devis/${refuse.id}/statut`, { headers, data: { statut } });
+    expect(changement.status(), await changement.text()).toBe(200);
+  }
+
+  const page = await allerSurPageAdmin('/devis');
+  for (const devis of [annule, refuse]) {
+    const telechargement = page.waitForEvent('download');
+    await page.getByRole('button', { name: `PDF du devis ${devis.numero} version 1` }).click();
+    expect((await telechargement).suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
+  }
+});

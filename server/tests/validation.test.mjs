@@ -663,6 +663,8 @@ describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
     assert.equal(ligneColonnes(['Café', '2 pièce', '1 234'], largeurs), 'Café       2 pièce 1 234');
     // Une valeur aussi large que sa colonne garde elle aussi son séparateur.
     assert.equal(ligneColonnes(['A', '12345678', 'x'], largeurs), 'A          12345678     x');
+    // Audit n° 4 : une cellule reste sur sa ligne, même avec un saut de ligne saisi (\n, \r, U+2028).
+    for (const unite of ['m\nl', 'm\rl', 'm\r\nl', 'm\u2028l']) assert.equal(ligneColonnes(['A', unite, 'x'], largeurs), 'A              m l     x');
   });
 
   test('le repli d’une désignation se mesure sur le texte imprimé', async () => {
@@ -670,5 +672,8 @@ describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
     // L'espace sans chasse et la marque d'ordre des octets, invisibles, ne coupent pas un mot.
     assert.deepEqual(replierTexte('Café x﻿y co­op', 6), ['Café', 'xy', 'coop']);
     assert.deepEqual(replierTexte('Café noir', 9), ['Café noir']);
+    // Audit n° 4 : un retour chariot seul sépare deux mots, comme une fin de ligne Windows.
+    assert.deepEqual(replierTexte('10\r20 m', 9), ['10 20 m']);
+    assert.deepEqual(replierTexte('10\r\n20 m', 9), ['10 20 m']);
   });
 });
