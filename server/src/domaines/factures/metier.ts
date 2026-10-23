@@ -22,6 +22,16 @@ export function formatDateFacture(valeur: Date | string) {
   return new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC' }).format(new Date(valeur)).replace(/\//g, '-');
 }
 
+// Refus du document d'une pièce, communs à son PDF et à son envoi (lot 6a-3) : seule une pièce émise
+// a un document, imprimé depuis ses mentions légales et son adresse de facturation figées.
+export const STATUTS_DOCUMENT_FACTURE = ['EMISE', 'REGLEE', 'ANNULEE'];
+export function refusDocumentFacture(facture: { statut: string; mentionsLegalesVersion: object | null; clientAdresse: string | null }): string | null {
+  if (!STATUTS_DOCUMENT_FACTURE.includes(facture.statut)) return 'Le document est disponible uniquement pour une facture émise.';
+  if (!facture.mentionsLegalesVersion) return 'Les mentions légales figées sont introuvables.';
+  if (!facture.clientAdresse) return 'L’adresse de facturation figée est absente de cette facture : le document ne peut pas être imprimé sans cette mention obligatoire.';
+  return null;
+}
+
 export class FactureRattachementRefuse extends Error {
   statut: number;
   constructor(statut: number, message: string) { super(message); this.statut = statut; }

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Ban, Download, FilePlus2, HandCoins, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { Ban, Download, FilePlus2, HandCoins, Mail, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 import { situationReglement } from '../lib/reglements';
+import { telechargerPdf } from '../lib/documentPdf';
+import EnvoiDocument, { type DocumentAEnvoyer } from '../components/EnvoiDocument';
 import { nombreFr, totauxApercuAvoir, type AvoirPrecedent } from '../lib/apercuAvoir';
 
 type Client = { id: string; raisonSociale: string };
@@ -78,6 +80,8 @@ export default function Factures() {
   const [erreurListe, setErreurListe] = useState('');
   const [succes, setSucces] = useState('');
   const [ouvert, setOuvert] = useState(false);
+  // Envoi d'une pièce émise par la messagerie (lot 6a-3) : le dialogue s'ouvre en haut de l'écran.
+  const [envoi, setEnvoi] = useState<DocumentAEnvoyer | null>(null);
   const [origine, setOrigine] = useState<Origine>('HORS_AFFAIRE');
   const [clientSelection, setClientSelection] = useState('');
   const [lignes, setLignes] = useState<Ligne[]>([nouvelleLigne()]);
@@ -386,18 +390,14 @@ export default function Factures() {
 
   const telechargerDocument = async (facture: Facture) => {
     setErreur('');
-    const res = await apiFetch(`/factures/${facture.id}/document.pdf`);
-    if (!res.ok) {
-      const data = await res.json();
-      return setErreur(data.error || 'Document indisponible.');
+    try {
+      await telechargerPdf(`/factures/${facture.id}/document.pdf`, `${facture.numero || 'facture'}.pdf`);
+    } catch (e) {
+      setErreur(e instanceof Error ? e.message : 'Document indisponible.');
     }
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${facture.numero || 'facture'}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
+  const libellePiece = (facture: Facture) => `${facture.type === 'AVOIR' ? 'l’avoir' : 'la facture'} ${facture.numero || ''}`.trim();
+  const ouvrirEnvoi = (facture: Facture) => { setErreur(''); setEnvoi({ libelle: libellePiece(facture), chemin: `/factures/${facture.id}`, nomFichier: `${facture.numero || 'facture'}.pdf` }); };
 
   const emissionImpossible = (facture: Facture) => !!derniereDateEmission && facture.dateEmission.slice(0, 10) < derniereDateEmission.slice(0, 10);
   const sources = (origine === 'CHANTIER' ? chantiers : origine === 'INTERVENTION' ? interventions : contrats)
@@ -422,6 +422,8 @@ export default function Factures() {
       {erreurListe && <p className="text-red-600">{erreurListe}</p>}
       <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission === undefined ? (erreurListe ? 'indisponible' : 'en cours de chargement') : derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
       {succes && <p className="text-emerald-700">{succes}</p>}
+
+      {envoi && <EnvoiDocument key={envoi.chemin} document={envoi} onFermer={() => setEnvoi(null)} />}
 
       {factureAvoir && (
         <form className="rounded-xl border border-amber-300 bg-amber-50 p-5 space-y-4" onSubmit={creerAvoirPartiel}>
@@ -567,6 +569,7 @@ export default function Factures() {
                         : <button className="btn btn-secondary" onClick={() => void annuler(facture)}><Ban size={16} /> Annuler la facture</button>}
                   </>}
                   {facture.statut !== 'BROUILLON' && <button className="btn btn-secondary" onClick={() => void telechargerDocument(facture)}><Download size={16} /> PDF</button>}
+                  {facture.statut !== 'BROUILLON' && <button className="btn btn-secondary" aria-label={`Envoyer ${libellePiece(facture)}`} onClick={() => ouvrirEnvoi(facture)}><Mail size={16} /> Envoyer</button>}
                 </div></td>
               </tr>
             ))}

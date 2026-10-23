@@ -487,6 +487,8 @@ model Devis {
   lignes             DevisLigne[]
   conversion         DevisConversion?
   signature          DevisSignature?
+  // Envois préparés par la messagerie de l'utilisateur (lot 6a-3), en ajout seul.
+  envois             EnvoiDocument[]
 
   // --- Acompte conditionnant l'ouverture du chantier ---
   // Coché sur le devis initial : tant que l'acompte n'est pas constaté, la conversion en
@@ -640,6 +642,8 @@ model Facture {
   ecrituresScellees Boolean @default(false)
   journal       JournalFacture[]
   affectationsReglement AffectationReglement[]
+  // Envois préparés par la messagerie de l'utilisateur (lot 6a-3), en ajout seul.
+  envois        EnvoiDocument[]
   createdById   String?
   emisLe        DateTime?
   createdAt     DateTime       @default(now())
@@ -712,6 +716,31 @@ model EcritureFacture {
 
   @@unique([factureId, ordre])
   @@index([factureId])
+}
+
+// Journal des envois d'un document (lot 6a-3, choix par défaut, à confirmer) : chaque envoi préparé
+// depuis Iris, aujourd'hui par la messagerie de l'utilisateur (lien mailto, PDF joint à la main).
+// Iris ne sait pas si le courriel est parti : une ligne dit qu'un envoi a été préparé, à qui, sous
+// quel objet et par qui. En ajout seul, garanti en base (migration 20261023120000) : ni
+// modification, ni suppression, ni vidage ; horodatage imposé par la base ; exactement un
+// document, devis ou facture (avoir compris). Le canal MICROSOFT_365 viendra avec le lot 6b.
+model EnvoiDocument {
+  id           String   @id @default(uuid())
+  devisId      String?
+  devis        Devis?   @relation(fields: [devisId], references: [id], onDelete: Restrict)
+  factureId    String?
+  facture      Facture? @relation(fields: [factureId], references: [id], onDelete: Restrict)
+  canal        String   // MESSAGERIE
+  destinataire String
+  objet        String
+  // Compte qui a préparé l'envoi, sans clé étrangère (comme JournalFacture.acteurId), et son nom
+  // copié à l'enregistrement : le journal se lit même si le compte est renommé ou supprimé.
+  auteurId     String
+  auteurNom    String
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([devisId, createdAt])
+  @@index([factureId, createdAt])
 }
 
 model JournalFacture {
