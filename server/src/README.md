@@ -62,7 +62,9 @@ server/
     domaines/documents/       gabarit.ts (modèle PDF commun), identite.ts (identité de
                               l'émetteur figée à l'émission), identiteClient.ts (identité
                               minimale du client exigée à la signature d'un devis et à
-                              l'émission d'une facture), logo.ts (validation), routes.ts (logo)
+                              l'émission d'une facture), logo.ts (validation), routes.ts (logo),
+                              envois.ts (envoi par la messagerie : destinataire, objet et texte,
+                              journal des envois ; routes dans les domaines devis et factures)
     domaines/reglements/      routes.ts, metier.ts (moyens, soldes, statut)
     domaines/comptabilite/    routes.ts (plan comptable, import, règles, TVA), metier.ts (clés
                               et natures, verrou, écritures d'une pièce, libellé d'un compte)
@@ -84,13 +86,13 @@ Domaines :
 | `parametres` | paramètres métier, rémunération, registre des entreprises (**déplacé**) |
 | `clients` | clients, contacts, sites, parc d'équipements (**déplacé**) |
 | `catalogue` | prestations, articles, équipements (**déplacé**) |
-| `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**), PDF du devis (lot 6a-2) |
+| `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**), PDF du devis (lot 6a-2), envoi par la messagerie (lot 6a-3) |
 | `chantiers` | affaires, achats, heures, métriques et suivi (**déplacé**) |
 | `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**) |
 | `contrats` | contrats de maintenance et visites (**déplacé**) |
 | `planning` | affectations, types d'événement, partage public (**déplacé**) |
-| `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**) |
-| `documents` | modèle PDF commun, identité de l'émetteur figée à l'émission, logo des documents (lot 6a-1) ; identité minimale du client pour signer un devis et émettre une facture (lot 6a-2 bis) |
+| `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**), envoi par la messagerie (lot 6a-3) |
+| `documents` | modèle PDF commun, identité de l'émetteur figée à l'émission, logo des documents (lot 6a-1) ; identité minimale du client pour signer un devis et émettre une facture (lot 6a-2 bis) ; envoi d'un document par la messagerie et journal des envois (lot 6a-3) |
 | `reglements` | encaissements et affectations (**déplacé**) |
 | `comptabilite` | plan comptable, règles, TVA, import, écritures (**déplacé**) |
 | `statistiques` | tableaux de bord et statistiques (**déplacé**) |

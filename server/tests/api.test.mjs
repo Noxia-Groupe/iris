@@ -171,6 +171,17 @@ if (!TEST_DATABASE_URL) {
   let cleApi = '';
 
   const nettoyer = async () => {
+    // Le journal des envois (lot 6a-3) retient ses devis et ses factures, et il est en ajout seul :
+    // la base jetable le purge avant eux, garde suspendu le temps d'une transaction (un arrêt en
+    // cours de route ne peut pas le laisser désactivé).
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe('ALTER TABLE "EnvoiDocument" DISABLE TRIGGER "envoi_document_ajout_seul"'),
+      prisma.envoiDocument.deleteMany({ where: { OR: [
+        { devis: { client: { raisonSociale: { startsWith: 'TEST ' } } } },
+        { facture: { client: { raisonSociale: { startsWith: 'TEST ' } } } },
+      ] } }),
+      prisma.$executeRawUnsafe('ALTER TABLE "EnvoiDocument" ENABLE TRIGGER "envoi_document_ajout_seul"'),
+    ]);
     // La signature dépend du devis : elle part avant le devis pour garder ce teardown explicite.
     // Elle est figée en base (lot pilote 2) : le nettoyage de la base jetable suspend ce garde le
     // temps de purger les fixtures, puis le réactive.
@@ -16520,6 +16531,489 @@ if (!TEST_DATABASE_URL) {
       const reemission = await emettre(emise.body.id);
       assert.equal(reemission.status, 409, JSON.stringify(reemission.body));
       assert.equal(reemission.body.error, 'Seul un brouillon peut être émis.');
+    });
+  });
+  describe('Lot 6a-3 : envoi d’un devis ou d’une facture par la messagerie, journal des envois', () => {
+    let session = '';
+    let adminId = '';
+    let adminNom = '';
+    const admin = () => ({ Authorization: `Bearer ${session}` });
+    const entete = (utilisateur) => ({ Authorization: `Bearer ${jwt.sign({ id: utilisateur.id }, process.env.JWT_SECRET)}` });
+    const SOCIETE = { raisonSociale: 'TEST Émetteur envoi A', nomCommercial: '', siret: '55555555500055', adresse: '5 rue de l’Envoi', codePostal: '14000', ville: 'Caen' };
+    const EMAILS = ['envoi6a3.commercial@iris.test', 'envoi6a3.technicien@iris.test', 'envoi6a3.lecteur@iris.test', 'envoi6a3.directeur@iris.test', 'envoi6a3.sansnom@iris.test'];
+    const CHAMPS_ENVOI = ['auteurNom', 'canal', 'createdAt', 'destinataire', 'id', 'objet'];
+    const REFUS_DESTINATAIRE = 'Adresse du destinataire invalide : indiquez une seule adresse électronique, de la forme nom@domaine.fr.';
+    const corpsAttendu = (joint, raisonSociale) => `Bonjour,\n\nVeuillez trouver ci-joint ${joint}.\n\nCordialement,\n${raisonSociale}`;
+    const definirSociete = async (champs) => {
+      const res = await request(app).put('/api/company').set(admin()).send(champs);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    const creerClient = async (raisonSociale, { email, site = true } = {}) => {
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale, ...(email ? { email } : {}) });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      if (site) {
+        const cree = await request(app).post(`/api/clients/${client.body.id}/sites`).set(admin()).send({ nom: 'TEST Facturation envoi', adresse: '6 rue du Destinataire', codePostal: '75003', ville: 'Paris', estSiteFacturation: true });
+        assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      }
+      return client.body;
+    };
+    const ajouterContact = async (clientId, donnees) => {
+      const res = await request(app).post(`/api/clients/${clientId}/contacts`).set(admin()).send(donnees);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const creerDevis = async (clientId, objet, extra = {}) => {
+      const res = await request(app).post('/api/devis').set(admin()).send({ clientId, objet, lignes: [{ designation: 'TEST Prestation envoyée', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }], ...extra });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const signer = (id) => request(app).post(`/api/devis/${id}/signature`).set(admin()).send({ signataire: 'TEST Signataire envoi', confirme: true });
+    const statutDevis = async (id, statut) => assert.equal((await request(app).put(`/api/devis/${id}/statut`).set(admin()).send({ statut })).status, 200);
+    const lire = (chemin, auth = admin()) => request(app).get(`/api/${chemin}/envois`).set(auth);
+    const envoyer = (chemin, destinataire, auth = admin()) => request(app).post(`/api/${chemin}/envois`).set(auth).send({ destinataire });
+    // Jour civil de la société : la numérotation est chronologique, et une émission future est refusée.
+    const aujourdhui = async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      return jourCivilEntreprise(new Date(), fuseau).split('-').reverse().join('-');
+    };
+    const creerBrouillon = async (clientId, designation) => {
+      const jour = await aujourdhui();
+      const res = await request(app).post('/api/factures').set(admin()).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST envoi par la messagerie', dateEmission: jour, dateEcheance: jour, lignes: [{ designation, quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const creerEmise = async (clientId, designation) => {
+      const brouillon = await creerBrouillon(clientId, designation);
+      const emise = await request(app).post(`/api/factures/${brouillon.id}/emettre`).set(admin());
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      return emise.body;
+    };
+    // Prérequis comptables de l'émission, posés s'ils manquent : le bloc reste exécutable seul.
+    const assurerFacturation = async () => {
+      const plan = async () => (await request(app).get('/api/comptabilite').set(admin())).body;
+      const compte = async (code, libelle, nature) => {
+        let trouve = (await plan()).comptes.find((item) => item.code === code);
+        if (!trouve) { const cree = await request(app).post('/api/comptabilite/comptes').set(admin()).send({ code, libelle, nature }); assert.equal(cree.status, 201, JSON.stringify(cree.body)); trouve = cree.body; }
+        if (!trouve.actif) await prisma.compteComptable.update({ where: { id: trouve.id }, data: { actif: true } });
+        return trouve;
+      };
+      const client = await compte('411963', 'TEST Clients envoi', 'ACTIF');
+      const ventes = await compte('706963', 'TEST Prestations envoi', 'PRODUIT');
+      const articles = await compte('707963', 'TEST Articles envoi', 'PRODUIT');
+      const tva = await compte('445963', 'TEST TVA envoi', 'TVA');
+      const { regles, reglesTva } = await plan();
+      for (const [cle, donnees] of [['CLIENT', { compteId: client.id }], ['VENTE_PRESTATION', { compteId: ventes.id }], ['VENTE_ARTICLE', { compteId: articles.id }], ['JOURNAL_VENTES', { journal: 'VE' }]]) {
+        const actuelle = regles.find((r) => r.cle === cle);
+        if (actuelle && (cle === 'JOURNAL_VENTES' ? Boolean(actuelle.journal) : actuelle.compte?.actif)) continue;
+        const version = actuelle ? { expectedValeur: cle === 'JOURNAL_VENTES' ? actuelle.journal : actuelle.compteId, expectedUpdatedAt: actuelle.updatedAt } : {};
+        const res = await request(app).put(`/api/comptabilite/regles/${cle}`).set(admin()).send({ ...donnees, ...version, motif: 'TEST prérequis du lot 6a-3' });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      }
+      const tva20 = reglesTva.find((r) => Number(r.taux) === 20);
+      if (!tva20?.compte?.actif) {
+        const res = await request(app).put('/api/comptabilite/tva/20').set(admin()).send({ compteId: tva.id, motif: 'TEST prérequis du lot 6a-3', ...(tva20 ? { expectedCompteId: tva20.compteId, expectedUpdatedAt: tva20.updatedAt } : {}) });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      }
+    };
+    // Le verrou d'une transaction qui tient la ligne : attend que la requête lancée s'y bloque.
+    const attendreBlocage = async (pidTenant) => {
+      for (let essai = 0; essai < 1000; essai++) {
+        const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidTenant}::int = ANY(pg_blocking_pids(pid))`;
+        if (n > 0) return true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return false;
+    };
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      const secours = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      adminId = secours.id; adminNom = secours.name;
+      await prisma.user.deleteMany({ where: { email: { in: EMAILS } } });
+      await assurerFacturation();
+      await definirSociete(SOCIETE);
+    });
+
+    after(async () => {
+      await prisma.user.deleteMany({ where: { email: { in: EMAILS } } });
+    });
+
+    test('proposition : courriel du contact principal, sinon celui de la fiche client, sinon vide', async () => {
+      const suffixe = Date.now();
+      const avecContact = await creerClient(`TEST Client envoi contact ${suffixe}`, { email: 'fiche@client-envoi.test' });
+      await ajouterContact(avecContact.id, { nom: 'TEST Secondaire', email: 'secondaire@client-envoi.test' });
+      await ajouterContact(avecContact.id, { nom: 'TEST Principal', email: 'Principal@Client-Envoi.test', principal: true });
+      const devisContact = await creerDevis(avecContact.id, 'TEST Envoi au contact principal');
+      const luContact = await lire(`devis/${devisContact.id}`);
+      assert.equal(luContact.status, 200, JSON.stringify(luContact.body));
+      assert.equal(luContact.body.proposition.destinataire, 'principal@client-envoi.test');
+      assert.deepEqual(luContact.body.envois, []);
+
+      // Un contact principal sans courriel laisse la place à la fiche client.
+      const repli = await creerClient(`TEST Client envoi fiche ${suffixe}`, { email: 'fiche@client-envoi.test' });
+      await ajouterContact(repli.id, { nom: 'TEST Principal sans courriel', principal: true });
+      await ajouterContact(repli.id, { nom: 'TEST Secondaire', email: 'secondaire@client-envoi.test' });
+      const devisRepli = await creerDevis(repli.id, 'TEST Envoi à la fiche client');
+      assert.equal((await lire(`devis/${devisRepli.id}`)).body.proposition.destinataire, 'fiche@client-envoi.test');
+      const factureRepli = await creerEmise(repli.id, 'TEST Facture à la fiche client');
+      assert.equal((await lire(`factures/${factureRepli.id}`)).body.proposition.destinataire, 'fiche@client-envoi.test');
+
+      // Ni l'un ni l'autre : rien n'est proposé, même si un autre contact a un courriel.
+      const sansCourriel = await creerClient(`TEST Client envoi sans courriel ${suffixe}`);
+      await ajouterContact(sansCourriel.id, { nom: 'TEST Secondaire', email: 'secondaire@client-envoi.test' });
+      const devisVide = await creerDevis(sansCourriel.id, 'TEST Envoi sans destinataire connu');
+      assert.equal((await lire(`devis/${devisVide.id}`)).body.proposition.destinataire, '');
+      const factureVide = await creerEmise(sansCourriel.id, 'TEST Facture sans destinataire connu');
+      assert.equal((await lire(`factures/${factureVide.id}`)).body.proposition.destinataire, '');
+
+      // Le contact principal l'emporte aussi pour une facture ; la proposition suit la fiche actuelle.
+      const facturePrincipal = await creerEmise(avecContact.id, 'TEST Facture au contact principal');
+      assert.equal((await lire(`factures/${facturePrincipal.id}`)).body.proposition.destinataire, 'principal@client-envoi.test');
+      const principal = await prisma.clientContact.findFirstOrThrow({ where: { clientId: avecContact.id, principal: true } });
+      assert.equal((await request(app).put(`/api/clients/${avecContact.id}/contacts/${principal.id}`).set(admin()).send({ email: 'nouveau@client-envoi.test' })).status, 200);
+      assert.equal((await lire(`devis/${devisContact.id}`)).body.proposition.destinataire, 'nouveau@client-envoi.test');
+    });
+
+    test('objet et texte : un devis non signé suit la société, un devis signé garde la raison sociale copiée à sa signature', async () => {
+      const client = await creerClient(`TEST Client envoi textes ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Envoi du texte');
+      const lu = await lire(`devis/${devis.id}`);
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      assert.deepEqual(lu.body, {
+        proposition: { destinataire: '', objet: `Devis ${devis.numero} version 1 – TEST Émetteur envoi A`, corps: corpsAttendu(`notre devis ${devis.numero} (version 1)`, 'TEST Émetteur envoi A') },
+        envois: [],
+      });
+      const signe = await creerDevis(client.id, 'TEST Envoi du devis signé');
+      assert.equal((await signer(signe.id)).status, 201);
+      try {
+        await definirSociete({ raisonSociale: '  TEST Émetteur envoi renommé  ' });
+        const objetSigne = `Devis ${signe.numero} version 1 – TEST Émetteur envoi A`;
+        const corpsSigne = corpsAttendu(`notre devis ${signe.numero} (version 1)`, 'TEST Émetteur envoi A');
+        assert.deepEqual((await lire(`devis/${signe.id}`)).body.proposition, { destinataire: '', objet: objetSigne, corps: corpsSigne });
+        const envoi = await envoyer(`devis/${signe.id}`, 'client@envoi.test');
+        assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
+        assert.equal(envoi.body.objet, objetSigne);
+        assert.equal(envoi.body.corps, corpsSigne);
+        assert.equal(envoi.body.envoi.objet, objetSigne);
+        // C'est bien la raison sociale que son PDF imprime.
+        const pdf = await request(app).get(`/api/devis/${signe.id}/document.pdf`).set(admin()).buffer(true)
+          .parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
+        assert.equal(pdf.status, 200);
+        const lecteur = new PDFParse({ data: pdf.body });
+        const { text } = await lecteur.getText();
+        await lecteur.destroy();
+        assert.ok(text.includes('TEST Émetteur envoi A') && !text.includes('renommé'), text);
+
+        // Le devis non signé, et la révision (brouillon) du devis signé, suivent l'identité actuelle,
+        // normalisée comme à l'impression.
+        assert.equal((await lire(`devis/${devis.id}`)).body.proposition.objet, `Devis ${devis.numero} version 1 – TEST Émetteur envoi renommé`);
+        const revision = await request(app).post(`/api/devis/${signe.id}/revisions`).set(admin());
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        assert.deepEqual((await lire(`devis/${revision.body.id}`)).body.proposition, {
+          destinataire: '', objet: `Devis ${signe.numero} version 2 – TEST Émetteur envoi renommé`,
+          corps: corpsAttendu(`notre devis ${signe.numero} (version 2)`, 'TEST Émetteur envoi renommé'),
+        });
+        const envoiRevision = await envoyer(`devis/${revision.body.id}`, 'client@envoi.test');
+        assert.equal(envoiRevision.status, 201, JSON.stringify(envoiRevision.body));
+        assert.equal(envoiRevision.body.envoi.objet, `Devis ${signe.numero} version 2 – TEST Émetteur envoi renommé`);
+      } finally {
+        await definirSociete(SOCIETE);
+      }
+    });
+
+    test('objet et texte : facture et avoir émis, avec la raison sociale figée à leur émission ; une facture annulée s’envoie', async () => {
+      const client = await creerClient(`TEST Client envoi facture ${Date.now()}`, { email: 'compta@client-envoi.test' });
+      const facture = await creerEmise(client.id, 'TEST Facture envoyée');
+      const avoir = await request(app).post(`/api/factures/${facture.id}/avoirs`).set(admin()).send({ lignes: [{ designation: 'TEST Avoir envoyé', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+      assert.equal(avoir.status, 201, JSON.stringify(avoir.body));
+      try {
+        await definirSociete({ raisonSociale: 'TEST Émetteur envoi renommé' });
+        const lu = await lire(`factures/${facture.id}`);
+        assert.equal(lu.status, 200, JSON.stringify(lu.body));
+        assert.deepEqual(lu.body, {
+          proposition: { destinataire: 'compta@client-envoi.test', objet: `Facture ${facture.numero} – TEST Émetteur envoi A`, corps: corpsAttendu(`notre facture ${facture.numero}`, 'TEST Émetteur envoi A') },
+          envois: [],
+        });
+        const luAvoir = await lire(`factures/${avoir.body.id}`);
+        assert.deepEqual(luAvoir.body.proposition, {
+          destinataire: 'compta@client-envoi.test', objet: `Avoir ${avoir.body.numero} – TEST Émetteur envoi A`, corps: corpsAttendu(`notre avoir ${avoir.body.numero}`, 'TEST Émetteur envoi A'),
+        });
+        for (const [piece, objet] of [[facture, lu.body.proposition.objet], [avoir.body, luAvoir.body.proposition.objet]]) {
+          const envoi = await envoyer(`factures/${piece.id}`, 'compta@client-envoi.test');
+          assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
+          assert.equal(envoi.body.objet, objet);
+          assert.equal(envoi.body.envoi.objet, objet);
+          assert.equal(envoi.body.corps, piece === facture ? lu.body.proposition.corps : luAvoir.body.proposition.corps);
+          assert.equal((await lire(`factures/${piece.id}`)).body.envois.length, 1);
+        }
+      } finally {
+        await definirSociete(SOCIETE);
+      }
+      // Une facture annulée garde son document (« FACTURE ANNULÉE ») : elle s'envoie, comme son avoir total.
+      const annulee = await creerEmise(client.id, 'TEST Facture annulée envoyée');
+      const annulation = await request(app).post(`/api/factures/${annulee.id}/annuler`).set(admin());
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal((await envoyer(`factures/${annulee.id}`, 'compta@client-envoi.test')).status, 201);
+      assert.equal((await envoyer(`factures/${annulation.body.avoir.id}`, 'compta@client-envoi.test')).body.envoi.objet, `Avoir ${annulation.body.avoir.numero} – TEST Émetteur envoi A`);
+    });
+
+    test('enregistrement : envois du plus récent au plus ancien, sans identifiant de compte ; statut du devis inchangé', async () => {
+      const client = await creerClient(`TEST Client envoi journal ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Envoi journalisé');
+      const avant = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } });
+      const [{ debut }] = await prisma.$queryRaw`SELECT now() AS debut`;
+      const premier = await envoyer(`devis/${devis.id}`, '  premier@client-envoi.test\n');
+      assert.equal(premier.status, 201, JSON.stringify(premier.body));
+      assert.deepEqual(Object.keys(premier.body).sort(), ['corps', 'envoi', 'objet']);
+      assert.deepEqual(Object.keys(premier.body.envoi).sort(), CHAMPS_ENVOI);
+      assert.equal(premier.body.envoi.destinataire, 'premier@client-envoi.test');
+      assert.equal(premier.body.envoi.canal, 'MESSAGERIE');
+      assert.equal(premier.body.envoi.auteurNom, adminNom);
+      assert.equal(premier.body.envoi.objet, `Devis ${devis.numero} version 1 – TEST Émetteur envoi A`);
+      const second = await envoyer(`devis/${devis.id}`, 'second@client-envoi.test');
+      assert.equal(second.status, 201, JSON.stringify(second.body));
+      const lu = await lire(`devis/${devis.id}`);
+      assert.deepEqual(lu.body.envois.map((e) => e.destinataire), ['second@client-envoi.test', 'premier@client-envoi.test']);
+      assert.deepEqual(lu.body.envois, [second.body.envoi, premier.body.envoi]);
+      for (const envoi of lu.body.envois) assert.deepEqual(Object.keys(envoi).sort(), CHAMPS_ENVOI);
+      assert.ok(!JSON.stringify(lu.body).includes(adminId), 'identifiant du compte exposé');
+      assert.ok(Date.parse(lu.body.envois[0].createdAt) >= Date.parse(lu.body.envois[1].createdAt));
+      // En base : le compte, le document et l'horodatage de la base.
+      const lignes = await prisma.envoiDocument.findMany({ where: { devisId: devis.id }, orderBy: { createdAt: 'asc' } });
+      assert.equal(lignes.length, 2);
+      for (const ligne of lignes) {
+        assert.equal(ligne.auteurId, adminId); assert.equal(ligne.factureId, null);
+        assert.ok(ligne.createdAt.getTime() >= debut.getTime() - 1000, `${ligne.createdAt.toISOString()} < ${debut.toISOString()}`);
+      }
+      // Préparer un envoi ne change ni le statut ni le devis.
+      const apres = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } });
+      assert.equal(apres.statut, 'BROUILLON');
+      assert.equal(apres.updatedAt.getTime(), avant.updatedAt.getTime());
+      const envoye = await creerDevis(client.id, 'TEST Envoi d’un devis envoyé');
+      await statutDevis(envoye.id, 'ENVOYE');
+      const signe = await creerDevis(client.id, 'TEST Envoi d’un devis signé', { acompteExige: true, tauxAcompte: 30 });
+      assert.equal((await signer(signe.id)).status, 201);
+      const attente = await creerDevis(client.id, 'TEST Envoi d’un devis en attente d’acompte', { acompteExige: true, tauxAcompte: 30 });
+      assert.equal((await signer(attente.id)).status, 201);
+      await statutDevis(attente.id, 'EN_ATTENTE_ACOMPTE');
+      for (const [cible, statut] of [[envoye, 'ENVOYE'], [signe, 'ACCEPTE'], [attente, 'EN_ATTENTE_ACOMPTE']]) {
+        assert.equal((await envoyer(`devis/${cible.id}`, 'client@envoi.test')).status, 201);
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: cible.id } })).statut, statut);
+      }
+      // Un compte sans nom est nommé par son adresse.
+      const sansNom = await prisma.user.create({ data: { email: EMAILS[4], name: '  ', role: 'COMMERCIAL' } });
+      const parSansNom = await envoyer(`devis/${devis.id}`, 'troisieme@client-envoi.test', entete(sansNom));
+      assert.equal(parSansNom.status, 201, JSON.stringify(parSansNom.body));
+      assert.equal(parSansNom.body.envoi.auteurNom, EMAILS[4]);
+    });
+
+    test('droits : en session seulement ; devis avec les droits devis, jamais le technicien ; facture réservée à l’administration', async () => {
+      const client = await creerClient(`TEST Client envoi droits ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Droits de l’envoi');
+      const facture = await creerEmise(client.id, 'TEST Droits de l’envoi d’une facture');
+      const [commercial, technicien, lecteur, directeur] = await Promise.all([
+        prisma.user.create({ data: { email: EMAILS[0], name: 'TEST Commercial envoi', role: 'COMMERCIAL' } }),
+        // Les droits devis, accordés individuellement, restent sans effet pour un technicien.
+        prisma.user.create({ data: { email: EMAILS[1], name: 'TEST Technicien envoi', role: 'TECHNICIEN', permissions: ['devis:read', 'devis:write'] } }),
+        prisma.user.create({ data: { email: EMAILS[2], name: 'TEST Lecteur envoi', role: 'DIRECTEUR', permissions: ['devis:read'] } }),
+        prisma.user.create({ data: { email: EMAILS[3], name: 'TEST Directeur envoi', role: 'DIRECTEUR' } }),
+      ]);
+      const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé envoi', scopes: ['devis:read', 'devis:write', 'finances:read'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
+      try {
+        // Le commercial lit et prépare l'envoi d'un devis, à son nom.
+        assert.equal((await lire(`devis/${devis.id}`, entete(commercial))).status, 200);
+        const envoi = await envoyer(`devis/${devis.id}`, 'client@envoi.test', entete(commercial));
+        assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
+        assert.equal(envoi.body.envoi.auteurNom, 'TEST Commercial envoi');
+        // Le droit de lecture seul lit le journal, sans préparer d'envoi.
+        assert.equal((await lire(`devis/${devis.id}`, entete(lecteur))).status, 200);
+        assert.equal((await envoyer(`devis/${devis.id}`, 'client@envoi.test', entete(lecteur))).status, 403);
+        for (const compte of [technicien, directeur]) {
+          assert.equal((await lire(`devis/${devis.id}`, entete(compte))).status, 403, compte.email);
+          assert.equal((await envoyer(`devis/${devis.id}`, 'client@envoi.test', entete(compte))).status, 403, compte.email);
+        }
+        // Facture : l'administration seule, comme son PDF.
+        for (const compte of [commercial, technicien, lecteur, directeur]) {
+          const refus = await lire(`factures/${facture.id}`, entete(compte));
+          assert.equal(refus.status, 403, compte.email);
+          assert.equal(refus.body.error, 'Accès réservé aux administrateurs');
+          assert.equal((await envoyer(`factures/${facture.id}`, 'client@envoi.test', entete(compte))).status, 403, compte.email);
+        }
+        // Ni visiteur, ni clé d'intégration, ni route /api/v1.
+        for (const chemin of [`devis/${devis.id}`, `factures/${facture.id}`]) {
+          assert.equal((await request(app).get(`/api/${chemin}/envois`)).status, 401);
+          assert.equal((await request(app).post(`/api/${chemin}/envois`).send({ destinataire: 'client@envoi.test' })).status, 401);
+          assert.equal((await lire(chemin, parCle)).status, 401);
+          assert.equal((await envoyer(chemin, 'client@envoi.test', parCle)).status, 401);
+          assert.equal((await request(app).get(`/api/v1/${chemin}/envois`).set(parCle)).status, 404);
+          assert.equal((await request(app).post(`/api/v1/${chemin}/envois`).set(parCle).send({ destinataire: 'client@envoi.test' })).status, 404);
+        }
+        assert.equal((await request(app).get('/api/v1/devis').set(parCle)).status, 200, 'la clé lit bien les devis');
+        assert.equal(await prisma.envoiDocument.count({ where: { devisId: devis.id } }), 1);
+        assert.equal(await prisma.envoiDocument.count({ where: { factureId: facture.id } }), 0);
+        // L'administration, elle, prépare l'envoi de la facture.
+        assert.equal((await envoyer(`factures/${facture.id}`, 'client@envoi.test')).status, 201);
+      } finally {
+        await prisma.apiAccessKey.deleteMany({ where: { nom: 'TEST clé envoi' } });
+        await prisma.user.deleteMany({ where: { email: { in: EMAILS } } });
+      }
+    });
+
+    test('refus : document introuvable, devis annulé ou refusé, identité incomplète, facture brouillon, sans rien écrire', async () => {
+      const client = await creerClient(`TEST Client envoi refus ${Date.now()}`);
+      for (const [chemin, message] of [[`devis/${randomUUID()}`, 'Devis introuvable.'], [`factures/${randomUUID()}`, 'Facture introuvable.']]) {
+        const lu = await lire(chemin);
+        assert.equal(lu.status, 404); assert.equal(lu.body.error, message);
+        const envoi = await envoyer(chemin, 'client@envoi.test');
+        assert.equal(envoi.status, 404); assert.equal(envoi.body.error, message);
+      }
+      const annule = await creerDevis(client.id, 'TEST Envoi d’un devis annulé');
+      assert.equal((await request(app).post(`/api/devis/${annule.id}/annulation`).set(admin()).send({ motif: 'TEST motif' })).status, 200);
+      const refuse = await creerDevis(client.id, 'TEST Envoi d’un devis refusé');
+      await statutDevis(refuse.id, 'ENVOYE');
+      await statutDevis(refuse.id, 'REFUSE');
+      for (const devis of [annule, refuse]) {
+        const envoi = await envoyer(`devis/${devis.id}`, 'client@envoi.test');
+        assert.equal(envoi.status, 409, JSON.stringify(envoi.body));
+        assert.equal(envoi.body.error, 'Un devis annulé ou refusé ne s’envoie pas.');
+        // Son journal reste lisible.
+        assert.equal((await lire(`devis/${devis.id}`)).status, 200);
+      }
+
+      const nonSigne = await creerDevis(client.id, 'TEST Envoi sans identité');
+      const signe = await creerDevis(client.id, 'TEST Envoi signé sans identité');
+      assert.equal((await signer(signe.id)).status, 201);
+      const facture = await creerEmise(client.id, 'TEST Facture envoyée sans identité');
+      try {
+        await definirSociete({ siret: '', ville: '' });
+        const message = 'Identité de la société incomplète : renseignez SIRET, ville dans l’écran Société avant d’envoyer un devis.';
+        const lu = await lire(`devis/${nonSigne.id}`);
+        assert.equal(lu.status, 409); assert.equal(lu.body.error, message);
+        const envoi = await envoyer(`devis/${nonSigne.id}`, 'client@envoi.test');
+        assert.equal(envoi.status, 409); assert.equal(envoi.body.error, message);
+        // Un devis introuvable le reste ; un devis annulé est refusé comme tel.
+        assert.equal((await lire(`devis/${randomUUID()}`)).status, 404);
+        assert.equal((await envoyer(`devis/${annule.id}`, 'client@envoi.test')).body.error, 'Un devis annulé ou refusé ne s’envoie pas.');
+        // Le devis signé et la facture émise s'impriment depuis leur identité figée : ils s'envoient.
+        assert.equal((await envoyer(`devis/${signe.id}`, 'client@envoi.test')).status, 201);
+        assert.equal((await envoyer(`factures/${facture.id}`, 'client@envoi.test')).status, 201);
+      } finally {
+        await definirSociete(SOCIETE);
+      }
+
+      const brouillon = await creerBrouillon(client.id, 'TEST Facture brouillon non envoyée');
+      for (const reponse of [await lire(`factures/${brouillon.id}`), await envoyer(`factures/${brouillon.id}`, 'client@envoi.test')]) {
+        assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
+        assert.equal(reponse.body.error, 'Le document est disponible uniquement pour une facture émise.');
+      }
+      assert.equal(await prisma.envoiDocument.count({ where: { devisId: { in: [annule.id, refuse.id, nonSigne.id] } } }), 0);
+      assert.equal(await prisma.envoiDocument.count({ where: { factureId: brouillon.id } }), 0);
+    });
+
+    test('destinataire : une seule adresse, refusée sous chacune de ses formes invalides, sans rien écrire', async () => {
+      const client = await creerClient(`TEST Client envoi destinataire ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Envoi à une adresse invalide');
+      const facture = await creerEmise(client.id, 'TEST Facture envoyée à une adresse invalide');
+      const invalides = [
+        undefined, null, 42, true, ['a@b.fr'], { adresse: 'a@b.fr' }, '', '   ',
+        'sans-arobase.fr', 'a@b', 'a@b.', '@b.fr', 'a@.fr', 'a@@b.fr', 'a@b@c.fr',
+        'a b@c.fr', 'a@b.fr c@d.fr', 'a@b.fr,c@d.fr', 'a@b.fr;c@d.fr', '<a@b.fr>', 'Nom <a@b.fr>',
+        'a\tb@c.fr', 'a b@c.fr', 'a b@c.fr', 'a\u0000b@c.fr', 'a@b.fr\u0007', 'a\u007fb@c.fr', 'a\u0085b@c.fr',
+        `${'a'.repeat(250)}@b.fr`,
+      ];
+      for (const valeur of invalides) {
+        for (const chemin of [`devis/${devis.id}`, `factures/${facture.id}`]) {
+          const reponse = await request(app).post(`/api/${chemin}/envois`).set(admin()).send(valeur === undefined ? {} : { destinataire: valeur });
+          assert.equal(reponse.status, 400, `${JSON.stringify(valeur)} → ${chemin} : ${JSON.stringify(reponse.body)}`);
+          assert.equal(reponse.body.error, REFUS_DESTINATAIRE);
+        }
+      }
+      // Sans corps du tout.
+      assert.equal((await request(app).post(`/api/devis/${devis.id}/envois`).set(admin())).status, 400);
+      assert.equal(await prisma.envoiDocument.count({ where: { OR: [{ devisId: devis.id }, { factureId: facture.id }] } }), 0);
+      // 254 caractères au plus.
+      const limite = `${'a'.repeat(249)}@b.fr`;
+      assert.equal(limite.length, 254);
+      const envoi = await envoyer(`devis/${devis.id}`, limite);
+      assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
+      assert.equal(envoi.body.envoi.destinataire, limite);
+    });
+
+    test('verrous : l’envoi d’un devis attend son annulation en cours, puis la refuse ; celui d’une facture attend le verrou de la pièce', async () => {
+      const client = await creerClient(`TEST Client envoi verrou ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Envoi pendant une annulation');
+      const facture = await creerEmise(client.id, 'TEST Facture envoyée pendant un verrou');
+      for (const [chemin, tenir, statutAttendu] of [
+        [`devis/${devis.id}`, (tx) => tx.$executeRaw`UPDATE "Devis" SET "statut" = 'ANNULE', "annuleLe" = now(), "motifAnnulation" = 'TEST annulation concurrente' WHERE "id" = ${devis.id}`, 409],
+        // Le verrou que prend la mise à jour d'une pièce (statut, règlement), que la seule clé étrangère
+        // de l'envoi (FOR KEY SHARE) n'attendrait pas : seul le verrou partagé de la route l'attend.
+        [`factures/${facture.id}`, (tx) => tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${facture.id} FOR NO KEY UPDATE`, 201],
+      ]) {
+        let liberer;
+        const retenue = new Promise((resolve) => { liberer = resolve; });
+        let pidTenant = null;
+        const tenant = prisma.$transaction(async (tx) => {
+          [{ pid: pidTenant }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          await tenir(tx);
+          await retenue;
+        }, { timeout: 40_000 });
+        try {
+          while (pidTenant === null) await new Promise((resolve) => setTimeout(resolve, 10));
+          const envoi = envoyer(chemin, 'client@envoi.test').then((reponse) => reponse);
+          const bloque = await attendreBlocage(pidTenant);
+          liberer();
+          await tenant;
+          const reponse = await envoi;
+          assert.equal(bloque, true, `l’envoi doit attendre le verrou (${chemin})`);
+          assert.equal(reponse.status, statutAttendu, JSON.stringify(reponse.body));
+        } finally {
+          liberer();
+          await tenant.catch(() => undefined);
+        }
+      }
+      assert.equal(await prisma.envoiDocument.count({ where: { devisId: devis.id } }), 0);
+      assert.equal(await prisma.envoiDocument.count({ where: { factureId: facture.id } }), 1);
+    });
+
+    test('en base : journal en ajout seul, vidage refusé, chaque contrainte et horodatage imposé', async () => {
+      const client = await creerClient(`TEST Client envoi garde ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Garde du journal des envois');
+      const facture = await creerEmise(client.id, 'TEST Garde du journal des envois d’une facture');
+      const envoi = await envoyer(`devis/${devis.id}`, 'client@envoi.test');
+      assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
+      const id = envoi.body.envoi.id;
+      for (const data of [{ destinataire: 'autre@envoi.test' }, { objet: 'TEST autre objet' }, { auteurNom: 'TEST Autre' }, { createdAt: new Date('2020-01-01T00:00:00Z') }, { devisId: null, factureId: facture.id }]) {
+        await assert.rejects(prisma.envoiDocument.update({ where: { id }, data }), /Journal des envois : ajout seul/, JSON.stringify(data));
+      }
+      await assert.rejects(prisma.envoiDocument.delete({ where: { id } }), /Journal des envois : ajout seul/);
+      await assert.rejects(prisma.envoiDocument.deleteMany({ where: { devisId: devis.id } }), /Journal des envois : ajout seul/);
+      await assert.rejects(prisma.$executeRawUnsafe('TRUNCATE "EnvoiDocument"'), /Vidage de « EnvoiDocument » interdit/);
+      // Le document envoyé ne se supprime pas : le journal le garde.
+      await assert.rejects(prisma.devis.delete({ where: { id: devis.id } }), /Foreign key constraint|violates foreign key/i);
+      assert.deepEqual(await prisma.envoiDocument.findUniqueOrThrow({ where: { id }, select: { destinataire: true, objet: true } }), { destinataire: 'client@envoi.test', objet: envoi.body.objet });
+
+      const inserer = ({ devisId = devis.id, factureId = null, canal = 'MESSAGERIE', destinataire = 'client@envoi.test', objet = 'TEST Objet', auteurNom = 'TEST Auteur', createdAt = null } = {}) => prisma.$executeRaw`
+        INSERT INTO "EnvoiDocument" ("id", "devisId", "factureId", "canal", "destinataire", "objet", "auteurId", "auteurNom", "createdAt")
+        VALUES (${randomUUID()}, ${devisId}, ${factureId}, ${canal}, ${destinataire}, ${objet}, ${adminId}, ${auteurNom}, COALESCE(${createdAt}::timestamptz, now()))`;
+      for (const [donnees, contrainte] of [
+        [{ devisId: null }, 'EnvoiDocument_un_document'],
+        [{ factureId: facture.id }, 'EnvoiDocument_un_document'],
+        [{ canal: 'MICROSOFT_365' }, 'EnvoiDocument_canal'],
+        [{ canal: 'messagerie' }, 'EnvoiDocument_canal'],
+        [{ destinataire: '   ' }, 'EnvoiDocument_destinataire_renseigne'],
+        [{ objet: '' }, 'EnvoiDocument_objet_renseigne'],
+        [{ auteurNom: '   ' }, 'EnvoiDocument_auteur_nomme'],
+      ]) await assert.rejects(inserer(donnees), new RegExp(`violates check constraint \\\\?"${contrainte}\\\\?"`), JSON.stringify(donnees));
+      // Témoins : une ligne valide s'insère, pour un devis comme pour une facture, et sa date est celle
+      // de la base, quelle que soit celle fournie.
+      const [{ maintenant }] = await prisma.$queryRaw`SELECT now() AS maintenant`;
+      assert.equal(await inserer({ createdAt: '2020-01-01T00:00:00Z' }), 1);
+      assert.equal(await inserer({ devisId: null, factureId: facture.id }), 1);
+      const lignes = await prisma.envoiDocument.findMany({ where: { OR: [{ devisId: devis.id }, { factureId: facture.id }] } });
+      assert.equal(lignes.length, 3);
+      for (const ligne of lignes) assert.ok(Math.abs(ligne.createdAt.getTime() - maintenant.getTime()) < 60_000, ligne.createdAt.toISOString());
     });
   });
 }

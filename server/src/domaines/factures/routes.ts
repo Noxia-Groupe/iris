@@ -17,12 +17,13 @@ import { getCompanySettings } from '../administration/metier';
 import { CLES_COMPTABLES, verrouillerParametrageComptable, ImputationIncompletError, ecrituresPourPiece } from '../comptabilite/metier';
 import {
   factureInclude, formaterAdresseFacturation, FactureRattachementRefuse, ventilationTvaDerivee, ventilationFacture,
-  lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee,
+  lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee, refusDocumentFacture,
 } from './metier';
 import { rendreDocumentFacturePdf } from './pdf';
 import { champsIdentiteManquants, figerIdentiteEmetteur, IdentiteEmetteurIncompleteError } from '../documents/identite';
 import { exigerIdentiteClient, IdentiteClientIncompleteError } from '../documents/identiteClient';
 import { avecSoldes, synchroniserStatutReglement } from '../reglements/metier';
+import { FACTURE_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiFacture, validerDestinataire } from '../documents/envois';
 
 export function enregistrerRoutesFactures(app: Express): void {
   app.get('/api/factures/chronologie', requireAuth, requireAdmin, async (_req, res) => {
@@ -77,9 +78,8 @@ export function enregistrerRoutesFactures(app: Express): void {
     try {
       const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: { ...factureInclude, identiteEmetteur: { include: { logo: { select: { contenu: true } } } } } });
       if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
-      if (!['EMISE', 'REGLEE', 'ANNULEE'].includes(facture.statut)) return res.status(409).json({ error: 'Le document est disponible uniquement pour une facture émise.' });
-      if (!facture.mentionsLegalesVersion) return res.status(409).json({ error: 'Les mentions légales figées sont introuvables.' });
-      if (!facture.clientAdresse) return res.status(409).json({ error: 'L’adresse de facturation figée est absente de cette facture : le document ne peut pas être imprimé sans cette mention obligatoire.' });
+      const refus = refusDocumentFacture(facture);
+      if (refus) return res.status(409).json({ error: refus });
       // L'identité figée garde son logo en octets : elle échappe à la conversion des montants.
       const { identiteEmetteur, ...piece } = facture;
       const pdf = await rendreDocumentFacturePdf({ ...decimalToNumber(piece), identiteEmetteur });
@@ -88,6 +88,52 @@ export function enregistrerRoutesFactures(app: Express): void {
       res.setHeader('Content-Length', pdf.length);
       return res.send(pdf);
     } catch { return res.status(500).json({ error: 'Lecture du document de facture impossible.' }); }
+  });
+
+  // Envoi d'une facture ou d'un avoir émis par la messagerie de l'utilisateur, et journal des envois
+  // (lot 6a-3) : réservés à l'administration, en session, comme le PDF des factures, et refusés comme
+  // lui pour une pièce sans document. Lecture : destinataire, objet et texte proposés, et envois déjà
+  // préparés, du plus récent au plus ancien, dans une même photo de la base.
+  app.get('/api/factures/:id/envois', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const lu = await transactionVerifiee(async (tx) => {
+        const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, select: FACTURE_A_ENVOYER });
+        if (!facture) return { refus: { statut: 404, error: 'Facture introuvable.' } };
+        const refus = refusDocumentFacture(facture);
+        if (refus) return { refus: { statut: 409, error: refus } };
+        const { objet, corps } = await texteEnvoiFacture(tx, facture);
+        return { lecture: { proposition: { destinataire: await propositionDestinataire(tx, facture.clientId), objet, corps }, envois: await lireEnvois(tx, { factureId: facture.id }) } };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+      if (lu.refus) return res.status(lu.refus.statut).json({ error: lu.refus.error });
+      return res.json(lu.lecture);
+    } catch (error) {
+      if (error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
+      return res.status(500).json({ error: 'Lecture des envois de la facture impossible.' });
+    }
+  });
+
+  // Enregistrement de l'envoi préparé, sous un verrou partagé de la pièce : une annulation ou un avoir
+  // en cours est attendu, et l'envoi lit la pièce validée. L'écran télécharge le PDF avant cet appel.
+  app.post('/api/factures/:id/envois', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const destinataire = validerDestinataire(req.body?.destinataire);
+      const resultat = await transactionVerifiee(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Facture" WHERE "id" = ${paramId(req)} FOR SHARE`;
+        const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, select: FACTURE_A_ENVOYER });
+        if (!facture) return { refus: { statut: 404, error: 'Facture introuvable.' } };
+        const refus = refusDocumentFacture(facture);
+        if (refus) return { refus: { statut: 409, error: refus } };
+        const { objet, corps } = await texteEnvoiFacture(tx, facture);
+        const envoi = await enregistrerEnvoi(tx, { factureId: facture.id }, { destinataire, objet }, req.user!);
+        return { envoi: { envoi, objet, corps } };
+      });
+      if (resultat.refus) return res.status(resultat.refus.statut).json({ error: resultat.refus.error });
+      return res.status(201).json(resultat.envoi);
+    } catch (error) {
+      if (error instanceof DestinataireInvalideError) return res.status(400).json({ error: error.message });
+      if (error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
+      return res.status(500).json({ error: 'Enregistrement de l’envoi de la facture impossible.' });
+    }
   });
 
   app.get('/api/factures/:id/journal', requireAuth, requireAdmin, async (req, res) => {

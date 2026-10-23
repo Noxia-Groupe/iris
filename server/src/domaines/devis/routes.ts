@@ -27,12 +27,14 @@ import {
   devisInclude, contenuDevisSigne, copieLigneDevis, verrouillerDevis, acompteDevisPayload, nouveauNumeroDevis,
 } from './metier';
 import { rendreDocumentDevisPdf } from './document';
+import { DEVIS_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiDevis, validerDestinataire } from '../documents/envois';
 
 function devisErreur(res: express.Response, error: unknown) {
   if (error instanceof DevisSaisieError) return res.status(400).json({ error: error.message });
   if (error instanceof DevisConflitError) return res.status(409).json({ error: error.message });
   if (error instanceof DevisDroitError) return res.status(403).json({ error: error.message });
   if (error instanceof IdentiteEmetteurIncompleteError || error instanceof IdentiteClientIncompleteError) return res.status(409).json({ error: error.message });
+  if (error instanceof DestinataireInvalideError) return res.status(400).json({ error: error.message });
   if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
@@ -147,6 +149,39 @@ const imprimerDevis: express.RequestHandler = async (req, res) => { try {
   res.setHeader('Content-Disposition', `inline; filename="${devis.numero}-v${devis.version}.pdf"`);
   res.setHeader('Content-Length', pdf.length);
   res.send(pdf);
+} catch (error) { devisErreur(res, error); } };
+
+// Envoi du devis par la messagerie de l'utilisateur (lot 6a-3) : destinataire, objet et texte
+// proposés, et envois déjà préparés, du plus récent au plus ancien. La raison sociale de l'objet est
+// celle du PDF : un devis non signé exige donc, comme son PDF, l'identité complète de la société.
+// Une même photo de la base pour le devis, l'identité et le journal.
+const lireEnvoisDevis: express.RequestHandler = async (req, res) => { try {
+  const lu = await transactionVerifiee(async tx => {
+    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: DEVIS_A_ENVOYER });
+    if (!devis) return null;
+    const { objet, corps } = await texteEnvoiDevis(tx, devis);
+    return { proposition: { destinataire: await propositionDestinataire(tx, devis.clientId), objet, corps }, envois: await lireEnvois(tx, { devisId: devis.id }) };
+  }, { isolationLevel: 'RepeatableRead' });
+  if (!lu) return void res.status(404).json({ error: 'Devis introuvable.' });
+  res.json(lu);
+} catch (error) { devisErreur(res, error); } };
+
+// Enregistre l'envoi préparé, sous le verrou du devis : une annulation ou un refus en cours est
+// attendu, puis refuse l'envoi. Le statut du devis ne change pas (choix par défaut, à confirmer :
+// un brouillon ne passe pas « envoyé » de lui-même). L'écran télécharge le PDF avant cet appel.
+const envoyerDevis: express.RequestHandler = async (req, res) => { try {
+  const destinataire = validerDestinataire(req.body?.destinataire);
+  const auteur = (req as AuthRequest).user!;
+  const resultat = await transactionVerifiee(async tx => {
+    if (!await verrouillerDevis(tx, paramId(req))) return null;
+    const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: DEVIS_A_ENVOYER });
+    if (devis.statut === 'ANNULE' || devis.statut === 'REFUSE') throw new DevisConflitError('Un devis annulé ou refusé ne s’envoie pas.');
+    const { objet, corps } = await texteEnvoiDevis(tx, devis);
+    const envoi = await enregistrerEnvoi(tx, { devisId: devis.id }, { destinataire, objet }, auteur);
+    return { envoi, objet, corps };
+  });
+  if (!resultat) return void res.status(404).json({ error: 'Devis introuvable.' });
+  res.status(201).json(resultat);
 } catch (error) { devisErreur(res, error); } };
 
 // Cycle de vie d'un devis. `ANNULE` ne figure dans aucune liste de destinations : on n'y
@@ -396,6 +431,10 @@ export function enregistrerRoutesDevis(app: Express): void {
   // PDF du devis (lot 6a-2) : porteurs du droit de lecture des devis, en session seulement (celui des
   // factures est réservé à l'administration).
   app.get('/api/devis/:id/document.pdf', requireAuth, requirePermission('devis:read'), imprimerDevis);
+  // Envoi par la messagerie et journal des envois (lot 6a-3) : en session seulement, comme le PDF ;
+  // la lecture avec le droit de lecture des devis, l'enregistrement avec le droit de les écrire.
+  app.get('/api/devis/:id/envois', requireAuth, requirePermission('devis:read'), lireEnvoisDevis);
+  app.post('/api/devis/:id/envois', requireAuth, requirePermission('devis:write'), envoyerDevis);
 
   routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requirePermission('devis:write')]);
 
