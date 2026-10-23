@@ -15969,5 +15969,72 @@ if (!TEST_DATABASE_URL) {
         assert.ok(texte.includes(attendu), `absent du devis signé : ${attendu}\n${texte}`);
       }
     });
+
+    // Audit n° 15 : un devis signé imprime toute l'identité copiée (nom commercial, adresse, SIRET,
+    // TVA, téléphone, courriel, pied de page), les références du catalogue et la suite des
+    // désignations repliées. Ces éléments n'étaient vérifiés que sur des devis non signés : imprimé
+    // sans eux, un devis signé passait toute la suite.
+    test('devis signé : identité copiée entière, pied de page, références et désignations repliées imprimés', async () => {
+      const suffixe = Date.now();
+      const client = await creerClient(`TEST Client signé identité entière ${suffixe}`);
+      const reference = `TEST-REF-SIGNE-${suffixe}`;
+      const fiche = await request(app).post('/api/catalogue/prestations').set(admin()).send({ reference, nom: `TEST Pose signée ${suffixe}`, unite: 'u', prixVenteHt: '10', tauxTva: '20' });
+      assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+      // 42 caractères : la colonne en tient 31, « devis à replier » passe à la ligne suivante.
+      const devis = await creerDevis(client.id, 'TEST Devis signé, identité entière', [
+        { designation: 'TEST Désignation longue de devis à replier', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, catalogueFamille: 'prestations', catalogueId: fiche.body.id },
+        { designation: 'TEST Ligne signée suivante', quantite: 1, prixUnitaireHt: 5, tauxTva: 20 },
+      ]);
+      // Identité de la signature : chaque champ imprimé diffère de celle qui la remplace ensuite.
+      const SIGNEE = { ...SOCIETE_B, tvaIntra: 'FR44444444444', telephone: '02 31 00 00 04', email: 'devis-signe@iris.test' };
+      try {
+        await definirSociete(SIGNEE);
+        assert.equal((await signer(devis.id)).status, 201);
+        await definirSociete(SOCIETE_A);
+        const { texte } = await texteDevis(devis.id);
+        for (const attendu of [`DEVIS ${devis.numero}`, 'Objet : TEST Devis signé, identité entière', 'TEST Émetteur devis B', 'TEST Enseigne devis B', '4 avenue Changée', '14000 Caen', 'SIRET 44444444400044',
+          'TVA intracommunautaire FR44444444444', 'Tél. 02 31 00 00 04', 'devis-signe@iris.test', 'TEST Pied devis B']) {
+          assert.ok(texte.includes(attendu), `absent du devis signé : ${attendu}\n${texte}`);
+        }
+        assert.ok(!/TEST Émetteur devis A|3 rue du Devis|SIRET 33333333300033|FR33333333333|devis-a@iris\.test|TEST Pied devis A/.test(texte), texte);
+        const lignes = texte.split('\n').map((l) => l.trim());
+        const rang = (debut) => lignes.findIndex((l) => l.startsWith(debut));
+        const [premiere, suite, ref, suivante] = [rang('TEST Désignation longue de'), rang('devis à replier'), rang(`Réf. ${reference}`), rang('TEST Ligne signée suivante')];
+        assert.ok(premiere >= 0 && suite === premiere + 1 && ref === suite + 1 && suivante === ref + 1, JSON.stringify(lignes));
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
+
+    // Audit n° 15 : seul le tableau des lignes s'imprime en Courier, pour caler ses colonnes ; les
+    // totaux, la ventilation et le cadre du bon pour accord reprennent la police du document.
+    test('gabarit : seul le tableau des lignes en Courier, les totaux et le cadre en Helvetica', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const client = await creerClient(`TEST Client polices devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Polices du devis');
+      const res = await pdfDevis(devis.id);
+      assert.equal(res.status, 200);
+      const octets = res.body, brut = octets.toString('latin1');
+      // Ressources de police de la page (/F1…) et leur police de base.
+      const polices = {};
+      for (const [, nom, objet] of brut.matchAll(/\/(F\d+) (\d+) 0 R/g)) {
+        const base = new RegExp(`(?:^|\\n)${objet} 0 obj\\s*<<[^>]*?/BaseFont /([\\w-]+)`).exec(brut);
+        if (base) polices[nom] = base[1];
+      }
+      const ecrits = [];
+      for (const flux of brut.matchAll(/stream\r?\n/g)) {
+        const debut = flux.index + flux[0].length;
+        let contenu;
+        try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+        let police = null;
+        for (const [, ressource, morceaux] of contenu.matchAll(/\/(F\d+) [\d.]+ Tf|\[([^\]]*)\] TJ/g)) {
+          if (ressource) police = polices[ressource];
+          else ecrits.push([police, [...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join('')]);
+        }
+      }
+      const police = (debut) => ecrits.find(([, texte]) => texte.startsWith(debut))?.[0];
+      assert.equal(police('D\xe9signation'), 'Courier', JSON.stringify(ecrits));
+      for (const debut of ['Total HT', 'TVA 20 %', 'TVA totale', 'Total TTC', 'Bon pour accord']) assert.equal(police(debut), 'Helvetica', `${debut}\n${JSON.stringify(ecrits)}`);
+    });
   });
 }

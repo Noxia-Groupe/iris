@@ -389,7 +389,8 @@ export function enregistrerRoutesDevis(app: Express): void {
   routeMixte('post', '/devis/:id/revisions', 'devis:write', creerRevision, [requirePermission('devis:write')]);
   // La signature engage une personne identifiée : aucune clé d'intégration ne peut l'émettre.
   app.post('/api/devis/:id/signature', requireAuth, requirePermission('devis:write'), signerDevis);
-  // PDF du devis (lot 6a-2) : porteurs du droit devis, en session seulement, comme le PDF des factures.
+  // PDF du devis (lot 6a-2) : porteurs du droit de lecture des devis, en session seulement (celui des
+  // factures est réservé à l'administration).
   app.get('/api/devis/:id/document.pdf', requireAuth, requirePermission('devis:read'), imprimerDevis);
 
   routeMixte('put', '/devis/:id/statut', 'devis:write', changerStatutDevis, [requirePermission('devis:write')]);
