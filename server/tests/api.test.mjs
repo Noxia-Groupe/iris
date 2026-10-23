@@ -14759,6 +14759,15 @@ if (!TEST_DATABASE_URL) {
       assert.match(texte, /^TEST Désignation de trente-quatre 1\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
     });
 
+    // Audit n° 14 : la facture replie elle aussi sur le texte imprimé (replierTexte commun). Saisie avec
+    // un accent décomposé, cette désignation a 37 caractères, mais 36 une fois imprimée : elle tient sur
+    // la ligne de ses montants, comme sa forme composée ; le repli de main renvoyait le rang à la ligne.
+    test('gabarit : la désignation d’une facture se replie sur le texte imprimé, accent décomposé compris', async () => {
+      const facture = await creerEmise('TEST De\u0301signation de trente-quatre!');
+      const { texte } = await documentPdf(facture.id);
+      assert.match(texte, /^TEST Désignation de trente-quatre! 1\s+1\s+10,00 €\s+20 %\s+10,00 €$/m, texte);
+    });
+
     // Audit n° 7 : la mise en page de la facture reste celle de main, colonne par colonne (largeurs 38,
     // 9, 16, 8 et 16 ; désignation repliée à 36 caractères), relevée dans le flux du PDF, que
     // l'extraction du texte ne restitue pas : le PDF d'une facture déjà émise ne bouge pas.
@@ -15684,6 +15693,22 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Audit n° 14 : le client s'imprime par sa raison sociale, celle que copie la signature, et non
+    // par son nom commercial ; aucun client de test n'en avait un.
+    test('client : sa raison sociale, et non son nom commercial, imprimée et copiée à la signature', async () => {
+      const suffixe = Date.now();
+      const client = await creerClient(`TEST Client raison sociale ${suffixe}`);
+      const enseigne = `TEST Enseigne du client ${suffixe}`;
+      assert.equal((await request(app).put(`/api/clients/${client.id}`).set(admin()).send({ nomCommercial: enseigne })).status, 200);
+      const devis = await creerDevis(client.id, 'TEST Devis du client à enseigne');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(nonSigne.includes(client.raisonSociale) && !nonSigne.includes(enseigne), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientRaisonSociale, client.raisonSociale);
+      const signe = (await texteDevis(devis.id)).texte;
+      assert.ok(signe.includes(client.raisonSociale) && !signe.includes(enseigne), signe);
+    });
+
     // Audit n° 7 : un objet et un signataire longs (300 et 200 caractères au plus) s'impriment en
     // entier, repliés à la largeur de la page, jamais tronqués.
     test('objet et signataire longs : imprimés en entier', async () => {
@@ -15891,6 +15916,58 @@ if (!TEST_DATABASE_URL) {
       assert.equal(cadres.length, 31 + 13 + 13, JSON.stringify(cadres));
       // Page A4 de 842 points, moins la marge basse du gabarit (84 points avec un pied d'une ligne).
       for (const [n, bas, variante] of cadres) assert.ok(bas <= 842 - 84, `cadre dans la marge basse avec ${n} lignes (${variante}) : bas à ${bas}`);
+    });
+
+    // Audit n° 14 : un pied de page de plusieurs lignes agrandit la marge basse ; le cadre passe alors
+    // à la page suivante plutôt que de recouvrir le pied. Le test précédent n'éprouve qu'un pied d'une
+    // ligne, où la marge vaut son minimum (84 points).
+    test('cadre du bon pour accord : jamais sur un pied de page de plusieurs lignes', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const client = await creerClient(`TEST Client cadre pied long ${Date.now()}`);
+      const cadres = [];
+      try {
+        await definirSociete({ piedFacture: Array.from({ length: 8 }, (_, i) => `TEST Pied long ${i + 1}`).join('\n') });
+        for (let n = 18; n <= 36; n++) {
+          const devis = await creerDevis(client.id, `TEST Devis cadre pied long ${n}`, Array.from({ length: n }, (_, i) => ({ designation: `TEST Ligne ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 })));
+          const res = await pdfDevis(devis.id);
+          assert.equal(res.status, 200);
+          const octets = res.body, brut = octets.toString('latin1');
+          for (const flux of brut.matchAll(/stream\r?\n/g)) {
+            const debut = flux.index + flux[0].length;
+            let contenu;
+            try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+            const cadre = /[\d.]+ ([\d.]+) 240 ([\d.]+) re/.exec(contenu);
+            if (!cadre) continue;
+            // Ligne la plus haute du pied (corps de 7 points), en ordonnée du PDF, comptée depuis le bas.
+            const pied = Math.max(...[...contenu.matchAll(/1 0 0 1 [\d.]+ ([\d.]+) Tm\s*\/F\d+ 7 Tf/g)].map(([, y]) => Number(y)));
+            assert.ok(Number.isFinite(pied), `pied de page introuvable avec ${n} lignes`);
+            // Le gabarit écrit le pied 18 points sous le haut de sa marge : le cadre doit finir au-dessus
+            // de cette marge (première ligne du pied, moins son corps et ces 18 points).
+            cadres.push([n, Number(cadre[1]) + Number(cadre[2]), 842 - pied - 7 - 18]);
+          }
+        }
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+      assert.equal(cadres.length, 19, JSON.stringify(cadres));
+      for (const [n, bas, haut] of cadres) assert.ok(bas <= haut, `cadre dans la marge du pied avec ${n} lignes : bas à ${bas}, marge à ${haut}`);
+    });
+
+    // Audit n° 14 : le contenu d'un devis signé (lignes, unités, ventilation, totaux, acompte) est celui
+    // du document accepté ; les tests du devis signé ne vérifiaient que son en-tête et sa signature.
+    test('devis signé : lignes, ventilation, totaux et acompte imprimés', async () => {
+      const client = await creerClient(`TEST Client contenu signé ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis signé complet', [
+        { designation: 'TEST Main-d’œuvre signée', quantite: 2.5, unite: 'h', prixUnitaireHt: 48, tauxTva: 20 },
+        { designation: 'TEST Fourniture signée', quantite: 1, unite: 'u', prixUnitaireHt: 250, tauxTva: 10 },
+      ], { acompteExige: true, tauxAcompte: 30 });
+      assert.equal((await signer(devis.id)).status, 201);
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Main-d’œuvre signée\s+2,5 h\s+48,00 €\s+20 %\s+120,00 €$/m, texte);
+      assert.match(texte, /^TEST Fourniture signée\s+1 u\s+250,00 €\s+10 %\s+250,00 €$/m, texte);
+      for (const attendu of ['Total HT : 370,00 €', 'TVA 10 % sur 250,00 € : 25,00 €', 'TVA 20 % sur 120,00 € : 24,00 €', 'TVA totale : 49,00 €', 'Total TTC : 419,00 €', 'Acompte demandé : 30 %', 'Accepté par TEST Signataire client']) {
+        assert.ok(texte.includes(attendu), `absent du devis signé : ${attendu}\n${texte}`);
+      }
     });
   });
 }

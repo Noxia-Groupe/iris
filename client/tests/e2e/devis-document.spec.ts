@@ -123,10 +123,19 @@ test('PDF du devis : à 375 px, le refus est ramené en vue, puis effacé au té
   } finally {
     await request.put(`${api}/company`, { headers, data: { siret: societe.siret } });
   }
+  // Audit n° 14 : seul un refus ramène l'écran en haut ; un téléchargement réussi laisse la liste où
+  // elle est. Les appels à window.scrollTo sont comptés à partir d'ici.
+  await page.evaluate(() => {
+    const fenetre = window as Window & { defilements?: number };
+    const origine = window.scrollTo.bind(window) as (options?: ScrollToOptions) => void;
+    fenetre.defilements = 0;
+    window.scrollTo = ((options?: ScrollToOptions) => { fenetre.defilements = (fenetre.defilements ?? 0) + 1; origine(options); }) as typeof window.scrollTo;
+  });
   const telechargement = page.waitForEvent('download');
   await bouton.click();
   expect((await telechargement).suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
   await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as Window & { defilements?: number }).defilements)).toBe(0);
 });
 
 // Une erreur sans corps JSON (passerelle, proxy) s'annonce sans message technique.
