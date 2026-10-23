@@ -14703,6 +14703,34 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Audit n° 9 : les réponses des écritures (signature, statut, acompte, annulation) gardent elles
+    // aussi la signature d'avant ce lot. Une clé « devis:write », à qui l'adresse d'un client est
+    // fermée, ne la lit pas dans la réponse d'un changement de statut.
+    test('API JSON : les réponses des écritures n’exposent pas les copies de la signature', async () => {
+      const client = await creerClient(`TEST Client copies des écritures ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Copies non exposées en écriture', undefined, { acompteExige: true, tauxAcompte: 30 });
+      const champs = ['devisId', 'empreinte', 'enregistreParId', 'id', 'signataire', 'signeLe'];
+      const signature = await signer(devis.id);
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.deepEqual(Object.keys(signature.body).sort(), ['empreinte', 'enregistreParId', 'id', 'signataire', 'signeLe'], JSON.stringify(signature.body));
+      const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé copies écritures', scopes: ['devis:write'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      try {
+        const statut = await request(app).put(`/api/v1/devis/${devis.id}/statut`).set({ Authorization: `Bearer ${cle.body.apiKey}` }).send({ statut: 'EN_ATTENTE_ACOMPTE' });
+        assert.equal(statut.status, 200, JSON.stringify(statut.body));
+        assert.deepEqual(Object.keys(statut.body.signature).sort(), champs, JSON.stringify(statut.body.signature));
+        assert.ok(!JSON.stringify(statut.body).includes('5 rue du Client'), 'adresse de facturation lue par une clé « devis:write »');
+      } finally {
+        await prisma.apiAccessKey.deleteMany({ where: { nom: 'TEST clé copies écritures' } });
+      }
+      const acompte = await request(app).post(`/api/devis/${devis.id}/acompte`).set(admin()).send({ recuLe: '2026-01-15', montant: '36', reference: 'TEST acompte des copies' });
+      assert.equal(acompte.status, 200, JSON.stringify(acompte.body));
+      assert.deepEqual(Object.keys(acompte.body.signature).sort(), champs, JSON.stringify(acompte.body.signature));
+      const annulation = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST motif des copies' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual(Object.keys(annulation.body.devis.signature).sort(), champs, JSON.stringify(annulation.body.devis.signature));
+    });
+
     test('identité incomplète : PDF du devis non signé et signature refusés, sans rien écrire', async () => {
       const client = await creerClient(`TEST Client identité devis ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Sans identité');
