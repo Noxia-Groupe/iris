@@ -16036,5 +16036,35 @@ if (!TEST_DATABASE_URL) {
       assert.equal(police('D\xe9signation'), 'Courier', JSON.stringify(ecrits));
       for (const debut of ['Total HT', 'TVA 20 %', 'TVA totale', 'Total TTC', 'Bon pour accord']) assert.equal(police(debut), 'Helvetica', `${debut}\n${JSON.stringify(ecrits)}`);
     });
+
+    // Audit n° 17 : le titre du devis s'imprime dans la couleur de la société, celle copiée à la
+    // signature pour un devis signé ; le filet de l'en-tête, seul, ne suffit pas à le vérifier.
+    test('gabarit : le titre du devis dans la couleur de la société, celle de la signature une fois signé', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const couleurDuTitre = (octets, numero) => {
+        const brut = octets.toString('latin1');
+        for (const flux of brut.matchAll(/stream\r?\n/g)) {
+          const debut = flux.index + flux[0].length;
+          let contenu;
+          try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+          let remplissage = null;
+          for (const [, r, v, b, morceaux] of contenu.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) scn\b|\[([^\]]*)\] TJ/g)) {
+            if (r !== undefined) remplissage = `#${[r, v, b].map((c) => Math.round(Number(c) * 255).toString(16).padStart(2, '0')).join('')}`;
+            else if ([...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join('').startsWith(`DEVIS ${numero}`)) return remplissage;
+          }
+        }
+        return undefined;
+      };
+      const client = await creerClient(`TEST Client couleur du titre ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Couleur du titre');
+      assert.equal(couleurDuTitre((await pdfDevis(devis.id)).body, devis.numero), SOCIETE_A.couleurPrimaire);
+      assert.equal((await signer(devis.id)).status, 201);
+      try {
+        await definirSociete(SOCIETE_B);
+        assert.equal(couleurDuTitre((await pdfDevis(devis.id)).body, devis.numero), SOCIETE_A.couleurPrimaire, 'couleur copiée à la signature');
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
+    });
   });
 }

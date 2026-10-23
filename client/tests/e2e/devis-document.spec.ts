@@ -190,3 +190,35 @@ test('PDF du devis : un devis envoyé, en attente d’acompte, converti, annulé
     expect((await telechargement).suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
   }
 });
+
+// Audit n° 17 : le refus de la signature sans identité complète de la société, décidé par Nelson le
+// 23-10-2026 (« Oui garde les 5 champs »), s'affiche dans l'écran Devis ; le dialogue reste ouvert
+// et rien n'est enregistré.
+test('signature : refusée à l’écran si l’identité de la société manque, sans rien enregistrer', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const headers = auth(session.token);
+  const client = await creerClient('devis signature refusée');
+  const objet = `E2E signature refusée ${Date.now()}`;
+  const cree = await request.post(`${api}/devis`, { headers, data: { clientId: client.id, objet, lignes: [{ designation: 'Diagnostic', quantite: 1, prixUnitaireHt: 80, tauxTva: 20 }] } });
+  expect(cree.status(), await cree.text()).toBe(201);
+  const devis = await cree.json() as { id: string };
+  const page = await allerSurPageAdmin('/devis');
+  const societe = await (await request.get(`${api}/company`, { headers })).json() as { siret: string };
+  try {
+    const maj = await request.put(`${api}/company`, { headers, data: { siret: '' } });
+    expect(maj.ok(), await maj.text()).toBeTruthy();
+    await page.getByRole('listitem').filter({ hasText: objet }).getByRole('button', { name: 'Faire signer le client' }).click();
+    const dialogue = page.getByRole('dialog', { name: 'Signature client' });
+    await dialogue.getByRole('textbox', { name: 'Autre signataire client' }).fill('Client E2E');
+    await dialogue.getByRole('checkbox', { name: 'Confirmation du client' }).check();
+    const reponse = page.waitForResponse(r => r.url().endsWith(`/api/devis/${devis.id}/signature`) && r.request().method() === 'POST');
+    await dialogue.getByRole('button', { name: 'Enregistrer la signature client' }).click();
+    expect((await reponse).status()).toBe(409);
+    await expect(page.getByRole('alert')).toHaveText('Identité de la société incomplète : renseignez SIRET dans l’écran Société avant d’enregistrer la signature d’un devis.');
+    await expect(dialogue).toBeVisible();
+    const relu = (await (await request.get(`${api}/devis`, { headers })).json() as { id: string; statut: string; signature: unknown }[]).find(d => d.id === devis.id);
+    expect(relu?.signature).toBeNull();
+    expect(relu?.statut).toBe('BROUILLON');
+  } finally {
+    await request.put(`${api}/company`, { headers, data: { siret: societe.siret } });
+  }
+});
