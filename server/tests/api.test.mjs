@@ -15826,6 +15826,19 @@ if (!TEST_DATABASE_URL) {
       assert.ok(texte.includes('Acompte demandé : 12,5 %'), texte);
     });
 
+    // Audit n° 13 : la saisie admet deux décimales pour un taux de TVA ou d'acompte (1,75 %, 12,25 %).
+    // Imprimés avec une seule décimale, ils deviendraient 1,8 % et 12,3 %.
+    test('décimales : taux de TVA et taux d’acompte à deux décimales imprimés sans arrondi', async () => {
+      const client = await creerClient(`TEST Client deux décimales devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis à deux décimales', [
+        { designation: 'TEST Fourniture au second taux', quantite: 1, prixUnitaireHt: 8, tauxTva: 1.75 },
+      ], { acompteExige: true, tauxAcompte: 12.25 });
+      const { texte } = await texteDevis(devis.id);
+      assert.match(texte, /^TEST Fourniture au second taux\s+1\s+8,00 €\s+1,75 %\s+8,00 €$/m, texte);
+      assert.ok(texte.includes('TVA 1,75 % sur 8,00 € : 0,14 €') && texte.includes('TVA totale : 0,14 €'), texte);
+      assert.ok(texte.includes('Acompte demandé : 12,25 %'), texte);
+    });
+
     test('prix d’achat prévu : absent du PDF sous toutes ses écritures', async () => {
       const client = await creerClient(`TEST Client achat devis ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Devis au prix d’achat', [{ designation: 'TEST Fourniture achetée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, prixAchatUnitaireHt: 6543.21 }]);
