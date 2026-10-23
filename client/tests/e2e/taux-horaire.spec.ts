@@ -39,7 +39,7 @@ test('un conducteur suit son chantier sans taux ni coût de main-d’œuvre ; l�
 
   // Vendu 200 € : 100 € de fourniture et 2 h de pose à 50 € ; 3 h pointées à 47 € (141 €) :
   // heures et main-d'œuvre dépassées, marge du jour 59 €.
-  const client = await creerClient('taux-horaire', false);
+  const client = await creerClient('taux-horaire');
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Taux horaire E2E ${suffixe}`, lignes: [
     { designation: 'Caméra', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 50, tauxTva: 20 },

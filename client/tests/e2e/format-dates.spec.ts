@@ -12,7 +12,7 @@ test('la fiche chantier affiche les dates de ses achats au format JJ-MM-AAAA', a
     return response.json();
   };
   const suffixe = Date.now();
-  const client = await creerClient('format-dates', false);
+  const client = await creerClient('format-dates');
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Format dates E2E ${suffixe}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
   await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
   await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });

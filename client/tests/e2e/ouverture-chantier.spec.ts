@@ -30,7 +30,7 @@ async function preparer(request: APIRequestContext, token: string, creerClient: 
   const conducteur = await creerCompte('CONDUCTEUR_TRAVAUX', 'Conducteur partant');
   const remplacant = await creerCompte('CONDUCTEUR_TRAVAUX', 'Conducteur remplaçant');
   const commercial = await creerCompte('COMMERCIAL', 'Commercial ouverture');
-  const client = await creerClient(`ouverture-${cle}`, false);
+  const client = await creerClient(`ouverture-${cle}`);
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Ouverture ${cle} E2E ${suffixe}`, lignes: [
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 50, tauxTva: 20 },
   ] }) as { id: string; numero: string; objet: string; clientId: string };
@@ -493,7 +493,7 @@ test('un refus de la fiche garde la saisie, et le commercial déjà enregistré 
   const autreCommercial = await envoyer('post', '/users', { email: `ouverture.refus.autre.${suffixe}@iris.test`, name: `Autre commercial ${suffixe}`, role: 'COMMERCIAL' }) as Compte;
   const ouvert = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER', responsableId: conducteur.id, commercialId: commercial.id }) as { id: string; nom: string };
   // Une autre affaire, dont la référence est déjà portée par son chantier.
-  const autreClient = await creerClient('ouverture-refus-autre', false);
+  const autreClient = await creerClient('ouverture-refus-autre');
   const autreDevis = await envoyer('post', '/devis', { clientId: autreClient.id, objet: `Autre affaire E2E ${suffixe}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] }) as { id: string; numero: string };
   await envoyer('put', `/devis/${autreDevis.id}/statut`, { statut: 'ENVOYE' });
   await envoyer('post', `/devis/${autreDevis.id}/signature`, { signataire: 'Client E2E', confirme: true });

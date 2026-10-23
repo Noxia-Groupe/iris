@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
@@ -63,13 +64,26 @@ async function preparerFacturation(request: APIRequestContext, token: string) {
   }
 }
 
+// Lot 6a-2 bis : un devis ne se signe et une facture ne s'émet que pour un client identifié
+// (raison sociale, adresse de facturation et SIREN, ou nom complet et adresse d'un particulier « pas
+// de SIRET »). Le SIREN d'un client de parcours, unique en base, est tiré au hasard : un tirage déjà
+// pris sur une base conservée (409) est retenté.
+export const sirenAuHasard = () => String(randomInt(100_000_000, 1_000_000_000));
+export async function creerClientAvecSiren(request: APIRequestContext, headersRequete: Record<string, string>, data: Record<string, unknown>) {
+  for (let essai = 1; ; essai += 1) {
+    const response = await request.post(`${api}/clients`, { headers: headersRequete, data: { ...data, siren: sirenAuHasard() } });
+    if (response.status() === 409 && essai < 5) continue;
+    expect(response.status(), await response.text()).toBe(201);
+    return response.json() as Promise<{ id: string; raisonSociale: string; siren: string }>;
+  }
+}
+
 async function creerClient(request: APIRequestContext, token: string, libelle: string, avecSite: boolean) {
   // Nom unique, sans rang imposé : sur une base qui a déjà servi, le client peut être au-delà
   // des 200 premiers ; un parcours le choisit donc par la recherche (choisirClient).
   const raisonSociale = `E2E ${libelle} ${Date.now()}`;
-  const response = await request.post(`${api}/clients`, { headers: headers(token), data: { raisonSociale } });
-  expect(response.status(), await response.text()).toBe(201);
-  const { id } = await response.json() as { id: string };
+  // Client professionnel identifié : SIREN, et site de facturation sauf demande contraire.
+  const { id } = await creerClientAvecSiren(request, headers(token), { raisonSociale });
   if (avecSite) {
     const site = await request.post(`${api}/clients/${id}/sites`, { headers: headers(token), data: { nom: 'Facturation', adresse: '2 rue du Parcours', codePostal: '14000', ville: 'Caen', estSiteFacturation: true } });
     expect(site.status(), await site.text()).toBe(201);

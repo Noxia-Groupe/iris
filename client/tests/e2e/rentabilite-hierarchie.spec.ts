@@ -66,7 +66,7 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
     const commercial = await creerCompte('commercial', 'Commercial chaîne', 'COMMERCIAL');
 
     // 100 € de fourniture et 2 h de pose à 50 € : 200 € vendus ; 250 € d'achats → perte de 50 €.
-    const client = await creerClient('rentabilite-hierarchie', false);
+    const client = await creerClient('rentabilite-hierarchie');
     const ouvrirAffaire = async (objet: string) => {
       const devis = await envoyer('post', '/devis', { clientId: client.id, objet, lignes: [
         { designation: 'Caméra', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },

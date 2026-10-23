@@ -58,7 +58,7 @@ test('le rapport de chantier se télécharge au format A4', async ({ request, se
     expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
     return reponse.json();
   };
-  const client = await creerClient('rapport-a4', false);
+  const client = await creerClient('rapport-a4');
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Rapport A4 E2E ${Date.now()}`, lignes: [
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
   ] }) as { id: string };

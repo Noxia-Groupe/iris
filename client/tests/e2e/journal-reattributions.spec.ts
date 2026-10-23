@@ -13,7 +13,7 @@ test('titulaire, commercial et encaissement changés se lisent au journal de la 
     return reponse.json();
   };
   const suffixe = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-  const client = await creerClient('journal-181', false);
+  const client = await creerClient('journal-181');
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Journal 181 ${suffixe.replace('.', ' ')}`, lignes: [
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
   ] }) as { id: string };

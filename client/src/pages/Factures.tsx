@@ -352,7 +352,11 @@ export default function Factures() {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 409) await charger();
-      return setErreur(data.error || 'Émission impossible.');
+      // Le refus (identité de la société ou du client incomplète, chronologie…) s'affiche en tête de
+      // page : on y remonte, sans quoi il resterait hors de vue sous une longue liste ou à 375 px.
+      setErreur(data.error || 'Émission impossible.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
     setSucces(`Facture ${data.numero} émise et figée.`);
     await charger();
@@ -418,7 +422,7 @@ export default function Factures() {
         </div>
       </div>
 
-      {erreur && <p className="text-red-600">{erreur}</p>}
+      {erreur && <p role="alert" className="text-red-600">{erreur}</p>}
       {erreurListe && <p className="text-red-600">{erreurListe}</p>}
       <p data-testid="derniere-date-facture" className="text-sm text-gray-600">Dernière facture numérotée : {derniereDateEmission === undefined ? (erreurListe ? 'indisponible' : 'en cours de chargement') : derniereDateEmission ? formatDate(derniereDateEmission) : 'aucune'}.</p>
       {succes && <p className="text-emerald-700">{succes}</p>}

@@ -1116,7 +1116,7 @@ test.describe('Facturation — parcours utilisateur', () => {
   });
 
   test('fait signer le client désigné et identifie l’employé qui enregistre', async ({ allerSurPageAdmin, apiAdmin, creerClient, request, session }) => {
-    const client = await creerClient('signataire-client', false);
+    const client = await creerClient('signataire-client');
     const apiResponse = await apiAdmin.get('/company');
     expect(apiResponse.ok(), await apiResponse.text()).toBeTruthy();
     const api = new URL('/api', apiResponse.url()).toString().replace(/\/$/, '');

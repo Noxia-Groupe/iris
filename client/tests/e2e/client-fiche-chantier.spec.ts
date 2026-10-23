@@ -1,5 +1,5 @@
 import type { APIRequestContext, Page } from '@playwright/test';
-import { test, expect, choisirClient } from './fixtures';
+import { test, expect, choisirClient, creerClientAvecSiren } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -57,10 +57,13 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
   const headers = auth(session.token);
   await remplirAuDela(request, headers);
   const prefixe = `ZZZ E2E 111 fiche ${Date.now()}`;
+  // Lot 6a-2 bis : le devis du client initial se signe ; chaque client est donc identifié (SIREN
+  // et site de facturation).
   const creerClient = async (libelle: string) => {
-    const reponse = await request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefixe} ${libelle}` } });
-    expect(reponse.status(), await reponse.text()).toBe(201);
-    return (await reponse.json()) as { id: string; raisonSociale: string };
+    const client = await creerClientAvecSiren(request, headers, { raisonSociale: `${prefixe} ${libelle}` });
+    const site = await request.post(`${api}/clients/${client.id}/sites`, { headers, data: { nom: 'Facturation', adresse: '2 rue du Parcours', codePostal: '14000', ville: 'Caen', estSiteFacturation: true } });
+    expect(site.status(), await site.text()).toBe(201);
+    return client;
   };
   const initial = await creerClient('initial');
   const autre = await creerClient('autre');
@@ -195,7 +198,7 @@ test('#111 : client de la fiche chantier hors des 200 premiers, réaffecté puis
 // de la fiche, et refusé tant qu'une intervention SAV y est rattachée.
 test('changement de client tracé au journal de la fiche, puis refusé une fois une intervention rattachée', async ({ allerSurPageAdmin, creerClient, request, session }) => {
   const headers = auth(session.token);
-  const premier = await creerClient('trace premier', false);
+  const premier = await creerClient('trace premier');
   const second = await creerClient('trace second', false);
   const troisieme = await creerClient('trace troisième', false);
   const chantier = await ouvrirAffaire(request, headers, premier.id, `Trace client ${premier.raisonSociale}`);

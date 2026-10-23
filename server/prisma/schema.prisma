@@ -453,6 +453,9 @@ model Client {
   raisonSociale        String
   nomCommercial        String?
   siren                String?              @unique
+  // Case « pas de SIRET » (lot 6a-2 bis) : un particulier, que l'on facture sans SIREN ; son nom
+  // complet tient lieu de raison sociale. La base refuse un client « pas de SIRET » qui garde un SIREN.
+  sansSiret            Boolean              @default(false)
   tvaIntra             String?
   telephone            String?
   email                String?
