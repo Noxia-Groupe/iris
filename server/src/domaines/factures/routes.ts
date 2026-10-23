@@ -16,11 +16,12 @@ import { csvComptable } from '../../commun/csv';
 import { getCompanySettings } from '../administration/metier';
 import { CLES_COMPTABLES, verrouillerParametrageComptable, ImputationIncompletError, ecrituresPourPiece } from '../comptabilite/metier';
 import {
-  factureInclude, SITE_FACTURATION_ORDRE, formaterAdresseFacturation, FactureRattachementRefuse, ventilationTvaDerivee, ventilationFacture,
+  factureInclude, formaterAdresseFacturation, FactureRattachementRefuse, ventilationTvaDerivee, ventilationFacture,
   lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee, refusDocumentFacture,
 } from './metier';
 import { rendreDocumentFacturePdf } from './pdf';
 import { champsIdentiteManquants, figerIdentiteEmetteur, IdentiteEmetteurIncompleteError } from '../documents/identite';
+import { exigerIdentiteClient, IdentiteClientIncompleteError } from '../documents/identiteClient';
 import { avecSoldes, synchroniserStatutReglement } from '../reglements/metier';
 import { FACTURE_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiFacture, validerDestinataire } from '../documents/envois';
 
@@ -341,10 +342,13 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
         if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
         const mentions = await tx.mentionsLegalesVersion.findFirst({ where: { actif: true, publieeLe: { not: null } }, select: { id: true } });
         if (!mentions) return { erreur: 'LEGAL_MENTIONS_MISSING' as const };
-        const siteFacturation = await tx.clientSite.findFirst({ where: { clientId: facture.clientId }, orderBy: SITE_FACTURATION_ORDRE });
-        if (!siteFacturation) return { erreur: 'CLIENT_ADRESSE_MISSING' as const };
-        // Avant le numéro : un refus ne consomme aucun numéro de la séquence.
+        // Avant le numéro : un refus ne consomme aucun numéro de la séquence, et annule la copie de
+        // l'identité de la société. La société passe avant le client, comme à la signature d'un devis.
         const identiteEmetteurId = await figerIdentiteEmetteur(tx);
+        // Lot 6a-2 bis : identité minimale du client (raison sociale, adresse de facturation et SIREN,
+        // ou nom complet et adresse pour un particulier « pas de SIRET »), relue dans la transaction.
+        // Le site retenu est celui dont l'adresse est copiée sur la facture.
+        const { siteFacturation } = await exigerIdentiteClient(tx, facture.clientId, 'd’émettre une facture');
         const ecritures = await ecrituresPourPiece(tx, facture);
         const sequence = await tx.sequenceFacture.upsert({ where: { annee }, create: { annee, dernierNumero: 1 }, update: { dernierNumero: { increment: 1 } } });
         const identite = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { prefixeFacture: true } });
@@ -360,12 +364,11 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
         if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Facture introuvable.' });
         if (resultat.erreur === 'CHRONOLOGY') return res.status(409).json({ error: `La numérotation est chronologique : la dernière facture émise porte la date du ${dateFrancaise(resultat.limite)}. Ce brouillon ne peut plus être numéroté.` });
         if (resultat.erreur === 'LEGAL_MENTIONS_MISSING') return res.status(409).json({ error: 'Aucune version publiée des mentions légales et CGV n’est active. Publiez-en une avant d’émettre une facture.' });
-        if (resultat.erreur === 'CLIENT_ADRESSE_MISSING') return res.status(409).json({ error: 'Ce client n’a aucun site : l’adresse de facturation est une mention obligatoire. Créez-lui un site de facturation avant d’émettre.' });
         return res.status(409).json({ error: 'Seul un brouillon peut être émis.' });
       }
       res.json(decimalToNumber(resultat.facture));
     } catch (error) {
-      if (error instanceof ImputationIncompletError || error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
+      if (error instanceof ImputationIncompletError || error instanceof IdentiteEmetteurIncompleteError || error instanceof IdentiteClientIncompleteError) return res.status(409).json({ error: error.message });
       if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Numérotation de facture déjà attribuée, veuillez réessayer.' });
       res.status(500).json({ error: 'Émission de facture impossible.' });
     }

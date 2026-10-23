@@ -1,6 +1,6 @@
 import express from 'express';
 import type { Express } from 'express';
-import { prisma } from '../../db';
+import { prisma, transactionVerifiee } from '../../db';
 import { ROLE_TECHNICIEN } from '../../droits/roles';
 import { requirePermission } from '../../droits/permissions';
 import { perimetreChantiers } from '../../droits/perimetres';
@@ -8,7 +8,7 @@ import { type AuthRequest, requireAuth } from '../../http/auth';
 import type { ApiRequest } from '../../http/cles-api';
 import { paramId } from '../../http/requete';
 import { routeMixte } from '../../http/routes-mixtes';
-import { clientPayload, contactPayload, sitePayload } from './metier';
+import { ClientSaisieError, MESSAGE_SANS_SIRET_AVEC_SIREN, clientPayload, contactPayload, sitePayload, verifierSansSiret } from './metier';
 import { listerEquipementsClient, creerEquipementClient, archiverEquipementClient } from './equipements';
 
 // --- Référentiel Clients natif Iris ---
@@ -28,6 +28,9 @@ function clientApiError(res: express.Response, error: unknown) {
   if ((error as { code?: string })?.code === 'P2025') {
     return res.status(404).json({ error: 'Enregistrement introuvable.' });
   }
+  if (error instanceof ClientSaisieError) return res.status(400).json({ error: error.message });
+  // Filet de la contrainte de la base, si une écriture concurrente passait le contrôle de l'API.
+  if (error instanceof Error && error.message.includes('Client_sansSiret_siren_check')) return res.status(400).json({ error: MESSAGE_SANS_SIRET_AVEC_SIREN });
   const message = error instanceof Error ? error.message : 'Erreur client.';
   const saisie = message.startsWith('Champ client invalide') || message.includes('obligatoire') || message.includes('SIREN');
   return res.status(saisie ? 400 : 500).json({ error: saisie ? message : 'Erreur client.' });
@@ -89,7 +92,17 @@ const creerClient: express.RequestHandler = async (req, res) => {
 const modifierClient: express.RequestHandler = async (req, res) => {
   try {
     const data = clientPayload((req.body ?? {}) as Record<string, unknown>);
-    res.json(await prisma.client.update({ where: { id: paramId(req) }, data: data as never, include: clientDetailInclude }));
+    const id = paramId(req);
+    const client = await transactionVerifiee(async tx => {
+      // Fiche verrouillée : la case « pas de SIRET » et le SIREN se contrôlent sur l'état final,
+      // requête et fiche réunies, sans qu'une modification concurrente s'intercale.
+      const [actuel] = await tx.$queryRaw<Array<{ siren: string | null; sansSiret: boolean }>>`SELECT "siren", "sansSiret" FROM "Client" WHERE "id" = ${id} FOR UPDATE`;
+      if (!actuel) return null;
+      verifierSansSiret((data.sansSiret as boolean | undefined) ?? actuel.sansSiret, 'siren' in data ? (data.siren as string | null) : actuel.siren);
+      return tx.client.update({ where: { id }, data: data as never, include: clientDetailInclude });
+    });
+    if (!client) return res.status(404).json({ error: 'Enregistrement introuvable.' });
+    res.json(client);
   } catch (error) {
     clientApiError(res, error);
   }

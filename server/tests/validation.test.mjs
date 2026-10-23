@@ -88,6 +88,22 @@ describe('Fiche client', () => {
     const data = clientPayload({ telephone: '0102030405' });
     assert.deepEqual(Object.keys(data), ['telephone']);
   });
+
+  // Lot 6a-2 bis : case « pas de SIRET » d'un particulier.
+  test('la case « pas de SIRET » est un booléen strict, incompatible avec un SIREN à la création', () => {
+    assert.equal(clientPayload({ raisonSociale: 'X', sansSiret: true }, true).sansSiret, true);
+    assert.equal(clientPayload({ raisonSociale: 'X', sansSiret: false, siren: '123456789' }, true).sansSiret, false);
+    assert.equal('sansSiret' in clientPayload({ raisonSociale: 'X' }, true), false);
+    for (const valeur of ['oui', 'true', 1, 0, null, {}]) {
+      assert.throws(() => clientPayload({ raisonSociale: 'X', sansSiret: valeur }, true), /^Error: Champ client invalide : sansSiret$/);
+      assert.throws(() => clientPayload({ sansSiret: valeur }), /^Error: Champ client invalide : sansSiret$/);
+    }
+    assert.throws(() => clientPayload({ raisonSociale: 'X', sansSiret: true, siren: '123 456 789' }, true), /^Error: Un client sans SIRET ne peut pas avoir de SIREN : videz le SIREN ou décochez la case\.$/);
+    assert.equal(clientPayload({ raisonSociale: 'X', sansSiret: true, siren: '' }, true).siren, null);
+    assert.throws(() => clientPayload({ sansSiret: true }, true), /nom complet est obligatoire/);
+    // À la modification, la contradiction se juge sur la fiche entière, sous verrou, par la route.
+    assert.deepEqual(clientPayload({ sansSiret: true }), { sansSiret: true });
+  });
 });
 
 describe('Contacts et sites', () => {

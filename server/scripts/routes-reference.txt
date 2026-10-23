@@ -55,7 +55,7 @@ GET /api/factures/export-comptable.csv requireAuth#07b983da0ce5 > requireAdmin#7
 POST /api/mentions-legales/:version/publier requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1b5902ebb285
 POST /api/mentions-legales requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#80030fa61cd1
 GET /api/mentions-legales requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#dcdb04c92920
-POST /api/factures/:id/emettre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#540f6b430f38
+POST /api/factures/:id/emettre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#87aad10d2896
 POST /api/factures/:id/regler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7c4c1669baf6
 POST /api/factures/:id/annuler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9ae7ad2b98c2
 POST /api/factures/:id/avoirs requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4527855323e1
@@ -166,8 +166,8 @@ POST /api/clients requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerCl
 POST /api/v1/clients <anonymous>{scope="clients:write"}#4aeb6d464b38 > creerClient#fe449de902f6
 GET /api/clients/:id requireAuth#07b983da0ce5 > <anonymous>{permission="clients:read"}#c4dc4769916b > lireClient#0dfd25537b4b
 GET /api/v1/clients/:id <anonymous>{scope="clients:read"}#4aeb6d464b38 > lireClient#0dfd25537b4b
-PUT /api/clients/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > modifierClient#3ae2baf7184c
-PUT /api/v1/clients/:id <anonymous>{scope="clients:write"}#4aeb6d464b38 > modifierClient#3ae2baf7184c
+PUT /api/clients/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > modifierClient#d2dceb282762
+PUT /api/v1/clients/:id <anonymous>{scope="clients:write"}#4aeb6d464b38 > modifierClient#d2dceb282762
 DELETE /api/clients/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > desactiverClient#599a87672d01
 DELETE /api/v1/clients/:id <anonymous>{scope="clients:write"}#4aeb6d464b38 > desactiverClient#599a87672d01
 POST /api/clients/:clientId/contacts requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerContact#e8b07c8672f1
@@ -206,7 +206,7 @@ PATCH /api/devis/:id requireAuth#07b983da0ce5 > <anonymous>{permission="devis:wr
 PATCH /api/v1/devis/:id <anonymous>{scope="devis:write"}#4aeb6d464b38 > modifierDevis#1c85bb61d7b1
 POST /api/devis/:id/revisions requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerRevision#7b32048f7b7c
 POST /api/v1/devis/:id/revisions <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerRevision#7b32048f7b7c
-POST /api/devis/:id/signature requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#279483881390
+POST /api/devis/:id/signature requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#e26d1a256d5c
 GET /api/devis/:id/document.pdf requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > imprimerDevis#b0e632f75b6b
 GET /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > lireEnvoisDevis#2f968ae9a8f2
 POST /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > envoyerDevis#a62f429280b0

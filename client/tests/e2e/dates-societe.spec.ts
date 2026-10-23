@@ -47,7 +47,7 @@ async function signerDevisPret(request: APIRequestContext, token: string, creerC
     expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
     return response.json();
   };
-  const client = await creerClient(libelle, false);
+  const client = await creerClient(libelle);
   const devis = await envoyer('/devis', 'post', { clientId: client.id, objet: `${libelle} E2E ${Date.now()}`, lignes: [
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
   ] }) as { id: string };
@@ -240,7 +240,7 @@ test.describe('navigateur à Gambier, société à Nouméa : fiche chantier', ()
     const suffixe = Date.now();
     const conducteur = await envoyer('post', '/users', { email: `dates.conducteur.${suffixe}@iris.test`, name: `Conducteur dates ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' }) as { id: string };
     const commercial = await envoyer('post', '/users', { email: `dates.commercial.${suffixe}@iris.test`, name: `Commercial dates ${suffixe}`, role: 'COMMERCIAL' }) as { id: string };
-    const client = await creerClient('dates-fiche', false);
+    const client = await creerClient('dates-fiche');
     const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Dates fiche E2E ${suffixe}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
     await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
     await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });

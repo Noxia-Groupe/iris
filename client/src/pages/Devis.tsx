@@ -168,7 +168,11 @@ export default function Devis() {
     if (!res.ok) throw new Error(data.error || 'Signature impossible.');
     setDevisASigner(null); setSignataire(''); setConfirmationSignature(false);
     await load();
-  } catch (e) { setError(e instanceof Error ? e.message : 'Signature impossible.'); } finally { setSaving(false); } };
+  } catch (e) {
+    // Le refus (identité de la société ou du client incomplète…) s'affiche au-dessus du formulaire :
+    // on y remonte, sans quoi il resterait hors de vue à 375 px.
+    setError(e instanceof Error ? e.message : 'Signature impossible.'); window.scrollTo({ top: 0, behavior: 'smooth' });
+  } finally { setSaving(false); } };
   // Changements de statut du cycle de vie (« Marquer envoyé », « Repasser en brouillon », « Refuser »…).
   // « Repasser en brouillon » (lot 6a-3 bis, décision de Nelson du 23-10-2026) vaut pour tout devis
   // envoyé non signé, qu'il le soit par la préparation d'un envoi ou par « Marquer envoyé » (choix

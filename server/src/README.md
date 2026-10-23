@@ -60,7 +60,9 @@ server/
                               (module actif, validation des événements)
     domaines/factures/        routes.ts, metier.ts (sélection, adresse, avoirs), pdf.ts
     domaines/documents/       gabarit.ts (modèle PDF commun), identite.ts (identité de
-                              l'émetteur figée à l'émission), logo.ts (validation), routes.ts (logo),
+                              l'émetteur figée à l'émission), identiteClient.ts (identité
+                              minimale du client exigée à la signature d'un devis et à
+                              l'émission d'une facture), logo.ts (validation), routes.ts (logo),
                               envois.ts (envoi par la messagerie : destinataire, objet et texte,
                               journal des envois ; routes dans les domaines devis et factures)
     domaines/reglements/      routes.ts, metier.ts (moyens, soldes, statut)
@@ -90,7 +92,7 @@ Domaines :
 | `contrats` | contrats de maintenance et visites (**déplacé**) |
 | `planning` | affectations, types d'événement, partage public (**déplacé**) |
 | `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**), envoi par la messagerie (lot 6a-3) |
-| `documents` | modèle PDF commun, identité de l'émetteur figée à l'émission, logo des documents (lot 6a-1) ; envoi d'un document par la messagerie et journal des envois (lot 6a-3) |
+| `documents` | modèle PDF commun, identité de l'émetteur figée à l'émission, logo des documents (lot 6a-1) ; identité minimale du client pour signer un devis et émettre une facture (lot 6a-2 bis) ; envoi d'un document par la messagerie et journal des envois (lot 6a-3) |
 | `reglements` | encaissements et affectations (**déplacé**) |
 | `comptabilite` | plan comptable, règles, TVA, import, écritures (**déplacé**) |
 | `statistiques` | tableaux de bord et statistiques (**déplacé**) |
