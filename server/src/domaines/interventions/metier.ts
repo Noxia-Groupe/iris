@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
-import { ROLE_RESPONSABLE, isAdminRole } from '../../droits/roles';
+import { COMPTE_SYSTEME_ID, NOM_COMPTE_SYSTEME, ROLE_RESPONSABLE, isAdminRole } from '../../droits/roles';
 import type { AuthRequest } from '../../http/auth';
 import { paramId } from '../../http/requete';
 import { aujourdHuiEntreprise, dateIsoStricte, dateSeuleEnJourCivil } from '../../commun/dates';
@@ -20,12 +20,11 @@ export function chantierDuJournalReduit(instantane: Prisma.JsonValue | null): Pr
 }
 
 // --- Interventions SAV natives ---
-// Auteur d'une écriture du journal SAV. `null` désigne la génération automatique des visites
-// (lot pilote 5), seule écriture sans compte auteur, au nom ci-dessous (contrainte CHECK en
-// base) ; une requête doit, elle, porter son compte.
-export const AUTEUR_GENERATION_AUTOMATIQUE = 'Génération automatique';
-export function auteurJournalSav(req: AuthRequest | null): { auteurId: string | null; auteurNom: string } {
-  if (req === null) return { auteurId: null, auteurNom: AUTEUR_GENERATION_AUTOMATIQUE };
+// Auteur d'une écriture du journal SAV. `null` désigne une écriture automatique (génération des
+// visites, lot pilote 5), portée par le compte système (décision de Nelson du 22-10-2026) ; une
+// requête doit, elle, porter son compte. La base exige un auteur pour toute nouvelle écriture.
+export function auteurJournalSav(req: AuthRequest | null): { auteurId: string; auteurNom: string } {
+  if (req === null) return { auteurId: COMPTE_SYSTEME_ID, auteurNom: NOM_COMPTE_SYSTEME };
   const user = req.user;
   if (!user) throw new Error('Écriture du journal SAV sans compte auteur.');
   return { auteurId: user.id, auteurNom: user.name };

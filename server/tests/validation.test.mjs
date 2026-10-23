@@ -602,9 +602,12 @@ test('peutVoirFinance : jamais pour un technicien, même avec un accès financie
 
 // Ajout du second audit interne de #293 : l'auteur du journal SAV.
 describe('Lot pilote 5 : auteur du journal SAV', () => {
-  test('seule la génération automatique écrit sans compte ; une requête sans compte est refusée', async () => {
-    const { auteurJournalSav, AUTEUR_GENERATION_AUTOMATIQUE } = await import('../dist/src/domaines/interventions/metier.js');
-    assert.deepEqual(auteurJournalSav(null), { auteurId: null, auteurNom: AUTEUR_GENERATION_AUTOMATIQUE });
+  // Décision de Nelson du 22-10-2026 : la génération automatique écrit au nom du compte système.
+  test('la génération automatique écrit au nom du compte système ; une requête sans compte est refusée', async () => {
+    const { auteurJournalSav } = await import('../dist/src/domaines/interventions/metier.js');
+    const { COMPTE_SYSTEME_ID, NOM_COMPTE_SYSTEME } = await import('../dist/src/droits/roles.js');
+    assert.deepEqual(auteurJournalSav(null), { auteurId: '00000000-0000-4000-8000-000000000001', auteurNom: 'Iris (automatique)' });
+    assert.deepEqual([COMPTE_SYSTEME_ID, NOM_COMPTE_SYSTEME], ['00000000-0000-4000-8000-000000000001', 'Iris (automatique)']);
     assert.deepEqual(auteurJournalSav({ user: { id: 'compte', name: 'Nom' } }), { auteurId: 'compte', auteurNom: 'Nom' });
     assert.throws(() => auteurJournalSav({}), /sans compte auteur/);
   });

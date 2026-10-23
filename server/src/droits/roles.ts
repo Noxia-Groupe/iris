@@ -15,6 +15,15 @@ export const ROLE_RESPONSABLE = 'RESPONSABLE';
 // tous les chantiers (non annulés), leur rentabilité et leurs alertes si la société l'a
 // laissé destinataire (Parametres.rentabiliteDirecteurs), et ne saisit rien.
 export const ROLE_DIRECTEUR = 'DIRECTEUR';
+// Compte système (décision de Nelson du 22-10-2026, lot pilote 5) : auteur des écritures
+// automatiques, comme la génération des visites. Créé par la migration, il ne se connecte jamais
+// (inactif, sans mot de passe, adresse réservée), n'a aucun droit et n'apparaît pas dans la
+// gestion des comptes ; la base refuse de le modifier ou de le supprimer.
+export const ROLE_SYSTEME = 'SYSTEME';
+export const COMPTE_SYSTEME_ID = '00000000-0000-4000-8000-000000000001';
+// Nom par défaut, à confirmer (passation, section 4) : le changer demande une migration, la base figeant le compte.
+export const NOM_COMPTE_SYSTEME = 'Iris (automatique)';
+export const EMAIL_COMPTE_SYSTEME = 'systeme@iris.invalid';
 
 export function isAdminRole(role: string | undefined | null): boolean {
   return role === 'ADMIN' || role === ROLE_SUPERADMIN;

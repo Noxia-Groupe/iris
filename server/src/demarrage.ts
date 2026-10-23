@@ -2,7 +2,7 @@ import express from 'express';
 import type http from 'http';
 import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from './db';
-import { ROLE_SUPERADMIN } from './droits/roles';
+import { COMPTE_SYSTEME_ID, ROLE_SUPERADMIN } from './droits/roles';
 import { journaliserAdministration, purgerJournalAdministration } from './commun/journal-administration';
 import { upsertSingleton } from './domaines/parametres/metier';
 import { normalizeEmail } from './domaines/authentification/sso';
@@ -64,6 +64,12 @@ export const ensureSuperAdmins = async () => {
 
 async function assurerSuperAdmin(email: string) {
   const existing = await prisma.user.findUnique({ where: { email } });
+  // L'adresse réservée du compte système, mise par erreur dans la liste : ni promotion ni nouvel
+  // essai (la base refuserait toute modification de ce compte), un signalement explicite.
+  if (existing?.id === COMPTE_SYSTEME_ID) {
+    console.error(`[DÉMARRAGE] ${email} est l'adresse réservée du compte système : retirez-la de SUPERADMIN_EMAILS, ce compte n'est jamais promu.`);
+    return;
+  }
   // Promotions et créations du démarrage : journalisées comme les autres changements de droits,
   // sans auteur (AUTEUR_JOURNAL_DEMARRAGE), et réservées au super administrateur.
   if (existing) {

@@ -30,211 +30,211 @@ USE /api/comptabilite/importer jsonParser{readOptions.defaultCharset="utf-8",rea
 USE /api/company/logo jsonParser{readOptions.defaultCharset="utf-8",readOptions.inflate=true,readOptions.limit=1048576,readOptions.verify=false}#223e9f48a546
 USE / jsonParser{readOptions.defaultCharset="utf-8",readOptions.inflate=true,readOptions.limit=102400,readOptions.verify=false}#223e9f48a546
 USE / <anonymous>#aad6e7e7a45c
-GET /api/factures/chronologie requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d089685a5f45
-GET /api/factures/a-regler requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#da27e52f58a3
-GET /api/factures requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#bb316d5281c8
-GET /api/factures/:id/document.pdf requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#21a2ee87a500
-GET /api/factures/:id/journal requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
-GET /api/factures/:id/tracabilite requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4d3a959b39f5
-POST /api/factures requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d1503c57bcdd
-GET /api/facturation/prete-a-facturer requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#be63c1fffb33
-GET /api/comptabilite requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#13e90d7b003f
-POST /api/comptabilite/comptes requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#6b69dfe1117a
-PATCH /api/comptabilite/comptes/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#62c34363c7c5
-GET /api/comptabilite/comptes/:id/journal requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#7fffc39550cb
-PATCH /api/comptabilite/comptes/:id/activation requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#79cdf842beeb
-POST /api/comptabilite/importer requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#638b255df1a4
-GET /api/comptabilite/regles/journal requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#56c1cb61b6e4
-PUT /api/comptabilite/regles/:cle requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#e4ddd31ea190
-DELETE /api/comptabilite/regles/:cle requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#32bd9e5ceaa1
-DELETE /api/comptabilite/tva/:taux requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#b87ef7b0ae80
-PUT /api/comptabilite/tva/:taux requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#a8cfe1867b81
-GET /api/factures/export-comptable.csv requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#41a19b7b85af
-POST /api/mentions-legales/:version/publier requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#1b5902ebb285
-POST /api/mentions-legales requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#80030fa61cd1
-GET /api/mentions-legales requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#dcdb04c92920
-POST /api/factures/:id/emettre requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#540f6b430f38
-POST /api/factures/:id/regler requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#7c4c1669baf6
-POST /api/factures/:id/annuler requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#9ae7ad2b98c2
-POST /api/factures/:id/avoirs requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4527855323e1
-GET /api/reglements requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c8df78a7855a
-POST /api/reglements requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#51f9704bcdc4
-POST /api/reglements/:id/contrepasser requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#f9592331ed59
-GET /api/contrats-maintenance requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#106802cb4df7
-GET /api/contrats-maintenance/generation-visites requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#373a35ed462c
-POST /api/contrats-maintenance/generation-visites requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#1e9928683461
-GET /api/contrats-maintenance/:id/journal-saisies requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#3f95c0d7c799
-POST /api/contrats-maintenance requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#cb003fe48a0c
-PATCH /api/contrats-maintenance/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c56b20c5c1cc
-PATCH /api/contrats-maintenance/:id/statut requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0a3d898d249d
-POST /api/contrats-maintenance/:id/avancer-echeance requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#6c7a62204870
-POST /api/contrats-maintenance/:id/generer-intervention requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#ff2867025ef0
-POST /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#051bd6c57c60 > <anonymous>#5f8877e44fed
-GET /api/interventions requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#174bd48a1244
-GET /api/interventions/journee requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
-GET /api/interventions/:id requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#68266b8fd47c
-GET /api/interventions/:id/couts requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#3bbada459c05
-POST /api/interventions/:id/couts/heures requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#971650f71db2
-POST /api/interventions/:id/couts/achats requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#aaaf5b8c9ae8
-PATCH /api/interventions/:id/couts/:type/:coutId requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#b6e1b61bab0d
-POST /api/interventions/:id/couts/:type/:coutId/:action requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#60eb271babe0
-GET /api/interventions/:id/journal-saisies requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#6d9623c26cdd
-POST /api/interventions/:id/rapports requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#a829e5e2fbfc
-POST /api/interventions/rapports/:rapportId/signature requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#c8a45558077c
-PATCH /api/interventions/:id/statut requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#dc24b6b412aa
-GET /api/planning/interventions-a-planifier requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#02fa19bc763a
-PUT /api/interventions/:id/planning requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d54544a33096
+GET /api/factures/chronologie requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d089685a5f45
+GET /api/factures/a-regler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#da27e52f58a3
+GET /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#bb316d5281c8
+GET /api/factures/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#21a2ee87a500
+GET /api/factures/:id/journal requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
+GET /api/factures/:id/tracabilite requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4d3a959b39f5
+POST /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d1503c57bcdd
+GET /api/facturation/prete-a-facturer requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#be63c1fffb33
+GET /api/comptabilite requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#13e90d7b003f
+POST /api/comptabilite/comptes requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#6b69dfe1117a
+PATCH /api/comptabilite/comptes/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#62c34363c7c5
+GET /api/comptabilite/comptes/:id/journal requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7fffc39550cb
+PATCH /api/comptabilite/comptes/:id/activation requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#79cdf842beeb
+POST /api/comptabilite/importer requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#638b255df1a4
+GET /api/comptabilite/regles/journal requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#56c1cb61b6e4
+PUT /api/comptabilite/regles/:cle requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#e4ddd31ea190
+DELETE /api/comptabilite/regles/:cle requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#32bd9e5ceaa1
+DELETE /api/comptabilite/tva/:taux requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b87ef7b0ae80
+PUT /api/comptabilite/tva/:taux requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#a8cfe1867b81
+GET /api/factures/export-comptable.csv requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#41a19b7b85af
+POST /api/mentions-legales/:version/publier requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1b5902ebb285
+POST /api/mentions-legales requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#80030fa61cd1
+GET /api/mentions-legales requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#dcdb04c92920
+POST /api/factures/:id/emettre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#540f6b430f38
+POST /api/factures/:id/regler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7c4c1669baf6
+POST /api/factures/:id/annuler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9ae7ad2b98c2
+POST /api/factures/:id/avoirs requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4527855323e1
+GET /api/reglements requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c8df78a7855a
+POST /api/reglements requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#51f9704bcdc4
+POST /api/reglements/:id/contrepasser requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#f9592331ed59
+GET /api/contrats-maintenance requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#106802cb4df7
+GET /api/contrats-maintenance/generation-visites requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#373a35ed462c
+POST /api/contrats-maintenance/generation-visites requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1e9928683461
+GET /api/contrats-maintenance/:id/journal-saisies requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#3f95c0d7c799
+POST /api/contrats-maintenance requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#cb003fe48a0c
+PATCH /api/contrats-maintenance/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c56b20c5c1cc
+PATCH /api/contrats-maintenance/:id/statut requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#0a3d898d249d
+POST /api/contrats-maintenance/:id/avancer-echeance requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#6c7a62204870
+POST /api/contrats-maintenance/:id/generer-intervention requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#ff2867025ef0
+POST /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#051bd6c57c60 > <anonymous>#5f8877e44fed
+GET /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#174bd48a1244
+GET /api/interventions/journee requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
+GET /api/interventions/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#68266b8fd47c
+GET /api/interventions/:id/couts requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3bbada459c05
+POST /api/interventions/:id/couts/heures requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#971650f71db2
+POST /api/interventions/:id/couts/achats requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#aaaf5b8c9ae8
+PATCH /api/interventions/:id/couts/:type/:coutId requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#b6e1b61bab0d
+POST /api/interventions/:id/couts/:type/:coutId/:action requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#60eb271babe0
+GET /api/interventions/:id/journal-saisies requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#6d9623c26cdd
+POST /api/interventions/:id/rapports requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#a829e5e2fbfc
+POST /api/interventions/rapports/:rapportId/signature requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#c8a45558077c
+PATCH /api/interventions/:id/statut requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#dc24b6b412aa
+GET /api/planning/interventions-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#02fa19bc763a
+PUT /api/interventions/:id/planning requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d54544a33096
 GET /api/health <anonymous>#8e6d60bb30d8
 GET /api/config <anonymous>#8496550e7475
 POST /api/auth/sso <anonymous>#29d388e00d09
 GET /api/auth/secours/etat <anonymous>#24b8a487cf83
 POST /api/auth/secours <anonymous>#0ef9b6e1b9ae
-GET /api/me requireAuth#76fb48c2d0f5 > <anonymous>#eefe8f938bf2
-PUT /api/me/theme requireAuth#76fb48c2d0f5 > <anonymous>#16df72f47e17
-GET /api/chantiers requireAuth#76fb48c2d0f5 > listerChantiers#01ec853057b9
+GET /api/me requireAuth#07b983da0ce5 > <anonymous>#eefe8f938bf2
+PUT /api/me/theme requireAuth#07b983da0ce5 > <anonymous>#16df72f47e17
+GET /api/chantiers requireAuth#07b983da0ce5 > listerChantiers#01ec853057b9
 GET /api/v1/chantiers <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerChantiers#01ec853057b9
-GET /api/chantiers/:id requireAuth#76fb48c2d0f5 > <anonymous>#5b27a1bfd28f
-GET /api/chantiers/:id/journal-saisies requireAuth#76fb48c2d0f5 > <anonymous>#4373de266aea
-POST /api/chantiers requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
-PATCH /api/chantiers/:id requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#82e823ced404
-DELETE /api/chantiers/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c4bcd35fe13f
-PATCH /api/chantiers/:id/statut requireAuth#76fb48c2d0f5 > blockCommercialSeulement#f36b50e5b6cd > <anonymous>#b69e5b3dc15a
-PATCH /api/chantiers/:id/commercial requireAuth#76fb48c2d0f5 > blockCommercial#e6317a73d660 > <anonymous>#a888c4b20222
-GET /api/users requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#0552dd3633a7
-POST /api/users requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#d2a05dc6e5a0
-DELETE /api/users/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#74803f5b5389
-PATCH /api/users/:id/role requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#8cded3afe1bd
-PATCH /api/users/:id/responsable-hierarchique requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5a6000b3b5b1
-PATCH /api/users/:id/est-commercial requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#4450aa149024
-PUT /api/users/:id/permissions requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#af6a696dea18
-PATCH /api/users/:id/acces-finance requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#72b545dfd957
-PATCH /api/users/:id/actif requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#76a3352c758f
-GET /api/commerciaux requireAuth#76fb48c2d0f5 > <anonymous>#bed7235de09c
-GET /api/conducteurs requireAuth#76fb48c2d0f5 > <anonymous>#73f7374f60c7
-GET /api/intervenants requireAuth#76fb48c2d0f5 > <anonymous>#7f11ac3852d4
-POST /api/intervenants requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#c6ba071ecbe1
-PUT /api/intervenants/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#783c0d87a196
-PUT /api/intervenants/:id/compte requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#5e61db3bb78c
-DELETE /api/intervenants/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#86e1b7b43b2b
-GET /api/planning/chantiers requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#35c56b70d597
-GET /api/planning/events requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#d25ca4de9e46
-POST /api/planning/events requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d20ba39cc1f2
-PATCH /api/planning/events/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#72ed95d3b1f9
-DELETE /api/planning/events/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#59692ae83863
-GET /api/planning/types requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#e508e00d69ec
-POST /api/planning/types requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#1a01d61a796c
-PUT /api/planning/types/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#e54e2d50459f
-DELETE /api/planning/types/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#a2831fc2f729
-GET /api/planning/share requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > requirePlanningActif#20945635a340 > <anonymous>#e5ac1a3b2c3a
-POST /api/planning/share requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > requirePlanningActif#20945635a340 > <anonymous>#7d135e47b735
-PATCH /api/planning/share requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > requirePlanningActif#20945635a340 > <anonymous>#3809fb29947b
+GET /api/chantiers/:id requireAuth#07b983da0ce5 > <anonymous>#5b27a1bfd28f
+GET /api/chantiers/:id/journal-saisies requireAuth#07b983da0ce5 > <anonymous>#4373de266aea
+POST /api/chantiers requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
+PATCH /api/chantiers/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#82e823ced404
+DELETE /api/chantiers/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c4bcd35fe13f
+PATCH /api/chantiers/:id/statut requireAuth#07b983da0ce5 > blockCommercialSeulement#f36b50e5b6cd > <anonymous>#b69e5b3dc15a
+PATCH /api/chantiers/:id/commercial requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#a888c4b20222
+GET /api/users requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#25aa992576b7
+POST /api/users requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d2a05dc6e5a0
+DELETE /api/users/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b402a62e9497
+PATCH /api/users/:id/role requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#5cb9dc1449ae
+PATCH /api/users/:id/responsable-hierarchique requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b49e15113c76
+PATCH /api/users/:id/est-commercial requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7c2c0b1a156c
+PUT /api/users/:id/permissions requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#aa7a7f3e5c06
+PATCH /api/users/:id/acces-finance requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#df39bb4b0258
+PATCH /api/users/:id/actif requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#368df173608e
+GET /api/commerciaux requireAuth#07b983da0ce5 > <anonymous>#bed7235de09c
+GET /api/conducteurs requireAuth#07b983da0ce5 > <anonymous>#73f7374f60c7
+GET /api/intervenants requireAuth#07b983da0ce5 > <anonymous>#7f11ac3852d4
+POST /api/intervenants requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c6ba071ecbe1
+PUT /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#783c0d87a196
+PUT /api/intervenants/:id/compte requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#5e61db3bb78c
+DELETE /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#86e1b7b43b2b
+GET /api/planning/chantiers requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#35c56b70d597
+GET /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#d25ca4de9e46
+POST /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d20ba39cc1f2
+PATCH /api/planning/events/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#72ed95d3b1f9
+DELETE /api/planning/events/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#59692ae83863
+GET /api/planning/types requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#e508e00d69ec
+POST /api/planning/types requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#1a01d61a796c
+PUT /api/planning/types/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#e54e2d50459f
+DELETE /api/planning/types/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#a2831fc2f729
+GET /api/planning/share requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > requirePlanningActif#20945635a340 > <anonymous>#e5ac1a3b2c3a
+POST /api/planning/share requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > requirePlanningActif#20945635a340 > <anonymous>#7d135e47b735
+PATCH /api/planning/share requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > requirePlanningActif#20945635a340 > <anonymous>#3809fb29947b
 GET /api/planning/public/:token <anonymous>#196626a68b5b
-GET /api/categories requireAuth#76fb48c2d0f5 > <anonymous>#55a80d3ebdd5
-POST /api/categories requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#3acefb2b9ce2
-PUT /api/categories/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#5d493a7ea310
-DELETE /api/categories/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#3bc1733df511
-GET /api/fournisseurs requireAuth#76fb48c2d0f5 > <anonymous>#333722666a1a
-POST /api/fournisseurs requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#8f0805860ba0
-PUT /api/fournisseurs/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#8ab476918808
-DELETE /api/fournisseurs/:id requireAuth#76fb48c2d0f5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#3fb4b54184ca
-POST /api/achats requireAuth#76fb48c2d0f5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#ea877e493e1f
-PATCH /api/achats/:id requireAuth#76fb48c2d0f5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#a76e6da95b42
-DELETE /api/achats/:id requireAuth#76fb48c2d0f5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#65ae2c815cd1
-POST /api/achats/:id/restaurer requireAuth#76fb48c2d0f5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#b547de0cd48d
-GET /api/achats requireAuth#76fb48c2d0f5 > listerAchats#57fd2968acbb
+GET /api/categories requireAuth#07b983da0ce5 > <anonymous>#55a80d3ebdd5
+POST /api/categories requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#3acefb2b9ce2
+PUT /api/categories/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#5d493a7ea310
+DELETE /api/categories/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#3bc1733df511
+GET /api/fournisseurs requireAuth#07b983da0ce5 > <anonymous>#333722666a1a
+POST /api/fournisseurs requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#8f0805860ba0
+PUT /api/fournisseurs/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#8ab476918808
+DELETE /api/fournisseurs/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > <anonymous>#3fb4b54184ca
+POST /api/achats requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#ea877e493e1f
+PATCH /api/achats/:id requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#a76e6da95b42
+DELETE /api/achats/:id requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#65ae2c815cd1
+POST /api/achats/:id/restaurer requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#b547de0cd48d
+GET /api/achats requireAuth#07b983da0ce5 > listerAchats#57fd2968acbb
 GET /api/v1/achats <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerAchats#57fd2968acbb
-GET /api/heures requireAuth#76fb48c2d0f5 > listerHeures#b6716193be5c
+GET /api/heures requireAuth#07b983da0ce5 > listerHeures#b6716193be5c
 GET /api/v1/heures <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerHeures#b6716193be5c
-POST /api/heures requireAuth#76fb48c2d0f5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#4e613df2e04e
-PATCH /api/heures/:id requireAuth#76fb48c2d0f5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#f7414586d918
-DELETE /api/heures/:id requireAuth#76fb48c2d0f5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#a964dff53d9c
-POST /api/heures/:id/restaurer requireAuth#76fb48c2d0f5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#bc81f9477fc9
-PATCH /api/chantiers/:id/encaisse requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#76321f646549
-PUT /api/commerciaux/:id/prime-mensuelle requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#1e069a7e8edc
-GET /api/parametres requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#b469f501b945
-GET /api/registry/companies requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#9636734be755
-GET /api/admin/api-keys requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#691b4b5290ef
-GET /api/admin/api-scopes requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#b36e28c73feb
-POST /api/admin/api-keys requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#de382866ae08
-POST /api/admin/api-keys/:id/revoke requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#0c6dc67a0c39
+POST /api/heures requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#4e613df2e04e
+PATCH /api/heures/:id requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#f7414586d918
+DELETE /api/heures/:id requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#a964dff53d9c
+POST /api/heures/:id/restaurer requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#bc81f9477fc9
+PATCH /api/chantiers/:id/encaisse requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#76321f646549
+PUT /api/commerciaux/:id/prime-mensuelle requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1e069a7e8edc
+GET /api/parametres requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b469f501b945
+GET /api/registry/companies requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9636734be755
+GET /api/admin/api-keys requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#691b4b5290ef
+GET /api/admin/api-scopes requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#b36e28c73feb
+POST /api/admin/api-keys requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#de382866ae08
+POST /api/admin/api-keys/:id/revoke requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#0c6dc67a0c39
 GET /api/v1/company <anonymous>{scope="company:read"}#4aeb6d464b38 > <anonymous>#0b08e4374fe7
-GET /api/clients requireAuth#76fb48c2d0f5 > <anonymous>{permission="clients:read"}#c4dc4769916b > listerClients#8abe06b78bbb
+GET /api/clients requireAuth#07b983da0ce5 > <anonymous>{permission="clients:read"}#c4dc4769916b > listerClients#8abe06b78bbb
 GET /api/v1/clients <anonymous>{scope="clients:read"}#4aeb6d464b38 > listerClients#8abe06b78bbb
-POST /api/clients requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > creerClient#fe449de902f6
+POST /api/clients requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerClient#fe449de902f6
 POST /api/v1/clients <anonymous>{scope="clients:write"}#4aeb6d464b38 > creerClient#fe449de902f6
-GET /api/clients/:id requireAuth#76fb48c2d0f5 > <anonymous>{permission="clients:read"}#c4dc4769916b > lireClient#0dfd25537b4b
+GET /api/clients/:id requireAuth#07b983da0ce5 > <anonymous>{permission="clients:read"}#c4dc4769916b > lireClient#0dfd25537b4b
 GET /api/v1/clients/:id <anonymous>{scope="clients:read"}#4aeb6d464b38 > lireClient#0dfd25537b4b
-PUT /api/clients/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > modifierClient#3ae2baf7184c
+PUT /api/clients/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > modifierClient#3ae2baf7184c
 PUT /api/v1/clients/:id <anonymous>{scope="clients:write"}#4aeb6d464b38 > modifierClient#3ae2baf7184c
-DELETE /api/clients/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > desactiverClient#599a87672d01
+DELETE /api/clients/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > desactiverClient#599a87672d01
 DELETE /api/v1/clients/:id <anonymous>{scope="clients:write"}#4aeb6d464b38 > desactiverClient#599a87672d01
-POST /api/clients/:clientId/contacts requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > creerContact#e8b07c8672f1
+POST /api/clients/:clientId/contacts requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerContact#e8b07c8672f1
 POST /api/v1/clients/:clientId/contacts <anonymous>{scope="clients:write"}#4aeb6d464b38 > creerContact#e8b07c8672f1
-PUT /api/clients/:clientId/contacts/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > modifierContact#a2ab7322c77e
+PUT /api/clients/:clientId/contacts/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > modifierContact#a2ab7322c77e
 PUT /api/v1/clients/:clientId/contacts/:id <anonymous>{scope="clients:write"}#4aeb6d464b38 > modifierContact#a2ab7322c77e
-POST /api/clients/:clientId/sites requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > creerSite#eaf0a1a927e7
+POST /api/clients/:clientId/sites requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerSite#eaf0a1a927e7
 POST /api/v1/clients/:clientId/sites <anonymous>{scope="clients:write"}#4aeb6d464b38 > creerSite#eaf0a1a927e7
-PUT /api/clients/:clientId/sites/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > modifierSite#670e9c863bcc
+PUT /api/clients/:clientId/sites/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > modifierSite#670e9c863bcc
 PUT /api/v1/clients/:clientId/sites/:id <anonymous>{scope="clients:write"}#4aeb6d464b38 > modifierSite#670e9c863bcc
-GET /api/clients/:clientId/equipements requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > listerEquipementsClient#b0102c9f5eb5
+GET /api/clients/:clientId/equipements requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > listerEquipementsClient#b0102c9f5eb5
 GET /api/v1/clients/:clientId/equipements <anonymous>{scope="equipements:read"}#4aeb6d464b38 > listerEquipementsClient#b0102c9f5eb5
-POST /api/clients/:clientId/equipements requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > creerEquipementClient#d4c7652c1f59
+POST /api/clients/:clientId/equipements requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerEquipementClient#d4c7652c1f59
 POST /api/v1/clients/:clientId/equipements <anonymous>{scope="equipements:write"}#4aeb6d464b38 > creerEquipementClient#d4c7652c1f59
-POST /api/clients/:clientId/equipements/:id/archiver requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > archiverEquipementClient#621212d81ed6
+POST /api/clients/:clientId/equipements/:id/archiver requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > archiverEquipementClient#621212d81ed6
 POST /api/v1/clients/:clientId/equipements/:id/archiver <anonymous>{scope="equipements:write"}#4aeb6d464b38 > archiverEquipementClient#621212d81ed6
-GET /api/clients/:id/chantiers requireAuth#76fb48c2d0f5 > <anonymous>{permission="clients:read"}#c4dc4769916b > <anonymous>{permission="chantiers:read"}#c4dc4769916b > <anonymous>#c585dbd891a2
-GET /api/catalogue/categories requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > listerCategoriesCatalogue#49175a8ca1ab
+GET /api/clients/:id/chantiers requireAuth#07b983da0ce5 > <anonymous>{permission="clients:read"}#c4dc4769916b > <anonymous>{permission="chantiers:read"}#c4dc4769916b > <anonymous>#c585dbd891a2
+GET /api/catalogue/categories requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > listerCategoriesCatalogue#49175a8ca1ab
 GET /api/v1/catalogue/categories <anonymous>{scope="catalogue:read"}#4aeb6d464b38 > listerCategoriesCatalogue#49175a8ca1ab
-POST /api/catalogue/categories requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > creerCategorieCatalogue#7d1affdf7db3
+POST /api/catalogue/categories requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerCategorieCatalogue#7d1affdf7db3
 POST /api/v1/catalogue/categories <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > creerCategorieCatalogue#7d1affdf7db3
-GET /api/catalogue/:family requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > listerCatalogue#667a729a3954
+GET /api/catalogue/:family requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > listerCatalogue#667a729a3954
 GET /api/v1/catalogue/:family <anonymous>{scope="catalogue:read"}#4aeb6d464b38 > listerCatalogue#667a729a3954
-POST /api/catalogue/:family requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > creerFicheCatalogue#95e1a4f99a90
+POST /api/catalogue/:family requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerFicheCatalogue#95e1a4f99a90
 POST /api/v1/catalogue/:family <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > creerFicheCatalogue#95e1a4f99a90
-PUT /api/catalogue/:family/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > modifierFicheCatalogue#158c9aa2840d
+PUT /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > modifierFicheCatalogue#158c9aa2840d
 PUT /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > modifierFicheCatalogue#158c9aa2840d
-DELETE /api/catalogue/:family/:id requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > desactiverFicheCatalogue#77fbb2528cc6
+DELETE /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > desactiverFicheCatalogue#77fbb2528cc6
 DELETE /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > desactiverFicheCatalogue#77fbb2528cc6
-GET /api/devis/catalogue requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#b9b899006c11
-GET /api/devis requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:read"}#c4dc4769916b > listerDevis#1b0df21d4732
+GET /api/devis/catalogue requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#b9b899006c11
+GET /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > listerDevis#1b0df21d4732
 GET /api/v1/devis <anonymous>{scope="devis:read"}#4aeb6d464b38 > listerDevis#1b0df21d4732
-POST /api/devis requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerDevis#7b0e96e3f96e
+POST /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerDevis#7b0e96e3f96e
 POST /api/v1/devis <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerDevis#7b0e96e3f96e
-PATCH /api/devis/:id requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > modifierDevis#1c85bb61d7b1
+PATCH /api/devis/:id requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > modifierDevis#1c85bb61d7b1
 PATCH /api/v1/devis/:id <anonymous>{scope="devis:write"}#4aeb6d464b38 > modifierDevis#1c85bb61d7b1
-POST /api/devis/:id/revisions requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerRevision#7b32048f7b7c
+POST /api/devis/:id/revisions requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerRevision#7b32048f7b7c
 POST /api/v1/devis/:id/revisions <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerRevision#7b32048f7b7c
-POST /api/devis/:id/signature requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#89dc1e49886c
-PUT /api/devis/:id/statut requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > changerStatutDevis#6c8a59009904
+POST /api/devis/:id/signature requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#89dc1e49886c
+PUT /api/devis/:id/statut requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > changerStatutDevis#6c8a59009904
 PUT /api/v1/devis/:id/statut <anonymous>{scope="devis:write"}#4aeb6d464b38 > changerStatutDevis#6c8a59009904
-POST /api/devis/:id/convertir requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > convertirDevis#259f89bfa325
+POST /api/devis/:id/convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > convertirDevis#259f89bfa325
 POST /api/v1/devis/:id/convertir <anonymous>{scope="devis:write"}#4aeb6d464b38 > convertirDevis#259f89bfa325
-GET /api/devis/a-convertir requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:read"}#c4dc4769916b > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#5a2fc4154133
-POST /api/devis/:id/acompte requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#46d632fba771
-POST /api/devis/:id/annulation requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#90cee2a217f8
-POST /api/devis/:id/duplication requireAuth#76fb48c2d0f5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#807a81482e59
-GET /api/company requireAuth#76fb48c2d0f5 > <anonymous>#0b08e4374fe7
-PUT /api/company requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#f4c33f529f68
-GET /api/company/logo requireAuth#76fb48c2d0f5 > <anonymous>#8234217eaf1c
-PUT /api/company/logo requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#ff41154d07ab
-DELETE /api/company/logo requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#a0ed659f0e66
-GET /api/parametres/remuneration requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#61efeee81638
-PUT /api/parametres/remuneration requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#98b0a30737c8
-PUT /api/parametres requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#9a85dc27c687
-GET /api/modules requireAuth#76fb48c2d0f5 > <anonymous>#409f48a66fe8
-PUT /api/modules requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#8f2e5db809d0
-GET /api/journal-administration requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#38867022b71f
-GET /api/journal-administration/export.csv requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#72c377372775
-PUT /api/journal-administration/conservation requireAuth#76fb48c2d0f5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#3483eb2d5d53
-GET /api/stats/global requireAuth#76fb48c2d0f5 > <anonymous>#df5b32801d07
-GET /api/stats/conducteurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#c2aaff04fe92
-GET /api/stats/conducteurs/assiduite requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#a9e036d8d362
-GET /api/stats/chantiers-repartition requireAuth#76fb48c2d0f5 > requireAdmin#72440b3191ab > <anonymous>#673eacee93bc
-GET /api/stats/intervenants requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#6930e6226651
-GET /api/stats/fournisseurs requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#0cad5c59e893
-GET /api/stats/types-chantiers requireAuth#76fb48c2d0f5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#e403d98394dc
-GET /api/stats/commerciaux requireAuth#76fb48c2d0f5 > <anonymous>#3ec062c1a65f
-POST /api/chantiers/:id/analyze requireAuth#76fb48c2d0f5 > <anonymous>#0c1d287413d9
+GET /api/devis/a-convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#5a2fc4154133
+POST /api/devis/:id/acompte requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#46d632fba771
+POST /api/devis/:id/annulation requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#90cee2a217f8
+POST /api/devis/:id/duplication requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#807a81482e59
+GET /api/company requireAuth#07b983da0ce5 > <anonymous>#0b08e4374fe7
+PUT /api/company requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#f4c33f529f68
+GET /api/company/logo requireAuth#07b983da0ce5 > <anonymous>#8234217eaf1c
+PUT /api/company/logo requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#ff41154d07ab
+DELETE /api/company/logo requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#a0ed659f0e66
+GET /api/parametres/remuneration requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#61efeee81638
+PUT /api/parametres/remuneration requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#98b0a30737c8
+PUT /api/parametres requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9a85dc27c687
+GET /api/modules requireAuth#07b983da0ce5 > <anonymous>#409f48a66fe8
+PUT /api/modules requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#8f2e5db809d0
+GET /api/journal-administration requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#38867022b71f
+GET /api/journal-administration/export.csv requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#72c377372775
+PUT /api/journal-administration/conservation requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#3483eb2d5d53
+GET /api/stats/global requireAuth#07b983da0ce5 > <anonymous>#df5b32801d07
+GET /api/stats/conducteurs requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#c2aaff04fe92
+GET /api/stats/conducteurs/assiduite requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#a9e036d8d362
+GET /api/stats/chantiers-repartition requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#673eacee93bc
+GET /api/stats/intervenants requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#6930e6226651
+GET /api/stats/fournisseurs requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#0cad5c59e893
+GET /api/stats/types-chantiers requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#e403d98394dc
+GET /api/stats/commerciaux requireAuth#07b983da0ce5 > <anonymous>#3ec062c1a65f
+POST /api/chantiers/:id/analyze requireAuth#07b983da0ce5 > <anonymous>#0c1d287413d9
 EXPORT alerteGenerationVisites
 EXPORT anneeEntreprise
 EXPORT apiKeyHash

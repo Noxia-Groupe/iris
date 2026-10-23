@@ -221,9 +221,10 @@ model JournalSaisieChantier {
   cible          String   // ACHAT | HEURE | INTERVENTION | INTERVENTION_RAPPORT | INTERVENTION_SIGNATURE | CONTRAT | CHANTIER (changement de client, de titulaire, de commercial ou de la case « Encaissé » de l’affaire)
   cibleId        String
   action         String   // CREATION | CORRECTION | ARCHIVAGE | RESTAURATION | CHANGEMENT_STATUT | CREATION_CONTRAT | SUSPENSION | REACTIVATION | CLOTURE | CHANGEMENT_CLIENT | CHANGEMENT_TITULAIRE | CHANGEMENT_COMMERCIAL | CHANGEMENT_ENCAISSEMENT
-  // Sans compte auteur pour la seule génération automatique des visites (lot pilote 5) : création
-  // de la visite d'un contrat ou avancement de son échéance, au nom « Génération automatique »
-  // (contrainte CHECK en base). Toute autre écriture a un compte auteur.
+  // Toute nouvelle écriture a un compte auteur (contrainte CHECK en base, décision de Nelson du
+  // 22-10-2026) : la génération automatique des visites écrit au nom du compte système, et seulement
+  // la création de la visite d'un contrat ou l'avancement de son échéance. Vide pour les seules
+  // écritures de cette génération faites avant #302, au nom « Génération automatique ».
   auteurId       String?
   auteur         User?    @relation("JournalSaisieChantierAuteur", fields: [auteurId], references: [id], onDelete: Restrict)
   // Nom figé à l'acte, lisible même si le compte est désactivé ultérieurement.
@@ -374,10 +375,10 @@ model Parametres {
   // Génération automatique des visites de maintenance (lot pilote 5) : chaque jour, la visite de
   // l'échéance d'un contrat actif est créée dès que l'échéance tombe dans ce nombre de jours
   // civils (0 : le jour même ; CHECK 0 à 365 en base). Vide (null), la génération automatique
-  // est désactivée ; les actions manuelles des contrats restent possibles. 30 jours par défaut
-  // (posé en question à Nelson, question (a) du lot pilote 5, passation section 3). Réglée par
-  // un administrateur, et journalisée.
-  anticipationVisitesJours Int?   @default(30)
+  // est désactivée ; les actions manuelles des contrats restent possibles. Vide au démarrage :
+  // la génération reste désactivée tant que la société ne l'a pas réglée (décision de Nelson du
+  // 22-10-2026). Réglée par un administrateur, et journalisée.
+  anticipationVisitesJours Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -911,7 +912,8 @@ model ExecutionGenerationVisites {
   jour               DateTime  @db.Date
   declenchement      String    // AUTOMATIQUE | MANUEL
   cleJourAutomatique String?   @unique
-  // Administrateur qui a lancé un passage manuel ; vide pour un passage automatique.
+  // Administrateur qui a lancé un passage manuel ; compte système pour un passage automatique (vide
+  // pour les seuls passages automatiques enregistrés avant #302).
   auteurId           String?
   auteurNom          String?
   anticipationJours  Int
