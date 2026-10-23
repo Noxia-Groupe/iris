@@ -15618,6 +15618,25 @@ if (!TEST_DATABASE_URL) {
       assert.ok(lignes.includes(`Réf. ${reference}`), JSON.stringify(lignes));
     });
 
+    // Audit n° 12 : la référence suit la désignation entière, jamais entre sa première ligne et sa
+    // suite ; une ligne sans référence n'en imprime aucune.
+    test('référence : imprimée sous la désignation repliée entière, avant la ligne suivante', async () => {
+      const client = await creerClient(`TEST Client référence et repli ${Date.now()}`);
+      const reference = `TEST-REPLI-${Date.now()}`;
+      const fiche = await request(app).post('/api/catalogue/prestations').set(admin()).send({ reference, nom: `TEST Pose repliée ${Date.now()}`, unite: 'u', prixVenteHt: '10', tauxTva: '20' });
+      assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+      // 42 caractères : la colonne en tient 31, « devis à replier » passe à la ligne suivante.
+      const devis = await creerDevis(client.id, 'TEST Devis référence et repli', [
+        { designation: 'TEST Désignation longue de devis à replier', quantite: 1, prixUnitaireHt: 10, tauxTva: 20, catalogueFamille: 'prestations', catalogueId: fiche.body.id },
+        { designation: 'TEST Ligne suivante sans référence', quantite: 1, prixUnitaireHt: 5, tauxTva: 20 },
+      ]);
+      const lignes = (await texteDevis(devis.id)).texte.split('\n').map((l) => l.trim());
+      const rang = (debut) => lignes.findIndex((l) => l.startsWith(debut));
+      const [premiere, suite, ref, suivante] = [rang('TEST Désignation longue de'), rang('devis à replier'), rang(`Réf. ${reference}`), rang('TEST Ligne suivante')];
+      assert.ok(premiere >= 0 && suite === premiere + 1 && ref === suite + 1 && suivante === ref + 1, JSON.stringify(lignes));
+      assert.equal(lignes.filter((l) => l.startsWith('Réf.')).length, 1, JSON.stringify(lignes));
+    });
+
     test('client actuel : le site de facturation, quels que soient l’ordre d’écriture et les identifiants', async () => {
       const client = await creerClient(`TEST Client sites ordonnés ${Date.now()}`, false);
       const suite = randomUUID().slice(8);
