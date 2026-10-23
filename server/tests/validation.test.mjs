@@ -680,6 +680,16 @@ describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
     assert.deepEqual(replierTexte('10\r\n20 m', 9), ['10 20 m']);
   });
 
+  // Audit n° 18 : toutes les fins de ligne d'un texte sont converties, et non la première seule ;
+  // une cellule reste sur sa ligne, quel que soit le nombre de sauts de ligne saisis.
+  test('chaque fin de ligne d’un texte est convertie, et non la première seule', async () => {
+    const { ligneColonnes, replierTexte, texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');
+    assert.equal(texteWinAnsi('10\r20\r30'), '10\n20\n30');
+    assert.equal(texteWinAnsi('10\r\n20\r\n30'), '10\n20\n30');
+    assert.deepEqual(replierTexte('10\r20\r30 m', 12), ['10 20 30 m']);
+    for (const unite of ['m\nl\nk', 'm\r\nl\rk']) assert.equal(ligneColonnes(['A', unite, 'x'], [10, 8, 6]), 'A            m l k     x');
+  });
+
   // Audit n° 5 : chaque équivalent et chaque invisible de la table, un par un, entre deux lettres.
   test('chaque équivalent de même sens et chaque invisible documentés', async () => {
     const { texteWinAnsi } = await import('../dist/src/domaines/documents/gabarit.js');

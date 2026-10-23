@@ -14989,6 +14989,8 @@ if (!TEST_DATABASE_URL) {
         const pdf = await pdfDevis(devis.id);
         assert.equal(pdf.status, 409);
         assert.match(JSON.parse(pdf.body.toString()).error, /^Identité de la société incomplète : renseignez SIRET, ville dans l’écran Société avant d’imprimer un devis\.$/);
+        // Audit n° 18 : un devis introuvable reste introuvable (404), même sans identité complète.
+        assert.equal((await pdfDevis(randomUUID())).status, 404);
         const signature = await signer(devis.id);
         assert.equal(signature.status, 409, JSON.stringify(signature.body));
         assert.match(signature.body.error, /^Identité de la société incomplète : renseignez SIRET, ville dans l’écran Société avant d’enregistrer la signature d’un devis\.$/);
@@ -16065,6 +16067,53 @@ if (!TEST_DATABASE_URL) {
       } finally {
         await definirSociete(SOCIETE_A);
       }
+    });
+
+    // Audit n° 18 : après le titre, et après la mention d'un devis annulé, le corps du devis revient
+    // au noir ; l'adresse actuelle du client garde ses lignes, comme la copie d'un devis signé.
+    test('gabarit : le corps du devis en noir après le titre et la mention d’annulation, l’adresse du client sur ses lignes', async () => {
+      const { inflateSync } = await import('node:zlib');
+      const couleurs = (octets) => {
+        const brut = octets.toString('latin1'), releve = [];
+        for (const flux of brut.matchAll(/stream\r?\n/g)) {
+          const debut = flux.index + flux[0].length;
+          let contenu;
+          try { contenu = inflateSync(octets.subarray(debut, brut.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
+          let remplissage = null;
+          for (const [, r, v, b, morceaux] of contenu.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) scn\b|\[([^\]]*)\] TJ/g)) {
+            if (r !== undefined) remplissage = `#${[r, v, b].map((c) => Math.round(Number(c) * 255).toString(16).padStart(2, '0')).join('')}`;
+            else releve.push([[...morceaux.matchAll(/<([0-9a-f]*)>/g)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1')).join(''), remplissage]);
+          }
+        }
+        return (debut) => releve.find(([texte]) => texte.startsWith(debut))?.[1];
+      };
+      const client = await creerClient(`TEST Client corps en noir ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Corps en noir');
+      const { octets, texte } = await texteDevis(devis.id);
+      const couleurDe = couleurs(octets);
+      for (const debut of ['Version 1', 'Client', 'Objet : TEST Corps en noir', 'Total TTC']) assert.equal(couleurDe(debut), '#000000', debut);
+      assert.ok(texte.includes('5 rue du Client\n75002 Paris'), texte);
+      assert.equal((await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST motif' })).status, 200);
+      const annule = couleurs((await pdfDevis(devis.id)).body);
+      assert.equal(annule('DEVIS ANNUL'), '#b91c1c');
+      for (const debut of ['Client', 'Objet : TEST Corps en noir', 'Total TTC']) assert.equal(annule(debut), '#000000', `${debut}, après la mention d’annulation`);
+    });
+
+    // Audit n° 18 : un devis brouillon s'imprime comme un devis envoyé, sans mention « brouillon »
+    // (décision de Nelson du 23-10-2026) ; un devis signé, accepté ou en attente d'acompte, sans
+    // autre mention. Le texte imprimé ne change pas avec ces statuts.
+    test('statuts : brouillon imprimé comme envoyé, accepté comme en attente d’acompte, mot pour mot', async () => {
+      const client = await creerClient(`TEST Client statut sans mention ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Statut sans mention', undefined, { acompteExige: true, tauxAcompte: 30 });
+      const statut = async (valeur) => assert.equal((await request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: valeur })).status, 200);
+      const brouillon = (await texteDevis(devis.id)).texte;
+      assert.ok(!/brouillon/i.test(brouillon), brouillon);
+      await statut('ENVOYE');
+      assert.equal((await texteDevis(devis.id)).texte, brouillon);
+      assert.equal((await signer(devis.id)).status, 201);
+      const accepte = (await texteDevis(devis.id)).texte;
+      await statut('EN_ATTENTE_ACOMPTE');
+      assert.equal((await texteDevis(devis.id)).texte, accepte);
     });
   });
 }
