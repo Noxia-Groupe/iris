@@ -8,6 +8,8 @@ const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 // Lot 6a-3 : un devis, une facture ou un avoir émis s'envoie par la messagerie de l'utilisateur.
 // « Préparer l'envoi » télécharge le PDF, enregistre l'envoi au journal, puis propose le lien mailto
 // (destinataire, objet et texte remplis), que ces parcours ne cliquent pas : seul son href est lu.
+// Lot 6a-3 bis (décision de Nelson du 23-10-2026) : un devis brouillon passe « envoyé » quand son
+// envoi est préparé, et le bouton « Repasser en brouillon » le ramène en brouillon.
 
 type Envoi = { id: string; destinataire: string; objet: string; auteurNom: string; createdAt: string };
 const corpsAttendu = (joint: string, raisonSociale: string) => `Bonjour,\n\nVeuillez trouver ci-joint ${joint}.\n\nCordialement,\n${raisonSociale}`;
@@ -20,7 +22,13 @@ async function societe(request: APIRequestContext, token: string) {
 async function creerDevis(request: APIRequestContext, token: string, clientId: string, objet: string) {
   const cree = await request.post(`${api}/devis`, { headers: auth(token), data: { clientId, objet: `${objet} ${Date.now()}`, lignes: [{ designation: 'Diagnostic', quantite: 1, prixUnitaireHt: 80, tauxTva: 20 }] } });
   expect(cree.status(), await cree.text()).toBe(201);
-  return await cree.json() as { id: string; numero: string; version: number; statut: string };
+  return await cree.json() as { id: string; numero: string; version: number; objet: string; statut: string };
+}
+// Statut d'un devis relu par l'API, et non à l'écran.
+async function statutDevis(request: APIRequestContext, token: string, id: string) {
+  const lu = await request.get(`${api}/devis`, { headers: auth(token) });
+  expect(lu.status(), await lu.text()).toBe(200);
+  return (await lu.json() as { id: string; statut: string }[]).find((d) => d.id === id)?.statut;
 }
 async function envoisDe(request: APIRequestContext, token: string, chemin: string) {
   const lu = await request.get(`${api}/${chemin}/envois`, { headers: auth(token) });
@@ -66,7 +74,7 @@ async function ligneFacture(page: Page, raisonSociale: string) {
   return ligne;
 }
 
-test('devis : destinataire proposé et modifiable, PDF téléchargé, envoi listé, lien mailto exact, statut inchangé', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+test('devis : destinataire proposé et modifiable, PDF téléchargé, envoi listé, lien mailto exact, brouillon passé « envoyé » puis repassé en brouillon', async ({ allerSurPageAdmin, creerClient, request, session }) => {
   const headers = auth(session.token);
   const client = await creerClient('envoi devis');
   const suffixe = Date.now();
@@ -81,6 +89,9 @@ test('devis : destinataire proposé et modifiable, PDF téléchargé, envoi list
   const auteur = (session.user as { name: string }).name;
 
   const page = await allerSurPageAdmin('/devis');
+  const ligne = page.locator('li', { hasText: devis.objet });
+  await expect(ligne).toContainText('v1 · BROUILLON');
+  await expect(ligne.getByRole('button', { name: 'Repasser en brouillon' })).toHaveCount(0);
   await page.getByRole('button', { name: `Envoyer le devis ${devis.numero} version 1`, exact: true }).click();
   const dialogue = page.getByRole('dialog', { name: `Envoyer le devis ${devis.numero} version 1` });
   const destinataire = dialogue.getByRole('textbox', { name: 'Destinataire' });
@@ -97,6 +108,11 @@ test('devis : destinataire proposé et modifiable, PDF téléchargé, envoi list
   expect(premier).toMatchObject({ destinataire: principal, objet, auteurNom: auteur });
   const liste = dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem');
   await expect(liste).toHaveText([`Envoi préparé le ${dateHeure(premier.createdAt, fuseauHoraire || 'Europe/Paris')} à ${principal} par ${auteur}`]);
+  // Le brouillon est passé « envoyé » : la liste l'affiche, le dialogue restant ouvert.
+  await expect(ligne).toContainText('v1 · ENVOYE');
+  expect(await statutDevis(request, session.token, devis.id)).toBe('ENVOYE');
+  await expect(ligne.getByRole('button', { name: 'Marquer envoyé' })).toHaveCount(0);
+  await expect(dialogue).toBeVisible();
 
   // Le destinataire se corrige : le second envoi passe en tête, le lien suit la nouvelle adresse.
   const autre = `autre.${suffixe}@client-e2e.test`;
@@ -108,14 +124,25 @@ test('devis : destinataire proposé et modifiable, PDF téléchargé, envoi list
   const envois = await envoisDe(request, session.token, `devis/${devis.id}`);
   expect(envois.map((e) => e.destinataire)).toEqual([autre, principal]);
 
-  // Préparer l'envoi ne change pas le statut du devis.
-  const relu = (await (await request.get(`${api}/devis`, { headers })).json() as { id: string; statut: string }[]).find((d) => d.id === devis.id);
-  expect(relu?.statut).toBe('BROUILLON');
+  // Un second envoi d'un devis déjà envoyé ne change pas son statut.
+  expect(await statutDevis(request, session.token, devis.id)).toBe('ENVOYE');
+  await expect(ligne).toContainText('v1 · ENVOYE');
   // Le journal se relit à la réouverture du dialogue.
   await dialogue.getByRole('button', { name: 'Fermer' }).click();
   await expect(dialogue).toHaveCount(0);
   await page.getByRole('button', { name: `Envoyer le devis ${devis.numero} version 1`, exact: true }).click();
   await expect(dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem')).toHaveCount(2);
+  await dialogue.getByRole('button', { name: 'Fermer' }).click();
+
+  // Le courriel n'est finalement pas parti : « Repasser en brouillon » ramène le devis en brouillon,
+  // relu par l'API, et le journal des envois reste entier.
+  await ligne.getByRole('button', { name: 'Repasser en brouillon' }).click();
+  await expect(ligne).toContainText('v1 · BROUILLON');
+  expect(await statutDevis(request, session.token, devis.id)).toBe('BROUILLON');
+  await expect(ligne.getByRole('button', { name: 'Repasser en brouillon' })).toHaveCount(0);
+  await expect(ligne.getByRole('button', { name: 'Marquer envoyé' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect((await envoisDe(request, session.token, `devis/${devis.id}`)).map((e) => e.destinataire)).toEqual([autre, principal]);
 });
 
 test('facture : envoi d’une facture émise depuis l’écran Factures, au courriel de la fiche client', async ({ allerSurPageAdmin, creerClient, request, session }) => {
@@ -198,6 +225,9 @@ test('refus : identité incomplète à l’ouverture comme à la préparation, P
   await expect(dialogue.getByRole('button', { name: 'Préparer l’envoi' })).toBeEnabled();
   expect(telecharge).toBe(false);
   expect(await envoisDe(request, session.token, `devis/${devis.id}`)).toEqual([]);
+  // Rien n'est enregistré, statut compris : le devis reste brouillon (lot 6a-3 bis).
+  expect(await statutDevis(request, session.token, devis.id)).toBe('BROUILLON');
+  await expect(page.locator('li', { hasText: devis.objet })).toContainText('v1 · BROUILLON');
 });
 
 test('à 375 px : dialogue d’envoi d’un devis et d’une facture sans défilement horizontal', async ({ allerSurPageAdmin, creerClient, request, session }) => {
@@ -226,6 +256,16 @@ test('à 375 px : dialogue d’envoi d’un devis et d’une facture sans défil
   const lien = dialogue.getByRole('link', { name: 'Ouvrir la messagerie' });
   await expect(lien).toBeVisible();
   await sansDebordement(page, 375, [dialogue, lien, dialogue.getByRole('button', { name: 'Préparer l’envoi' }), dialogue.getByRole('button', { name: 'Fermer' }), dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem').first()]);
+  // Le devis est passé « envoyé » : « Repasser en brouillon » tient dans sa ligne, et le ramène.
+  const ligneDevis = page.locator('li', { hasText: devis.objet });
+  await expect(ligneDevis).toContainText('v1 · ENVOYE');
+  const repasser = ligneDevis.getByRole('button', { name: 'Repasser en brouillon' });
+  await repasser.scrollIntoViewIfNeeded();
+  await sansDebordement(page, 375, [ligneDevis, repasser, ligneDevis.getByRole('button', { name: 'Refuser' })]);
+  await repasser.click();
+  await expect(ligneDevis).toContainText('v1 · BROUILLON');
+  expect(await statutDevis(request, session.token, devis.id)).toBe('BROUILLON');
+  await sansDebordement(page, 375, [ligneDevis.getByRole('button', { name: 'Marquer envoyé' })]);
 
   await page.goto('/factures', { waitUntil: 'networkidle' });
   const ligne = (await ligneFacture(page, client.raisonSociale)).filter({ hasText: facture.numero });
