@@ -13783,6 +13783,9 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(inserer('CREATION_CONTRAT', SYSTEME.id, SYSTEME.nom, 'CONTRAT'), /auteur_check/);
       await assert.rejects(inserer('AVANCEMENT_ECHEANCE', SYSTEME.id, SYSTEME.nom), /auteur_check/);
       await assert.rejects(inserer('SUSPENSION', SYSTEME.id, SYSTEME.nom, 'CONTRAT'), /auteur_check/);
+      // Dixième audit de #302 : la garde porte sur le compte, et non sur le nom écrit à l'acte (l'ancienne
+      // exception, elle, portait sur le nom « Génération automatique »).
+      await assert.rejects(inserer('CORRECTION', SYSTEME.id, 'Génération automatique'), /auteur_check/);
       assert.equal(await inserer('CORRECTION', comptes.conducteur.id, comptes.conducteur.name), 1);
       // Septième audit de #302 : le compte système n'écrit, de toutes les cibles et actions du journal SAV,
       // que la création de la visite d'un contrat et l'avancement de son échéance. Les essais ci-dessus
@@ -13813,6 +13816,11 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', 'un-compte', 'Quelqu’un'), /coherence/);
       await assert.rejects(passage('MANUEL', null, null, null), /coherence/);
       await assert.rejects(passage('MANUEL', null, SYSTEME.id, SYSTEME.nom), /coherence/);
+      // Dixième audit de #302 : ces gardes portent sur le compte, et non sur le nom écrit, et un passage manuel
+      // nomme son auteur.
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', 'un-compte', SYSTEME.nom), /coherence/);
+      await assert.rejects(passage('MANUEL', null, SYSTEME.id, 'Quelqu’un'), /coherence/);
+      await assert.rejects(passage('MANUEL', null, 'un-compte', null), /coherence/);
       await assert.rejects(passage('MANUEL', '2001-02-03', 'un-compte', 'Quelqu’un'), /coherence/);
       await assert.rejects(passage('MANUEL', null, 'un-compte', 'Quelqu’un', 'INCONNU'), /coherence/);
       assert.equal(await passage('MANUEL', null, 'un-compte', 'Quelqu’un'), 1);
@@ -14001,7 +14009,14 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([sessionSysteme.status, sessionSysteme.body], [sessionAbsente.status, sessionAbsente.body]);
       // Neuvième audit de #302 : requireAuth refuse le type SYSTEME par lui-même, et non seulement parce que
       // le compte est inactif, comme l'annonce son commentaire (« même si une modification le réactivait »).
-      // Le déclencheur, qui interdit cette réactivation, est neutralisé le temps de l'essai.
+      // Le déclencheur, qui interdit cette réactivation, est neutralisé le temps de l'essai. Dixième audit : il doit
+      // être actif au départ, tel que la migration le crée ; sans ce contrôle, son rétablissement ci-dessous
+      // masquerait un déclencheur laissé neutralisé par une migration (par exemple après un renommage du compte).
+      const [{ declencheur }] = await prisma.$queryRaw`SELECT "tgenabled"::text AS "declencheur" FROM pg_trigger WHERE "tgrelid" = '"User"'::regclass AND "tgname" = 'compte_systeme_fige'`;
+      assert.equal(declencheur, 'O', 'déclencheur compte_systeme_fige actif');
+      // Un arrêt brutal du processus entre la neutralisation et le rétablissement laisserait une base locale
+      // conservée en défaut (déclencheur neutralisé ou compte réactivé), signalé par ce test : recréer la base.
+      // La CI part d'une base neuve.
       await prisma.$executeRawUnsafe('ALTER TABLE "User" DISABLE TRIGGER "compte_systeme_fige"');
       try {
         await prisma.$executeRaw`UPDATE "User" SET "actif" = true WHERE "id" = ${SYSTEME.id}`;
@@ -14077,12 +14092,15 @@ if (!TEST_DATABASE_URL) {
       // La base refuse de le modifier ou de le supprimer, et de donner son type à un autre compte.
       await assert.rejects(prisma.user.update({ where: { id: SYSTEME.id }, data: { actif: true } }), /Compte système/);
       // Septième audit de #302 : toute modification, et non seulement sa réactivation (nom, adresse, droits,
-      // rattachement, préférence d'affichage).
-      for (const data of [{ name: 'TEST Autre nom' }, { email: 'systeme.autre@iris.test' }, { permissions: ['devis:read'] }, { accesFinance: true }, { responsableHierarchiqueId: comptes.conducteur.id }, { theme: 'dark' }]) {
+      // rattachement, préférence d'affichage ; dixième audit : case « commercial » et mot de passe aussi).
+      for (const data of [{ name: 'TEST Autre nom' }, { email: 'systeme.autre@iris.test' }, { permissions: ['devis:read'] }, { accesFinance: true }, { responsableHierarchiqueId: comptes.conducteur.id }, { theme: 'dark' }, { estCommercial: true }, { password: 'x' }]) {
         await assert.rejects(prisma.user.update({ where: { id: SYSTEME.id }, data }), /Compte système/, JSON.stringify(data));
       }
       // Neuvième audit de #302 : même une mise à jour sans changement de valeur (passation, section 5).
       await assert.rejects(prisma.$executeRaw`UPDATE "User" SET "actif" = "actif" WHERE "id" = ${SYSTEME.id}`, /Compte système/);
+      // Dixième audit de #302 : ni son identifiant, même avec un autre type comme le CHECK l'exigerait : le
+      // déclencheur juge la ligne d'origine, et non la ligne écrite.
+      await assert.rejects(prisma.$executeRaw`UPDATE "User" SET "id" = ${randomUUID()}, "role" = 'ADMIN' WHERE "id" = ${SYSTEME.id}`, /Compte système/);
       await assert.rejects(prisma.user.delete({ where: { id: SYSTEME.id } }), /Compte système/);
       await assert.rejects(prisma.user.create({ data: { email: 'systeme.bis@iris.test', name: 'TEST Système bis', role: 'SYSTEME' } }), /role_systeme/);
       // Huitième audit de #302 : même un second compte en tout point semblable au compte système (inactif,
