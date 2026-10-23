@@ -17,6 +17,7 @@ import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { SITE_FACTURATION_ORDRE, formaterAdresseFacturation } from '../factures/metier';
 import { IdentiteEmetteurIncompleteError, figerIdentiteEmetteur, identiteActuelleImprimee } from '../documents/identite';
+import { IdentiteClientIncompleteError, exigerIdentiteClient } from '../documents/identiteClient';
 import { type CatalogueFamily, catalogueFamily, catalogueModels } from '../catalogue/metier';
 import { sanitizeTypes, refusTitulaire, refusCommercial } from '../chantiers/metier';
 import { SaisieInterventionInvalide, creerInterventionNumerotee, estEncadrementCoutIntervention, exposerIntervention, lireDetailsIntervention } from '../interventions/metier';
@@ -32,7 +33,7 @@ function devisErreur(res: express.Response, error: unknown) {
   if (error instanceof DevisSaisieError) return res.status(400).json({ error: error.message });
   if (error instanceof DevisConflitError) return res.status(409).json({ error: error.message });
   if (error instanceof DevisDroitError) return res.status(403).json({ error: error.message });
-  if (error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
+  if (error instanceof IdentiteEmetteurIncompleteError || error instanceof IdentiteClientIncompleteError) return res.status(409).json({ error: error.message });
   if (error instanceof DestinataireInvalideError) return res.status(400).json({ error: error.message });
   if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
@@ -100,15 +101,18 @@ const signerDevis: express.RequestHandler = async (req, res) => { try {
     // Lot 6a-2 : le devis signé, figé, s'imprimera depuis ces copies, et non depuis la société et
     // la fiche client vivantes. Sans identité complète, la signature est refusée sans rien écrire.
     const identiteEmetteurId = await figerIdentiteEmetteur(tx, 'd’enregistrer la signature d’un devis');
+    // Lot 6a-2 bis : le client doit lui aussi être identifié (raison sociale, adresse de facturation
+    // et SIREN, ou nom complet et adresse pour un particulier « pas de SIRET »). Sa fiche et son site
+    // sont relus ici, sous le verrou du devis et avant toute écriture du devis ; un refus annule la
+    // transaction, copie de l'identité de la société comprise. La société passe en premier.
+    const { raisonSociale, siteFacturation } = await exigerIdentiteClient(tx, devis.clientId, 'd’enregistrer la signature d’un devis');
     // Le fuseau, qui date le devis imprimé, est lu sous le verrou partagé de la société pris ci-dessus.
     const { fuseauHoraire } = await tx.companySettings.findUniqueOrThrow({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
-    const client = await tx.client.findUniqueOrThrow({ where: { id: devis.clientId }, select: { raisonSociale: true } });
-    const siteFacturation = await tx.clientSite.findFirst({ where: { clientId: devis.clientId }, orderBy: SITE_FACTURATION_ORDRE });
     await tx.devis.update({ where: { id: devis.id }, data: { statut: 'ACCEPTE' } });
     const auteur = (req as AuthRequest).user;
     if (!auteur) throw new DevisConflitError('Une session humaine active est obligatoire pour signer un devis.');
     return tx.devisSignature.create({
-      data: { devisId: devis.id, enregistreParId: auteur.id, signataire, empreinte, identiteEmetteurId, clientRaisonSociale: client.raisonSociale.trim(), clientAdresse: siteFacturation ? formaterAdresseFacturation(siteFacturation) : null, fuseauHoraire: fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT },
+      data: { devisId: devis.id, enregistreParId: auteur.id, signataire, empreinte, identiteEmetteurId, clientRaisonSociale: raisonSociale, clientAdresse: formaterAdresseFacturation(siteFacturation), fuseauHoraire: fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT },
       select: { id: true, signataire: true, empreinte: true, signeLe: true, enregistreParId: true },
     });
   });

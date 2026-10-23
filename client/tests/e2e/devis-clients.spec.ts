@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, creerClientAvecSiren } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -14,9 +14,10 @@ test('#113 : recherche, édition et signature d’un client hors des 200 premier
     for (const reponse of reponses) expect(reponse.status(), await reponse.text()).toBe(201);
   }
   const prefix = `ZZZ E2E 113 ${Date.now()}`;
-  const cible = await request.post(`${api}/clients`, { headers, data: { raisonSociale: `${prefix} cible` } });
-  expect(cible.status(), await cible.text()).toBe(201);
-  const clientId = (await cible.json()).id as string;
+  // Lot 6a-2 bis : le client se signe ; il est donc identifié (SIREN et site de facturation).
+  const clientId = (await creerClientAvecSiren(request, headers, { raisonSociale: `${prefix} cible` })).id;
+  const site = await request.post(`${api}/clients/${clientId}/sites`, { headers, data: { nom: 'Facturation', adresse: '2 rue du Parcours', codePostal: '14000', ville: 'Caen', estSiteFacturation: true } });
+  expect(site.status(), await site.text()).toBe(201);
   const contact = await request.post(`${api}/clients/${clientId}/contacts`, { headers, data: { nom: 'Signataire113', prenom: 'Alice', estSignataire: true } });
   expect(contact.status(), await contact.text()).toBe(201);
   const nonHabilite = await request.post(`${api}/clients/${clientId}/contacts`, { headers, data: { nom: 'NonHabilite113', estSignataire: false } });

@@ -41,7 +41,7 @@ test('un directeur clôture le chantier d’un conducteur depuis la liste ; un a
   const conducteur = await creerCompte('conducteur', 'Conducteur clôture', 'CONDUCTEUR_TRAVAUX');
   const autreConducteur = await creerCompte('autre', 'Autre conducteur clôture', 'CONDUCTEUR_TRAVAUX');
 
-  const client = await creerClient('cloture-directeur', false);
+  const client = await creerClient('cloture-directeur');
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Clôture directeur E2E ${suffixe}`, lignes: [
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
   ] });

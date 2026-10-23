@@ -40,7 +40,7 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   // Signé, mais son acompte n'est pas constaté : ni chantier, ni intervention, ni contrat proposés.
   const objetAcompte = `Acompte attendu ${suffixe}`;
   await devisSigne(client.id, objetAcompte, { acompteExige: true });
-  const clientInactif = await creerClient('conversion-devis-inactif', false);
+  const clientInactif = await creerClient('conversion-devis-inactif');
   const objetRefuse = `Conversion refusée ${suffixe}`;
   await devisSigne(clientInactif.id, objetRefuse);
   const desactivation = await request.delete(`${api}/clients/${clientInactif.id}`, { headers });
@@ -180,7 +180,7 @@ test('la date de début du contrat se remplit quand le fuseau de la société ar
     expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
     return reponse.json();
   };
-  const client = await creerClient('conversion-devis-fuseau', false);
+  const client = await creerClient('conversion-devis-fuseau');
   const objet = `Fuseau tardif ${Date.now()}`;
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet, lignes: [{ designation: 'Visite', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
   await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
@@ -206,7 +206,7 @@ test('formulaire de conversion à 320 px : une raison sociale insécable se coup
     expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
     return reponse.json();
   };
-  const client = await creerClient(`SocieteDeMaintenanceDesInstallationsThermiques${Date.now()}`, false);
+  const client = await creerClient(`SocieteDeMaintenanceDesInstallationsThermiques${Date.now()}`);
   const objet = `En-tête insécable ${Date.now()}`;
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet, lignes: [{ designation: 'Visite', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
   await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });

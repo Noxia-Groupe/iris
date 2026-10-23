@@ -168,7 +168,11 @@ export default function Devis() {
     if (!res.ok) throw new Error(data.error || 'Signature impossible.');
     setDevisASigner(null); setSignataire(''); setConfirmationSignature(false);
     await load();
-  } catch (e) { setError(e instanceof Error ? e.message : 'Signature impossible.'); } finally { setSaving(false); } };
+  } catch (e) {
+    // Le refus (identité de la société ou du client incomplète…) s'affiche au-dessus du formulaire :
+    // on y remonte, sans quoi il resterait hors de vue à 375 px.
+    setError(e instanceof Error ? e.message : 'Signature impossible.'); window.scrollTo({ top: 0, behavior: 'smooth' });
+  } finally { setSaving(false); } };
   const statut = async (id: string, valeur: string) => { try {
     const res = await apiFetch(`/devis/${id}/statut`, { method: 'PUT', body: JSON.stringify({ statut: valeur }) }), data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Mise à jour impossible.'); await load();

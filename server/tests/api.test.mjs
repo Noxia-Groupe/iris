@@ -6,7 +6,7 @@
 // Sans elle, la suite s'annonce ignorée : mieux vaut un « skip » visible qu'un vert obtenu
 // sans avoir rien vérifié.
 import assert from 'node:assert/strict';
-import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import test, { after, afterEach, before, describe, mock } from 'node:test';
@@ -53,6 +53,27 @@ if (!TEST_DATABASE_URL) {
     await prisma.$executeRaw`INSERT INTO "IdentiteEmetteur" ("id", "empreinte", "raisonSociale", "siret", "adresse", "codePostal", "ville", "couleurPrimaire")
       VALUES (${randomUUID()}, 'TEST-IDENTITE-FIXTURE', 'TEST Société émettrice', '12345678900011', '1 rue des Tests', '14000', 'Caen', '#1e3a8a') ON CONFLICT ("empreinte") DO NOTHING`;
     return (await prisma.identiteEmetteur.findUniqueOrThrow({ where: { empreinte: 'TEST-IDENTITE-FIXTURE' }, select: { id: true } })).id;
+  };
+  // Lot 6a-2 bis : un devis ne se signe et une facture ne s'émet que pour un client identifié :
+  // raison sociale, adresse de facturation et SIREN, ou nom complet et adresse s'il est « pas de
+  // SIRET ». Les clients des tests qui signent ou émettent reçoivent un SIREN libre, tiré au hasard
+  // et absent de la base : unique (contrainte @unique), y compris d'une exécution à l'autre sur une
+  // base conservée.
+  const sirensTires = new Set();
+  const sirenLibre = async () => {
+    for (;;) {
+      const siren = String(randomInt(100_000_000, 1_000_000_000));
+      if (sirensTires.has(siren)) continue;
+      sirensTires.add(siren);
+      if (!await prisma.client.findUnique({ where: { siren }, select: { id: true } })) return siren;
+    }
+  };
+  // Complète en base l'identité d'un client de fixture : un SIREN libre s'il n'en a pas (et n'est pas
+  // « pas de SIRET »), et un site de facturation complet s'il n'a aucun site.
+  const completerIdentiteClient = async (clientId) => {
+    const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId }, select: { siren: true, sansSiret: true, _count: { select: { sites: true } } } });
+    if (!client.siren && !client.sansSiret) await prisma.client.update({ where: { id: clientId }, data: { siren: await sirenLibre() } });
+    if (!client._count.sites) await prisma.clientSite.create({ data: { clientId, nom: 'TEST Facturation (identité)', adresse: '1 rue de l’Identité', codePostal: '14000', ville: 'Caen', estSiteFacturation: true } });
   };
   // Lot 3b-3 : terminer une intervention exige un compte rendu, signé par le client ou accompagné
   // d'un motif. Les tests qui ne portent pas sur cette règle terminent avec un compte rendu et le
@@ -2985,7 +3006,7 @@ if (!TEST_DATABASE_URL) {
       admin = { Authorization: `Bearer ${secours.body.token}` };
       const compte = await prisma.user.create({ data: { email: 'catalogue.devis.commercial@iris.test', name: 'TEST Commercial catalogue', role: 'COMMERCIAL' } });
       commercial = { Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` };
-      const client = await request(app).post('/api/clients').set(admin).send({ raisonSociale: 'TEST Client catalogue devis' });
+      const client = await request(app).post('/api/clients').set(admin).send({ raisonSociale: 'TEST Client catalogue devis', siren: await sirenLibre() });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       clientId = client.body.id;
       const creer = async (famille, corps) => {
@@ -3342,6 +3363,7 @@ if (!TEST_DATABASE_URL) {
       const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
         .send({ raisonSociale: 'TEST Client devis' });
       clientId = client.body.id;
+      await completerIdentiteClient(clientId);
     });
 
     test('crée un brouillon de devis avec ses lignes et ses totaux calculés', async () => {
@@ -4097,6 +4119,7 @@ if (!TEST_DATABASE_URL) {
     before(async () => {
       session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
       clientId = (await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client cycle' })).body.id;
+      await completerIdentiteClient(clientId);
       categorieId = (await prisma.categorie.upsert({ where: { nom: 'TEST Catégorie cycle' }, update: {}, create: { nom: 'TEST Catégorie cycle' } })).id;
       fournisseurId = (await prisma.fournisseur.upsert({ where: { nom: 'TEST Fournisseur cycle' }, update: {}, create: { nom: 'TEST Fournisseur cycle' } })).id;
       intervenantId = (await prisma.intervenant.create({ data: { nom: 'TEST Intervenant cycle', role: 'Technicien', tauxHoraireCharge: 40 } })).id;
@@ -4945,6 +4968,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(contratTropTot.body.error, 'L’acompte exigé par ce devis n’a pas été constaté : le contrat ne peut pas être créé.');
 
         const clientInactif = await prisma.client.create({ data: { raisonSociale: 'TEST Client conversion désactivé' } });
+        await completerIdentiteClient(clientInactif.id);
         const cree = await request(app).post('/api/devis').set(admin()).send({ clientId: clientInactif.id, objet: 'TEST Conversion client désactivé', lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
         assert.equal(cree.status, 201, JSON.stringify(cree.body));
         assert.equal((await request(app).put(`/api/devis/${cree.body.id}/statut`).set(admin()).send({ statut: 'ENVOYE' })).status, 200);
@@ -7769,7 +7793,7 @@ if (!TEST_DATABASE_URL) {
     before(async () => {
       session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
       const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`)
-        .send({ raisonSociale: 'TEST Client contrat maintenance' });
+        .send({ raisonSociale: 'TEST Client contrat maintenance', siren: await sirenLibre() });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       clientId = client.body.id;
       const site = await request(app).post(`/api/clients/${clientId}/sites`).set('Authorization', `Bearer ${session}`)
@@ -12193,7 +12217,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('fige l’adresse de facturation du client dans le document PDF', async () => {
-      const clientAdresse = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client adresse facture' });
+      const clientAdresse = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client adresse facture', siren: await sirenLibre() });
       assert.equal(clientAdresse.status, 201, JSON.stringify(clientAdresse.body));
       const creerSite = corps => request(app).post(`/api/clients/${clientAdresse.body.id}/sites`).set('Authorization', `Bearer ${session}`).send(corps);
       assert.equal((await creerSite({ nom: 'A Site de chantier', adresse: '1 rue Ignorée', codePostal: '13001', ville: 'Marseille', estSiteIntervention: true })).status, 201);
@@ -12231,7 +12255,7 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('refuse d’émettre une facture pour un client sans adresse de facturation', async () => {
-      const clientSansSite = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client sans site' });
+      const clientSansSite = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST Client sans site', siren: await sirenLibre() });
       const brouillon = await request(app).post('/api/factures').set('Authorization', `Bearer ${session}`).send({ clientId: clientSansSite.body.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST adresse absente', dateEmission: '10-09-2026', dateEcheance: '10-10-2026', lignes: [{ designation: 'TEST adresse absente', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
       const refus = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set('Authorization', `Bearer ${session}`);
       assert.equal(refus.status, 409, JSON.stringify(refus.body)); assert.match(refus.body.error, /adresse de facturation/i);
@@ -12242,7 +12266,7 @@ if (!TEST_DATABASE_URL) {
       const diagnostic = () => request(app).get('/api/facturation/prete-a-facturer').set('Authorization', `Bearer ${session}`);
       const controle = (corps, cle) => corps.controles.find((item) => item.cle === cle);
       const avant = await diagnostic();
-      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST client sans site diagnostic' });
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale: 'TEST client sans site diagnostic', siren: await sirenLibre() });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       const apres = await diagnostic();
       assert.equal(controle(apres.body, 'ADRESSES_CLIENTS').pret, false);
@@ -12467,7 +12491,7 @@ if (!TEST_DATABASE_URL) {
     // Factures émises le 11-09-2026, la date la plus tardive des tests de facturation, pour ne
     // pas bloquer la chronologie des numéros ; règlements datés du 12-09-2026.
     const clientReglement = async (raisonSociale) => {
-      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale });
+      const client = await request(app).post('/api/clients').set('Authorization', `Bearer ${session}`).send({ raisonSociale, siren: await sirenLibre() });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       const site = await request(app).post(`/api/clients/${client.body.id}/sites`).set('Authorization', `Bearer ${session}`)
         .send({ nom: 'TEST Site facturation', adresse: '2 rue des Règlements', codePostal: '75002', ville: 'Paris', estSiteFacturation: true });
@@ -14354,7 +14378,7 @@ if (!TEST_DATABASE_URL) {
 
     before(async () => {
       session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
-      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale: 'TEST Client émetteur figé' });
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale: 'TEST Client émetteur figé', siren: await sirenLibre() });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       clientId = client.body.id;
       const site = await request(app).post(`/api/clients/${clientId}/sites`).set(admin()).send({ nom: 'TEST Facturation', adresse: '3 rue du Client', codePostal: '75001', ville: 'Paris', estSiteFacturation: true });
@@ -14818,7 +14842,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(res.status, 200, JSON.stringify(res.body));
     };
     const creerClient = async (raisonSociale, site = true) => {
-      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale });
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale, siren: await sirenLibre() });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       if (site) {
         const cree = await request(app).post(`/api/clients/${client.body.id}/sites`).set(admin()).send({ nom: 'TEST Facturation devis', adresse: '5 rue du Client', codePostal: '75002', ville: 'Paris', estSiteFacturation: true });
@@ -14832,6 +14856,20 @@ if (!TEST_DATABASE_URL) {
       return res.body;
     };
     const signer = (id, auth = admin()) => request(app).post(`/api/devis/${id}/signature`).set(auth).send({ signataire: 'TEST Signataire client', confirme: true });
+    // Lot 6a-2 bis : un client sans site n'est plus signé (adresse de facturation exigée), refus vérifié
+    // ici. Une signature du lot 6a-2 qui n'a pas copié d'adresse reste imprimable : elle est fabriquée
+    // en base, avec ses autres copies, pour éprouver ce rendu. L'identité copiée est celle des pièces
+    // écrites en base par les tests (identiteEmetteurFixture) : chaque test reste exécutable seul.
+    const signerSansAdresseEnBase = async (devisId, raisonSociale) => {
+      const refus = await signer(devisId);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /^Identité du client incomplète : renseignez adresse de facturation sur la fiche client/);
+      assert.equal(await prisma.devisSignature.count({ where: { devisId } }), 0);
+      const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true } });
+      const identiteEmetteurId = await identiteEmetteurFixture();
+      await prisma.devis.update({ where: { id: devisId }, data: { statut: 'ACCEPTE' } });
+      await prisma.devisSignature.create({ data: { devisId, enregistreParId: auteur.id, signataire: 'TEST Signataire client', empreinte: 'a'.repeat(64), identiteEmetteurId, clientRaisonSociale: raisonSociale, clientAdresse: null, fuseauHoraire: 'Europe/Paris' } });
+    };
     const pdfDevis = (id, auth = admin()) => request(app).get(`/api/devis/${id}/document.pdf`).set(auth).buffer(true)
       .parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
     const texteDevis = async (id, auth = admin()) => {
@@ -15063,10 +15101,11 @@ if (!TEST_DATABASE_URL) {
         await definirSociete(SOCIETE_A);
       }
 
-      // Client sans site : la signature copie son nom sans adresse.
+      // Client sans site : la signature est refusée ; une signature du lot 6a-2 sans adresse copiée
+      // (fabriquée en base) s'imprime avec le nom copié.
       const sansSite = await creerClient(`TEST Client sans site devis ${Date.now()}`, false);
       const devisSansSite = await creerDevis(sansSite.id, 'TEST Client sans adresse');
-      assert.equal((await signer(devisSansSite.id)).status, 201);
+      await signerSansAdresseEnBase(devisSansSite.id, sansSite.raisonSociale);
       assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devisSansSite.id } })).clientAdresse, null);
       const texteSansSite = (await texteDevis(devisSansSite.id)).texte;
       assert.ok(texteSansSite.includes(sansSite.raisonSociale) && texteSansSite.includes('Accepté par TEST Signataire client'));
@@ -15577,7 +15616,7 @@ if (!TEST_DATABASE_URL) {
 
       const sansSite = await creerClient(`TEST Client sans site puis site ${Date.now()}`, false);
       const devisSansSite = await creerDevis(sansSite.id, 'TEST Devis signé sans adresse');
-      assert.equal((await signer(devisSansSite.id)).status, 201);
+      await signerSansAdresseEnBase(devisSansSite.id, sansSite.raisonSociale);
       assert.equal((await request(app).post(`/api/clients/${sansSite.id}/sites`).set(admin()).send({ nom: 'TEST Site tardif', adresse: '7 rue Tardive', codePostal: '44000', ville: 'Nantes', estSiteFacturation: true })).status, 201);
       assert.ok(!(await texteDevis(devisSansSite.id)).texte.includes('7 rue Tardive'), 'adresse ajoutée après la signature imprimée');
     });
@@ -15618,7 +15657,7 @@ if (!TEST_DATABASE_URL) {
       const client = await creerClient(`TEST Client sans adresse imprimée ${Date.now()}`, false);
       const nonSigne = await creerDevis(client.id, 'TEST Devis sans adresse non signé');
       const signe = await creerDevis(client.id, 'TEST Devis sans adresse signé');
-      assert.equal((await signer(signe.id)).status, 201);
+      await signerSansAdresseEnBase(signe.id, client.raisonSociale);
       for (const [devis, objet] of [[nonSigne, 'TEST Devis sans adresse non signé'], [signe, 'TEST Devis sans adresse signé']]) {
         const lignes = (await texteDevis(devis.id)).texte.split('\n').map((l) => l.trim()).filter(Boolean);
         const rang = lignes.indexOf(client.raisonSociale);
@@ -16127,6 +16166,374 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await texteDevis(devis.id)).texte, accepte);
     });
   });
+
+  // Lot 6a-2 bis, décisions de Nelson du 23-10-2026 : un devis ne se signe, une facture ne s'émet que
+  // pour un client identifié. Professionnel : raison sociale, adresse de facturation et SIREN ;
+  // particulier (case « pas de SIRET ») : nom complet et adresse.
+  describe('Lot 6a-2 bis : identité minimale du client pour signer un devis et émettre une facture', () => {
+    let session = '';
+    const admin = () => ({ Authorization: `Bearer ${session}` });
+    const SOCIETE = { raisonSociale: 'TEST Émetteur 6a-2 bis', siret: '55555555500055', adresse: '5 rue de l’Identité', codePostal: '14000', ville: 'Caen' };
+    const SIREN = 'SIREN (ou case « pas de SIRET » pour un particulier)';
+    const SANS_SIRET_AVEC_SIREN = 'Un client sans SIRET ne peut pas avoir de SIREN : videz le SIREN ou décochez la case.';
+    const AVANT_SIGNATURE = 'd’enregistrer la signature d’un devis';
+    const AVANT_EMISSION = 'd’émettre une facture';
+    const refusClient = (champs, avant) => `Identité du client incomplète : renseignez ${champs} sur la fiche client avant ${avant}.`;
+    const SITE = { nom: 'TEST Facturation 6a-2 bis', adresse: '8 rue du Client', codePostal: '75008', ville: 'Paris', estSiteFacturation: true };
+    const definirSociete = async (champs) => {
+      const res = await request(app).put('/api/company').set(admin()).send(champs);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    const aujourdhui = async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      const [annee, mois, jour] = jourCivilEntreprise(new Date(), fuseau).split('-');
+      return `${jour}-${mois}-${annee}`;
+    };
+    const modifierClient = async (id, corps) => {
+      const res = await request(app).put(`/api/clients/${id}`).set(admin()).send(corps);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body;
+    };
+    const creerSite = async (clientId, site = SITE) => {
+      const res = await request(app).post(`/api/clients/${clientId}/sites`).set(admin()).send(site);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const modifierSite = async (client, corps) => {
+      const res = await request(app).put(`/api/clients/${client.id}/sites/${client.site.id}`).set(admin()).send(corps);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    // Le nettoyage des tests retrouve leurs clients par le préfixe « TEST » de la raison sociale : un
+    // test qui la vide en base la rétablit toujours, même en échec.
+    const retablirNom = (client) => prisma.client.update({ where: { id: client.id }, data: { raisonSociale: client.raisonSociale } });
+    // Client professionnel complet par défaut : raison sociale, SIREN libre et site de facturation.
+    const creerClient = async (libelle, { siren = true, sansSiret, site = SITE } = {}) => {
+      const corps = { raisonSociale: `TEST 6a-2 bis ${libelle} ${Date.now()}`, ...(siren ? { siren: await sirenLibre() } : {}), ...(sansSiret === undefined ? {} : { sansSiret }) };
+      const res = await request(app).post('/api/clients').set(admin()).send(corps);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return { ...res.body, site: site ? await creerSite(res.body.id, site) : null };
+    };
+    const creerDevis = async (clientId) => {
+      const res = await request(app).post('/api/devis').set(admin()).send({ clientId, objet: 'TEST Devis identité du client', lignes: [{ designation: 'TEST Pose', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const envoi = await request(app).put(`/api/devis/${res.body.id}/statut`).set(admin()).send({ statut: 'ENVOYE' });
+      assert.equal(envoi.status, 200, JSON.stringify(envoi.body));
+      return res.body;
+    };
+    const signer = (id) => request(app).post(`/api/devis/${id}/signature`).set(admin()).send({ signataire: 'TEST Signataire 6a-2 bis', confirme: true });
+    const creerBrouillon = async (clientId) => {
+      const jour = await aujourdhui();
+      const res = await request(app).post('/api/factures').set(admin()).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST identité du client', dateEmission: jour, dateEcheance: jour, lignes: [{ designation: 'TEST Prestation identité du client', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const emettre = (id) => request(app).post(`/api/factures/${id}/emettre`).set(admin());
+    // Chaque cas d'identité incomplète, pris seul : options de la fiche créée complète, dégradation
+    // écrite après la création du devis ou du brouillon (en base pour un champ que l'API ne vide pas),
+    // puis complétion par l'API.
+    const CAS = [
+      { libelle: 'raison sociale vide', manque: 'raison sociale',
+        degrader: (c) => prisma.client.update({ where: { id: c.id }, data: { raisonSociale: '   ' } }),
+        completer: (c) => modifierClient(c.id, { raisonSociale: c.raisonSociale }) },
+      { libelle: 'nom complet vide d’un particulier', manque: 'nom complet', options: { siren: false, sansSiret: true },
+        degrader: (c) => prisma.client.update({ where: { id: c.id }, data: { raisonSociale: '' } }),
+        completer: (c) => modifierClient(c.id, { raisonSociale: c.raisonSociale }) },
+      { libelle: 'aucun site', manque: 'adresse de facturation', options: { site: null },
+        completer: (c) => creerSite(c.id) },
+      { libelle: 'adresse vide', manque: 'adresse de facturation',
+        degrader: (c) => prisma.clientSite.update({ where: { id: c.site.id }, data: { adresse: '  ' } }),
+        completer: (c) => modifierSite(c, { adresse: SITE.adresse }) },
+      { libelle: 'code postal vide', manque: 'adresse de facturation',
+        degrader: (c) => prisma.clientSite.update({ where: { id: c.site.id }, data: { codePostal: '' } }),
+        completer: (c) => modifierSite(c, { codePostal: SITE.codePostal }) },
+      { libelle: 'ville vide', manque: 'adresse de facturation',
+        degrader: (c) => prisma.clientSite.update({ where: { id: c.site.id }, data: { ville: '\t' } }),
+        completer: (c) => modifierSite(c, { ville: SITE.ville }) },
+      { libelle: 'SIREN absent d’un professionnel', manque: SIREN, options: { siren: false },
+        completer: async (c) => modifierClient(c.id, { siren: await sirenLibre() }) },
+    ];
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      await definirSociete(SOCIETE);
+      // Prérequis comptables et légaux de l'émission, posés s'ils manquent : le bloc reste exécutable seul.
+      const plan = async () => (await request(app).get('/api/comptabilite').set(admin())).body;
+      const compte = async (code, libelle, nature) => {
+        let trouve = (await plan()).comptes.find((item) => item.code === code);
+        if (!trouve) { const cree = await request(app).post('/api/comptabilite/comptes').set(admin()).send({ code, libelle, nature }); assert.equal(cree.status, 201, JSON.stringify(cree.body)); trouve = cree.body; }
+        if (!trouve.actif) await prisma.compteComptable.update({ where: { id: trouve.id }, data: { actif: true } });
+        return trouve;
+      };
+      const comptes = { CLIENT: await compte('411962', 'TEST Clients 6a-2 bis', 'ACTIF'), VENTE_PRESTATION: await compte('706962', 'TEST Prestations 6a-2 bis', 'PRODUIT'), VENTE_ARTICLE: await compte('707962', 'TEST Articles 6a-2 bis', 'PRODUIT') };
+      const tva = await compte('445962', 'TEST TVA 6a-2 bis', 'TVA');
+      const { regles, reglesTva } = await plan();
+      for (const [cle, donnees] of [...Object.entries(comptes).map(([c, { id }]) => [c, { compteId: id }]), ['JOURNAL_VENTES', { journal: 'VE' }]]) {
+        const actuelle = regles.find((r) => r.cle === cle);
+        if (actuelle && (cle === 'JOURNAL_VENTES' ? Boolean(actuelle.journal) : actuelle.compte?.actif)) continue;
+        const version = actuelle ? { expectedValeur: cle === 'JOURNAL_VENTES' ? actuelle.journal : actuelle.compteId, expectedUpdatedAt: actuelle.updatedAt } : {};
+        const res = await request(app).put(`/api/comptabilite/regles/${cle}`).set(admin()).send({ ...donnees, ...version, motif: 'TEST prérequis du lot 6a-2 bis' });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      }
+      const tva20 = reglesTva.find((r) => Number(r.taux) === 20);
+      if (!tva20?.compte?.actif) {
+        const res = await request(app).put('/api/comptabilite/tva/20').set(admin()).send({ compteId: tva.id, motif: 'TEST prérequis du lot 6a-2 bis', ...(tva20 ? { expectedCompteId: tva20.compteId, expectedUpdatedAt: tva20.updatedAt } : {}) });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      }
+      const versions = (await request(app).get('/api/mentions-legales').set(admin())).body;
+      if (!versions.some((v) => v.actif && v.publieeLe)) {
+        const creee = await request(app).post('/api/mentions-legales').set(admin()).send({ mentions: 'TEST Mentions 6a-2 bis', cgv: 'TEST CGV 6a-2 bis', penalites: 'TEST Pénalités 6a-2 bis' });
+        assert.equal(creee.status, 201, JSON.stringify(creee.body));
+        assert.equal((await request(app).post(`/api/mentions-legales/${creee.body.version}/publier`).set(admin())).status, 200);
+      }
+    });
+
+    test('fiche : la case « pas de SIRET » se crée, se lit et se modifie ; toute valeur non booléenne est refusée', async () => {
+      const professionnel = await creerClient('professionnel', { site: null });
+      assert.equal(professionnel.sansSiret, false, 'case décochée par défaut');
+      const particulier = await creerClient('particulier', { siren: false, sansSiret: true, site: null });
+      assert.equal(particulier.sansSiret, true);
+      assert.equal(particulier.siren, null);
+      assert.equal((await request(app).get(`/api/clients/${particulier.id}`).set(admin())).body.sansSiret, true);
+      const liste = (await request(app).get(`/api/clients?q=${encodeURIComponent(particulier.raisonSociale)}`).set(admin())).body.clients;
+      assert.deepEqual(liste.map((c) => [c.id, c.sansSiret]), [[particulier.id, true]]);
+      assert.equal((await modifierClient(particulier.id, { sansSiret: false })).sansSiret, false);
+      assert.equal((await modifierClient(particulier.id, { sansSiret: true })).sansSiret, true);
+      assert.equal((await modifierClient(particulier.id, { telephone: '01 02 03 04 05' })).sansSiret, true, 'une modification sans la case la garde');
+      for (const valeur of ['oui', 1, 0, null, 'true', {}]) {
+        const creation = await request(app).post('/api/clients').set(admin()).send({ raisonSociale: `TEST 6a-2 bis case invalide ${Date.now()}`, sansSiret: valeur });
+        assert.equal(creation.status, 400, `${JSON.stringify(valeur)} : ${JSON.stringify(creation.body)}`);
+        assert.equal(creation.body.error, 'Champ client invalide : sansSiret');
+        const modification = await request(app).put(`/api/clients/${professionnel.id}`).set(admin()).send({ sansSiret: valeur });
+        assert.equal(modification.status, 400, `${JSON.stringify(valeur)} : ${JSON.stringify(modification.body)}`);
+        assert.equal(modification.body.error, 'Champ client invalide : sansSiret');
+      }
+      assert.equal((await prisma.client.findUniqueOrThrow({ where: { id: professionnel.id } })).sansSiret, false);
+      // Le nom complet d'un particulier est obligatoire, comme la raison sociale d'une société.
+      const sansNom = await request(app).post('/api/clients').set(admin()).send({ sansSiret: true });
+      assert.equal(sansNom.status, 400, JSON.stringify(sansNom.body));
+      assert.equal(sansNom.body.error, 'Le nom complet est obligatoire.');
+    });
+
+    test('fiche : cocher la case avec un SIREN est refusé, dans la même requête ou sur une fiche qui le garde, sans rien écrire', async () => {
+      const raisonSociale = `TEST 6a-2 bis case et SIREN ${Date.now()}`;
+      const creation = await request(app).post('/api/clients').set(admin()).send({ raisonSociale, sansSiret: true, siren: await sirenLibre() });
+      assert.equal(creation.status, 400, JSON.stringify(creation.body));
+      assert.equal(creation.body.error, SANS_SIRET_AVEC_SIREN);
+      assert.equal(await prisma.client.count({ where: { raisonSociale } }), 0);
+
+      const client = await creerClient('case cochée sur fiche avec SIREN', { site: null });
+      const lire = () => prisma.client.findUniqueOrThrow({ where: { id: client.id }, select: { siren: true, sansSiret: true, updatedAt: true } });
+      const initial = await lire();
+      const autreSiren = await sirenLibre();
+      for (const corps of [{ sansSiret: true }, { sansSiret: true, siren: autreSiren }, { sansSiret: true, siren: '123 456 789' }]) {
+        const refus = await request(app).put(`/api/clients/${client.id}`).set(admin()).send(corps);
+        assert.equal(refus.status, 400, `${JSON.stringify(corps)} : ${JSON.stringify(refus.body)}`);
+        assert.equal(refus.body.error, SANS_SIRET_AVEC_SIREN);
+        assert.deepEqual(await lire(), initial);
+      }
+      // L'écran vide le SIREN en cochant la case : la requête qui fait les deux est acceptée.
+      const coche = await modifierClient(client.id, { sansSiret: true, siren: '' });
+      assert.deepEqual([coche.sansSiret, coche.siren], [true, null]);
+      // Fiche cochée : un SIREN saisi seul est refusé de même.
+      const cochee = await lire();
+      const refusSiren = await request(app).put(`/api/clients/${client.id}`).set(admin()).send({ siren: autreSiren });
+      assert.equal(refusSiren.status, 400, JSON.stringify(refusSiren.body));
+      assert.equal(refusSiren.body.error, SANS_SIRET_AVEC_SIREN);
+      assert.deepEqual(await lire(), cochee);
+      // Décocher et saisir le SIREN dans la même requête est accepté.
+      const decoche = await modifierClient(client.id, { sansSiret: false, siren: autreSiren });
+      assert.deepEqual([decoche.sansSiret, decoche.siren], [false, autreSiren]);
+      // Fiche inconnue : 404, comme avant ce lot.
+      assert.equal((await request(app).put(`/api/clients/${randomUUID()}`).set(admin()).send({ sansSiret: true })).status, 404);
+    });
+
+    test('en base : un client « pas de SIRET » n’a pas de SIREN (contrainte CHECK), et la case est décochée par défaut', async () => {
+      const siren = await sirenLibre();
+      await assert.rejects(prisma.client.create({ data: { raisonSociale: `TEST 6a-2 bis CHECK ${Date.now()}`, sansSiret: true, siren } }), /Client_sansSiret_siren_check/);
+      const particulier = await prisma.client.create({ data: { raisonSociale: `TEST 6a-2 bis CHECK particulier ${Date.now()}`, sansSiret: true } });
+      await assert.rejects(prisma.client.update({ where: { id: particulier.id }, data: { siren } }), /Client_sansSiret_siren_check/);
+      const professionnel = await prisma.client.create({ data: { raisonSociale: `TEST 6a-2 bis CHECK professionnel ${Date.now()}`, siren } });
+      await assert.rejects(prisma.$executeRaw`UPDATE "Client" SET "sansSiret" = true WHERE "id" = ${professionnel.id}`, /Client_sansSiret_siren_check/);
+      const id = randomUUID();
+      await prisma.$executeRaw`INSERT INTO "Client" ("id", "raisonSociale", "updatedAt") VALUES (${id}, 'TEST 6a-2 bis défaut', now())`;
+      assert.equal((await prisma.client.findUniqueOrThrow({ where: { id } })).sansSiret, false);
+    });
+
+    test('signature : refusée pour chaque champ manquant pris seul, avec un message qui le nomme, sans rien écrire ; acceptée une fois la fiche complétée', async () => {
+      try {
+        for (const [rang, cas] of CAS.entries()) {
+          // Identité de la société nouvelle à chaque cas : la copie que la signature refusée aurait
+          // figée, dans sa transaction, n'en laisse aucune trace.
+          const telephone = `02 31 ${String(Date.now()).slice(-5)}${rang}`;
+          await definirSociete({ telephone });
+          const client = await creerClient(cas.libelle, cas.options);
+          try {
+            const devis = await creerDevis(client.id);
+            await cas.degrader?.(client);
+            const avant = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } });
+            const refus = await signer(devis.id);
+            assert.equal(refus.status, 409, `${cas.libelle} : ${JSON.stringify(refus.body)}`);
+            assert.equal(refus.body.error, refusClient(cas.manque, AVANT_SIGNATURE), cas.libelle);
+            assert.deepEqual(await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } }), avant, `${cas.libelle} : devis modifié`);
+            assert.equal(await prisma.devisSignature.count({ where: { devisId: devis.id } }), 0, `${cas.libelle} : signature écrite`);
+            assert.equal(await prisma.identiteEmetteur.count({ where: { telephone } }), 0, `${cas.libelle} : copie de la société laissée`);
+            await cas.completer(client);
+            const signature = await signer(devis.id);
+            assert.equal(signature.status, 201, `${cas.libelle} complété : ${JSON.stringify(signature.body)}`);
+            assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ACCEPTE');
+            assert.equal(await prisma.identiteEmetteur.count({ where: { telephone } }), 1, `${cas.libelle} : copie de la société`);
+          } finally {
+            await retablirNom(client);
+          }
+        }
+      } finally {
+        await definirSociete({ telephone: '' });
+      }
+    });
+
+    test('signature et émission : plusieurs champs manquants nommés ensemble ; un particulier sans site ne se voit demander que son adresse', async () => {
+      const incomplet = await creerClient('tout manque', { siren: false, site: null });
+      const devis = await creerDevis(incomplet.id);
+      const brouillonIncomplet = await creerBrouillon(incomplet.id);
+      try {
+        await prisma.client.update({ where: { id: incomplet.id }, data: { raisonSociale: ' ' } });
+        const refus = await signer(devis.id);
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.equal(refus.body.error, refusClient(`raison sociale, adresse de facturation, ${SIREN}`, AVANT_SIGNATURE));
+        const refusIncomplet = await emettre(brouillonIncomplet.id);
+        assert.equal(refusIncomplet.status, 409, JSON.stringify(refusIncomplet.body));
+        assert.equal(refusIncomplet.body.error, refusClient(`raison sociale, adresse de facturation, ${SIREN}`, AVANT_EMISSION));
+      } finally {
+        await retablirNom(incomplet);
+      }
+      const particulier = await creerClient('particulier sans site', { siren: false, sansSiret: true, site: null });
+      const brouillon = await creerBrouillon(particulier.id);
+      const refusEmission = await emettre(brouillon.id);
+      assert.equal(refusEmission.status, 409, JSON.stringify(refusEmission.body));
+      assert.equal(refusEmission.body.error, refusClient('adresse de facturation', AVANT_EMISSION));
+    });
+
+    test('signature : acceptée pour un professionnel complet et pour un particulier sans SIREN ; l’adresse copiée est celle du site retenu', async () => {
+      // Le site de facturation, créé après un site de chantier et nommé après lui, est celui retenu.
+      const professionnel = await creerClient('professionnel deux sites', { site: { nom: 'A Chantier', adresse: '1 rue du Chantier', codePostal: '33000', ville: 'Bordeaux' } });
+      await creerSite(professionnel.id, { ...SITE, nom: 'Z Facturation', adresse: '9 rue Facturée', complementAdresse: 'Bâtiment F' });
+      const devisPro = await creerDevis(professionnel.id);
+      assert.equal((await signer(devisPro.id)).status, 201);
+      const copiePro = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devisPro.id } });
+      assert.deepEqual([copiePro.clientRaisonSociale, copiePro.clientAdresse], [professionnel.raisonSociale, '9 rue Facturée\nBâtiment F\n75008 Paris']);
+
+      const particulier = await creerClient('particulier', { siren: false, sansSiret: true });
+      const devisParticulier = await creerDevis(particulier.id);
+      assert.equal((await signer(devisParticulier.id)).status, 201);
+      const copieParticulier = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devisParticulier.id } });
+      assert.deepEqual([copieParticulier.clientRaisonSociale, copieParticulier.clientAdresse], [particulier.raisonSociale, '8 rue du Client\n75008 Paris']);
+
+      // Le site retenu incomplet n'est pas remplacé par un autre site complet.
+      const retenuIncomplet = await creerClient('site retenu incomplet', { site: { nom: 'A Chantier complet', adresse: '2 rue Complète', codePostal: '31000', ville: 'Toulouse' } });
+      const facturation = await creerSite(retenuIncomplet.id, { ...SITE, nom: 'Z Facturation incomplète' });
+      await prisma.clientSite.update({ where: { id: facturation.id }, data: { ville: ' ' } });
+      const devisIncomplet = await creerDevis(retenuIncomplet.id);
+      const refus = await signer(devisIncomplet.id);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, refusClient('adresse de facturation', AVANT_SIGNATURE));
+    });
+
+    test('émission : refusée pour chaque champ manquant pris seul, sans numéro consommé ni écriture ni journal ; acceptée une fois la fiche complétée', async () => {
+      const annee = Number((await aujourdhui()).slice(6));
+      for (const cas of CAS) {
+        const client = await creerClient(cas.libelle, cas.options);
+        try {
+          const brouillon = await creerBrouillon(client.id);
+          await cas.degrader?.(client);
+          const sequenceAvant = await prisma.sequenceFacture.findUnique({ where: { annee } });
+          const refus = await emettre(brouillon.id);
+          assert.equal(refus.status, 409, `${cas.libelle} : ${JSON.stringify(refus.body)}`);
+          assert.equal(refus.body.error, refusClient(cas.manque, AVANT_EMISSION), cas.libelle);
+          const relue = await prisma.facture.findUniqueOrThrow({ where: { id: brouillon.id } });
+          assert.deepEqual(
+            { statut: relue.statut, numero: relue.numero, emisLe: relue.emisLe, identiteEmetteurId: relue.identiteEmetteurId, clientAdresse: relue.clientAdresse, mentions: relue.mentionsLegalesVersionId, scellees: relue.ecrituresScellees },
+            { statut: 'BROUILLON', numero: null, emisLe: null, identiteEmetteurId: null, clientAdresse: null, mentions: null, scellees: false }, cas.libelle,
+          );
+          assert.deepEqual(await prisma.sequenceFacture.findUnique({ where: { annee } }), sequenceAvant, `${cas.libelle} : numéro consommé`);
+          assert.equal(await prisma.ecritureFacture.count({ where: { factureId: brouillon.id } }), 0, `${cas.libelle} : écritures comptables`);
+          assert.deepEqual((await prisma.journalFacture.findMany({ where: { factureId: brouillon.id } })).map((j) => j.action), ['CREATION_BROUILLON'], cas.libelle);
+          await cas.completer(client);
+          const emise = await emettre(brouillon.id);
+          assert.equal(emise.status, 200, `${cas.libelle} complété : ${JSON.stringify(emise.body)}`);
+          assert.ok(emise.body.numero);
+        } finally {
+          await retablirNom(client);
+        }
+      }
+    });
+
+    test('émission : acceptée pour un professionnel et un particulier ; l’avoir d’une facture émise reste possible après que la fiche a été vidée', async () => {
+      const particulier = await creerClient('particulier facturé', { siren: false, sansSiret: true });
+      const factureParticulier = await emettre((await creerBrouillon(particulier.id)).id);
+      assert.equal(factureParticulier.status, 200, JSON.stringify(factureParticulier.body));
+      assert.deepEqual([factureParticulier.body.clientRaisonSociale, factureParticulier.body.clientAdresse], [particulier.raisonSociale, '8 rue du Client\n75008 Paris']);
+
+      const professionnel = await creerClient('professionnel facturé');
+      const premiere = await emettre((await creerBrouillon(professionnel.id)).id);
+      const seconde = await emettre((await creerBrouillon(professionnel.id)).id);
+      assert.deepEqual([premiere.status, seconde.status], [200, 200], JSON.stringify([premiere.body, seconde.body]));
+      // Fiche vidée après l'émission : SIREN retiré, raison sociale et adresse effacées en base. Un avoir
+      // reprend les copies figées de sa facture et ne relit pas la fiche client.
+      await modifierClient(professionnel.id, { siren: '' });
+      try {
+        await prisma.client.update({ where: { id: professionnel.id }, data: { raisonSociale: ' ' } });
+        await prisma.clientSite.update({ where: { id: professionnel.site.id }, data: { adresse: ' ', codePostal: ' ', ville: ' ' } });
+        const partiel = await request(app).post(`/api/factures/${premiere.body.id}/avoirs`).set(admin()).send({ lignes: [{ designation: 'TEST Avoir partiel fiche vidée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
+        assert.equal(partiel.status, 201, JSON.stringify(partiel.body));
+        const total = await request(app).post(`/api/factures/${seconde.body.id}/annuler`).set(admin());
+        assert.equal(total.status, 200, JSON.stringify(total.body));
+      } finally {
+        await retablirNom(professionnel);
+      }
+      const avoirs = await prisma.facture.findMany({ where: { type: 'AVOIR', factureOrigineId: { in: [premiere.body.id, seconde.body.id] } }, select: { clientRaisonSociale: true, clientAdresse: true } });
+      assert.deepEqual(avoirs.map((a) => [a.clientRaisonSociale, a.clientAdresse]), [[professionnel.raisonSociale, '8 rue du Client\n75008 Paris'], [professionnel.raisonSociale, '8 rue du Client\n75008 Paris']]);
+    });
+
+    // Choix par défaut, à confirmer : quand la société et le client sont tous deux incomplets, le refus
+    // de la société passe en premier, à la signature comme à l'émission.
+    test('priorité : la société incomplète est signalée avant le client incomplet, à la signature comme à l’émission', async () => {
+      const client = await creerClient('société et client incomplets', { siren: false, site: null });
+      const devis = await creerDevis(client.id);
+      const brouillon = await creerBrouillon(client.id);
+      try {
+        await definirSociete({ siret: '' });
+        const signature = await signer(devis.id);
+        assert.equal(signature.status, 409, JSON.stringify(signature.body));
+        assert.equal(signature.body.error, 'Identité de la société incomplète : renseignez SIRET dans l’écran Société avant d’enregistrer la signature d’un devis.');
+        const emission = await emettre(brouillon.id);
+        assert.equal(emission.status, 409, JSON.stringify(emission.body));
+        assert.equal(emission.body.error, 'Identité de la société incomplète : renseignez SIRET dans l’écran Société avant d’émettre.');
+      } finally {
+        await definirSociete(SOCIETE);
+      }
+      assert.equal((await signer(devis.id)).body.error, refusClient(`adresse de facturation, ${SIREN}`, AVANT_SIGNATURE));
+      assert.equal((await emettre(brouillon.id)).body.error, refusClient(`adresse de facturation, ${SIREN}`, AVANT_EMISSION));
+    });
+
+    test('ordre des refus : l’état du devis ou de la facture passe avant l’identité du client', async () => {
+      const client = await creerClient('refus d’état');
+      const signe = await creerDevis(client.id);
+      assert.equal((await signer(signe.id)).status, 201);
+      const refuse = await creerDevis(client.id);
+      assert.equal((await request(app).put(`/api/devis/${refuse.id}/statut`).set(admin()).send({ statut: 'REFUSE' })).status, 200);
+      const emise = await emettre((await creerBrouillon(client.id)).id);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      await modifierClient(client.id, { siren: '' });
+      for (const [id, message] of [[signe.id, 'Ce devis est déjà signé.'], [refuse.id, 'Ce devis ne peut plus être signé dans son état actuel.']]) {
+        const res = await signer(id);
+        assert.equal(res.status, 409, JSON.stringify(res.body));
+        assert.equal(res.body.error, message);
+      }
+      const reemission = await emettre(emise.body.id);
+      assert.equal(reemission.status, 409, JSON.stringify(reemission.body));
+      assert.equal(reemission.body.error, 'Seul un brouillon peut être émis.');
+    });
+  });
   describe('Lot 6a-3 : envoi d’un devis ou d’une facture par la messagerie, journal des envois', () => {
     let session = '';
     let adminId = '';
@@ -16142,8 +16549,11 @@ if (!TEST_DATABASE_URL) {
       const res = await request(app).put('/api/company').set(admin()).send(champs);
       assert.equal(res.status, 200, JSON.stringify(res.body));
     };
+    // Lot 6a-2 bis : un devis ne se signe et une facture ne s'émet que pour un client identifié. Le
+    // client de ces envois est un professionnel complet : raison sociale, SIREN libre et site de
+    // facturation (adresse, code postal, ville).
     const creerClient = async (raisonSociale, { email, site = true } = {}) => {
-      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale, ...(email ? { email } : {}) });
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale, siren: await sirenLibre(), ...(email ? { email } : {}) });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       if (site) {
         const cree = await request(app).post(`/api/clients/${client.body.id}/sites`).set(admin()).send({ nom: 'TEST Facturation envoi', adresse: '6 rue du Destinataire', codePostal: '75003', ville: 'Paris', estSiteFacturation: true });

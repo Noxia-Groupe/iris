@@ -44,7 +44,7 @@ test('un technicien consulte son chantier sans montant ni alerte de dépassement
 
   // 100 € de fourniture et 2 h de pose à 50 € ; 250 € d'achats et 3 h pointées : matériel et
   // heures dépassés.
-  const client = await creerClient('budgets-technicien', false);
+  const client = await creerClient('budgets-technicien');
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Budgets technicien E2E ${suffixe}`, lignes: [
     { designation: 'Caméra', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
     { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 50, tauxTva: 20 },

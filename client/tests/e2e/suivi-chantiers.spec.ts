@@ -13,7 +13,7 @@ test.describe('Suivi des chantiers — rentabilité et dérives', () => {
       return response.json();
     };
     const etiquette = `Suivi E2E ${Date.now()}`;
-    const client = await creerClient('suivi-chantiers', false);
+    const client = await creerClient('suivi-chantiers');
     // 100 € de fourniture et 2 h de pose. La dérive vend la pose 50 €/h (200 € au total) ;
     // l'affaire saine 500 €/h (1 100 €), pour que sa marge estimée reste au-dessus du seuil
     // quel que soit l'historique de la base partagée.
