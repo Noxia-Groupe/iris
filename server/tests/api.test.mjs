@@ -13947,6 +13947,12 @@ if (!TEST_DATABASE_URL) {
         await prisma.parametres.delete({ where: { id: 'singleton' } });
         await initDb();
         assert.equal((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).anticipationVisitesJours, null);
+        // Lecture retenue de « Au demarrage » : une nouvelle instance, et non chaque démarrage du serveur.
+        // Une anticipation réglée par la société survit au redémarrage (initDb) ; sinon la génération se
+        // désactiverait en silence à chaque mise à jour du serveur (sixième audit de #302).
+        assert.equal((await regler(12)).status, 200);
+        await initDb();
+        assert.equal((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).anticipationVisitesJours, 12);
         await prisma.parametres.delete({ where: { id: 'singleton' } });
         const lu = await etat();
         assert.deepEqual([lu.status, lu.body.anticipationVisitesJours, lu.body.alerte], [200, null, null]);
