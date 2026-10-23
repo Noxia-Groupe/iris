@@ -13784,6 +13784,23 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(inserer('AVANCEMENT_ECHEANCE', SYSTEME.id, SYSTEME.nom), /auteur_check/);
       await assert.rejects(inserer('SUSPENSION', SYSTEME.id, SYSTEME.nom, 'CONTRAT'), /auteur_check/);
       assert.equal(await inserer('CORRECTION', comptes.conducteur.id, comptes.conducteur.name), 1);
+      // Septième audit de #302 : le compte système n'écrit, de toutes les cibles et actions du journal SAV,
+      // que la création de la visite d'un contrat et l'avancement de son échéance. Les essais ci-dessus
+      // laissaient passer une garde élargie à une autre action (CONTRAT/CLOTURE, INTERVENTION/CREATION)
+      // ou à toute une cible (CHANTIER).
+      const CIBLES_JOURNAL = ['ACHAT', 'HEURE', 'INTERVENTION', 'INTERVENTION_RAPPORT', 'INTERVENTION_SIGNATURE', 'COUT_INTERVENTION_HEURE', 'COUT_INTERVENTION_ACHAT', 'CONTRAT', 'CHANTIER'];
+      const ACTIONS_JOURNAL = ['CREATION', 'CORRECTION', 'ARCHIVAGE', 'RESTAURATION', 'CHANGEMENT_STATUT', 'CREATION_CONTRAT', 'SUSPENSION', 'REACTIVATION', 'CLOTURE',
+        'MODIFICATION_COUVERTURE', 'AVANCEMENT_ECHEANCE', 'CHANGEMENT_CLIENT', 'CHANGEMENT_TITULAIRE', 'CHANGEMENT_COMMERCIAL', 'CHANGEMENT_ENCAISSEMENT'];
+      // Un seul parent par écriture (contrainte du journal) : le contrat pour sa cible, la visite sinon.
+      const insererSysteme = (cible, action) => prisma.$executeRaw`INSERT INTO "JournalSaisieChantier" ("id", "interventionId", "contratMaintenanceId", "cible", "cibleId", "action", "auteurId", "auteurNom", "motif")
+        VALUES (${randomUUID()}, ${cible === 'CONTRAT' ? null : id}, ${cible === 'CONTRAT' ? contrat.id : null}, ${cible}, ${cible === 'CONTRAT' ? contrat.id : id}, ${action}, ${SYSTEME.id}, ${SYSTEME.nom}, 'TEST motif')`;
+      for (const cible of CIBLES_JOURNAL) {
+        for (const action of ACTIONS_JOURNAL) {
+          const admise = (cible === 'INTERVENTION' && action === 'CREATION_CONTRAT') || (cible === 'CONTRAT' && action === 'AVANCEMENT_ECHEANCE');
+          if (admise) assert.equal(await insererSysteme(cible, action), 1, `${cible}/${action}`);
+          else await assert.rejects(insererSysteme(cible, action), /auteur_check/, `${cible}/${action}`);
+        }
+      }
 
       const passage = (declenchement, cle, auteurId, auteurNom, statut = 'REUSSIE') => prisma.$executeRaw`INSERT INTO "ExecutionGenerationVisites" ("id", "jour", "declenchement", "cleJourAutomatique", "auteurId", "auteurNom", "anticipationJours", "statut")
         VALUES (${randomUUID()}, DATE '2001-02-03', ${declenchement}, ${cle}, ${auteurId}, ${auteurNom}, 30, ${statut})`;
@@ -14043,6 +14060,11 @@ if (!TEST_DATABASE_URL) {
       }
       // La base refuse de le modifier ou de le supprimer, et de donner son type à un autre compte.
       await assert.rejects(prisma.user.update({ where: { id: SYSTEME.id }, data: { actif: true } }), /Compte système/);
+      // Septième audit de #302 : toute modification, et non seulement sa réactivation (nom, adresse, droits,
+      // rattachement, préférence d'affichage).
+      for (const data of [{ name: 'TEST Autre nom' }, { email: 'systeme.autre@iris.test' }, { permissions: ['devis:read'] }, { accesFinance: true }, { responsableHierarchiqueId: comptes.conducteur.id }, { theme: 'dark' }]) {
+        await assert.rejects(prisma.user.update({ where: { id: SYSTEME.id }, data }), /Compte système/, JSON.stringify(data));
+      }
       await assert.rejects(prisma.user.delete({ where: { id: SYSTEME.id } }), /Compte système/);
       await assert.rejects(prisma.user.create({ data: { email: 'systeme.bis@iris.test', name: 'TEST Système bis', role: 'SYSTEME' } }), /role_systeme/);
       await assert.rejects(prisma.user.update({ where: { id: comptes.conducteur.id }, data: { role: 'SYSTEME' } }), /role_systeme/);

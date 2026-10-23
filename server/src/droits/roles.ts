@@ -21,6 +21,7 @@ export const ROLE_DIRECTEUR = 'DIRECTEUR';
 // gestion des comptes ; la base refuse de le modifier ou de le supprimer.
 export const ROLE_SYSTEME = 'SYSTEME';
 export const COMPTE_SYSTEME_ID = '00000000-0000-4000-8000-000000000001';
+// Nom par défaut, à confirmer (passation, section 4) : le changer demande une migration, la base figeant le compte.
 export const NOM_COMPTE_SYSTEME = 'Iris (automatique)';
 export const EMAIL_COMPTE_SYSTEME = 'systeme@iris.invalid';
 

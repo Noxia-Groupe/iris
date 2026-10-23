@@ -9,7 +9,8 @@ ALTER TABLE "Parametres" ALTER COLUMN "anticipationVisitesJours" DROP DEFAULT;
 -- d'un auteur vide. Il ne se connecte jamais : inactif, sans mot de passe, d'une adresse
 -- réservée (.invalid, qui ne peut être un domaine vérifié d'Entra ID ; une connexion qui la
 -- présenterait resterait refusée, le compte étant inactif), d'un type de compte qu'aucune route
--- n'accorde et qui ne donne aucun droit.
+-- n'accorde et qui ne donne aucun droit. Son nom, « Iris (automatique) », est un choix par défaut,
+-- à confirmer (passation, section 4).
 INSERT INTO "User" ("id", "email", "name", "role", "actif", "updatedAt")
 VALUES ('00000000-0000-4000-8000-000000000001', 'systeme@iris.invalid', 'Iris (automatique)', 'SYSTEME', false, CURRENT_TIMESTAMP)
 ON CONFLICT ("id") DO NOTHING;
