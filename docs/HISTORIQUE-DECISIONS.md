@@ -344,8 +344,40 @@ Découpage retenu par Claude Code (choix de mise en œuvre, non décidé par Nel
    - « un SIREN suffit » vise le client : sa raison sociale, une adresse de facturation et son SIREN sont exigés pour signer un devis et pour émettre une facture, sauf si une case « pas de SIRET » de sa fiche en fait un particulier (B2B comme B2C). Lecture confirmée le soir même par Nelson ([décisions du 23-10-2026, soir](#décisions-du-23-10-2026-soir)), appliquée par le lot 6a-2 bis.
 2. **Devis brouillon imprimé** (question : le marquer d'une mention, sans cadre à remplir, ou l'imprimer comme un devis envoyé) : même message, « pas de mention brouillon ». Lecture retenue : un devis brouillon s'imprime comme un devis envoyé, cadre « Bon pour accord » compris, sans mention « brouillon » ; c'est le comportement de #301, inchangé.
 
+## Décision du 23-10-2026 (soir) : tests manquants
+
+*Rédigé le 23-10-2026.* Question posée par Claude Code après le dix-huitième audit de #301, les audits 14 à 18 n'ayant plus relevé de défaut dans le code, seulement des cas que les tests ne couvraient pas : faut-il fusionner quand un audit ne relève que des tests manquants hors montants, et verser ces tests à une PR de suivi ? Réponse de Nelson, citée mot pour mot (message de la session de travail) : « Oui fusionne si ce n’eqt que des test manquant il faut eviter de tourner en rond et de provoquer des test de plus en olus longtemps et qui ne provoque pas d’erreur. Si pas d’erreur on continue ».
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin, appliquée dès le dix-neuvième audit de #301 et consignée dans la règle 3 de la méthode (`CLAUDE.md`, `.agents/AGENTS.md`) :
+- une remarque d'audit qui ne signale qu'un test manquant (cas non couvert, mutant survivant), sans erreur constatée dans le code, la documentation ou un test existant, ne retarde pas la fusion, même sur un autre parcours de la règle 2 que les montants ; la question excluant les montants, un test manquant qui touche un montant reste ajouté et retesté avant fusion ;
+- elle devient une issue `suivi-audit`, qui reprend le test proposé, versé ensuite par une PR de suivi, sans nouvelle boucle d'audit (première application : #308) ;
+- une erreur constatée suit la règle 3 : corrigée et retestée avant fusion, avec un nouvel audit sur la nouvelle SHA, si elle est bloquante ou touche un parcours de la règle 2 ;
+- la fusion exige toujours une CI verte et un audit sur la même SHA.
+
+## Lots des 22 et 23-10-2026
+
+*Rédigé le 23-10-2026.* Fusions faites par Claude Code selon la décision de Nelson du 20-10-2026, chacune avec une CI verte et un audit interne fusionnable sur la même SHA ; #301 l'est selon la règle du 23-10-2026 sur les tests manquants. Aucune n'est validée pour mise en service.
+
+### Lots fusionnés
+
+- #297 : passation et historique après les lots pilotes 4 et 5.
+- #298 : tests de #295 (cible de la clé du formulaire de conversion) et de #296 (notes N1 et N2 du troisième audit de #293) ; les deux issues sont closes.
+- #300 (lot 6a-1) : modèle commun des PDF ; identité de l'émetteur, logo, couleur et pied de page copiés et figés à l'émission des factures et des avoirs.
+- #302 (lot 5 suite) : génération des visites désactivée au démarrage d'une nouvelle instance ; écritures de la génération automatique au nom d'un compte système (décisions du 22-10-2026, soir).
+- #301 (lot 6a-2) : PDF du devis sur le modèle commun ; identité de l'émetteur, client et fuseau copiés et figés à la signature ; signature refusée sans identité complète de la société (décision du 23-10-2026). Dix-neuf audits internes, dont un arrêté sans verdict.
+
+### Suivis ouverts pendant ces lots
+
+Étiquette `suivi-audit` : #303 (boutons désactivés sans aspect distinct, audit de #302), #304 (journal SAV sans garde en base contre la modification, audit de #302), #305 (gabarit PDF : coupure sur une espace insécable, caractères de mise en forme, attente des tests de verrou, lettres en exposant, pages suivantes sans référence, ordre des sites côté facture, nombres des factures imprimés avec un point ; audits de #301), #306 (drapeaux des sites d'un client basculés hors transaction, audit de #301), #307 (URL d'un fichier téléchargé révoquée juste après le clic, audits de #301) et #308 (en-tête et pied de page avec des caractères hors WinAnsi, test manquant du dix-neuvième audit de #301).
+
+### En cours au 23-10-2026
+
+- Lots pilotes 4 et 5, et lots 6a-1 et 6a-2, implémentés, non validés pour mise en service. Restent du lot 6 : l'envoi par la messagerie et son journal (6a-3), les PDF des autres documents et leur envoi (6a-4) et Microsoft 365 (6b).
+- Lots dédiés prévus par les décisions des 22 et 23-10-2026 : deux conversions par affaire (lot 4, lecture retenue des réponses du 22-10-2026) ; identité minimale du client pour signer un devis et émettre une facture, avec la case « pas de SIRET » (lecture retenue, confirmée le soir même : section suivante).
+- #250 (#240) : toujours en pause, en brouillon, jusqu'à la fin du pilote.
+
 ## Décisions du 23-10-2026 (soir)
 
-*Rédigé le 23-10-2026.* Nouvelle réponse de Nelson sur l'identité exigée du client pour signer un devis et émettre une facture (lecture retenue « à confirmer » de la section précédente ; passation, section 3), citée mot pour mot entre guillemets (message de la session de travail). Elle s'ajoute aux trois réponses citées plus haut (« Pour la question… », « case pas de Sirte… », « un SIREN suffit »). Ce qui suit la citation est la lecture retenue par Claude Code, à corriger par Nelson si besoin :
+*Rédigé le 23-10-2026.* Nouvelle réponse de Nelson sur l'identité exigée du client pour signer un devis et émettre une facture (lecture retenue « à confirmer » de la section [« Décisions du 23-10-2026 »](#décisions-du-23-10-2026) ; passation, section 3), citée mot pour mot entre guillemets (message de la session de travail). Elle s'ajoute aux trois réponses citées plus haut (« Pour la question… », « case pas de Sirte… », « un SIREN suffit »). Ce qui suit la citation est la lecture retenue par Claude Code, à corriger par Nelson si besoin :
 
 - **Identité minimale d'un client sans SIRET** : « L’identité minimal d’un client sans siret, avoir le nom du client complet et de son adresse ». Lecture retenue : elle confirme la lecture du matin. Un client professionnel (case « pas de SIRET » décochée) porte une raison sociale, une adresse de facturation et un SIREN ; un client sans SIRET (particulier, case cochée), son nom complet et son adresse. La règle vaut pour signer un devis et pour émettre une facture ; celle de la société émettrice (cinq champs, « Oui garde les 5 champs ») ne change pas. Appliquée par le lot 6a-2 bis ; ses choix de mise en œuvre non couverts par ces réponses sont des choix par défaut, à confirmer ([passation](ROADMAP-PASSATION.md#4-choix-par-défaut-à-confirmer), section 4, « Identité du client »).
