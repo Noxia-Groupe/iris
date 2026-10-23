@@ -14003,6 +14003,32 @@ if (!TEST_DATABASE_URL) {
       // Sans session non plus, sur un chemin qu'aucune route ne sert (ici GET).
       const [sansSessionSysteme, sansSessionAbsent] = await Promise.all([SYSTEME.id, inexistant].map((id) => request(app).get(`/api/users/${id}`)));
       assert.deepEqual([sansSessionSysteme.status, sansSessionSysteme.type], [sansSessionAbsent.status, sansSessionAbsent.type]);
+      // Désigné ailleurs par son identifiant (responsable, commercial d'une prime, compte d'une fiche,
+      // commercial ou responsable d'un chantier), il répond aussi comme un compte inexistant (note N2 du
+      // quatrième audit de #302).
+      const fiche = await prisma.intervenant.create({ data: { nom: 'TEST Génération fiche du compte système', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Génération chantier du compte système', client: 'TEST Génération client', dateDebut: new Date(), budgetGlobalVendu: 0, responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id } });
+      try {
+        for (const auth of [entete('admin'), admin()]) {
+          for (const [methode, chemin, corps] of [
+            ['patch', () => `/api/users/${comptes.conducteur.id}/responsable-hierarchique`, (id) => ({ responsableHierarchiqueId: id })],
+            ['put', (id) => `/api/commerciaux/${id}/prime-mensuelle`, () => ({ periode: '2026-01', suiviAdministratif: true })],
+            ['put', () => `/api/intervenants/${fiche.id}/compte`, (id) => ({ userId: id })],
+            ['patch', () => `/api/chantiers/${chantier.id}/commercial`, (id) => ({ commercialId: id })],
+            ['patch', () => `/api/chantiers/${chantier.id}`, (id) => ({ responsableId: id })],
+          ]) {
+            const [systeme, absent] = await Promise.all([SYSTEME.id, inexistant].map((id) => request(app)[methode](chemin(id)).set(auth).send(corps(id))));
+            const lu = (res, id) => JSON.stringify([res.status, res.body]).replaceAll(id, 'ID');
+            assert.equal(lu(systeme, SYSTEME.id), lu(absent, inexistant), `${methode} ${chemin('ID')}`);
+          }
+        }
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: comptes.conducteur.id } })).responsableHierarchiqueId, null);
+        assert.equal((await prisma.intervenant.findUniqueOrThrow({ where: { id: fiche.id } })).userId, null);
+        assert.deepEqual(await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id }, select: { responsableId: true, commercialId: true } }), { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id });
+      } finally {
+        await prisma.chantier.delete({ where: { id: chantier.id } });
+        await prisma.intervenant.delete({ where: { id: fiche.id } });
+      }
       // La base refuse de le modifier ou de le supprimer, et de donner son type à un autre compte.
       await assert.rejects(prisma.user.update({ where: { id: SYSTEME.id }, data: { actif: true } }), /Compte système/);
       await assert.rejects(prisma.user.delete({ where: { id: SYSTEME.id } }), /Compte système/);
