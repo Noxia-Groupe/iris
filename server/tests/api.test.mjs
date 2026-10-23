@@ -16548,8 +16548,11 @@ if (!TEST_DATABASE_URL) {
       const res = await request(app).put('/api/company').set(admin()).send(champs);
       assert.equal(res.status, 200, JSON.stringify(res.body));
     };
+    // Lot 6a-2 bis : un devis ne se signe et une facture ne s'émet que pour un client identifié. Le
+    // client de ces envois est un professionnel complet : raison sociale, SIREN libre et site de
+    // facturation (adresse, code postal, ville).
     const creerClient = async (raisonSociale, { email, site = true } = {}) => {
-      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale, ...(email ? { email } : {}) });
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale, siren: await sirenLibre(), ...(email ? { email } : {}) });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       if (site) {
         const cree = await request(app).post(`/api/clients/${client.body.id}/sites`).set(admin()).send({ nom: 'TEST Facturation envoi', adresse: '6 rue du Destinataire', codePostal: '75003', ville: 'Paris', estSiteFacturation: true });
