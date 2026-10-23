@@ -25,6 +25,9 @@ test('PDF du devis : téléchargé depuis l’écran Devis, refus expliqué si l
   expect(fichier.suggestedFilename()).toBe(`${devis.numero}-v1.pdf`);
   const octets = await readFile(await fichier.path() as string);
   expect(octets.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  // Audit n° 6 : le fichier garde les octets binaires du PDF reçu (commentaire d'en-tête en 0xFF),
+  // qu'une lecture de la réponse en texte remplacerait.
+  expect(octets.subarray(0, 15).equals(Buffer.from('%PDF-1.3\n%\xff\xff\xff\xff\n', 'latin1'))).toBe(true);
   // Le fichier est bien celui de ce devis : son titre porte son numéro et sa version.
   expect(octets.includes(Buffer.from(`(Devis ${devis.numero} version 1)`))).toBe(true);
 

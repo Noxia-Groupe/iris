@@ -692,7 +692,8 @@ describe('Lot 6a-2 : colonnes à chasse fixe des documents', () => {
     // Séparateurs de ligne et de paragraphe, fins de ligne Windows et anciennes : un saut de ligne.
     for (const code of [0x0a, 0x0d, 0x2028, 0x2029]) assert.equal(entre(code), 'a\nb', `U+${code.toString(16)}`);
     assert.equal(texteWinAnsi('a\r\nb'), 'a\nb');
-    for (const code of [0xad, 0x200b, 0x200c, 0x200d, 0x2060, 0xfeff]) assert.equal(entre(code), 'ab', `U+${code.toString(16)}`);
+    // Audit n° 6 : le gluon de graphèmes (U+034F), invisible, est le septième caractère retiré.
+    for (const code of [0xad, 0x034f, 0x200b, 0x200c, 0x200d, 0x2060, 0xfeff]) assert.equal(entre(code), 'ab', `U+${code.toString(16)}`);
     // Les autres caractères de mise en forme invisibles deviennent « ? », comme le dit la passation.
     for (const code of [0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2062, 0xfe0f]) assert.equal(entre(code), 'a?b', `U+${code.toString(16)}`);
     assert.equal(texteWinAnsi('©\ufe0f'), '©?');

@@ -14603,6 +14603,8 @@ if (!TEST_DATABASE_URL) {
         'Acompte demandé : 30 %', 'Bon pour accord', 'Date, nom et signature du client :',
       ]) assert.ok(texte.includes(attendu), `absent du PDF : ${attendu}\n${texte}`);
       assert.ok(texte.indexOf('TVA 10 %') < texte.indexOf('TVA 20 %'), 'ventilation par taux croissant');
+      // Audit n° 6 : les lignes s'impriment dans l'ordre du devis, celui du contenu signé.
+      assert.ok(texte.indexOf('TEST Pose catalogue') > texte.indexOf('TEST Main-d’œuvre de dépannage'), `ordre des lignes\n${texte}`);
       assert.ok(!texte.includes('7,77') && !texte.includes('90,00'), 'prix d’achat imprimé');
       assert.ok(!/Accepté par|ANNULÉ|refusé/.test(texte));
       assert.ok((await couleursPdf(octets)).has('#0f766e'), 'couleur de la société');
@@ -14755,6 +14757,14 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.identiteEmetteur.delete({ where: { id: copie.identiteEmetteurId } }), /Foreign key constraint|violates foreign key/i);
       // La date de création, imprimée « établi le », est figée avec le devis signé.
       await assert.rejects(prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2020-01-01T00:00:00Z') } }), /Devis signé : client, objet, date, montants/);
+      // Audit n° 6 : redéfini par ce lot, le garde de #161 fige toujours chacune de ses colonnes et
+      // refuse toujours la suppression d'un devis signé.
+      const autreClient = await creerClient(`TEST Autre client garde devis ${Date.now()}`, false);
+      for (const data of [{ dossierId: randomUUID() }, { numero: 'A99-9999' }, { version: 99 }, { clientId: autreClient.id }, { objet: 'TEST Autre objet' },
+        { totalHt: 1 }, { totalTva: 1 }, { totalTtc: 1 }, { acompteExige: true }, { tauxAcompte: 50 }]) {
+        await assert.rejects(prisma.devis.update({ where: { id: devis.id }, data }), /Devis signé : client, objet, date, montants/, JSON.stringify(data));
+      }
+      await assert.rejects(prisma.devis.delete({ where: { id: devis.id } }), /Devis signé : il ne se supprime pas/);
 
       // Signature enregistrée avant ce lot (sans copie, garde désactivé le temps de l'écrire) : le
       // devis s'imprime avec l'identité et la fiche client actuelles, signature comprise.
@@ -14791,6 +14801,21 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).post(`/api/devis/${signeAnnule.id}/annulation`).set(admin()).send({ motif: 'TEST motif interne' })).status, 200);
       const texteSigneAnnule = (await texteDevis(signeAnnule.id)).texte;
       assert.ok(texteSigneAnnule.includes('DEVIS ANNULÉ') && texteSigneAnnule.includes('Accepté par TEST Signataire client'));
+
+      // Audit n° 6 : signé puis annulé, ou signé et en attente d'acompte, le devis reste imprimé
+      // depuis ses copies, quel que soit son statut.
+      const signeAcompte = await creerDevis(client.id, 'TEST Devis signé en attente d’acompte', undefined, { acompteExige: true, tauxAcompte: 30 });
+      assert.equal((await signer(signeAcompte.id)).status, 201);
+      assert.equal((await request(app).put(`/api/devis/${signeAcompte.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' })).status, 200);
+      try {
+        await definirSociete(SOCIETE_B);
+        for (const id of [signeAnnule.id, signeAcompte.id]) {
+          const texte = (await texteDevis(id)).texte;
+          assert.ok(texte.includes('TEST Émetteur devis A') && !texte.includes('TEST Émetteur devis B'), `identité vivante imprimée :\n${texte}`);
+        }
+      } finally {
+        await definirSociete(SOCIETE_A);
+      }
     });
 
     test('gabarit : un devis long a son pied de page et sa pagination sur chaque page, et un seul cadre de signature', async () => {
@@ -15157,6 +15182,19 @@ if (!TEST_DATABASE_URL) {
 
     // Audit n° 5 : sans tri, la lecture rend les sites dans l'ordre d'écriture ou des identifiants,
     // aléatoires : l'autre site est ici le premier écrit et le premier par identifiant.
+    // Audit n° 6 : comme la facture, le devis prend le site principal d'un client qui n'a aucun site
+    // marqué facturation, avec son complément d'adresse et son pays.
+    test('client : sans site marqué facturation, le site principal, complément et pays compris', async () => {
+      const client = await creerClient(`TEST Client site principal ${Date.now()}`, false);
+      const site = await request(app).post(`/api/clients/${client.id}/sites`).set(admin()).send({ nom: 'TEST Siège', adresse: '12 rue Principale', complementAdresse: 'Bâtiment B', codePostal: '1000', ville: 'Bruxelles', pays: 'Belgique', principal: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      const devis = await creerDevis(client.id, 'TEST Devis site principal');
+      const nonSigne = (await texteDevis(devis.id)).texte;
+      assert.ok(['12 rue Principale', 'Bâtiment B', '1000 Bruxelles', 'Belgique'].every((t) => nonSigne.includes(t)), nonSigne);
+      assert.equal((await signer(devis.id)).status, 201);
+      assert.equal((await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: devis.id } })).clientAdresse, '12 rue Principale\nBâtiment B\n1000 Bruxelles\nBelgique');
+    });
+
     test('client actuel : le site de facturation, quels que soient l’ordre d’écriture et les identifiants', async () => {
       const client = await creerClient(`TEST Client sites ordonnés ${Date.now()}`, false);
       const suite = randomUUID().slice(8);
@@ -15222,6 +15260,17 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Audit n° 6 : une ligne au taux de 0 % garde sa base dans la ventilation, qui reconstitue le total HT.
+    test('ventilation : un taux de 0 % garde sa base HT', async () => {
+      const client = await creerClient(`TEST Client taux nul devis ${Date.now()}`);
+      const devis = await creerDevis(client.id, 'TEST Devis au taux nul', [
+        { designation: 'TEST Prestation au taux nul', quantite: 1, prixUnitaireHt: 40, tauxTva: 0 },
+        { designation: 'TEST Fourniture taxée', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+      ]);
+      const { texte } = await texteDevis(devis.id);
+      for (const attendu of ['TVA 0 % sur 40,00 € : 0,00 €', 'TVA 20 % sur 10,00 € : 2,00 €', 'TVA totale : 2,00 €', 'Total HT : 50,00 €']) assert.ok(texte.includes(attendu), `absent du PDF : ${attendu}\n${texte}`);
+    });
+
     test('ventilation : TVA arrondie sur la base cumulée du taux, comme la TVA du devis', async () => {
       const client = await creerClient(`TEST Client arrondi devis ${Date.now()}`);
       // Trois lignes de 0,03 € à 20 % : 0,01 € de TVA chacune ligne à ligne, 0,02 € sur la base cumulée.
@@ -15270,9 +15319,17 @@ if (!TEST_DATABASE_URL) {
     test('cadre du bon pour accord : jamais dans la marge basse, quelle que soit la longueur du devis', async () => {
       const { inflateSync } = await import('node:zlib');
       const client = await creerClient(`TEST Client cadre devis ${Date.now()}`);
+      const sansSite = await creerClient(`TEST Client cadre sans site ${Date.now()}`, false);
       const cadres = [];
-      for (let n = 30; n <= 60; n++) {
-        const devis = await creerDevis(client.id, `TEST Devis cadre ${n}`, Array.from({ length: n }, (_, i) => ({ designation: `TEST Ligne ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 })));
+      // Audit n° 6 : l'en-tête (adresse du client, ligne d'acompte) décale le cadre ; chaque variante
+      // parcourt sa propre plage de longueurs.
+      const variantes = [
+        { clientId: client.id, extra: {}, de: 30, a: 60 },
+        { clientId: client.id, extra: { acompteExige: true, tauxAcompte: 30 }, de: 24, a: 36 },
+        { clientId: sansSite.id, extra: {}, de: 24, a: 36 },
+      ];
+      for (const { clientId, extra, de, a } of variantes) for (let n = de; n <= a; n++) {
+        const devis = await creerDevis(clientId, `TEST Devis cadre ${n}`, Array.from({ length: n }, (_, i) => ({ designation: `TEST Ligne ${i + 1}`, quantite: 1, prixUnitaireHt: 10, tauxTva: 20 })), extra);
         const res = await pdfDevis(devis.id);
         assert.equal(res.status, 200);
         const octets = res.body, texte = octets.toString('latin1');
@@ -15280,12 +15337,12 @@ if (!TEST_DATABASE_URL) {
           const debut = flux.index + flux[0].length;
           let contenu;
           try { contenu = inflateSync(octets.subarray(debut, texte.indexOf('endstream', debut))).toString('latin1'); } catch { continue; }
-          for (const [, haut, hauteur] of contenu.matchAll(/[\d.]+ ([\d.]+) 240 ([\d.]+) re/g)) cadres.push([n, Number(haut) + Number(hauteur)]);
+          for (const [, haut, hauteur] of contenu.matchAll(/[\d.]+ ([\d.]+) 240 ([\d.]+) re/g)) cadres.push([n, Number(haut) + Number(hauteur), extra.acompteExige ? 'acompte' : clientId === sansSite.id ? 'sans adresse' : 'adresse']);
         }
       }
-      assert.equal(cadres.length, 31, JSON.stringify(cadres));
+      assert.equal(cadres.length, 31 + 13 + 13, JSON.stringify(cadres));
       // Page A4 de 842 points, moins la marge basse du gabarit (84 points avec un pied d'une ligne).
-      for (const [n, bas] of cadres) assert.ok(bas <= 842 - 84, `cadre dans la marge basse avec ${n} lignes : bas à ${bas}`);
+      for (const [n, bas, variante] of cadres) assert.ok(bas <= 842 - 84, `cadre dans la marge basse avec ${n} lignes (${variante}) : bas à ${bas}`);
     });
   });
 }
