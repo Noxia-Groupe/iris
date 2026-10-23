@@ -14858,16 +14858,17 @@ if (!TEST_DATABASE_URL) {
     const signer = (id, auth = admin()) => request(app).post(`/api/devis/${id}/signature`).set(auth).send({ signataire: 'TEST Signataire client', confirme: true });
     // Lot 6a-2 bis : un client sans site n'est plus signé (adresse de facturation exigée), refus vérifié
     // ici. Une signature du lot 6a-2 qui n'a pas copié d'adresse reste imprimable : elle est fabriquée
-    // en base, avec ses autres copies, pour éprouver ce rendu.
+    // en base, avec ses autres copies, pour éprouver ce rendu. L'identité copiée est celle des pièces
+    // écrites en base par les tests (identiteEmetteurFixture) : chaque test reste exécutable seul.
     const signerSansAdresseEnBase = async (devisId, raisonSociale) => {
       const refus = await signer(devisId);
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
       assert.match(refus.body.error, /^Identité du client incomplète : renseignez adresse de facturation sur la fiche client/);
       assert.equal(await prisma.devisSignature.count({ where: { devisId } }), 0);
       const auteur = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' }, select: { id: true } });
-      const identite = await prisma.identiteEmetteur.findFirstOrThrow({ where: { siret: SOCIETE_A.siret }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+      const identiteEmetteurId = await identiteEmetteurFixture();
       await prisma.devis.update({ where: { id: devisId }, data: { statut: 'ACCEPTE' } });
-      await prisma.devisSignature.create({ data: { devisId, enregistreParId: auteur.id, signataire: 'TEST Signataire client', empreinte: 'a'.repeat(64), identiteEmetteurId: identite.id, clientRaisonSociale: raisonSociale, clientAdresse: null, fuseauHoraire: 'Europe/Paris' } });
+      await prisma.devisSignature.create({ data: { devisId, enregistreParId: auteur.id, signataire: 'TEST Signataire client', empreinte: 'a'.repeat(64), identiteEmetteurId, clientRaisonSociale: raisonSociale, clientAdresse: null, fuseauHoraire: 'Europe/Paris' } });
     };
     const pdfDevis = (id, auth = admin()) => request(app).get(`/api/devis/${id}/document.pdf`).set(auth).buffer(true)
       .parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
