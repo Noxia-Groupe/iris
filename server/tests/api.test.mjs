@@ -13821,6 +13821,12 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', 'un-compte', SYSTEME.nom), /coherence/);
       await assert.rejects(passage('MANUEL', null, SYSTEME.id, 'Quelqu’un'), /coherence/);
       await assert.rejects(passage('MANUEL', null, 'un-compte', null), /coherence/);
+      // Onzième audit de #302 : un passage sans compte est refusé même nommé, automatique comme manuel. Une
+      // comparaison à une valeur vide est inconnue (NULL), ce qu'une contrainte CHECK accepterait : la garde
+      // tient à IS NOT DISTINCT FROM (automatique) et à « "auteurId" IS NOT NULL » (manuel), que rien d'autre
+      // n'éprouvait.
+      await assert.rejects(passage('AUTOMATIQUE', '2001-02-03', null, SYSTEME.nom), /coherence/);
+      await assert.rejects(passage('MANUEL', null, null, 'Quelqu’un'), /coherence/);
       await assert.rejects(passage('MANUEL', '2001-02-03', 'un-compte', 'Quelqu’un'), /coherence/);
       await assert.rejects(passage('MANUEL', null, 'un-compte', 'Quelqu’un', 'INCONNU'), /coherence/);
       assert.equal(await passage('MANUEL', null, 'un-compte', 'Quelqu’un'), 1);
@@ -14014,8 +14020,9 @@ if (!TEST_DATABASE_URL) {
       // masquerait un déclencheur laissé neutralisé par une migration (par exemple après un renommage du compte).
       const [{ declencheur }] = await prisma.$queryRaw`SELECT "tgenabled"::text AS "declencheur" FROM pg_trigger WHERE "tgrelid" = '"User"'::regclass AND "tgname" = 'compte_systeme_fige'`;
       assert.equal(declencheur, 'O', 'déclencheur compte_systeme_fige actif');
-      // Un arrêt brutal du processus entre la neutralisation et le rétablissement laisserait une base locale
-      // conservée en défaut (déclencheur neutralisé ou compte réactivé), signalé par ce test : recréer la base.
+      // Un arrêt brutal du processus entre la neutralisation et le rétablissement, ou un échec de la base pendant
+      // le rétablissement, laisserait une base locale conservée en défaut (déclencheur neutralisé ou compte
+      // réactivé), signalé par ce test au passage suivant, jamais par un faux vert : recréer la base.
       // La CI part d'une base neuve.
       await prisma.$executeRawUnsafe('ALTER TABLE "User" DISABLE TRIGGER "compte_systeme_fige"');
       try {
