@@ -49,9 +49,9 @@ export async function propositionDestinataire(db: Prisma.TransactionClient, clie
   return courrielContact || client?.email?.trim() || '';
 }
 
-// Objet et texte du courriel (choix par défaut, à confirmer) : aucune mention légale ajoutée, le
-// document joint porte les siennes. La raison sociale est celle que le PDF imprime, sauf pour une pièce
-// émise avant le lot 6a-1 (texteEnvoiFacture).
+// Objet et texte du courriel, validés par Nelson le 23-10-2026 (lot 6a-3 bis) : aucune mention légale
+// ajoutée, le document joint porte les siennes. La raison sociale est celle que le PDF imprime, sauf
+// pour une pièce émise avant le lot 6a-1 (texteEnvoiFacture).
 type DocumentEnvoye = { nature: 'DEVIS'; numero: string; version: number } | { nature: 'FACTURE' | 'AVOIR'; numero: string };
 export function texteEnvoi(document: DocumentEnvoye, raisonSociale: string): { objet: string; corps: string } {
   const designation = document.nature === 'DEVIS' ? `Devis ${document.numero} version ${document.version}`

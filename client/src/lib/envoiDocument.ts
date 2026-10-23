@@ -4,6 +4,9 @@
 
 export type EnvoiPrepare = { id: string; canal: string; destinataire: string; objet: string; auteurNom: string; createdAt: string };
 export type PropositionEnvoi = { destinataire: string; objet: string; corps: string };
+// Réponse à l'enregistrement d'un envoi. Celle d'un devis porte aussi son statut après l'envoi : un
+// brouillon passe « envoyé » (lot 6a-3 bis, décision de Nelson du 23-10-2026).
+export type EnvoiEnregistre = { envoi: EnvoiPrepare; objet: string; corps: string; statutDevis?: string };
 
 // Objet et texte encodés par encodeURIComponent ; les sauts de ligne du texte deviennent CRLF
 // (%0D%0A), comme le demande la RFC 6068. L'adresse est encodée de même, arobase laissée lisible :

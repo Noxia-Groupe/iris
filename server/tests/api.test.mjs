@@ -16761,21 +16761,25 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await envoyer(`factures/${annulation.body.avoir.id}`, 'compta@client-envoi.test')).body.envoi.objet, `Avoir ${annulation.body.avoir.numero} – TEST Émetteur envoi A`);
     });
 
-    test('enregistrement : envois du plus récent au plus ancien, sans identifiant de compte ; statut du devis inchangé', async () => {
+    test('enregistrement : envois du plus récent au plus ancien, sans identifiant de compte ; un brouillon passe « envoyé », les autres statuts ne changent pas', async () => {
       const client = await creerClient(`TEST Client envoi journal ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Envoi journalisé');
-      const avant = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } });
+      const relireDevis = (id) => prisma.devis.findUniqueOrThrow({ where: { id }, include: { lignes: { orderBy: { ordre: 'asc' } } } });
+      const avant = await relireDevis(devis.id);
       const [{ debut }] = await prisma.$queryRaw`SELECT now() AS debut`;
       const premier = await envoyer(`devis/${devis.id}`, '  premier@client-envoi.test\n');
       assert.equal(premier.status, 201, JSON.stringify(premier.body));
-      assert.deepEqual(Object.keys(premier.body).sort(), ['corps', 'envoi', 'objet']);
+      assert.deepEqual(Object.keys(premier.body).sort(), ['corps', 'envoi', 'objet', 'statutDevis']);
       assert.deepEqual(Object.keys(premier.body.envoi).sort(), CHAMPS_ENVOI);
       assert.equal(premier.body.envoi.destinataire, 'premier@client-envoi.test');
       assert.equal(premier.body.envoi.canal, 'MESSAGERIE');
       assert.equal(premier.body.envoi.auteurNom, adminNom);
       assert.equal(premier.body.envoi.objet, `Devis ${devis.numero} version 1 – TEST Émetteur envoi A`);
+      assert.equal(premier.body.statutDevis, 'ENVOYE');
+      const apresPremier = await relireDevis(devis.id);
       const second = await envoyer(`devis/${devis.id}`, 'second@client-envoi.test');
       assert.equal(second.status, 201, JSON.stringify(second.body));
+      assert.equal(second.body.statutDevis, 'ENVOYE');
       const lu = await lire(`devis/${devis.id}`);
       assert.deepEqual(lu.body.envois.map((e) => e.destinataire), ['second@client-envoi.test', 'premier@client-envoi.test']);
       assert.deepEqual(lu.body.envois, [second.body.envoi, premier.body.envoi]);
@@ -16789,10 +16793,13 @@ if (!TEST_DATABASE_URL) {
         assert.equal(ligne.auteurId, adminId); assert.equal(ligne.factureId, null);
         assert.ok(ligne.createdAt.getTime() >= debut.getTime() - 1000, `${ligne.createdAt.toISOString()} < ${debut.toISOString()}`);
       }
-      // Préparer un envoi ne change ni le statut ni le devis.
-      const apres = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } });
-      assert.equal(apres.statut, 'BROUILLON');
-      assert.equal(apres.updatedAt.getTime(), avant.updatedAt.getTime());
+      // Préparer l'envoi d'un brouillon le passe « envoyé » (décision de Nelson du 23-10-2026, lot
+      // 6a-3 bis), sans rien changer d'autre du devis ; celui d'un devis déjà envoyé n'y écrit rien.
+      const sansStatut = ({ statut, updatedAt, ...reste }) => reste;
+      assert.equal(avant.statut, 'BROUILLON');
+      assert.equal(apresPremier.statut, 'ENVOYE');
+      assert.deepEqual(sansStatut(apresPremier), sansStatut(avant));
+      assert.deepEqual(await relireDevis(devis.id), apresPremier);
       const envoye = await creerDevis(client.id, 'TEST Envoi d’un devis envoyé');
       await statutDevis(envoye.id, 'ENVOYE');
       const signe = await creerDevis(client.id, 'TEST Envoi d’un devis signé', { acompteExige: true, tauxAcompte: 30 });
@@ -16800,9 +16807,14 @@ if (!TEST_DATABASE_URL) {
       const attente = await creerDevis(client.id, 'TEST Envoi d’un devis en attente d’acompte', { acompteExige: true, tauxAcompte: 30 });
       assert.equal((await signer(attente.id)).status, 201);
       await statutDevis(attente.id, 'EN_ATTENTE_ACOMPTE');
+      // Un devis envoyé, accepté (signé) ou en attente d'acompte garde son statut, et n'est pas réécrit.
       for (const [cible, statut] of [[envoye, 'ENVOYE'], [signe, 'ACCEPTE'], [attente, 'EN_ATTENTE_ACOMPTE']]) {
-        assert.equal((await envoyer(`devis/${cible.id}`, 'client@envoi.test')).status, 201);
-        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: cible.id } })).statut, statut);
+        const lu = await relireDevis(cible.id);
+        const reponse = await envoyer(`devis/${cible.id}`, 'client@envoi.test');
+        assert.equal(reponse.status, 201, JSON.stringify(reponse.body));
+        assert.equal(reponse.body.statutDevis, statut);
+        assert.equal(lu.statut, statut);
+        assert.deepEqual(await relireDevis(cible.id), lu);
       }
       // Un compte sans nom est nommé par son adresse.
       const sansNom = await prisma.user.create({ data: { email: EMAILS[4], name: '  ', role: 'COMMERCIAL' } });
@@ -16857,6 +16869,14 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await request(app).get('/api/v1/devis').set(parCle)).status, 200, 'la clé lit bien les devis');
         assert.equal(await prisma.envoiDocument.count({ where: { devisId: devis.id } }), 1);
         assert.equal(await prisma.envoiDocument.count({ where: { factureId: facture.id } }), 0);
+        // Un refus de droits n'écrit rien, statut compris (lot 6a-3 bis) : un brouillon reste brouillon.
+        const intact = await creerDevis(client.id, 'TEST Droits : brouillon jamais envoyé');
+        for (const [auth, code] of [[entete(lecteur), 403], [entete(technicien), 403], [entete(directeur), 403], [parCle, 401]]) {
+          assert.equal((await envoyer(`devis/${intact.id}`, 'client@envoi.test', auth)).status, code);
+        }
+        assert.equal((await request(app).post(`/api/devis/${intact.id}/envois`).send({ destinataire: 'client@envoi.test' })).status, 401);
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: intact.id } })).statut, 'BROUILLON');
+        assert.equal(await prisma.envoiDocument.count({ where: { devisId: intact.id } }), 0);
         // L'administration, elle, prépare l'envoi de la facture.
         assert.equal((await envoyer(`factures/${facture.id}`, 'client@envoi.test')).status, 201);
       } finally {
@@ -16914,6 +16934,11 @@ if (!TEST_DATABASE_URL) {
       }
       assert.equal(await prisma.envoiDocument.count({ where: { devisId: { in: [annule.id, refuse.id, nonSigne.id] } } }), 0);
       assert.equal(await prisma.envoiDocument.count({ where: { factureId: brouillon.id } }), 0);
+      // Un refus n'écrit rien, statut compris (lot 6a-3 bis) : le brouillon refusé faute d'identité le
+      // reste, le devis annulé et le devis refusé gardent le leur.
+      for (const [devis, statut] of [[nonSigne, 'BROUILLON'], [annule, 'ANNULE'], [refuse, 'REFUSE']]) {
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, statut);
+      }
     });
 
     test('destinataire : une seule adresse, refusée sous chacune de ses formes invalides, sans rien écrire', async () => {
@@ -16937,12 +16962,15 @@ if (!TEST_DATABASE_URL) {
       // Sans corps du tout.
       assert.equal((await request(app).post(`/api/devis/${devis.id}/envois`).set(admin())).status, 400);
       assert.equal(await prisma.envoiDocument.count({ where: { OR: [{ devisId: devis.id }, { factureId: facture.id }] } }), 0);
+      // Le brouillon refusé reste brouillon (lot 6a-3 bis).
+      assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'BROUILLON');
       // 254 caractères au plus.
       const limite = `${'a'.repeat(249)}@b.fr`;
       assert.equal(limite.length, 254);
       const envoi = await envoyer(`devis/${devis.id}`, limite);
       assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
       assert.equal(envoi.body.envoi.destinataire, limite);
+      assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ENVOYE');
     });
 
     test('verrous : l’envoi d’un devis attend son annulation en cours, puis la refuse ; celui d’une facture attend le verrou de la pièce', async () => {
@@ -16979,6 +17007,8 @@ if (!TEST_DATABASE_URL) {
       }
       assert.equal(await prisma.envoiDocument.count({ where: { devisId: devis.id } }), 0);
       assert.equal(await prisma.envoiDocument.count({ where: { factureId: facture.id } }), 1);
+      // Le brouillon annulé pendant l'attente reste annulé : l'envoi refusé ne le passe pas « envoyé ».
+      assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ANNULE');
     });
 
     test('en base : journal en ajout seul, vidage refusé, chaque contrainte et horodatage imposé', async () => {
@@ -17018,6 +17048,79 @@ if (!TEST_DATABASE_URL) {
       const lignes = await prisma.envoiDocument.findMany({ where: { OR: [{ devisId: devis.id }, { factureId: facture.id }] } });
       assert.equal(lignes.length, 3);
       for (const ligne of lignes) assert.ok(Math.abs(ligne.createdAt.getTime() - maintenant.getTime()) < 60_000, ligne.createdAt.toISOString());
+    });
+
+    // Décision de Nelson du 23-10-2026 (nuit) : un devis brouillon passe « envoyé » quand son envoi est
+    // préparé, et peut être repassé manuellement en brouillon s'il n'est finalement pas envoyé.
+    describe('Lot 6a-3 bis : un brouillon passe « envoyé » quand son envoi est préparé ; retour manuel au brouillon', () => {
+      const statutEnBase = async (id) => (await prisma.devis.findUniqueOrThrow({ where: { id } })).statut;
+      const changerStatut = (id, statut) => request(app).put(`/api/devis/${id}/statut`).set(admin()).send({ statut });
+
+      test('un brouillon dont l’envoi est préparé passe « envoyé », relu en base et par la liste ; le retour au brouillon garde le journal', async () => {
+        const client = await creerClient(`TEST Client envoi statut ${Date.now()}`);
+        const devis = await creerDevis(client.id, 'TEST Brouillon envoyé puis repassé en brouillon');
+        assert.equal(devis.statut, 'BROUILLON');
+        const envoi = await envoyer(`devis/${devis.id}`, 'client@envoi.test');
+        assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
+        assert.equal(envoi.body.statutDevis, 'ENVOYE');
+        assert.equal(await statutEnBase(devis.id), 'ENVOYE');
+        const journal = await prisma.envoiDocument.findMany({ where: { devisId: devis.id } });
+        assert.deepEqual(journal.map((ligne) => [ligne.id, ligne.destinataire]), [[envoi.body.envoi.id, 'client@envoi.test']]);
+        // La liste que lit l'écran Devis porte le nouveau statut.
+        const liste = await request(app).get('/api/devis').set(admin());
+        assert.equal(liste.status, 200);
+        assert.equal(liste.body.find((d) => d.id === devis.id)?.statut, 'ENVOYE');
+
+        // Retour manuel au brouillon, par la transition existante ENVOYE → BROUILLON : le journal des
+        // envois est gardé tel quel.
+        const retour = await changerStatut(devis.id, 'BROUILLON');
+        assert.equal(retour.status, 200, JSON.stringify(retour.body));
+        assert.equal(retour.body.statut, 'BROUILLON');
+        assert.equal(await statutEnBase(devis.id), 'BROUILLON');
+        assert.deepEqual((await lire(`devis/${devis.id}`)).body.envois.map((e) => e.id), [envoi.body.envoi.id]);
+        // Un nouvel envoi préparé le repasse « envoyé ».
+        const nouvel = await envoyer(`devis/${devis.id}`, 'autre@envoi.test');
+        assert.equal(nouvel.status, 201, JSON.stringify(nouvel.body));
+        assert.equal(nouvel.body.statutDevis, 'ENVOYE');
+        assert.equal(await statutEnBase(devis.id), 'ENVOYE');
+        assert.equal(await prisma.envoiDocument.count({ where: { devisId: devis.id } }), 2);
+
+        // Le retour vaut aussi pour un devis passé « envoyé » par « Marquer envoyé » (choix par défaut,
+        // à confirmer).
+        const marque = await creerDevis(client.id, 'TEST Marqué envoyé puis repassé en brouillon');
+        await statutDevis(marque.id, 'ENVOYE');
+        await statutDevis(marque.id, 'BROUILLON');
+        assert.equal(await statutEnBase(marque.id), 'BROUILLON');
+      });
+
+      test('le retour au brouillon reste refusé pour un devis signé, en attente d’acompte, refusé ou annulé, envoi préparé ou non', async () => {
+        const client = await creerClient(`TEST Client envoi statut refusé ${Date.now()}`);
+        // Envoi préparé (brouillon → envoyé), puis signature : le devis signé est « accepté ».
+        const signe = await creerDevis(client.id, 'TEST Envoyé puis signé', { acompteExige: true, tauxAcompte: 30 });
+        assert.equal((await envoyer(`devis/${signe.id}`, 'client@envoi.test')).body.statutDevis, 'ENVOYE');
+        assert.equal((await signer(signe.id)).status, 201);
+        const attente = await creerDevis(client.id, 'TEST Signé puis en attente d’acompte', { acompteExige: true, tauxAcompte: 30 });
+        assert.equal((await signer(attente.id)).status, 201);
+        await statutDevis(attente.id, 'EN_ATTENTE_ACOMPTE');
+        assert.equal((await envoyer(`devis/${attente.id}`, 'client@envoi.test')).body.statutDevis, 'EN_ATTENTE_ACOMPTE');
+        const refuse = await creerDevis(client.id, 'TEST Envoyé puis refusé');
+        assert.equal((await envoyer(`devis/${refuse.id}`, 'client@envoi.test')).body.statutDevis, 'ENVOYE');
+        await statutDevis(refuse.id, 'REFUSE');
+        const annule = await creerDevis(client.id, 'TEST Envoyé puis annulé');
+        assert.equal((await envoyer(`devis/${annule.id}`, 'client@envoi.test')).body.statutDevis, 'ENVOYE');
+        assert.equal((await request(app).post(`/api/devis/${annule.id}/annulation`).set(admin()).send({ motif: 'TEST motif' })).status, 200);
+        for (const [devis, statut, message] of [
+          [signe, 'ACCEPTE', 'Transition ACCEPTE → BROUILLON interdite.'],
+          [attente, 'EN_ATTENTE_ACOMPTE', 'Transition EN_ATTENTE_ACOMPTE → BROUILLON interdite.'],
+          [refuse, 'REFUSE', 'Transition REFUSE → BROUILLON interdite.'],
+          [annule, 'ANNULE', 'Ce devis est annulé : son statut ne peut plus changer.'],
+        ]) {
+          const refus = await changerStatut(devis.id, 'BROUILLON');
+          assert.equal(refus.status, 400, JSON.stringify(refus.body));
+          assert.equal(refus.body.error, message);
+          assert.equal(await statutEnBase(devis.id), statut);
+        }
+      });
     });
   });
 }
