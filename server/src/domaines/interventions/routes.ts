@@ -447,6 +447,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
           const contrat = await tx.contratMaintenance.findUniqueOrThrow({ where: { id: actuel.contratMaintenanceId }, select: { statut: true } });
           if (contrat.statut === 'SUSPENDU') throw new Error('CONTRAT_SUSPENDU');
           if (contrat.statut === 'TERMINE') throw new Error('CONTRAT_TERMINE');
+          if (contrat.statut === 'ANNULE') throw new Error('CONTRAT_ANNULE');
         }
         const planning = await tx.planningEvent.upsert({
           where: { interventionId: id },
@@ -467,6 +468,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if ((error as Error).message === 'INTERVENTION_NON_PLANIFIABLE') return res.status(409).json({ error: 'Cette intervention ne peut plus être planifiée.' });
       if ((error as Error).message === 'CONTRAT_SUSPENDU') return res.status(409).json({ error: 'Réactivez le contrat avant de planifier cette visite.' });
       if ((error as Error).message === 'CONTRAT_TERMINE') return res.status(409).json({ error: 'Un contrat clos interdit tout nouveau placement de visite.' });
+      if ((error as Error).message === 'CONTRAT_ANNULE') return res.status(409).json({ error: 'Un contrat annulé interdit tout nouveau placement de visite.' });
       console.error('Erreur de planification SAV', error);
       res.status(500).json({ error: 'Erreur lors de la planification de l’intervention.' });
     }

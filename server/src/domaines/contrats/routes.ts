@@ -8,6 +8,11 @@ import { exposerIntervention } from '../interventions/metier';
 import { GenerationVisitesDesactivee, etatGenerationVisites, executerGenerationVisites } from './generation';
 import { journaliserContrat, motifContratValide, lirePolitiqueCouverture, verrouillerContratMaintenance, lireSaisieContrat, creerContratMaintenance, SaisieContratInvalide, visiteDeLEcheance, creerVisiteContrat, avancerEcheanceContrat, VISITE_INCLUDE } from './metier';
 
+// Un contrat annulé avec son devis (lot 4 suite) ne se modifie, ne se suspend, ne se clôt ni ne se
+// réactive plus ; la base le refuse aussi (trigger contrat_annule_fige). La suspension et la clôture
+// d'un contrat restent, elles, documentées par un motif obligatoire et journalisé.
+const REFUS_CONTRAT_ANNULE = 'Ce contrat a été annulé avec son devis : il ne se modifie plus.';
+
 export function enregistrerRoutesContrats(app: Express): void {
   // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
   // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
@@ -84,6 +89,7 @@ export function enregistrerRoutesContrats(app: Express): void {
         const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
         if (!contrat) return { erreur: 'NOT_FOUND' as const };
         if (contrat.statut === 'TERMINE') return { erreur: 'TERMINE' as const };
+        if (contrat.statut === 'ANNULE') return { erreur: 'ANNULE' as const };
         if (contrat.statut !== 'ACTIF') return { erreur: 'SUSPENDU' as const };
         // Le verrou précède la relecture : deux éditeurs ne peuvent pas écraser la version de l'autre.
         if (req.body?.expectedUpdatedAt !== undefined && req.body.expectedUpdatedAt !== contrat.updatedAt.toISOString()) return { erreur: 'PERIME' as const };
@@ -97,6 +103,7 @@ export function enregistrerRoutesContrats(app: Express): void {
       if ('erreur' in resultat) {
         if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
         if (resultat.erreur === 'TERMINE') return res.status(409).json({ error: 'Un contrat clos ne peut plus être modifié.' });
+        if (resultat.erreur === 'ANNULE') return res.status(409).json({ error: REFUS_CONTRAT_ANNULE });
         if (resultat.erreur === 'SUSPENDU') return res.status(409).json({ error: 'Réactivez le contrat avant de modifier sa couverture.' });
         if (resultat.erreur === 'PERIME') return res.status(409).json({ error: 'Le contrat a été modifié depuis l’ouverture de l’éditeur : actualisez la liste.' });
         if (resultat.erreur === 'INCHANGEE') return res.status(409).json({ error: 'La couverture est inchangée.' });
@@ -119,6 +126,7 @@ export function enregistrerRoutesContrats(app: Express): void {
         const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) } });
         if (!contrat) return { erreur: 'NOT_FOUND' as const };
         if (contrat.statut === 'TERMINE') return { erreur: 'TERMINE' as const };
+        if (contrat.statut === 'ANNULE') return { erreur: 'ANNULE' as const };
         const autorise = (contrat.statut === 'ACTIF' && ['SUSPENDU', 'TERMINE'].includes(statut)) || (contrat.statut === 'SUSPENDU' && ['ACTIF', 'TERMINE'].includes(statut));
         if (!autorise) return { erreur: 'TRANSITION' as const };
         const maj = await tx.contratMaintenance.update({ where: { id: contrat.id }, data: { statut } });
@@ -129,6 +137,7 @@ export function enregistrerRoutesContrats(app: Express): void {
       if ('erreur' in resultat) {
         if (resultat.erreur === 'NOT_FOUND') return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
         if (resultat.erreur === 'TERMINE') return res.status(409).json({ error: 'Un contrat clos ne se rouvre pas : signez un nouveau contrat.' });
+        if (resultat.erreur === 'ANNULE') return res.status(409).json({ error: REFUS_CONTRAT_ANNULE });
         return res.status(409).json({ error: 'Transition de statut de contrat incohérente.' });
       }
       res.json(decimalToNumber(resultat.contrat));

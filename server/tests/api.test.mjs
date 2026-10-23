@@ -4497,8 +4497,8 @@ if (!TEST_DATABASE_URL) {
           const reponses = await Promise.all([convertir(devis.id), request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' })]);
           assert.equal(reponses.filter((r) => r.status < 300).length, 1, JSON.stringify(reponses.map((r) => [r.status, r.body.error])));
           assert.ok(reponses.every((r) => r.status < 500), JSON.stringify(reponses.map((r) => [r.status, r.body.error])));
-          const relu = await prisma.devis.findUnique({ where: { id: devis.id }, include: { conversion: true } });
-          assert.ok(!(relu.conversion && relu.statut !== 'ACCEPTE'), `devis converti au statut ${relu.statut}`);
+          const relu = await prisma.devis.findUnique({ where: { id: devis.id }, include: { conversions: true } });
+          assert.ok(!(relu.conversions.length && relu.statut !== 'ACCEPTE'), `devis converti au statut ${relu.statut}`);
         }
       });
 
@@ -4775,7 +4775,7 @@ if (!TEST_DATABASE_URL) {
         contactEtrangerId = (await prisma.clientContact.create({ data: { clientId: autreClient.id, nom: 'TEST Contact étranger' } })).id;
       });
 
-      test('un devis signé crée son intervention, à planifier, et l’affaire n’est plus convertie', async () => {
+      test('un devis signé crée son intervention, à planifier, et l’affaire n’en crée pas une seconde', async () => {
         const devis = await devisAccepte('TEST Conversion en intervention');
         // Un chantier du même client transmis par le corps n'est pas rattaché : la conversion crée
         // une intervention hors affaire, comme le dit sa ligne. Un client transmis est ignoré : le
@@ -4795,44 +4795,44 @@ if (!TEST_DATABASE_URL) {
         assert.equal(cree.body.dateSouhaitee, '2099-12-15T00:00:00.000Z');
         assert.equal(cree.body.description, 'TEST Description de la demande');
         assert.ok(cree.body.dateDemande, 'la demande est datée du jour civil de la société');
-        const conversion = await prisma.devisConversion.findUnique({ where: { devisId: devis.id } });
-        assert.deepEqual([conversion.cibleType, conversion.cibleId], ['INTERVENTION', cree.body.id]);
+        const conversions = await prisma.devisConversion.findMany({ where: { devisId: devis.id } });
+        assert.deepEqual(conversions.map((c) => [c.cibleType, c.cibleId, c.rang]), [['INTERVENTION', cree.body.id, 1]]);
         const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: cree.body.id } });
         assert.equal(journal.length, 1);
         assert.equal(journal[0].action, 'CREATION');
         assert.equal(journal[0].motif, `Conversion du devis ${devis.numero} (version 1).`);
 
         const lu = (await request(app).get('/api/devis').set(admin())).body.find((d) => d.id === devis.id);
-        assert.equal(lu.conversion.cibleType, 'INTERVENTION');
-        assert.equal((await request(app).get('/api/devis/a-convertir').set(admin())).body.some((d) => d.id === devis.id), false, 'plus proposé à l’ouverture d’un chantier');
+        assert.deepEqual(lu.conversions.map((c) => [c.cibleType, c.cibleId, c.rang]), [['INTERVENTION', cree.body.id, 1]]);
+        assert.equal('conversion' in lu, false, 'la réponse expose le tableau des conversions, et lui seul');
+        // Lot 4 suite : le devis reste proposé à l'ouverture de son chantier, seconde conversion possible.
+        assert.equal((await request(app).get('/api/devis/a-convertir').set(admin())).body.some((d) => d.id === devis.id), true, 'toujours proposé à l’ouverture de son chantier');
 
-        // Une seule conversion par affaire, quelle que soit la cible.
-        for (const [cible, corps] of [['INTERVENTION', {}], ['CONTRAT', CONTRAT], ['CHANTIER', {}]]) {
-          const doublon = await convertirEn(devis.id, cible, corps);
-          assert.equal(doublon.status, 409, `${cible} : ${JSON.stringify(doublon.body)}`);
-          assert.equal(doublon.body.error, 'Ce devis a déjà créé son intervention : chaque affaire n’est convertie qu’une fois.');
-        }
+        // Une seule intervention par affaire (lot 4 suite : les autres types restent possibles).
+        const doublon = await convertirEn(devis.id, 'INTERVENTION');
+        assert.equal(doublon.status, 409, JSON.stringify(doublon.body));
+        assert.equal(doublon.body.error, 'Ce devis a déjà créé son intervention : chaque affaire n’en crée qu’une.');
         assert.deepEqual(await dossiersCrees('TEST Conversion en intervention'), { interventions: 1, contrats: 0, chantiers: 0 });
 
-        // Le devis est figé : son statut ne change plus, et il ne s'annule plus.
+        // Le devis est figé : son statut ne change plus, il ne se révise plus.
         const statut = await request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' });
         assert.equal(statut.status, 400, JSON.stringify(statut.body));
         assert.equal(statut.body.error, 'Ce devis est déjà converti : son statut ne change plus.');
-        const annulation = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST erreur' });
-        assert.equal(annulation.status, 409, JSON.stringify(annulation.body));
-        assert.match(annulation.body.error, /Ce devis a créé une intervention : il ne s’annule plus/);
         assert.equal((await prisma.devis.findUnique({ where: { id: devis.id } })).statut, 'ACCEPTE');
         assert.equal((await prisma.intervention.findUnique({ where: { id: cree.body.id } })).statut, 'A_PLANIFIER');
         const revision = await request(app).post(`/api/devis/${devis.id}/revisions`).set(admin());
         assert.equal(revision.status, 409, JSON.stringify(revision.body));
         assert.equal(revision.body.error, 'Ce devis est déjà converti : il ne peut plus être révisé.');
-        // L'intervention annulée depuis sa fiche, le devis ne s'annule toujours pas (règle (b), posée
-        // en question à Nelson).
+        // L'intervention annulée depuis sa fiche, seule l'intervention change ; le devis s'annule
+        // ensuite (lot 4 suite), sans réécrire l'intervention déjà annulée.
         const interventionAnnulee = await request(app).patch(`/api/interventions/${cree.body.id}/statut`).set(admin()).send({ statut: 'ANNULEE' });
         assert.equal(interventionAnnulee.status, 200, JSON.stringify(interventionAnnulee.body));
+        assert.equal((await prisma.devis.findUnique({ where: { id: devis.id } })).statut, 'ACCEPTE', 'l’intervention annulée laisse le devis inchangé');
         const apresCible = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST intervention annulée' });
-        assert.equal(apresCible.status, 409, JSON.stringify(apresCible.body));
-        assert.match(apresCible.body.error, /Ce devis a créé une intervention : il ne s’annule plus/);
+        assert.equal(apresCible.status, 200, JSON.stringify(apresCible.body));
+        assert.deepEqual([apresCible.body.devis.statut, apresCible.body.interventionsAnnulees, apresCible.body.contratAnnule, apresCible.body.chantierArchive], ['ANNULE', [], null, null]);
+        assert.equal((await prisma.intervention.findUnique({ where: { id: cree.body.id } })).statut, 'ANNULEE');
+        assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: cree.body.id } }), 2, 'création et annulation depuis la fiche, rien de plus');
       });
 
       test('un devis signé crée son contrat de maintenance, actif, avec sa couverture', async () => {
@@ -4848,17 +4848,15 @@ if (!TEST_DATABASE_URL) {
         assert.equal(cree.body.dateDebut, '2026-11-01T00:00:00.000Z');
         assert.equal(cree.body.prochaineEcheance, '2026-11-01T00:00:00.000Z', 'première échéance à la date de début');
         assert.deepEqual([cree.body.politiqueMainOeuvre, cree.body.politiqueMateriel, cree.body.noteCouverture], ['INCLUSE', 'HORS_FORFAIT', 'TEST deux visites par an']);
-        const conversion = await prisma.devisConversion.findUnique({ where: { devisId: devis.id } });
-        assert.deepEqual([conversion.cibleType, conversion.cibleId], ['CONTRAT', cree.body.id]);
+        const conversions = await prisma.devisConversion.findMany({ where: { devisId: devis.id } });
+        assert.deepEqual(conversions.map((c) => [c.cibleType, c.cibleId, c.rang]), [['CONTRAT', cree.body.id, 1]]);
         const journal = await prisma.journalSaisieChantier.findMany({ where: { contratMaintenanceId: cree.body.id } });
         assert.deepEqual(journal.map((entree) => [entree.action, entree.motif]), [['CREATION', `Conversion du devis ${devis.numero} (version 1).`]]);
 
-        const doublon = await convertirEn(devis.id, 'INTERVENTION');
+        // Un seul contrat par affaire (lot 4 suite : les autres types restent possibles).
+        const doublon = await convertirEn(devis.id, 'CONTRAT', CONTRAT);
         assert.equal(doublon.status, 409, JSON.stringify(doublon.body));
-        assert.equal(doublon.body.error, 'Ce devis a déjà créé son contrat : chaque affaire n’est convertie qu’une fois.');
-        const annulation = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST erreur' });
-        assert.equal(annulation.status, 409, JSON.stringify(annulation.body));
-        assert.match(annulation.body.error, /Ce devis a créé un contrat de maintenance : il ne s’annule plus/);
+        assert.equal(doublon.body.error, 'Ce devis a déjà créé son contrat : chaque affaire n’en crée qu’un.');
         const statut = await request(app).put(`/api/devis/${devis.id}/statut`).set(admin()).send({ statut: 'EN_ATTENTE_ACOMPTE' });
         assert.equal(statut.status, 400, JSON.stringify(statut.body));
         assert.equal(statut.body.error, 'Ce devis est déjà converti : son statut ne change plus.');
@@ -4866,12 +4864,18 @@ if (!TEST_DATABASE_URL) {
         assert.equal(revision.status, 409, JSON.stringify(revision.body));
         assert.equal(revision.body.error, 'Ce devis est déjà converti : il ne peut plus être révisé.');
         assert.deepEqual(await dossiersCrees('TEST Conversion en contrat'), { interventions: 0, contrats: 1, chantiers: 0 });
-        // Le contrat terminé depuis la liste des contrats, le devis ne s'annule toujours pas (règle (b)).
+        // Le contrat clos depuis la liste des contrats, le devis reste inchangé ; son annulation annule
+        // ensuite aussi le contrat clos (lot 4 suite, choix par défaut, à confirmer).
         const termine = await request(app).patch(`/api/contrats-maintenance/${cree.body.id}/statut`).set(admin()).send({ statut: 'TERMINE', motif: 'TEST fin du contrat' });
         assert.equal(termine.status, 200, JSON.stringify(termine.body));
+        assert.equal((await prisma.devis.findUnique({ where: { id: devis.id } })).statut, 'ACCEPTE', 'le contrat clos laisse le devis inchangé');
         const apresCible = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST contrat terminé' });
-        assert.equal(apresCible.status, 409, JSON.stringify(apresCible.body));
-        assert.match(apresCible.body.error, /Ce devis a créé un contrat de maintenance : il ne s’annule plus/);
+        assert.equal(apresCible.status, 200, JSON.stringify(apresCible.body));
+        assert.equal(apresCible.body.contratAnnule, cree.body.id);
+        const contratAnnule = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: cree.body.id } });
+        assert.deepEqual([contratAnnule.statut, contratAnnule.motifAnnulation], ['ANNULE', 'TEST contrat terminé']);
+        const derniere = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { contratMaintenanceId: cree.body.id }, orderBy: { createdAt: 'desc' } });
+        assert.deepEqual([derniere.action, derniere.avant.statut, derniere.apres.statut], ['ANNULATION', 'TERMINE', 'ANNULE']);
 
         // Un titre propre au contrat remplace l'objet du devis, limité comme à sa création directe.
         const autre = await devisAccepte(`TEST Conversion titrée ${'x'.repeat(220)}`);
@@ -5042,7 +5046,7 @@ if (!TEST_DATABASE_URL) {
         for (const [cible, corps] of [['INTERVENTION', {}], ['CONTRAT', CONTRAT]]) {
           const refus = await convertirEn(premiere.id, cible, corps);
           assert.equal(refus.status, 409, `${cible} : ${JSON.stringify(refus.body)}`);
-          assert.equal(refus.body.error, 'Une autre version de ce devis a déjà été convertie : chaque affaire n’est convertie qu’une fois. Pour la reprendre, dupliquez le devis.');
+          assert.equal(refus.body.error, 'Une autre version de ce devis a déjà été convertie : les conversions d’une affaire partent toutes de la même version. Pour la reprendre, dupliquez le devis.');
         }
         assert.equal(await prisma.intervention.count({ where: { titre: 'TEST Conversion autre version' } }), 0);
         assert.equal(await prisma.contratMaintenance.count({ where: { titre: 'TEST Conversion autre version' } }), 0);
@@ -5083,26 +5087,27 @@ if (!TEST_DATABASE_URL) {
         assert.equal(await prisma.contratMaintenance.count({ where: { titre: 'TEST Ordre' } }), 0);
       });
 
-      test('trois conversions simultanées du même devis vers trois cibles : une seule aboutit', async () => {
+      test('trois conversions simultanées du même devis vers trois cibles : deux aboutissent, la troisième est refusée', async () => {
         const devis = await devisAccepte('TEST Conversion simultanée');
         const reponses = await Promise.all([
           convertirEn(devis.id, 'INTERVENTION'), convertirEn(devis.id, 'CONTRAT', CONTRAT), convertirEn(devis.id, 'CHANTIER'),
         ]);
-        assert.deepEqual(reponses.map((reponse) => reponse.status).sort(), [201, 409, 409], JSON.stringify(reponses.map((reponse) => reponse.body.error)));
-        // Les perdantes lisent, sous le verrou du devis, la conversion gagnante : sans ce verrou, une
-        // contrainte unique les refuserait aussi, mais avec un autre message.
-        for (const reponse of reponses.filter((r) => r.status === 409)) {
-          assert.match(reponse.body.error, /^Ce devis a déjà (créé son (intervention|contrat|chantier) : chaque affaire n’est convertie qu’une fois|été converti : chaque affaire n’ouvre qu’un seul chantier)\.$/, reponse.body.error);
-        }
-        assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 1);
+        assert.deepEqual(reponses.map((reponse) => reponse.status).sort(), [201, 201, 409], JSON.stringify(reponses.map((reponse) => reponse.body.error)));
+        // La perdante lit, sous le verrou du devis, les deux conversions gagnantes : sans ce verrou, une
+        // contrainte unique la refuserait aussi, mais avec un autre message.
+        const perdante = reponses.find((r) => r.status === 409);
+        assert.match(perdante.body.error, /^Ce devis a déjà créé son (intervention|contrat|chantier) et son (intervention|contrat|chantier) : une affaire se convertit au plus deux fois\.$/, perdante.body.error);
+        const conversions = await prisma.devisConversion.findMany({ where: { devisId: devis.id }, orderBy: { rang: 'asc' } });
+        assert.deepEqual(conversions.map((c) => c.rang), [1, 2]);
+        assert.equal(new Set(conversions.map((c) => c.cibleType)).size, 2);
         const crees = await dossiersCrees('TEST Conversion simultanée');
-        assert.equal(crees.interventions + crees.contrats + crees.chantiers, 1, JSON.stringify(crees));
+        assert.equal(crees.interventions + crees.contrats + crees.chantiers, 2, JSON.stringify(crees));
       });
 
       // Annulation et conversion en intervention ou en contrat simultanées : sous le verrou du devis,
       // soit l'annulation passe d'abord et la conversion lit un devis annulé, soit la conversion passe
-      // d'abord et l'annulation la lit et la refuse (règle (b), posée en question à Nelson).
-      test('une annulation lancée en même temps qu’une conversion en intervention ou en contrat ne laisse jamais un devis annulé avec sa cible', async () => {
+      // d'abord et l'annulation la lit et annule sa cible avec le devis (lot 4 suite).
+      test('une annulation lancée en même temps qu’une conversion en intervention ou en contrat ne laisse jamais un devis annulé avec une cible vivante', async () => {
         for (let tour = 0; tour < 3; tour += 1) {
           for (const [cible, corps] of [['INTERVENTION', {}], ['CONTRAT', CONTRAT]]) {
             const devis = await devisAccepte(`TEST Conversion et annulation simultanées ${cible} ${tour}`);
@@ -5110,15 +5115,18 @@ if (!TEST_DATABASE_URL) {
               convertirEn(devis.id, cible, corps),
               request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST annulation simultanée' }),
             ]);
-            const relu = await prisma.devis.findUnique({ where: { id: devis.id }, include: { conversion: true } });
+            assert.equal(annulation.status, 200, `${cible} : ${JSON.stringify(annulation.body)}`);
+            const relu = await prisma.devis.findUnique({ where: { id: devis.id }, include: { conversions: true } });
             if (conversion.status === 201) {
-              assert.equal(annulation.status, 409, `${cible} : ${JSON.stringify(annulation.body)}`);
-              assert.deepEqual([relu.statut, relu.conversion?.cibleType], ['ACCEPTE', cible]);
+              assert.deepEqual([relu.statut, relu.conversions.map((c) => c.cibleType)], ['ANNULE', [cible]]);
+              const statutCible = cible === 'INTERVENTION'
+                ? (await prisma.intervention.findUniqueOrThrow({ where: { id: conversion.body.id } })).statut
+                : (await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: conversion.body.id } })).statut;
+              assert.equal(statutCible, cible === 'INTERVENTION' ? 'ANNULEE' : 'ANNULE');
             } else {
               assert.equal(conversion.status, 400, `${cible} : ${JSON.stringify(conversion.body)}`);
               assert.match(conversion.body.error, /annulé/);
-              assert.equal(annulation.status, 200, `${cible} : ${JSON.stringify(annulation.body)}`);
-              assert.deepEqual([relu.statut, relu.conversion], ['ANNULE', null]);
+              assert.deepEqual([relu.statut, relu.conversions], ['ANNULE', []]);
             }
           }
         }
@@ -5146,27 +5154,26 @@ if (!TEST_DATABASE_URL) {
             if (!attente) await new Promise((r) => setTimeout(r, 20));
           }
           assert.equal(attente, true, 'la conversion attend le verrou du devis');
-          await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType: 'CONTRAT', cibleId: 'TEST-conversion-concurrente' } });
+          // Même type que la conversion en attente (lot 4 suite : un autre type serait admis).
+          await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType: 'INTERVENTION', cibleId: 'TEST-conversion-concurrente' } });
         }, { timeout: 20000 });
         const refus = await reponse;
         assert.equal(refus.status, 409, JSON.stringify(refus.body));
-        assert.equal(refus.body.error, 'Ce devis a déjà créé son contrat : chaque affaire n’est convertie qu’une fois.');
+        assert.equal(refus.body.error, 'Ce devis a déjà créé son intervention : chaque affaire n’en crée qu’une.');
         assert.deepEqual(await dossiersCrees('TEST Conversion sous verrou'), { interventions: 0, contrats: 0, chantiers: 0 });
       });
 
       // Même procédé pour l'annulation, que la course précédente ne prouve que si les requêtes se
       // chevauchent : une transaction de test tient la ligne du devis, l'annulation part et doit
-      // attendre ce verrou ; la transaction enregistre alors une conversion en intervention, puis en
-      // contrat, et valide. L'annulation doit la relire sous le verrou et la refuser (règle (b),
-      // posée en question à Nelson) : chacun des deux refus a sa propre lecture à prouver.
+      // attendre ce verrou ; la transaction crée alors une intervention, puis un contrat, avec la
+      // conversion du devis, et valide. L'annulation doit la relire sous le verrou et annuler la cible
+      // avec le devis (lot 4 suite) : chacune des deux cascades a sa propre lecture à prouver.
       test('l’annulation attend le verrou du devis et relit la conversion en intervention ou en contrat validée entre-temps', async () => {
-        for (const [cible, message] of [
-          ['INTERVENTION', 'Ce devis a créé une intervention : il ne s’annule plus. Annulez l’intervention depuis sa fiche si elle ne doit pas avoir lieu.'],
-          ['CONTRAT', 'Ce devis a créé un contrat de maintenance : il ne s’annule plus. Suspendez ou terminez le contrat depuis la liste des contrats.'],
-        ]) {
+        for (const cible of ['INTERVENTION', 'CONTRAT']) {
           const devis = await devisAccepte(`TEST Annulation sous verrou ${cible}`);
           const { dossierId } = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, select: { dossierId: true } });
           let reponse;
+          let cibleId;
           await prisma.$transaction(async (tx) => {
             await tx.$queryRaw`SELECT "id" FROM "Devis" WHERE "id" = ${devis.id} FOR SHARE`;
             const [{ pid: pidVerrou }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
@@ -5177,13 +5184,509 @@ if (!TEST_DATABASE_URL) {
               if (!attente) await new Promise((r) => setTimeout(r, 20));
             }
             assert.equal(attente, true, `${cible} : l’annulation attend le verrou du devis`);
-            await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType: cible, cibleId: `TEST-annulation-concurrente-${cible}` } });
+            cibleId = cible === 'INTERVENTION'
+              ? (await tx.intervention.create({ data: { reference: `TEST-${randomUUID()}`, clientId, titre: `TEST Annulation sous verrou ${cible}` } })).id
+              : (await tx.contratMaintenance.create({ data: { clientId, titre: `TEST Annulation sous verrou ${cible}`, periodiciteMois: 6, dureePrevisionnelleMinutes: 60, dateDebut: new Date('2026-11-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-11-01T00:00:00.000Z') } })).id;
+            await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType: cible, cibleId } });
           }, { timeout: 20000 });
-          const refus = await reponse;
-          assert.equal(refus.status, 409, `${cible} : ${JSON.stringify(refus.body)}`);
-          assert.equal(refus.body.error, message);
+          const annulation = await reponse;
+          assert.equal(annulation.status, 200, `${cible} : ${JSON.stringify(annulation.body)}`);
+          assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ANNULE');
+          if (cible === 'INTERVENTION') {
+            assert.deepEqual(annulation.body.interventionsAnnulees, [cibleId]);
+            assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: cibleId } })).statut, 'ANNULEE');
+          } else {
+            assert.equal(annulation.body.contratAnnule, cibleId);
+            assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: cibleId } })).statut, 'ANNULE');
+          }
+        }
+      });
+    });
+
+    // Lot 4 suite (décisions de Nelson des 22 et 23-10-2026) : un devis signé se convertit au plus
+    // deux fois, en deux cibles de types différents parmi chantier, intervention et contrat ; son
+    // annulation annule, dans la même transaction, tout ce qu'il a créé.
+    describe('Lot 4 suite : deux conversions par affaire, annulation du devis en cascade', () => {
+      const comptes = {};
+      const admin = () => ({ Authorization: `Bearer ${session}` });
+      const entete = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+      const convertirEn = (id, cible, corps = {}, auth = admin()) => request(app).post(`/api/devis/${id}/convertir`).set(auth).send({ cible, ...corps });
+      const annuler = (id, motif = 'TEST annulation en cascade', auth = entete('admin')) => request(app).post(`/api/devis/${id}/annulation`).set(auth).send({ motif });
+      const CONTRAT = { periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: '01-11-2026' };
+      const corpsDe = (cible) => (cible === 'CONTRAT' ? CONTRAT : {});
+      const DOSSIER = { CHANTIER: 'son chantier', INTERVENTION: 'son intervention', CONTRAT: 'son contrat' };
+      const DEJA_CREE = {
+        CHANTIER: 'Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier.',
+        INTERVENTION: 'Ce devis a déjà créé son intervention : chaque affaire n’en crée qu’une.',
+        CONTRAT: 'Ce devis a déjà créé son contrat : chaque affaire n’en crée qu’un.',
+      };
+      const dossiersCrees = async (objet) => ({
+        interventions: await prisma.intervention.count({ where: { titre: objet } }),
+        contrats: await prisma.contratMaintenance.count({ where: { titre: objet } }),
+        chantiers: await prisma.chantier.count({ where: { nom: objet } }),
+      });
+      const conversionsDe = async (devisId) => (await prisma.devisConversion.findMany({ where: { devisId }, orderBy: { rang: 'asc' } })).map((c) => [c.cibleType, c.cibleId, c.rang]);
+      const aConvertir = async (devisId) => (await request(app).get('/api/devis/a-convertir').set(admin())).body.some((d) => d.id === devisId);
+      const statutIntervention = async (id) => (await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut;
+      const passer = async (id, ...statuts) => {
+        for (const statut of statuts) {
+          const res = await request(app).patch(`/api/interventions/${id}/statut`).set(admin()).send({ statut });
+          assert.equal(res.status, 200, JSON.stringify(res.body));
+        }
+      };
+      const terminer = async (id) => {
+        await passer(id, 'PLANIFIEE', 'EN_COURS');
+        const fin = await terminerIntervention(id, session);
+        assert.equal(fin.status, 200, JSON.stringify(fin.body));
+      };
+      const genererVisite = async (contratId) => {
+        const res = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set(admin());
+        assert.equal(res.status, 201, JSON.stringify(res.body));
+        return res.body;
+      };
+      // Visite écrite en base pour une échéance donnée : plusieurs visites non réalisées sur un contrat.
+      const visiteEnBase = (contratId, echeance, statut = 'A_PLANIFIER') => prisma.intervention.create({ data: {
+        reference: `TEST-${randomUUID()}`, clientId, contratMaintenanceId: contratId, echeanceContrat: new Date(`${echeance}T00:00:00.000Z`),
+        dateDemande: new Date(`${echeance}T00:00:00.000Z`), titre: `TEST Visite ${echeance}`, statut,
+      } });
+      const journalContrat = (id) => prisma.journalSaisieChantier.findMany({ where: { contratMaintenanceId: id }, orderBy: { createdAt: 'asc' } });
+      const journalIntervention = (id) => prisma.journalSaisieChantier.findMany({ where: { interventionId: id }, orderBy: { createdAt: 'asc' } });
+      // Devis signé converti successivement vers les cibles demandées, chacune créée (201).
+      const devisConverti = async (objet, cibles, corps = {}) => {
+        const devis = await devisAccepte(objet);
+        const crees = {};
+        for (const cible of cibles) {
+          const res = await convertirEn(devis.id, cible, { ...corpsDe(cible), ...(corps[cible] ?? {}) });
+          assert.equal(res.status, 201, `${cible} : ${JSON.stringify(res.body)}`);
+          crees[cible] = res.body;
+        }
+        return { devis, ...crees };
+      };
+
+      before(async () => {
+        for (const [cle, role] of [['admin', 'ADMIN'], ['commercial', 'COMMERCIAL'], ['conducteur', 'CONDUCTEUR_TRAVAUX']]) {
+          const email = `conversion4suite.${cle}@iris.test`;
+          comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Conversion suite ${cle}`, role } });
+        }
+      });
+
+      test('chaque paire admise, dans les deux ordres, crée ses deux cibles ; même type ou troisième conversion refusés sans rien créer', async () => {
+        const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST agent lecture lot 4 suite', scopes: ['devis:read'] });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        const paires = [['CHANTIER', 'CONTRAT'], ['CONTRAT', 'CHANTIER'], ['CHANTIER', 'INTERVENTION'], ['INTERVENTION', 'CHANTIER'], ['CONTRAT', 'INTERVENTION'], ['INTERVENTION', 'CONTRAT']];
+        for (const [premiere, seconde] of paires) {
+          const objet = `TEST Paire ${premiere} puis ${seconde}`;
+          const devis = await devisAccepte(objet);
+          const motif = `Conversion du devis ${devis.numero} (version 1).`;
+          const crees = {};
+          for (const [rang, cible] of [[1, premiere], [2, seconde]]) {
+            const res = await convertirEn(devis.id, cible, corpsDe(cible));
+            assert.equal(res.status, 201, `${objet}, ${cible} : ${JSON.stringify(res.body)}`);
+            crees[cible] = res.body;
+            // Données transférées : celles de chaque conversion seule, quel que soit son rang.
+            if (cible === 'CHANTIER') {
+              assert.deepEqual([res.body.nom, res.body.clientId, res.body.numeroDevis, res.body.statut, res.body.budgetGlobalVendu, res.body.budgetMaterielVendu, res.body.budgetMainOeuvreVendu, res.body.heuresVendues],
+                [objet, clientId, devis.numero, 'EN_COURS', 200, 0, 200, 2], `${objet} : chantier`);
+            } else if (cible === 'INTERVENTION') {
+              assert.deepEqual([res.body.titre, res.body.client.id, res.body.statut, res.body.chantierId, res.body.contratMaintenanceId], [objet, clientId, 'A_PLANIFIER', null, null], `${objet} : intervention`);
+              assert.deepEqual((await journalIntervention(res.body.id)).map((e) => [e.action, e.motif]), [['CREATION', motif]]);
+            } else {
+              assert.deepEqual([res.body.titre, res.body.client.id, res.body.statut, res.body.dateDebut, res.body.prochaineEcheance, res.body.periodiciteMois, res.body.annuleLe],
+                [objet, clientId, 'ACTIF', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z', 6, null], `${objet} : contrat`);
+              assert.deepEqual((await journalContrat(res.body.id)).map((e) => [e.action, e.motif]), [['CREATION', motif]]);
+            }
+            // Le devis reste proposé à l'ouverture de son chantier tant qu'il n'en a pas et n'a pas
+            // atteint deux conversions.
+            assert.equal(await aConvertir(devis.id), rang === 1 && cible !== 'CHANTIER', `${objet} : liste des devis à convertir après ${cible}`);
+          }
+          assert.deepEqual(await conversionsDe(devis.id), [[premiere, crees[premiere].id, 1], [seconde, crees[seconde].id, 2]]);
+          const lu = (await request(app).get('/api/devis').set(admin())).body.find((d) => d.id === devis.id);
+          assert.deepEqual(lu.conversions.map((c) => [c.cibleType, c.cibleId, c.rang]), [[premiere, crees[premiere].id, 1], [seconde, crees[seconde].id, 2]]);
+          const parCle = (await request(app).get('/api/v1/devis').set('Authorization', `Bearer ${cle.body.apiKey}`)).body.find((d) => d.id === devis.id);
+          assert.deepEqual(parCle.conversions.map((c) => c.cibleType), [premiere, seconde], 'une clé d’intégration lit aussi le tableau des conversions');
+          assert.equal('conversion' in parCle, false);
+
+          const troisieme = ['CHANTIER', 'INTERVENTION', 'CONTRAT'].find((c) => c !== premiere && c !== seconde);
+          const refus = await convertirEn(devis.id, troisieme, corpsDe(troisieme));
+          assert.equal(refus.status, 409, `${objet} : ${JSON.stringify(refus.body)}`);
+          assert.equal(refus.body.error, `Ce devis a déjà créé ${DOSSIER[premiere]} et ${DOSSIER[seconde]} : une affaire se convertit au plus deux fois.`);
+          for (const cible of [premiere, seconde]) {
+            const doublon = await convertirEn(devis.id, cible, corpsDe(cible));
+            assert.equal(doublon.status, 409, `${objet}, ${cible} : ${JSON.stringify(doublon.body)}`);
+            assert.equal(doublon.body.error, DEJA_CREE[cible]);
+          }
+          const attendu = { interventions: 0, contrats: 0, chantiers: 0 };
+          for (const cible of [premiere, seconde]) attendu[{ CHANTIER: 'chantiers', INTERVENTION: 'interventions', CONTRAT: 'contrats' }[cible]] = 1;
+          assert.deepEqual(await dossiersCrees(objet), attendu, objet);
+          assert.equal((await conversionsDe(devis.id)).length, 2);
           assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ACCEPTE');
         }
+      });
+
+      test('deux conversions simultanées : deux types différents passent l’un après l’autre, un même type une seule fois', async () => {
+        for (let tour = 0; tour < 3; tour += 1) {
+          const differents = await devisAccepte(`TEST Conversions simultanées différentes ${tour}`);
+          const reponses = await Promise.all([convertirEn(differents.id, 'CONTRAT', CONTRAT), convertirEn(differents.id, 'INTERVENTION')]);
+          assert.deepEqual(reponses.map((r) => r.status), [201, 201], JSON.stringify(reponses.map((r) => r.body.error)));
+          assert.deepEqual((await conversionsDe(differents.id)).map(([, , rang]) => rang), [1, 2]);
+
+          const memes = await devisAccepte(`TEST Conversions simultanées identiques ${tour}`);
+          const doubles = await Promise.all([convertirEn(memes.id, 'CHANTIER'), convertirEn(memes.id, 'CHANTIER')]);
+          assert.deepEqual(doubles.map((r) => r.status).sort(), [201, 409], JSON.stringify(doubles.map((r) => r.body.error)));
+          assert.equal(doubles.find((r) => r.status === 409).body.error, DEJA_CREE.CHANTIER);
+          assert.deepEqual(await dossiersCrees(`TEST Conversions simultanées identiques ${tour}`), { interventions: 0, contrats: 0, chantiers: 1 });
+        }
+      });
+
+      // Une transaction de test tient la ligne du devis : la conversion part, attend ce verrou, puis
+      // la transaction enregistre une ou deux conversions et valide. La requête doit les relire sous
+      // le verrou : après une seule, elle passe au rang 2 ; après deux, elle est refusée.
+      test('la seconde conversion attend le verrou du devis et relit les conversions validées entre-temps', async () => {
+        for (const [deja, attendu] of [[['CONTRAT'], 201], [['CONTRAT', 'CHANTIER'], 409]]) {
+          const objet = `TEST Seconde conversion sous verrou ${deja.length}`;
+          const devis = await devisAccepte(objet);
+          const { dossierId } = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, select: { dossierId: true } });
+          let reponse;
+          await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "id" FROM "Devis" WHERE "id" = ${devis.id} FOR SHARE`;
+            const [{ pid: pidVerrou }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+            reponse = convertirEn(devis.id, 'INTERVENTION').then((r) => r);
+            let attente = false;
+            for (let tour = 0; tour < 150 && !attente; tour += 1) {
+              attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidVerrou}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0;
+              if (!attente) await new Promise((r) => setTimeout(r, 20));
+            }
+            assert.equal(attente, true, 'la conversion attend le verrou du devis');
+            for (const [index, cibleType] of deja.entries()) {
+              await tx.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType, cibleId: `TEST-concurrente-${cibleType}`, rang: index + 1 } });
+            }
+          }, { timeout: 20000 });
+          const res = await reponse;
+          assert.equal(res.status, attendu, JSON.stringify(res.body));
+          if (attendu === 201) {
+            assert.deepEqual(await conversionsDe(devis.id), [['CONTRAT', 'TEST-concurrente-CONTRAT', 1], ['INTERVENTION', res.body.id, 2]]);
+          } else {
+            assert.equal(res.body.error, 'Ce devis a déjà créé son contrat et son chantier : une affaire se convertit au plus deux fois.');
+            assert.deepEqual(await dossiersCrees(objet), { interventions: 0, contrats: 0, chantiers: 0 });
+          }
+        }
+      });
+
+      test('la base garantit deux conversions au plus, de types connus et différents, et un contrat annulé cohérent et figé', async () => {
+        const { devis } = await devisConverti('TEST Garde en base conversions', ['CHANTIER', 'CONTRAT']);
+        const { dossierId } = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, select: { dossierId: true } });
+        const inserer = (cibleType, rang) => prisma.devisConversion.create({ data: { devisId: devis.id, dossierId, cibleType, cibleId: `TEST-garde-${cibleType}-${rang}`, rang } });
+        await assert.rejects(inserer('INTERVENTION', 3), /DevisConversion_rang_check|violates check constraint/, 'troisième rang refusé');
+        await assert.rejects(inserer('INTERVENTION', 2), (e) => e.code === 'P2002', 'rang déjà pris dans le dossier');
+        await assert.rejects(inserer('INTERVENTION'), (e) => e.code === 'P2002', 'une ligne sans rang prend le rang 1, déjà pris');
+        const autre = await devisConverti('TEST Garde en base type', ['CHANTIER']);
+        const dossierAutre = (await prisma.devis.findUniqueOrThrow({ where: { id: autre.devis.id }, select: { dossierId: true } })).dossierId;
+        await assert.rejects(prisma.devisConversion.create({ data: { devisId: autre.devis.id, dossierId: dossierAutre, cibleType: 'CHANTIER', cibleId: 'TEST-garde-doublon', rang: 2 } }), (e) => e.code === 'P2002', 'même type deux fois');
+        await assert.rejects(prisma.devisConversion.create({ data: { devisId: autre.devis.id, dossierId: dossierAutre, cibleType: 'FACTURE', cibleId: 'TEST-garde-facture', rang: 2 } }), /DevisConversion_cibleType_check|violates check constraint/, 'type inconnu');
+        assert.equal((await conversionsDe(devis.id)).length, 2);
+
+        const contrat = (await request(app).post('/api/contrats-maintenance').set(admin()).send({ clientId, titre: 'TEST Garde en base contrat', ...CONTRAT })).body;
+        await assert.rejects(prisma.contratMaintenance.update({ where: { id: contrat.id }, data: { statut: 'ANNULE' } }), /ContratMaintenance_annulation_check|violates check constraint/, 'statut annulé sans date, auteur ni motif');
+        await assert.rejects(prisma.contratMaintenance.update({ where: { id: contrat.id }, data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: comptes.admin.id, motifAnnulation: '   ' } }), /ContratMaintenance_annulation_check|violates check constraint/, 'motif blanc');
+        await assert.rejects(prisma.contratMaintenance.update({ where: { id: contrat.id }, data: { motifAnnulation: 'TEST motif sans annulation' } }), /ContratMaintenance_annulation_check|violates check constraint/, 'motif sans statut annulé');
+        await prisma.contratMaintenance.update({ where: { id: contrat.id }, data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: comptes.admin.id, motifAnnulation: 'TEST annulation en base' } });
+        for (const data of [{ statut: 'ACTIF', annuleLe: null, annuleParId: null, motifAnnulation: null }, { titre: 'TEST Garde en base renommé' }, { prochaineEcheance: new Date('2027-05-01T00:00:00.000Z') }]) {
+          await assert.rejects(prisma.contratMaintenance.update({ where: { id: contrat.id }, data }), /Contrat de maintenance annulé : il ne se modifie plus/, JSON.stringify(data));
+        }
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).titre, 'TEST Garde en base contrat');
+      });
+
+      test('chantier + contrat commencé : le chantier, le contrat et ses visites non réalisées sont annulés avec le devis ; le reste ne bouge pas', async () => {
+        const objet = 'TEST Cascade chantier et contrat';
+        const { devis, CHANTIER: chantier, CONTRAT: contrat } = await devisConverti(objet, ['CHANTIER', 'CONTRAT'], { CONTRAT: { periodiciteMois: 6, dateDebut: '01-01-2025' } });
+        // Contrat commencé : date de début passée, première visite réalisée, échéance avancée.
+        const realisee = await genererVisite(contrat.id);
+        await terminer(realisee.id);
+        const avance = await request(app).post(`/api/contrats-maintenance/${contrat.id}/avancer-echeance`).set(admin());
+        assert.equal(avance.status, 200, JSON.stringify(avance.body));
+        const planifiee = await genererVisite(contrat.id);
+        await passer(planifiee.id, 'PLANIFIEE');
+        const aPlanifier = await visiteEnBase(contrat.id, '2026-01-01');
+        const dejaAnnulee = await visiteEnBase(contrat.id, '2026-07-01', 'ANNULEE');
+        // Ni le contrat ni l'intervention d'un autre dossier ne changent.
+        const autreContrat = (await request(app).post('/api/contrats-maintenance').set(admin()).send({ clientId, titre: 'TEST Contrat hors devis', ...CONTRAT })).body;
+        const visiteAutre = await genererVisite(autreContrat.id);
+        const interventionAutre = (await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Intervention hors devis' })).body;
+        const autreAvant = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: autreContrat.id } });
+        const contratAvant = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } });
+        const journalRealisee = (await journalIntervention(realisee.id)).length;
+
+        const res = await annuler(devis.id, 'TEST le client renonce');
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        assert.deepEqual([res.body.devis.statut, res.body.chantierArchive, res.body.contratAnnule], ['ANNULE', chantier.id, contrat.id]);
+        assert.deepEqual([...res.body.interventionsAnnulees].sort(), [planifiee.id, aPlanifier.id].sort());
+        assert.deepEqual(res.body.devis.conversions.map((c) => c.cibleType), ['CHANTIER', 'CONTRAT']);
+
+        const auteur = comptes.admin;
+        const devisLu = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } });
+        assert.deepEqual([devisLu.statut, devisLu.annuleParId, devisLu.motifAnnulation], ['ANNULE', auteur.id, 'TEST le client renonce']);
+        assert.ok(Math.abs(devisLu.annuleLe.getTime() - Date.now()) < 60_000, 'annulé à l’instant');
+        const chantierLu = await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } });
+        assert.deepEqual([chantierLu.statut, chantierLu.annuleParId, chantierLu.motifAnnulation, chantierLu.annuleLe.getTime()], ['ANNULE', auteur.id, 'TEST le client renonce', devisLu.annuleLe.getTime()]);
+        const contratLu = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } });
+        assert.deepEqual([contratLu.statut, contratLu.annuleParId, contratLu.motifAnnulation, contratLu.annuleLe.getTime()], ['ANNULE', auteur.id, 'TEST le client renonce', devisLu.annuleLe.getTime()]);
+        assert.deepEqual([contratLu.prochaineEcheance, contratLu.politiqueMainOeuvre, contratLu.titre], [contratAvant.prochaineEcheance, contratAvant.politiqueMainOeuvre, contratAvant.titre], 'le reste du contrat est inchangé');
+        const motifJournal = `Annulation du devis ${devis.numero} (version 1) : TEST le client renonce`;
+        const journal = await journalContrat(contrat.id);
+        const annulation = journal.at(-1);
+        assert.deepEqual([annulation.action, annulation.auteurId, annulation.auteurNom, annulation.motif, annulation.avant.statut, annulation.apres.statut, annulation.apres.motifAnnulation],
+          ['ANNULATION', auteur.id, auteur.name, motifJournal, 'ACTIF', 'ANNULE', 'TEST le client renonce']);
+        assert.equal(journal.filter((e) => e.action === 'ANNULATION').length, 1);
+
+        // Visites : réalisée gardée, non réalisées annulées et journalisées, déjà annulée inchangée.
+        assert.deepEqual(await Promise.all([realisee, planifiee, aPlanifier, dejaAnnulee].map((v) => statutIntervention(v.id))), ['TERMINEE', 'ANNULEE', 'ANNULEE', 'ANNULEE']);
+        for (const [visite, avant] of [[planifiee, 'PLANIFIEE'], [aPlanifier, 'A_PLANIFIER']]) {
+          const derniere = (await journalIntervention(visite.id)).at(-1);
+          assert.deepEqual([derniere.action, derniere.auteurId, derniere.motif, derniere.avant.statut, derniere.apres.statut], ['CHANGEMENT_STATUT', auteur.id, motifJournal, avant, 'ANNULEE']);
+        }
+        assert.equal((await journalIntervention(realisee.id)).length, journalRealisee, 'la visite réalisée n’est pas réécrite');
+        assert.equal((await journalIntervention(dejaAnnulee.id)).length, 0, 'la visite déjà annulée n’est pas réécrite');
+
+        const autreApres = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: autreContrat.id } });
+        assert.deepEqual([autreApres.statut, autreApres.updatedAt.getTime(), autreApres.annuleLe], ['ACTIF', autreAvant.updatedAt.getTime(), null]);
+        assert.deepEqual([await statutIntervention(visiteAutre.id), await statutIntervention(interventionAutre.id)], ['A_PLANIFIER', 'A_PLANIFIER']);
+
+        // Un contrat annulé ne se modifie, ne se suspend, ne se clôt ni ne se réactive plus.
+        const nbJournal = (await journalContrat(contrat.id)).length;
+        const couverture = await request(app).patch(`/api/contrats-maintenance/${contrat.id}`).set(admin()).send({ politiqueMateriel: 'INCLUS', motif: 'TEST couverture' });
+        assert.equal(couverture.status, 409, JSON.stringify(couverture.body));
+        assert.equal(couverture.body.error, 'Ce contrat a été annulé avec son devis : il ne se modifie plus.');
+        for (const statut of ['ACTIF', 'SUSPENDU', 'TERMINE']) {
+          const refus = await request(app).patch(`/api/contrats-maintenance/${contrat.id}/statut`).set(admin()).send({ statut, motif: 'TEST réactivation' });
+          assert.equal(refus.status, 409, `${statut} : ${JSON.stringify(refus.body)}`);
+          assert.equal(refus.body.error, 'Ce contrat a été annulé avec son devis : il ne se modifie plus.');
+        }
+        const versAnnule = await request(app).patch(`/api/contrats-maintenance/${contrat.id}/statut`).set(admin()).send({ statut: 'ANNULE', motif: 'TEST annulation directe' });
+        assert.equal(versAnnule.status, 400, 'un contrat ne s’annule qu’avec son devis');
+        for (const action of ['avancer-echeance', 'generer-intervention']) {
+          const refus = await request(app).post(`/api/contrats-maintenance/${contrat.id}/${action}`).set(admin());
+          assert.equal(refus.status, 404, `${action} : ${JSON.stringify(refus.body)}`);
+        }
+        assert.equal((await journalContrat(contrat.id)).length, nbJournal);
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).statut, 'ANNULE');
+        // La liste des contrats l'expose, annulé, avec son motif.
+        const liste = (await request(app).get('/api/contrats-maintenance').set(admin())).body.find((c) => c.id === contrat.id);
+        assert.deepEqual([liste.statut, liste.motifAnnulation], ['ANNULE', 'TEST le client renonce']);
+
+        // La génération des visites l'ignore : ni visite, ni échéance avancée, ni signalement.
+        const reglage = (await prisma.parametres.findUnique({ where: { id: 'singleton' } }))?.anticipationVisitesJours ?? null;
+        assert.equal((await request(app).put('/api/parametres').set(admin()).send({ anticipationVisitesJours: 30 })).status, 200);
+        try {
+          const passage = await request(app).post('/api/contrats-maintenance/generation-visites').set(admin());
+          assert.equal(passage.status, 201, JSON.stringify(passage.body));
+          assert.equal(passage.body.execution.contratsIgnores.some((c) => c.contratId === contrat.id), false);
+          assert.equal(await prisma.intervention.count({ where: { contratMaintenanceId: contrat.id } }), 4);
+          assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).prochaineEcheance.getTime(), contratAvant.prochaineEcheance.getTime());
+        } finally {
+          assert.equal((await request(app).put('/api/parametres').set(admin()).send({ anticipationVisitesJours: reglage === null ? '' : reglage })).status, 200);
+        }
+      });
+
+      test('chantier + intervention : le chantier et l’intervention sont annulés avec le devis', async () => {
+        const { devis, INTERVENTION: intervention, CHANTIER: chantier } = await devisConverti('TEST Cascade chantier et intervention', ['INTERVENTION', 'CHANTIER']);
+        await passer(intervention.id, 'PLANIFIEE');
+        const res = await annuler(devis.id, 'TEST erreur de client');
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        assert.deepEqual([res.body.devis.statut, res.body.chantierArchive, res.body.contratAnnule, res.body.interventionsAnnulees], ['ANNULE', chantier.id, null, [intervention.id]]);
+        assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, 'ANNULE');
+        assert.equal(await statutIntervention(intervention.id), 'ANNULEE');
+        const derniere = (await journalIntervention(intervention.id)).at(-1);
+        assert.deepEqual([derniere.action, derniere.auteurId, derniere.motif, derniere.avant.statut, derniere.apres.statut],
+          ['CHANGEMENT_STATUT', comptes.admin.id, `Annulation du devis ${devis.numero} (version 1) : TEST erreur de client`, 'PLANIFIEE', 'ANNULEE']);
+      });
+
+      test('contrat + intervention (SAV) : le contrat, ses visites non réalisées et l’intervention sont annulés avec le devis', async () => {
+        const { devis, CONTRAT: contrat, INTERVENTION: intervention } = await devisConverti('TEST Cascade contrat et SAV', ['CONTRAT', 'INTERVENTION']);
+        const visite = await genererVisite(contrat.id);
+        const res = await annuler(devis.id, 'TEST contrat et SAV abandonnés');
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        assert.deepEqual([res.body.devis.statut, res.body.chantierArchive, res.body.contratAnnule], ['ANNULE', null, contrat.id]);
+        assert.deepEqual([...res.body.interventionsAnnulees].sort(), [visite.id, intervention.id].sort());
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).statut, 'ANNULE');
+        assert.deepEqual([await statutIntervention(visite.id), await statutIntervention(intervention.id)], ['ANNULEE', 'ANNULEE']);
+        assert.deepEqual((await journalContrat(contrat.id)).map((e) => e.action), ['CREATION', 'ANNULATION']);
+      });
+
+      test('refus sans rien écrire : heures ou achats sur le chantier, intervention en cours ou terminée, visite en cours', async () => {
+        const secours = await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+        const etat = async ({ devis, CHANTIER: chantier, CONTRAT: contrat, INTERVENTION: intervention }, visites = []) => ({
+          devis: (await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut,
+          chantier: chantier ? (await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut : null,
+          contrat: contrat ? (await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).statut : null,
+          journalContrat: contrat ? (await journalContrat(contrat.id)).length : null,
+          intervention: intervention ? await statutIntervention(intervention.id) : null,
+          visites: await Promise.all(visites.map((v) => statutIntervention(v.id))),
+        });
+        const refuser = async (dossier, visites, message) => {
+          const avant = await etat(dossier, visites);
+          const res = await annuler(dossier.devis.id);
+          assert.equal(res.status, 409, JSON.stringify(res.body));
+          assert.equal(res.body.error, message);
+          assert.deepEqual(await etat(dossier, visites), avant, 'rien n’a été écrit');
+        };
+
+        // Heures sur le chantier : ni le chantier, ni le contrat, ni ses visites ne changent.
+        const heures = await devisConverti('TEST Refus heures chantier contrat', ['CHANTIER', 'CONTRAT']);
+        const visiteHeures = await genererVisite(heures.CONTRAT.id);
+        await prisma.pointageHeure.create({ data: { date: new Date(), nbrHeures: 2, tauxHoraireApplique: 40, chantierId: heures.CHANTIER.id, intervenantId, createdById: secours.id, updatedById: secours.id } });
+        await refuser(heures, [visiteHeures], 'Annulation impossible : ce chantier porte déjà 1 pointage(s) d’heures et 0 achat(s). Une affaire commencée ne s’annule pas.');
+
+        // Achat sur le chantier : l'intervention ne change pas.
+        const achats = await devisConverti('TEST Refus achats chantier intervention', ['CHANTIER', 'INTERVENTION']);
+        await prisma.achatReel.create({ data: { date: new Date(), description: 'TEST matériel', montantHT: 100, chantierId: achats.CHANTIER.id, categorieId, fournisseurId, createdById: secours.id, updatedById: secours.id } });
+        await refuser(achats, [], 'Annulation impossible : ce chantier porte déjà 0 pointage(s) d’heures et 1 achat(s). Une affaire commencée ne s’annule pas.');
+
+        // Intervention en cours, puis terminée : le contrat et sa visite ne changent pas.
+        const sav = await devisConverti('TEST Refus SAV contrat', ['CONTRAT', 'INTERVENTION']);
+        const visiteSav = await genererVisite(sav.CONTRAT.id);
+        await passer(sav.INTERVENTION.id, 'PLANIFIEE', 'EN_COURS');
+        await refuser(sav, [visiteSav], `Annulation impossible : l’intervention ${sav.INTERVENTION.reference} issue de ce devis est en cours. Une affaire commencée ne s’annule pas.`);
+        const fin = await terminerIntervention(sav.INTERVENTION.id, session);
+        assert.equal(fin.status, 200, JSON.stringify(fin.body));
+        await refuser(sav, [visiteSav], `Annulation impossible : l’intervention ${sav.INTERVENTION.reference} issue de ce devis est terminée. Une affaire commencée ne s’annule pas.`);
+
+        // Visite du contrat en cours : le chantier et l'autre visite ne changent pas. Annulée depuis sa
+        // fiche, elle n'empêche plus l'annulation du devis.
+        const visiteEnCours = await devisConverti('TEST Refus visite en cours', ['CHANTIER', 'CONTRAT'], { CONTRAT: { dateDebut: '01-01-2025' } });
+        const enCours = await genererVisite(visiteEnCours.CONTRAT.id);
+        const autreVisite = await visiteEnBase(visiteEnCours.CONTRAT.id, '2026-01-01');
+        await passer(enCours.id, 'PLANIFIEE', 'EN_COURS');
+        await refuser(visiteEnCours, [enCours, autreVisite], `Annulation impossible : la visite ${enCours.reference} du contrat issu de ce devis est en cours. Terminez-la ou annulez-la d’abord depuis sa fiche.`);
+        await passer(enCours.id, 'ANNULEE');
+        const apres = await annuler(visiteEnCours.devis.id);
+        assert.equal(apres.status, 200, JSON.stringify(apres.body));
+        assert.deepEqual(apres.body.interventionsAnnulees, [autreVisite.id]);
+        assert.deepEqual(await etat(visiteEnCours, [enCours, autreVisite]), { devis: 'ANNULE', chantier: 'ANNULE', contrat: 'ANNULE', journalContrat: 2, intervention: null, visites: ['ANNULEE', 'ANNULEE'] });
+      });
+
+      // Règle 3 du cahier : annuler une intervention n'annule qu'elle ; son contrat, ou le devis dont
+      // elle est issue, ne changent pas.
+      test('annuler une intervention depuis sa fiche laisse son contrat et son devis inchangés', async () => {
+        const dossier = await devisConverti('TEST Annulation intervention seule', ['CONTRAT', 'INTERVENTION']);
+        const visite = await genererVisite(dossier.CONTRAT.id);
+        const contratAvant = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: dossier.CONTRAT.id } });
+        const journalAvant = (await journalContrat(dossier.CONTRAT.id)).length;
+        await passer(visite.id, 'ANNULEE');
+        await passer(dossier.INTERVENTION.id, 'ANNULEE');
+        const contratApres = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: dossier.CONTRAT.id } });
+        assert.deepEqual([contratApres.statut, contratApres.updatedAt.getTime(), contratApres.prochaineEcheance.getTime()], ['ACTIF', contratAvant.updatedAt.getTime(), contratAvant.prochaineEcheance.getTime()]);
+        assert.equal((await journalContrat(dossier.CONTRAT.id)).length, journalAvant);
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: dossier.devis.id } })).statut, 'ACCEPTE');
+        assert.equal((await conversionsDe(dossier.devis.id)).length, 2);
+      });
+
+      test('droits inchangés : l’administration annule et crée intervention ou contrat ; le chantier suit ses règles', async () => {
+        const dossier = await devisConverti('TEST Droits seconde conversion', ['CONTRAT']);
+        // Seconde conversion en intervention : refusée au commercial, porteur du droit devis.
+        const commercialIntervention = await convertirEn(dossier.devis.id, 'INTERVENTION', {}, entete('commercial'));
+        assert.equal(commercialIntervention.status, 403, JSON.stringify(commercialIntervention.body));
+        assert.equal(commercialIntervention.body.error, 'Création réservée à l’encadrement SAV.');
+        // Le conducteur n'a pas le droit devis.
+        assert.equal((await convertirEn(dossier.devis.id, 'INTERVENTION', {}, entete('conducteur'))).status, 403);
+        // Le chantier, seconde conversion, s'ouvre par le commercial, comme une première.
+        const chantier = await convertirEn(dossier.devis.id, 'CHANTIER', {}, entete('commercial'));
+        assert.equal(chantier.status, 201, JSON.stringify(chantier.body));
+        assert.deepEqual((await conversionsDe(dossier.devis.id)).map(([type, , rang]) => [type, rang]), [['CONTRAT', 1], ['CHANTIER', 2]]);
+        // Seconde conversion en contrat, refusée au commercial même avant la limite.
+        const autre = await devisConverti('TEST Droits seconde conversion contrat', ['CHANTIER']);
+        const commercialContrat = await convertirEn(autre.devis.id, 'CONTRAT', CONTRAT, entete('commercial'));
+        assert.equal(commercialContrat.status, 403, JSON.stringify(commercialContrat.body));
+        assert.equal(commercialContrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration.');
+        // L'annulation reste réservée à l'administration, quel que soit ce que le devis a créé.
+        for (const cle of ['commercial', 'conducteur']) {
+          const refus = await annuler(dossier.devis.id, 'TEST essai', entete(cle));
+          assert.equal(refus.status, 403, `${cle} : ${JSON.stringify(refus.body)}`);
+        }
+        assert.equal((await request(app).post(`/api/v1/devis/${dossier.devis.id}/annulation`).send({ motif: 'TEST essai' })).status, 404, 'aucune porte d’intégration');
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: dossier.devis.id } })).statut, 'ACCEPTE');
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: dossier.CONTRAT.id } })).statut, 'ACTIF');
+      });
+
+      // Verrous de la cascade : une transaction de test tient la visite (resp. le contrat) ; l'annulation
+      // doit l'attendre, puis relire l'état validé entre-temps.
+      test('la cascade attend le verrou des visites et du contrat, et relit ce qui a changé entre-temps', async () => {
+        const attendreBlocage = async (tx) => {
+          const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          for (let tour = 0; tour < 150; tour += 1) {
+            if ((await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0) return true;
+            await new Promise((r) => setTimeout(r, 20));
+          }
+          return false;
+        };
+        // Une visite démarrée pendant l'attente refuse l'annulation, sans rien écrire.
+        const visiteDemarree = await devisConverti('TEST Verrou visite démarrée', ['CHANTIER', 'CONTRAT']);
+        const visite = await genererVisite(visiteDemarree.CONTRAT.id);
+        let reponse;
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${visite.id} FOR UPDATE`;
+          reponse = annuler(visiteDemarree.devis.id).then((r) => r);
+          assert.equal(await attendreBlocage(tx), true, 'l’annulation attend le verrou de la visite');
+          await tx.intervention.update({ where: { id: visite.id }, data: { statut: 'EN_COURS' } });
+        }, { timeout: 20000 });
+        const refus = await reponse;
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.equal(refus.body.error, `Annulation impossible : la visite ${visite.reference} du contrat issu de ce devis est en cours. Terminez-la ou annulez-la d’abord depuis sa fiche.`);
+        assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: visiteDemarree.CHANTIER.id } })).statut, 'EN_COURS');
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: visiteDemarree.CONTRAT.id } })).statut, 'ACTIF');
+
+        // Une visite créée pendant l'attente du verrou du contrat (génération) : l'annulation est
+        // refusée, à relancer, plutôt que de laisser une visite vivante sur un contrat annulé.
+        const visiteCreee = await devisConverti('TEST Verrou visite créée', ['CONTRAT']);
+        let nouvelle;
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "ContratMaintenance" WHERE "id" = ${visiteCreee.CONTRAT.id} FOR UPDATE`;
+          reponse = annuler(visiteCreee.devis.id).then((r) => r);
+          assert.equal(await attendreBlocage(tx), true, 'l’annulation attend le verrou du contrat');
+          nouvelle = await tx.intervention.create({ data: { reference: `TEST-${randomUUID()}`, clientId, contratMaintenanceId: visiteCreee.CONTRAT.id, echeanceContrat: new Date('2026-11-01T00:00:00.000Z'), dateDemande: new Date('2026-11-01T00:00:00.000Z'), titre: 'TEST Visite créée pendant l’attente' } });
+        }, { timeout: 20000 });
+        const relance = await reponse;
+        assert.equal(relance.status, 409, JSON.stringify(relance.body));
+        assert.equal(relance.body.error, 'Une visite vient d’être créée pour le contrat de ce devis : relancez l’annulation.');
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: visiteCreee.CONTRAT.id } })).statut, 'ACTIF');
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: visiteCreee.devis.id } })).statut, 'ACCEPTE');
+        // Relancée, elle annule aussi cette visite.
+        const reprise = await annuler(visiteCreee.devis.id);
+        assert.equal(reprise.status, 200, JSON.stringify(reprise.body));
+        assert.deepEqual(reprise.body.interventionsAnnulees, [nouvelle.id]);
+      });
+
+      // Course entre l'annulation et les routes qui verrouillent les mêmes lignes : changement de
+      // statut d'une visite, placement au planning (intervention puis contrat), suspension du contrat.
+      // Aucun interblocage ni erreur serveur, et jamais un devis annulé avec une cible vivante.
+      test('annulation concurrente du statut d’une visite, de son placement et de la suspension du contrat : ni interblocage ni état incohérent', async () => {
+        for (let tour = 0; tour < 4; tour += 1) {
+          const dossier = await devisConverti(`TEST Course cascade ${tour}`, ['CHANTIER', 'CONTRAT'], { CONTRAT: { dateDebut: '01-01-2025' } });
+          const visite = await genererVisite(dossier.CONTRAT.id);
+          const autre = await visiteEnBase(dossier.CONTRAT.id, '2026-01-01');
+          const reponses = await Promise.all([
+            annuler(dossier.devis.id),
+            request(app).patch(`/api/interventions/${visite.id}/statut`).set(admin()).send({ statut: 'PLANIFIEE' }),
+            request(app).put(`/api/interventions/${autre.id}/planning`).set(admin()).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [intervenantId] }),
+            request(app).patch(`/api/contrats-maintenance/${dossier.CONTRAT.id}/statut`).set(admin()).send({ statut: 'SUSPENDU', motif: 'TEST suspension concurrente' }),
+          ]);
+          assert.ok(reponses.every((r) => r.status < 500), JSON.stringify(reponses.map((r) => [r.status, r.body?.error])));
+          assert.equal(reponses[0].status, 200, JSON.stringify(reponses[0].body));
+          assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: dossier.devis.id } })).statut, 'ANNULE');
+          assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: dossier.CONTRAT.id } })).statut, 'ANNULE');
+          assert.deepEqual([await statutIntervention(visite.id), await statutIntervention(autre.id)], ['ANNULEE', 'ANNULEE']);
+        }
+      });
+
+      // Défense en profondeur : une visite non réalisée sur un contrat annulé (écrite en base) ne se
+      // place pas au planning.
+      test('une visite d’un contrat annulé ne se place pas au planning', async () => {
+        const dossier = await devisConverti('TEST Planning contrat annulé', ['CONTRAT']);
+        assert.equal((await annuler(dossier.devis.id)).status, 200);
+        const visite = await visiteEnBase(dossier.CONTRAT.id, '2027-05-01');
+        const placement = await request(app).put(`/api/interventions/${visite.id}/planning`).set(admin()).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [intervenantId] });
+        assert.equal(placement.status, 409, JSON.stringify(placement.body));
+        assert.equal(placement.body.error, 'Un contrat annulé interdit tout nouveau placement de visite.');
+        assert.equal(await statutIntervention(visite.id), 'A_PLANIFIER');
       });
     });
   });

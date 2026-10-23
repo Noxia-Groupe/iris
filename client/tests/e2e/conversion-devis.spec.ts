@@ -60,7 +60,8 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   await ligne(objetContrat).getByRole('button', { name: 'Créer l’intervention' }).click();
   await page.getByRole('dialog', { name: 'Créer l’intervention du devis' }).getByLabel('Titre').fill('Titre saisi pour un autre devis');
 
-  // Intervention : à planifier, reliée au devis, sans autre conversion possible.
+  // Intervention : à planifier, reliée au devis ; une seconde conversion, dans un autre type, reste
+  // proposée (lot 4 suite), et l'administration peut annuler le devis.
   await ligne(objetIntervention).getByRole('button', { name: 'Créer l’intervention' }).click();
   const formulaireIntervention = page.getByRole('dialog', { name: 'Créer l’intervention du devis' });
   await expect(formulaireIntervention.getByLabel('Titre')).toHaveValue(objetIntervention);
@@ -81,8 +82,9 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   expect(envois).toBe(1);
   await expect(formulaireIntervention).toHaveCount(0);
   await expect(ligne(objetIntervention)).toContainText('Intervention issue de ce devis');
-  for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Créer le contrat', 'Annuler']) {
-    await expect(ligne(objetIntervention).getByRole('button', { name: action, exact: true })).toHaveCount(0);
+  await expect(ligne(objetIntervention).getByRole('button', { name: 'Créer l’intervention', exact: true })).toHaveCount(0);
+  for (const action of ['Ouvrir le chantier', 'Créer le contrat', 'Annuler']) {
+    await expect(ligne(objetIntervention).getByRole('button', { name: action, exact: true })).toBeVisible();
   }
 
   // Contrat : actif, avec sa périodicité, visible dans la liste des contrats. Passer de
@@ -111,8 +113,9 @@ test('un devis signé crée son intervention ou son contrat depuis l’écran De
   expect(await contratCree.json()).toMatchObject({ titre: `${objetContrat} — contrat`, dateDebut: `${annee}-${mois}-${jour}T00:00:00.000Z`, periodiciteMois: 6, politiqueMateriel: 'INCLUS', site: { nom: 'Facturation' } });
   await expect(ligne(objetContrat)).toContainText('Contrat de maintenance issu de ce devis');
   await expect(ligne(objetContrat).getByRole('link', { name: 'voir les contrats' })).toHaveAttribute('href', '/contrats-maintenance');
-  for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Créer le contrat', 'Annuler']) {
-    await expect(ligne(objetContrat).getByRole('button', { name: action, exact: true })).toHaveCount(0);
+  await expect(ligne(objetContrat).getByRole('button', { name: 'Créer le contrat', exact: true })).toHaveCount(0);
+  for (const action of ['Ouvrir le chantier', 'Créer l’intervention', 'Annuler']) {
+    await expect(ligne(objetContrat).getByRole('button', { name: action, exact: true })).toBeVisible();
   }
 
   // Refus du serveur : le client a été désactivé ; le message reste dans le formulaire.
