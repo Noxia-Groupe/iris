@@ -13603,12 +13603,22 @@ if (!TEST_DATABASE_URL) {
       const [visite] = await visites(enRetard.id);
       assert.deepEqual([visite?.echeanceContrat.toISOString().slice(0, 10), visite?.statut, visite?.createdById], ['2026-05-01', 'A_PLANIFIER', SYSTEME.id]);
       assert.equal(await echeance(enRetard.id), '2026-05-01');
-      // Visite terminée : le passage suivant avance l'échéance au 01-06, encore passée, et crée sa
-      // visite, au lieu de reprendre à la prochaine échéance à venir.
+      // Visite terminée : le passage automatique suivant avance l'échéance au 01-06, encore passée, et
+      // crée sa visite, au lieu de reprendre à la prochaine échéance à venir (audit n° 3 de #302 : le
+      // passage automatique, que vise la décision, et non seulement le passage manuel).
       await terminer(visite.id);
-      assert.equal((await lancer()).status, 201);
+      await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR_FICTIF } });
+      assert.ok(await executerGenerationVisites({ type: 'AUTOMATIQUE' }, INSTANT_FICTIF));
       assert.equal(await echeance(enRetard.id), '2026-06-01');
       assert.deepEqual((await visites(enRetard.id)).map((v) => [v.echeanceContrat.toISOString().slice(0, 10), v.statut]), [['2026-05-01', 'TERMINEE'], ['2026-06-01', 'A_PLANIFIER']]);
+      const avancement = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { contratMaintenanceId: enRetard.id, action: 'AVANCEMENT_ECHEANCE' } });
+      assert.deepEqual([avancement.auteurId, avancement.auteurNom], [SYSTEME.id, SYSTEME.nom]);
+      // Le passage manuel suit la même règle : du 01-06 au 01-07, encore passé, sans saut.
+      const [, suivante] = await visites(enRetard.id);
+      await terminer(suivante.id);
+      assert.equal((await lancer()).status, 201);
+      assert.equal(await echeance(enRetard.id), '2026-07-01');
+      assert.deepEqual((await visites(enRetard.id)).map((v) => v.echeanceContrat.toISOString().slice(0, 10)), ['2026-05-01', '2026-06-01', '2026-07-01']);
     });
 
     test('passage manuel : au nom de l’administrateur ; client désactivé et visite annulée signalés ; contrat suspendu ignoré', async () => {
@@ -13940,6 +13950,14 @@ if (!TEST_DATABASE_URL) {
         await prisma.parametres.delete({ where: { id: 'singleton' } });
         const lu = await etat();
         assert.deepEqual([lu.status, lu.body.anticipationVisitesJours, lu.body.alerte], [200, null, null]);
+        // Audit n° 3 de #302 : les autres écritures qui créent la ligne absente (modules, paramètres,
+        // conservation du journal) ne lui donnent pas non plus d'anticipation.
+        for (const [chemin, corps] of [['/api/modules', { planningActif: true }], ['/api/parametres', { joursSansSaisie: null }], ['/api/journal-administration/conservation', { jours: 90 }]]) {
+          await prisma.parametres.delete({ where: { id: 'singleton' } });
+          const ecrit = await request(app).put(chemin).set(admin()).send(corps);
+          assert.equal(ecrit.status, 200, `${chemin} : ${JSON.stringify(ecrit.body)}`);
+          assert.equal((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).anticipationVisitesJours, null, chemin);
+        }
       } finally {
         await prisma.parametres.upsert({ where: { id: 'singleton' }, update: sauvegarde, create: sauvegarde });
       }
