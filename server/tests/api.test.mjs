@@ -13966,10 +13966,14 @@ if (!TEST_DATABASE_URL) {
         assert.equal((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).anticipationVisitesJours, null);
         // Lecture retenue de « Au demarrage » : une nouvelle instance, et non chaque démarrage du serveur.
         // Une anticipation réglée par la société survit au redémarrage (initDb) ; sinon la génération se
-        // désactiverait en silence à chaque mise à jour du serveur (sixième audit de #302).
-        assert.equal((await regler(12)).status, 200);
-        await initDb();
-        assert.equal((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).anticipationVisitesJours, 12);
+        // désactiverait en silence à chaque mise à jour du serveur (sixième audit de #302). Y compris 30,
+        // l'ancienne valeur par défaut, qu'un démarrage ne doit pas prendre pour un défaut à vider
+        // (huitième audit de #302).
+        for (const reglee of [12, 30]) {
+          assert.equal((await regler(reglee)).status, 200);
+          await initDb();
+          assert.equal((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).anticipationVisitesJours, reglee);
+        }
         await prisma.parametres.delete({ where: { id: 'singleton' } });
         const lu = await etat();
         assert.deepEqual([lu.status, lu.body.anticipationVisitesJours, lu.body.alerte], [200, null, null]);
@@ -14067,6 +14071,9 @@ if (!TEST_DATABASE_URL) {
       }
       await assert.rejects(prisma.user.delete({ where: { id: SYSTEME.id } }), /Compte système/);
       await assert.rejects(prisma.user.create({ data: { email: 'systeme.bis@iris.test', name: 'TEST Système bis', role: 'SYSTEME' } }), /role_systeme/);
+      // Huitième audit de #302 : même un second compte en tout point semblable au compte système (inactif,
+      // sans mot de passe, d'une adresse réservée en .invalid) n'a pas ce type ; seul l'identifiant compte.
+      await assert.rejects(prisma.user.create({ data: { email: 'systeme.bis@iris.invalid', name: SYSTEME.nom, role: 'SYSTEME', actif: false } }), /role_systeme/);
       await assert.rejects(prisma.user.update({ where: { id: comptes.conducteur.id }, data: { role: 'SYSTEME' } }), /role_systeme/);
       // Son adresse mise par erreur dans SUPERADMIN_EMAILS : signalée au démarrage, sans nouvel essai ni promotion.
       const emails = process.env.SUPERADMIN_EMAILS;
