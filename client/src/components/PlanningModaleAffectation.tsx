@@ -3,7 +3,7 @@ import { CalendarX2, Trash2, X } from 'lucide-react';
 import { apiFetch } from '../api';
 import type { Intervenant, ChantierLite, PlanningType, PlanningEvent } from '../planningUtils';
 import { jourFrancais } from '../lib/dateFormatting';
-import { visiteRemettable } from '../lib/remiseAPlanifier';
+import { interventionRemettable } from '../lib/remiseAPlanifier';
 import { RemiseAPlanifier } from './RemiseAPlanifier';
 
 export type ModalState =
@@ -48,14 +48,15 @@ export const EventModal = ({
   onSaved: () => void;
   onDelete: (ev: PlanningEvent) => void;
   onTypesChanged: () => void;
-  // Visite de contrat remise « à planifier » depuis son affectation : créneau libéré.
+  // Intervention (visite de contrat ou curative) remise « à planifier » depuis son affectation : créneau libéré.
   onRemise: () => void;
 }) => {
   const isEdit = modal.mode === 'edit';
   const event = isEdit ? modal.event : null;
   const linkedIntervention = !!event?.interventionId;
-  // Remise « à planifier » d'une visite de contrat planifiée (décision de Nelson du 23-10-2026, nuit).
-  const remettable = !!event?.interventionId && visiteRemettable(event.intervention);
+  // Remise « à planifier » d'une intervention planifiée, visite de contrat ou curative (décisions de Nelson
+  // du 23-10-2026, nuit, et du 24-10-2026, point 1).
+  const remettable = !!event?.interventionId && interventionRemettable(event.intervention);
   const [remiseOuverte, setRemiseOuverte] = useState(false);
   const titreId = useId();
   const [categorie, setCategorie] = useState<PlanningEvent['categorie']>(event?.categorie || 'CHANTIER');
@@ -307,7 +308,7 @@ export const EventModal = ({
       </div>
     </div>
     {remiseOuverte && event?.interventionId && (
-      <RemiseAPlanifier interventionId={event.interventionId} reference={event.intervention?.reference || ''} onClose={() => setRemiseOuverte(false)} onRemise={onRemise} />
+      <RemiseAPlanifier interventionId={event.interventionId} reference={event.intervention?.reference || ''} contratMaintenanceId={event.intervention?.contratMaintenanceId} onClose={() => setRemiseOuverte(false)} onRemise={onRemise} />
     )}
     </>
   );

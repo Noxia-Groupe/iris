@@ -143,6 +143,31 @@ export async function synchroniserAffectationsIntervention(tx: Prisma.Transactio
   }
 }
 
+// --- Créneau retiré du planning (remise « à planifier », annulation) ---
+// Décisions de Nelson du 24-10-2026 (docs/HISTORIQUE-DECISIONS.md, « Décisions du 24-10-2026 sur la
+// remise à planifier », points 1 et 7) : une intervention remise « à planifier » ou annulée quitte le
+// planning. Sa projection (planningEvent, avec ses intervenants) est supprimée et ses affectations SAV,
+// qui évoluent avec les intervenants de la projection, sont retirées. Toujours appelée dans la
+// transaction du changement de statut, sous le verrou de l'intervention (FOR UPDATE) déjà pris : le
+// placement et le déplacement au planning prennent ce même verrou avant d'écrire la projection, puis
+// relisent le statut, si bien qu'aucune projection ne reste ni ne se recrée sur une intervention annulée.
+export async function retirerCreneauIntervention(tx: Prisma.TransactionClient, interventionId: string) {
+  await tx.planningEvent.deleteMany({ where: { interventionId } });
+  await synchroniserAffectationsIntervention(tx, interventionId, []);
+}
+
+// Instantané écrit au journal SAV d'un changement de statut qui retire le créneau. Le planning n'a pas
+// de journal propre : la projection supprimée (dates, créneau, intervenants) et les affectations
+// figurent dans l'« avant », et l'« après », de même forme, les montre vides.
+export const INSTANTANE_CRENEAU = {
+  client: { select: { id: true, raisonSociale: true } },
+  planningEvent: { select: {
+    id: true, dateDebut: true, dateFin: true, creneau: true, heureDebut: true, heureFin: true,
+    intervenants: { select: { id: true, nom: true }, orderBy: { nom: 'asc' } },
+  } },
+  affectations: { select: { intervenantId: true }, orderBy: { intervenantId: 'asc' } },
+} as const;
+
 export function dateDemandeCurative(value: unknown, fuseauHoraire: string, instant = new Date()): string | null {
   if (value === undefined) return `${aujourdHuiEntreprise(fuseauHoraire, instant)}T00:00:00.000Z`;
   if (typeof value !== 'string' || !/^\d{2}-\d{2}-\d{4}$/.test(value)) return null;

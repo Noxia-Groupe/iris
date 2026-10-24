@@ -1,6 +1,6 @@
 import { Prisma, type ContratMaintenance } from '@prisma/client';
 import type { AuthRequest } from '../../http/auth';
-import { journaliserIntervention } from '../interventions/metier';
+import { INSTANTANE_CRENEAU, journaliserIntervention, retirerCreneauIntervention } from '../interventions/metier';
 import { verrouillerIntervention } from '../interventions/comptesRendus';
 import { journaliserContrat, verrouillerContratMaintenance } from '../contrats/metier';
 import { DevisConflitError, DevisSaisieError, devisInclude, verrouillerDevis } from './metier';
@@ -19,7 +19,9 @@ import { DevisConflitError, DevisSaisieError, devisInclude, verrouillerDevis } f
 //  - l'intervention SAV passe ANNULEE ; en cours ou terminée, elle refuse l'annulation (choix par
 //    défaut, à confirmer, comme le chantier qui porte des heures). Seul son statut compte : des
 //    coûts saisis sur une intervention pas encore commencée ne refusent pas l'annulation.
-// Chaque intervention annulée l'est comme depuis sa fiche (changement de statut journalisé). Les
+// Chaque intervention annulée l'est comme depuis sa fiche (changement de statut journalisé) : son
+// créneau est retiré du planning, projection et affectations SAV, sous son verrou déjà pris, et son
+// journal les garde dans l'« avant » (décision de Nelson du 24-10-2026, point 7). Les
 // contrats et interventions qui ne sont pas issus de ce devis ne changent pas. Une intervention
 // ou un contrat que la base ne contiendrait plus (aucune route n'en supprime) est laissé de côté ;
 // un chantier ne se supprime pas (DELETE /api/chantiers/:id répond 410). Tous les contrôles
@@ -35,7 +37,6 @@ import { DevisConflitError, DevisSaisieError, devisInclude, verrouillerDevis } f
 // peut créer une visite entre la lecture des visites et le verrou du contrat : relue sous ce verrou,
 // une visite nouvelle refuse l'annulation (409, à relancer) plutôt que d'être verrouillée hors ordre.
 const STATUTS_NON_REALISES = ['A_PLANIFIER', 'PLANIFIEE'];
-const AVEC_CLIENT = { client: { select: { id: true, raisonSociale: true } } } as const;
 
 export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisId: string, motif: string, req: AuthRequest) {
   const auteur = req.user!;
@@ -92,8 +93,9 @@ export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisI
   const interventionsAnnulees: string[] = [];
   for (const intervention of [...(sav ? [sav] : []), ...visites]) {
     if (!STATUTS_NON_REALISES.includes(intervention.statut)) continue;
-    const avant = await tx.intervention.findUniqueOrThrow({ where: { id: intervention.id }, include: AVEC_CLIENT });
-    const modifiee = await tx.intervention.update({ where: { id: intervention.id }, data: { statut: 'ANNULEE' }, include: AVEC_CLIENT });
+    const avant = await tx.intervention.findUniqueOrThrow({ where: { id: intervention.id }, include: INSTANTANE_CRENEAU });
+    await retirerCreneauIntervention(tx, intervention.id);
+    const modifiee = await tx.intervention.update({ where: { id: intervention.id }, data: { statut: 'ANNULEE' }, include: INSTANTANE_CRENEAU });
     await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, avant, motifCible);
     interventionsAnnulees.push(intervention.id);
   }

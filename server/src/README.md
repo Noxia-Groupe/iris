@@ -51,10 +51,11 @@ server/
     domaines/chantiers/       routes.ts, saisies.ts (achats, heures, encaissé), suivi.ts
                               (indicateurs et sérialisation), droits.ts (rentabilité, montants,
                               clôture), metier.ts (types, titulaire, commercial)
-    domaines/interventions/   routes.ts (SAV, coûts, comptes rendus, placement), metier.ts,
-                              lectures.ts (liste, « Ma journée », fiche), comptesRendus.ts (tracé,
-                              empreinte, clé d'envoi, motifs de clôture, verrou et périmètre relu, journal),
-                              remiseAPlanifier.ts (remise « à planifier » d'une visite de contrat planifiée)
+    domaines/interventions/   routes.ts (SAV, coûts, comptes rendus, placement), metier.ts (dont le
+                              créneau retiré à la remise et à l'annulation), lectures.ts (liste,
+                              « Ma journée », fiche), comptesRendus.ts (tracé, empreinte, clé d'envoi,
+                              motifs de clôture, verrou et périmètre relu, journal),
+                              remiseAPlanifier.ts (remise « à planifier » d'une intervention planifiée)
     domaines/contrats/        routes.ts, metier.ts (couverture, échéances, visites, verrou),
                               generation.ts (passage quotidien des visites, alerte, minuteur)
     domaines/planning/        routes.ts (événements, types, partage, lien public), metier.ts
@@ -89,7 +90,7 @@ Domaines :
 | `catalogue` | prestations, articles, équipements (**déplacé**) |
 | `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**), PDF du devis (lot 6a-2), envoi par la messagerie (lot 6a-3), deux conversions par affaire et annulation en cascade sur ce que le devis a créé (lot 4 suite, `annulation.ts`) |
 | `chantiers` | affaires, achats, heures, métriques et suivi (**déplacé**) |
-| `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**), remise « à planifier » d'une visite de contrat planifiée, son créneau libéré (lot « visite à replanifier », `remiseAPlanifier.ts`) |
+| `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**), remise « à planifier » d'une intervention planifiée, visite de contrat ou curative, son créneau libéré (lot « visite à replanifier », `remiseAPlanifier.ts`, étendue par le lot « remise et annulation » du 24-10-2026), créneau retiré du planning à l'annulation (`retirerCreneauIntervention`, `metier.ts`), motif obligatoire de la remise et de l'annulation (`motifInterventionValide`, `comptesRendus.ts`) |
 | `contrats` | contrats de maintenance et visites (**déplacé**), statut « annulé » avec le devis (lot 4 suite) |
 | `planning` | affectations, types d'événement, partage public (**déplacé**) |
 | `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**), envoi par la messagerie (lot 6a-3) |
