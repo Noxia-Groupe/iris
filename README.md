@@ -147,8 +147,8 @@ converti en chantier, un dossier dont une autre version est déjà convertie, y 
 conversions simultanées, et une référence d'affaire déjà portée par un autre chantier sont refusés
 (409). Depuis le lot 4 suite (décisions de Nelson des 22 et 23-10-2026), une affaire se convertit
 au plus deux fois, en deux cibles de types différents parmi chantier, intervention et contrat de
-maintenance ; l'annulation du devis annule aussi le contrat, ses visites non réalisées et
-l'intervention qu'il a créés. Le chantier s'ouvre depuis l'écran Devis (« Ouvrir le chantier ») ou depuis **Administration >
+maintenance ; l'annulation du devis annule aussi le contrat, ses visites non réalisées (choix
+par défaut, à confirmer) et l'intervention qu'il a créés. Le chantier s'ouvre depuis l'écran Devis (« Ouvrir le chantier ») ou depuis **Administration >
 Chantiers** (« Ouvrir le chantier d'une affaire »). Ce second formulaire part du devis signé,
 dont le chantier reprend le client, la référence, le montant et les heures vendus, et fixe en
 même temps le responsable, le commercial, les types et la date de début ; ces choix
@@ -177,8 +177,12 @@ alimentera ces mêmes champs plus tard sans changer la règle.
 erreur. Réservée aux administrateurs, elle exige un motif, **archive** le chantier lié au
 lieu de le détruire — sa raison doit rester lisible — et elle est **refusée dès qu'une
 heure ou un achat y a été saisi** : une affaire commencée se mène à son terme, elle ne
-s'efface pas. Une affaire archivée sort des listes, des coûts, des marges et des
-commissions, n'accepte plus aucune écriture, mais reste consultable avec son motif.
+s'efface pas. Depuis le lot 4 suite, elle annule aussi le contrat de maintenance issu du devis
+et ses visites non réalisées, ainsi que l'intervention SAV qu'il a créée ; elle est également
+refusée si cette intervention est en cours ou terminée, ou si une visite du contrat est en cours
+(sort des visites et refus : choix par défaut, à confirmer, passation section 4). Une affaire
+archivée sort des listes, des coûts, des marges et des commissions, n'accepte plus aucune
+écriture, mais reste consultable avec son motif.
 
 **Reprise.** On n'annule pas une annulation. La reprise passe par la duplication du devis :
 même client, même objet, mêmes lignes, mais un numéro d'affaire neuf et un retour en
