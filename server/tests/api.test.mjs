@@ -3535,13 +3535,14 @@ if (!TEST_DATABASE_URL) {
 
     test('une prestation ordinaire garde son comportement : sans champs de main d’œuvre, sans journal ; ces champs lui sont refusés', async () => {
       const avantJournal = await nbEntreesJournal();
-      const creation = await envoyer('post', '/api/catalogue/prestations', admin, { reference: `TEST-MO-ORD-${suffixe}`, nom: 'TEST Pose ordinaire', unite: 'forfait', prixVenteHt: '250', prixAchatHt: '90', dureeIndicativeMin: 120 });
+      const creation = await envoyer('post', '/api/catalogue/prestations', admin, { reference: `TEST-MO-ORD-${suffixe}`, nom: 'TEST Pose ordinaire', unite: 'forfait', prixVenteHt: '250', prixAchatHt: '90', dureeIndicativeMin: 120, tauxTva: '10' });
       assert.equal(creation.status, 201, JSON.stringify(creation.body));
       assert.deepEqual([creation.body.estMainOeuvre, creation.body.prixJourHorsContratHt, creation.body.prixHeureSousContratHt, creation.body.prixJourSousContratHt, creation.body.heuresParJour, creation.body.unite, creation.body.prixAchatHt, creation.body.dureeIndicativeMin],
         [false, null, null, null, null, 'forfait', 90, 120]);
-      const maj = await envoyer('put', `/api/catalogue/prestations/${creation.body.id}`, admin, { reference: `TEST-MO-ORD-${suffixe}`, nom: 'TEST Pose ordinaire', unite: 'forfait', prixVenteHt: '260' });
+      assert.equal(creation.body.tauxTva, 10);
+      const maj = await envoyer('put', `/api/catalogue/prestations/${creation.body.id}`, admin, { reference: `TEST-MO-ORD-${suffixe}`, nom: 'TEST Pose ordinaire', unite: 'forfait', prixVenteHt: '260', tauxTva: '5.5', prixAchatHt: '95' });
       assert.equal(maj.status, 200, JSON.stringify(maj.body));
-      assert.equal(maj.body.prixVenteHt, 260);
+      assert.deepEqual([maj.body.prixVenteHt, maj.body.tauxTva, maj.body.prixAchatHt], [260, 5.5, 95]);
       assert.equal((await request(app).delete(`/api/catalogue/prestations/${creation.body.id}`).set(admin)).status, 200);
       assert.equal(await nbEntreesJournal(), avantJournal, 'aucune entrée pour une prestation ordinaire');
       const avant = await etatPrestation(creation.body.id);
@@ -3566,7 +3567,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([journal[0].avant.estMainOeuvre, journal[0].apres.estMainOeuvre, journal[0].avant.prixAchatHt, journal[0].apres.prixAchatHt, journal[0].avant.unite, journal[0].apres.unite], [false, true, 10, null, 'forfait', 'heure']);
       const intervenant = await prisma.intervenant.create({ data: { nom: `TEST Intervenant passage ${suffixe}`, role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
       assert.equal((await envoyer('put', `/api/intervenants/${intervenant.id}/main-oeuvre`, admin, { mainOeuvreId: ordinaire.body.id })).status, 200);
-      const retour = { estMainOeuvre: false, reference: `TEST-MO-PASSAGE-${suffixe}`, nom: 'TEST Dépannage', unite: 'forfait', prixVenteHt: '80', tauxTva: '10' };
+      const retour = { estMainOeuvre: false, reference: `TEST-MO-PASSAGE-${suffixe}`, nom: 'TEST Dépannage', unite: 'forfait', prixVenteHt: '80', tauxTva: '10', prixAchatHt: '12.5', dureeIndicativeMin: 45 };
       const avant = await etatPrestation(ordinaire.body.id);
       const refus = await envoyer('put', `/api/catalogue/prestations/${ordinaire.body.id}`, admin, retour);
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
@@ -3578,10 +3579,13 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([retourAccepte.body.estMainOeuvre, retourAccepte.body.prixJourHorsContratHt, retourAccepte.body.heuresParJour, retourAccepte.body.unite], [false, null, null, 'forfait']);
       // Le retour enregistre le prix de vente et la TVA du corps (fiche entière), et non ceux de la main d'œuvre.
       assert.deepEqual([retourAccepte.body.prixVenteHt, retourAccepte.body.tauxTva], [80, 10]);
+      // Il enregistre aussi le prix d’achat et la durée indicative du corps, qu’une main d’œuvre ne porte pas.
+      assert.deepEqual([retourAccepte.body.prixAchatHt, retourAccepte.body.dureeIndicativeMin], [12.5, 45]);
       journal = await journalMainOeuvre(ordinaire.body.id);
       assert.deepEqual(journal.map((e) => e.action), ['PASSAGE_MAIN_OEUVRE', 'RETRAIT_MAIN_OEUVRE']);
       assert.deepEqual([journal[1].avant.prixJourHorsContratHt, journal[1].apres.prixJourHorsContratHt], [320, null]);
       assert.deepEqual([journal[1].avant.prixVenteHt, journal[1].apres.prixVenteHt, journal[1].avant.tauxTva, journal[1].apres.tauxTva], [45.5, 80, 20, 10]);
+      assert.deepEqual([journal[1].avant.prixAchatHt, journal[1].apres.prixAchatHt, journal[1].avant.dureeIndicativeMin, journal[1].apres.dureeIndicativeMin], [null, 12.5, null, 45]);
     });
 
     test('passage en main d’œuvre d’une prestation qui a une durée indicative : la durée est effacée et journalisée', async () => {
