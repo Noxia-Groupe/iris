@@ -339,6 +339,8 @@ if (!TEST_DATABASE_URL) {
       'conversion4.commercial@iris.test', 'conversion4.conducteur@iris.test', 'conversion4.assistante@iris.test', 'conversion4.comptable@iris.test',
       'conversion4.directeur.commercial@iris.test', 'conversion4.directeur@iris.test', 'conversion4.responsable@iris.test',
       'generation5.conducteur@iris.test', 'generation5.commercial@iris.test', 'generation5.technicien@iris.test', 'generation5.admin@iris.test',
+      'replanif.admin@iris.test', 'replanif.conducteur@iris.test', 'replanif.responsable@iris.test', 'replanif.technicien@iris.test', 'replanif.commercial@iris.test',
+      'replanif.directeur@iris.test', 'replanif.directeurCommercial@iris.test', 'replanif.assistante@iris.test', 'replanif.comptable@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
@@ -17624,6 +17626,469 @@ if (!TEST_DATABASE_URL) {
           assert.equal(await statutEnBase(devis.id), statut);
         }
       });
+    });
+  });
+
+  // Remise « à planifier » d'une visite de contrat planifiée, son créneau libéré : décision de Nelson du
+  // 23-10-2026 (nuit), réponse 2 (docs/HISTORIQUE-DECISIONS.md, « Décisions du 23-10-2026 (nuit) sur le
+  // lot 4 », point 5). Le reste est un choix par défaut, à confirmer (passation, section 4).
+  describe('Remise « à planifier » d’une visite de contrat, son créneau libéré', () => {
+    let session = '';
+    let clientId = '';
+    let fiche = null;
+    let ficheBis = null;
+    const comptes = {};
+    const admin = () => ({ Authorization: `Bearer ${session}` });
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    const MOTIF = 'TEST Client indisponible ce jour-là';
+    const MOTIF_INVALIDE = 'Un motif de 3 à 500 caractères sans caractère de contrôle est obligatoire.';
+    const REFUS_CURATIVE = 'Seule une visite de contrat de maintenance se remet « à planifier » : déplacez le créneau de cette intervention au planning, ou annulez-la depuis sa fiche.';
+    const remettre = (id, enTete = jeton('admin'), corps = { motif: MOTIF }) => request(app).post(`/api/interventions/${id}/remise-a-planifier`).set(enTete).send(corps);
+    const placer = (id, corps = {}, enTete = admin()) => request(app).put(`/api/interventions/${id}/planning`).set(enTete)
+      .send({ dateDebut: '2099-03-04', creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:30', intervenantIds: [fiche.id], ...corps });
+    const changerStatut = (id, statut) => request(app).patch(`/api/interventions/${id}/statut`).set(admin()).send({ statut });
+    const dansLaFile = async (id) => {
+      const file = await request(app).get('/api/planning/interventions-a-planifier').set(admin());
+      assert.equal(file.status, 200, JSON.stringify(file.body));
+      return file.body.some((item) => item.id === id);
+    };
+    const creerContrat = async (titre, dateDebut = '01-01-2099') => {
+      const res = await request(app).post('/api/contrats-maintenance').set(admin()).send({ clientId, titre, periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const genererVisite = async (contratId) => {
+      const res = await request(app).post(`/api/contrats-maintenance/${contratId}/generer-intervention`).set(admin());
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    // Visite d'un contrat actif, placée au planning (statut PLANIFIEE, projection et affectation).
+    const visitePlanifiee = async (titre, { dateDebut } = {}) => {
+      const contrat = await creerContrat(titre, dateDebut);
+      const visite = await genererVisite(contrat.id);
+      const placement = await placer(visite.id);
+      assert.equal(placement.status, 200, JSON.stringify(placement.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: visite.id } })).statut, 'PLANIFIEE');
+      return { contrat, visite, projection: placement.body };
+    };
+    // Tout ce qu'une remise écrit : un refus doit le laisser intact.
+    const etat = async (id) => ({
+      intervention: await prisma.intervention.findUniqueOrThrow({ where: { id } }),
+      projection: await prisma.planningEvent.findUnique({ where: { interventionId: id }, include: { intervenants: { select: { id: true }, orderBy: { id: 'asc' } } } }),
+      affectations: await prisma.interventionAffectation.findMany({ where: { interventionId: id }, orderBy: { intervenantId: 'asc' } }),
+      journal: await prisma.journalSaisieChantier.findMany({ where: { interventionId: id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
+    });
+    const refusSansEcriture = async (id, reponse, statut, message, contexte) => {
+      const avant = await etat(id);
+      const res = await reponse();
+      assert.equal(res.status, statut, `${contexte} : ${JSON.stringify(res.body)}`);
+      if (message !== undefined) assert.equal(res.body.error, message, contexte);
+      assert.deepEqual(await etat(id), avant, `${contexte} : rien n’est écrit`);
+      return res;
+    };
+    // Sessions qui attendent un verrou de ligne : la transaction de test tient celui de la visite.
+    const attendreVerrous = async (nombre) => {
+      for (let tour = 0; tour < 250; tour += 1) {
+        const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%"Intervention"%FOR UPDATE%'`;
+        if (n >= nombre) return true;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return false;
+    };
+    // Lance les requêtes l'une après l'autre pendant que la visite est verrouillée, chacune entrée dans
+    // la file d'attente du verrou avant la suivante : PostgreSQL les sert dans cet ordre.
+    const enFileSurLaVisite = async (id, requetes) => {
+      const reponses = [];
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`;
+        for (const [rang, requete] of requetes.entries()) {
+          reponses.push(requete().then((r) => r));
+          assert.equal(await attendreVerrous(rang + 1), true, `requête ${rang + 1} en attente du verrou de la visite`);
+        }
+      }, { timeout: 20000 });
+      return Promise.all(reponses);
+    };
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      for (const [cle, role] of [
+        ['admin', 'ADMIN'], ['conducteur', 'CONDUCTEUR_TRAVAUX'], ['responsable', 'RESPONSABLE'], ['technicien', 'TECHNICIEN'],
+        ['commercial', 'COMMERCIAL'], ['directeur', 'DIRECTEUR'], ['directeurCommercial', 'DIRECTEUR_COMMERCIAL'],
+        ['assistante', 'ASSISTANTE_COMMERCIALE'], ['comptable', 'COMPTABLE'],
+      ]) {
+        const email = `replanif.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Replanif ${cle}`, role } });
+      }
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale: 'TEST Client remise à planifier' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      clientId = client.body.id;
+      fiche = await prisma.intervenant.create({ data: { nom: 'TEST Replanif fiche du technicien', role: 'Technicien', tauxHoraireCharge: 40 } });
+      ficheBis = await prisma.intervenant.create({ data: { nom: 'TEST Replanif fiche bis', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const liaison = await request(app).put(`/api/intervenants/${fiche.id}/compte`).set(admin()).send({ userId: comptes.technicien.id });
+      assert.equal(liaison.status, 200, JSON.stringify(liaison.body));
+    });
+
+    test('remise d’une visite planifiée : statut « à planifier », créneau supprimé, affectations retirées, journal motivé, retour dans la file', async () => {
+      const { visite, projection } = await visitePlanifiee('TEST Remise nominale');
+      assert.equal(await dansLaFile(visite.id), false);
+      // Le planning porte de quoi proposer l'action : référence, statut et contrat de la visite.
+      const semaine = await request(app).get('/api/planning/events?start=2099-03-02&end=2099-03-08').set(admin());
+      assert.equal(semaine.status, 200, JSON.stringify(semaine.body));
+      assert.deepEqual(semaine.body.find((ev) => ev.id === projection.id)?.intervention, { reference: visite.reference, statut: 'PLANIFIEE', contratMaintenanceId: visite.contratMaintenanceId });
+      assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: visite.id } }), 1);
+
+      const res = await remettre(visite.id, jeton('admin'), { motif: `  ${MOTIF}  ` });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.deepEqual([res.body.id, res.body.statut, res.body.planningEvent, res.body.affectations], [visite.id, 'A_PLANIFIER', null, []]);
+      const apres = await etat(visite.id);
+      assert.equal(apres.intervention.statut, 'A_PLANIFIER');
+      assert.equal(apres.intervention.echeanceContrat.toISOString(), visite.echeanceContrat, 'la visite reste celle de son échéance');
+      assert.equal(apres.projection, null, 'créneau libéré');
+      assert.equal(await prisma.planningEvent.count({ where: { id: projection.id } }), 0);
+      assert.deepEqual(apres.affectations, [], 'affectations retirées avec la projection');
+      const [{ n: liens }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM "_PlanningEventIntervenants" WHERE "A" = ${projection.id} OR "B" = ${projection.id}`;
+      assert.equal(liens, 0);
+      // Journal SAV : changement de statut, comme depuis la fiche, avec le motif ; la projection
+      // supprimée et ses intervenants figurent dans l'instantané « avant ».
+      const entree = apres.journal.at(-1);
+      assert.deepEqual([entree.cible, entree.cibleId, entree.action, entree.auteurId, entree.auteurNom, entree.motif],
+        ['INTERVENTION', visite.id, 'CHANGEMENT_STATUT', comptes.admin.id, 'TEST Replanif admin', `Remise à planifier : ${MOTIF}`]);
+      assert.deepEqual([entree.avant.statut, entree.apres.statut], ['PLANIFIEE', 'A_PLANIFIER']);
+      assert.deepEqual(entree.avant.planningEvent, {
+        id: projection.id, dateDebut: '2099-03-04T00:00:00.000Z', dateFin: '2099-03-04T00:00:00.000Z', creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:30',
+        intervenants: [{ id: fiche.id, nom: fiche.nom }],
+      });
+      assert.deepEqual(entree.avant.affectations, [{ intervenantId: fiche.id }]);
+      assert.deepEqual([entree.apres.planningEvent, entree.apres.affectations], [null, []]);
+      assert.deepEqual(entree.avant.client, { id: clientId, raisonSociale: 'TEST Client remise à planifier' });
+      // Elle revient dans la file des visites à planifier et sort du planning.
+      assert.equal(await dansLaFile(visite.id), true);
+      const semaineApres = await request(app).get('/api/planning/events?start=2099-03-02&end=2099-03-08').set(admin());
+      assert.equal(semaineApres.body.some((ev) => ev.interventionId === visite.id), false);
+      // Elle se replace ensuite comme une visite à planifier (premier placement, journalisé).
+      const replacee = await placer(visite.id, { dateDebut: '2099-03-11' });
+      assert.equal(replacee.status, 200, JSON.stringify(replacee.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: visite.id } })).statut, 'PLANIFIEE');
+      assert.equal(await dansLaFile(visite.id), false);
+      const derniere = (await etat(visite.id)).journal.at(-1);
+      assert.deepEqual([derniere.action, derniere.avant.statut, derniere.apres.statut], ['CHANGEMENT_STATUT', 'A_PLANIFIER', 'PLANIFIEE']);
+    });
+
+    test('motif obligatoire, de 3 à 500 caractères sans caractère de contrôle : chaque refus n’écrit rien', async () => {
+      const { visite } = await visitePlanifiee('TEST Remise motifs');
+      for (const [corps, contexte] of [
+        [{}, 'motif absent'], [{ motif: '' }, 'motif vide'], [{ motif: '  ab  ' }, 'deux caractères'], [{ motif: 'a'.repeat(501) }, '501 caractères'],
+        [{ motif: 123 }, 'motif non textuel'], [{ motif: 'abc\u0007def' }, 'caractère de contrôle'], [{ motif: 'abc​def' }, 'caractère de mise en forme'],
+        [{ motif: 'abc\ud800def' }, 'demi-paire de substitution'],
+      ]) {
+        await refusSansEcriture(visite.id, () => remettre(visite.id, jeton('admin'), corps), 400, MOTIF_INVALIDE, contexte);
+      }
+      // Bornes admises : 3 et 500 caractères (un emoji compte pour un).
+      const borne = await remettre(visite.id, jeton('admin'), { motif: '👍ab' });
+      assert.equal(borne.status, 200, JSON.stringify(borne.body));
+      assert.equal((await etat(visite.id)).journal.at(-1).motif, 'Remise à planifier : 👍ab');
+      const { visite: autre } = await visitePlanifiee('TEST Remise motif long');
+      const long = await remettre(autre.id, jeton('admin'), { motif: 'm'.repeat(500) });
+      assert.equal(long.status, 200, JSON.stringify(long.body));
+    });
+
+    test('seule une visite de contrat planifiée se remet : autres statuts et intervention curative refusés (409), sans rien écrire', async () => {
+      // À planifier : visite générée, jamais placée.
+      const aPlanifier = await genererVisite((await creerContrat('TEST Remise déjà à planifier')).id);
+      await refusSansEcriture(aPlanifier.id, () => remettre(aPlanifier.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est déjà à planifier.', 'à planifier');
+      // En cours, terminée, annulée : la projection reste en place.
+      const { visite: enCours } = await visitePlanifiee('TEST Remise en cours');
+      assert.equal((await changerStatut(enCours.id, 'EN_COURS')).status, 200);
+      await refusSansEcriture(enCours.id, () => remettre(enCours.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est en cours.', 'en cours');
+      const { visite: terminee } = await visitePlanifiee('TEST Remise terminée');
+      assert.equal((await changerStatut(terminee.id, 'EN_COURS')).status, 200);
+      assert.equal((await terminerIntervention(terminee.id, session)).status, 200);
+      await refusSansEcriture(terminee.id, () => remettre(terminee.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est terminée.', 'terminée');
+      const { visite: annulee } = await visitePlanifiee('TEST Remise annulée');
+      assert.equal((await changerStatut(annulee.id, 'ANNULEE')).status, 200);
+      await refusSansEcriture(annulee.id, () => remettre(annulee.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est annulée.', 'annulée');
+      for (const id of [enCours.id, terminee.id, annulee.id]) assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 1);
+      // Curative (sans contrat), planifiée au planning : refusée, choix par défaut le plus restrictif.
+      const curative = await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Remise curative' });
+      assert.equal(curative.status, 201, JSON.stringify(curative.body));
+      assert.equal((await placer(curative.body.id)).status, 200);
+      const semaine = await request(app).get('/api/planning/events?start=2099-03-02&end=2099-03-08').set(admin());
+      assert.deepEqual(semaine.body.find((ev) => ev.interventionId === curative.body.id)?.intervention, { reference: curative.body.reference, statut: 'PLANIFIEE', contratMaintenanceId: null });
+      await refusSansEcriture(curative.body.id, () => remettre(curative.body.id), 409, REFUS_CURATIVE, 'curative');
+      // Une intervention inconnue est introuvable.
+      assert.equal((await remettre(randomUUID())).status, 404);
+    });
+
+    test('heures ou matériel non archivés refusent la remise ; archivés, ils ne la retiennent plus', async () => {
+      const { visite } = await visitePlanifiee('TEST Remise saisies vivantes');
+      const fournisseur = await prisma.fournisseur.upsert({ where: { nom: 'TEST Fournisseur remise' }, update: {}, create: { nom: 'TEST Fournisseur remise' } });
+      // Le technicien affecté saisit ses heures : son affectation les lui ouvre.
+      const heure = await request(app).post(`/api/interventions/${visite.id}/couts/heures`).set(jeton('technicien')).send({ date: '02-01-2026', nbrHeures: 1.5 });
+      assert.equal(heure.status, 201, JSON.stringify(heure.body));
+      assert.equal((await request(app).get(`/api/interventions/${visite.id}/couts`).set(jeton('technicien'))).body.heures.length, 1);
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Remise impossible : cette visite porte déjà 1 saisie(s) d’heures et 0 achat(s) de matériel non archivés, que son affectation ouvre au technicien. Déplacez plutôt son créneau au planning.', 'heures vivantes');
+      const archivage = await request(app).post(`/api/interventions/${visite.id}/couts/heures/${heure.body.id}/archiver`).set(admin()).send({ motif: 'TEST Heure saisie par erreur' });
+      assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
+      const achat = await request(app).post(`/api/interventions/${visite.id}/couts/achats`).set(admin()).send({ date: '02-01-2026', fournisseurId: fournisseur.id, description: 'TEST Filtre', montantHT: 12.5 });
+      assert.equal(achat.status, 201, JSON.stringify(achat.body));
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Remise impossible : cette visite porte déjà 0 saisie(s) d’heures et 1 achat(s) de matériel non archivés, que son affectation ouvre au technicien. Déplacez plutôt son créneau au planning.', 'matériel vivant');
+      const archivageAchat = await request(app).post(`/api/interventions/${visite.id}/couts/achats/${achat.body.id}/archiver`).set(admin()).send({ motif: 'TEST Achat saisi par erreur' });
+      assert.equal(archivageAchat.status, 200, JSON.stringify(archivageAchat.body));
+      const res = await remettre(visite.id);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      // Sans affectation, la visite sort du périmètre du technicien ; ses saisies archivées restent.
+      assert.equal((await request(app).get(`/api/interventions/${visite.id}`).set(jeton('technicien'))).status, 404);
+      assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: visite.id, archivedAt: { not: null } } }), 1);
+      assert.equal(await prisma.coutInterventionAchat.count({ where: { interventionId: visite.id, archivedAt: { not: null } } }), 1);
+    });
+
+    test('mêmes droits que le placement : hors périmètre 404, technicien, commercial et types sans planning 403, module désactivé, aucune clé d’intégration', async () => {
+      const { visite } = await visitePlanifiee('TEST Remise droits');
+      await refusSansEcriture(visite.id, () => remettre(visite.id, jeton('conducteur')), 404, 'Intervention introuvable.', 'conducteur hors périmètre');
+      await refusSansEcriture(visite.id, () => remettre(visite.id, jeton('responsable')), 404, 'Intervention introuvable.', 'responsable hors périmètre');
+      await refusSansEcriture(visite.id, () => remettre(visite.id, jeton('technicien')), 403, 'Un technicien ne modifie ni le planning ni les référentiels.', 'technicien affecté');
+      for (const [cle, message] of [
+        ['commercial', 'Accès non autorisé pour un compte commercial.'], ['directeur', 'Accès non autorisé pour un compte directeur.'],
+        ['directeurCommercial', 'Accès non autorisé pour un compte directeur commercial.'], ['assistante', 'Accès non autorisé pour un compte assistante commerciale.'],
+        ['comptable', 'Accès non autorisé pour un compte comptable.'],
+      ]) {
+        await refusSansEcriture(visite.id, () => remettre(visite.id, jeton(cle)), 403, message, cle);
+      }
+      await refusSansEcriture(visite.id, () => request(app).post(`/api/interventions/${visite.id}/remise-a-planifier`).send({ motif: MOTIF }), 401, 'Authentification requise', 'sans session');
+      // Clé d'intégration : refusée par la route de session, et aucune porte /api/v1.
+      const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST agent remise à planifier', scopes: ['clients:read', 'chantiers:write'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
+      await refusSansEcriture(visite.id, () => remettre(visite.id, parCle), 401, 'Session expirée ou invalide', 'clé d’intégration');
+      await refusSansEcriture(visite.id, () => request(app).post(`/api/v1/interventions/${visite.id}/remise-a-planifier`).set(parCle).send({ motif: MOTIF }), 404, undefined, 'porte /api/v1');
+      // Le conducteur passe les gardes : sur sa propre curative, c'est la règle métier qui répond.
+      const curative = await request(app).post('/api/interventions').set(jeton('conducteur')).send({ clientId, titre: 'TEST Remise curative du conducteur' });
+      assert.equal(curative.status, 201, JSON.stringify(curative.body));
+      assert.equal((await placer(curative.body.id, {}, jeton('conducteur'))).status, 200);
+      await refusSansEcriture(curative.body.id, () => remettre(curative.body.id, jeton('conducteur')), 409, REFUS_CURATIVE, 'curative du conducteur');
+      // Module Planning désactivé : refusé à l'administrateur, comme le placement ; le super
+      // administrateur garde le planning (requirePlanningActif).
+      const parametres = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+      assert.equal((await request(app).put('/api/modules').set(admin()).send({ planningActif: false })).status, 200);
+      try {
+        const refus = await refusSansEcriture(visite.id, () => remettre(visite.id), 403, 'Le module Planning est désactivé par l\'administration.', 'module désactivé');
+        assert.equal(refus.body.code, 'PLANNING_DESACTIVE');
+        assert.equal((await placer(visite.id, {}, jeton('admin'))).status, 403, 'le placement aussi');
+        const superAdmin = await remettre(visite.id, admin());
+        assert.equal(superAdmin.status, 200, JSON.stringify(superAdmin.body));
+      } finally {
+        assert.equal((await request(app).put('/api/modules').set(admin()).send({ planningActif: parametres.planningActif })).status, 200);
+      }
+    });
+
+    test('visite passée « planifiée » sans créneau : elle repasse simplement « à planifier »', async () => {
+      const visite = await genererVisite((await creerContrat('TEST Remise sans créneau')).id);
+      assert.equal((await changerStatut(visite.id, 'PLANIFIEE')).status, 200);
+      assert.equal(await dansLaFile(visite.id), true, 'une visite planifiée sans créneau est déjà dans la file');
+      const res = await remettre(visite.id);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      const apres = await etat(visite.id);
+      assert.deepEqual([apres.intervention.statut, apres.projection, apres.affectations], ['A_PLANIFIER', null, []]);
+      const entree = apres.journal.at(-1);
+      assert.deepEqual([entree.action, entree.motif, entree.avant.statut, entree.apres.statut, entree.avant.planningEvent, entree.avant.affectations], ['CHANGEMENT_STATUT', `Remise à planifier : ${MOTIF}`, 'PLANIFIEE', 'A_PLANIFIER', null, []]);
+      assert.equal(await dansLaFile(visite.id), true);
+    });
+
+    // Course avec un placement : les deux routes prennent le verrou de la visite ; celle qui l'obtient
+    // en second relit l'état laissé par la première. Ni projection orpheline, ni statut incohérent.
+    test('course avec un placement : sous le verrou de la visite, chacune relit ce que l’autre a écrit', async () => {
+      // Remise d'abord, puis placement : la visite est replacée au nouveau créneau, comme un premier placement.
+      const premier = await visitePlanifiee('TEST Course remise puis placement');
+      const [remiseA, placementA] = await enFileSurLaVisite(premier.visite.id, [
+        () => remettre(premier.visite.id),
+        () => placer(premier.visite.id, { dateDebut: '2099-04-01', intervenantIds: [ficheBis.id] }),
+      ]);
+      assert.equal(remiseA.status, 200, JSON.stringify(remiseA.body));
+      assert.equal(placementA.status, 200, JSON.stringify(placementA.body));
+      const etatA = await etat(premier.visite.id);
+      assert.equal(etatA.intervention.statut, 'PLANIFIEE');
+      assert.equal(etatA.projection.dateDebut.toISOString(), '2099-04-01T00:00:00.000Z');
+      assert.notEqual(etatA.projection.id, premier.projection.id, 'nouvelle projection');
+      assert.deepEqual(etatA.projection.intervenants, [{ id: ficheBis.id }]);
+      assert.deepEqual(etatA.affectations.map((a) => a.intervenantId), [ficheBis.id]);
+      assert.deepEqual(etatA.journal.slice(-2).map((e) => [e.action, e.avant.statut, e.apres.statut, e.motif]), [
+        ['CHANGEMENT_STATUT', 'PLANIFIEE', 'A_PLANIFIER', `Remise à planifier : ${MOTIF}`],
+        ['CHANGEMENT_STATUT', 'A_PLANIFIER', 'PLANIFIEE', null],
+      ]);
+      assert.equal(await prisma.planningEvent.count({ where: { id: premier.projection.id } }), 0);
+
+      // Placement d'abord (créneau déplacé, autre intervenant), puis remise : elle libère le créneau
+      // déplacé, relu sous le verrou, et retire l'affectation qu'il venait de poser.
+      const second = await visitePlanifiee('TEST Course placement puis remise');
+      const [placementB, remiseB] = await enFileSurLaVisite(second.visite.id, [
+        () => placer(second.visite.id, { dateDebut: '2099-05-06', intervenantIds: [ficheBis.id] }),
+        () => remettre(second.visite.id),
+      ]);
+      assert.equal(placementB.status, 200, JSON.stringify(placementB.body));
+      assert.equal(remiseB.status, 200, JSON.stringify(remiseB.body));
+      const etatB = await etat(second.visite.id);
+      assert.deepEqual([etatB.intervention.statut, etatB.projection, etatB.affectations], ['A_PLANIFIER', null, []]);
+      const entree = etatB.journal.at(-1);
+      assert.equal(entree.avant.planningEvent.dateDebut, '2099-05-06T00:00:00.000Z', 'le créneau libéré est celui que le placement venait d’écrire');
+      assert.deepEqual(entree.avant.planningEvent.intervenants, [{ id: ficheBis.id, nom: ficheBis.nom }]);
+      assert.deepEqual(entree.avant.affectations, [{ intervenantId: ficheBis.id }]);
+      assert.equal(await dansLaFile(second.visite.id), true);
+    });
+
+    test('course avec un changement de statut : la remise relit le statut sous verrou, l’autre transition aussi', async () => {
+      // Démarrage d'abord : la visite est en cours, la remise est refusée, le créneau reste.
+      const premier = await visitePlanifiee('TEST Course démarrage puis remise');
+      const [depart, refus] = await enFileSurLaVisite(premier.visite.id, [
+        () => changerStatut(premier.visite.id, 'EN_COURS'),
+        () => remettre(premier.visite.id),
+      ]);
+      assert.equal(depart.status, 200, JSON.stringify(depart.body));
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Seule une visite planifiée se remet « à planifier » : celle-ci est en cours.');
+      const etatA = await etat(premier.visite.id);
+      assert.equal(etatA.intervention.statut, 'EN_COURS');
+      assert.equal(etatA.projection.id, premier.projection.id);
+      assert.deepEqual(etatA.affectations.map((a) => a.intervenantId), [fiche.id]);
+      assert.equal(etatA.journal.filter((e) => e.motif?.startsWith('Remise à planifier')).length, 0);
+
+      // Remise d'abord : le démarrage, relu sous verrou, trouve une visite à planifier et est refusé.
+      const second = await visitePlanifiee('TEST Course remise puis démarrage');
+      const [remise, demarrage] = await enFileSurLaVisite(second.visite.id, [
+        () => remettre(second.visite.id),
+        () => changerStatut(second.visite.id, 'EN_COURS'),
+      ]);
+      assert.equal(remise.status, 200, JSON.stringify(remise.body));
+      assert.equal(demarrage.status, 409, JSON.stringify(demarrage.body));
+      assert.equal(demarrage.body.error, 'Transition impossible : A_PLANIFIER vers EN_COURS.');
+      const etatB = await etat(second.visite.id);
+      assert.deepEqual([etatB.intervention.statut, etatB.projection, etatB.affectations], ['A_PLANIFIER', null, []]);
+    });
+
+    test('périmètre relu sous le verrou : un conducteur retiré de la visite pendant l’attente la trouve introuvable, sans rien écrire', async () => {
+      // Fiche reliée en base à un compte conducteur (donnée historique : l'écran ne relie qu'un compte
+      // technicien) : l'affectation met la visite dans son périmètre SAV.
+      const ficheConducteur = await prisma.intervenant.create({ data: { nom: 'TEST Replanif fiche du conducteur', role: 'Conducteur', tauxHoraireCharge: 40, userId: comptes.conducteur.id } });
+      const { visite } = await visitePlanifiee('TEST Remise périmètre relu');
+      assert.equal((await placer(visite.id, { intervenantIds: [ficheConducteur.id] })).status, 200);
+      assert.equal((await request(app).get(`/api/interventions/${visite.id}`).set(jeton('conducteur'))).status, 200, 'dans son périmètre');
+      let reponse;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${visite.id} FOR UPDATE`;
+        reponse = remettre(visite.id, jeton('conducteur')).then((r) => r);
+        assert.equal(await attendreVerrous(1), true, 'la remise attend le verrou de la visite');
+        // Comme un placement concurrent : la projection et l'affectation passent à une autre fiche.
+        await tx.planningEvent.update({ where: { interventionId: visite.id }, data: { intervenants: { set: [{ id: ficheBis.id }] } } });
+        await tx.interventionAffectation.deleteMany({ where: { interventionId: visite.id } });
+        await tx.interventionAffectation.create({ data: { interventionId: visite.id, intervenantId: ficheBis.id } });
+      }, { timeout: 20000 });
+      const avant = await etat(visite.id);
+      const refus = await reponse;
+      assert.equal(refus.status, 404, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Intervention introuvable.');
+      assert.deepEqual(await etat(visite.id), avant, 'rien n’est écrit');
+      assert.deepEqual([avant.intervention.statut, avant.projection.intervenants, avant.affectations.map((a) => a.intervenantId)], ['PLANIFIEE', [{ id: ficheBis.id }], [ficheBis.id]]);
+      assert.equal(avant.journal.filter((e) => e.motif?.startsWith('Remise à planifier')).length, 0);
+    });
+
+    test('courses libres avec placement, démarrage et annulation : aucune erreur serveur, jamais de créneau sans visite planifiée', async () => {
+      for (let tour = 0; tour < 4; tour += 1) {
+        const { visite } = await visitePlanifiee(`TEST Course libre ${tour}`);
+        const reponses = await Promise.all([
+          remettre(visite.id),
+          placer(visite.id, { dateDebut: '2099-06-0' + (tour + 1), intervenantIds: [ficheBis.id] }),
+          changerStatut(visite.id, tour % 2 ? 'EN_COURS' : 'ANNULEE'),
+        ]);
+        assert.ok(reponses.every((r) => r.status < 500), JSON.stringify(reponses.map((r) => [r.status, r.body?.error])));
+        const fin = await etat(visite.id);
+        const intervenantsProjection = fin.projection ? fin.projection.intervenants.map((i) => i.id) : [];
+        // Les affectations suivent toujours les intervenants de la projection.
+        assert.deepEqual(fin.affectations.map((a) => a.intervenantId), intervenantsProjection, `tour ${tour}`);
+        if (fin.intervention.statut === 'A_PLANIFIER') assert.equal(fin.projection, null, `tour ${tour} : une visite à planifier n’a pas de créneau`);
+        if (['PLANIFIEE', 'EN_COURS'].includes(fin.intervention.statut)) assert.ok(fin.projection, `tour ${tour} : une visite planifiée ou en cours garde un créneau`);
+        // Une remise acceptée est journalisée une fois, avec son motif ; refusée, elle n'écrit rien.
+        assert.equal(fin.journal.filter((e) => e.motif === `Remise à planifier : ${MOTIF}`).length, reponses[0].status === 200 ? 1 : 0, `tour ${tour}`);
+      }
+    });
+
+    test('annulation du devis pendant la remise : la visite, remise d’abord, est ensuite annulée avec son contrat', async () => {
+      await completerIdentiteClient(clientId);
+      const devis = await request(app).post('/api/devis').set(admin()).send({ clientId, objet: 'TEST Remise et annulation du devis', lignes: [{ designation: 'Visite annuelle', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await request(app).put(`/api/devis/${devis.body.id}/statut`).set(admin()).send({ statut: 'ENVOYE' })).status, 200);
+      const signature = await request(app).post(`/api/devis/${devis.body.id}/signature`).set(admin()).send({ signataire: 'TEST Signataire', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      const contrat = await request(app).post(`/api/devis/${devis.body.id}/convertir`).set(admin()).send({ cible: 'CONTRAT', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2099' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const visite = await genererVisite(contrat.body.id);
+      assert.equal((await placer(visite.id)).status, 200);
+      const [remise, annulation] = await enFileSurLaVisite(visite.id, [
+        () => remettre(visite.id),
+        () => request(app).post(`/api/devis/${devis.body.id}/annulation`).set(admin()).send({ motif: 'TEST annulation pendant la remise' }),
+      ]);
+      assert.equal(remise.status, 200, JSON.stringify(remise.body));
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual(annulation.body.interventionsAnnulees, [visite.id]);
+      const fin = await etat(visite.id);
+      assert.deepEqual([fin.intervention.statut, fin.projection, fin.affectations], ['ANNULEE', null, []]);
+      assert.deepEqual(fin.journal.slice(-2).map((e) => [e.avant.statut, e.apres.statut]), [['PLANIFIEE', 'A_PLANIFIER'], ['A_PLANIFIER', 'ANNULEE']]);
+      assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.body.id } })).statut, 'ANNULE');
+      // Un contrat annulé n'a plus de visite planifiée : la remise de sa visite annulée est refusée.
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est annulée.', 'visite d’un contrat annulé');
+    });
+
+    test('contrat suspendu ou clos : la remise libère le créneau sans contrôler le contrat ; la file suit le statut du contrat', async () => {
+      const suspendu = await visitePlanifiee('TEST Remise contrat suspendu');
+      const statutContrat = (contratId, statut) => request(app).patch(`/api/contrats-maintenance/${contratId}/statut`).set(admin()).send({ statut, motif: `TEST passage ${statut}` });
+      assert.equal((await statutContrat(suspendu.contrat.id, 'SUSPENDU')).status, 200);
+      const res = await remettre(suspendu.visite.id);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      const etatSuspendu = await etat(suspendu.visite.id);
+      assert.deepEqual([etatSuspendu.intervention.statut, etatSuspendu.projection, etatSuspendu.affectations], ['A_PLANIFIER', null, []]);
+      // Absente de la file tant que le contrat est suspendu, comme toute visite d'un contrat suspendu ;
+      // le placement est refusé jusqu'à la réactivation, puis elle revient et se replace.
+      assert.equal(await dansLaFile(suspendu.visite.id), false);
+      assert.equal((await placer(suspendu.visite.id)).status, 409);
+      assert.equal((await statutContrat(suspendu.contrat.id, 'ACTIF')).status, 200);
+      assert.equal(await dansLaFile(suspendu.visite.id), true);
+      assert.equal((await placer(suspendu.visite.id)).status, 200);
+      // Contrat clos : la remise libère aussi le créneau, mais la visite ne se replace plus (contrat
+      // clos) et ne revient pas dans la file : elle reste « à planifier », à annuler depuis sa fiche.
+      const clos = await visitePlanifiee('TEST Remise contrat clos');
+      assert.equal((await statutContrat(clos.contrat.id, 'TERMINE')).status, 200);
+      assert.equal((await remettre(clos.visite.id)).status, 200);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: clos.visite.id } })).statut, 'A_PLANIFIER');
+      assert.equal(await dansLaFile(clos.visite.id), false);
+      const replacement = await placer(clos.visite.id);
+      assert.equal(replacement.status, 409, JSON.stringify(replacement.body));
+      assert.equal(replacement.body.error, 'Un contrat clos interdit tout nouveau placement de visite.');
+    });
+
+    test('génération des visites : la visite remise reste celle de son échéance, sans doublon', async () => {
+      const { executerGenerationVisites } = await import('../dist/index.js');
+      // Échéance du 01-01-2020 et passage automatique fictif du 15-01-2020, anticipation nulle : seule
+      // une échéance aussi ancienne, sans visite, recevrait une visite.
+      const { contrat, visite } = await visitePlanifiee('TEST Remise puis génération', { dateDebut: '01-01-2020' });
+      assert.equal(visite.echeanceContrat, '2020-01-01T00:00:00.000Z');
+      assert.equal((await remettre(visite.id)).status, 200);
+      // Action « Générer l'intervention » de l'écran : elle rend la visite existante, sans en créer.
+      const action = await request(app).post(`/api/contrats-maintenance/${contrat.id}/generer-intervention`).set(admin());
+      assert.equal(action.status, 200, JSON.stringify(action.body));
+      assert.equal(action.body.id, visite.id);
+      const JOUR = '2020-01-15';
+      await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR } });
+      assert.equal((await request(app).put('/api/parametres').set(admin()).send({ anticipationVisitesJours: 0 })).status, 200);
+      try {
+        const passage = await executerGenerationVisites({ type: 'AUTOMATIQUE' }, new Date(`${JOUR}T11:00:00.000Z`));
+        assert.ok(passage, 'passage du jour fictif');
+        assert.equal(passage.erreurs.some((e) => e.contratId === contrat.id), false, JSON.stringify(passage.erreurs));
+        assert.equal(passage.contratsIgnores.some((c) => c.contratId === contrat.id), false, JSON.stringify(passage.contratsIgnores));
+      } finally {
+        await prisma.executionGenerationVisites.deleteMany({ where: { cleJourAutomatique: JOUR } });
+        assert.equal((await request(app).put('/api/parametres').set(admin()).send({ anticipationVisitesJours: '' })).status, 200);
+      }
+      const visites = await prisma.intervention.findMany({ where: { contratMaintenanceId: contrat.id } });
+      assert.deepEqual(visites.map((v) => [v.id, v.statut, v.echeanceContrat.toISOString()]), [[visite.id, 'A_PLANIFIER', '2020-01-01T00:00:00.000Z']]);
+      assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).prochaineEcheance.toISOString(), '2020-01-01T00:00:00.000Z');
     });
   });
 }

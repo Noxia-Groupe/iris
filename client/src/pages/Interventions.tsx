@@ -7,9 +7,12 @@ import { CoordonneesIntervention } from '../components/CoordonneesIntervention';
 import { FormulaireCloture, FormulaireCompteRendu, FormulaireSignature } from '../components/FormulairesIntervention';
 import { TraceSignature } from '../components/TraceSignature';
 import { AlerteGenerationVisites } from '../components/GenerationVisites';
+import { RemiseAPlanifier } from '../components/RemiseAPlanifier';
 import type { TraceSignature as Trace } from '../lib/traceSignature';
 import { resumeCoutsIntervention } from '../lib/coutsIntervention';
-import { isAdminRole, useCurrentUser } from '../roles';
+import { isAdminRole, peutConsulterPlanning, useCurrentUser } from '../roles';
+import { useModules } from '../modules';
+import { visiteRemettable } from '../lib/remiseAPlanifier';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
 import { chantiersDuClient } from '../lib/chantiersDuClient';
@@ -64,6 +67,11 @@ export default function Interventions({ interventionId }: { interventionId?: str
   const user = useCurrentUser();
   const estEncadrement = isAdminRole(user?.role) || user?.role === 'CONDUCTEUR_TRAVAUX';
   const estTechnicien = user?.role === 'TECHNICIEN';
+  // Remise « à planifier » d'une visite de contrat planifiée, comme depuis le planning : mêmes comptes
+  // que le planning (hors technicien, en consultation seule), module actif.
+  const { planningActif } = useModules();
+  const peutRemettre = !estTechnicien && peutConsulterPlanning(user?.role) && planningActif;
+  const [remise, setRemise] = useState<{ id: string; reference: string } | null>(null);
 
   const chargerCouts = useCallback(async (items: Intervention[]) => {
     const resultats = await Promise.all(items.map(async (item) => {
@@ -249,7 +257,8 @@ export default function Interventions({ interventionId }: { interventionId?: str
       {formulaire?.interventionId === item.id && formulaire.type === 'compteRendu' && <FormulaireCompteRendu interventionId={item.id} onEnregistre={apresEnregistrement} onRelire={() => load(true)} onAnnuler={() => setFormulaire(null)} />}
       {formulaire?.interventionId === item.id && formulaire.type === 'signature' && (() => { const rapport = (item.rapports || []).find((candidat) => candidat.id === formulaire.rapportId); return rapport && <FormulaireSignature rapport={rapport} enregistrePar={user?.name || 'Session interne active'} onEnregistre={apresEnregistrement} onRelire={() => load(true)} onAnnuler={() => setFormulaire(null)} />; })()}
       {formulaire?.interventionId === item.id && formulaire.type === 'cloture' && item.statut === 'EN_COURS' && <FormulaireCloture interventionId={item.id} nombreComptesRendus={(item.rapports || []).length} signe={(item.rapports || []).some((rapport) => rapport.signature)} onTermine={apresEnregistrement} onRelire={() => load(true)} onAjouterCompteRendu={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} onAnnuler={() => setFormulaire(null)} />}
-      {!formulaire && <div className="mt-4 flex flex-wrap gap-2">{(transitions[item.statut] || []).filter((action) => !estTechnicien || action.statut === 'EN_COURS' || action.statut === 'TERMINEE').map((action) => <button key={action.statut} type="button" onClick={() => void transition(item.id, action.statut)} className={action.statut === 'ANNULEE' ? 'btn btn-secondary text-red-700' : 'btn btn-primary'}>{action.libelle}</button>)}{item.statut === 'EN_COURS' && <button type="button" onClick={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} className="btn btn-secondary">Ajouter un compte rendu</button>}</div>}
+      {!formulaire && <div className="mt-4 flex flex-wrap gap-2">{(transitions[item.statut] || []).filter((action) => !estTechnicien || action.statut === 'EN_COURS' || action.statut === 'TERMINEE').map((action) => <button key={action.statut} type="button" onClick={() => void transition(item.id, action.statut)} className={action.statut === 'ANNULEE' ? 'btn btn-secondary text-red-700' : 'btn btn-primary'}>{action.libelle}</button>)}{item.statut === 'EN_COURS' && <button type="button" onClick={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} className="btn btn-secondary">Ajouter un compte rendu</button>}{peutRemettre && visiteRemettable(item) && <button type="button" onClick={() => setRemise({ id: item.id, reference: item.reference })} className="btn btn-secondary">Remettre à planifier</button>}</div>}
     </article>)}</div>}
+    {remise && <RemiseAPlanifier interventionId={remise.id} reference={remise.reference} onClose={() => setRemise(null)} onRemise={() => { setRemise(null); void load(true); }} />}
   </div>;
 }

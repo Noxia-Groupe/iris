@@ -338,7 +338,10 @@ const Planning = () => {
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
-          <table className="w-full border-collapse" style={{ minWidth: '980px' }}>
+          {/* Colonnes fixes : un nom de technicien ou un libellé long est tronqué au lieu d'élargir sa
+              colonne. Sans cela, sur téléphone, la colonne des techniciens, fixée à gauche, pouvait
+              couvrir toute la largeur du cadre et rendre les affectations impossibles à toucher. */}
+          <table className="w-full border-collapse table-fixed" style={{ minWidth: '980px' }}>
             <thead>
               <tr>
                 <th className="sticky left-0 z-10 bg-gray-50 border border-gray-100 px-3 py-3 text-left text-xs uppercase text-gray-500 font-semibold" style={{ width: '170px', minWidth: '170px' }}>
@@ -432,6 +435,8 @@ const Planning = () => {
           onSaved={() => { setModal(null); fetchEvents(); }}
           onDelete={handleDelete}
           onTypesChanged={fetchTypes}
+          // Visite remise « à planifier » : elle quitte la grille et revient dans la file.
+          onRemise={() => { setModal(null); fetchEvents(); fetchQueue(); }}
         />
       )}
 

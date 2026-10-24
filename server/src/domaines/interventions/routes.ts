@@ -22,6 +22,7 @@ import {
   RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereInvalide, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
 } from './comptesRendus';
 import { enregistrerLecturesInterventions } from './lectures';
+import { enregistrerRemiseAPlanifier } from './remiseAPlanifier';
 
 class ChantierInterventionIntrouvable extends Error {}
 // Refus métier relevé sous verrou, dans la transaction : il l'annule et devient un 409.
@@ -473,4 +474,8 @@ export function enregistrerRoutesInterventions(app: Express): void {
       res.status(500).json({ error: 'Erreur lors de la planification de l’intervention.' });
     }
   });
+
+  // Inverse du premier placement d'une visite de contrat : elle revient « à planifier », son créneau
+  // libéré (décision de Nelson du 23-10-2026, nuit, réponse 2 ; cf. remiseAPlanifier.ts).
+  enregistrerRemiseAPlanifier(app);
 }
