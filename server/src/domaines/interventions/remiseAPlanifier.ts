@@ -33,7 +33,8 @@ import { contientCaractereInvalide, interventionDansPerimetre, verrouillerInterv
 // prennent l'intervention puis le contrat, l'annulation d'un devis les interventions puis le contrat,
 // la génération des visites le contrat seul : aucun verrou n'est pris dans l'ordre inverse.
 // L'archivage et la restauration d'un coût ne prennent aucun verrou explicite (chemin préexistant) :
-// leur UPDATE ne verrouille que la ligne du coût.
+// leur transaction ne verrouille jamais l'intervention, mais la ligne du coût et, en partage, celle
+// du compte qui agit (contrôle des clés étrangères : archivedById à l'archivage, auteur du journal).
 
 class RefusRemise extends Error {}
 class InterventionHorsPerimetre extends Error {}
