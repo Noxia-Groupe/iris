@@ -14,7 +14,9 @@ export function valeurJournal(value: unknown): Record<string, unknown> {
 // rien. Aucun secret n'y entre (clé d'intégration, jeton du partage public).
 type EntreeJournalAdministration = {
   domaine: 'DROITS' | 'REGLAGES';
-  type: 'COMPTE' | 'PARAMETRES' | 'MODULES' | 'REMUNERATION' | 'PRIME_COMMERCIAL' | 'SOCIETE' | 'CLE_INTEGRATION' | 'PARTAGE_PLANNING' | 'CONSERVATION_JOURNAL';
+  // MAIN_OEUVRE : mains d'œuvre du catalogue, en prix de vente ; INTERVENANT : rattachement
+  // d'une fiche intervenant à une main d'œuvre (lot « main d'œuvre au catalogue »).
+  type: 'COMPTE' | 'PARAMETRES' | 'MODULES' | 'REMUNERATION' | 'PRIME_COMMERCIAL' | 'SOCIETE' | 'CLE_INTEGRATION' | 'PARTAGE_PLANNING' | 'CONSERVATION_JOURNAL' | 'MAIN_OEUVRE' | 'INTERVENANT';
   action: string;
   cibleId?: string | null;
   cibleLibelle?: string | null;

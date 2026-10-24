@@ -43,10 +43,12 @@ server/
     domaines/authentification/  routes.ts, sso.ts (Microsoft Entra ID), secours.ts
                                 (accès de secours)
     domaines/utilisateurs/    comptes.ts (comptes, hiérarchie), equipes.ts (commerciaux,
-                              conducteurs, fiches intervenant, prime mensuelle)
+                              conducteurs, fiches intervenant, prime mensuelle),
+                              rattachement-main-oeuvre.ts (main d'œuvre d'une fiche intervenant)
     domaines/clients/         routes.ts, metier.ts (validation des saisies), equipements.ts
                               (parc d'équipements)
-    domaines/catalogue/       routes.ts, metier.ts (familles, validation, fiche selon le lecteur)
+    domaines/catalogue/       routes.ts, metier.ts (familles, validation, fiche selon le lecteur),
+                              main-oeuvre.ts (prestations main d'œuvre : prix de vente, droits, journal)
     domaines/devis/           routes.ts, metier.ts (numéro, saisie, lignes, verrous), document.ts (PDF)
     domaines/chantiers/       routes.ts, saisies.ts (achats, heures, encaissé), suivi.ts
                               (indicateurs et sérialisation), droits.ts (rentabilité, montants,
@@ -83,11 +85,11 @@ Domaines :
 |---|---|
 | `referentiels` | catégories et fournisseurs des achats (**déplacé**) |
 | `authentification` | SSO Microsoft, accès de secours, `/api/me`, configuration publique, santé (**déplacé**) |
-| `utilisateurs` | comptes, hiérarchie, commerciaux, conducteurs, fiches intervenant (**déplacé**) |
+| `utilisateurs` | comptes, hiérarchie, commerciaux, conducteurs, fiches intervenant (**déplacé**), rattachement d'une fiche intervenant à une main d'œuvre du catalogue (lot « main d'œuvre au catalogue », `rattachement-main-oeuvre.ts`) |
 | `administration` | clés d'intégration, journal des paramètres et des droits, modules, société (**déplacé**) |
 | `parametres` | paramètres métier, rémunération, registre des entreprises (**déplacé**) |
 | `clients` | clients, contacts, sites, parc d'équipements (**déplacé**) |
-| `catalogue` | prestations, articles, équipements (**déplacé**) |
+| `catalogue` | prestations, articles, équipements (**déplacé**) ; mains d'œuvre en prix de vente, prestations marquées, quatre prix et heures par jour, écriture réservée à l'administration en session et journalisée (lot « main d'œuvre au catalogue », `main-oeuvre.ts`) |
 | `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**), PDF du devis (lot 6a-2), envoi par la messagerie (lot 6a-3), deux conversions par affaire et annulation en cascade sur ce que le devis a créé (lot 4 suite, `annulation.ts`) |
 | `chantiers` | affaires, achats, heures, métriques et suivi (**déplacé**) |
 | `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**), remise « à planifier » d'une intervention planifiée, visite de contrat ou curative, son créneau libéré (lot « visite à replanifier », `remiseAPlanifier.ts`, étendue par le lot « remise et annulation » du 24-10-2026), créneau retiré du planning à l'annulation (`retirerCreneauIntervention`, `metier.ts`), motif obligatoire de la remise et de l'annulation (`motifInterventionValide`, `comptesRendus.ts`) |

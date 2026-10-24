@@ -2,13 +2,14 @@ import type { Express } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import { ROLE_TECHNICIEN, isSuperAdminRole, isCommercialLike, COMMERCIAL_OR_FILTER } from '../../droits/roles';
-import { saisieSelonDroits } from '../../droits/visibilite';
+import { saisieSelonDroits, voitRattachementMainOeuvre } from '../../droits/visibilite';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { decimalToNumber } from '../../commun/montants';
 import { journaliserAdministration, changementsJournal } from '../../commun/journal-administration';
 import { refuseSuperAdminTarget, libelleCompteJournal, lireCompteVerrouille, ISOLATION_RETRAIT, verrouillerRetraitsComptes } from './comptes';
+import { INCLUSION_RATTACHEMENT, avecMainOeuvre, journaliserRattachementSupprime, rattacherMainOeuvre } from './rattachement-main-oeuvre';
 
 export function enregistrerRoutesEquipes(app: Express): void {
   // Liste minimale des commerciaux (id + nom), pour peupler les sélecteurs d'affectation
@@ -51,7 +52,10 @@ export function enregistrerRoutesEquipes(app: Express): void {
   // Intervenants
   app.get('/api/intervenants', requireAuth, async (req, res) => {
     try {
-      const intervenants = decimalToNumber(await prisma.intervenant.findMany());
+      // La main d'œuvre rattachée (prix de vente du catalogue) n'est jointe que pour l'administration.
+      const intervenants = voitRattachementMainOeuvre(req)
+        ? decimalToNumber((await prisma.intervenant.findMany({ include: INCLUSION_RATTACHEMENT })).map(avecMainOeuvre))
+        : decimalToNumber(await prisma.intervenant.findMany());
       // Le taux horaire chargé de chacun n’est envoyé qu’à l’administration (et à une clé d’intégration).
       res.json(intervenants.map(saisieSelonDroits(req)));
     } catch (error) {
@@ -154,6 +158,10 @@ export function enregistrerRoutesEquipes(app: Express): void {
     }
   });
 
+  // Rattacher une fiche à une main d'œuvre du catalogue (prix de vente), ou retirer ce rattachement :
+  // administration seule, journalisé (lot « main d'œuvre au catalogue », cf. rattachement-main-oeuvre.ts).
+  app.put('/api/intervenants/:id/main-oeuvre', requireAuth, requireAdmin, rattacherMainOeuvre);
+
   // Supprimer un intervenant. Bloqué s'il possède des pointages ou des coûts SAV (historique préservé) ou
   // des affectations SAV (elles gouvernent l'accès aux dossiers, ce n'est pas du prévisionnel).
   // Ses affectations de planning restent, elles, purement prévisionnelles : il en est simplement
@@ -185,6 +193,8 @@ export function enregistrerRoutesEquipes(app: Express): void {
         const compte = verrou.userId ? await lireCompteVerrouille(tx, verrou.userId) : null;
         const refus = refuseSuperAdminTarget(req, compte?.role);
         if (refus) return { statut: 403, erreur: refus };
+        // La fiche emporte son rattachement à une main d'œuvre : retrait journalisé.
+        await journaliserRattachementSupprime(tx, req, { id, nom: verrou.nom });
         await tx.planningEvent.deleteMany({ where: { id: { in: affectationsSolo.map((e) => e.id) } } });
         await tx.intervenant.delete({ where: { id } });
         // Supprimer une fiche reliée délie aussi son compte : changement de droits, journalisé.

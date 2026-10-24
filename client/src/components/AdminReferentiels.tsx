@@ -1,6 +1,7 @@
 import { ROLE_TECHNICIEN } from '../roles';
+import { libelleMainOeuvre, mainsOeuvreProposees, type MainOeuvreResumee } from '../lib/mainOeuvre';
 
-export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fournisseurs, categories, editRow, setEditRow, handleSubmit, editField, saveEdit, relierCompte, deleteEntity }: {
+export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fournisseurs, categories, editRow, setEditRow, handleSubmit, editField, saveEdit, relierCompte, mainsOeuvre, rattacherMainOeuvre, deleteEntity }: {
   activeTab: string;
   isAdmin: boolean;
   users: any[];
@@ -13,6 +14,8 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
   editField: (field: string, value: string) => void;
   saveEdit: () => void;
   relierCompte: (intervenantId: string, userId: string) => void;
+  mainsOeuvre: MainOeuvreResumee[];
+  rattacherMainOeuvre: (intervenantId: string, mainOeuvreId: string) => void;
   deleteEntity: (type: string, id: string, label: string) => void;
 }) {
   return (
@@ -46,12 +49,13 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
 
           <h3 className="mb-4">Liste des Intervenants</h3>
           <div className="overflow-x-auto">
-            <table style={{width: '100%', minWidth: '600px', textAlign: 'left', borderCollapse: 'collapse'}}>
+            <table style={{width: '100%', minWidth: '760px', textAlign: 'left', borderCollapse: 'collapse'}}>
               <thead>
                 <tr style={{borderBottom: '1px solid var(--color-border)'}}>
                   <th style={{padding: '8px'}}>Nom</th>
                   <th style={{padding: '8px'}}>Rôle / Fonction</th>
                   {isAdmin && <th style={{padding: '8px'}}>Compte technicien</th>}
+                  {isAdmin && <th style={{padding: '8px'}}>Main d’œuvre (prix de vente)</th>}
                   {isAdmin && <th style={{padding: '8px'}}>Coût Horaire (€/h)</th>}
                   {isAdmin && <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>}
                 </tr>
@@ -89,6 +93,20 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
                       )}
                       {isAdmin && (
                         <td style={{padding: '8px'}}>
+                          {/* Main d'œuvre du catalogue qui valorisera ses heures (prix de vente, lot suivant).
+                              Proposées : les actives ; la sienne reste affichée si elle a été désactivée
+                              depuis (rattachement gardé), sans pouvoir être choisie à nouveau. */}
+                          <select aria-label={`Main d’œuvre de ${i.nom}`} className="form-input" value={i.mainOeuvreId || ''}
+                            onChange={e => rattacherMainOeuvre(i.id, e.target.value)}>
+                            <option value="">Aucune</option>
+                            {mainsOeuvreProposees(mainsOeuvre, i.mainOeuvre ?? null).map(m => (
+                              <option key={m.id} value={m.id} disabled={!m.actif}>{libelleMainOeuvre(m)}</option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
+                      {isAdmin && (
+                        <td style={{padding: '8px'}}>
                           {isEditing
                             ? <input type="number" step="0.1" className="form-input" value={editRow.tauxHoraireCharge} onChange={e => editField('tauxHoraireCharge', e.target.value)} />
                             : `${i.tauxHoraireCharge} €`}
@@ -113,7 +131,7 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
                   );
                 })}
                 {intervenants.length === 0 && (
-                  <tr><td colSpan={4} className="text-muted" style={{padding: '12px', textAlign: 'center'}}>Aucun intervenant.</td></tr>
+                  <tr><td colSpan={6} className="text-muted" style={{padding: '12px', textAlign: 'center'}}>Aucun intervenant.</td></tr>
                 )}
               </tbody>
             </table>
