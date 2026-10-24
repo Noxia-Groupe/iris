@@ -5,10 +5,13 @@ import { paramId } from '../../http/requete';
 import { routeMixte } from '../../http/routes-mixtes';
 import { decimalToNumber } from '../../commun/montants';
 import { catalogueModels, catalogueFamily, cataloguePayload, catalogueExtraPayload, ficheCataloguePourLecteur } from './metier';
+import { RefusCatalogue, creerPrestation, desactiverPrestation, modifierPrestation } from './main-oeuvre';
 
-// Erreur catalogue : 409 sur une référence déjà prise (contrainte unique Prisma P2002),
-// 400 sur une saisie refusée par la validation, 500 sinon.
+// Erreur catalogue : refus métier avec son statut (main d'œuvre : clé d'intégration 403, fiche
+// introuvable 404, rattachements 409), 409 sur une référence déjà prise (contrainte unique Prisma
+// P2002), 400 sur une saisie refusée par la validation, 500 sinon.
 function catalogueApiError(res: express.Response, error: unknown) {
+  if (error instanceof RefusCatalogue) return res.status(error.statut).json({ error: error.message });
   if ((error as { code?: string })?.code === 'P2002') {
     return res.status(409).json({ error: 'Cette référence catalogue est déjà utilisée.' });
   }
@@ -59,7 +62,11 @@ const creerFicheCatalogue: express.RequestHandler = async (req, res) => {
   const family = catalogueFamily(String(req.params.family));
   if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
   try {
+    // Une prestation peut être une main d'œuvre (lot « main d'œuvre au catalogue ») : règles,
+    // droits et journal propres dans main-oeuvre.ts.
+    if (family === 'prestations') return res.status(201).json(ficheCataloguePourLecteur(req, decimalToNumber(await creerPrestation(req))));
     const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.estMainOeuvre !== undefined && body.estMainOeuvre !== null && body.estMainOeuvre !== false) throw new Error('Seule une prestation peut être une main d’œuvre.');
     const data = { ...cataloguePayload(body), ...catalogueExtraPayload(family, body) };
     res.status(201).json(ficheCataloguePourLecteur(req, decimalToNumber(await catalogueModels[family].create({
       data: data as never,
@@ -76,7 +83,9 @@ const modifierFicheCatalogue: express.RequestHandler = async (req, res) => {
   const family = catalogueFamily(String(req.params.family));
   if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
   try {
+    if (family === 'prestations') return res.json(ficheCataloguePourLecteur(req, decimalToNumber(await modifierPrestation(req, paramId(req)))));
     const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.estMainOeuvre !== undefined && body.estMainOeuvre !== null && body.estMainOeuvre !== false) throw new Error('Seule une prestation peut être une main d’œuvre.');
     const data: Record<string, unknown> = { ...cataloguePayload(body), ...catalogueExtraPayload(family, body) };
     if (body.actif !== undefined) data.actif = !!body.actif;
     res.json(ficheCataloguePourLecteur(req, decimalToNumber(await catalogueModels[family].update({
@@ -99,11 +108,13 @@ const desactiverFicheCatalogue: express.RequestHandler = async (req, res) => {
   const family = catalogueFamily(String(req.params.family));
   if (!family) return res.status(404).json({ error: 'Famille catalogue inconnue.' });
   try {
+    if (family === 'prestations') return res.json(ficheCataloguePourLecteur(req, decimalToNumber(await desactiverPrestation(req, paramId(req)))));
     res.json(ficheCataloguePourLecteur(req, decimalToNumber(await catalogueModels[family].update({
       where: { id: paramId(req) },
       data: { actif: false } as never,
     }))));
-  } catch {
+  } catch (error) {
+    if (error instanceof RefusCatalogue && error.statut !== 404) return res.status(error.statut).json({ error: error.message });
     res.status(404).json({ error: 'Fiche catalogue introuvable.' });
   }
 };

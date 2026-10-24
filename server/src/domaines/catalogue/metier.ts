@@ -38,8 +38,9 @@ function cataloguePrixAchat(value: unknown): number | null {
   return value === undefined || value === null || (typeof value === 'string' && value.trim() === '') ? null : catalogueNombre(value, "Prix d'achat");
 }
 
-// Champs communs aux trois familles.
-export function cataloguePayload(body: Record<string, unknown>) {
+// Champs communs aux trois familles et aux mains d'œuvre : référence, nom, description,
+// catégorie, TVA.
+export function champsCommunsCatalogue(body: Record<string, unknown>) {
   const reference = String(body.reference || '').trim();
   const nom = String(body.nom || '').trim();
   if (!reference || !nom || reference.length > 80 || nom.length > 200) {
@@ -51,6 +52,14 @@ export function cataloguePayload(body: Record<string, unknown>) {
     description: body.description ? String(body.description).trim() : null,
     categorieId: body.categorieId ? String(body.categorieId) : null,
     tauxTva: catalogueNombre(body.tauxTva, 'TVA', 20),
+  };
+}
+
+// Champs communs aux trois familles, prix de vente compris. Celui d'une main d'œuvre suit la
+// règle plus stricte de ses quatre prix (cf. main-oeuvre.ts).
+export function cataloguePayload(body: Record<string, unknown>) {
+  return {
+    ...champsCommunsCatalogue(body),
     prixVenteHt: catalogueNombre(body.prixVenteHt, 'Prix de vente'),
   };
 }

@@ -65,3 +65,11 @@ export function voitPrixAchatDevis(req: express.Request): boolean {
 export function ecritPrixAchatDevis(req: express.Request): boolean {
   return !(req as ApiRequest).apiKey && isAdminRole((req as AuthRequest).user?.role);
 }
+
+// Rattachement d'un intervenant à une main d'œuvre (prix de vente du catalogue) : l'administration
+// seule le lit et le règle, comme le taux horaire, et comme elle seule voit le catalogue en session.
+// Les autres comptes, technicien compris, ne le reçoivent sous aucune route ; aucune clé
+// d'intégration non plus (la liste des intervenants est une route de session).
+export function voitRattachementMainOeuvre(req: express.Request): boolean {
+  return !(req as ApiRequest).apiKey && isAdminRole((req as AuthRequest).user?.role);
+}
