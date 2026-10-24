@@ -4,7 +4,7 @@ import { apiFetch } from '../api';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDateTime } from '../lib/dateFormatting';
 import { telechargerPdf } from '../lib/documentPdf';
-import { lienMessagerie, type EnvoiPrepare, type PropositionEnvoi } from '../lib/envoiDocument';
+import { lienMessagerie, type EnvoiEnregistre, type EnvoiPrepare, type PropositionEnvoi } from '../lib/envoiDocument';
 
 export type DocumentAEnvoyer = {
   // Désignation du document dans les libellés : « le devis A26-0001 version 1 », « la facture
@@ -22,7 +22,9 @@ const DATE_HEURE = { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2
 // le PDF, puis enregistre l'envoi au journal, puis propose le lien qui ouvre la messagerie avec le
 // destinataire, l'objet et le texte remplis ; le PDF se joint à la main. Si le PDF est refusé, rien
 // n'est enregistré. Iris ne sait pas si le courriel part : le journal dit « Envoi préparé ».
-export default function EnvoiDocument({ document: piece, onFermer }: { document: DocumentAEnvoyer; onFermer: () => void }) {
+// `onEnvoiPrepare` reçoit la réponse de l'enregistrement : celle d'un devis porte son statut après
+// l'envoi, un brouillon passant « envoyé » (lot 6a-3 bis), que l'écran Devis affiche dans sa liste.
+export default function EnvoiDocument({ document: piece, onFermer, onEnvoiPrepare }: { document: DocumentAEnvoyer; onFermer: () => void; onEnvoiPrepare?: (reponse: EnvoiEnregistre) => void }) {
   const fuseau = useCompanyTimezone();
   const titre = useRef<HTMLHeadingElement>(null);
   const [chargement, setChargement] = useState(true);
@@ -65,8 +67,10 @@ export default function EnvoiDocument({ document: piece, onFermer }: { document:
       const reponse = await apiFetch(`${piece.chemin}/envois`, { method: 'POST', body: JSON.stringify({ destinataire }) });
       const donnees = await reponse.json().catch(() => ({}));
       if (!reponse.ok) throw new Error(donnees?.error || 'Enregistrement de l’envoi impossible.');
-      setEnvois((liste) => [donnees.envoi, ...liste.filter((envoi) => envoi.id !== donnees.envoi.id)]);
-      setPrepare({ destinataire: donnees.envoi.destinataire, objet: donnees.objet, corps: donnees.corps });
+      const enregistre = donnees as EnvoiEnregistre;
+      setEnvois((liste) => [enregistre.envoi, ...liste.filter((envoi) => envoi.id !== enregistre.envoi.id)]);
+      setPrepare({ destinataire: enregistre.envoi.destinataire, objet: enregistre.objet, corps: enregistre.corps });
+      onEnvoiPrepare?.(enregistre);
     } catch (e) {
       setErreur(e instanceof Error ? e.message : 'Enregistrement de l’envoi impossible.');
     } finally {

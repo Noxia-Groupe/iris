@@ -390,9 +390,22 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin, appliquée d�
 
 Lecture retenue par Claude Code, à corriger par Nelson si besoin : elle confirme les deux conversions par affaire (réponse (a) du 22-10-2026) et revient sur la lecture de la réponse (b) : un contrat de maintenance créé par le même devis qu'un chantier est annulé avec le devis et son chantier. Les messages de la nuit, ci-dessous, l'étendent à tout contrat et à toute intervention créés par le devis.
 
+## Décisions du 23-10-2026 (nuit)
+
+*Rédigé le 23-10-2026.* Réponse de Nelson aux deux questions du lot 6a-3 (passation, section 3, « Envoi des documents (lot 6a-3) » : faut-il qu'un devis brouillon passe « envoyé » dès que son envoi est préparé ? l'objet et le texte du courriel conviennent-ils ?), citée mot pour mot entre guillemets (message de la session de travail ; la suite du message, sur le lot 4, est consignée par le lot qui la traite) :
+
+« Lot 6a-3 : oui un devis brouillon passe en envoyé lorsque l’on prepare son envoi. (Possible egalement dans ces cas la de le repasser manuellement en brouillon si on ne l’envoi pas manuellement)
+L’objet et le texte me convienne »
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin, appliquée par le lot 6a-3 bis :
+
+1. **Statut du devis à la préparation de son envoi** : préparer l'envoi d'un devis brouillon le passe « envoyé », dans la même transaction que l'enregistrement de l'envoi, sous le verrou du devis. Un devis dans un autre statut (envoyé, accepté, en attente d'acompte) garde le sien. Un refus (devis annulé ou refusé, identité incomplète, destinataire invalide, devis introuvable, droits insuffisants) n'écrit rien, statut compris. Ce passage ne fige pas le devis : la question du figement à l'envoi ou à la signature reste ouverte (passation, section 3), et un devis envoyé non signé reste modifiable. L'envoi d'une facture ou d'un avoir ne change pas son statut.
+2. **Retour manuel au brouillon** : l'écran Devis propose un bouton « Repasser en brouillon » sur un devis envoyé, non signé et non converti, dans les mêmes conditions d'affichage que « Refuser » ; il emprunte la transition « envoyé → brouillon », que l'API admettait déjà (`PUT /api/devis/:id/statut`, droit `devis:write`). Choix par défaut, à confirmer : le bouton vaut pour tout devis envoyé non signé, qu'il soit passé « envoyé » par la préparation d'un envoi ou par « Marquer envoyé ». Le journal des envois garde les envois déjà préparés.
+3. **Objet et texte du courriel** : validés tels que le lot 6a-3 les a écrits ; ils ne sont plus à confirmer. Ils restent écrits dans le code jusqu'aux modèles d'e-mails personnalisables (lot P5, après le premier jour).
+
 ## Décisions du 23-10-2026 (nuit) sur le lot 4
 
-*Rédigé le 23-10-2026.* Deux messages de Nelson sur le lot pilote 4 (deux conversions par affaire, annulation en cascade), cités mot pour mot entre guillemets (messages de la session de travail ; retours à la ligne gardés). Premier message, partie lot 4 (la partie lot 6a-3 du même message est consignée par le lot 6a-3 bis, #315) :
+*Rédigé le 23-10-2026.* Deux messages de Nelson sur le lot pilote 4 (deux conversions par affaire, annulation en cascade), cités mot pour mot entre guillemets (messages de la session de travail ; retours à la ligne gardés). Premier message, partie lot 4 (la partie lot 6a-3 du même message est consignée par le lot 6a-3 bis, #315, dans les [décisions du 23-10-2026 (nuit)](#décisions-du-23-10-2026-nuit)) :
 
 « Lot 4 : chantier contrat de maintenance, intervention + abonnement (recurrence), contrat se maintenance + sav, abonnement + contrat de maintenance. Si annulation d’une intervention sur le contrat, seul l’intervention est annulé, le contrat ne change pas. Si contrat deja commencé, doit etre respecté, l’intervention de maintenace (visites si il y a lieu de visites dans le contrat) est simplement revenu a replanifier.
 Si devis annulé, le contrat de maintenace l’est aussi. »

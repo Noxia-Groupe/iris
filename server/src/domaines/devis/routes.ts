@@ -168,8 +168,10 @@ const lireEnvoisDevis: express.RequestHandler = async (req, res) => { try {
 } catch (error) { devisErreur(res, error); } };
 
 // Enregistre l'envoi préparé, sous le verrou du devis : une annulation ou un refus en cours est
-// attendu, puis refuse l'envoi. Le statut du devis ne change pas (choix par défaut, à confirmer :
-// un brouillon ne passe pas « envoyé » de lui-même). L'écran télécharge le PDF avant cet appel.
+// attendu, puis refuse l'envoi. Un brouillon passe « envoyé » dans la même transaction (décision
+// de Nelson du 23-10-2026, lot 6a-3 bis) ; un devis dans un autre statut le garde. Un refus n'écrit
+// rien, statut compris. La réponse porte le statut du devis après l'envoi, que l'écran affiche.
+// L'écran télécharge le PDF avant cet appel.
 const envoyerDevis: express.RequestHandler = async (req, res) => { try {
   const destinataire = validerDestinataire(req.body?.destinataire);
   const auteur = (req as AuthRequest).user!;
@@ -179,7 +181,12 @@ const envoyerDevis: express.RequestHandler = async (req, res) => { try {
     if (devis.statut === 'ANNULE' || devis.statut === 'REFUSE') throw new DevisConflitError('Un devis annulé ou refusé ne s’envoie pas.');
     const { objet, corps } = await texteEnvoiDevis(tx, devis);
     const envoi = await enregistrerEnvoi(tx, { devisId: devis.id }, { destinataire, objet }, auteur);
-    return { envoi, objet, corps };
+    // Un brouillon n'est jamais signé ni converti (la signature le fait passer « accepté ») : son
+    // passage à « envoyé » est celui du bouton « Marquer envoyé » (TRANSITIONS_DEVIS).
+    const statutDevis = devis.statut === 'BROUILLON'
+      ? (await tx.devis.update({ where: { id: devis.id }, data: { statut: 'ENVOYE' }, select: { statut: true } })).statut
+      : devis.statut;
+    return { envoi, objet, corps, statutDevis };
   });
   if (!resultat) return void res.status(404).json({ error: 'Devis introuvable.' });
   res.status(201).json(resultat);
