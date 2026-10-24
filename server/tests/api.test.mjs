@@ -3364,6 +3364,22 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await journalMainOeuvre(fiche.id)).length, 5);
     });
 
+    test('une modification sans « actif » garde une main d’œuvre désactivée : seule une réactivation explicite la réactive', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-ACTIF-${suffixe}`);
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${fiche.id}`).set(admin)).status, 200);
+      const corps = { ...corpsMainOeuvre(fiche.reference), prixHeureSousContratHt: '41' };
+      const maj = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, corps);
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      assert.deepEqual([maj.body.actif, maj.body.prixHeureSousContratHt], [false, 41]);
+      let derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.avant, derniere.apres], ['MODIFICATION', { prixHeureSousContratHt: 40 }, { prixHeureSousContratHt: 41 }]);
+      const reactivation = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, { ...corps, actif: true });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      assert.equal(reactivation.body.actif, true);
+      derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.avant, derniere.apres], ['REACTIVATION', { actif: false }, { actif: true }]);
+    });
+
     test('chaque prix de vente et la TVA, modifiés seuls, sont journalisés avec l’auteur, l’avant et l’après', async () => {
       const fiche = await creerMainOeuvre(`TEST-MO-CHAMPS-${suffixe}`);
       let corps = corpsMainOeuvre(fiche.reference);
@@ -3444,6 +3460,21 @@ if (!TEST_DATABASE_URL) {
       const borneHaute = await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE3-${suffixe}`, { prixVenteHt: max, prixJourHorsContratHt: max, prixHeureSousContratHt: max, prixJourSousContratHt: max }));
       assert.equal(borneHaute.status, 201, JSON.stringify(borneHaute.body));
       assert.deepEqual(prixEnBase(await prisma.cataloguePrestation.findUnique({ where: { id: borneHaute.body.id } })), [max, max, max, max, '7.5']);
+      // Borne basse des quatre prix : zéro admis pour chacun (« positifs ou nuls »), par l'API comme par la contrainte de la base.
+      const zero = await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE4-${suffixe}`, { prixVenteHt: '0', prixJourHorsContratHt: '0', prixHeureSousContratHt: '0', prixJourSousContratHt: '0' }));
+      assert.equal(zero.status, 201, JSON.stringify(zero.body));
+      assert.deepEqual(prixEnBase(await prisma.cataloguePrestation.findUnique({ where: { id: zero.body.id } })), ['0', '0', '0', '0', '7.5']);
+    });
+
+    test('un prix refusé est nommé par son propre libellé, pour chacun des quatre prix', async () => {
+      const libelles = [['prixVenteHt', 'Prix de vente HT à l’heure, hors contrat'], ['prixJourHorsContratHt', 'Prix de vente HT au forfait jour, hors contrat'],
+        ['prixHeureSousContratHt', 'Prix de vente HT à l’heure, sous contrat'], ['prixJourSousContratHt', 'Prix de vente HT au forfait jour, sous contrat']];
+      for (const [champ, libelle] of libelles) {
+        const corps = { ...corpsMainOeuvre(`TEST-MO-LIBELLE-${suffixe}`), [champ]: '-5' };
+        const res = await envoyer('post', '/api/catalogue/prestations', admin, corps);
+        assert.equal(res.status, 400, `${champ} : ${JSON.stringify(res.body)}`);
+        assert.ok(res.body.error.startsWith(`${libelle} : `), `${champ} : ${res.body.error}`);
+      }
     });
 
     test('comptes non administrateurs refusés (403), sans rien écrire', async () => {

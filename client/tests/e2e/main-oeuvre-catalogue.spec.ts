@@ -103,6 +103,46 @@ test('l’administration crée une main d’œuvre depuis le catalogue, modifie 
   await expect(page.getByText(reference)).toHaveCount(0);
 });
 
+test('réactivation depuis l’écran : les prix de la fiche sont renvoyés à l’identique ; un écran resté ouvert n’annule pas une désactivation en enregistrant des prix', async ({ allerSurPageAdmin, request, session }) => {
+  const suffixe = `${Date.now()}`;
+  const reference = `E2E-MO-PERIME-${suffixe}`;
+  const nom = `Écran périmé ${suffixe}`;
+  const fiche = await envoyer(request, session.token, 'post', '/catalogue/prestations', {
+    estMainOeuvre: true, reference, nom, tauxTva: '20', prixVenteHt: '45.5', prixJourHorsContratHt: '320.05', prixHeureSousContratHt: '38', prixJourSousContratHt: '280.25', heuresParJour: '7.75',
+  }) as MainOeuvre;
+  const montants = (m: MainOeuvre) => [m.prixVenteHt, m.prixJourHorsContratHt, m.prixHeureSousContratHt, m.prixJourSousContratHt, m.heuresParJour];
+  const relire = async () => (await lire<MainOeuvre[]>(request, session.token, '/catalogue/prestations')).find((p) => p.id === fiche.id)!;
+  const journal = async () => (await lire<{ entrees: Entree[] }>(request, session.token, '/journal-administration?type=MAIN_OEUVRE')).entrees.filter((e) => e.cibleLibelle === `${reference} — ${nom}`).reverse();
+  const page = await allerSurPageAdmin('/catalogue');
+  await ouvrirOngletMainOeuvre(page);
+  const carte = page.getByRole('article', { name: nom });
+  await carte.getByRole('button', { name: `Modifier les prix de ${nom}` }).click();
+  // Un autre administrateur la désactive pendant la saisie : l'écran la croit encore active.
+  await envoyer(request, session.token, 'delete', `/catalogue/prestations/${fiche.id}`);
+  await expect(carte).not.toContainText('Désactivée');
+  const formulaire = carte.getByRole('form', { name: `Prix de ${nom}` });
+  await formulaire.getByLabel('Prix de vente HT à l’heure, sous contrat (€)').fill('39,50');
+  await formulaire.getByRole('button', { name: 'Enregistrer les prix' }).click();
+  await expect(page.getByRole('status')).toHaveText(`Prix de « ${nom} » enregistrés.`);
+  // Le prix est enregistré, la main d'œuvre reste désactivée, et l'écran rechargé le montre.
+  await expect(carte).toContainText('Désactivée');
+  const enregistree = await relire();
+  expect([enregistree.actif, ...montants(enregistree)]).toEqual([false, 45.5, 320.05, 39.5, 280.25, 7.75]);
+  let entrees = await journal();
+  expect(entrees.map((e) => e.action)).toEqual(['CREATION', 'DESACTIVATION', 'MODIFICATION']);
+  expect([entrees[2].avant, entrees[2].apres]).toEqual([{ prixHeureSousContratHt: 38 }, { prixHeureSousContratHt: 39.5 }]);
+  // La réactivation volontaire, depuis l'écran, renvoie la fiche entière : seule l'activité change.
+  await carte.getByRole('button', { name: `Réactiver ${nom}` }).click();
+  await expect(page.getByRole('status')).toHaveText(`Main d’œuvre « ${nom} » réactivée.`);
+  await expect(carte).not.toContainText('Désactivée');
+  await expect(carte.getByRole('button', { name: `Désactiver ${nom}` })).toBeVisible();
+  const reactivee = await relire();
+  expect([reactivee.actif, ...montants(reactivee)]).toEqual([true, 45.5, 320.05, 39.5, 280.25, 7.75]);
+  entrees = await journal();
+  expect(entrees.map((e) => e.action)).toEqual(['CREATION', 'DESACTIVATION', 'MODIFICATION', 'REACTIVATION']);
+  expect([entrees[3].avant, entrees[3].apres]).toEqual([{ actif: false }, { actif: true }]);
+});
+
 test('l’administration rattache un intervenant à une main d’œuvre active ; désactivée, elle reste affichée comme telle', async ({ allerSurPageAdmin, request, session }) => {
   const suffixe = `${Date.now()}`;
   const electricien = await creerMainOeuvre(request, session.token, `E2E-MO-RAT1-${suffixe}`, `Électricien rattaché ${suffixe}`);
