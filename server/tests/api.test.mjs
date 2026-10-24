@@ -3498,8 +3498,10 @@ if (!TEST_DATABASE_URL) {
       const fiche = await creerMainOeuvre(`TEST-MO-CLE-${suffixe}`);
       const inactive = await creerMainOeuvre(`TEST-MO-CLE-INACTIVE-${suffixe}`);
       assert.equal((await request(app).delete(`/api/catalogue/prestations/${inactive.id}`).set(admin)).status, 200);
-      const ordinaire = await envoyer('post', '/api/v1/catalogue/prestations', parCle(cleEcriture), { reference: `TEST-MO-ORD-CLE-${suffixe}`, nom: 'TEST Pose par clé', unite: 'forfait', prixVenteHt: '120' });
+      const ordinaire = await envoyer('post', '/api/v1/catalogue/prestations', parCle(cleEcriture), { reference: `TEST-MO-ORD-CLE-${suffixe}`, nom: 'TEST Pose par clé', unite: 'forfait', prixVenteHt: '120', prixAchatHt: '30' });
       assert.equal(ordinaire.status, 201, 'une clé crée toujours une prestation ordinaire');
+      // Sans finances:read, la clé ne lit le prix d’achat de la fiche dans aucune réponse d’écriture (création, modification, désactivation).
+      assert.ok(!('prixAchatHt' in ordinaire.body), 'création : prix d’achat masqué sans finances:read');
       const etats = async () => [await etatPrestation(fiche.id), await etatPrestation(inactive.id), await etatPrestation(ordinaire.body.id)];
       const avant = await etats();
       const avantPrestations = await prisma.cataloguePrestation.count();
@@ -3525,10 +3527,14 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.cataloguePrestation.count(), avantPrestations);
       assert.equal(await nbEntreesJournal(), avantJournal);
       // Une clé modifie et désactive toujours une prestation ordinaire, et lit les mains d'œuvre.
-      const majOrdinaire = await envoyer('put', `/api/v1/catalogue/prestations/${ordinaire.body.id}`, cle, { reference: ordinaire.body.reference, nom: 'TEST Pose par clé', unite: 'forfait', prixVenteHt: '130' });
+      const majOrdinaire = await envoyer('put', `/api/v1/catalogue/prestations/${ordinaire.body.id}`, cle, { reference: ordinaire.body.reference, nom: 'TEST Pose par clé', unite: 'forfait', prixVenteHt: '130', prixAchatHt: '31' });
       assert.equal(majOrdinaire.status, 200, JSON.stringify(majOrdinaire.body));
       assert.equal(majOrdinaire.body.prixVenteHt, 130);
-      assert.equal((await request(app).delete(`/api/v1/catalogue/prestations/${ordinaire.body.id}`).set(cle)).status, 200);
+      assert.ok(!('prixAchatHt' in majOrdinaire.body), 'modification : prix d’achat masqué sans finances:read');
+      const desactivationOrdinaire = await request(app).delete(`/api/v1/catalogue/prestations/${ordinaire.body.id}`).set(cle);
+      assert.equal(desactivationOrdinaire.status, 200, JSON.stringify(desactivationOrdinaire.body));
+      assert.ok(!('prixAchatHt' in desactivationOrdinaire.body), 'désactivation : prix d’achat masqué sans finances:read');
+      assert.equal((await prisma.cataloguePrestation.findUnique({ where: { id: ordinaire.body.id } })).prixAchatHt.toString(), '31', 'le prix d’achat reste enregistré');
       assert.ok((await request(app).get('/api/v1/catalogue/prestations').set(cle)).body.some((f) => f.id === fiche.id && f.prixJourHorsContratHt === 320));
       assert.equal(await nbEntreesJournal(), avantJournal, 'les prestations ordinaires ne sont pas journalisées');
     });

@@ -37,6 +37,10 @@ test('l’administration crée une main d’œuvre depuis le catalogue, modifie 
   const suffixe = `${Date.now()}`;
   const reference = `E2E-MO-${suffixe}`;
   const nom = `Électricien E2E ${suffixe}`;
+  // Une prestation ordinaire, au forfait : elle n'est jamais présentée comme une main d'œuvre, dont
+  // l'onglet afficherait ses prix comme des prix de vente à l'heure ou au forfait jour.
+  const referenceOrdinaire = `E2E-ORD-${suffixe}`;
+  await envoyer(request, session.token, 'post', '/catalogue/prestations', { reference: referenceOrdinaire, nom: `Pose forfaitaire E2E ${suffixe}`, unite: 'forfait', prixVenteHt: '250', tauxTva: '20' });
   const page = await allerSurPageAdmin('/catalogue');
   await ouvrirOngletMainOeuvre(page);
 
@@ -64,6 +68,8 @@ test('l’administration crée une main d’œuvre depuis le catalogue, modifie 
   await expect(fiche.locator('[data-prix="prixJourSousContratHt"]')).toHaveText('280,25 €');
   await expect(fiche.locator('[data-prix="heuresParJour"]')).toHaveText('7,5 h');
   await expect(fiche.getByText('Prix de vente HT au forfait jour, sous contrat')).toBeVisible();
+  // La liste rechargée ne montre que des mains d'œuvre : la prestation ordinaire n'y figure pas.
+  await expect(page.getByText(referenceOrdinaire)).toHaveCount(0);
 
   // Modifier un prix depuis l'écran.
   await fiche.getByRole('button', { name: `Modifier les prix de ${nom}` }).click();
@@ -97,9 +103,10 @@ test('l’administration crée une main d’œuvre depuis le catalogue, modifie 
   await expect(ligne).toContainText('Mains d’œuvre (prix de vente)');
   await expect(ligne).toContainText('Prix de vente HT au forfait jour, sous contrat : 280.25');
 
-  // L'onglet Prestations ne liste pas les mains d'œuvre.
+  // L'onglet Prestations ne liste pas les mains d'œuvre ; il liste la prestation ordinaire (témoin du chargement).
   await page.goto('/catalogue', { waitUntil: 'networkidle' });
   await expect(page.getByRole('button', { name: 'Prestations', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText(referenceOrdinaire)).toBeVisible();
   await expect(page.getByText(reference)).toHaveCount(0);
 });
 
