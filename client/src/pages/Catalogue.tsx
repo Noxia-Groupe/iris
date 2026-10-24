@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, Plus, FolderTree, Power } from 'lucide-react';
 import { apiFetch } from '../api';
+import CatalogueMainOeuvre from '../components/CatalogueMainOeuvre';
+import type { MainOeuvre } from '../lib/mainOeuvre';
 
 /**
  * Catalogue natif Iris : prestations, articles et équipements.
@@ -13,6 +15,9 @@ import { apiFetch } from '../api';
  * Une fiche n'est jamais supprimée, seulement désactivée : elle peut déjà être référencée
  * par un équipement installé chez un client, ou copiée dans une ligne de devis (le devis garde
  * sa copie, figée, même si la fiche change ou est désactivée ensuite).
+ *
+ * Les mains d'œuvre (prestations en prix de vente, décisions de Nelson du 24-10-2026) ont leur
+ * onglet : l'onglet Prestations ne montre que les prestations ordinaires.
  */
 type Categorie = { id: string; nom: string; parentId: string | null };
 type Fiche = {
@@ -21,6 +26,7 @@ type Fiche = {
   unite?: string; dureeIndicativeMin?: number | null;
   prixAchatHt?: number | null; stockSuivi?: boolean; stockActuel?: number;
   fabricant?: string | null;
+  estMainOeuvre?: boolean;
 };
 
 const FAMILLES = [
@@ -29,6 +35,9 @@ const FAMILLES = [
   { cle: 'equipements', libelle: 'Équipements' },
 ] as const;
 type Famille = typeof FAMILLES[number]['cle'];
+// Onglet « Main d'œuvre » : les prestations marquées main d'œuvre, lues avec les prestations.
+const ONGLET_MAIN_OEUVRE = 'mainOeuvre';
+type Onglet = Famille | typeof ONGLET_MAIN_OEUVRE;
 
 const ficheVide = {
   reference: '', nom: '', description: '', categorieId: '', tauxTva: '20', prixVenteHt: '0',
@@ -36,7 +45,8 @@ const ficheVide = {
 };
 
 const Catalogue = () => {
-  const [famille, setFamille] = useState<Famille>('prestations');
+  const [onglet, setOnglet] = useState<Onglet>('prestations');
+  const famille: Famille = onglet === ONGLET_MAIN_OEUVRE ? 'prestations' : onglet;
   const [fiches, setFiches] = useState<Fiche[]>([]);
   const [categories, setCategories] = useState<Categorie[]>([]);
   const [saisie, setSaisie] = useState({ ...ficheVide });
@@ -44,8 +54,10 @@ const Catalogue = () => {
   const [erreur, setErreur] = useState('');
   const [chargement, setChargement] = useState(true);
 
-  const charger = async (f: Famille) => {
-    setChargement(true);
+  // `silencieux` : relecture après une écriture de l'onglet Main d'œuvre, sans le démonter (son
+  // message de confirmation et sa saisie restent affichés).
+  const charger = async (f: Famille, silencieux = false) => {
+    if (!silencieux) setChargement(true);
     try {
       const [resFiches, resCategories] = await Promise.all([
         apiFetch(`/catalogue/${f}`),
@@ -59,10 +71,12 @@ const Catalogue = () => {
     } catch (e) {
       setErreur(e instanceof Error ? e.message : 'Chargement impossible.');
     } finally {
-      setChargement(false);
+      if (!silencieux) setChargement(false);
     }
   };
   useEffect(() => { void charger(famille); }, [famille]);
+  // Prestations ordinaires dans leur onglet, mains d'œuvre dans le leur.
+  const fichesAffichees = famille === 'prestations' ? fiches.filter((f) => !f.estMainOeuvre) : fiches;
 
   const creerCategorie = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,16 +141,17 @@ const Catalogue = () => {
         <BookOpen className="text-blue-700" size={26} />
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Catalogue</h1>
-          <p className="text-gray-500">Prestations, articles et équipements de votre référentiel — base des futurs devis.</p>
+          <p className="text-gray-500">Prestations, articles, équipements et mains d’œuvre de votre référentiel — base des futurs devis.</p>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {FAMILLES.map((f) => (
+        {[...FAMILLES, { cle: ONGLET_MAIN_OEUVRE, libelle: 'Main d’œuvre' } as const].map((f) => (
           <button
             key={f.cle}
-            onClick={() => setFamille(f.cle)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium ${famille === f.cle ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-700'}`}
+            onClick={() => setOnglet(f.cle)}
+            aria-pressed={onglet === f.cle}
+            className={`px-4 py-2 rounded-lg text-sm font-medium ${onglet === f.cle ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-700'}`}
           >
             {f.libelle}
           </button>
@@ -147,7 +162,7 @@ const Catalogue = () => {
 
       <section className="bg-white border border-gray-100 rounded-xl p-5">
         <h2 className="font-semibold flex items-center gap-2 text-gray-800"><FolderTree size={18} /> Catégories</h2>
-        <p className="text-sm text-gray-500 mt-1">Communes aux trois familles. Elles n'imposent aucune nomenclature : nommez-les comme votre métier.</p>
+        <p className="text-sm text-gray-500 mt-1">Communes aux trois familles et aux mains d’œuvre. Elles n'imposent aucune nomenclature : nommez-les comme votre métier.</p>
         <div className="flex flex-wrap gap-2 mt-3">
           {categories.map((c) => <span key={c.id} className="text-xs bg-gray-100 text-gray-700 rounded-full px-3 py-1">{c.nom}</span>)}
           {categories.length === 0 && <span className="text-sm text-gray-400">Aucune catégorie pour l'instant.</span>}
@@ -158,6 +173,9 @@ const Catalogue = () => {
         </form>
       </section>
 
+      {onglet === ONGLET_MAIN_OEUVRE ? (chargement ? <p className="p-6 text-gray-500">Chargement…</p> : (
+        <CatalogueMainOeuvre fiches={fiches.filter((f) => f.estMainOeuvre) as unknown as MainOeuvre[]} categories={categories} recharger={() => charger('prestations', true)} />
+      )) : (<>
       <section className="bg-white border border-gray-100 rounded-xl p-5">
         <h2 className="font-semibold flex items-center gap-2 text-gray-800"><Plus size={18} /> Nouvelle fiche</h2>
         <form onSubmit={creerFiche} className="mt-4 space-y-4">
@@ -192,7 +210,7 @@ const Catalogue = () => {
       </section>
 
       <section className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-        {chargement ? <p className="p-6 text-gray-500">Chargement…</p> : fiches.length === 0 ? (
+        {chargement ? <p className="p-6 text-gray-500">Chargement…</p> : fichesAffichees.length === 0 ? (
           <p className="p-8 text-center text-gray-500">Aucune fiche dans cette famille. Créez la première ci-dessus.</p>
         ) : (
           <table className="w-full text-sm">
@@ -208,7 +226,7 @@ const Catalogue = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {fiches.map((f) => (
+              {fichesAffichees.map((f) => (
                 <tr key={f.id} className={f.actif ? '' : 'text-gray-400'}>
                   <td className="px-4 py-3 font-mono text-xs">{f.reference}</td>
                   <td className="px-4 py-3">
@@ -230,6 +248,7 @@ const Catalogue = () => {
           </table>
         )}
       </section>
+      </>)}
     </div>
   );
 };

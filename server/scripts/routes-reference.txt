@@ -114,11 +114,12 @@ PATCH /api/users/:id/acces-finance requireAuth#07b983da0ce5 > requireSuperAdmin#
 PATCH /api/users/:id/actif requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#368df173608e
 GET /api/commerciaux requireAuth#07b983da0ce5 > <anonymous>#bed7235de09c
 GET /api/conducteurs requireAuth#07b983da0ce5 > <anonymous>#73f7374f60c7
-GET /api/intervenants requireAuth#07b983da0ce5 > <anonymous>#7f11ac3852d4
+GET /api/intervenants requireAuth#07b983da0ce5 > <anonymous>#5f66470a380c
 POST /api/intervenants requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c6ba071ecbe1
 PUT /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#783c0d87a196
 PUT /api/intervenants/:id/compte requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#5e61db3bb78c
-DELETE /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#86e1b7b43b2b
+PUT /api/intervenants/:id/main-oeuvre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > rattacherMainOeuvre#6b47f279f68e
+DELETE /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c87065a29eb2
 GET /api/planning/chantiers requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#35c56b70d597
 GET /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#48e661370296
 POST /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d20ba39cc1f2
@@ -192,12 +193,12 @@ POST /api/catalogue/categories requireAuth#07b983da0ce5 > requireAdmin#72440b319
 POST /api/v1/catalogue/categories <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > creerCategorieCatalogue#7d1affdf7db3
 GET /api/catalogue/:family requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > listerCatalogue#667a729a3954
 GET /api/v1/catalogue/:family <anonymous>{scope="catalogue:read"}#4aeb6d464b38 > listerCatalogue#667a729a3954
-POST /api/catalogue/:family requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerFicheCatalogue#95e1a4f99a90
-POST /api/v1/catalogue/:family <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > creerFicheCatalogue#95e1a4f99a90
-PUT /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > modifierFicheCatalogue#158c9aa2840d
-PUT /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > modifierFicheCatalogue#158c9aa2840d
-DELETE /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > desactiverFicheCatalogue#77fbb2528cc6
-DELETE /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > desactiverFicheCatalogue#77fbb2528cc6
+POST /api/catalogue/:family requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > creerFicheCatalogue#efe4121d1bdc
+POST /api/v1/catalogue/:family <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > creerFicheCatalogue#efe4121d1bdc
+PUT /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > modifierFicheCatalogue#6bed41e242c5
+PUT /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > modifierFicheCatalogue#6bed41e242c5
+DELETE /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > desactiverFicheCatalogue#775098fdc77c
+DELETE /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > desactiverFicheCatalogue#775098fdc77c
 GET /api/devis/catalogue requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#b9b899006c11
 GET /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > listerDevis#1b0df21d4732
 GET /api/v1/devis <anonymous>{scope="devis:read"}#4aeb6d464b38 > listerDevis#1b0df21d4732

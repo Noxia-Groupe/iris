@@ -16,7 +16,7 @@ import { getCompanySettings } from './metier';
 // Option retenue par Nelson (13-10-2026) : un onglet « Journal » dans Administration, filtrable par
 // date, type et auteur, avec export CSV. Un simple administrateur ne reçoit ni les entrées qui
 // concernent un compte super administrateur, ni l'historique des clés d'intégration.
-const TYPES_JOURNAL_ADMINISTRATION = ['COMPTE', 'PARAMETRES', 'MODULES', 'REMUNERATION', 'PRIME_COMMERCIAL', 'SOCIETE', 'CLE_INTEGRATION', 'PARTAGE_PLANNING', 'CONSERVATION_JOURNAL'];
+const TYPES_JOURNAL_ADMINISTRATION = ['COMPTE', 'PARAMETRES', 'MODULES', 'REMUNERATION', 'PRIME_COMMERCIAL', 'SOCIETE', 'CLE_INTEGRATION', 'PARTAGE_PLANNING', 'CONSERVATION_JOURNAL', 'MAIN_OEUVRE', 'INTERVENANT'];
 
 const AUTEUR_FILTRE_DEMARRAGE = 'DEMARRAGE';
 

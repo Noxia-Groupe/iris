@@ -249,6 +249,8 @@ model Intervenant {
   nom               String
   role              String
   tauxHoraireCharge Decimal @db.Decimal(10, 2)
+  // Main d'œuvre (prix de vente) à laquelle l'intervenant est rattaché, facultative.
+  rattachementMainOeuvre IntervenantMainOeuvre?
 
   pointages      PointageHeure[]
   coutsInterventionHeures CoutInterventionHeure[]
@@ -396,7 +398,7 @@ model Parametres {
 model JournalAdministration {
   id                 String   @id @default(uuid())
   domaine            String // DROITS | REGLAGES
-  type               String // COMPTE | PARAMETRES | MODULES | REMUNERATION | PRIME_COMMERCIAL | SOCIETE | CLE_INTEGRATION | PARTAGE_PLANNING | CONSERVATION_JOURNAL
+  type               String // COMPTE | PARAMETRES | MODULES | REMUNERATION | PRIME_COMMERCIAL | SOCIETE | CLE_INTEGRATION | PARTAGE_PLANNING | CONSERVATION_JOURNAL | MAIN_OEUVRE | INTERVENANT
   action             String
   cibleId            String?
   cibleLibelle       String?
@@ -1278,7 +1280,42 @@ model CataloguePrestation {
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
+  // Main d'œuvre au catalogue (décisions de Nelson du 24-10-2026) : une prestation par main
+  // d'œuvre, avec quatre PRIX DE VENTE, jamais des coûts (le coût reste le taux horaire chargé de
+  // l'intervenant). Choix par défaut, à confirmer : `prixVenteHt` est le prix à l'heure hors
+  // contrat, l'unité l'heure ; s'y ajoutent le forfait jour hors contrat, l'heure et le forfait
+  // jour sous contrat, et le nombre d'heures d'une journée (décision « Par main d'œuvre »). Une
+  // contrainte CHECK exige ces champs d'une main d'œuvre et les interdit à une autre prestation.
+  estMainOeuvre             Boolean                 @default(false)
+  prixJourHorsContratHt     Decimal?                @db.Decimal(12, 2)
+  prixHeureSousContratHt    Decimal?                @db.Decimal(12, 2)
+  prixJourSousContratHt     Decimal?                @db.Decimal(12, 2)
+  heuresParJour             Decimal?                @db.Decimal(4, 2)
+  rattachementsIntervenants IntervenantMainOeuvre[]
+
+  // Cible de la clé étrangère composite des rattachements : seule une main d'œuvre est visée.
+  @@unique([id, estMainOeuvre])
   @@index([categorieId])
+}
+
+// Rattachement d'un intervenant à une main d'œuvre (décision de Nelson du 24-10-2026, « Liée à
+// l'intervenant ») : ses heures seront valorisées à ce prix de vente (lot suivant). Réglé par
+// l'administration seule. Une table à part plutôt qu'une colonne de l'intervenant : le
+// rattachement ne voyage pas avec les fiches intervenant jointes aux heures, au planning ou aux
+// interventions, que lisent des comptes qui ne voient pas le catalogue. La clé étrangère
+// composite (prestationId, estMainOeuvre toujours vrai) garantit en base que la cible est, et
+// reste, une main d'œuvre ; une main d'œuvre désactivée garde ses rattachements (choix par
+// défaut, à confirmer).
+model IntervenantMainOeuvre {
+  intervenantId String              @id
+  intervenant   Intervenant         @relation(fields: [intervenantId], references: [id], onDelete: Cascade)
+  prestationId  String
+  estMainOeuvre Boolean             @default(true)
+  prestation    CataloguePrestation @relation(fields: [prestationId, estMainOeuvre], references: [id, estMainOeuvre], onDelete: Restrict, onUpdate: Restrict)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([prestationId, estMainOeuvre])
 }
 
 // Article vendu/consommé : suivi de stock simple, sans traçabilité unitaire obligatoire.

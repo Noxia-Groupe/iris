@@ -298,6 +298,9 @@ if (!TEST_DATABASE_URL) {
     await prisma.executionGenerationVisites.deleteMany({});
     await prisma.clientSite.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
     await prisma.clientContact.deleteMany({ where: { client: { raisonSociale: { startsWith: 'TEST ' } } } });
+    // Un rattachement d'intervenant retient sa main d'œuvre (clé étrangère RESTRICT) : il part avant
+    // les fiches du catalogue et les intervenants de test.
+    await prisma.intervenantMainOeuvre.deleteMany({ where: { OR: [{ prestation: { reference: { startsWith: 'TEST-' } } }, { intervenant: { nom: { startsWith: 'TEST ' } } }] } });
     await prisma.cataloguePrestation.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.catalogueArticle.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
     await prisma.catalogueEquipement.deleteMany({ where: { reference: { startsWith: 'TEST-' } } });
@@ -331,6 +334,7 @@ if (!TEST_DATABASE_URL) {
       'd0.181.conducteur.a@iris.test', 'd0.181.conducteur.b@iris.test', 'd0.181.conducteur.c@iris.test', 'd0.181.commercial.a@iris.test', 'd0.181.commercial.b@iris.test',
       'd0.179.directeur.commercial@iris.test', 'd0.179.assistante.commerciale@iris.test', 'd0.179.comptable@iris.test', 'd0.179.conducteur@iris.test', 'd0.179.commercial@iris.test', 'd0.179.admin@iris.test',
       'conversion4.admin@iris.test',
+      'mo.conducteur@iris.test', 'mo.technicien@iris.test', 'mo.commercial@iris.test', 'mo.directeur@iris.test', 'mo.comptable@iris.test', 'mo.assistante@iris.test', 'mo.directeurCommercial@iris.test', 'mo.responsable@iris.test',
       'planning.limite.titulaire@iris.test', 'planning.limite.coequipier@iris.test', 'planning.limite.titulaire.sansfiche@iris.test', 'planning.limite.autre.titulaire@iris.test',
       'pilote3.technicien@iris.test', 'pilote3.autre.technicien@iris.test', 'pilote3.inactif@iris.test', 'pilote3.conducteur@iris.test', 'pilote3.tiers@iris.test',
       'pilote3.reconverti@iris.test', 'pilote3.promu@iris.test', 'pilote3.admin@iris.test', 'pilote3.superadmin@iris.test', 'pilote3.concurrent.a@iris.test', 'pilote3.concurrent.b@iris.test', 'pilote3.demarrage@iris.test', 'pilote3.interblocage@iris.test', 'pilote3.interblocage.refus@iris.test', 'pilote3.interblocage.reliee@iris.test', 'pilote3.interblocage.responsable@iris.test', 'pilote3.interblocage.collaborateur@iris.test', 'pilote3.interblocage.ordre@iris.test', 'pilote3.interblocage.promotion@iris.test', 'pilote3.demarrage.course@iris.test', 'pilote3.demarrage.bloque@iris.test', 'pilote3.demarrage.nouveau@iris.test',
@@ -3246,6 +3250,531 @@ if (!TEST_DATABASE_URL) {
       // Le cycle de vie reste possible : seul le contenu est figé.
       await prisma.devis.update({ where: { id: devisId }, data: { acompteReference: 'TEST cycle de vie' } });
       assert.equal((await lignesEnBase(devisId)).length, 2);
+    });
+  });
+
+  // Lot « main d'œuvre au catalogue » (décisions de Nelson du 24-10-2026 : « Dans le catalogue »,
+  // heures d'une journée « Par main d'œuvre », valorisation « Liée à l'intervenant ») : une prestation
+  // du catalogue par main d'œuvre, quatre PRIX DE VENTE et ses heures par jour ; écriture réservée à
+  // l'administration en session, journalisée ; aucune clé d'intégration (choix par défaut, à
+  // confirmer) ; rattachement facultatif d'un intervenant à une main d'œuvre active.
+  describe('Main d’œuvre au catalogue : prix de vente, droits, journal et rattachement des intervenants', () => {
+    let admin = {};
+    let adminId = '';
+    let nomSecours = '';
+    const comptes = {};
+    let cleEcriture = '';
+    let cleLecture = '';
+    const suffixe = `${Date.now()}`;
+    const PRIX = { prixVenteHt: '45.50', prixJourHorsContratHt: '320', prixHeureSousContratHt: '40', prixJourSousContratHt: '280.25', heuresParJour: '7.5' };
+    const corpsMainOeuvre = (reference, extra = {}) => ({ estMainOeuvre: true, reference, nom: `TEST Main d’œuvre ${reference}`, tauxTva: '20', ...PRIX, ...extra });
+    // Le corps est calculé AVANT la requête : `request(app)` ouvre un serveur éphémère, qu'une
+    // exception levée en construisant le corps laisserait ouvert.
+    const envoyer = (methode, chemin, enTete, corps) => request(app)[methode](chemin).set(enTete).send(corps);
+    const creerMainOeuvre = async (reference, extra) => {
+      const corps = corpsMainOeuvre(reference, extra);
+      const res = await envoyer('post', '/api/catalogue/prestations', admin, corps);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const journalMainOeuvre = (cibleId) => prisma.journalAdministration.findMany({ where: { type: 'MAIN_OEUVRE', cibleId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    const journalIntervenant = (cibleId) => prisma.journalAdministration.findMany({ where: { type: 'INTERVENANT', cibleId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    const nbEntreesJournal = () => prisma.journalAdministration.count({ where: { type: { in: ['MAIN_OEUVRE', 'INTERVENANT'] } } });
+    const etatPrestation = async (id) => JSON.stringify(await prisma.cataloguePrestation.findUnique({ where: { id } }));
+    const parCle = (secret) => ({ Authorization: `Bearer ${secret}` });
+    const prixEnBase = (fiche) => [fiche.prixVenteHt, fiche.prixJourHorsContratHt, fiche.prixHeureSousContratHt, fiche.prixJourSousContratHt, fiche.heuresParJour].map((v) => v?.toString() ?? null);
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      nomSecours = secours.body.user.name;
+      const types = {
+        conducteur: 'CONDUCTEUR_TRAVAUX', technicien: 'TECHNICIEN', commercial: 'COMMERCIAL', directeur: 'DIRECTEUR', comptable: 'COMPTABLE',
+        assistante: 'ASSISTANTE_COMMERCIALE', directeurCommercial: 'DIRECTEUR_COMMERCIAL', responsable: 'RESPONSABLE',
+      };
+      for (const [cle, role] of Object.entries(types)) {
+        const compte = await prisma.user.create({ data: { email: `mo.${cle}@iris.test`, name: `TEST Main d’œuvre ${cle}`, role } });
+        comptes[cle] = { Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}`, id: compte.id };
+      }
+      const cle = async (scopes) => {
+        const corps = { nom: `TEST main d’œuvre ${scopes.join(' ')}`, scopes };
+        const res = await envoyer('post', '/api/admin/api-keys', admin, corps);
+        assert.equal(res.status, 201, JSON.stringify(res.body));
+        return res.body.apiKey;
+      };
+      cleEcriture = await cle(['catalogue:read', 'catalogue:write']);
+      cleLecture = await cle(['catalogue:read']);
+    });
+    const enTete = (qui) => ({ Authorization: comptes[qui].Authorization });
+
+    test('l’administration crée une main d’œuvre : quatre prix de vente, heures par jour, unité l’heure, création journalisée', async () => {
+      const categorie = await envoyer('post', '/api/catalogue/categories', admin, { nom: `TEST Corps de métier ${suffixe}` });
+      assert.equal(categorie.status, 201, JSON.stringify(categorie.body));
+      const corps = corpsMainOeuvre(`TEST-MO-ELEC-${suffixe}`, { categorieId: categorie.body.id, description: 'Tarif électricien', prixVenteHt: '45,50', heuresParJour: '7,75' });
+      const creation = await envoyer('post', '/api/catalogue/prestations', admin, corps);
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const fiche = creation.body;
+      assert.deepEqual([fiche.estMainOeuvre, fiche.unite, fiche.prixVenteHt, fiche.prixJourHorsContratHt, fiche.prixHeureSousContratHt, fiche.prixJourSousContratHt, fiche.heuresParJour, fiche.actif, fiche.prixAchatHt, fiche.dureeIndicativeMin],
+        [true, 'heure', 45.5, 320, 40, 280.25, 7.75, true, null, null]);
+      assert.equal(fiche.categorie.nom, `TEST Corps de métier ${suffixe}`);
+      // En base, au centime exact.
+      assert.deepEqual(prixEnBase(await prisma.cataloguePrestation.findUnique({ where: { id: fiche.id } })), ['45.5', '320', '40', '280.25', '7.75']);
+      const [entree, ...autres] = await journalMainOeuvre(fiche.id);
+      assert.equal(autres.length, 0, 'une seule entrée');
+      assert.deepEqual([entree.domaine, entree.action, entree.auteurId, entree.auteurNom, entree.cibleLibelle, entree.avant], ['REGLAGES', 'CREATION', adminId, nomSecours, `TEST-MO-ELEC-${suffixe} — TEST Main d’œuvre TEST-MO-ELEC-${suffixe}`, null]);
+      assert.deepEqual(entree.apres, {
+        reference: `TEST-MO-ELEC-${suffixe}`, nom: `TEST Main d’œuvre TEST-MO-ELEC-${suffixe}`, description: 'Tarif électricien', categorie: `TEST Corps de métier ${suffixe}`,
+        tauxTva: 20, prixVenteHt: 45.5, prixJourHorsContratHt: 320, prixHeureSousContratHt: 40, prixJourSousContratHt: 280.25, heuresParJour: 7.75, unite: 'heure', actif: true,
+      });
+      // Lecture : l'administration et une clé catalogue:read voient les quatre prix.
+      for (const [qui, chemin, entetes] of [['administration', '/api/catalogue/prestations', admin], ['clé catalogue:read', '/api/v1/catalogue/prestations', parCle(cleLecture)]]) {
+        const lue = (await request(app).get(chemin).set(entetes)).body.find((f) => f.id === fiche.id);
+        assert.ok(lue, qui);
+        assert.deepEqual([lue.estMainOeuvre, lue.prixVenteHt, lue.prixJourHorsContratHt, lue.prixHeureSousContratHt, lue.prixJourSousContratHt, lue.heuresParJour], [true, 45.5, 320, 40, 280.25, 7.75], qui);
+      }
+    });
+    test('modification, désactivation et réactivation par l’administration : chaque changement journalisé, avant et après', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-PLB-${suffixe}`);
+      const modification = { ...corpsMainOeuvre(`TEST-MO-PLB-${suffixe}`), nom: `TEST Plombier ${suffixe}`, prixJourSousContratHt: '300.10', heuresParJour: '8' };
+      const maj = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, modification);
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      assert.deepEqual([maj.body.nom, maj.body.prixJourSousContratHt, maj.body.heuresParJour, maj.body.prixVenteHt], [`TEST Plombier ${suffixe}`, 300.1, 8, 45.5]);
+      let journal = await journalMainOeuvre(fiche.id);
+      assert.equal(journal.length, 2);
+      assert.deepEqual([journal[1].action, journal[1].auteurId, journal[1].avant, journal[1].apres], ['MODIFICATION', adminId,
+        { nom: `TEST Main d’œuvre TEST-MO-PLB-${suffixe}`, prixJourSousContratHt: 280.25, heuresParJour: 7.5 },
+        { nom: `TEST Plombier ${suffixe}`, prixJourSousContratHt: 300.1, heuresParJour: 8 }]);
+      // Un enregistrement à l'identique n'écrit rien.
+      assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, modification)).status, 200);
+      assert.equal((await journalMainOeuvre(fiche.id)).length, 2);
+      // Désactivation (DELETE), puis réactivation (PUT, actif) : journalisées.
+      const desactivation = await request(app).delete(`/api/catalogue/prestations/${fiche.id}`).set(admin);
+      assert.equal(desactivation.status, 200, JSON.stringify(desactivation.body));
+      assert.equal(desactivation.body.actif, false);
+      const reactivation = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, { ...modification, actif: true });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      assert.equal(reactivation.body.actif, true);
+      journal = await journalMainOeuvre(fiche.id);
+      assert.deepEqual(journal.map((e) => [e.action, e.avant?.actif ?? null, e.apres?.actif ?? null]).slice(2), [['DESACTIVATION', true, false], ['REACTIVATION', false, true]]);
+      // Désactiver une fiche déjà désactivée n'écrit rien au journal.
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${fiche.id}`).set(admin)).status, 200);
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${fiche.id}`).set(admin)).status, 200);
+      assert.equal((await journalMainOeuvre(fiche.id)).length, 5);
+    });
+
+    test('une modification sans « actif » garde une main d’œuvre désactivée : seule une réactivation explicite la réactive', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-ACTIF-${suffixe}`);
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${fiche.id}`).set(admin)).status, 200);
+      const corps = { ...corpsMainOeuvre(fiche.reference), prixHeureSousContratHt: '41' };
+      const maj = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, corps);
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      assert.deepEqual([maj.body.actif, maj.body.prixHeureSousContratHt], [false, 41]);
+      let derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.avant, derniere.apres], ['MODIFICATION', { prixHeureSousContratHt: 40 }, { prixHeureSousContratHt: 41 }]);
+      const reactivation = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, { ...corps, actif: true });
+      assert.equal(reactivation.status, 200, JSON.stringify(reactivation.body));
+      assert.equal(reactivation.body.actif, true);
+      derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.avant, derniere.apres], ['REACTIVATION', { actif: false }, { actif: true }]);
+    });
+
+    test('chaque prix de vente et la TVA, modifiés seuls, sont journalisés avec l’auteur, l’avant et l’après', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-CHAMPS-${suffixe}`);
+      let corps = corpsMainOeuvre(fiche.reference);
+      const changements = [['prixVenteHt', '46.10', 45.5, 46.1], ['prixJourHorsContratHt', '321.05', 320, 321.05], ['prixHeureSousContratHt', '41.20', 40, 41.2], ['prixJourSousContratHt', '281', 280.25, 281], ['tauxTva', '10', 20, 10]];
+      for (const [champ, nouveau, avantAttendu, apresAttendu] of changements) {
+        corps = { ...corps, [champ]: nouveau };
+        const maj = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, corps);
+        assert.equal(maj.status, 200, `${champ} : ${JSON.stringify(maj.body)}`);
+        const derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+        assert.deepEqual([derniere.action, derniere.auteurId, derniere.avant, derniere.apres], ['MODIFICATION', adminId, { [champ]: avantAttendu }, { [champ]: apresAttendu }], champ);
+      }
+      assert.equal((await journalMainOeuvre(fiche.id)).length, 1 + changements.length);
+    });
+
+    test('une modification sans « estMainOeuvre » garde la nature d’une main d’œuvre : sans ses prix, elle est refusée et rien ne change', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-NATURE-${suffixe}`);
+      const avant = await etatPrestation(fiche.id);
+      const avantJournal = await nbEntreesJournal();
+      const refus = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, { reference: fiche.reference, nom: fiche.nom, unite: 'heure', prixVenteHt: '45.50' });
+      assert.equal(refus.status, 400, JSON.stringify(refus.body));
+      assert.equal(await etatPrestation(fiche.id), avant);
+      assert.equal(await nbEntreesJournal(), avantJournal);
+      const { estMainOeuvre: _drapeau, ...sansDrapeau } = corpsMainOeuvre(fiche.reference);
+      const garde = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, { ...sansDrapeau, nom: `TEST Renommée ${suffixe}` });
+      assert.equal(garde.status, 200, JSON.stringify(garde.body));
+      assert.deepEqual([garde.body.estMainOeuvre, garde.body.prixJourSousContratHt, (await journalMainOeuvre(fiche.id)).at(-1).action], [true, 280.25, 'MODIFICATION']);
+    });
+
+    test('saisies refusées sans rien écrire : prix manquant, négatif ou au-delà du centime, heures par jour hors bornes ou hors quart d’heure, référence en double', async () => {
+      const existante = await creerMainOeuvre(`TEST-MO-REF-${suffixe}`);
+      const cas = [];
+      for (const champ of ['prixVenteHt', 'prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt']) {
+        cas.push([`${champ} manquant`, { [champ]: undefined }], [`${champ} vide`, { [champ]: '' }], [`${champ} négatif`, { [champ]: '-1' }],
+          [`${champ} à trois décimales`, { [champ]: '12.345' }], [`${champ} non numérique`, { [champ]: 'douze' }], [`${champ} en notation scientifique`, { [champ]: '1e3' }],
+          [`${champ} au-delà de DECIMAL(12,2)`, { [champ]: '12345678901' }]);
+      }
+      cas.push(['heures par jour manquantes', { heuresParJour: undefined }], ['heures par jour nulles', { heuresParJour: '0' }], ['heures par jour négatives', { heuresParJour: '-7' }],
+        ['heures par jour au-delà de 24', { heuresParJour: '24.25' }], ['25 heures par jour', { heuresParJour: '25' }], ['heures hors quart d’heure', { heuresParJour: '7.1' }],
+        ['heures hors quart d’heure (7,3)', { heuresParJour: '7,3' }], ['autre unité', { unite: 'forfait' }], ['prix d’achat', { prixAchatHt: '20' }], ['durée indicative', { dureeIndicativeMin: 60 }],
+        ['drapeau non booléen', { estMainOeuvre: 'oui' }], ['sans référence', { reference: '' }]);
+      const avantPrestations = await prisma.cataloguePrestation.count();
+      const avantJournal = await nbEntreesJournal();
+      const avantExistante = await etatPrestation(existante.id);
+      for (const [quoi, ecart] of cas) {
+        const corps = { ...corpsMainOeuvre(`TEST-MO-REFUS-${suffixe}`), ...ecart };
+        for (const cle of Object.keys(ecart)) if (ecart[cle] === undefined) delete corps[cle];
+        const creation = await envoyer('post', '/api/catalogue/prestations', admin, corps);
+        assert.equal(creation.status, 400, `création, ${quoi} : ${creation.status} ${JSON.stringify(creation.body)}`);
+        const corpsMaj = { ...corps, reference: existante.reference };
+        if ('reference' in ecart) corpsMaj.reference = ecart.reference;
+        const maj = await envoyer('put', `/api/catalogue/prestations/${existante.id}`, admin, corpsMaj);
+        assert.equal(maj.status, 400, `modification, ${quoi} : ${maj.status} ${JSON.stringify(maj.body)}`);
+        // Refus de l'API elle-même, avec son message, et non de la contrainte de la base.
+        for (const [ou, res] of [['création', creation], ['modification', maj]]) {
+          assert.doesNotMatch(res.body.error, /prisma|violates|constraint|invocation/i, `${ou}, ${quoi} : ${res.body.error}`);
+          if ('heuresParJour' in ecart) assert.match(res.body.error, /^Heures par jour : nombre obligatoire, strictement positif, 24 au plus, au quart d’heure près/, `${ou}, ${quoi}`);
+        }
+      }
+      // Un message qui nomme le prix en cause.
+      const message = await envoyer('post', '/api/catalogue/prestations', admin, { ...corpsMainOeuvre(`TEST-MO-REFUS-${suffixe}`), prixJourSousContratHt: '-5' });
+      assert.match(message.body.error, /Prix de vente HT au forfait jour, sous contrat/);
+      const heures = await envoyer('post', '/api/catalogue/prestations', admin, { ...corpsMainOeuvre(`TEST-MO-REFUS-${suffixe}`), heuresParJour: '7.1' });
+      assert.match(heures.body.error, /quart d’heure/);
+      // Référence en double : 409.
+      const doublon = await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(existante.reference));
+      assert.equal(doublon.status, 409, JSON.stringify(doublon.body));
+      const autre = await creerMainOeuvre(`TEST-MO-AUTRE-${suffixe}`);
+      const doublonMaj = await envoyer('put', `/api/catalogue/prestations/${autre.id}`, admin, corpsMainOeuvre(existante.reference));
+      assert.equal(doublonMaj.status, 409, JSON.stringify(doublonMaj.body));
+      assert.equal(await prisma.cataloguePrestation.count(), avantPrestations + 1, 'aucune autre fiche créée');
+      assert.equal(await nbEntreesJournal(), avantJournal + 1, 'seule la création valide est journalisée');
+      assert.equal(await etatPrestation(existante.id), avantExistante, 'fiche existante inchangée');
+      // Bornes admises : 0 € et 24 h, 0,25 h.
+      assert.equal((await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE1-${suffixe}`, { prixHeureSousContratHt: '0', heuresParJour: '24' }))).status, 201);
+      assert.equal((await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE2-${suffixe}`, { heuresParJour: '0.25' }))).status, 201);
+      // Borne haute des quatre prix : dix chiffres avant la virgule, comme la colonne DECIMAL(12,2), enregistrés à l'identique.
+      const max = '9999999999.99';
+      const borneHaute = await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE3-${suffixe}`, { prixVenteHt: max, prixJourHorsContratHt: max, prixHeureSousContratHt: max, prixJourSousContratHt: max }));
+      assert.equal(borneHaute.status, 201, JSON.stringify(borneHaute.body));
+      assert.deepEqual(prixEnBase(await prisma.cataloguePrestation.findUnique({ where: { id: borneHaute.body.id } })), [max, max, max, max, '7.5']);
+      // Borne basse des quatre prix : zéro admis pour chacun (« positifs ou nuls »), par l'API comme par la contrainte de la base.
+      const zero = await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE4-${suffixe}`, { prixVenteHt: '0', prixJourHorsContratHt: '0', prixHeureSousContratHt: '0', prixJourSousContratHt: '0' }));
+      assert.equal(zero.status, 201, JSON.stringify(zero.body));
+      assert.deepEqual(prixEnBase(await prisma.cataloguePrestation.findUnique({ where: { id: zero.body.id } })), ['0', '0', '0', '0', '7.5']);
+    });
+
+    test('un prix refusé est nommé par son propre libellé, pour chacun des quatre prix', async () => {
+      const libelles = [['prixVenteHt', 'Prix de vente HT à l’heure, hors contrat'], ['prixJourHorsContratHt', 'Prix de vente HT au forfait jour, hors contrat'],
+        ['prixHeureSousContratHt', 'Prix de vente HT à l’heure, sous contrat'], ['prixJourSousContratHt', 'Prix de vente HT au forfait jour, sous contrat']];
+      for (const [champ, libelle] of libelles) {
+        const corps = { ...corpsMainOeuvre(`TEST-MO-LIBELLE-${suffixe}`), [champ]: '-5' };
+        const res = await envoyer('post', '/api/catalogue/prestations', admin, corps);
+        assert.equal(res.status, 400, `${champ} : ${JSON.stringify(res.body)}`);
+        assert.ok(res.body.error.startsWith(`${libelle} : `), `${champ} : ${res.body.error}`);
+      }
+    });
+
+    test('comptes non administrateurs refusés (403), sans rien écrire', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-DROITS-${suffixe}`);
+      const avant = await etatPrestation(fiche.id);
+      const avantPrestations = await prisma.cataloguePrestation.count();
+      const avantJournal = await nbEntreesJournal();
+      for (const qui of Object.keys(comptes)) {
+        const entetes = enTete(qui);
+        assert.equal((await envoyer('post', '/api/catalogue/prestations', entetes, corpsMainOeuvre(`TEST-MO-INTRUS-${suffixe}`))).status, 403, `${qui} : création`);
+        assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, entetes, { ...corpsMainOeuvre(fiche.reference), prixVenteHt: '99' })).status, 403, `${qui} : modification`);
+        assert.equal((await request(app).delete(`/api/catalogue/prestations/${fiche.id}`).set(entetes)).status, 403, `${qui} : désactivation`);
+        assert.equal((await request(app).get('/api/catalogue/prestations').set(entetes)).status, 403, `${qui} : lecture du catalogue`);
+      }
+      assert.equal(await etatPrestation(fiche.id), avant);
+      assert.equal(await prisma.cataloguePrestation.count(), avantPrestations);
+      assert.equal(await nbEntreesJournal(), avantJournal);
+    });
+
+    test('clé d’intégration catalogue:write : aucune main d’œuvre créée, modifiée, désactivée ni réactivée, aucun passage dans un sens ou l’autre (403) ; les prestations ordinaires restent permises', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-CLE-${suffixe}`);
+      const inactive = await creerMainOeuvre(`TEST-MO-CLE-INACTIVE-${suffixe}`);
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${inactive.id}`).set(admin)).status, 200);
+      const ordinaire = await envoyer('post', '/api/v1/catalogue/prestations', parCle(cleEcriture), { reference: `TEST-MO-ORD-CLE-${suffixe}`, nom: 'TEST Pose par clé', unite: 'forfait', prixVenteHt: '120', prixAchatHt: '30' });
+      assert.equal(ordinaire.status, 201, 'une clé crée toujours une prestation ordinaire');
+      // Sans finances:read, la clé ne lit le prix d’achat de la fiche dans aucune réponse d’écriture (création, modification, désactivation).
+      assert.ok(!('prixAchatHt' in ordinaire.body), 'création : prix d’achat masqué sans finances:read');
+      const etats = async () => [await etatPrestation(fiche.id), await etatPrestation(inactive.id), await etatPrestation(ordinaire.body.id)];
+      const avant = await etats();
+      const avantPrestations = await prisma.cataloguePrestation.count();
+      const avantJournal = await nbEntreesJournal();
+      const cle = parCle(cleEcriture);
+      const refus = [
+        ['création d’une main d’œuvre', () => envoyer('post', '/api/v1/catalogue/prestations', cle, corpsMainOeuvre(`TEST-MO-CLE-NOUVELLE-${suffixe}`))],
+        ['création avec les seuls prix d’une main d’œuvre', () => envoyer('post', '/api/v1/catalogue/prestations', cle, { reference: `TEST-MO-CLE-PRIX-${suffixe}`, nom: 'TEST', prixVenteHt: '10', heuresParJour: '7' })],
+        ['modification des prix', () => envoyer('put', `/api/v1/catalogue/prestations/${fiche.id}`, cle, { ...corpsMainOeuvre(fiche.reference), prixVenteHt: '99' })],
+        ['modification sans champ propre à la main d’œuvre', () => envoyer('put', `/api/v1/catalogue/prestations/${fiche.id}`, cle, { reference: fiche.reference, nom: 'TEST Renommée par clé', unite: 'heure', prixVenteHt: '45.5' })],
+        ['passage d’une main d’œuvre en prestation ordinaire', () => envoyer('put', `/api/v1/catalogue/prestations/${fiche.id}`, cle, { estMainOeuvre: false, reference: fiche.reference, nom: 'TEST', prixVenteHt: '45.5' })],
+        ['désactivation', () => request(app).delete(`/api/v1/catalogue/prestations/${fiche.id}`).set(cle)],
+        ['réactivation', () => envoyer('put', `/api/v1/catalogue/prestations/${inactive.id}`, cle, { ...corpsMainOeuvre(inactive.reference), actif: true })],
+        ['passage d’une prestation ordinaire en main d’œuvre', () => envoyer('put', `/api/v1/catalogue/prestations/${ordinaire.body.id}`, cle, corpsMainOeuvre(ordinaire.body.reference))],
+        ['prix d’une main d’œuvre sur une prestation ordinaire', () => envoyer('put', `/api/v1/catalogue/prestations/${ordinaire.body.id}`, cle, { reference: ordinaire.body.reference, nom: 'TEST', prixVenteHt: '120', prixHeureSousContratHt: '30' })],
+      ];
+      for (const [quoi, requete] of refus) {
+        const res = await requete();
+        assert.equal(res.status, 403, `${quoi} : ${res.status} ${JSON.stringify(res.body)}`);
+        assert.match(res.body.error, /clé d’intégration/, quoi);
+      }
+      assert.deepEqual(await etats(), avant, 'rien n’a changé');
+      assert.equal(await prisma.cataloguePrestation.count(), avantPrestations);
+      assert.equal(await nbEntreesJournal(), avantJournal);
+      // Une clé modifie et désactive toujours une prestation ordinaire, et lit les mains d'œuvre.
+      const majOrdinaire = await envoyer('put', `/api/v1/catalogue/prestations/${ordinaire.body.id}`, cle, { reference: ordinaire.body.reference, nom: 'TEST Pose par clé', unite: 'forfait', prixVenteHt: '130', prixAchatHt: '31' });
+      assert.equal(majOrdinaire.status, 200, JSON.stringify(majOrdinaire.body));
+      assert.equal(majOrdinaire.body.prixVenteHt, 130);
+      assert.ok(!('prixAchatHt' in majOrdinaire.body), 'modification : prix d’achat masqué sans finances:read');
+      const desactivationOrdinaire = await request(app).delete(`/api/v1/catalogue/prestations/${ordinaire.body.id}`).set(cle);
+      assert.equal(desactivationOrdinaire.status, 200, JSON.stringify(desactivationOrdinaire.body));
+      assert.ok(!('prixAchatHt' in desactivationOrdinaire.body), 'désactivation : prix d’achat masqué sans finances:read');
+      assert.equal((await prisma.cataloguePrestation.findUnique({ where: { id: ordinaire.body.id } })).prixAchatHt.toString(), '31', 'le prix d’achat reste enregistré');
+      assert.ok((await request(app).get('/api/v1/catalogue/prestations').set(cle)).body.some((f) => f.id === fiche.id && f.prixJourHorsContratHt === 320));
+      assert.equal(await nbEntreesJournal(), avantJournal, 'les prestations ordinaires ne sont pas journalisées');
+    });
+
+    test('une prestation ordinaire garde son comportement : sans champs de main d’œuvre, sans journal ; ces champs lui sont refusés', async () => {
+      const avantJournal = await nbEntreesJournal();
+      const creation = await envoyer('post', '/api/catalogue/prestations', admin, { reference: `TEST-MO-ORD-${suffixe}`, nom: 'TEST Pose ordinaire', unite: 'forfait', prixVenteHt: '250', prixAchatHt: '90', dureeIndicativeMin: 120, tauxTva: '10' });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      assert.deepEqual([creation.body.estMainOeuvre, creation.body.prixJourHorsContratHt, creation.body.prixHeureSousContratHt, creation.body.prixJourSousContratHt, creation.body.heuresParJour, creation.body.unite, creation.body.prixAchatHt, creation.body.dureeIndicativeMin],
+        [false, null, null, null, null, 'forfait', 90, 120]);
+      assert.equal(creation.body.tauxTva, 10);
+      const maj = await envoyer('put', `/api/catalogue/prestations/${creation.body.id}`, admin, { reference: `TEST-MO-ORD-${suffixe}`, nom: 'TEST Pose ordinaire', unite: 'forfait', prixVenteHt: '260', tauxTva: '5.5', prixAchatHt: '95' });
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      assert.deepEqual([maj.body.prixVenteHt, maj.body.tauxTva, maj.body.prixAchatHt], [260, 5.5, 95]);
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${creation.body.id}`).set(admin)).status, 200);
+      assert.equal(await nbEntreesJournal(), avantJournal, 'aucune entrée pour une prestation ordinaire');
+      const avant = await etatPrestation(creation.body.id);
+      for (const ecart of [{ heuresParJour: '7' }, { prixJourHorsContratHt: '300' }, { estMainOeuvre: false, prixHeureSousContratHt: '40' }]) {
+        const corps = { reference: `TEST-MO-ORD-${suffixe}`, nom: 'TEST Pose ordinaire', unite: 'forfait', prixVenteHt: '260', ...ecart };
+        assert.equal((await envoyer('put', `/api/catalogue/prestations/${creation.body.id}`, admin, corps)).status, 400, JSON.stringify(ecart));
+        assert.equal((await envoyer('post', '/api/catalogue/prestations', admin, { ...corps, reference: `TEST-MO-ORD2-${suffixe}` })).status, 400, JSON.stringify(ecart));
+      }
+      assert.equal(await etatPrestation(creation.body.id), avant);
+      // Un article ou un équipement n'est jamais une main d'œuvre.
+      assert.equal((await envoyer('post', '/api/catalogue/articles', admin, { reference: `TEST-MO-ART-${suffixe}`, nom: 'TEST', prixVenteHt: '1', estMainOeuvre: true })).status, 400);
+    });
+
+    test('passage d’une prestation en main d’œuvre et retour, journalisés ; retour refusé tant qu’un intervenant y est rattaché', async () => {
+      const ordinaire = await envoyer('post', '/api/catalogue/prestations', admin, { reference: `TEST-MO-PASSAGE-${suffixe}`, nom: 'TEST Dépannage', unite: 'forfait', prixVenteHt: '80', prixAchatHt: '10' });
+      assert.equal(ordinaire.status, 201);
+      const passage = await envoyer('put', `/api/catalogue/prestations/${ordinaire.body.id}`, admin, corpsMainOeuvre(`TEST-MO-PASSAGE-${suffixe}`, { nom: 'TEST Dépannage' }));
+      assert.equal(passage.status, 200, JSON.stringify(passage.body));
+      assert.deepEqual([passage.body.estMainOeuvre, passage.body.unite, passage.body.prixAchatHt, passage.body.prixVenteHt], [true, 'heure', null, 45.5]);
+      let journal = await journalMainOeuvre(ordinaire.body.id);
+      assert.deepEqual(journal.map((e) => e.action), ['PASSAGE_MAIN_OEUVRE']);
+      assert.deepEqual([journal[0].avant.estMainOeuvre, journal[0].apres.estMainOeuvre, journal[0].avant.prixAchatHt, journal[0].apres.prixAchatHt, journal[0].avant.unite, journal[0].apres.unite], [false, true, 10, null, 'forfait', 'heure']);
+      const intervenant = await prisma.intervenant.create({ data: { nom: `TEST Intervenant passage ${suffixe}`, role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      assert.equal((await envoyer('put', `/api/intervenants/${intervenant.id}/main-oeuvre`, admin, { mainOeuvreId: ordinaire.body.id })).status, 200);
+      const retour = { estMainOeuvre: false, reference: `TEST-MO-PASSAGE-${suffixe}`, nom: 'TEST Dépannage', unite: 'forfait', prixVenteHt: '80', tauxTva: '10', prixAchatHt: '12.5', dureeIndicativeMin: 45 };
+      const avant = await etatPrestation(ordinaire.body.id);
+      const refus = await envoyer('put', `/api/catalogue/prestations/${ordinaire.body.id}`, admin, retour);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /rattachée à 1 intervenant/);
+      assert.equal(await etatPrestation(ordinaire.body.id), avant);
+      assert.equal((await envoyer('put', `/api/intervenants/${intervenant.id}/main-oeuvre`, admin, { mainOeuvreId: null })).status, 200);
+      const retourAccepte = await envoyer('put', `/api/catalogue/prestations/${ordinaire.body.id}`, admin, retour);
+      assert.equal(retourAccepte.status, 200, JSON.stringify(retourAccepte.body));
+      assert.deepEqual([retourAccepte.body.estMainOeuvre, retourAccepte.body.prixJourHorsContratHt, retourAccepte.body.heuresParJour, retourAccepte.body.unite], [false, null, null, 'forfait']);
+      // Le retour enregistre le prix de vente et la TVA du corps (fiche entière), et non ceux de la main d'œuvre.
+      assert.deepEqual([retourAccepte.body.prixVenteHt, retourAccepte.body.tauxTva], [80, 10]);
+      // Il enregistre aussi le prix d’achat et la durée indicative du corps, qu’une main d’œuvre ne porte pas.
+      assert.deepEqual([retourAccepte.body.prixAchatHt, retourAccepte.body.dureeIndicativeMin], [12.5, 45]);
+      journal = await journalMainOeuvre(ordinaire.body.id);
+      assert.deepEqual(journal.map((e) => e.action), ['PASSAGE_MAIN_OEUVRE', 'RETRAIT_MAIN_OEUVRE']);
+      assert.deepEqual([journal[1].avant.prixJourHorsContratHt, journal[1].apres.prixJourHorsContratHt], [320, null]);
+      assert.deepEqual([journal[1].avant.prixVenteHt, journal[1].apres.prixVenteHt, journal[1].avant.tauxTva, journal[1].apres.tauxTva], [45.5, 80, 20, 10]);
+      assert.deepEqual([journal[1].avant.prixAchatHt, journal[1].apres.prixAchatHt, journal[1].avant.dureeIndicativeMin, journal[1].apres.dureeIndicativeMin], [null, 12.5, null, 45]);
+    });
+
+    test('passage en main d’œuvre d’une prestation qui a une durée indicative : la durée est effacée et journalisée', async () => {
+      const ordinaire = await envoyer('post', '/api/catalogue/prestations', admin, { reference: `TEST-MO-DUREE-${suffixe}`, nom: 'TEST Visite', unite: 'forfait', prixVenteHt: '80', dureeIndicativeMin: 90 });
+      assert.equal(ordinaire.status, 201, JSON.stringify(ordinaire.body));
+      const passage = await envoyer('put', `/api/catalogue/prestations/${ordinaire.body.id}`, admin, corpsMainOeuvre(`TEST-MO-DUREE-${suffixe}`, { nom: 'TEST Visite' }));
+      assert.equal(passage.status, 200, JSON.stringify(passage.body));
+      assert.deepEqual([passage.body.estMainOeuvre, passage.body.dureeIndicativeMin], [true, null]);
+      const [entree] = await journalMainOeuvre(ordinaire.body.id);
+      assert.deepEqual([entree.action, entree.avant.dureeIndicativeMin, entree.apres.dureeIndicativeMin], ['PASSAGE_MAIN_OEUVRE', 90, null]);
+    });
+
+    test('contraintes en base : une main d’œuvre incomplète ou incohérente, une prestation ordinaire avec des champs de main d’œuvre, un rattachement hors main d’œuvre sont refusés', async () => {
+      const inserer = (reference, colonnes) => {
+        const noms = ['id', 'reference', 'nom', 'updatedAt', ...Object.keys(colonnes)].map((c) => `"${c}"`).join(', ');
+        const valeurs = [randomUUID(), reference, 'TEST insertion directe', new Date(), ...Object.values(colonnes)];
+        return prisma.$executeRawUnsafe(`INSERT INTO "CataloguePrestation" (${noms}) VALUES (${valeurs.map((_, i) => `$${i + 1}`).join(', ')})`, ...valeurs);
+      };
+      const complete = { estMainOeuvre: true, unite: 'heure', prixVenteHt: 45, prixJourHorsContratHt: 300, prixHeureSousContratHt: 40, prixJourSousContratHt: 280, heuresParJour: 7.5 };
+      const incoherentes = [
+        ['prix manquant', { ...complete, prixJourSousContratHt: null }],
+        ['heures manquantes', { ...complete, heuresParJour: null }],
+        ['prix négatif', { ...complete, prixHeureSousContratHt: -1 }],
+        ['prix de vente négatif', { ...complete, prixVenteHt: -0.01 }],
+        ['heures nulles', { ...complete, heuresParJour: 0 }],
+        ['plus de 24 heures', { ...complete, heuresParJour: 24.25 }],
+        ['hors quart d’heure', { ...complete, heuresParJour: 7.1 }],
+        ['autre unité', { ...complete, unite: 'unité' }],
+        ['prix d’achat', { ...complete, prixAchatHt: 10 }],
+        ['durée indicative', { ...complete, dureeIndicativeMin: 60 }],
+        ['prestation ordinaire avec heures par jour', { estMainOeuvre: false, heuresParJour: 7 }],
+        ['prestation ordinaire avec un prix sous contrat', { estMainOeuvre: false, prixHeureSousContratHt: 40 }],
+        ['prix jour hors contrat manquant', { ...complete, prixJourHorsContratHt: null }],
+        ['prix heure sous contrat manquant', { ...complete, prixHeureSousContratHt: null }],
+        ['prix jour hors contrat négatif', { ...complete, prixJourHorsContratHt: -0.01 }],
+        ['prix jour sous contrat négatif', { ...complete, prixJourSousContratHt: -0.01 }],
+        ['prestation ordinaire avec un prix jour hors contrat', { estMainOeuvre: false, prixJourHorsContratHt: 300 }],
+        ['prestation ordinaire avec un prix jour sous contrat', { estMainOeuvre: false, prixJourSousContratHt: 280 }],
+      ];
+      for (const [quoi, colonnes] of incoherentes) {
+        await assert.rejects(inserer(`TEST-MO-SQL-${randomUUID()}`, colonnes), /CataloguePrestation_main_oeuvre_check/, quoi);
+      }
+      // Témoins : une main d'œuvre complète et une prestation ordinaire s'insèrent.
+      const referenceTemoin = `TEST-MO-SQL-OK-${suffixe}`;
+      assert.equal(await inserer(referenceTemoin, complete), 1);
+      assert.equal(await inserer(`TEST-MO-SQL-ORD-${suffixe}`, { estMainOeuvre: false, prixVenteHt: 12 }), 1);
+      const temoin = await prisma.cataloguePrestation.findUniqueOrThrow({ where: { reference: referenceTemoin } });
+      const ordinaire = await prisma.cataloguePrestation.findUniqueOrThrow({ where: { reference: `TEST-MO-SQL-ORD-${suffixe}` } });
+      const intervenant = await prisma.intervenant.create({ data: { nom: `TEST Intervenant SQL ${suffixe}`, role: 'TECHNICIEN', tauxHoraireCharge: 30 } });
+      // Rattachement à une prestation ordinaire : refusé par la clé étrangère composite ; « estMainOeuvre » faux : refusé.
+      await assert.rejects(prisma.$executeRaw`INSERT INTO "IntervenantMainOeuvre" ("intervenantId", "prestationId", "updatedAt") VALUES (${intervenant.id}, ${ordinaire.id}, now())`, /IntervenantMainOeuvre_prestationId_estMainOeuvre_fkey/);
+      await assert.rejects(prisma.$executeRaw`INSERT INTO "IntervenantMainOeuvre" ("intervenantId", "prestationId", "estMainOeuvre", "updatedAt") VALUES (${intervenant.id}, ${ordinaire.id}, false, now())`, /IntervenantMainOeuvre_estMainOeuvre_check/);
+      assert.equal(await prisma.$executeRaw`INSERT INTO "IntervenantMainOeuvre" ("intervenantId", "prestationId", "updatedAt") VALUES (${intervenant.id}, ${temoin.id}, now())`, 1);
+      // Une main d'œuvre rattachée ne redevient pas une prestation ordinaire, et ne se supprime pas.
+      await assert.rejects(prisma.$executeRaw`UPDATE "CataloguePrestation" SET "estMainOeuvre" = false, "prixJourHorsContratHt" = NULL, "prixHeureSousContratHt" = NULL, "prixJourSousContratHt" = NULL, "heuresParJour" = NULL WHERE "id" = ${temoin.id}`, /IntervenantMainOeuvre_prestationId_estMainOeuvre_fkey/);
+      await assert.rejects(prisma.$executeRaw`DELETE FROM "CataloguePrestation" WHERE "id" = ${temoin.id}`, /IntervenantMainOeuvre_prestationId_estMainOeuvre_fkey/);
+      // Une main d'œuvre désactivée garde son rattachement (choix par défaut, à confirmer).
+      assert.equal(await prisma.$executeRaw`UPDATE "CataloguePrestation" SET "actif" = false WHERE "id" = ${temoin.id}`, 1);
+      assert.ok(await prisma.intervenantMainOeuvre.findUnique({ where: { intervenantId: intervenant.id } }));
+    });
+
+    test('rattachement d’un intervenant : main d’œuvre active seulement, journalisé, gardé quand elle est désactivée, réservé à l’administration', async () => {
+      const electricien = await creerMainOeuvre(`TEST-MO-RAT1-${suffixe}`, { nom: `TEST Électricien ${suffixe}` });
+      const plombier = await creerMainOeuvre(`TEST-MO-RAT2-${suffixe}`, { nom: `TEST Plombier rattaché ${suffixe}` });
+      const inactive = await creerMainOeuvre(`TEST-MO-RAT3-${suffixe}`, { nom: `TEST Ancien tarif ${suffixe}` });
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${inactive.id}`).set(admin)).status, 200);
+      const ordinaire = await envoyer('post', '/api/catalogue/prestations', admin, { reference: `TEST-MO-RAT-ORD-${suffixe}`, nom: 'TEST Pose', prixVenteHt: '10' });
+      const intervenant = await envoyer('post', '/api/intervenants', admin, { nom: `TEST Intervenant rattaché ${suffixe}`, role: 'TECHNICIEN', tauxHoraireCharge: '35' });
+      assert.equal(intervenant.status, 200, JSON.stringify(intervenant.body));
+      const id = intervenant.body.id;
+      const rattacher = (entetes, mainOeuvreId) => envoyer('put', `/api/intervenants/${id}/main-oeuvre`, entetes, { mainOeuvreId });
+      const rattachementEnBase = async () => (await prisma.intervenantMainOeuvre.findUnique({ where: { intervenantId: id } }))?.prestationId ?? null;
+
+      const premier = await rattacher(admin, electricien.id);
+      assert.equal(premier.status, 200, JSON.stringify(premier.body));
+      assert.deepEqual([premier.body.mainOeuvreId, premier.body.mainOeuvre], [electricien.id, { id: electricien.id, reference: electricien.reference, nom: electricien.nom, actif: true }]);
+      assert.equal(await rattachementEnBase(), electricien.id);
+      const second = await rattacher(admin, plombier.id);
+      assert.equal(second.status, 200, JSON.stringify(second.body));
+      // Même main d'œuvre : rien n'est écrit.
+      assert.equal((await rattacher(admin, plombier.id)).status, 200);
+      let journal = await journalIntervenant(id);
+      assert.deepEqual(journal.map((e) => [e.domaine, e.action, e.auteurId, e.cibleLibelle, e.avant, e.apres]), [
+        ['REGLAGES', 'RATTACHEMENT_MAIN_OEUVRE', adminId, `TEST Intervenant rattaché ${suffixe}`, { mainOeuvre: null }, { mainOeuvre: `${electricien.reference} — ${electricien.nom}` }],
+        ['REGLAGES', 'RATTACHEMENT_MAIN_OEUVRE', adminId, `TEST Intervenant rattaché ${suffixe}`, { mainOeuvre: `${electricien.reference} — ${electricien.nom}` }, { mainOeuvre: `${plombier.reference} — ${plombier.nom}` }],
+      ]);
+
+      // Refus (400) sans rien écrire : main d'œuvre désactivée, prestation ordinaire, identifiant inconnu ou invalide.
+      const avantJournal = await nbEntreesJournal();
+      for (const [quoi, valeur, motif] of [['désactivée', inactive.id, /désactivée/], ['prestation ordinaire', ordinaire.body.id, /introuvable/], ['inconnue', randomUUID(), /introuvable/], ['vide', '  ', /invalide/], ['nombre', 12, /invalide/]]) {
+        const refus = await rattacher(admin, valeur);
+        assert.equal(refus.status, 400, `${quoi} : ${JSON.stringify(refus.body)}`);
+        assert.match(refus.body.error, motif, quoi);
+      }
+      assert.equal(await rattachementEnBase(), plombier.id);
+      assert.equal(await nbEntreesJournal(), avantJournal);
+      // Fiche inconnue : 404.
+      assert.equal((await envoyer('put', `/api/intervenants/${randomUUID()}/main-oeuvre`, admin, { mainOeuvreId: plombier.id })).status, 404);
+      // Comptes non administrateurs : 403 ; aucune clé d'intégration (route de session).
+      for (const qui of Object.keys(comptes)) assert.equal((await rattacher(enTete(qui), electricien.id)).status, 403, qui);
+      assert.equal((await envoyer('put', `/api/v1/intervenants/${id}/main-oeuvre`, parCle(cleEcriture), { mainOeuvreId: electricien.id })).status, 404);
+      assert.equal((await rattacher(parCle(cleEcriture), electricien.id)).status, 401);
+      assert.equal(await rattachementEnBase(), plombier.id);
+      assert.equal(await nbEntreesJournal(), avantJournal);
+
+      // Désactiver la main d'œuvre garde le rattachement, affiché comme tel à l'administration.
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${plombier.id}`).set(admin)).status, 200);
+      const liste = (await request(app).get('/api/intervenants').set(admin)).body.find((i) => i.id === id);
+      assert.deepEqual([liste.mainOeuvreId, liste.mainOeuvre?.actif], [plombier.id, false]);
+      // Retrait du rattachement, journalisé ; puis la suppression de la fiche journalise celui qu'elle emporte.
+      const retrait = await rattacher(admin, null);
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      assert.deepEqual([retrait.body.mainOeuvreId, retrait.body.mainOeuvre], [null, null]);
+      assert.equal(await rattachementEnBase(), null);
+      assert.equal((await rattacher(admin, electricien.id)).status, 200);
+      assert.equal((await request(app).delete(`/api/intervenants/${id}`).set(admin)).status, 200);
+      journal = await journalIntervenant(id);
+      assert.deepEqual(journal.slice(2).map((e) => [e.avant.mainOeuvre, e.apres.mainOeuvre]), [
+        [`${plombier.reference} — ${plombier.nom}`, null],
+        [null, `${electricien.reference} — ${electricien.nom}`],
+        [`${electricien.reference} — ${electricien.nom}`, null],
+      ]);
+      assert.match(journal.at(-1).detail, /Fiche intervenant supprimée/);
+    });
+
+    test('le technicien et les autres comptes ne reçoivent ni le rattachement ni les prix de vente des mains d’œuvre', async () => {
+      const mainOeuvre = await creerMainOeuvre(`TEST-MO-SECRET-${suffixe}`, { nom: `TEST Tarif confidentiel ${suffixe}`, prixJourHorsContratHt: '987.65' });
+      const intervenant = await prisma.intervenant.create({ data: { nom: `TEST Intervenant masqué ${suffixe}`, role: 'TECHNICIEN', tauxHoraireCharge: 31 } });
+      assert.equal((await envoyer('put', `/api/intervenants/${intervenant.id}/main-oeuvre`, admin, { mainOeuvreId: mainOeuvre.id })).status, 200);
+      // Un chantier avec des heures de cet intervenant, lu par son conducteur (fiche jointe aux heures).
+      const conducteurId = comptes.conducteur.id;
+      const chantier = await prisma.chantier.create({ data: { nom: `TEST Chantier main d’œuvre ${suffixe}`, client: 'TEST Client main d’œuvre', dateDebut: new Date(), budgetGlobalVendu: 1000, responsableId: conducteurId } });
+      const heures = await envoyer('post', '/api/heures', admin, { chantierId: chantier.id, intervenantId: intervenant.id, date: jourCivilEntreprise(new Date()), nbrHeures: 2 });
+      assert.equal(heures.status, 200, JSON.stringify(heures.body));
+      const absents = (corps, qui) => {
+        const texte = JSON.stringify(corps);
+        for (const indice of ['"mainOeuvre', '"rattachementMainOeuvre"', mainOeuvre.id, mainOeuvre.reference, '987.65', '"prixJourHorsContratHt"', '"heuresParJour"']) {
+          assert.equal(texte.includes(indice), false, `${qui} : « ${indice} » exposé`);
+        }
+      };
+      for (const qui of Object.keys(comptes)) {
+        const liste = await request(app).get('/api/intervenants').set(enTete(qui));
+        assert.equal(liste.status, 200, qui);
+        assert.ok(liste.body.some((i) => i.id === intervenant.id), `${qui} : la fiche est listée`);
+        absents(liste.body, `${qui}, liste des intervenants`);
+        assert.equal((await request(app).get('/api/catalogue/prestations').set(enTete(qui))).status, 403, `${qui} : catalogue`);
+      }
+      // Le technicien n'a pas non plus la recherche du catalogue des devis (droit devis jamais accordé).
+      assert.equal((await request(app).get('/api/devis/catalogue').set(enTete('technicien'))).status, 403);
+      const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(enTete('conducteur'));
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      assert.equal(fiche.body.pointages[0].intervenant.nom, intervenant.nom);
+      absents(fiche.body, 'conducteur, fiche chantier');
+      absents((await request(app).get('/api/heures').set(enTete('conducteur'))).body, 'conducteur, journal des heures');
+      // Témoin : l'administration voit le rattachement.
+      const vueAdmin = (await request(app).get('/api/intervenants').set(admin)).body.find((i) => i.id === intervenant.id);
+      assert.deepEqual([vueAdmin.mainOeuvreId, vueAdmin.mainOeuvre.reference], [mainOeuvre.id, mainOeuvre.reference]);
+    });
+
+    test('une ligne de devis reprise d’une main d’œuvre fige son prix à l’heure hors contrat et l’unité heure', async () => {
+      const mainOeuvre = await creerMainOeuvre(`TEST-MO-DEVIS-${suffixe}`, { nom: `TEST Main d’œuvre devis ${suffixe}` });
+      const siren = await sirenLibre();
+      const client = await envoyer('post', '/api/clients', admin, { raisonSociale: 'TEST Client devis main d’œuvre', siren });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      // La recherche du catalogue des devis propose la main d'œuvre comme une prestation : son prix de
+      // vente (l'heure hors contrat) et l'heure, sans ses autres prix.
+      const recherche = await request(app).get('/api/devis/catalogue').query({ q: `TEST-MO-DEVIS-${suffixe}` }).set(enTete('commercial'));
+      assert.equal(recherche.status, 200, JSON.stringify(recherche.body));
+      assert.equal(recherche.body.length, 1);
+      const [proposee] = recherche.body;
+      assert.deepEqual(Object.keys(proposee).sort(), ['famille', 'id', 'nature', 'nom', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
+      assert.deepEqual([proposee.famille, proposee.nature, proposee.unite, proposee.prixVenteHt], ['prestations', 'MAIN_OEUVRE', 'heure', 45.5]);
+      const corps = { clientId: client.body.id, objet: `TEST Devis main d’œuvre ${suffixe}`, lignes: [
+        { designation: proposee.nom, nature: proposee.nature, quantite: '3', prixUnitaireHt: String(proposee.prixVenteHt), tauxTva: '20', unite: proposee.unite, catalogueFamille: 'prestations', catalogueId: proposee.id },
+      ] };
+      const devis = await envoyer('post', '/api/devis', enTete('commercial'), corps);
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.deepEqual([devis.body.totalHt, devis.body.lignes[0].prixUnitaireHt, devis.body.lignes[0].unite, devis.body.lignes[0].reference], [136.5, 45.5, 'heure', mainOeuvre.reference]);
+      // Les prix de la main d'œuvre changent : la ligne garde sa copie.
+      const maj = await envoyer('put', `/api/catalogue/prestations/${mainOeuvre.id}`, admin, { ...corpsMainOeuvre(mainOeuvre.reference), nom: mainOeuvre.nom, prixVenteHt: '52' });
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      const ligne = await prisma.devisLigne.findFirstOrThrow({ where: { devisId: devis.body.id } });
+      assert.deepEqual([ligne.prixUnitaireHt.toString(), ligne.unite, ligne.reference, ligne.nature, ligne.totalHt.toString(), ligne.prixAchatUnitaireHt], ['45.5', 'heure', mainOeuvre.reference, 'MAIN_OEUVRE', '136.5', null]);
     });
   });
 

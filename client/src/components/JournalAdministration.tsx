@@ -43,6 +43,8 @@ const TYPES_JOURNAL: Record<string, string> = {
   CLE_INTEGRATION: 'Clés d’intégration',
   PARTAGE_PLANNING: 'Partage public du planning',
   CONSERVATION_JOURNAL: 'Conservation du journal',
+  MAIN_OEUVRE: 'Mains d’œuvre (prix de vente)',
+  INTERVENANT: 'Fiche intervenant',
 };
 
 const ACTIONS_JOURNAL: Record<string, string> = {
@@ -62,6 +64,10 @@ const ACTIONS_JOURNAL: Record<string, string> = {
   FICHE_INTERVENANT: 'Fiche intervenant',
   LOGO_DOCUMENTS: 'Logo des documents',
   LOGO_DOCUMENTS_RETIRE: 'Logo des documents retiré',
+  REACTIVATION: 'Réactivation',
+  PASSAGE_MAIN_OEUVRE: 'Prestation passée en main d’œuvre',
+  RETRAIT_MAIN_OEUVRE: 'Main d’œuvre redevenue prestation',
+  RATTACHEMENT_MAIN_OEUVRE: 'Main d’œuvre rattachée',
 };
 
 const FILTRES_VIDES: Filtres = { du: '', au: '', type: '', auteur: '' };
@@ -87,6 +93,21 @@ const CHAMPS_JOURNAL: Record<string, string> = {
   suiviAdministratif: 'Prime de suivi administratif',
   journalConservationJours: 'Conservation (jours)',
   logoDocuments: 'Logo des documents',
+  estMainOeuvre: 'Main d’œuvre',
+  reference: 'Référence',
+  nom: 'Nom',
+  description: 'Description',
+  categorie: 'Catégorie',
+  tauxTva: 'TVA (%)',
+  prixVenteHt: 'Prix de vente HT à l’heure, hors contrat',
+  prixJourHorsContratHt: 'Prix de vente HT au forfait jour, hors contrat',
+  prixHeureSousContratHt: 'Prix de vente HT à l’heure, sous contrat',
+  prixJourSousContratHt: 'Prix de vente HT au forfait jour, sous contrat',
+  heuresParJour: 'Heures par jour',
+  unite: 'Unité',
+  prixAchatHt: 'Prix d’achat HT',
+  dureeIndicativeMin: 'Durée indicative (min)',
+  mainOeuvre: 'Main d’œuvre',
 };
 
 function lisible(valeur: unknown, champ?: string): string {

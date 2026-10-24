@@ -10,6 +10,7 @@ import { AdminReferentiels } from '../components/AdminReferentiels';
 import { AdminMarges } from '../components/AdminMarges';
 import { AdminUtilisateurs } from '../components/AdminUtilisateurs';
 import { AdminModules } from '../components/AdminModules';
+import type { MainOeuvreResumee } from '../lib/mainOeuvre';
 
 // Onglets ouverts aux CONDUCTEURS DE TRAVAUX : uniquement les référentiels du Journal des
 // Achats, qu'ils alimentent au quotidien. Tout le reste de l'Administration (chantiers,
@@ -30,6 +31,8 @@ const Admin = () => {
   const [activeTab, setActiveTab] = useState(isAdmin ? 'chantiers' : 'fournisseurs');
   const [users, setUsers] = useState<any[]>([]);
   const [intervenants, setIntervenants] = useState<any[]>([]);
+  // Mains d'œuvre du catalogue proposées au rattachement des intervenants (prix de vente).
+  const [mainsOeuvre, setMainsOeuvre] = useState<MainOeuvreResumee[]>([]);
   const [fournisseurs, setFournisseurs] = useState<any[]>([]);
   const [chantiers, setChantiers] = useState<any[]>([]);
   const [parametres, setParametres] = useState<any>(null);
@@ -97,6 +100,20 @@ const Admin = () => {
           else if (onglet === 'fournisseurs') setFournisseurs(data);
           else if (onglet === 'categories') setCategories(data);
           else setChantiers(data);
+        }
+      }
+
+      // Mains d'œuvre du catalogue (administration) : une liste qui ne se charge pas laisse la
+      // précédente, et chaque fiche garde sa main d'œuvre actuelle, lue avec la liste des intervenants.
+      if (onglet === 'intervenants' && isAdmin) {
+        try {
+          const res = await apiFetch('/catalogue/prestations');
+          if (res.ok) {
+            const prestations = await res.json() as Array<MainOeuvreResumee & { estMainOeuvre?: boolean }>;
+            setMainsOeuvre(prestations.filter((p) => p.estMainOeuvre).map(({ id, reference, nom, actif }) => ({ id, reference, nom, actif })));
+          }
+        } catch (e) {
+          console.error(e);
         }
       }
 
@@ -496,6 +513,19 @@ const Admin = () => {
     }
   };
 
+  // Rattache un intervenant à une main d'œuvre du catalogue (ses heures seront valorisées à ce prix
+  // de vente par un lot suivant). Le serveur n'accepte qu'une main d'œuvre active et journalise le
+  // changement ; la liste est relue dans tous les cas.
+  const rattacherMainOeuvre = async (intervenantId: string, mainOeuvreId: string) => {
+    try {
+      const res = await apiFetch(`/intervenants/${intervenantId}/main-oeuvre`, { method: 'PUT', body: JSON.stringify({ mainOeuvreId: mainOeuvreId || null }) });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Impossible de rattacher cette main d’œuvre.'); }
+    } catch {
+      alert('Impossible de joindre le serveur.');
+    }
+    fetchData();
+  };
+
   const deleteEntity = async (type: string, id: string, label: string) => {
     if (!window.confirm(`Supprimer « ${label} » ? Cette action est définitive.`)) return;
     try {
@@ -627,6 +657,8 @@ const Admin = () => {
         editField={editField}
         saveEdit={saveEdit}
         relierCompte={relierCompte}
+        mainsOeuvre={mainsOeuvre}
+        rattacherMainOeuvre={rattacherMainOeuvre}
         deleteEntity={deleteEntity}
       />
 
