@@ -3581,6 +3581,16 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([journal[1].avant.prixJourHorsContratHt, journal[1].apres.prixJourHorsContratHt], [320, null]);
     });
 
+    test('passage en main d’œuvre d’une prestation qui a une durée indicative : la durée est effacée et journalisée', async () => {
+      const ordinaire = await envoyer('post', '/api/catalogue/prestations', admin, { reference: `TEST-MO-DUREE-${suffixe}`, nom: 'TEST Visite', unite: 'forfait', prixVenteHt: '80', dureeIndicativeMin: 90 });
+      assert.equal(ordinaire.status, 201, JSON.stringify(ordinaire.body));
+      const passage = await envoyer('put', `/api/catalogue/prestations/${ordinaire.body.id}`, admin, corpsMainOeuvre(`TEST-MO-DUREE-${suffixe}`, { nom: 'TEST Visite' }));
+      assert.equal(passage.status, 200, JSON.stringify(passage.body));
+      assert.deepEqual([passage.body.estMainOeuvre, passage.body.dureeIndicativeMin], [true, null]);
+      const [entree] = await journalMainOeuvre(ordinaire.body.id);
+      assert.deepEqual([entree.action, entree.avant.dureeIndicativeMin, entree.apres.dureeIndicativeMin], ['PASSAGE_MAIN_OEUVRE', 90, null]);
+    });
+
     test('contraintes en base : une main d’œuvre incomplète ou incohérente, une prestation ordinaire avec des champs de main d’œuvre, un rattachement hors main d’œuvre sont refusés', async () => {
       const inserer = (reference, colonnes) => {
         const noms = ['id', 'reference', 'nom', 'updatedAt', ...Object.keys(colonnes)].map((c) => `"${c}"`).join(', ');

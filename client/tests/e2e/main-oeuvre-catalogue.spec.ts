@@ -143,6 +143,54 @@ test('réactivation depuis l’écran : les prix de la fiche sont renvoyés à l
   expect([entrees[3].avant, entrees[3].apres]).toEqual([{ actif: false }, { actif: true }]);
 });
 
+test('la TVA saisie à l’écran est gardée : ni l’enregistrement des prix ni la réactivation depuis l’écran ne la changent', async ({ allerSurPageAdmin, request, session }) => {
+  const suffixe = `${Date.now()}`;
+  const reference = `E2E-MO-TVA-${suffixe}`;
+  const nom = `TVA réduite ${suffixe}`;
+  const relire = async () => (await lire<Array<MainOeuvre & { tauxTva: number }>>(request, session.token, '/catalogue/prestations')).find((p) => p.reference === reference)!;
+  const journal = async () => (await lire<{ entrees: Entree[] }>(request, session.token, '/journal-administration?type=MAIN_OEUVRE')).entrees.filter((e) => e.cibleLibelle === `${reference} — ${nom}`).reverse();
+  const page = await allerSurPageAdmin('/catalogue');
+  await ouvrirOngletMainOeuvre(page);
+  await page.getByLabel('Référence').fill(reference);
+  await page.getByLabel('Désignation').fill(nom);
+  await page.getByLabel('Prix de vente HT à l’heure, hors contrat (€)').fill('45,50');
+  await page.getByLabel('Prix de vente HT au forfait jour, hors contrat (€)').fill('320');
+  await page.getByLabel('Prix de vente HT à l’heure, sous contrat (€)').fill('40');
+  await page.getByLabel('Prix de vente HT au forfait jour, sous contrat (€)').fill('280,25');
+  await page.getByLabel('Heures par jour (forfait jour)').fill('7,5');
+  // TVA proposée à 20 %, comme pour les autres fiches du catalogue, puis saisie à 10 %.
+  const tva = page.getByLabel('TVA (%)');
+  await expect(tva).toHaveValue('20');
+  await tva.fill('10');
+  await page.getByRole('button', { name: 'Créer la main d’œuvre' }).click();
+  await expect(page.getByRole('status')).toHaveText(`Main d’œuvre « ${nom} » créée.`);
+  const carte = page.getByRole('article', { name: nom });
+  await expect(carte).toContainText('TVA 10 %');
+  expect((await relire()).tauxTva).toBe(10);
+  expect((await journal())[0].apres?.tauxTva).toBe(10);
+  // Enregistrer un prix depuis l'écran renvoie la fiche entière : la TVA ne change pas.
+  await carte.getByRole('button', { name: `Modifier les prix de ${nom}` }).click();
+  const formulaire = carte.getByRole('form', { name: `Prix de ${nom}` });
+  await formulaire.getByLabel('Prix de vente HT à l’heure, sous contrat (€)').fill('41');
+  await formulaire.getByRole('button', { name: 'Enregistrer les prix' }).click();
+  await expect(page.getByRole('status')).toHaveText(`Prix de « ${nom} » enregistrés.`);
+  await expect(carte).toContainText('TVA 10 %');
+  const apresPrix = await relire();
+  expect([apresPrix.tauxTva, apresPrix.prixHeureSousContratHt]).toEqual([10, 41]);
+  let entrees = await journal();
+  expect([entrees.at(-1)?.action, entrees.at(-1)?.avant, entrees.at(-1)?.apres]).toEqual(['MODIFICATION', { prixHeureSousContratHt: 40 }, { prixHeureSousContratHt: 41 }]);
+  // Désactiver puis réactiver depuis l'écran : seule l'activité change, la TVA reste à 10 %.
+  await carte.getByRole('button', { name: `Désactiver ${nom}` }).click();
+  await expect(page.getByRole('status')).toHaveText(`Main d’œuvre « ${nom} » désactivée.`);
+  await carte.getByRole('button', { name: `Réactiver ${nom}` }).click();
+  await expect(page.getByRole('status')).toHaveText(`Main d’œuvre « ${nom} » réactivée.`);
+  const reactivee = await relire();
+  expect([reactivee.actif, reactivee.tauxTva]).toEqual([true, 10]);
+  entrees = await journal();
+  expect(entrees.map((e) => e.action)).toEqual(['CREATION', 'MODIFICATION', 'DESACTIVATION', 'REACTIVATION']);
+  expect([entrees[3].avant, entrees[3].apres]).toEqual([{ actif: false }, { actif: true }]);
+});
+
 test('l’administration rattache un intervenant à une main d’œuvre active ; désactivée, elle reste affichée comme telle', async ({ allerSurPageAdmin, request, session }) => {
   const suffixe = `${Date.now()}`;
   const electricien = await creerMainOeuvre(request, session.token, `E2E-MO-RAT1-${suffixe}`, `Électricien rattaché ${suffixe}`);
@@ -224,5 +272,25 @@ test('rendu à 375 px : l’onglet Main d’œuvre, sa création et la modificat
     await bouton.scrollIntoViewIfNeeded();
     const boite = await bouton.boundingBox();
     expect(boite && boite.x >= 0 && boite.x + boite.width <= 375).toBeTruthy();
+  }
+});
+
+test('journal d’Administration : chaque prix modifié d’une main d’œuvre est affiché sous son propre libellé', async ({ allerSurPageAdmin, request, session }) => {
+  const suffixe = `${Date.now()}`;
+  const fiche = await creerMainOeuvre(request, session.token, `E2E-MO-LIB-${suffixe}`, `Libellés du journal ${suffixe}`);
+  await envoyer(request, session.token, 'put', `/catalogue/prestations/${fiche.id}`, {
+    estMainOeuvre: true, reference: fiche.reference, nom: fiche.nom, tauxTva: '20', prixVenteHt: '42.10', prixJourHorsContratHt: '300.20', prixHeureSousContratHt: '38.30', prixJourSousContratHt: '270.40', heuresParJour: '7',
+  });
+  const page = await allerSurPageAdmin('/admin');
+  await page.getByRole('button', { name: 'Journal', exact: true }).click();
+  const ligne = page.getByRole('table', { name: 'Entrées du journal' }).locator('tr', { hasText: `${fiche.reference} — ${fiche.nom}` }).filter({ hasText: 'Modification' });
+  await expect(ligne).toHaveCount(1);
+  const [colonneAvant, colonneApres] = [ligne.locator('td').nth(5), ligne.locator('td').nth(6)];
+  for (const [libelle, avant, apres] of [
+    ['Prix de vente HT à l’heure, hors contrat', '42', '42.1'], ['Prix de vente HT au forfait jour, hors contrat', '300', '300.2'],
+    ['Prix de vente HT à l’heure, sous contrat', '38', '38.3'], ['Prix de vente HT au forfait jour, sous contrat', '270', '270.4'],
+  ]) {
+    await expect(colonneAvant.getByRole('listitem').filter({ hasText: `${libelle} :` })).toHaveText(`${libelle} : ${avant}`);
+    await expect(colonneApres.getByRole('listitem').filter({ hasText: `${libelle} :` })).toHaveText(`${libelle} : ${apres}`);
   }
 });
