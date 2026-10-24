@@ -3364,12 +3364,41 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await journalMainOeuvre(fiche.id)).length, 5);
     });
 
+    test('chaque prix de vente et la TVA, modifiés seuls, sont journalisés avec l’auteur, l’avant et l’après', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-CHAMPS-${suffixe}`);
+      let corps = corpsMainOeuvre(fiche.reference);
+      const changements = [['prixVenteHt', '46.10', 45.5, 46.1], ['prixJourHorsContratHt', '321.05', 320, 321.05], ['prixHeureSousContratHt', '41.20', 40, 41.2], ['prixJourSousContratHt', '281', 280.25, 281], ['tauxTva', '10', 20, 10]];
+      for (const [champ, nouveau, avantAttendu, apresAttendu] of changements) {
+        corps = { ...corps, [champ]: nouveau };
+        const maj = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, corps);
+        assert.equal(maj.status, 200, `${champ} : ${JSON.stringify(maj.body)}`);
+        const derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+        assert.deepEqual([derniere.action, derniere.auteurId, derniere.avant, derniere.apres], ['MODIFICATION', adminId, { [champ]: avantAttendu }, { [champ]: apresAttendu }], champ);
+      }
+      assert.equal((await journalMainOeuvre(fiche.id)).length, 1 + changements.length);
+    });
+
+    test('une modification sans « estMainOeuvre » garde la nature d’une main d’œuvre : sans ses prix, elle est refusée et rien ne change', async () => {
+      const fiche = await creerMainOeuvre(`TEST-MO-NATURE-${suffixe}`);
+      const avant = await etatPrestation(fiche.id);
+      const avantJournal = await nbEntreesJournal();
+      const refus = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, { reference: fiche.reference, nom: fiche.nom, unite: 'heure', prixVenteHt: '45.50' });
+      assert.equal(refus.status, 400, JSON.stringify(refus.body));
+      assert.equal(await etatPrestation(fiche.id), avant);
+      assert.equal(await nbEntreesJournal(), avantJournal);
+      const { estMainOeuvre: _drapeau, ...sansDrapeau } = corpsMainOeuvre(fiche.reference);
+      const garde = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, admin, { ...sansDrapeau, nom: `TEST Renommée ${suffixe}` });
+      assert.equal(garde.status, 200, JSON.stringify(garde.body));
+      assert.deepEqual([garde.body.estMainOeuvre, garde.body.prixJourSousContratHt, (await journalMainOeuvre(fiche.id)).at(-1).action], [true, 280.25, 'MODIFICATION']);
+    });
+
     test('saisies refusées sans rien écrire : prix manquant, négatif ou au-delà du centime, heures par jour hors bornes ou hors quart d’heure, référence en double', async () => {
       const existante = await creerMainOeuvre(`TEST-MO-REF-${suffixe}`);
       const cas = [];
       for (const champ of ['prixVenteHt', 'prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt']) {
         cas.push([`${champ} manquant`, { [champ]: undefined }], [`${champ} vide`, { [champ]: '' }], [`${champ} négatif`, { [champ]: '-1' }],
-          [`${champ} à trois décimales`, { [champ]: '12.345' }], [`${champ} non numérique`, { [champ]: 'douze' }], [`${champ} en notation scientifique`, { [champ]: '1e3' }]);
+          [`${champ} à trois décimales`, { [champ]: '12.345' }], [`${champ} non numérique`, { [champ]: 'douze' }], [`${champ} en notation scientifique`, { [champ]: '1e3' }],
+          [`${champ} au-delà de DECIMAL(12,2)`, { [champ]: '12345678901' }]);
       }
       cas.push(['heures par jour manquantes', { heuresParJour: undefined }], ['heures par jour nulles', { heuresParJour: '0' }], ['heures par jour négatives', { heuresParJour: '-7' }],
         ['heures par jour au-delà de 24', { heuresParJour: '24.25' }], ['25 heures par jour', { heuresParJour: '25' }], ['heures hors quart d’heure', { heuresParJour: '7.1' }],
@@ -3410,6 +3439,11 @@ if (!TEST_DATABASE_URL) {
       // Bornes admises : 0 € et 24 h, 0,25 h.
       assert.equal((await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE1-${suffixe}`, { prixHeureSousContratHt: '0', heuresParJour: '24' }))).status, 201);
       assert.equal((await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE2-${suffixe}`, { heuresParJour: '0.25' }))).status, 201);
+      // Borne haute des quatre prix : dix chiffres avant la virgule, comme la colonne DECIMAL(12,2), enregistrés à l'identique.
+      const max = '9999999999.99';
+      const borneHaute = await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(`TEST-MO-BORNE3-${suffixe}`, { prixVenteHt: max, prixJourHorsContratHt: max, prixHeureSousContratHt: max, prixJourSousContratHt: max }));
+      assert.equal(borneHaute.status, 201, JSON.stringify(borneHaute.body));
+      assert.deepEqual(prixEnBase(await prisma.cataloguePrestation.findUnique({ where: { id: borneHaute.body.id } })), [max, max, max, max, '7.5']);
     });
 
     test('comptes non administrateurs refusés (403), sans rien écrire', async () => {
@@ -3536,6 +3570,12 @@ if (!TEST_DATABASE_URL) {
         ['durée indicative', { ...complete, dureeIndicativeMin: 60 }],
         ['prestation ordinaire avec heures par jour', { estMainOeuvre: false, heuresParJour: 7 }],
         ['prestation ordinaire avec un prix sous contrat', { estMainOeuvre: false, prixHeureSousContratHt: 40 }],
+        ['prix jour hors contrat manquant', { ...complete, prixJourHorsContratHt: null }],
+        ['prix heure sous contrat manquant', { ...complete, prixHeureSousContratHt: null }],
+        ['prix jour hors contrat négatif', { ...complete, prixJourHorsContratHt: -0.01 }],
+        ['prix jour sous contrat négatif', { ...complete, prixJourSousContratHt: -0.01 }],
+        ['prestation ordinaire avec un prix jour hors contrat', { estMainOeuvre: false, prixJourHorsContratHt: 300 }],
+        ['prestation ordinaire avec un prix jour sous contrat', { estMainOeuvre: false, prixJourSousContratHt: 280 }],
       ];
       for (const [quoi, colonnes] of incoherentes) {
         await assert.rejects(inserer(`TEST-MO-SQL-${randomUUID()}`, colonnes), /CataloguePrestation_main_oeuvre_check/, quoi);

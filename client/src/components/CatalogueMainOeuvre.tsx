@@ -23,11 +23,13 @@ const saisieVide = {
 };
 
 // Fiche entière renvoyée au serveur (la modification remplace la fiche), avec ses prix éventuellement changés.
-const corpsFiche = (fiche: MainOeuvre, prix: Partial<ValeursPrix>, actif: boolean) => ({
+// L'activité n'est envoyée que pour une réactivation : l'enregistrement des prix depuis un écran périmé ne
+// doit pas réactiver une main d'œuvre désactivée entre-temps (le serveur garde l'activité si elle est absente).
+const corpsFiche = (fiche: MainOeuvre, prix: Partial<ValeursPrix>, actif?: boolean) => ({
   estMainOeuvre: true, reference: fiche.reference, nom: fiche.nom, description: fiche.description, categorieId: fiche.categorieId || null,
   tauxTva: fiche.tauxTva, prixVenteHt: fiche.prixVenteHt, prixJourHorsContratHt: fiche.prixJourHorsContratHt,
   prixHeureSousContratHt: fiche.prixHeureSousContratHt, prixJourSousContratHt: fiche.prixJourSousContratHt, heuresParJour: fiche.heuresParJour,
-  ...prix, actif,
+  ...prix, ...(actif === undefined ? {} : { actif }),
 });
 
 async function erreurDe(res: Response, defaut: string) {
@@ -69,7 +71,7 @@ export default function CatalogueMainOeuvre({ fiches, categories, recharger }: {
 
   const enregistrerPrix = async (fiche: MainOeuvre) => {
     if (!edition) return;
-    const ok = await ecrire(() => apiFetch(`/catalogue/prestations/${fiche.id}`, { method: 'PUT', body: JSON.stringify(corpsFiche(fiche, edition.valeurs, fiche.actif)) }), 'Modification impossible.', `Prix de « ${fiche.nom} » enregistrés.`);
+    const ok = await ecrire(() => apiFetch(`/catalogue/prestations/${fiche.id}`, { method: 'PUT', body: JSON.stringify(corpsFiche(fiche, edition.valeurs)) }), 'Modification impossible.', `Prix de « ${fiche.nom} » enregistrés.`);
     if (ok) setEdition(null);
   };
 
