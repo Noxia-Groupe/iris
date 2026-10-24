@@ -17,11 +17,13 @@ import { DevisConflitError, DevisSaisieError, devisInclude, verrouillerDevis } f
 //    ses visites non réalisées (à planifier, planifiées) sont annulées, ses visites terminées
 //    restent, et une visite en cours refuse l'annulation (choix par défaut, à confirmer) ;
 //  - l'intervention SAV passe ANNULEE ; en cours ou terminée, elle refuse l'annulation (choix par
-//    défaut, à confirmer : l'option la plus restrictive, comme le chantier qui porte des heures).
+//    défaut, à confirmer, comme le chantier qui porte des heures). Seul son statut compte : des
+//    coûts saisis sur une intervention pas encore commencée ne refusent pas l'annulation.
 // Chaque intervention annulée l'est comme depuis sa fiche (changement de statut journalisé). Les
-// contrats et interventions qui ne sont pas issus de ce devis ne changent pas. Une cible que la
-// base ne contient plus (aucune route ne supprime une intervention ni un contrat) est laissée de
-// côté. Tous les contrôles précèdent toute écriture.
+// contrats et interventions qui ne sont pas issus de ce devis ne changent pas. Une intervention
+// ou un contrat que la base ne contiendrait plus (aucune route n'en supprime) est laissé de côté ;
+// un chantier ne se supprime pas (DELETE /api/chantiers/:id répond 410). Tous les contrôles
+// précèdent toute écriture.
 //
 // Ordre des verrous, toujours le même : le devis (comme la conversion, qui l'attend), puis le
 // chantier (FOR NO KEY UPDATE, le verrou que prenait sa mise à jour), puis les interventions (SAV

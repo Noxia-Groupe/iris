@@ -259,7 +259,8 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
 // administrateur. Sans eux, c'est la conversion de l'écran Devis, et le chantier s'attribue
 // ensuite depuis sa fiche.
 const CHAMPS_OUVERTURE_CHANTIER = ['responsableId', 'commercialId', 'types', 'dateDebut'];
-// Règle d'intégrité gardée dans le code (C-16 de la proposition de paramétrage), décidée par Nelson.
+// Limite décidée par Nelson, gardée dans le code et bornée en base (rang 1 ou 2), dans la ligne de
+// la règle C-16 (un chantier par affaire) de la proposition de paramétrage.
 const CONVERSIONS_PAR_AFFAIRE = 2;
 type CibleConversion = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT';
 const CIBLES_CONVERSION: CibleConversion[] = ['CHANTIER', 'INTERVENTION', 'CONTRAT'];
