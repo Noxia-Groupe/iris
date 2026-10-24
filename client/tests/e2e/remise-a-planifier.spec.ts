@@ -3,9 +3,10 @@ import { test, expect } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
-// Remise « à planifier » d'une visite de contrat planifiée, son créneau libéré (décision de Nelson du
-// 23-10-2026, nuit, réponse 2) : depuis son affectation au planning, la visite quitte la grille et
-// revient dans la file des visites à planifier ; le motif est obligatoire.
+// Remise « à planifier » d'une intervention planifiée, son créneau libéré (décision de Nelson du
+// 23-10-2026, nuit, réponse 2) : depuis son affectation au planning, l'intervention quitte la grille et
+// revient dans la file des interventions à planifier ; le motif est obligatoire. Décisions du 24-10-2026 :
+// une curative se remet aussi (point 1) ; une intervention annulée quitte le planning (point 7).
 
 type Visite = { id: string; reference: string; titre: string; contratTitre: string };
 
@@ -35,7 +36,7 @@ async function preparer(request: APIRequestContext, token: string, creerClient: 
   return { envoyer, aujourdhui, technicien, placer, visitePlacee, client, suffixe };
 }
 
-async function ouvrirRemise(page: Page, visite: Visite) {
+async function ouvrirRemise(page: Page, visite: Visite, designation = 'la visite') {
   const affectation = page.getByText(visite.titre, { exact: true });
   // Sur téléphone, la grille défile dans son cadre sous la colonne des techniciens, fixée à gauche :
   // comme d'un glissement du doigt, la journée est amenée juste à droite de cette colonne.
@@ -50,7 +51,7 @@ async function ouvrirRemise(page: Page, visite: Visite) {
   const modale = page.getByRole('dialog', { name: 'Modifier l\'affectation' });
   await expect(modale).toBeVisible();
   await modale.getByRole('button', { name: 'Remettre à planifier' }).click();
-  const dialogue = page.getByRole('dialog', { name: `Remettre à planifier la visite ${visite.reference}` });
+  const dialogue = page.getByRole('dialog', { name: `Remettre à planifier ${designation} ${visite.reference}` });
   await expect(dialogue).toBeVisible();
   return { modale, dialogue };
 }
@@ -58,7 +59,8 @@ async function ouvrirRemise(page: Page, visite: Visite) {
 test('depuis le planning, une visite planifiée se remet à planifier : motif exigé, créneau libéré, retour dans la file', async ({ allerSurPageAdmin, session, request, creerClient }) => {
   const { envoyer, aujourdhui, technicien, placer, visitePlacee, client, suffixe } = await preparer(request, session.token, creerClient);
   const visite = await visitePlacee('Visite remise E2E');
-  // Une curative placée le même jour : son affectation ne propose pas la remise.
+  // Une curative placée le même jour : depuis le 24-10-2026 (décision de Nelson, point 1), son affectation
+  // propose aussi la remise (modifié : elle ne la proposait pas).
   const curative = await envoyer('post', '/interventions', { clientId: client.id, titre: `Dépannage remise E2E ${suffixe}` }) as Visite;
   await placer(curative.id);
 
@@ -68,7 +70,7 @@ test('depuis le planning, une visite planifiée se remet à planifier : motif ex
   await page.getByText(curative.titre, { exact: true }).click();
   const modaleCurative = page.getByRole('dialog', { name: 'Modifier l\'affectation' });
   await expect(modaleCurative).toBeVisible();
-  await expect(modaleCurative.getByRole('button', { name: 'Remettre à planifier' })).toHaveCount(0);
+  await expect(modaleCurative.getByRole('button', { name: 'Remettre à planifier' })).toBeVisible();
   await modaleCurative.getByRole('button', { name: 'Annuler' }).click();
   await expect(modaleCurative).toHaveCount(0);
 
@@ -171,4 +173,95 @@ test('depuis la fiche de l’intervention, une visite planifiée se remet aussi 
   await expect(carte.getByRole('button', { name: 'Remettre à planifier' })).toHaveCount(0);
   const fiche = await envoyer('get', `/interventions/${visite.id}`) as { statut: string; planningEvent: unknown };
   expect([fiche.statut, fiche.planningEvent]).toEqual(['A_PLANIFIER', null]);
+});
+
+// Décision de Nelson du 24-10-2026, point 1 : une curative planifiée se remet « à planifier » depuis le
+// planning, comme une visite ; parcours mené sur téléphone (375 px).
+test('sur téléphone (375 px), une curative planifiée se remet à planifier depuis le planning : elle quitte la grille et revient dans la file', async ({ allerSurPageAdmin, page, session, request, creerClient }) => {
+  const { envoyer, placer, client, suffixe } = await preparer(request, session.token, creerClient);
+  const curative = await envoyer('post', '/interventions', { clientId: client.id, titre: `Dépannage remis E2E ${suffixe}` }) as Visite;
+  await placer(curative.id);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await allerSurPageAdmin('/planning');
+  const largeurPage = () => page.evaluate(() => document.documentElement.scrollWidth);
+  const file = page.getByRole('region', { name: 'Interventions à planifier' });
+  await expect(file.getByRole('row', { name: new RegExp(curative.reference) })).toHaveCount(0);
+  const { modale, dialogue } = await ouvrirRemise(page, curative, 'l’intervention');
+  await expect(dialogue).toContainText('Le créneau est libéré et les techniciens sont retirés de l’intervention, qui revient dans la file des interventions à planifier.');
+  for (const element of [dialogue, dialogue.getByLabel('Motif (obligatoire)'), dialogue.getByRole('button', { name: 'Confirmer la remise' })]) {
+    await expect(element).toBeInViewport({ ratio: 1 });
+    const cadre = await element.boundingBox();
+    expect(cadre && cadre.x >= 0 && cadre.x + cadre.width <= 375, 'dans la largeur de l’écran').toBe(true);
+  }
+  expect(await largeurPage()).toBeLessThanOrEqual(375);
+  await dialogue.getByLabel('Motif (obligatoire)').fill('Pièce à commander');
+  const reponse = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/interventions/${curative.id}/remise-a-planifier`));
+  await dialogue.getByRole('button', { name: 'Confirmer la remise' }).click();
+  expect((await reponse).status()).toBe(200);
+  await expect(dialogue).toHaveCount(0);
+  await expect(modale).toHaveCount(0);
+  // Elle quitte la grille et revient dans la file, en SAV hors contrat.
+  await expect(page.getByText(curative.titre, { exact: true })).toHaveCount(0);
+  const ligne = file.getByRole('row', { name: new RegExp(curative.reference) });
+  await expect(ligne).toBeVisible();
+  await expect(ligne).toContainText('SAV hors contrat');
+  expect(await largeurPage()).toBeLessThanOrEqual(375);
+  // Côté serveur : à planifier, sans créneau ni technicien, motif au journal.
+  const fiche = await envoyer('get', `/interventions/${curative.id}`) as { statut: string; planningEvent: unknown; affectations: unknown[] };
+  expect([fiche.statut, fiche.planningEvent, fiche.affectations]).toEqual(['A_PLANIFIER', null, []]);
+  const journal = await envoyer('get', `/interventions/${curative.id}/journal-saisies`) as Array<{ action: string; motif: string | null }>;
+  expect(journal[0]).toMatchObject({ action: 'CHANGEMENT_STATUT', motif: 'Remise à planifier : Pièce à commander' });
+});
+
+// Décisions de Nelson du 24-10-2026 : annuler une intervention depuis sa fiche exige un motif, demandé dans
+// un dialogue et écrit au journal (« Oui un motif pour une annulation depuis sa fiche ») ; l'intervention
+// annulée quitte le planning (point 7, « Retirer du planning »).
+test('depuis sa fiche, une intervention planifiée s’annule avec un motif et quitte le planning relu', async ({ allerSurPageAdmin, session, request, creerClient }) => {
+  const { envoyer, aujourdhui, placer, client, suffixe } = await preparer(request, session.token, creerClient);
+  const curative = await envoyer('post', '/interventions', { clientId: client.id, titre: `Dépannage annulé E2E ${suffixe}` }) as Visite;
+  await placer(curative.id);
+  const page = await allerSurPageAdmin('/planning');
+  await expect(page.getByText(curative.titre, { exact: true })).toBeVisible();
+
+  await page.goto(`/interventions/${curative.id}`, { waitUntil: 'networkidle' });
+  const carte = page.getByRole('article');
+  await expect(carte).toContainText('Planifiée');
+  let envois = 0;
+  page.on('request', (req) => { if (req.method() === 'PATCH' && req.url().endsWith(`/interventions/${curative.id}/statut`)) envois++; });
+  await carte.getByRole('button', { name: 'Annuler', exact: true }).click();
+  const dialogue = page.getByRole('dialog', { name: `Annuler l’intervention ${curative.reference}` });
+  await expect(dialogue).toBeVisible();
+  await expect(dialogue).toContainText('L’annulation est définitive : le créneau est retiré du planning et les techniciens sont retirés de l’intervention.');
+  const motif = dialogue.getByLabel('Motif (obligatoire)');
+  await expect(motif).toBeFocused();
+  // Sans motif valide : refusé à l'écran, sans requête ; fermer laisse l'intervention planifiée.
+  await dialogue.getByRole('button', { name: 'Confirmer l’annulation' }).click();
+  await expect(dialogue.getByRole('alert')).toContainText('de 3 à 500 caractères');
+  await motif.fill('ab');
+  await dialogue.getByRole('button', { name: 'Confirmer l’annulation' }).click();
+  await expect(dialogue.getByRole('alert')).toContainText('de 3 à 500 caractères');
+  expect(envois).toBe(0);
+  await dialogue.getByRole('button', { name: 'Fermer' }).click();
+  await expect(dialogue).toHaveCount(0);
+  await expect(carte).toContainText('Planifiée');
+  // Avec un motif : l'intervention est annulée, le motif écrit au journal.
+  await carte.getByRole('button', { name: 'Annuler', exact: true }).click();
+  await dialogue.getByLabel('Motif (obligatoire)').fill('Le client a trouvé un autre prestataire');
+  const reponse = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.url().endsWith(`/interventions/${curative.id}/statut`));
+  await dialogue.getByRole('button', { name: 'Confirmer l’annulation' }).click();
+  expect((await reponse).status()).toBe(200);
+  await expect(dialogue).toHaveCount(0);
+  const journal = await envoyer('get', `/interventions/${curative.id}/journal-saisies`) as Array<{ action: string; motif: string | null; apres: { statut: string } }>;
+  expect(journal[0]).toMatchObject({ action: 'CHANGEMENT_STATUT', motif: 'Annulation : Le client a trouvé un autre prestataire', apres: { statut: 'ANNULEE' } });
+  // La fiche d'une intervention annulée est introuvable, comme avant ce lot.
+  await expect(page.getByText('Intervention introuvable : annulée, ou retirée de vos dossiers.')).toBeVisible();
+
+  // Planning relu : le créneau n'y est plus, et l'intervention n'entre pas dans la file.
+  await page.goto('/planning', { waitUntil: 'networkidle' });
+  const file = page.getByRole('region', { name: 'Interventions à planifier' });
+  await expect(file).toBeVisible();
+  await expect(page.getByText(curative.titre, { exact: true })).toHaveCount(0);
+  await expect(file.getByRole('row', { name: new RegExp(curative.reference) })).toHaveCount(0);
+  const jour = await envoyer('get', `/planning/events?start=${aujourdhui}&end=${aujourdhui}`) as Array<{ interventionId: string | null }>;
+  expect(jour.some((ev) => ev.interventionId === curative.id)).toBe(false);
 });

@@ -4827,7 +4827,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(revision.body.error, 'Ce devis est déjà converti : il ne peut plus être révisé.');
         // L'intervention annulée depuis sa fiche, seule l'intervention change ; le devis s'annule
         // ensuite (lot 4 suite), sans réécrire l'intervention déjà annulée.
-        const interventionAnnulee = await request(app).patch(`/api/interventions/${cree.body.id}/statut`).set(admin()).send({ statut: 'ANNULEE' });
+        const interventionAnnulee = await request(app).patch(`/api/interventions/${cree.body.id}/statut`).set(admin()).send({ statut: 'ANNULEE', motif: 'TEST motif d’annulation' });
         assert.equal(interventionAnnulee.status, 200, JSON.stringify(interventionAnnulee.body));
         assert.equal((await prisma.devis.findUnique({ where: { id: devis.id } })).statut, 'ACCEPTE', 'l’intervention annulée laisse le devis inchangé');
         const apresCible = await request(app).post(`/api/devis/${devis.id}/annulation`).set(admin()).send({ motif: 'TEST intervention annulée' });
@@ -5232,7 +5232,8 @@ if (!TEST_DATABASE_URL) {
       const statutIntervention = async (id) => (await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut;
       const passer = async (id, ...statuts) => {
         for (const statut of statuts) {
-          const res = await request(app).patch(`/api/interventions/${id}/statut`).set(admin()).send({ statut });
+          // Annuler exige un motif (décision de Nelson du 24-10-2026).
+          const res = await request(app).patch(`/api/interventions/${id}/statut`).set(admin()).send({ statut, ...(statut === 'ANNULEE' ? { motif: 'TEST motif d’annulation' } : {}) });
           assert.equal(res.status, 200, JSON.stringify(res.body));
         }
       };
@@ -7355,9 +7356,15 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await signerSav(compteRendu.body.id, technicien.jeton, { ...base, trace: dessin })).status, 409);
       const annulee = await dossierEnCours('sav.trace.annule@iris.test', 'SAV tracé annulé');
       const rapportAnnule = await ajouterCompteRendu(annulee.id, annulee.technicien.jeton);
-      assert.equal((await statutSav(annulee.id, session, { statut: 'ANNULEE' })).status, 200);
+      assert.equal((await statutSav(annulee.id, session, { statut: 'ANNULEE', motif: 'TEST motif d’annulation' })).status, 200);
+      // Modifié par le lot du 24-10-2026 : l'annulation retire les affectations avec le créneau (décision
+      // de Nelson, point 7) ; le technicien ne trouve plus le compte rendu (404, il attendait 409), et
+      // l'encadrement, qui le voit encore, est refusé (409).
       const refusAnnulee = await signerSav(rapportAnnule.body.id, annulee.technicien.jeton, { ...base, trace: dessin });
-      assert.equal(refusAnnulee.status, 409, JSON.stringify(refusAnnulee.body));
+      assert.equal(refusAnnulee.status, 404, JSON.stringify(refusAnnulee.body));
+      const refusEncadrement = await signerSav(rapportAnnule.body.id, session, { ...base, trace: dessin });
+      assert.equal(refusEncadrement.status, 409, JSON.stringify(refusEncadrement.body));
+      assert.equal(refusEncadrement.body.error, 'La signature est impossible sur une intervention annulée.');
       assert.equal(await prisma.interventionSignature.count({ where: { rapportId: rapportAnnule.body.id } }), 0);
     });
 
@@ -7582,7 +7589,8 @@ if (!TEST_DATABASE_URL) {
         assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
       };
       const statut = async (id, valeur) => {
-        const reponse = await request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: valeur });
+        // Annuler exige un motif (décision de Nelson du 24-10-2026).
+        const reponse = await request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: valeur, ...(valeur === 'ANNULEE' ? { motif: 'TEST motif d’annulation' } : {}) });
         assert.equal(reponse.status, 200, JSON.stringify(reponse.body));
       };
       const titres = (liste) => liste.map((item) => item.titre);
@@ -7802,7 +7810,7 @@ if (!TEST_DATABASE_URL) {
         .send({ clientId, titre: 'TEST Liste active' });
       const cancelled = await request(app).post('/api/interventions').set('Authorization', `Bearer ${session}`)
         .send({ clientId, titre: 'TEST Liste annulée' });
-      await request(app).patch(`/api/interventions/${cancelled.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ANNULEE' });
+      await request(app).patch(`/api/interventions/${cancelled.body.id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ANNULEE', motif: 'TEST motif d’annulation' });
 
       const liste = await request(app).get('/api/interventions').set('Authorization', `Bearer ${session}`);
       assert.equal(liste.status, 200, JSON.stringify(liste.body));
@@ -7822,7 +7830,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(planification.body.statut, 'PLANIFIEE');
 
       const annulation = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${session}`)
-        .send({ statut: 'ANNULEE' });
+        .send({ statut: 'ANNULEE', motif: 'TEST motif d’annulation' });
       assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
 
       const reprise = await request(app).patch(`/api/interventions/${creation.body.id}/statut`).set('Authorization', `Bearer ${session}`)
@@ -7925,9 +7933,13 @@ if (!TEST_DATABASE_URL) {
       // Archivage et restauration par l'encadrement, puis plus aucune saisie une fois le dossier annulé.
       assert.equal((await request(app).post(`/api/interventions/${id}/couts/heures/${saisie.body.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Saisie à revoir' })).status, 200);
       assert.equal((await request(app).post(`/api/interventions/${id}/couts/heures/${saisie.body.id}/restaurer`).set('Authorization', `Bearer ${session}`).send({ motif: 'Saisie confirmée' })).status, 200);
-      assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ANNULEE' })).status, 200);
-      assert.equal((await heuresDe(technicien.jeton).send({ date: aujourdhui, nbrHeures: 1 })).status, 409, 'un dossier annulé ne reçoit plus d’heures');
-      assert.equal((await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 409);
+      assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set('Authorization', `Bearer ${session}`).send({ statut: 'ANNULEE', motif: 'TEST motif d’annulation' })).status, 200);
+      // Modifié par le lot du 24-10-2026 : l'annulation retire les affectations (décision de Nelson, point 7) ;
+      // le technicien ne trouve plus le dossier (404, il attendait 409), dont les heures restent.
+      assert.equal((await heuresDe(technicien.jeton).send({ date: aujourdhui, nbrHeures: 1 })).status, 404, 'un dossier annulé ne reçoit plus d’heures');
+      assert.equal((await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 404);
+      assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0);
+      assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: id, archivedAt: null } }), 1, 'ses heures restent');
       const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: id, cible: 'COUT_INTERVENTION_HEURE' }, select: { action: true }, orderBy: { createdAt: 'asc' } });
       assert.deepEqual(journal.map((entree) => entree.action), ['CREATION', 'CORRECTION', 'ARCHIVAGE', 'RESTAURATION']);
     });
@@ -8624,7 +8636,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(dossier.status, 201, JSON.stringify(dossier.body));
         const id = dossier.body.id;
         const transitions = statut === 'TERMINEE' ? ['PLANIFIEE', 'EN_COURS'] : ['ANNULEE'];
-        for (const etape of transitions) assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: etape })).status, 200);
+        for (const etape of transitions) assert.equal((await request(app).patch(`/api/interventions/${id}/statut`).set(auth).send({ statut: etape, ...(etape === 'ANNULEE' ? { motif: 'TEST motif d’annulation' } : {}) })).status, 200);
         if (statut === 'TERMINEE') assert.equal((await terminerIntervention(id, session)).status, 200);
         const avant = await prisma.intervention.findUniqueOrThrow({ where: { id } });
         const refus = await request(app).put(`/api/interventions/${id}/planning`).set(auth).send({ dateDebut: '2099-01-01', creneau: 'JOURNEE', intervenantIds: [technicien.id] });
@@ -8635,7 +8647,10 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    test('projection liée déplaçable EN_COURS, figée aux états terminaux, sans fuite de périmètre', async () => {
+    // Modifié par le lot du 24-10-2026 : une intervention annulée n'a plus de projection (décision de
+    // Nelson, point 7) ; le planning ne la trouve plus (404) au lieu de la refuser (409), et le placement
+    // reste refusé. La terminée garde sa projection, figée.
+    test('projection liée déplaçable EN_COURS, figée une fois terminée, retirée à l’annulation, sans fuite de périmètre', async () => {
       const auth = token => ({ Authorization: `Bearer ${token}` });
       const conducteur = await prisma.user.create({ data: { email: `file.conducteur.${Date.now()}@iris.test`, name: 'TEST Conducteur projection', role: 'CONDUCTEUR_TRAVAUX' } });
       const tiers = await prisma.user.create({ data: { email: `file.invisible.${Date.now()}@iris.test`, name: 'TEST Conducteur invisible', role: 'CONDUCTEUR_TRAVAUX' } });
@@ -8652,8 +8667,23 @@ if (!TEST_DATABASE_URL) {
         assert.equal(placed.status, 200, JSON.stringify(placed.body));
         const url = `/api/planning/events/${placed.body.id}`;
         for (const next of statut === 'TERMINEE' ? ['EN_COURS', 'TERMINEE'] : [statut]) {
-          const transition = next === 'TERMINEE' ? await terminerIntervention(id, session) : await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: next });
+          const transition = next === 'TERMINEE' ? await terminerIntervention(id, session) : await request(app).patch(`/api/interventions/${id}/statut`).set(auth(session)).send({ statut: next, ...(next === 'ANNULEE' ? { motif: 'TEST motif d’annulation' } : {}) });
           assert.equal(transition.status, 200, JSON.stringify(transition.body));
+        }
+        if (statut === 'ANNULEE') {
+          const mutation = { dateDebut: '2099-01-02', dateFin: '2099-01-02', intervenantIds: [second.id] };
+          assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0, 'créneau retiré à l’annulation');
+          assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0, 'affectations retirées');
+          for (const token of [tiersToken, session, conducteurToken]) {
+            const resultat = await request(app).patch(url).set(auth(token)).send(mutation);
+            assert.equal(resultat.status, 404, JSON.stringify(resultat.body));
+          }
+          const refusPut = await request(app).put(`/api/interventions/${id}/planning`).set(auth(session)).send({ dateDebut: '2099-01-03', creneau: 'JOURNEE', intervenantIds: [second.id] });
+          assert.equal(refusPut.status, 409, JSON.stringify(refusPut.body));
+          assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 0);
+          assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: id } }), 0);
+          assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id } })).statut, statut);
+          continue;
         }
         const avant = await prisma.planningEvent.findUniqueOrThrow({ where: { id: placed.body.id }, include: { intervenants: { select: { id: true } } } });
         const affectations = await prisma.interventionAffectation.findMany({ where: { interventionId: id }, select: { intervenantId: true } });
@@ -14172,7 +14202,7 @@ if (!TEST_DATABASE_URL) {
       const annule = await creerContrat('TEST Génération visite annulée', dateDuJour);
       const visiteAnnulee = await request(app).post(`/api/contrats-maintenance/${annule.id}/generer-intervention`).set(admin());
       assert.equal(visiteAnnulee.status, 201, JSON.stringify(visiteAnnulee.body));
-      assert.equal((await request(app).patch(`/api/interventions/${visiteAnnulee.body.id}/statut`).set(admin()).send({ statut: 'ANNULEE' })).status, 200);
+      assert.equal((await request(app).patch(`/api/interventions/${visiteAnnulee.body.id}/statut`).set(admin()).send({ statut: 'ANNULEE', motif: 'TEST motif d’annulation' })).status, 200);
       const suspendu = await creerContrat('TEST Génération suspendu', dateDuJour);
       assert.equal((await request(app).patch(`/api/contrats-maintenance/${suspendu.id}/statut`).set(admin()).send({ statut: 'SUSPENDU', motif: 'TEST suspension' })).status, 200);
 
@@ -17629,10 +17659,12 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
-  // Remise « à planifier » d'une visite de contrat planifiée, son créneau libéré : décision de Nelson du
+  // Remise « à planifier » d'une intervention planifiée, son créneau libéré : décision de Nelson du
   // 23-10-2026 (nuit), réponse 2 (docs/HISTORIQUE-DECISIONS.md, « Décisions du 23-10-2026 (nuit) sur le
-  // lot 4 », point 5). Le reste est un choix par défaut, à confirmer (passation, section 4).
-  describe('Remise « à planifier » d’une visite de contrat, son créneau libéré', () => {
+  // lot 4 », point 5), étendue aux curatives par les décisions du 24-10-2026 (« Décisions du 24-10-2026
+  // sur la remise à planifier », points 1 à 6), qui retirent aussi le créneau à l'annulation (point 7).
+  // Le reste est un choix par défaut, à confirmer (passation, section 4).
+  describe('Remise « à planifier » d’une intervention, son créneau libéré ; annulation qui retire le créneau', () => {
     let session = '';
     let clientId = '';
     let fiche = null;
@@ -17642,11 +17674,17 @@ if (!TEST_DATABASE_URL) {
     const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
     const MOTIF = 'TEST Client indisponible ce jour-là';
     const MOTIF_INVALIDE = 'Un motif de 3 à 500 caractères sans caractère de contrôle est obligatoire.';
-    const REFUS_CURATIVE = 'Seule une visite de contrat de maintenance se remet « à planifier » : déplacez le créneau de cette intervention au planning, ou annulez-la depuis sa fiche.';
+    const refusStatut = (libelle) => `Seule une intervention planifiée se remet « à planifier » : celle-ci est ${libelle}.`;
+    // Décisions de Nelson du 24-10-2026 : une intervention commencée ne se remet pas à planifier (réponse
+    // complémentaire au point 2), mais son créneau se déplace au planning (réponse sur le déplacement) ;
+    // une suite passe par une nouvelle intervention, dont le lien est prévu par un lot suivant.
+    const refusSaisies = (heures, achats) => `Remise impossible : cette intervention porte déjà ${heures} saisie(s) d’heures du technicien et ${achats} achat(s) de matériel non archivés. Une intervention commencée ne se remet pas à planifier : déplacez son créneau au planning, ou terminez-la et, si une suite est nécessaire, ouvrez une nouvelle intervention SAV.`;
     const remettre = (id, enTete = jeton('admin'), corps = { motif: MOTIF }) => request(app).post(`/api/interventions/${id}/remise-a-planifier`).set(enTete).send(corps);
     const placer = (id, corps = {}, enTete = admin()) => request(app).put(`/api/interventions/${id}/planning`).set(enTete)
       .send({ dateDebut: '2099-03-04', creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:30', intervenantIds: [fiche.id], ...corps });
-    const changerStatut = (id, statut) => request(app).patch(`/api/interventions/${id}/statut`).set(admin()).send({ statut });
+    // Annuler exige un motif (décision de Nelson du 24-10-2026), écrit au journal : « Annulation : … ».
+    const MOTIF_ANNULATION = 'TEST Le client a renoncé';
+    const changerStatut = (id, statut) => request(app).patch(`/api/interventions/${id}/statut`).set(admin()).send({ statut, ...(statut === 'ANNULEE' ? { motif: MOTIF_ANNULATION } : {}) });
     const dansLaFile = async (id) => {
       const file = await request(app).get('/api/planning/interventions-a-planifier').set(admin());
       assert.equal(file.status, 200, JSON.stringify(file.body));
@@ -17671,6 +17709,28 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: visite.id } })).statut, 'PLANIFIEE');
       return { contrat, visite, projection: placement.body };
     };
+    // Intervention curative (SAV hors contrat), placée au planning : statut PLANIFIEE, projection et affectation.
+    const curativePlanifiee = async (titre, enTete = admin()) => {
+      const cree = await request(app).post('/api/interventions').set(enTete).send({ clientId, titre });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const placement = await placer(cree.body.id, {}, enTete);
+      assert.equal(placement.status, 200, JSON.stringify(placement.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: cree.body.id } })).statut, 'PLANIFIEE');
+      return { curative: cree.body, projection: placement.body };
+    };
+    // Semaine du planning où `placer` pose ses créneaux, lue par un compte.
+    const semaineAuPlanning = async (enTete) => {
+      const res = await request(app).get('/api/planning/events?start=2099-03-02&end=2099-03-08').set(enTete);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body;
+    };
+    const voitAuPlanning = async (enTete, id) => (await semaineAuPlanning(enTete)).some((ev) => ev.interventionId === id);
+    // Instantané au journal SAV d'une projection supprimée (dates, créneau, intervenants triés par nom).
+    const projectionAuJournal = (projection, { dateDebut = '2099-03-04', intervenants = [fiche] } = {}) => ({
+      id: projection.id, dateDebut: `${dateDebut}T00:00:00.000Z`, dateFin: `${dateDebut}T00:00:00.000Z`, creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:30',
+      intervenants: intervenants.map((i) => ({ id: i.id, nom: i.nom })).sort((a, b) => a.nom.localeCompare(b.nom)),
+    });
+    const liensIntervenants = async (projectionId) => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM "_PlanningEventIntervenants" WHERE "A" = ${projectionId} OR "B" = ${projectionId}`)[0].n;
     // Tout ce qu'une remise écrit : un refus doit le laisser intact.
     const etat = async (id) => ({
       intervention: await prisma.intervention.findUniqueOrThrow({ where: { id } }),
@@ -17792,46 +17852,101 @@ if (!TEST_DATABASE_URL) {
       assert.equal(long.status, 200, JSON.stringify(long.body));
     });
 
-    test('seule une visite de contrat planifiée se remet : autres statuts et intervention curative refusés (409), sans rien écrire', async () => {
-      // À planifier : visite générée, jamais placée.
+    // Modifié par le lot du 24-10-2026 : le refus « curative » disparaît (décision de Nelson, point 1) ; le
+    // message nomme une intervention, et non plus une visite ; une intervention annulée n'a plus de créneau.
+    test('seule une intervention planifiée se remet : autres statuts refusés (409), sans rien écrire', async () => {
+      // À planifier : visite générée et curative créée, jamais placées.
       const aPlanifier = await genererVisite((await creerContrat('TEST Remise déjà à planifier')).id);
-      await refusSansEcriture(aPlanifier.id, () => remettre(aPlanifier.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est déjà à planifier.', 'à planifier');
-      // En cours, terminée, annulée : la projection reste en place.
+      await refusSansEcriture(aPlanifier.id, () => remettre(aPlanifier.id), 409, refusStatut('déjà à planifier'), 'visite à planifier');
+      const curativeAPlanifier = await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Remise curative à planifier' });
+      assert.equal(curativeAPlanifier.status, 201, JSON.stringify(curativeAPlanifier.body));
+      await refusSansEcriture(curativeAPlanifier.body.id, () => remettre(curativeAPlanifier.body.id), 409, refusStatut('déjà à planifier'), 'curative à planifier');
+      // En cours et terminée, visite comme curative : la projection reste en place.
       const { visite: enCours } = await visitePlanifiee('TEST Remise en cours');
       assert.equal((await changerStatut(enCours.id, 'EN_COURS')).status, 200);
-      await refusSansEcriture(enCours.id, () => remettre(enCours.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est en cours.', 'en cours');
+      await refusSansEcriture(enCours.id, () => remettre(enCours.id), 409, refusStatut('en cours'), 'en cours');
+      const { curative: curativeEnCours } = await curativePlanifiee('TEST Remise curative en cours');
+      assert.equal((await changerStatut(curativeEnCours.id, 'EN_COURS')).status, 200);
+      await refusSansEcriture(curativeEnCours.id, () => remettre(curativeEnCours.id), 409, refusStatut('en cours'), 'curative en cours');
       const { visite: terminee } = await visitePlanifiee('TEST Remise terminée');
       assert.equal((await changerStatut(terminee.id, 'EN_COURS')).status, 200);
       assert.equal((await terminerIntervention(terminee.id, session)).status, 200);
-      await refusSansEcriture(terminee.id, () => remettre(terminee.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est terminée.', 'terminée');
+      await refusSansEcriture(terminee.id, () => remettre(terminee.id), 409, refusStatut('terminée'), 'terminée');
+      for (const id of [enCours.id, curativeEnCours.id, terminee.id]) assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 1);
+      // Annulée : l'annulation a déjà retiré son créneau (décision du 24-10-2026, point 7), la remise est refusée.
       const { visite: annulee } = await visitePlanifiee('TEST Remise annulée');
       assert.equal((await changerStatut(annulee.id, 'ANNULEE')).status, 200);
-      await refusSansEcriture(annulee.id, () => remettre(annulee.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est annulée.', 'annulée');
-      for (const id of [enCours.id, terminee.id, annulee.id]) assert.equal(await prisma.planningEvent.count({ where: { interventionId: id } }), 1);
-      // Curative (sans contrat), planifiée au planning : refusée, choix par défaut le plus restrictif.
-      const curative = await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Remise curative' });
-      assert.equal(curative.status, 201, JSON.stringify(curative.body));
-      assert.equal((await placer(curative.body.id)).status, 200);
-      const semaine = await request(app).get('/api/planning/events?start=2099-03-02&end=2099-03-08').set(admin());
-      assert.deepEqual(semaine.body.find((ev) => ev.interventionId === curative.body.id)?.intervention, { reference: curative.body.reference, statut: 'PLANIFIEE', contratMaintenanceId: null });
-      await refusSansEcriture(curative.body.id, () => remettre(curative.body.id), 409, REFUS_CURATIVE, 'curative');
+      assert.equal(await prisma.planningEvent.count({ where: { interventionId: annulee.id } }), 0);
+      await refusSansEcriture(annulee.id, () => remettre(annulee.id), 409, refusStatut('annulée'), 'annulée');
       // Une intervention inconnue est introuvable.
       assert.equal((await remettre(randomUUID())).status, 404);
     });
 
-    test('heures ou matériel non archivés refusent la remise ; archivés, ils ne la retiennent plus', async () => {
+    // Décision de Nelson du 24-10-2026, point 1 : la remise vaut aussi pour une curative, avec les mêmes règles.
+    test('remise d’une curative planifiée : statut « à planifier », créneau supprimé, affectations retirées, journal motivé, retour dans la file', async () => {
+      const { curative, projection } = await curativePlanifiee('TEST Remise curative nominale');
+      assert.equal(await dansLaFile(curative.id), false);
+      // Le planning porte de quoi proposer l'action : la référence, le statut, et aucun contrat.
+      assert.deepEqual((await semaineAuPlanning(admin())).find((ev) => ev.id === projection.id)?.intervention, { reference: curative.reference, statut: 'PLANIFIEE', contratMaintenanceId: null });
+      // Le technicien affecté la voit à son planning et l'ouvre.
+      assert.equal(await voitAuPlanning(jeton('technicien'), curative.id), true);
+      assert.equal((await request(app).get(`/api/interventions/${curative.id}`).set(jeton('technicien'))).status, 200);
+
+      const res = await remettre(curative.id, jeton('admin'), { motif: `  ${MOTIF}  ` });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.deepEqual([res.body.id, res.body.statut, res.body.contratMaintenanceId, res.body.planningEvent, res.body.affectations], [curative.id, 'A_PLANIFIER', null, null, []]);
+      const apres = await etat(curative.id);
+      assert.deepEqual([apres.intervention.statut, apres.projection, apres.affectations], ['A_PLANIFIER', null, []]);
+      assert.equal(await prisma.planningEvent.count({ where: { id: projection.id } }), 0, 'créneau libéré');
+      assert.equal(await liensIntervenants(projection.id), 0);
+      // Journal SAV : changement de statut motivé ; la projection supprimée et ses intervenants dans l'« avant ».
+      const entree = apres.journal.at(-1);
+      assert.deepEqual([entree.cible, entree.cibleId, entree.action, entree.auteurId, entree.auteurNom, entree.motif],
+        ['INTERVENTION', curative.id, 'CHANGEMENT_STATUT', comptes.admin.id, 'TEST Replanif admin', `Remise à planifier : ${MOTIF}`]);
+      assert.deepEqual([entree.avant.statut, entree.apres.statut], ['PLANIFIEE', 'A_PLANIFIER']);
+      assert.deepEqual(entree.avant.planningEvent, projectionAuJournal(projection));
+      assert.deepEqual(entree.avant.affectations, [{ intervenantId: fiche.id }]);
+      assert.deepEqual([entree.apres.planningEvent, entree.apres.affectations], [null, []]);
+      assert.deepEqual(entree.avant.client, { id: clientId, raisonSociale: 'TEST Client remise à planifier' });
+      // Elle revient dans la file des interventions à planifier, sans contrat ni durée prévue, et sort du
+      // planning et du périmètre du technicien.
+      const file = (await request(app).get('/api/planning/interventions-a-planifier').set(admin())).body.find((item) => item.id === curative.id);
+      assert.deepEqual([file?.reference, file?.contratMaintenance, file?.dureePrevisionnelleMinutes], [curative.reference, null, null]);
+      assert.equal(await voitAuPlanning(admin(), curative.id), false);
+      assert.equal(await voitAuPlanning(jeton('technicien'), curative.id), false);
+      assert.equal((await request(app).get(`/api/interventions/${curative.id}`).set(jeton('technicien'))).status, 404);
+      // Elle se replace ensuite comme une curative à planifier (premier placement, journalisé).
+      const replacee = await placer(curative.id, { dateDebut: '2099-03-11' });
+      assert.equal(replacee.status, 200, JSON.stringify(replacee.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: curative.id } })).statut, 'PLANIFIEE');
+      assert.equal(await dansLaFile(curative.id), false);
+      const derniere = (await etat(curative.id)).journal.at(-1);
+      assert.deepEqual([derniere.action, derniere.avant.statut, derniere.apres.statut], ['CHANGEMENT_STATUT', 'A_PLANIFIER', 'PLANIFIEE']);
+    });
+
+    // Modifié par le lot du 24-10-2026 : le refus est désormais une décision de Nelson (réponse
+    // complémentaire au point 2) ; son message dit ce qui reste possible (déplacer le créneau, décidé le même
+    // jour ; terminer, puis ouvrir une nouvelle intervention). Les deux compteurs sont éprouvés séparément et
+    // ensemble ; la curative est refusée de même. Le créneau d'une intervention qui porte des saisies se
+    // déplace toujours au planning.
+    test('heures ou matériel non archivés refusent la remise, d’une visite comme d’une curative ; archivés, ils ne la retiennent plus', async () => {
       const { visite } = await visitePlanifiee('TEST Remise saisies vivantes');
       const fournisseur = await prisma.fournisseur.upsert({ where: { nom: 'TEST Fournisseur remise' }, update: {}, create: { nom: 'TEST Fournisseur remise' } });
       // Le technicien affecté saisit ses heures : son affectation les lui ouvre.
       const heure = await request(app).post(`/api/interventions/${visite.id}/couts/heures`).set(jeton('technicien')).send({ date: '02-01-2026', nbrHeures: 1.5 });
       assert.equal(heure.status, 201, JSON.stringify(heure.body));
       assert.equal((await request(app).get(`/api/interventions/${visite.id}/couts`).set(jeton('technicien'))).body.heures.length, 1);
-      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Remise impossible : cette visite porte déjà 1 saisie(s) d’heures du technicien et 0 achat(s) de matériel non archivés. Déplacez plutôt son créneau au planning.', 'heures vivantes');
-      const archivage = await request(app).post(`/api/interventions/${visite.id}/couts/heures/${heure.body.id}/archiver`).set(admin()).send({ motif: 'TEST Heure saisie par erreur' });
-      assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, refusSaisies(1, 0), 'heures vivantes');
       const achat = await request(app).post(`/api/interventions/${visite.id}/couts/achats`).set(admin()).send({ date: '02-01-2026', fournisseurId: fournisseur.id, description: 'TEST Filtre', montantHT: 12.5 });
       assert.equal(achat.status, 201, JSON.stringify(achat.body));
-      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Remise impossible : cette visite porte déjà 0 saisie(s) d’heures du technicien et 1 achat(s) de matériel non archivés. Déplacez plutôt son créneau au planning.', 'matériel vivant');
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, refusSaisies(1, 1), 'heures et matériel vivants');
+      // Son créneau se déplace toujours au planning, saisies comprises (décision de Nelson du 24-10-2026).
+      const deplacement = await placer(visite.id, { dateDebut: '2099-03-05' });
+      assert.equal(deplacement.status, 200, JSON.stringify(deplacement.body));
+      assert.deepEqual([(await etat(visite.id)).projection.dateDebut.toISOString(), (await etat(visite.id)).intervention.statut], ['2099-03-05T00:00:00.000Z', 'PLANIFIEE']);
+      const archivage = await request(app).post(`/api/interventions/${visite.id}/couts/heures/${heure.body.id}/archiver`).set(admin()).send({ motif: 'TEST Heure saisie par erreur' });
+      assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, refusSaisies(0, 1), 'matériel vivant');
       const archivageAchat = await request(app).post(`/api/interventions/${visite.id}/couts/achats/${achat.body.id}/archiver`).set(admin()).send({ motif: 'TEST Achat saisi par erreur' });
       assert.equal(archivageAchat.status, 200, JSON.stringify(archivageAchat.body));
       const res = await remettre(visite.id);
@@ -17840,6 +17955,18 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).get(`/api/interventions/${visite.id}`).set(jeton('technicien'))).status, 404);
       assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: visite.id, archivedAt: { not: null } } }), 1);
       assert.equal(await prisma.coutInterventionAchat.count({ where: { interventionId: visite.id, archivedAt: { not: null } } }), 1);
+
+      // Curative : le technicien affecté y saisit ses heures (hors contrat, sans matériel) ; elles retiennent
+      // la remise de la même façon, puis, archivées, ne la retiennent plus.
+      const { curative } = await curativePlanifiee('TEST Remise curative saisies vivantes');
+      const heureCurative = await request(app).post(`/api/interventions/${curative.id}/couts/heures`).set(jeton('technicien')).send({ date: '02-01-2026', nbrHeures: 2 });
+      assert.equal(heureCurative.status, 201, JSON.stringify(heureCurative.body));
+      await refusSansEcriture(curative.id, () => remettre(curative.id), 409, refusSaisies(1, 0), 'curative avec heures vivantes');
+      const archivageCurative = await request(app).post(`/api/interventions/${curative.id}/couts/heures/${heureCurative.body.id}/archiver`).set(admin()).send({ motif: 'TEST Heure saisie par erreur' });
+      assert.equal(archivageCurative.status, 200, JSON.stringify(archivageCurative.body));
+      const remiseCurative = await remettre(curative.id);
+      assert.equal(remiseCurative.status, 200, JSON.stringify(remiseCurative.body));
+      assert.deepEqual([(await etat(curative.id)).projection, await prisma.coutInterventionHeure.count({ where: { interventionId: curative.id, archivedAt: { not: null } } })], [null, 1]);
     });
 
     test('mêmes droits que le placement : hors périmètre 404, technicien, commercial et types sans planning 403, module désactivé, aucune clé d’intégration', async () => {
@@ -17861,11 +17988,12 @@ if (!TEST_DATABASE_URL) {
       const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
       await refusSansEcriture(visite.id, () => remettre(visite.id, parCle), 401, 'Session expirée ou invalide', 'clé d’intégration');
       await refusSansEcriture(visite.id, () => request(app).post(`/api/v1/interventions/${visite.id}/remise-a-planifier`).set(parCle).send({ motif: MOTIF }), 404, undefined, 'porte /api/v1');
-      // Le conducteur passe les gardes : sur sa propre curative, c'est la règle métier qui répond.
-      const curative = await request(app).post('/api/interventions').set(jeton('conducteur')).send({ clientId, titre: 'TEST Remise curative du conducteur' });
-      assert.equal(curative.status, 201, JSON.stringify(curative.body));
-      assert.equal((await placer(curative.body.id, {}, jeton('conducteur'))).status, 200);
-      await refusSansEcriture(curative.body.id, () => remettre(curative.body.id, jeton('conducteur')), 409, REFUS_CURATIVE, 'curative du conducteur');
+      // Le conducteur passe les gardes : sa propre curative, dans son périmètre, se remet « à planifier »
+      // (modifié par le lot du 24-10-2026 : elle était refusée par le refus « curative », retiré).
+      const { curative } = await curativePlanifiee('TEST Remise curative du conducteur', jeton('conducteur'));
+      const parConducteur = await remettre(curative.id, jeton('conducteur'));
+      assert.equal(parConducteur.status, 200, JSON.stringify(parConducteur.body));
+      assert.deepEqual([parConducteur.body.statut, (await etat(curative.id)).projection], ['A_PLANIFIER', null]);
       // Module Planning désactivé : refusé à l'administrateur, comme le placement ; le super
       // administrateur garde le planning (requirePlanningActif).
       const parametres = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
@@ -17944,7 +18072,7 @@ if (!TEST_DATABASE_URL) {
       ]);
       assert.equal(depart.status, 200, JSON.stringify(depart.body));
       assert.equal(refus.status, 409, JSON.stringify(refus.body));
-      assert.equal(refus.body.error, 'Seule une visite planifiée se remet « à planifier » : celle-ci est en cours.');
+      assert.equal(refus.body.error, refusStatut('en cours'));
       const etatA = await etat(premier.visite.id);
       assert.equal(etatA.intervention.statut, 'EN_COURS');
       assert.equal(etatA.projection.id, premier.projection.id);
@@ -17962,6 +18090,33 @@ if (!TEST_DATABASE_URL) {
       assert.equal(demarrage.body.error, 'Transition impossible : A_PLANIFIER vers EN_COURS.');
       const etatB = await etat(second.visite.id);
       assert.deepEqual([etatB.intervention.statut, etatB.projection, etatB.affectations], ['A_PLANIFIER', null, []]);
+
+      // Annulation d'abord : elle retire le créneau ; la remise, relue sous verrou, trouve une intervention annulée.
+      const troisieme = await visitePlanifiee('TEST Course annulation puis remise');
+      const [annulation, refusAnnulee] = await enFileSurLaVisite(troisieme.visite.id, [
+        () => changerStatut(troisieme.visite.id, 'ANNULEE'),
+        () => remettre(troisieme.visite.id),
+      ]);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal(refusAnnulee.status, 409, JSON.stringify(refusAnnulee.body));
+      assert.equal(refusAnnulee.body.error, refusStatut('annulée'));
+      const etatC = await etat(troisieme.visite.id);
+      assert.deepEqual([etatC.intervention.statut, etatC.projection, etatC.affectations], ['ANNULEE', null, []]);
+      assert.equal(etatC.journal.filter((e) => e.motif?.startsWith('Remise à planifier')).length, 0);
+      assert.equal(etatC.journal.at(-1).avant.planningEvent.id, troisieme.projection.id);
+
+      // Remise d'abord : l'annulation, relue sous verrou, annule une intervention à planifier, sans créneau.
+      const quatrieme = await visitePlanifiee('TEST Course remise puis annulation');
+      const [remiseD, annulationD] = await enFileSurLaVisite(quatrieme.visite.id, [
+        () => remettre(quatrieme.visite.id),
+        () => changerStatut(quatrieme.visite.id, 'ANNULEE'),
+      ]);
+      assert.equal(remiseD.status, 200, JSON.stringify(remiseD.body));
+      assert.equal(annulationD.status, 200, JSON.stringify(annulationD.body));
+      const etatD = await etat(quatrieme.visite.id);
+      assert.deepEqual([etatD.intervention.statut, etatD.projection, etatD.affectations], ['ANNULEE', null, []]);
+      assert.deepEqual(etatD.journal.slice(-2).map((e) => [e.avant.statut, e.apres.statut, e.avant.planningEvent?.id ?? null]),
+        [['PLANIFIEE', 'A_PLANIFIER', quatrieme.projection.id], ['A_PLANIFIER', 'ANNULEE', null]]);
     });
 
     test('périmètre relu sous le verrou : un conducteur retiré de la visite pendant l’attente la trouve introuvable, sans rien écrire', async () => {
@@ -18005,6 +18160,8 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual(fin.affectations.map((a) => a.intervenantId), intervenantsProjection, `tour ${tour}`);
         if (fin.intervention.statut === 'A_PLANIFIER') assert.equal(fin.projection, null, `tour ${tour} : une visite à planifier n’a pas de créneau`);
         if (['PLANIFIEE', 'EN_COURS'].includes(fin.intervention.statut)) assert.ok(fin.projection, `tour ${tour} : une visite planifiée ou en cours garde un créneau`);
+        // Une visite annulée n'a plus ni créneau ni affectation (décision du 24-10-2026, point 7).
+        if (fin.intervention.statut === 'ANNULEE') assert.deepEqual([fin.projection, fin.affectations], [null, []], `tour ${tour} : une visite annulée n’a plus de créneau`);
         // Une remise acceptée est journalisée une fois, avec son motif ; refusée, elle n'écrit rien.
         assert.equal(fin.journal.filter((e) => e.motif === `Remise à planifier : ${MOTIF}`).length, reponses[0].status === 200 ? 1 : 0, `tour ${tour}`);
       }
@@ -18033,7 +18190,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(fin.journal.slice(-2).map((e) => [e.avant.statut, e.apres.statut]), [['PLANIFIEE', 'A_PLANIFIER'], ['A_PLANIFIER', 'ANNULEE']]);
       assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.body.id } })).statut, 'ANNULE');
       // Un contrat annulé n'a plus de visite planifiée : la remise de sa visite annulée est refusée.
-      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Seule une visite planifiée se remet « à planifier » : celle-ci est annulée.', 'visite d’un contrat annulé');
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, refusStatut('annulée'), 'visite d’un contrat annulé');
     });
 
     test('contrat suspendu ou clos : la remise libère le créneau sans contrôler le contrat ; la file suit le statut du contrat', async () => {
@@ -18093,6 +18250,273 @@ if (!TEST_DATABASE_URL) {
       const visites = await prisma.intervention.findMany({ where: { contratMaintenanceId: contrat.id } });
       assert.deepEqual(visites.map((v) => [v.id, v.statut, v.echeanceContrat.toISOString()]), [[visite.id, 'A_PLANIFIER', '2020-01-01T00:00:00.000Z']]);
       assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).prochaineEcheance.toISOString(), '2020-01-01T00:00:00.000Z');
+    });
+
+    // Décision de Nelson du 24-10-2026, point 7 (« Retirer du planning ») : à l'annulation d'une
+    // intervention, depuis sa fiche ou avec son devis, son créneau est retiré du planning (projection et
+    // affectations SAV), dans la même transaction, sous le verrou de l'intervention ; le journal SAV garde
+    // ce qui est retiré dans l'« avant », avec un « après » de même forme. Ce comportement remplace le défaut
+    // connu « Projection d'une intervention annulée » (passation, section 1).
+    describe('Annulation : le créneau retiré du planning', () => {
+      const secours = () => prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } });
+      // Devis signé, converti vers les cibles demandées (contrat d'échéance 2099, intervention SAV).
+      const devisConvertiEn = async (objet, cibles) => {
+        await completerIdentiteClient(clientId);
+        const devis = await request(app).post('/api/devis').set(admin()).send({ clientId, objet, lignes: [{ designation: 'Visite annuelle', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+        assert.equal(devis.status, 201, JSON.stringify(devis.body));
+        assert.equal((await request(app).put(`/api/devis/${devis.body.id}/statut`).set(admin()).send({ statut: 'ENVOYE' })).status, 200);
+        const signature = await request(app).post(`/api/devis/${devis.body.id}/signature`).set(admin()).send({ signataire: 'TEST Signataire', confirme: true });
+        assert.equal(signature.status, 201, JSON.stringify(signature.body));
+        const crees = {};
+        for (const cible of cibles) {
+          const corps = cible === 'CONTRAT' ? { periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2099' } : {};
+          const conversion = await request(app).post(`/api/devis/${devis.body.id}/convertir`).set(admin()).send({ cible, ...corps });
+          assert.equal(conversion.status, 201, `${cible} : ${JSON.stringify(conversion.body)}`);
+          crees[cible] = conversion.body;
+        }
+        return { devis: devis.body, ...crees };
+      };
+      const annulerDevis = (devisId, motif = 'TEST annulation du devis') => request(app).post(`/api/devis/${devisId}/annulation`).set(admin()).send({ motif });
+      // Une intervention annulée : ni créneau, ni affectation, ni lien avec ses anciens intervenants.
+      const sansCreneau = async (id, projectionId, contexte) => {
+        const fin = await etat(id);
+        assert.deepEqual([fin.intervention.statut, fin.projection, fin.affectations], ['ANNULEE', null, []], contexte);
+        if (projectionId) {
+          assert.equal(await prisma.planningEvent.count({ where: { id: projectionId } }), 0, `${contexte} : projection supprimée`);
+          assert.equal(await liensIntervenants(projectionId), 0, `${contexte} : intervenants détachés`);
+        }
+        return fin;
+      };
+
+      test('depuis la fiche, une intervention planifiée perd son créneau et ses affectations ; journal « avant » complet, « après » vide de même forme ; le technicien ne la voit plus', async () => {
+        const auteur = await secours();
+        for (const [nature, preparer] of [
+          ['visite', async () => { const { visite, projection } = await visitePlanifiee('TEST Annulation visite planifiée'); return { intervention: visite, projection }; }],
+          ['curative', async () => { const { curative, projection } = await curativePlanifiee('TEST Annulation curative planifiée'); return { intervention: curative, projection }; }],
+        ]) {
+          const { intervention, projection } = await preparer();
+          assert.equal(await voitAuPlanning(jeton('technicien'), intervention.id), true, `${nature} : le technicien affecté la voit`);
+          const res = await changerStatut(intervention.id, 'ANNULEE');
+          assert.equal(res.status, 200, `${nature} : ${JSON.stringify(res.body)}`);
+          assert.deepEqual([res.body.statut, res.body.planningEvent, res.body.affectations], ['ANNULEE', null, []], nature);
+          const fin = await sansCreneau(intervention.id, projection.id, nature);
+          const entree = fin.journal.at(-1);
+          assert.deepEqual([entree.cible, entree.cibleId, entree.action, entree.auteurId, entree.motif], ['INTERVENTION', intervention.id, 'CHANGEMENT_STATUT', auteur.id, `Annulation : ${MOTIF_ANNULATION}`], nature);
+          assert.deepEqual([entree.avant.statut, entree.apres.statut], ['PLANIFIEE', 'ANNULEE'], nature);
+          assert.deepEqual(entree.avant.planningEvent, projectionAuJournal(projection), `${nature} : la projection supprimée au journal`);
+          assert.deepEqual(entree.avant.affectations, [{ intervenantId: fiche.id }], nature);
+          assert.deepEqual([entree.apres.planningEvent, entree.apres.affectations], [null, []], nature);
+          assert.deepEqual(Object.keys(entree.apres).sort(), Object.keys(entree.avant).sort(), `${nature} : même forme avant et après`);
+          assert.deepEqual(entree.avant.client, { id: clientId, raisonSociale: 'TEST Client remise à planifier' }, nature);
+          // Le planning ne la montre plus, ni à l'administration ni au technicien, qui la perd de son
+          // périmètre, y compris dans la liste avec les annulées ; elle n'entre pas dans la file.
+          assert.equal(await voitAuPlanning(admin(), intervention.id), false, nature);
+          assert.equal(await voitAuPlanning(jeton('technicien'), intervention.id), false, nature);
+          const listeTechnicien = await request(app).get('/api/interventions?inclureAnnulees=true').set(jeton('technicien'));
+          assert.equal(listeTechnicien.body.some((item) => item.id === intervention.id), false, nature);
+          assert.equal(await dansLaFile(intervention.id), false, nature);
+          // L'ancienne projection n'existe plus pour le planning (défaut connu corrigé : il répondait 409,
+          // « projection liée ») ; un nouveau placement est refusé, sans rien écrire.
+          assert.equal((await request(app).patch(`/api/planning/events/${projection.id}`).set(admin()).send({ dateDebut: '2099-03-05', dateFin: '2099-03-05' })).status, 404, nature);
+          assert.equal((await request(app).delete(`/api/planning/events/${projection.id}`).set(admin())).status, 404, nature);
+          await refusSansEcriture(intervention.id, () => placer(intervention.id), 409, 'Cette intervention ne peut plus être planifiée.', `${nature} : placement refusé`);
+        }
+      });
+
+      // Décision de Nelson du 24-10-2026 (« Oui un motif pour une annulation depuis sa fiche ») : annuler
+      // exige un motif de 3 à 500 caractères, écrit au journal avec le changement de statut ; il ne
+      // s'indique qu'en annulant. Un refus n'écrit rien : ni statut, ni créneau, ni affectation, ni journal.
+      test('annuler depuis la fiche exige un motif : chaque refus n’écrit rien ; le motif va au journal ; il ne s’indique qu’en annulant', async () => {
+        const MOTIF_ANNULATION_INVALIDE = 'Un motif de 3 à 500 caractères sans caractère de contrôle est obligatoire pour annuler l’intervention.';
+        const annuler = (id, corps, enTete = admin()) => request(app).patch(`/api/interventions/${id}/statut`).set(enTete).send({ statut: 'ANNULEE', ...corps });
+        const { curative, projection } = await curativePlanifiee('TEST Annulation motif obligatoire');
+        for (const [corps, contexte] of [
+          [{}, 'motif absent'], [{ motif: '' }, 'motif vide'], [{ motif: '  ab  ' }, 'deux caractères'], [{ motif: 'a'.repeat(501) }, '501 caractères'],
+          [{ motif: 123 }, 'motif non textuel'], [{ motif: null }, 'motif nul'], [{ motif: 'abc\u0007def' }, 'caractère de contrôle'], [{ motif: 'Avant\naprès' }, 'retour à la ligne'],
+          [{ motif: 'abc\u200bdef' }, 'caractère de mise en forme'], [{ motif: 'abc\ud800def' }, 'demi-paire de substitution'],
+        ]) {
+          await refusSansEcriture(curative.id, () => annuler(curative.id, corps), 400, MOTIF_ANNULATION_INVALIDE, contexte);
+        }
+        // Hors périmètre, l'intervention reste introuvable, motif ou non ; le technicien affecté reste refusé.
+        await refusSansEcriture(curative.id, () => annuler(curative.id, {}, jeton('conducteur')), 404, 'Intervention introuvable.', 'conducteur hors périmètre');
+        await refusSansEcriture(curative.id, () => annuler(curative.id, { motif: MOTIF_ANNULATION }, jeton('technicien')), 403, 'Un technicien peut uniquement démarrer ou terminer son intervention.', 'technicien affecté');
+        // Une clé d'intégration n'annule pas : la route est de session, et aucune porte /api/v1 n'existe.
+        const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST agent annulation', scopes: ['clients:read', 'chantiers:write'] });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        const parCle = { Authorization: `Bearer ${cle.body.apiKey}` };
+        await refusSansEcriture(curative.id, () => annuler(curative.id, { motif: MOTIF_ANNULATION }, parCle), 401, 'Session expirée ou invalide', 'clé d’intégration');
+        await refusSansEcriture(curative.id, () => request(app).patch(`/api/v1/interventions/${curative.id}/statut`).set(parCle).send({ statut: 'ANNULEE', motif: MOTIF_ANNULATION }), 404, undefined, 'porte /api/v1');
+        // Un motif envoyé avec une autre transition est refusé, sans rien écrire.
+        await refusSansEcriture(curative.id, () => request(app).patch(`/api/interventions/${curative.id}/statut`).set(admin()).send({ statut: 'EN_COURS', motif: MOTIF_ANNULATION }), 400, 'Un motif ne s’indique qu’en annulant l’intervention.', 'motif au démarrage');
+        await refusSansEcriture(curative.id, () => request(app).patch(`/api/interventions/${curative.id}/statut`).set(admin()).send({ statut: 'EN_COURS', motif: '' }), 400, 'Un motif ne s’indique qu’en annulant l’intervention.', 'motif vide au démarrage');
+        // Bornes admises : 3 caractères (un emoji compte pour un) et 500 ; espaces de bord retirées ; le
+        // motif est écrit au journal avec le changement de statut, le créneau retiré dans l'« avant ».
+        const res = await annuler(curative.id, { motif: '  👍ab  ' });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        const fin = await sansCreneau(curative.id, projection.id, 'annulation motivée');
+        const entree = fin.journal.at(-1);
+        assert.deepEqual([entree.action, entree.motif, entree.avant.statut, entree.apres.statut, entree.avant.planningEvent?.id], ['CHANGEMENT_STATUT', 'Annulation : 👍ab', 'PLANIFIEE', 'ANNULEE', projection.id]);
+        const longue = await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Annulation motif de 500 caractères' });
+        assert.equal(longue.status, 201, JSON.stringify(longue.body));
+        assert.equal((await annuler(longue.body.id, { motif: 'm'.repeat(500) })).status, 200);
+        assert.equal((await etat(longue.body.id)).journal.at(-1).motif, `Annulation : ${'m'.repeat(500)}`);
+        // Le motif d'une clôture sans signature reste réservé à la clôture, y compris en annulant.
+        const autre = await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Annulation avec motif de clôture' });
+        assert.equal(autre.status, 201, JSON.stringify(autre.body));
+        await refusSansEcriture(autre.body.id, () => annuler(autre.body.id, { motif: MOTIF_ANNULATION, motifSansSignature: 'CLIENT_ABSENT' }), 400, 'Un motif sans signature ne s’indique qu’en terminant l’intervention.', 'motif de clôture en annulant');
+      });
+
+      test('une intervention en cours avec créneau et heures : le créneau est retiré, les heures restent ; les autres transitions gardent leur journal', async () => {
+        const { curative, projection } = await curativePlanifiee('TEST Annulation en cours avec heures');
+        assert.equal((await changerStatut(curative.id, 'EN_COURS')).status, 200);
+        // Le démarrage garde son instantané : le client seul, sans projection ni affectations.
+        const demarrage = (await etat(curative.id)).journal.at(-1);
+        assert.deepEqual([demarrage.avant.statut, demarrage.apres.statut], ['PLANIFIEE', 'EN_COURS']);
+        assert.deepEqual(['planningEvent' in demarrage.avant, 'affectations' in demarrage.avant, 'planningEvent' in demarrage.apres, 'affectations' in demarrage.apres], [false, false, false, false]);
+        assert.deepEqual(demarrage.avant.client, { id: clientId, raisonSociale: 'TEST Client remise à planifier' });
+        const heure = await request(app).post(`/api/interventions/${curative.id}/couts/heures`).set(jeton('technicien')).send({ date: '02-01-2026', nbrHeures: 3 });
+        assert.equal(heure.status, 201, JSON.stringify(heure.body));
+
+        const res = await changerStatut(curative.id, 'ANNULEE');
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        const fin = await sansCreneau(curative.id, projection.id, 'en cours');
+        const entree = fin.journal.at(-1);
+        assert.deepEqual([entree.avant.statut, entree.apres.statut], ['EN_COURS', 'ANNULEE']);
+        assert.deepEqual([entree.avant.planningEvent, entree.avant.affectations], [projectionAuJournal(projection), [{ intervenantId: fiche.id }]]);
+        assert.deepEqual([entree.apres.planningEvent, entree.apres.affectations], [null, []]);
+        // Les heures restent vivantes, rattachées à l'intervention annulée, lisibles par l'encadrement ; le
+        // technicien n'en a plus la surface.
+        const heures = await prisma.coutInterventionHeure.findMany({ where: { interventionId: curative.id } });
+        assert.deepEqual(heures.map((h) => [h.id, h.archivedAt, Number(h.nbrHeures)]), [[heure.body.id, null, 3]]);
+        const couts = await request(app).get(`/api/interventions/${curative.id}/couts`).set(admin());
+        assert.equal(couts.status, 200, JSON.stringify(couts.body));
+        assert.deepEqual(couts.body.heures.map((h) => h.id), [heure.body.id]);
+        assert.equal((await request(app).get(`/api/interventions/${curative.id}/couts`).set(jeton('technicien'))).status, 404);
+        assert.equal(await voitAuPlanning(jeton('technicien'), curative.id), false);
+      });
+
+      test('une intervention sans créneau s’annule comme avant, avec un journal de même forme, vide avant comme après', async () => {
+        const curative = await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Annulation sans créneau à planifier' });
+        assert.equal(curative.status, 201, JSON.stringify(curative.body));
+        const visite = await genererVisite((await creerContrat('TEST Annulation planifiée sans créneau')).id);
+        assert.equal((await changerStatut(visite.id, 'PLANIFIEE')).status, 200);
+        for (const [id, statutAvant] of [[curative.body.id, 'A_PLANIFIER'], [visite.id, 'PLANIFIEE']]) {
+          const res = await changerStatut(id, 'ANNULEE');
+          assert.equal(res.status, 200, JSON.stringify(res.body));
+          const fin = await sansCreneau(id, null, statutAvant);
+          const entree = fin.journal.at(-1);
+          assert.deepEqual([entree.action, entree.avant.statut, entree.apres.statut, entree.avant.planningEvent, entree.avant.affectations, entree.apres.planningEvent, entree.apres.affectations],
+            ['CHANGEMENT_STATUT', statutAvant, 'ANNULEE', null, [], null, []], statutAvant);
+        }
+      });
+
+      test('annulation du devis en cascade : l’intervention SAV et la visite planifiées perdent créneau et affectations, journal compris', async () => {
+        const { devis, CONTRAT: contrat, INTERVENTION: sav } = await devisConvertiEn('TEST Annulation en cascade avec créneaux', ['CONTRAT', 'INTERVENTION']);
+        const visite = await genererVisite(contrat.id);
+        const placementVisite = await placer(visite.id);
+        assert.equal(placementVisite.status, 200, JSON.stringify(placementVisite.body));
+        const placementSav = await placer(sav.id, { dateDebut: '2099-03-05', intervenantIds: [fiche.id, ficheBis.id] });
+        assert.equal(placementSav.status, 200, JSON.stringify(placementSav.body));
+        for (const id of [visite.id, sav.id]) assert.equal(await voitAuPlanning(jeton('technicien'), id), true);
+
+        const auteur = await secours();
+        const res = await annulerDevis(devis.id, 'TEST le client renonce');
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        assert.deepEqual([...res.body.interventionsAnnulees].sort(), [visite.id, sav.id].sort());
+        const motif = `Annulation du devis ${devis.numero} (version 1) : TEST le client renonce`;
+        for (const [id, projection, options, affectations] of [
+          [visite.id, placementVisite.body, {}, [{ intervenantId: fiche.id }]],
+          [sav.id, placementSav.body, { dateDebut: '2099-03-05', intervenants: [fiche, ficheBis] }, [fiche.id, ficheBis.id].sort().map((intervenantId) => ({ intervenantId }))],
+        ]) {
+          const fin = await sansCreneau(id, projection.id, id === sav.id ? 'intervention SAV' : 'visite');
+          const entree = fin.journal.at(-1);
+          assert.deepEqual([entree.action, entree.auteurId, entree.motif, entree.avant.statut, entree.apres.statut], ['CHANGEMENT_STATUT', auteur.id, motif, 'PLANIFIEE', 'ANNULEE']);
+          assert.deepEqual([entree.avant.planningEvent, entree.avant.affectations], [projectionAuJournal(projection, options), affectations]);
+          assert.deepEqual([entree.apres.planningEvent, entree.apres.affectations], [null, []]);
+          assert.equal(await voitAuPlanning(jeton('technicien'), id), false);
+          assert.equal(await voitAuPlanning(admin(), id), false);
+        }
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).statut, 'ANNULE');
+      });
+
+      // La course se règle sous le verrou de l'intervention : celle des deux qui l'obtient en second relit
+      // ce que l'autre a écrit. Jamais de projection ni d'affectation sur une intervention annulée.
+      test('course entre l’annulation depuis la fiche et un placement, dans les deux ordres : aucune projection orpheline', async () => {
+        // Annulation d'abord : le placement, qui relit le statut sous le verrou, est refusé.
+        const premier = await visitePlanifiee('TEST Course annulation puis placement');
+        const [annulationA, placementA] = await enFileSurLaVisite(premier.visite.id, [
+          () => changerStatut(premier.visite.id, 'ANNULEE'),
+          () => placer(premier.visite.id, { dateDebut: '2099-04-01', intervenantIds: [ficheBis.id] }),
+        ]);
+        assert.equal(annulationA.status, 200, JSON.stringify(annulationA.body));
+        assert.equal(placementA.status, 409, JSON.stringify(placementA.body));
+        assert.equal(placementA.body.error, 'Cette intervention ne peut plus être planifiée.');
+        const finA = await sansCreneau(premier.visite.id, premier.projection.id, 'annulation puis placement');
+        assert.equal(finA.journal.at(-1).avant.planningEvent.id, premier.projection.id);
+        // Premier placement d'une curative à planifier, engagé pendant son annulation : refusé, rien n'est créé.
+        const curative = await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Course annulation puis premier placement' });
+        assert.equal(curative.status, 201, JSON.stringify(curative.body));
+        const [annulationC, placementC] = await enFileSurLaVisite(curative.body.id, [
+          () => changerStatut(curative.body.id, 'ANNULEE'),
+          () => placer(curative.body.id),
+        ]);
+        assert.deepEqual([annulationC.status, placementC.status], [200, 409], JSON.stringify([annulationC.body, placementC.body]));
+        const finC = await sansCreneau(curative.body.id, null, 'annulation puis premier placement');
+        assert.deepEqual([finC.journal.at(-1).avant.statut, finC.journal.at(-1).avant.planningEvent], ['A_PLANIFIER', null]);
+
+        // Placement d'abord (créneau déplacé, autre intervenant) : l'annulation retire le créneau qu'il vient
+        // d'écrire, relu sous le verrou, et l'affectation qu'il venait de poser.
+        const second = await visitePlanifiee('TEST Course placement puis annulation');
+        const [placementB, annulationB] = await enFileSurLaVisite(second.visite.id, [
+          () => placer(second.visite.id, { dateDebut: '2099-05-06', intervenantIds: [ficheBis.id] }),
+          () => changerStatut(second.visite.id, 'ANNULEE'),
+        ]);
+        assert.equal(placementB.status, 200, JSON.stringify(placementB.body));
+        assert.equal(annulationB.status, 200, JSON.stringify(annulationB.body));
+        const finB = await sansCreneau(second.visite.id, second.projection.id, 'placement puis annulation');
+        const entreeB = finB.journal.at(-1);
+        assert.equal(entreeB.avant.planningEvent.dateDebut, '2099-05-06T00:00:00.000Z', 'le créneau retiré est celui que le placement venait d’écrire');
+        assert.deepEqual([entreeB.avant.planningEvent.intervenants, entreeB.avant.affectations], [[{ id: ficheBis.id, nom: ficheBis.nom }], [{ intervenantId: ficheBis.id }]]);
+        // Premier placement d'une curative, puis son annulation : la projection créée est retirée.
+        const curativeD = await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Course premier placement puis annulation' });
+        assert.equal(curativeD.status, 201, JSON.stringify(curativeD.body));
+        const [placementD, annulationD] = await enFileSurLaVisite(curativeD.body.id, [
+          () => placer(curativeD.body.id),
+          () => changerStatut(curativeD.body.id, 'ANNULEE'),
+        ]);
+        assert.deepEqual([placementD.status, annulationD.status], [200, 200], JSON.stringify([placementD.body, annulationD.body]));
+        const finD = await sansCreneau(curativeD.body.id, placementD.body.id, 'premier placement puis annulation');
+        assert.deepEqual([finD.journal.at(-1).avant.statut, finD.journal.at(-1).avant.planningEvent?.id], ['PLANIFIEE', placementD.body.id]);
+      });
+
+      test('course entre l’annulation d’un devis et le placement de sa visite, dans les deux ordres : aucune projection orpheline', async () => {
+        // Annulation du devis d'abord : le placement de la visite, relu sous le verrou, est refusé.
+        const premier = await devisConvertiEn('TEST Course annulation du devis puis placement', ['CONTRAT']);
+        const visiteA = await genererVisite(premier.CONTRAT.id);
+        const projectionA = await placer(visiteA.id);
+        assert.equal(projectionA.status, 200, JSON.stringify(projectionA.body));
+        const [annulationA, placementA] = await enFileSurLaVisite(visiteA.id, [
+          () => annulerDevis(premier.devis.id),
+          () => placer(visiteA.id, { dateDebut: '2099-04-01', intervenantIds: [ficheBis.id] }),
+        ]);
+        assert.equal(annulationA.status, 200, JSON.stringify(annulationA.body));
+        assert.equal(placementA.status, 409, JSON.stringify(placementA.body));
+        await sansCreneau(visiteA.id, projectionA.body.id, 'annulation du devis puis placement');
+
+        // Placement d'abord : l'annulation du devis retire le créneau que le placement vient de déplacer.
+        const second = await devisConvertiEn('TEST Course placement puis annulation du devis', ['CONTRAT']);
+        const visiteB = await genererVisite(second.CONTRAT.id);
+        const projectionB = await placer(visiteB.id);
+        assert.equal(projectionB.status, 200, JSON.stringify(projectionB.body));
+        const [placementB, annulationB] = await enFileSurLaVisite(visiteB.id, [
+          () => placer(visiteB.id, { dateDebut: '2099-05-06', intervenantIds: [ficheBis.id] }),
+          () => annulerDevis(second.devis.id),
+        ]);
+        assert.equal(placementB.status, 200, JSON.stringify(placementB.body));
+        assert.equal(annulationB.status, 200, JSON.stringify(annulationB.body));
+        const finB = await sansCreneau(visiteB.id, projectionB.body.id, 'placement puis annulation du devis');
+        assert.equal(finB.journal.at(-1).avant.planningEvent.dateDebut, '2099-05-06T00:00:00.000Z');
+      });
     });
   });
 }

@@ -307,7 +307,7 @@ test('après une clôture à l’issue inconnue ou refusée, les autres cartes g
   await expect(carte(temoin).getByRole('button', { name: 'Terminer' })).toBeVisible();
   // 2. L'intervention est annulée ailleurs pendant que le formulaire est ouvert.
   await carte(annulee).getByRole('button', { name: 'Terminer' }).click();
-  expect((await request.patch(`${api}/interventions/${annulee.intervention.id}/statut`, { headers: annulee.headers, data: { statut: 'ANNULEE' } })).ok()).toBeTruthy();
+  expect((await request.patch(`${api}/interventions/${annulee.intervention.id}/statut`, { headers: annulee.headers, data: { statut: 'ANNULEE', motif: 'Annulée ailleurs pendant la clôture' } })).ok()).toBeTruthy();
   const cloture = carte(annulee).getByRole('dialog', { name: 'Terminer l’intervention' });
   await cloture.getByRole('radio', { name: 'Client absent' }).check();
   await cloture.getByRole('button', { name: 'Terminer sans signature' }).click();

@@ -16,10 +16,10 @@ import {
   CHANTIER_INTERVENTION_SELECT, chantierDuJournalReduit, journaliserIntervention, exposerIntervention, estEncadrementCoutIntervention,
   chargerInterventionCout, interventionCoutEligible, interventionHeuresEligible, dateHeuresIntervention, estConflitTransactionCout, verrouillerContexteCout, heureOperationnelleTechnicien,
   journaliserCoutIntervention, totalHeuresInterventionAuCentime, getInterventionFilterForUser, synchroniserAffectationsIntervention,
-  lireDetailsIntervention, creerInterventionNumerotee, SaisieInterventionInvalide, PRIORITES_INTERVENTION,
+  lireDetailsIntervention, creerInterventionNumerotee, SaisieInterventionInvalide, PRIORITES_INTERVENTION, INSTANTANE_CRENEAU, retirerCreneauIntervention,
 } from './metier';
 import {
-  RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereInvalide, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, traceSignatureValide, verrouillerIntervention,
+  RAPPORT_SELECT, SIGNATURE_SELECT, cleEnvoiValide, contientCaractereInvalide, empreinteSignature, interventionDansPerimetre, journaliserCompteRendu, motifClotureValide, motifInterventionValide, traceSignatureValide, verrouillerIntervention,
 } from './comptesRendus';
 import { enregistrerLecturesInterventions } from './lectures';
 import { enregistrerRemiseAPlanifier } from './remiseAPlanifier';
@@ -31,6 +31,9 @@ class RefusIntervention extends Error {}
 class InterventionHorsPerimetre extends Error {}
 
 const HEURES_DATE_FUTURE = 'Des heures se déclarent une fois faites : la date ne peut pas dépasser aujourd’hui.';
+// Instantané du journal SAV d'un changement de statut qui laisse le créneau en place.
+const AVEC_CLIENT = { client: { select: { id: true, raisonSociale: true } } } as const;
+const MOTIF_ANNULATION_INVALIDE = 'Un motif de 3 à 500 caractères sans caractère de contrôle est obligatoire pour annuler l’intervention.';
 
 export function enregistrerRoutesInterventions(app: Express): void {
   app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, res, next) => {
@@ -341,7 +344,9 @@ export function enregistrerRoutesInterventions(app: Express): void {
   // créer un nouveau dossier relié au même client (lot dédié avec motif de reprise).
   // Terminer exige un compte rendu, signé par le client ou, à défaut, accompagné d'un motif consigné
   // au journal, pour tous les comptes (décisions de Nelson des 19 et 20-10-2026). La transition et
-  // cette règle se vérifient sous le verrou exclusif de l'intervention.
+  // cette règle se vérifient sous le verrou exclusif de l'intervention. Annuler exige un motif et retire
+  // le créneau du planning (décisions de Nelson du 24-10-2026 : « Oui un motif pour une annulation depuis
+  // sa fiche », « Retirer du planning »).
   app.patch('/api/interventions/:id/statut', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       const statut = String(req.body?.statut || '');
@@ -364,6 +369,12 @@ export function enregistrerRoutesInterventions(app: Express): void {
       });
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       if (req.user?.role === ROLE_TECHNICIEN && !['EN_COURS', 'TERMINEE'].includes(statut)) return res.status(403).json({ error: 'Un technicien peut uniquement démarrer ou terminer son intervention.' });
+      // Motif de l'annulation (champ `motif`), obligatoire, de 3 à 500 caractères, écrit au journal SAV ; il
+      // ne s'indique qu'en annulant, comme le motif sans signature qu'en terminant.
+      const annulation = statut === 'ANNULEE';
+      const motifAnnulation = annulation ? motifInterventionValide(req.body?.motif) : null;
+      if (annulation && !motifAnnulation) return res.status(400).json({ error: MOTIF_ANNULATION_INVALIDE });
+      if (!annulation && req.body?.motif !== undefined) return res.status(400).json({ error: 'Un motif ne s’indique qu’en annulant l’intervention.' });
       if (!transitions[intervention.statut]?.includes(statut)) {
         return res.status(409).json({ error: `Transition impossible : ${intervention.statut} vers ${statut}.` });
       }
@@ -378,11 +389,15 @@ export function enregistrerRoutesInterventions(app: Express): void {
           if (signe && motif.texte) throw new RefusIntervention('Un compte rendu est signé par le client : aucun motif n’est à donner.');
           if (!signe && !motif.texte) throw new RefusIntervention('Sans signature du client, choisissez un motif pour terminer l’intervention.');
         }
-        const avant = await tx.intervention.findUniqueOrThrow({ where: { id: intervention.id }, include: { client: { select: { id: true, raisonSociale: true } } } });
-        const modifiee = await tx.intervention.update({
-          where: { id: intervention.id }, data: { statut }, include: { client: { select: { id: true, raisonSociale: true } } },
-        });
-        await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, avant, motif.texte ?? undefined);
+        // Une annulation retire le créneau du planning (décision de Nelson du 24-10-2026, point 7) : sa
+        // projection et ses affectations SAV, sous ce verrou, dans cette transaction. Son journal garde
+        // ce qui est retiré dans l'« avant », avec un « après » de même forme ; les autres transitions
+        // gardent leur instantané (le client seul).
+        const instantane = annulation ? INSTANTANE_CRENEAU : AVEC_CLIENT;
+        const avant = await tx.intervention.findUniqueOrThrow({ where: { id: intervention.id }, include: instantane });
+        if (annulation) await retirerCreneauIntervention(tx, intervention.id);
+        const modifiee = await tx.intervention.update({ where: { id: intervention.id }, data: { statut }, include: instantane });
+        await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, avant, annulation ? `Annulation : ${motifAnnulation}` : motif.texte ?? undefined);
         return modifiee;
       });
       res.json(decimalToNumber(updated));
@@ -395,8 +410,8 @@ export function enregistrerRoutesInterventions(app: Express): void {
     }
   });
 
-  // La file ne contient que les visites engendrées par un contrat et encore dépourvues
-  // de projection. Le même filtre de périmètre gouverne la fiche SAV et son placement.
+  // La file contient les interventions encore dépourvues de projection : visites d'un contrat actif et
+  // curatives. Le même filtre de périmètre gouverne la fiche SAV et son placement.
   app.get('/api/planning/interventions-a-planifier', requireAuth, blockCommercialEtAssimiles, requirePlanningActif, async (req: AuthRequest, res) => {
     try {
       // Visites d'un contrat actif, et interventions curatives (SAV hors contrat, lot pilote 3) : toute
@@ -436,6 +451,9 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const { error, data, intervenantIds } = await validatePlanningEvent({ ...req.body, categorie: 'HORS_CHANTIER', titre: intervention.titre, client: intervention.client.raisonSociale });
       if (error) return res.status(400).json({ error });
       const event = await transactionVerifiee(async (tx) => {
+        // Statut et périmètre relus sous le verrou de l'intervention, celui que prennent l'annulation et la
+        // remise « à planifier » avant de retirer le créneau : une intervention annulée pendant l'attente
+        // est refusée, et aucune projection ne se recrée sur elle (décision de Nelson du 24-10-2026, point 7).
         await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`);
         const actuel = await tx.intervention.findFirst({ where: { id, ...getInterventionFilterForUser(req.user!) }, include: { client: { select: { raisonSociale: true } } } });
         if (!actuel) throw new Error('INTERVENTION_HORS_PERIMETRE');
@@ -475,7 +493,8 @@ export function enregistrerRoutesInterventions(app: Express): void {
     }
   });
 
-  // Inverse du premier placement d'une visite de contrat : elle revient « à planifier », son créneau
-  // libéré (décision de Nelson du 23-10-2026, nuit, réponse 2 ; cf. remiseAPlanifier.ts).
+  // Inverse du premier placement d'une intervention, visite de contrat ou curative : elle revient « à
+  // planifier », son créneau libéré (décisions de Nelson des 23-10-2026, nuit, réponse 2, et 24-10-2026 ;
+  // cf. remiseAPlanifier.ts).
   enregistrerRemiseAPlanifier(app);
 }

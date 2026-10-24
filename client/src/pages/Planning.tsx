@@ -435,7 +435,7 @@ const Planning = () => {
           onSaved={() => { setModal(null); fetchEvents(); }}
           onDelete={handleDelete}
           onTypesChanged={fetchTypes}
-          // Visite remise « à planifier » : elle quitte la grille et revient dans la file.
+          // Intervention remise « à planifier » : elle quitte la grille et revient dans la file.
           onRemise={() => { setModal(null); fetchEvents(); fetchQueue(); }}
         />
       )}

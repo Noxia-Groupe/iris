@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { AuthRequest } from '../../http/auth';
 import { valeurJournal } from '../../commun/journal-administration';
 import { getInterventionFilterForUser } from './metier';
+import { motifContratValide } from '../contrats/metier';
 
 // --- Comptes rendus, signatures dessinées et clôture des interventions (lot pilote 3b-3) ---
 
@@ -61,6 +62,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 // ils sont refusés en amont (400) plutôt qu'en erreur serveur. Avec le drapeau u, une paire complète
 // (un emoji) forme un seul point de code et ne correspond pas à \p{Cs}.
 export const contientCaractereInvalide = (texte: string) => texte.includes('\u0000') || /\p{Cs}/u.test(texte);
+
+// Motif obligatoire d'une remise « à planifier » ou d'une annulation (décisions de Nelson du 24-10-2026 :
+// « on doit garder une tracabilité », « Oui un motif pour une annulation depuis sa fiche ») : même règle
+// que le motif du statut d'un contrat (3 à 500 caractères, sans caractère de contrôle), et ni caractère
+// nul ni demi-paire de substitution, que PostgreSQL et l'UTF-8 refusent.
+export function motifInterventionValide(valeur: unknown): string | null {
+  const motif = motifContratValide(valeur);
+  return motif && !contientCaractereInvalide(motif) ? motif : null;
+}
 
 export function cleEnvoiValide(valeur: unknown): string | null {
   return typeof valeur === 'string' && UUID.test(valeur) ? valeur.toLowerCase() : null;

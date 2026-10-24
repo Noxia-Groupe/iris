@@ -78,7 +78,7 @@ export function enregistrerRoutesPlanning(app: Express): void {
       ] }] : [];
       // Une projection porte la référence, le statut et le contrat de son intervention, toujours dans
       // le périmètre du demandeur (filtre ci-dessous) : l'écran y propose la remise « à planifier »
-      // d'une visite de contrat planifiée.
+      // d'une intervention planifiée, visite de contrat ou curative.
       const events = await prisma.planningEvent.findMany({
         where: { dateDebut: { lte: end }, dateFin: { gte: start }, OR: [
           { interventionId: null }, { intervention: { is: getInterventionFilterForUser(req.user!) } },
