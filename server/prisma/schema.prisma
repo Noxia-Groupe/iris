@@ -488,7 +488,8 @@ model Devis {
   totalTva           Decimal      @db.Decimal(12, 2)
   totalTtc           Decimal      @db.Decimal(12, 2)
   lignes             DevisLigne[]
-  conversion         DevisConversion?
+  // Conversions de l'affaire (lot 4 suite) : au plus deux, de types différents, sur ce devis.
+  conversions        DevisConversion[]
   signature          DevisSignature?
   // Envois préparés par la messagerie de l'utilisateur (lot 6a-3), en ajout seul.
   envois             EnvoiDocument[]
@@ -582,17 +583,26 @@ model DevisSignature {
   @@index([identiteEmetteurId])
 }
 
-// Conversion irréversible et traçable d’un devis accepté. Les autres cibles (intervention,
-// contrat, facture) arriveront avec leurs modules ; le lien reste déjà générique.
+// Conversion irréversible et traçable d’un devis accepté en chantier, intervention ou contrat
+// de maintenance. Depuis le lot 4 suite (décisions de Nelson des 22 et 23-10-2026), une affaire
+// (dossier) se convertit au plus deux fois, en deux cibles de types différents, toutes deux depuis
+// le même devis : un type par dossier et par devis (contraintes uniques), et un rang 1 ou 2
+// unique par dossier, que la base borne (CHECK de la migration 20261023230000).
 model DevisConversion {
   id        String   @id @default(uuid())
-  devisId   String   @unique
-  dossierId String   @unique
+  devisId   String
+  dossierId String
   devis     Devis    @relation(fields: [devisId], references: [id], onDelete: Restrict)
-  cibleType String
+  cibleType String   // CHANTIER | INTERVENTION | CONTRAT
   cibleId   String
+  // Rang de la conversion dans son affaire : 1, puis 2. Une ligne écrite sans rang prend le rang 1,
+  // qu'une seconde conversion du dossier ne peut plus prendre.
+  rang      Int      @default(1)
   createdAt DateTime @default(now())
 
+  @@unique([devisId, cibleType])
+  @@unique([dossierId, cibleType])
+  @@unique([dossierId, rang])
   @@index([cibleType, cibleId])
 }
 
@@ -979,7 +989,7 @@ model ContratMaintenance {
   siteId                      String?
   site                        ClientSite? @relation(fields: [siteId], references: [id], onDelete: Restrict)
   titre                       String
-  statut                      String      @default("ACTIF") // BROUILLON | ACTIF | SUSPENDU | TERMINE
+  statut                      String      @default("ACTIF") // BROUILLON | ACTIF | SUSPENDU | TERMINE | ANNULE
   periodiciteMois             Int
   dureePrevisionnelleMinutes  Int
   dateDebut                   DateTime
@@ -988,6 +998,13 @@ model ContratMaintenance {
   politiqueMainOeuvre         String      @default("HORS_FORFAIT") // INCLUSE | HORS_FORFAIT
   politiqueMateriel           String      @default("HORS_FORFAIT") // INCLUS | HORS_FORFAIT
   noteCouverture              String?
+  // Annulation avec le devis dont le contrat est issu (lot 4 suite, décision de Nelson du
+  // 23-10-2026) : terminale, même pour un contrat commencé. La date, l'auteur et le motif (celui
+  // de l'annulation du devis) sont exigés avec le statut ANNULE, et un contrat annulé ne se
+  // modifie plus (contrainte et trigger de la migration 20261023230000).
+  annuleLe                    DateTime?
+  annuleParId                 String?
+  motifAnnulation             String?
   createdById                 String?
   createdAt                   DateTime    @default(now())
   updatedAt                   DateTime    @updatedAt

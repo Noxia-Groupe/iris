@@ -4,8 +4,9 @@ import { valeurJournal } from '../../commun/journal-administration';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, dateFrancaise, dateIsoStricte } from '../../commun/dates';
 import { CHANTIER_INTERVENTION_SELECT, auteurJournalSav, journaliserIntervention, prochaineReferenceIntervention } from '../interventions/metier';
 
-// `req` null : écriture de la génération automatique des visites (lot pilote 5).
-export async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest | null, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE' | 'AVANCEMENT_ECHEANCE', contrat: unknown, avant: unknown, motif?: string) {
+// `req` null : écriture de la génération automatique des visites (lot pilote 5). ANNULATION :
+// annulation du contrat avec le devis dont il est issu (lot 4 suite, cf. devis/annulation.ts).
+export async function journaliserContrat(tx: Prisma.TransactionClient, req: AuthRequest | null, action: 'CREATION' | 'SUSPENSION' | 'REACTIVATION' | 'CLOTURE' | 'MODIFICATION_COUVERTURE' | 'AVANCEMENT_ECHEANCE' | 'ANNULATION', contrat: unknown, avant: unknown, motif?: string) {
   const cibleId = String((contrat as { id: string }).id);
   await tx.journalSaisieChantier.create({ data: {
     chantierId: null, interventionId: null, contratMaintenanceId: cibleId, cible: 'CONTRAT', cibleId, action,

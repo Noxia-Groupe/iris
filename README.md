@@ -143,9 +143,12 @@ et vaut, par le même geste, validation définitive du devis — il n'y a pas d'
 `POST /api/chantiers` répond 410, et un chantier ne se supprime plus.
 
 Chaque affaire a son chantier, un seul (décision de Nelson du 14-10-2026) : un devis déjà
-converti, un dossier dont une autre version l'est déjà, y compris entre deux conversions
-simultanées, et une référence d'affaire déjà portée par un chantier sont refusés (409). Le
-chantier s'ouvre depuis l'écran Devis (« Ouvrir le chantier ») ou depuis **Administration >
+converti en chantier, un dossier dont une autre version est déjà convertie, y compris entre deux
+conversions simultanées, et une référence d'affaire déjà portée par un autre chantier sont refusés
+(409). Depuis le lot 4 suite (décisions de Nelson des 22 et 23-10-2026), une affaire se convertit
+au plus deux fois, en deux cibles de types différents parmi chantier, intervention et contrat de
+maintenance ; l'annulation du devis annule aussi le contrat, ses visites non réalisées (choix
+par défaut, à confirmer) et l'intervention qu'il a créés. Le chantier s'ouvre depuis l'écran Devis (« Ouvrir le chantier ») ou depuis **Administration >
 Chantiers** (« Ouvrir le chantier d'une affaire »). Ce second formulaire part du devis signé,
 dont le chantier reprend le client, la référence, le montant et les heures vendus, et fixe en
 même temps le responsable, le commercial, les types et la date de début ; ces choix
@@ -159,6 +162,8 @@ BROUILLON → ENVOYÉ → ACCEPTÉ ─┬─ valider ─────────
 
 ACCEPTÉ ou converti ──[annulation administrateur + motif]──→ ANNULÉ (terminal)
                                                              ↳ chantier archivé, motif conservé
+                                                             ↳ contrat annulé, visites non réalisées annulées
+                                                             ↳ intervention annulée
 ```
 
 **Acompte.** Une case sur le devis initial conditionne l'ouverture du chantier à la
@@ -172,8 +177,12 @@ alimentera ces mêmes champs plus tard sans changer la règle.
 erreur. Réservée aux administrateurs, elle exige un motif, **archive** le chantier lié au
 lieu de le détruire — sa raison doit rester lisible — et elle est **refusée dès qu'une
 heure ou un achat y a été saisi** : une affaire commencée se mène à son terme, elle ne
-s'efface pas. Une affaire archivée sort des listes, des coûts, des marges et des
-commissions, n'accepte plus aucune écriture, mais reste consultable avec son motif.
+s'efface pas. Depuis le lot 4 suite, elle annule aussi le contrat de maintenance issu du devis
+et ses visites non réalisées, ainsi que l'intervention SAV qu'il a créée ; elle est également
+refusée si cette intervention est en cours ou terminée, ou si une visite du contrat est en cours
+(sort des visites et refus : choix par défaut, à confirmer, passation section 4). Une affaire
+archivée sort des listes, des coûts, des marges et des commissions, n'accepte plus aucune
+écriture, mais reste consultable avec son motif.
 
 **Reprise.** On n'annule pas une annulation. La reprise passe par la duplication du devis :
 même client, même objet, mêmes lignes, mais un numéro d'affaire neuf et un retour en
@@ -253,7 +262,7 @@ Le logiciel reste la propriété de Noxia-Groupe / OrizonLab. Les clients obtien
 **Source de passation à jour : [`docs/ROADMAP-PASSATION.md`](docs/ROADMAP-PASSATION.md)**, qui indique en tête le commit de `main` qu'elle décrit. Le détail des lots livrés, des décisions déjà appliquées et des constats corrigés est dans [`docs/HISTORIQUE-DECISIONS.md`](docs/HISTORIQUE-DECISIONS.md). « Code présent » ne signifie ni conformité validée ni mise en production. L'état de chaque domaine, les questions ouvertes pour Nelson et les choix par défaut, à confirmer, sont détaillés dans la passation.
 
 - [x] Phases 0–4 : identité du projet, accès Entra/secours, configuration d'instance, référentiel clients/sites/contacts, catalogue et parc d'équipements. Le catalogue et le plan comptable démarrent vides. L'écran Utilisateurs est allégé (#124) ; sur une installation neuve, la création des réglages uniques (paramètres, société) ne provoque plus d'erreur lors des premières requêtes simultanées, et une liste d'Administration qui ne se charge pas est signalée sans plantage (#125).
-- [ ] Phase 5 — **partielle** : devis versionnés, signature, acompte constaté, cycle de vie et conversion en chantier livrés ; conversions en intervention et en contrat implémentées (A7, lot pilote 4, #281), non validées pour mise en service. Sélection d'un client hors des 200 premiers livrée pour Devis (#114). Lignes reprises du catalogue et copiées figées dans le devis, avec un prix d'achat prévu facultatif réservé à l'administration ; devis signé figé en base (lot pilote 2, #161).
+- [ ] Phase 5 — **partielle** : devis versionnés, signature, acompte constaté, cycle de vie et conversion en chantier livrés ; conversions en intervention et en contrat implémentées (A7, lot pilote 4, #281), puis deux conversions par affaire et annulation du devis en cascade (lot 4 suite), non validées pour mise en service. Sélection d'un client hors des 200 premiers livrée pour Devis (#114). Lignes reprises du catalogue et copiées figées dans le devis, avec un prix d'achat prévu facultatif réservé à l'administration ; devis signé figé en base (lot pilote 2, #161).
 - [ ] Suivi Travaux — **livré**, place dans le pilote en question ; commissionnement — **fermé** : sécurité, journaux, achats/heures et fiche chantier déjà présents ; suivi de rentabilité (alertes, marge estimée en fin de chantier) implémenté par #117, et adressé selon la chaîne hiérarchique et au profil Directeur depuis #121 ; ne pas recréer un écran fictif. Profils commerciaux versionnés et individualisés de l'issue #15 non livrés, et commissions du barème global fermées tant qu'aucun plan commercial n'est attribué (#159) ; réévaluer les reliquats des issues #16 et #19 contre le code.
 - [ ] Phase 6 — **partielle** : SAV, rapports, planning et suivi chantier présents ; navigation utilisable sur téléphone depuis #118, et, depuis #147, écrans de l'administration (320 à 1024 px) et écrans principaux du conducteur et du technicien (320 et 375 px, hors `/admin`, voir #150) sans contenu coupé, rogné ni débordant, ni titre recouvert, dans leur état initial ; client hors des 200 premiers sélectionnable à la création d'une intervention SAV et d'un contrat de maintenance (#137), et sur la fiche chantier, où le client lié reste affiché même désactivé (#138) et où une réaffectation reprend la raison sociale du nouveau client (#142), s'écrit au journal de la fiche et se refuse tant qu'une intervention SAV y est rattachée (#146) ; une intervention SAV se rattache à un chantier par la fiche client, et non par son libellé (#144) ; la liste Clients annonce sa limite de 200 et retrouve les autres par la recherche (#139) ; comptes rendus en ajout seul et signatures figées en base (#255) ; heures du technicien sur une intervention hors contrat (#257) ; compte rendu et signature dessinée au doigt dans la page, sans fenêtre du navigateur, et clôture exigeant un compte rendu, signé ou accompagné d'un motif (#268) ; « Ma journée » et fiche intervention sur téléphone (#272) ; planning du technicien limité aux affectations dont il est chargé (#275) ; autres parcours terrain à qualifier.
 - [ ] Lots décidés par Nelson : technicien sans montants ni alertes de dépassement, en consultation seule sur l'affaire — **implémenté** par #123 ; annuaire des clients pour le technicien, sans montant ni devis — **implémenté** par #127 ; clôture de tout chantier par les directeurs et clients désactivés fermés au technicien dans l'annuaire — **implémentés** par #128 ; ouverture du chantier d'une affaire depuis l'Administration, sans doublon, et réattribution par le titulaire depuis la fiche corrigée — **implémentées** par #129 ; toutes les dates au jour et à l'heure de la société — **implémenté** par #130 ; correctif « socket hang up » (connexions inactives gardées plus longtemps par le serveur, parcours E2E qui attendent leurs alertes) — **implémenté** par #131 ; toutes les dates au format `JJ-MM-AAAA` — **implémenté** par #132 ; journal des paramètres et des droits (Administration > Journal) — **implémenté** par #133 ; taux horaire et coût de main-d'œuvre réservés aux administrateurs — **implémenté** par #134 ; **prévus, hors pilote** : plan commercial (plans de commission paramétrables attribués à chaque commercial, décidé le 14-10-2026 et précisé le 16-10-2026), horaires de la société et astreintes (décidés le 14-10-2026). Ordre : le pilote d'abord, voir la passation.

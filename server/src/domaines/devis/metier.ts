@@ -155,7 +155,8 @@ export async function resoudreLignesDevis(
 // facturation, fuseau) ne servent qu'au PDF, réservé aux sessions. Une clé « devis:read » ne
 // lit pas ainsi l'adresse d'un client, que seul le scope « clients:read » lui ouvre.
 const SIGNATURE_DEVIS_EXPOSEE = { id: true, devisId: true, enregistreParId: true, signataire: true, empreinte: true, signeLe: true } as const;
-export const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true, conversion: true, signature: { select: SIGNATURE_DEVIS_EXPOSEE } };
+// Les conversions du devis (lot 4 suite : deux au plus, de types différents), dans leur ordre.
+export const devisInclude = { lignes: { orderBy: { ordre: 'asc' as const } }, client: true, conversions: { orderBy: { rang: 'asc' as const } }, signature: { select: SIGNATURE_DEVIS_EXPOSEE } };
 function montantDevisFige(value: Prisma.Decimal | number | string | null, decimales: number): string | null {
   return value === null ? null : new Prisma.Decimal(value).toFixed(decimales);
 }

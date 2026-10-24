@@ -86,10 +86,10 @@ Domaines :
 | `parametres` | paramètres métier, rémunération, registre des entreprises (**déplacé**) |
 | `clients` | clients, contacts, sites, parc d'équipements (**déplacé**) |
 | `catalogue` | prestations, articles, équipements (**déplacé**) |
-| `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**), PDF du devis (lot 6a-2), envoi par la messagerie (lot 6a-3) |
+| `devis` | devis versionnés, signature, acompte, conversion, duplication (**déplacé**), PDF du devis (lot 6a-2), envoi par la messagerie (lot 6a-3), deux conversions par affaire et annulation en cascade sur ce que le devis a créé (lot 4 suite, `annulation.ts`) |
 | `chantiers` | affaires, achats, heures, métriques et suivi (**déplacé**) |
 | `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**) |
-| `contrats` | contrats de maintenance et visites (**déplacé**) |
+| `contrats` | contrats de maintenance et visites (**déplacé**), statut « annulé » avec le devis (lot 4 suite) |
 | `planning` | affectations, types d'événement, partage public (**déplacé**) |
 | `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**), envoi par la messagerie (lot 6a-3) |
 | `documents` | modèle PDF commun, identité de l'émetteur figée à l'émission, logo des documents (lot 6a-1) ; identité minimale du client pour signer un devis et émettre une facture (lot 6a-2 bis) ; envoi d'un document par la messagerie et journal des envois (lot 6a-3) |
