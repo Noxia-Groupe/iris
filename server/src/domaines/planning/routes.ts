@@ -76,11 +76,14 @@ export function enregistrerRoutesPlanning(app: Express): void {
         { intervenants: { some: { userId: req.user!.id } } },
         { chantier: { is: perimetreChantiers(req) } },
       ] }] : [];
+      // Une projection porte la référence, le statut et le contrat de son intervention, toujours dans
+      // le périmètre du demandeur (filtre ci-dessous) : l'écran y propose la remise « à planifier »
+      // d'une visite de contrat planifiée.
       const events = await prisma.planningEvent.findMany({
         where: { dateDebut: { lte: end }, dateFin: { gte: start }, OR: [
           { interventionId: null }, { intervention: { is: getInterventionFilterForUser(req.user!) } },
         ], AND: chargeDe },
-        include: PLANNING_EVENT_INCLUDE,
+        include: { ...PLANNING_EVENT_INCLUDE, intervention: { select: { reference: true, statut: true, contratMaintenanceId: true } } },
         orderBy: [{ dateDebut: 'asc' }, { createdAt: 'asc' }],
       });
       res.json(events);

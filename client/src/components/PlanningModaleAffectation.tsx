@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { Trash2, X } from 'lucide-react';
+import { useId, useState } from 'react';
+import { CalendarX2, Trash2, X } from 'lucide-react';
 import { apiFetch } from '../api';
 import type { Intervenant, ChantierLite, PlanningType, PlanningEvent } from '../planningUtils';
 import { jourFrancais } from '../lib/dateFormatting';
+import { visiteRemettable } from '../lib/remiseAPlanifier';
+import { RemiseAPlanifier } from './RemiseAPlanifier';
 
 export type ModalState =
   | { mode: 'create'; date: string; intervenantId?: string }
@@ -36,6 +38,7 @@ export const EventModal = ({
   onSaved,
   onDelete,
   onTypesChanged,
+  onRemise,
 }: {
   modal: ModalState;
   intervenants: Intervenant[];
@@ -45,10 +48,16 @@ export const EventModal = ({
   onSaved: () => void;
   onDelete: (ev: PlanningEvent) => void;
   onTypesChanged: () => void;
+  // Visite de contrat remise « à planifier » depuis son affectation : créneau libéré.
+  onRemise: () => void;
 }) => {
   const isEdit = modal.mode === 'edit';
   const event = isEdit ? modal.event : null;
-  const linkedIntervention = !!(event as PlanningEvent & { interventionId?: string } | null)?.interventionId;
+  const linkedIntervention = !!event?.interventionId;
+  // Remise « à planifier » d'une visite de contrat planifiée (décision de Nelson du 23-10-2026, nuit).
+  const remettable = !!event?.interventionId && visiteRemettable(event.intervention);
+  const [remiseOuverte, setRemiseOuverte] = useState(false);
+  const titreId = useId();
   const [categorie, setCategorie] = useState<PlanningEvent['categorie']>(event?.categorie || 'CHANTIER');
   const [creneau, setCreneau] = useState<PlanningEvent['creneau']>(event?.creneau || 'JOURNEE');
   const [typeSel, setTypeSel] = useState<string>(event?.typeEventId || '');
@@ -139,10 +148,11 @@ export const EventModal = ({
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-labelledby={titreId} className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-start mb-4">
-          <h2 className="text-lg font-bold text-primary-dark m-0">{isEdit ? "Modifier l'affectation" : 'Nouvelle affectation'}</h2>
+          <h2 id={titreId} className="text-lg font-bold text-primary-dark m-0">{isEdit ? "Modifier l'affectation" : 'Nouvelle affectation'}</h2>
           <button onClick={onClose} className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" title="Fermer">
             <X size={16} />
           </button>
@@ -279,7 +289,7 @@ export const EventModal = ({
             <input name="commentaire" className="form-input" placeholder="Consignes, matériel à prévoir..." defaultValue={event?.commentaire || ''} />
           </div>
 
-          <div className="flex gap-2 mt-2">
+          <div className="flex flex-wrap gap-2 mt-2">
             <button disabled={saving} className="btn btn-primary px-8">{saving ? 'Enregistrement…' : isEdit ? 'Enregistrer' : 'Ajouter au planning'}</button>
             <button type="button" onClick={onClose} className="btn bg-white border">Annuler</button>
             {isEdit && !linkedIntervention && (
@@ -287,9 +297,18 @@ export const EventModal = ({
                 <Trash2 size={15} /> Supprimer
               </button>
             )}
+            {remettable && (
+              <button type="button" onClick={() => setRemiseOuverte(true)} className="btn ml-auto flex items-center gap-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900">
+                <CalendarX2 size={15} /> Remettre à planifier
+              </button>
+            )}
           </div>
         </form>
       </div>
     </div>
+    {remiseOuverte && event?.interventionId && (
+      <RemiseAPlanifier interventionId={event.interventionId} reference={event.intervention?.reference || ''} onClose={() => setRemiseOuverte(false)} onRemise={onRemise} />
+    )}
+    </>
   );
 };

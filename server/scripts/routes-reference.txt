@@ -86,6 +86,7 @@ POST /api/interventions/rapports/:rapportId/signature requireAuth#07b983da0ce5 >
 PATCH /api/interventions/:id/statut requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#dc24b6b412aa
 GET /api/planning/interventions-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#02fa19bc763a
 PUT /api/interventions/:id/planning requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#a6bc0343155c
+POST /api/interventions/:id/remise-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#8c8298bd1c18
 GET /api/health <anonymous>#8e6d60bb30d8
 GET /api/config <anonymous>#8496550e7475
 POST /api/auth/sso <anonymous>#29d388e00d09
@@ -119,7 +120,7 @@ PUT /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab >
 PUT /api/intervenants/:id/compte requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#5e61db3bb78c
 DELETE /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#86e1b7b43b2b
 GET /api/planning/chantiers requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#35c56b70d597
-GET /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#d25ca4de9e46
+GET /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#997d22d70eea
 POST /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d20ba39cc1f2
 PATCH /api/planning/events/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#72ed95d3b1f9
 DELETE /api/planning/events/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#59692ae83863
