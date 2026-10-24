@@ -32,7 +32,8 @@ import { contientCaractereInvalide, interventionDansPerimetre, verrouillerInterv
 // périmètre, saisies et projection sont relus sous ce verrou. Le placement et les saisies de coûts SAV
 // prennent l'intervention puis le contrat, l'annulation d'un devis les interventions puis le contrat,
 // la génération des visites le contrat seul : aucun verrou n'est pris dans l'ordre inverse.
-// L'archivage et la restauration d'un coût ne prennent aucun verrou (chemin préexistant).
+// L'archivage et la restauration d'un coût ne prennent aucun verrou explicite (chemin préexistant) :
+// leur UPDATE ne verrouille que la ligne du coût.
 
 class RefusRemise extends Error {}
 class InterventionHorsPerimetre extends Error {}
