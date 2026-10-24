@@ -86,7 +86,7 @@ POST /api/interventions/rapports/:rapportId/signature requireAuth#07b983da0ce5 >
 PATCH /api/interventions/:id/statut requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#dc24b6b412aa
 GET /api/planning/interventions-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#02fa19bc763a
 PUT /api/interventions/:id/planning requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#a6bc0343155c
-POST /api/interventions/:id/remise-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#f1ec7a6726dc
+POST /api/interventions/:id/remise-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#8c8298bd1c18
 GET /api/health <anonymous>#8e6d60bb30d8
 GET /api/config <anonymous>#8496550e7475
 POST /api/auth/sso <anonymous>#29d388e00d09

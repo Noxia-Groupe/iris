@@ -24,13 +24,15 @@ import { contientCaractereInvalide, interventionDansPerimetre, verrouillerInterv
 //    figure dans l'instantané « avant » de cette écriture, avec ses intervenants ;
 //  - les affectations SAV évoluent avec les intervenants de la projection
 //    (synchroniserAffectationsIntervention) : sa suppression les retire. Une visite qui porte des
-//    heures ou du matériel non archivés est donc refusée (409) : retirer l'affectation fermerait au
-//    technicien ses propres saisies, que seule son affectation lui ouvre ;
+//    heures non archivées est donc refusée (409) : retirer l'affectation fermerait au technicien ses
+//    propres saisies, que seule son affectation lui ouvre. Du matériel non archivé, saisi par
+//    l'encadrement et que le technicien ne voit pas, la refuse aussi : option la plus restrictive ;
 //  - aucun contrôle du statut du contrat : un créneau se libère aussi sur un contrat suspendu ou clos.
 // Verrou : celui de l'intervention seul (FOR UPDATE), comme le changement de statut ; statut,
-// périmètre, saisies et projection sont relus sous ce verrou. Le placement et les coûts SAV prennent
-// l'intervention puis le contrat, l'annulation d'un devis les interventions puis le contrat, la
-// génération des visites le contrat seul : aucun verrou n'est pris dans l'ordre inverse.
+// périmètre, saisies et projection sont relus sous ce verrou. Le placement et les saisies de coûts SAV
+// prennent l'intervention puis le contrat, l'annulation d'un devis les interventions puis le contrat,
+// la génération des visites le contrat seul : aucun verrou n'est pris dans l'ordre inverse.
+// L'archivage et la restauration d'un coût ne prennent aucun verrou (chemin préexistant).
 
 class RefusRemise extends Error {}
 class InterventionHorsPerimetre extends Error {}
@@ -76,7 +78,7 @@ export function enregistrerRemiseAPlanifier(app: Express): void {
           tx.coutInterventionAchat.count({ where: { interventionId: id, archivedAt: null } }),
         ]);
         if (heures > 0 || achats > 0) {
-          throw new RefusRemise(`Remise impossible : cette visite porte déjà ${heures} saisie(s) d’heures et ${achats} achat(s) de matériel non archivés, que son affectation ouvre au technicien. Déplacez plutôt son créneau au planning.`);
+          throw new RefusRemise(`Remise impossible : cette visite porte déjà ${heures} saisie(s) d’heures du technicien et ${achats} achat(s) de matériel non archivés. Déplacez plutôt son créneau au planning.`);
         }
         // Une visite planifiée sans créneau (passée « planifiée » depuis sa fiche) n'a rien à libérer.
         await tx.planningEvent.deleteMany({ where: { interventionId: id } });

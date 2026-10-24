@@ -366,7 +366,7 @@ const Planning = () => {
                         {interv.nom.substring(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <div className="font-bold text-gray-800 text-sm truncate">{interv.nom}</div>
+                        <div className="font-bold text-gray-800 text-sm truncate" title={interv.nom}>{interv.nom}</div>
                         <div className="text-xs text-gray-400 font-normal truncate">{interv.role}</div>
                       </div>
                     </div>

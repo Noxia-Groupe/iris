@@ -17826,12 +17826,12 @@ if (!TEST_DATABASE_URL) {
       const heure = await request(app).post(`/api/interventions/${visite.id}/couts/heures`).set(jeton('technicien')).send({ date: '02-01-2026', nbrHeures: 1.5 });
       assert.equal(heure.status, 201, JSON.stringify(heure.body));
       assert.equal((await request(app).get(`/api/interventions/${visite.id}/couts`).set(jeton('technicien'))).body.heures.length, 1);
-      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Remise impossible : cette visite porte déjà 1 saisie(s) d’heures et 0 achat(s) de matériel non archivés, que son affectation ouvre au technicien. Déplacez plutôt son créneau au planning.', 'heures vivantes');
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Remise impossible : cette visite porte déjà 1 saisie(s) d’heures du technicien et 0 achat(s) de matériel non archivés. Déplacez plutôt son créneau au planning.', 'heures vivantes');
       const archivage = await request(app).post(`/api/interventions/${visite.id}/couts/heures/${heure.body.id}/archiver`).set(admin()).send({ motif: 'TEST Heure saisie par erreur' });
       assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
       const achat = await request(app).post(`/api/interventions/${visite.id}/couts/achats`).set(admin()).send({ date: '02-01-2026', fournisseurId: fournisseur.id, description: 'TEST Filtre', montantHT: 12.5 });
       assert.equal(achat.status, 201, JSON.stringify(achat.body));
-      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Remise impossible : cette visite porte déjà 0 saisie(s) d’heures et 1 achat(s) de matériel non archivés, que son affectation ouvre au technicien. Déplacez plutôt son créneau au planning.', 'matériel vivant');
+      await refusSansEcriture(visite.id, () => remettre(visite.id), 409, 'Remise impossible : cette visite porte déjà 0 saisie(s) d’heures du technicien et 1 achat(s) de matériel non archivés. Déplacez plutôt son créneau au planning.', 'matériel vivant');
       const archivageAchat = await request(app).post(`/api/interventions/${visite.id}/couts/achats/${achat.body.id}/archiver`).set(admin()).send({ motif: 'TEST Achat saisi par erreur' });
       assert.equal(archivageAchat.status, 200, JSON.stringify(archivageAchat.body));
       const res = await remettre(visite.id);
@@ -18051,8 +18051,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await statutContrat(suspendu.contrat.id, 'ACTIF')).status, 200);
       assert.equal(await dansLaFile(suspendu.visite.id), true);
       assert.equal((await placer(suspendu.visite.id)).status, 200);
-      // Contrat clos : la remise libère aussi le créneau, mais la visite ne se replace plus (contrat
-      // clos) et ne revient pas dans la file : elle reste « à planifier », à annuler depuis sa fiche.
+      // Contrat clos : la remise libère aussi le créneau, mais la visite ne se replace plus au planning
+      // (contrat clos) et ne revient pas dans la file. Depuis sa fiche, elle s'annule ou repasse
+      // « planifiée », sans créneau : le changement de statut ne contrôle pas le contrat.
       const clos = await visitePlanifiee('TEST Remise contrat clos');
       assert.equal((await statutContrat(clos.contrat.id, 'TERMINE')).status, 200);
       assert.equal((await remettre(clos.visite.id)).status, 200);
@@ -18061,6 +18062,9 @@ if (!TEST_DATABASE_URL) {
       const replacement = await placer(clos.visite.id);
       assert.equal(replacement.status, 409, JSON.stringify(replacement.body));
       assert.equal(replacement.body.error, 'Un contrat clos interdit tout nouveau placement de visite.');
+      const planifiee = await changerStatut(clos.visite.id, 'PLANIFIEE');
+      assert.equal(planifiee.status, 200, JSON.stringify(planifiee.body));
+      assert.deepEqual([planifiee.body.statut, await prisma.planningEvent.count({ where: { interventionId: clos.visite.id } })], ['PLANIFIEE', 0]);
     });
 
     test('génération des visites : la visite remise reste celle de son échéance, sans doublon', async () => {
