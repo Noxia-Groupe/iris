@@ -3552,7 +3552,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).delete(`/api/catalogue/prestations/${creation.body.id}`).set(admin)).status, 200);
       assert.equal(await nbEntreesJournal(), avantJournal, 'aucune entrée pour une prestation ordinaire');
       const avant = await etatPrestation(creation.body.id);
-      for (const ecart of [{ heuresParJour: '7' }, { prixJourHorsContratHt: '300' }, { estMainOeuvre: false, prixHeureSousContratHt: '40' }]) {
+      // Chacun des quatre champs propres à une main d'œuvre est refusé seul, sans être ignoré en silence.
+      for (const ecart of [{ heuresParJour: '7' }, { prixJourHorsContratHt: '300' }, { estMainOeuvre: false, prixHeureSousContratHt: '40' }, { prixJourSousContratHt: '280' }]) {
         const corps = { reference: `TEST-MO-ORD-${suffixe}`, nom: 'TEST Pose ordinaire', unite: 'forfait', prixVenteHt: '260', ...ecart };
         assert.equal((await envoyer('put', `/api/catalogue/prestations/${creation.body.id}`, admin, corps)).status, 400, JSON.stringify(ecart));
         assert.equal((await envoyer('post', '/api/catalogue/prestations', admin, { ...corps, reference: `TEST-MO-ORD2-${suffixe}` })).status, 400, JSON.stringify(ecart));
@@ -3668,6 +3669,8 @@ if (!TEST_DATABASE_URL) {
       const premier = await rattacher(admin, electricien.id);
       assert.equal(premier.status, 200, JSON.stringify(premier.body));
       assert.deepEqual([premier.body.mainOeuvreId, premier.body.mainOeuvre], [electricien.id, { id: electricien.id, reference: electricien.reference, nom: electricien.nom, actif: true }]);
+      // La réponse rend la fiche à l'administration avec son taux horaire chargé, en nombre comme les autres routes.
+      assert.equal(premier.body.tauxHoraireCharge, 35);
       assert.equal(await rattachementEnBase(), electricien.id);
       const second = await rattacher(admin, plombier.id);
       assert.equal(second.status, 200, JSON.stringify(second.body));

@@ -43,6 +43,9 @@ test('l’administration crée une main d’œuvre depuis le catalogue, modifie 
   await envoyer(request, session.token, 'post', '/catalogue/prestations', { reference: referenceOrdinaire, nom: `Pose forfaitaire E2E ${suffixe}`, unite: 'forfait', prixVenteHt: '250', tauxTva: '20' });
   const page = await allerSurPageAdmin('/catalogue');
   await ouvrirOngletMainOeuvre(page);
+  // Aucun prix ni aucune durée de journée proposés par défaut : chacun est saisi, rien n'est inventé.
+  const champsMontants = ['Prix de vente HT à l’heure, hors contrat (€)', 'Prix de vente HT au forfait jour, hors contrat (€)', 'Prix de vente HT à l’heure, sous contrat (€)', 'Prix de vente HT au forfait jour, sous contrat (€)', 'Heures par jour (forfait jour)'];
+  for (const libelle of champsMontants) await expect(page.getByLabel(libelle)).toHaveValue('');
 
   // Saisie à la française (virgule décimale) ; libellés sans ambiguïté.
   await page.getByLabel('Référence').fill(reference);
@@ -59,6 +62,7 @@ test('l’administration crée une main d’œuvre depuis le catalogue, modifie 
   await page.getByRole('button', { name: 'Créer la main d’œuvre' }).click();
   await expect(page.getByRole('status')).toHaveText(`Main d’œuvre « ${nom} » créée.`);
   await expect(page.getByLabel('Référence')).toHaveValue('');
+  for (const libelle of champsMontants) await expect(page.getByLabel(libelle)).toHaveValue('');
 
   const fiche = page.getByRole('article', { name: nom });
   await expect(fiche).toContainText(reference);
@@ -213,12 +217,15 @@ test('l’administration rattache un intervenant à une main d’œuvre active ;
   const electricien = await creerMainOeuvre(request, session.token, `E2E-MO-RAT1-${suffixe}`, `Électricien rattaché ${suffixe}`);
   const plombier = await creerMainOeuvre(request, session.token, `E2E-MO-RAT2-${suffixe}`, `Plombier rattaché ${suffixe}`);
   const intervenant = await envoyer(request, session.token, 'post', '/intervenants', { nom: `Intervenant main d’œuvre ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 34 }) as { id: string; nom: string };
+  // Une prestation ordinaire n'est jamais proposée au rattachement.
+  const ordinaire = await envoyer(request, session.token, 'post', '/catalogue/prestations', { reference: `E2E-MO-RAT-ORD-${suffixe}`, nom: `Pose rattachement ${suffixe}`, unite: 'forfait', prixVenteHt: '90', tauxTva: '20' }) as { reference: string };
 
   const page = await allerSurPageAdmin('/admin');
   await page.getByRole('button', { name: 'Intervenants', exact: true }).click();
   const selecteur = page.getByLabel(`Main d’œuvre de ${intervenant.nom}`);
   await expect(selecteur).toHaveValue('');
   await expect(selecteur.locator('option', { hasText: `${electricien.reference} · ${electricien.nom}` })).toHaveCount(1);
+  await expect(selecteur.locator('option', { hasText: ordinaire.reference })).toHaveCount(0);
   const rattachement = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().endsWith(`/intervenants/${intervenant.id}/main-oeuvre`));
   await selecteur.selectOption(electricien.id);
   expect((await rattachement).ok()).toBeTruthy();
@@ -298,6 +305,11 @@ test('journal d’Administration : chaque prix, la TVA et les heures par jour mo
   await envoyer(request, session.token, 'put', `/catalogue/prestations/${fiche.id}`, {
     estMainOeuvre: true, reference: fiche.reference, nom: fiche.nom, tauxTva: '10', prixVenteHt: '42.10', prixJourHorsContratHt: '300.20', prixHeureSousContratHt: '38.30', prixJourSousContratHt: '270.40', heuresParJour: '7.5',
   });
+  // Le prix d'achat, effacé au passage d'une prestation ordinaire en main d'œuvre, garde son propre libellé.
+  const ordinaire = await envoyer(request, session.token, 'post', '/catalogue/prestations', { reference: `E2E-MO-LIB-ORD-${suffixe}`, nom: `Passage libellés ${suffixe}`, unite: 'forfait', prixVenteHt: '80', prixAchatHt: '12.5', tauxTva: '20' }) as { id: string; reference: string; nom: string };
+  await envoyer(request, session.token, 'put', `/catalogue/prestations/${ordinaire.id}`, {
+    estMainOeuvre: true, reference: ordinaire.reference, nom: ordinaire.nom, tauxTva: '20', prixVenteHt: '42', prixJourHorsContratHt: '300', prixHeureSousContratHt: '38', prixJourSousContratHt: '270', heuresParJour: '7',
+  });
   const page = await allerSurPageAdmin('/admin');
   await page.getByRole('button', { name: 'Journal', exact: true }).click();
   const ligne = page.getByRole('table', { name: 'Entrées du journal' }).locator('tr', { hasText: `${fiche.reference} — ${fiche.nom}` }).filter({ hasText: 'Modification' });
@@ -311,4 +323,8 @@ test('journal d’Administration : chaque prix, la TVA et les heures par jour mo
     await expect(colonneAvant.getByRole('listitem').filter({ hasText: `${libelle} :` })).toHaveText(`${libelle} : ${avant}`);
     await expect(colonneApres.getByRole('listitem').filter({ hasText: `${libelle} :` })).toHaveText(`${libelle} : ${apres}`);
   }
+  const passage = page.getByRole('table', { name: 'Entrées du journal' }).locator('tr', { hasText: `${ordinaire.reference} — ${ordinaire.nom}` }).filter({ hasText: 'Prestation passée en main d’œuvre' });
+  await expect(passage).toHaveCount(1);
+  await expect(passage.locator('td').nth(5).getByRole('listitem').filter({ hasText: 'Prix d’achat HT :' })).toHaveText('Prix d’achat HT : 12.5');
+  await expect(passage.locator('td').nth(6).getByRole('listitem').filter({ hasText: 'Prix d’achat HT :' })).toHaveText('Prix d’achat HT : —');
 });
