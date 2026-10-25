@@ -19318,6 +19318,9 @@ if (!TEST_DATABASE_URL) {
         // Prix et TVA envoyés hors de leur format (11 chiffres entiers, TVA au millième) : illisibles, refusés, jamais ignorés.
         [{ prixUnitaireHt: '10000000000' }, /Ligne de devis invalide/],
         [{ tauxTva: '20.001' }, /Ligne de devis invalide/],
+        // TVA envoyée sur quatre chiffres entiers, même égale à celle de la main d'œuvre (zéros en tête) :
+        // illisible et refusée, comme sur une ligne saisie.
+        [{ tauxTva: '0020' }, /Ligne de devis invalide/],
       ]) {
         const refus = await creer([ligneTp(mo.elec, extra)]);
         assert.equal(refus.status, 400, `${JSON.stringify(extra)} : ${JSON.stringify(refus.body)}`);
