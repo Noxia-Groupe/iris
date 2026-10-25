@@ -199,27 +199,27 @@ PUT /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b319
 PUT /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > modifierFicheCatalogue#6bed41e242c5
 DELETE /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > desactiverFicheCatalogue#775098fdc77c
 DELETE /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > desactiverFicheCatalogue#775098fdc77c
-GET /api/devis/catalogue requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#b9b899006c11
+GET /api/devis/catalogue requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#be6ce7fa7492
 GET /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > listerDevis#1b0df21d4732
 GET /api/v1/devis <anonymous>{scope="devis:read"}#4aeb6d464b38 > listerDevis#1b0df21d4732
-POST /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerDevis#7b0e96e3f96e
-POST /api/v1/devis <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerDevis#7b0e96e3f96e
-PATCH /api/devis/:id requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > modifierDevis#8f279ef46a5e
-PATCH /api/v1/devis/:id <anonymous>{scope="devis:write"}#4aeb6d464b38 > modifierDevis#8f279ef46a5e
-POST /api/devis/:id/revisions requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerRevision#fb17f088fdc8
-POST /api/v1/devis/:id/revisions <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerRevision#fb17f088fdc8
+POST /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerDevis#d2bf54cdded8
+POST /api/v1/devis <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerDevis#d2bf54cdded8
+PATCH /api/devis/:id requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > modifierDevis#92395bcc82cf
+PATCH /api/v1/devis/:id <anonymous>{scope="devis:write"}#4aeb6d464b38 > modifierDevis#92395bcc82cf
+POST /api/devis/:id/revisions requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerRevision#891606cd873b
+POST /api/v1/devis/:id/revisions <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerRevision#891606cd873b
 POST /api/devis/:id/signature requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#aac29183a21a
 GET /api/devis/:id/document.pdf requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > imprimerDevis#b0e632f75b6b
 GET /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > lireEnvoisDevis#2f968ae9a8f2
 POST /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > envoyerDevis#a62f429280b0
 PUT /api/devis/:id/statut requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > changerStatutDevis#bae4b07f199b
 PUT /api/v1/devis/:id/statut <anonymous>{scope="devis:write"}#4aeb6d464b38 > changerStatutDevis#bae4b07f199b
-POST /api/devis/:id/convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > convertirDevis#a2b45ed35f70
-POST /api/v1/devis/:id/convertir <anonymous>{scope="devis:write"}#4aeb6d464b38 > convertirDevis#a2b45ed35f70
+POST /api/devis/:id/convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > convertirDevis#cc9274af927e
+POST /api/v1/devis/:id/convertir <anonymous>{scope="devis:write"}#4aeb6d464b38 > convertirDevis#cc9274af927e
 GET /api/devis/a-convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#8e9e09399810
 POST /api/devis/:id/acompte requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#46d632fba771
 POST /api/devis/:id/annulation requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4177370b8648
-POST /api/devis/:id/duplication requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#807a81482e59
+POST /api/devis/:id/duplication requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#6d31b03f165f
 GET /api/company requireAuth#07b983da0ce5 > <anonymous>#0b08e4374fe7
 PUT /api/company requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#f4c33f529f68
 GET /api/company/logo requireAuth#07b983da0ce5 > <anonymous>#8234217eaf1c
@@ -227,7 +227,7 @@ PUT /api/company/logo requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 
 DELETE /api/company/logo requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#a0ed659f0e66
 GET /api/parametres/remuneration requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#61efeee81638
 PUT /api/parametres/remuneration requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#98b0a30737c8
-PUT /api/parametres requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9a85dc27c687
+PUT /api/parametres requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b16e1b07487f
 GET /api/modules requireAuth#07b983da0ce5 > <anonymous>#409f48a66fe8
 PUT /api/modules requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#8f2e5db809d0
 GET /api/journal-administration requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#38867022b71f

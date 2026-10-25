@@ -1,9 +1,11 @@
 import { AvisSansPlanCommercial } from './AvisSansPlanCommercial';
 import { EditeurBareme } from './EditeurBareme';
+import { ReglageTempsPasse } from './ReglageTempsPasse';
 
-export function AdminMarges({ isSuper, parametres, remuneration, setRemuneration, erreurRemuneration, messageRemuneration, enregistrerRemuneration, handleParamsSubmit }: {
+export function AdminMarges({ isSuper, parametres, setParametres, remuneration, setRemuneration, erreurRemuneration, messageRemuneration, enregistrerRemuneration, handleParamsSubmit }: {
   isSuper: boolean;
   parametres: any;
+  setParametres: React.Dispatch<React.SetStateAction<any>>;
   remuneration: any;
   setRemuneration: React.Dispatch<React.SetStateAction<any>>;
   erreurRemuneration: string;
@@ -103,6 +105,12 @@ export function AdminMarges({ isSuper, parametres, remuneration, setRemuneration
               <button className="btn btn-primary">Enregistrer</button>
             </form>)}
           </div>
+
+          {/* Pas du temps passé (devis au temps passé) : son propre formulaire, qui n'envoie que ce réglage. */}
+          {parametres && <ReglageTempsPasse
+            pasTempsPasseMinutes={parametres.pasTempsPasseMinutes ?? null}
+            onEnregistre={(pas) => setParametres((actuels: any) => ({ ...actuels, pasTempsPasseMinutes: pas }))}
+          />}
 
           {/* Règles de rémunération commerciale : stockées en base, éditables par un
               superadmin. Elles étaient auparavant écrites en dur dans le serveur, ce qui

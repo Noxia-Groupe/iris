@@ -683,6 +683,7 @@ const Admin = () => {
         <AdminMarges
           isSuper={isSuper}
           parametres={parametres}
+          setParametres={setParametres}
           remuneration={remuneration}
           setRemuneration={setRemuneration}
           erreurRemuneration={erreurRemuneration}

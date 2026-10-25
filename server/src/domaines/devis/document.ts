@@ -2,6 +2,7 @@ import { baseHtDuTaux, tauxUtilises, tvaDuTaux } from '../../commun/montants';
 import { jourCivilEntreprise } from '../../commun/dates';
 import { formatMontantFacture } from '../factures/metier';
 import { ligneColonnes, ouvrirDocumentPdf, replierTexte, type IdentiteImprimee } from '../documents/gabarit';
+import { mentionTempsPasse } from './tempsPasse';
 
 // PDF du devis (lot 6a-2), sur le modèle commun du lot 6a-1. L'appelant fournit l'identité et le
 // client à imprimer : les copies prises à la signature pour un devis signé, les données
@@ -9,7 +10,8 @@ import { ligneColonnes, ouvrirDocumentPdf, replierTexte, type IdentiteImprimee }
 export type DevisImprime = {
   numero: string; version: number; objet: string; statut: string; createdAt: Date;
   totalHt: unknown; totalTva: unknown; totalTtc: unknown; acompteExige: boolean; tauxAcompte: unknown;
-  lignes: { designation: string; reference: string | null; unite: string | null; quantite: unknown; prixUnitaireHt: unknown; tauxTva: unknown; totalHt: unknown }[];
+  auTempsPasse: boolean; pasTempsPasseMinutes: number | null;
+  lignes: { designation: string; reference: string | null; unite: string | null; quantite: unknown; prixUnitaireHt: unknown; tauxTva: unknown; totalHt: unknown; tempsPasse: boolean; tarifTempsPasse: string | null }[];
   signature: { signataire: string; signeLe: Date; empreinte: string } | null;
 };
 
@@ -61,6 +63,14 @@ export async function rendreDocumentDevisPdf({ devis, identite, client, fuseau }
   }
   ligne(`TVA totale : ${formatMontantFacture(devis.totalTva)}`, { taille: 10, align: 'right' });
   ligne(`Total TTC : ${formatMontantFacture(devis.totalTtc)}`, { taille: 13, align: 'right' });
+  // Devis au temps passé (décision de Nelson du 25-10-2026, « Ligne minimum comptée ») : le devis dit
+  // que son total est un minimum, avec le prix, le tarif et le pas figés sur le devis (sa ligne au temps
+  // passé et son pas), et rien d'autre de la facture, qui viendra avec un lot suivant.
+  const mention = mentionTempsPasse(devis);
+  if (mention) {
+    pdf.moveDown();
+    ligne(mention, { taille: 10 });
+  }
   if (devis.acompteExige && devis.tauxAcompte !== null && devis.tauxAcompte !== undefined) {
     pdf.moveDown();
     ligne(`Acompte demandé : ${nombre(devis.tauxAcompte, 2)} %`, { taille: 10 });

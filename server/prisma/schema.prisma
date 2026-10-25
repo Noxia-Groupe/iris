@@ -381,6 +381,13 @@ model Parametres {
   // la génération reste désactivée tant que la société ne l'a pas réglée (décision de Nelson du
   // 22-10-2026). Réglée par un administrateur, et journalisée.
   anticipationVisitesJours Int?
+  // Pas du temps passé (lot « devis au temps passé », décisions de Nelson des 24 et 25-10-2026) : au-delà
+  // de la première heure, le temps passé se facture par ce pas, en minutes, toujours arrondi au pas
+  // supérieur. Vide au démarrage (décision du 25-10-2026, « Aucune, à régler ») : un devis au temps passé
+  // est refusé tant que l'administration ne l'a pas fixé. Choix par défaut, à confirmer : un entier de 1
+  // à 60 minutes (CHECK en base). Réglé par un administrateur, et journalisé. Chaque devis au temps passé
+  // fige sa valeur (cf. Devis.pasTempsPasseMinutes).
+  pasTempsPasseMinutes     Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -509,6 +516,16 @@ model Devis {
   acompteReference     String?
   acompteConstateParId String?
 
+  // --- Devis au temps passé (décisions de Nelson des 24 et 25-10-2026) ---
+  // Le marqueur distingue une intervention « au temps passé » ; il est reporté sur l'intervention à
+  // la conversion. Un devis au temps passé porte exactement une ligne de main d'œuvre au temps passé
+  // (DevisLigne.tempsPasse), un devis ordinaire aucune : garanti par l'API et, à la validation de
+  // chaque transaction, par la base. Le pas du temps passé est copié du réglage de la société et figé
+  // comme le taux d'acompte : à la création, au passage au temps passé, relu à la duplication, copié
+  // par une révision ; vide sur un devis ordinaire.
+  auTempsPasse         Boolean   @default(false)
+  pasTempsPasseMinutes Int?
+
   // --- Annulation, terminale ---
   // Un chantier ne se supprime plus : la seule façon de revenir sur une affaire ouverte par
   // erreur est d'annuler son devis, ce qui archive le chantier lié. Réservée aux
@@ -556,6 +573,13 @@ model DevisLigne {
   // Prix d'achat prévu, facultatif : donnée interne, réservée aux administrateurs, jamais
   // imprimée ni signée par le client (choix par défaut, à confirmer).
   prixAchatUnitaireHt Decimal? @db.Decimal(12, 2)
+  // Ligne « main d'œuvre au temps passé » (décisions de Nelson du 25-10-2026, « À l'heure seulement »
+  // et « Ligne minimum comptée ») : reprise d'une main d'œuvre active du catalogue, au prix à l'heure
+  // hors contrat ou sous contrat (tarifTempsPasse : HORS_CONTRAT | SOUS_CONTRAT), fixé par le serveur
+  // à son ajout puis figé ; une heure au moins, l'unité l'heure, comptée dans le total du devis. Une
+  // contrainte CHECK et un index unique partiel (une seule par devis) la gardent en base.
+  tempsPasse          Boolean  @default(false)
+  tarifTempsPasse     String?
 
   @@unique([devisId, ordre])
 }
@@ -1050,6 +1074,11 @@ model Intervention {
   dateSouhaitee  DateTime?
   // Jour de réception de la demande (date seule) ; NULL uniquement pour l'historique.
   dateDemande    DateTime? @db.Date
+  // Intervention « au temps passé » : marqueur reporté depuis son devis à la conversion (décision de
+  // Nelson du 25-10-2026, « Lot suivant ») ; la facture au temps passé viendra avec un lot suivant. Il ne
+  // change plus ensuite, et la base n'accepte un marqueur vrai que d'une conversion d'un devis au temps
+  // passé (gardes de la migration 20261025120000_devis_temps_passe).
+  auTempsPasse   Boolean  @default(false)
   createdById    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

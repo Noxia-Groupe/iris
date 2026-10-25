@@ -8,6 +8,7 @@ import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { type CatalogueFamily, catalogueFamily } from '../catalogue/metier';
+import { type SaisieTempsPasse, drapeauDevisTempsPasse, lireLigneTempsPasse, resoudreLigneTempsPasse, REFUS_NATURE_LIGNE_EXISTANTE, REFUS_PRIX_ACHAT_TEMPS_PASSE, TempsPasseSaisieError } from './tempsPasse';
 
 // Référence d'affaire portée par le chantier : celle du devis Iris dont il est issu
 // (A26-0001), attribuée par la séquence annuelle à la création du devis et recopiée
@@ -48,14 +49,55 @@ export class DevisDroitError extends Error {}
 
 // Demande de reprise du catalogue, ou de conservation d'une ligne existante, portée par une
 // ligne saisie. `devisPayload` ne fait que la valider ; `resoudreLignesDevis` la résout en base.
-type ReferenceLigneDevis = { ligneId: string | null; catalogue: { famille: CatalogueFamily; id: string } | null; prixAchatUnitaireHt: number | null | undefined };
+// Une ligne au temps passé porte en plus sa saisie (`tempsPasse`) : son prix est fixé à la résolution.
+type ReferenceLigneDevis = { ligneId: string | null; catalogue: { famille: CatalogueFamily; id: string } | null; prixAchatUnitaireHt: number | null | undefined; tempsPasse?: SaisieTempsPasse };
+// Ligne validée : une ligne au temps passé n'a ni prix, ni TVA, ni totaux avant sa résolution.
+type LigneDevisValidee = { ordre: number; designation: string; nature: string; quantite: number; prixUnitaireHt: number | null; tauxTva: number | null; totalHt: number | null; totalTtc: number | null; unite: string | null };
+// Prix d'achat prévu : facultatif ; `undefined` signifie « non transmis », null « effacé ».
+function prixAchatSaisi(item: Record<string, unknown>): number | null | undefined {
+  const prixAchatUnitaireHt = item.prixAchatUnitaireHt === undefined ? undefined
+    : item.prixAchatUnitaireHt === null || item.prixAchatUnitaireHt === '' ? null
+    : nombreDecimalNonNegatif(item.prixAchatUnitaireHt, 10, true);
+  if (prixAchatUnitaireHt === null && item.prixAchatUnitaireHt !== null && item.prixAchatUnitaireHt !== '') throw new DevisSaisieError('Prix d’achat prévu invalide.');
+  return prixAchatUnitaireHt;
+}
+// Totaux d'un devis depuis ses lignes chiffrées. Comme les factures et avoirs, la TVA est arrondie sur
+// la base HT cumulée de chaque taux.
+export function totauxDevis(lignes: { tauxTva: number; totalHt: number }[]) {
+  const totalHt = centimes(lignes.reduce((t, l) => t + l.totalHt, 0));
+  const totalTva = centimes(tauxUtilises(lignes).reduce((total, taux) => total + tvaDuTaux(lignes, taux), 0));
+  const totalTtc = centimes(totalHt + totalTva);
+  if (totalTtc > PLAFOND_MONTANT) throw new DevisSaisieError('Montant de devis hors des limites acceptées.');
+  return { totalHt, totalTva, totalTtc };
+}
 export function devisPayload(body: Record<string, unknown>) {
   const clientId = String(body.clientId || '').trim(), objet = String(body.objet || '').trim();
   const lignes = Array.isArray(body.lignes) ? body.lignes : [];
   if (!clientId || !objet || objet.length > 300 || !lignes.length) throw new DevisSaisieError('Client, objet et au moins une ligne sont requis.');
+  // Marqueur du devis au temps passé : absent, un PATCH garde celui du devis (cf. modifierDevis).
+  const auTempsPasse = drapeauDevisTempsPasse(body.auTempsPasse);
   const references: ReferenceLigneDevis[] = [];
-  const lignesCalculees = lignes.map((ligne, ordre) => {
+  const lignesCalculees = lignes.map((ligne, ordre): LigneDevisValidee => {
     const item = (ligne && typeof ligne === 'object' ? ligne : {}) as Record<string, unknown>, designation = String(item.designation || '').trim(), nature = String(item.nature || 'MAIN_OEUVRE');
+    const ligneId = item.ligneId === undefined || item.ligneId === null ? null : String(item.ligneId);
+    const lireCatalogue = (): ReferenceLigneDevis['catalogue'] => {
+      if (item.catalogueFamille === undefined || item.catalogueFamille === null) return null;
+      const famille = catalogueFamily(String(item.catalogueFamille));
+      const id = typeof item.catalogueId === 'string' ? item.catalogueId.trim() : '';
+      if (!famille || !id) throw new DevisSaisieError('Fiche catalogue de la ligne invalide.');
+      return { famille, id };
+    };
+    // Ligne « main d'œuvre au temps passé » : son prix, sa TVA et ses totaux viennent de la main
+    // d'œuvre, à la résolution (resoudreLignesDevis).
+    if (item.tempsPasse !== undefined && item.tempsPasse !== null && item.tempsPasse !== false) {
+      const catalogue = lireCatalogue();
+      const tempsPasse = lireLigneTempsPasse(item, ligneId, catalogue)!;
+      if (!designation || designation.length > 500) throw new DevisSaisieError('Ligne de devis invalide.');
+      const prixAchatUnitaireHt = prixAchatSaisi(item);
+      if (prixAchatUnitaireHt !== undefined && prixAchatUnitaireHt !== null) throw new TempsPasseSaisieError(REFUS_PRIX_ACHAT_TEMPS_PASSE);
+      references.push({ ligneId, catalogue, prixAchatUnitaireHt, tempsPasse: tempsPasse.saisie });
+      return { ordre, designation, nature: 'MAIN_OEUVRE', quantite: tempsPasse.quantite, prixUnitaireHt: null, tauxTva: null, totalHt: null, totalTtc: null, unite: null };
+    }
     // Mêmes échelles que les factures : le calcul entier ne doit jamais recevoir une précision
     // que ses unités (millièmes / centimes) ne représentent pas.
     const quantite = nombreDecimalNonNegatif(item.quantite, 9, false, 3);
@@ -67,28 +109,16 @@ export function devisPayload(body: Record<string, unknown>) {
     const totalTtc = centimesTtcLigne(totalHt, tauxTva);
     // Même plafond que les factures : au-delà, la colonne Decimal(12, 2) refuserait le montant.
     if (totalTtc > PLAFOND_MONTANT) throw new DevisSaisieError('Montant de ligne hors des limites acceptées.');
-    // Prix d'achat prévu : facultatif ; `undefined` signifie « non transmis », null « effacé ».
-    const prixAchatUnitaireHt = item.prixAchatUnitaireHt === undefined ? undefined
-      : item.prixAchatUnitaireHt === null || item.prixAchatUnitaireHt === '' ? null
-      : nombreDecimalNonNegatif(item.prixAchatUnitaireHt, 10, true);
-    if (prixAchatUnitaireHt === null && item.prixAchatUnitaireHt !== null && item.prixAchatUnitaireHt !== '') throw new DevisSaisieError('Prix d’achat prévu invalide.');
-    const ligneId = item.ligneId === undefined || item.ligneId === null ? null : String(item.ligneId);
-    let catalogue: ReferenceLigneDevis['catalogue'] = null;
-    if (item.catalogueFamille !== undefined && item.catalogueFamille !== null) {
-      const famille = catalogueFamily(String(item.catalogueFamille));
-      const id = typeof item.catalogueId === 'string' ? item.catalogueId.trim() : '';
-      if (!famille || !id) throw new DevisSaisieError('Fiche catalogue de la ligne invalide.');
-      catalogue = { famille, id };
-    }
+    const prixAchatUnitaireHt = prixAchatSaisi(item);
+    const catalogue = lireCatalogue();
     references.push({ ligneId, catalogue, prixAchatUnitaireHt });
     return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite };
   });
-  const totalHt = centimes(lignesCalculees.reduce((t, l) => t + l.totalHt, 0));
-  // Comme les factures et avoirs, la TVA est arrondie sur la base HT cumulée de chaque taux.
-  const totalTva = centimes(tauxUtilises(lignesCalculees).reduce((total, taux) => total + tvaDuTaux(lignesCalculees, taux), 0));
-  const totalTtc = centimes(totalHt + totalTva);
-  if (totalTtc > PLAFOND_MONTANT) throw new DevisSaisieError('Montant de devis hors des limites acceptées.');
-  return { clientId, objet, lignesCalculees, references, totalHt, totalTva, totalTtc };
+  // Les totaux d'un devis qui porte une ligne au temps passé ne se connaissent qu'une fois son prix
+  // fixé par le serveur : les routes les calculent toujours sur les lignes résolues (totauxDevis).
+  const totaux = lignesCalculees.some((ligne) => ligne.totalHt === null) ? { totalHt: null, totalTva: null, totalTtc: null }
+    : totauxDevis(lignesCalculees as { tauxTva: number; totalHt: number }[]);
+  return { clientId, objet, auTempsPasse, lignesCalculees, references, ...totaux };
 }
 
 // --- Catalogue dans les devis (lot pilote 2, décision A8 du 16-10-2026) ---
@@ -106,14 +136,20 @@ export function devisPourLecteur<T>(req: express.Request, valeur: T): T {
   return (Array.isArray(valeur) ? valeur.map(masquer) : masquer(valeur)) as T;
 }
 
-type LigneDevisExistante = { id: string; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null };
+type LigneDevisExistante = {
+  id: string; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null;
+  tempsPasse: boolean; tarifTempsPasse: string | null; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal;
+};
 // Résout la copie du catalogue et le prix d'achat prévu de chaque ligne saisie :
 //  - une ligne existante du devis (`ligneId`) garde sa fiche d'origine et sa référence, copiées
 //    à son ajout : modifier ou désactiver la fiche ensuite n'y change rien ;
 //  - une nouvelle ligne reprise du catalogue exige une fiche existante et active, dont la
 //    référence est recopiée par le serveur ;
 //  - le prix d'achat prévu n'est écrit que par un administrateur. Sinon, une ligne existante
-//    garde le sien, et une nouvelle ligne du catalogue reprend celui de la fiche.
+//    garde le sien, et une nouvelle ligne du catalogue reprend celui de la fiche ;
+//  - la ligne au temps passé prend le prix, la TVA et la référence de sa main d'œuvre à son ajout,
+//    puis les garde (./tempsPasse.ts) ; une ligne existante ne change pas de nature.
+// Les lignes rendues sont toutes chiffrées : les totaux du devis se calculent dessus (totauxDevis).
 export async function resoudreLignesDevis(
   db: Prisma.TransactionClient | typeof prisma,
   payload: ReturnType<typeof devisPayload>,
@@ -128,11 +164,19 @@ export async function resoudreLignesDevis(
   const lignes = [];
   for (const [index, ligne] of payload.lignesCalculees.entries()) {
     const reference = payload.references[index];
-    let copie: { reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | number | null };
+    let existante: LigneDevisExistante | null = null;
     if (reference.ligneId) {
-      const existante = parId.get(reference.ligneId);
+      existante = parId.get(reference.ligneId) ?? null;
       if (!existante || vues.has(reference.ligneId)) throw new DevisSaisieError('Ligne de devis inconnue : rechargez le devis.');
       vues.add(reference.ligneId);
+      if (existante.tempsPasse !== !!reference.tempsPasse) throw new TempsPasseSaisieError(REFUS_NATURE_LIGNE_EXISTANTE);
+    }
+    if (reference.tempsPasse) {
+      lignes.push(await resoudreLigneTempsPasse(db, ligne, reference.tempsPasse, reference.catalogue, existante));
+      continue;
+    }
+    let copie: { reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | number | null };
+    if (existante) {
       copie = { reference: existante.reference, catalogueFamille: existante.catalogueFamille, catalogueId: existante.catalogueId, prixAchatUnitaireHt: existante.prixAchatUnitaireHt };
     } else if (reference.catalogue) {
       // Lue par `db`, donc dans la transaction verrouillée de la modification, et non par le client global.
@@ -145,7 +189,8 @@ export async function resoudreLignesDevis(
       copie = { reference: null, catalogueFamille: null, catalogueId: null, prixAchatUnitaireHt: null };
     }
     if (ecritPrixAchat && reference.prixAchatUnitaireHt !== undefined) copie.prixAchatUnitaireHt = reference.prixAchatUnitaireHt;
-    lignes.push({ ...ligne, ...copie });
+    // Une ligne ordinaire est déjà chiffrée par devisPayload.
+    lignes.push({ ...ligne, prixUnitaireHt: ligne.prixUnitaireHt!, tauxTva: ligne.tauxTva!, totalHt: ligne.totalHt!, totalTtc: ligne.totalTtc!, ...copie, tempsPasse: false, tarifTempsPasse: null });
   }
   return lignes;
 }
@@ -163,28 +208,34 @@ function montantDevisFige(value: Prisma.Decimal | number | string | null, decima
 export function contenuDevisSigne(devis: {
   id: string; dossierId: string; numero: string; version: number; clientId: string; objet: string;
   acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; totalHt: Prisma.Decimal; totalTva: Prisma.Decimal; totalTtc: Prisma.Decimal;
-  lignes: { ordre: number; designation: string; nature: string; reference: string | null; unite: string | null; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal }[];
+  auTempsPasse: boolean; pasTempsPasseMinutes: number | null;
+  lignes: { ordre: number; designation: string; nature: string; reference: string | null; unite: string | null; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal; tempsPasse: boolean; tarifTempsPasse: string | null }[];
 }) {
-  // Le prix d'achat prévu, donnée interne, n'entre jamais dans ce que le client signe.
+  // Le prix d'achat prévu, donnée interne, n'entre jamais dans ce que le client signe. Le marqueur et
+  // le pas d'un devis au temps passé, et le tarif de sa ligne au temps passé, y entrent ; ils ne
+  // figurent pas dans le contenu d'un devis ordinaire, dont l'empreinte reste celle d'avant ce lot.
   return {
     devisId: devis.id, dossierId: devis.dossierId, numero: devis.numero, version: devis.version,
     clientId: devis.clientId, objet: devis.objet, acompteExige: devis.acompteExige,
     tauxAcompte: montantDevisFige(devis.tauxAcompte, 2), totalHt: montantDevisFige(devis.totalHt, 2),
     totalTva: montantDevisFige(devis.totalTva, 2), totalTtc: montantDevisFige(devis.totalTtc, 2),
+    ...(devis.auTempsPasse ? { auTempsPasse: true, pasTempsPasseMinutes: devis.pasTempsPasseMinutes } : {}),
     lignes: devis.lignes.map(ligne => ({
       ordre: ligne.ordre, designation: ligne.designation, nature: ligne.nature, reference: ligne.reference, unite: ligne.unite,
       quantite: montantDevisFige(ligne.quantite, 3), prixUnitaireHt: montantDevisFige(ligne.prixUnitaireHt, 2),
       tauxTva: montantDevisFige(ligne.tauxTva, 2), totalHt: montantDevisFige(ligne.totalHt, 2), totalTtc: montantDevisFige(ligne.totalTtc, 2),
+      ...(ligne.tempsPasse ? { tempsPasse: true, tarifTempsPasse: ligne.tarifTempsPasse } : {}),
     })),
   };
 }
-// Copie à l'identique d'une ligne (révision, duplication) : la copie du catalogue et le prix
-// d'achat prévu suivent, comme les montants.
-export function copieLigneDevis({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt }: {
+// Copie à l'identique d'une ligne (révision, duplication) : la copie du catalogue, le prix
+// d'achat prévu et la ligne au temps passé (son tarif et son prix figés) suivent, comme les montants.
+export function copieLigneDevis({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse }: {
   ordre: number; designation: string; nature: string; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal;
   unite: string | null; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null;
+  tempsPasse: boolean; tarifTempsPasse: string | null;
 }) {
-  return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt };
+  return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse };
 }
 export async function verrouillerDevis(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
   const lignes = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "Devis" WHERE "id" = ${id} FOR UPDATE`);
