@@ -45,9 +45,12 @@ test('une heure au moins ; une ligne au temps passé et une seule sur un devis a
 });
 
 test('mention : prix, tarif et pas figés du devis, le même texte que le PDF ; aucune pour un devis ordinaire', () => {
-  const devis = { auTempsPasse: true, pasTempsPasseMinutes: 15, lignes: [{ tempsPasse: false, prixUnitaireHt: 3 }, { tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT' as const, prixUnitaireHt: 45.5 }] };
+  const devis = { auTempsPasse: true, pasTempsPasseMinutes: 15, lignes: [{ tempsPasse: false, prixUnitaireHt: 3, quantite: 2 }, { tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT' as const, prixUnitaireHt: 45.5, quantite: 1 }] };
   assert.equal(mentionTempsPasse(devis), 'Devis au temps passé : une heure minimum facturée au prix de 45,50 € HT de l’heure (tarif à l’heure hors contrat), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de 15 minutes, toute tranche commencée étant due. Le total de ce devis est un minimum.');
-  assert.match(mentionTempsPasse({ ...devis, pasTempsPasseMinutes: 1, lignes: [{ tempsPasse: true, tarifTempsPasse: 'SOUS_CONTRAT', prixUnitaireHt: 40 }] })!, /40,00 € HT de l’heure \(tarif à l’heure sous contrat\).*tranches de 1 minute, toute/);
+  assert.match(mentionTempsPasse({ ...devis, pasTempsPasseMinutes: 1, lignes: [{ tempsPasse: true, tarifTempsPasse: 'SOUS_CONTRAT', prixUnitaireHt: 40, quantite: 1 }] })!, /40,00 € HT de l’heure \(tarif à l’heure sous contrat\).*tranches de 1 minute, toute/);
+  // Plus d'une heure : la quantité de la ligne est le minimum facturé, au pluriel dès deux heures.
+  assert.match(mentionTempsPasse({ ...devis, lignes: [{ tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT', prixUnitaireHt: 45.5, quantite: 2 }] })!, /^Devis au temps passé : 2 heures minimum facturées au prix de 45,50 €/);
+  assert.match(mentionTempsPasse({ ...devis, lignes: [{ tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT', prixUnitaireHt: 45.5, quantite: 1.5 }] })!, /^Devis au temps passé : 1,5 heure minimum facturée au prix de 45,50 €/);
   assert.equal(mentionTempsPasse({ ...devis, auTempsPasse: false }), null);
   assert.equal(mentionTempsPasse({ ...devis, pasTempsPasseMinutes: null }), null);
   assert.equal(formatPrix(1234.5).replace(/\s/g, ' '), '1 234,50 €');

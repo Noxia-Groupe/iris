@@ -19302,6 +19302,7 @@ if (!TEST_DATABASE_URL) {
         [{ quantite: '0.999' }, /au moins une heure/],
         [{ quantite: 0 }, /Ligne de devis invalide/],
         [{ quantite: '1.0001' }, /Ligne de devis invalide/],
+        [{ quantite: '1000000000' }, /Ligne de devis invalide/],
         [{ designation: '  ' }, /Ligne de devis invalide/],
         [{ prixAchatUnitaireHt: '10' }, /pas de prix d’achat prévu/],
         [{ catalogueFamille: 'articles', catalogueId: fiches.cable.id }, /reprend une main d’œuvre du catalogue/],
@@ -19320,12 +19321,19 @@ if (!TEST_DATABASE_URL) {
       const tropGros = await creer([ligneTp(mo.elec, { quantite: '109890110' }), { designation: 'TEST Gros matériel', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: '5000000000', tauxTva: 20 }]);
       assert.equal(tropGros.status, 400, JSON.stringify(tropGros.body));
       assert.equal(tropGros.body.error, 'Montant de devis hors des limites acceptées.');
+      // TVA de la main d'œuvre aux bornes comprises, 0 et 100 %, et envoyée identique : acceptée.
+      for (const [taux, tva, ttc] of [['0', 0, 45.5], ['100', 45.5, 91]]) {
+        const borne = await creerMainOeuvre(`TVA${taux}`, { tauxTva: taux });
+        const accepte = await creer([ligneTp(borne, { tauxTva: taux })]);
+        assert.equal(accepte.status, 201, `${taux} : ${JSON.stringify(accepte.body)}`);
+        assert.deepEqual([accepte.body.lignes[0].tauxTva, accepte.body.totalHt, accepte.body.totalTva, accepte.body.totalTtc], [Number(taux), 45.5, tva, ttc]);
+      }
       // La TVA d'une main d'œuvre, que le catalogue admet plus large, est contrôlée comme celle d'une ligne.
       const tvaLarge = await creerMainOeuvre('TVA', { tauxTva: '150' });
       const refusTva = await creer([ligneTp(tvaLarge)]);
       assert.equal(refusTva.status, 400, JSON.stringify(refusTva.body));
       assert.match(refusTva.body.error, /TVA de la main d’œuvre invalide pour un devis/);
-      assert.equal(await devisDuClient(), avant, 'aucun refus n’écrit de devis');
+      assert.equal(await devisDuClient(), avant + 2, 'aucun refus n’écrit de devis (les deux bornes de TVA sont acceptées)');
     });
 
     test('un devis au temps passé porte exactement une ligne au temps passé, un devis ordinaire aucune', async () => {
@@ -19465,6 +19473,7 @@ if (!TEST_DATABASE_URL) {
       try {
         const source = await creerOk([ligneTp(mainOeuvre, { quantite: '1.5' }), FOURNITURE]);
         await signer(source.id);
+        assert.equal((await regler(25)).status, 200);
         const autreSigne = await creerOk([ligneTp(mainOeuvre)]);
         await signer(autreSigne.id);
         await changerPrix(mainOeuvre, { prixVenteHt: '99' });
@@ -19488,7 +19497,7 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual([await devisDuClient(), await sequence()], avant);
         const revisionSansReglage = await envoyer('post', `/api/devis/${autreSigne.id}/revisions`, admin);
         assert.equal(revisionSansReglage.status, 201, JSON.stringify(revisionSansReglage.body));
-        assert.deepEqual([revisionSansReglage.body.auTempsPasse, revisionSansReglage.body.pasTempsPasseMinutes, revisionSansReglage.body.lignes[0].prixUnitaireHt], [true, 15, 45.5]);
+        assert.deepEqual([revisionSansReglage.body.auTempsPasse, revisionSansReglage.body.pasTempsPasseMinutes, revisionSansReglage.body.lignes[0].prixUnitaireHt], [true, 25, 45.5]);
         // Un devis ordinaire se duplique toujours, sans pas, que le réglage soit vide ou non.
         const ordinaire = await creerOk([FOURNITURE], { auTempsPasse: false });
         for (const pas of ['', 15]) {
@@ -19549,6 +19558,21 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.devisLigne.updateMany({ where: { devisId: devis.id }, data: { quantite: 3, totalHt: 136.5, totalTtc: 163.8 } }), /lignes sont figées/);
       const modification = await envoyer('patch', `/api/devis/${devis.id}`, admin, corpsDevis([ligneTp(mo.elec, { ligneId: devis.lignes[0].id, quantite: 3 })]));
       assert.equal(modification.status, 409, JSON.stringify(modification.body));
+      // Sous contrat, et un autre pas : l'empreinte porte le tarif et le pas du devis.
+      try {
+        assert.equal((await regler(20)).status, 200);
+        const sous = await creerOk([ligneTp(mo.elec, { tarifTempsPasse: 'SOUS_CONTRAT' })]);
+        const signatureSous = await signer(sous.id);
+        const contenuSous = {
+          devisId: sous.id, dossierId: sous.dossierId, numero: sous.numero, version: 1, clientId: client.id, objet: sous.objet,
+          acompteExige: false, tauxAcompte: null, totalHt: '40.00', totalTva: '8.00', totalTtc: '48.00',
+          auTempsPasse: true, pasTempsPasseMinutes: 20,
+          lignes: [{ ordre: 0, designation: sous.lignes[0].designation, nature: 'MAIN_OEUVRE', reference: mo.elec.reference, unite: 'heure', quantite: '1.000', prixUnitaireHt: '40.00', tauxTva: '20.00', totalHt: '40.00', totalTtc: '48.00', tempsPasse: true, tarifTempsPasse: 'SOUS_CONTRAT' }],
+        };
+        assert.equal(signatureSous.empreinte, createHash('sha256').update(JSON.stringify(contenuSous), 'utf8').digest('hex'));
+      } finally {
+        assert.equal((await regler(15)).status, 200);
+      }
     });
 
     test('conversion : l’intervention porte le marqueur du devis au temps passé, vu sans prix ; chantier et contrat sans marqueur ; devis ordinaire sans marqueur', async () => {
@@ -19612,6 +19636,18 @@ if (!TEST_DATABASE_URL) {
       assert.ok(seules.body.every((f) => f.estMainOeuvre === true && f.famille === 'prestations'));
       const sansRecherche = await recherche({ mainOeuvre: '1' });
       assert.ok(sansRecherche.body.length > 0 && sansRecherche.body.every((f) => f.estMainOeuvre === true), JSON.stringify(sansRecherche.body));
+      // Toutes les mains d'œuvre actives, au-delà des 50 fiches de la recherche générale : l'écran du devis
+      // au temps passé les propose toutes, sans recherche.
+      const nombreAvant = sansRecherche.body.length;
+      await prisma.cataloguePrestation.createMany({ data: Array.from({ length: 51 }, (_, i) => ({
+        reference: `TEST-TP-NOMBRE-${suffixe}-${i}`, nom: `TEST Main d’œuvre en nombre ${suffixe} ${String(i).padStart(2, '0')}`, unite: 'heure', tauxTva: 20,
+        prixVenteHt: 40, estMainOeuvre: true, prixJourHorsContratHt: 300, prixHeureSousContratHt: 35, prixJourSousContratHt: 260, heuresParJour: 7,
+      })) });
+      const toutes = await recherche({ mainOeuvre: '1' });
+      assert.equal(toutes.body.length, nombreAvant + 51);
+      assert.ok(toutes.body.every((f) => f.estMainOeuvre === true && !('prixJourHorsContratHt' in f) && !('heuresParJour' in f)));
+      // La recherche générale garde sa limite de 50 fiches.
+      assert.equal((await recherche({ q: 'TEST' })).body.length, 50);
       assert.equal((await recherche({ mainOeuvre: '1', famille: 'articles' })).status, 400);
       // Le technicien n'a jamais le droit devis.
       assert.equal((await recherche({ q: mo.elec.reference }, enTete('technicien'))).status, 403);
@@ -19620,24 +19656,27 @@ if (!TEST_DATABASE_URL) {
 
     test('PDF : la mention du devis au temps passé, avec son prix, son tarif et son pas figés ; aucune mention sur un devis ordinaire', async () => {
       const mainOeuvre = await creerMainOeuvre('PDF');
-      const mention = (prix, tarif, pas) => `Devis au temps passé : une heure minimum facturée au prix de ${prix} HT de l’heure (tarif à l’heure ${tarif}), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de ${pas}, toute tranche commencée étant due. Le total de ce devis est un minimum.`;
+      const mention = (prix, tarif, pas, heures = 'une heure minimum facturée') => `Devis au temps passé : ${heures} au prix de ${prix} HT de l’heure (tarif à l’heure ${tarif}), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de ${pas}, toute tranche commencée étant due. Le total de ce devis est un minimum.`;
       try {
         const devis = await creerOk([ligneTp(mainOeuvre, { quantite: '1.5' }), { designation: `TEST Câble ${suffixe}`, nature: 'FOURNITURE', quantite: '12', prixUnitaireHt: '2.50', tauxTva: '20', unite: 'm', catalogueFamille: 'articles', catalogueId: fiches.cable.id }]);
         const texte = await texteDuPdf(devis.id);
-        assert.ok(sansBlancs(texte).includes(sansBlancs(mention('45,50 €', 'hors contrat', '15 minutes'))), texte);
+        assert.ok(sansBlancs(texte).includes(sansBlancs(mention('45,50 €', 'hors contrat', '15 minutes', '1,5 heure minimum facturée'))), texte);
         for (const attendu of ['1,5 heure', '45,50 €', '68,25 €', 'Total HT : 98,25 €', 'Total TTC : 117,90 €', `Réf. ${mainOeuvre.reference}`]) assert.ok(texte.includes(attendu), `absent du PDF : ${attendu}\n${texte}`);
-        assert.ok(sansBlancs(texte).indexOf('TotalTTC') < sansBlancs(texte).indexOf('Devisautempspassé:uneheure'), 'la mention suit les totaux');
+        assert.ok(sansBlancs(texte).indexOf('TotalTTC') < sansBlancs(texte).indexOf('Devisautempspassé:1,5heureminimum'), 'la mention suit les totaux');
         // Sous contrat, pas d'une minute : libellé du tarif et singulier.
         assert.equal((await regler(1)).status, 200);
         const sous = await creerOk([ligneTp(mainOeuvre, { tarifTempsPasse: 'SOUS_CONTRAT' })]);
         assert.ok(sansBlancs(await texteDuPdf(sous.id)).includes(sansBlancs(mention('40,00 €', 'sous contrat', '1 minute'))));
+        // Plus d'une heure : la quantité de la ligne est le minimum facturé, au pluriel dès deux heures.
+        const deux = await creerOk([ligneTp(mainOeuvre, { quantite: '2' })]);
+        assert.ok(sansBlancs(await texteDuPdf(deux.id)).includes(sansBlancs(mention('45,50 €', 'hors contrat', '1 minute', '2 heures minimum facturées'))));
         // Signé ou non, le devis imprime ses propres valeurs figées : la main d'œuvre et le réglage
         // changent ensuite sans effet.
         await signer(devis.id);
         await changerPrix(mainOeuvre, { prixVenteHt: '99', prixHeureSousContratHt: '88' });
         assert.equal((await regler(30)).status, 200);
         const signe = await texteDuPdf(devis.id);
-        assert.ok(sansBlancs(signe).includes(sansBlancs(mention('45,50 €', 'hors contrat', '15 minutes'))) && !signe.includes('99,00') && !signe.includes('30 minutes'), signe);
+        assert.ok(sansBlancs(signe).includes(sansBlancs(mention('45,50 €', 'hors contrat', '15 minutes', '1,5 heure minimum facturée'))) && !signe.includes('99,00') && !signe.includes('30 minutes'), signe);
         const brouillon = await texteDuPdf(sous.id);
         assert.ok(sansBlancs(brouillon).includes(sansBlancs(mention('40,00 €', 'sous contrat', '1 minute'))) && !brouillon.includes('88,00'), brouillon);
         // Un devis ordinaire n'imprime pas la mention.
@@ -19672,7 +19711,9 @@ if (!TEST_DATABASE_URL) {
         [{ catalogueFamille: null, catalogueId: null, reference: null }, 'sans fiche du catalogue'],
         [{ prixAchatUnitaireHt: '1' }, 'prix d’achat prévu'],
         [{ prixUnitaireHt: '45.51' }, 'total HT faux'],
+        [{ prixUnitaireHt: '45.49' }, 'total HT faux, au-dessus du calcul'],
         [{ totalTtc: '54.61' }, 'total TTC faux'],
+        [{ totalTtc: '54.59' }, 'total TTC faux, en dessous du calcul'],
         [{ tauxTva: '10' }, 'TVA sans son TTC'],
       ]) {
         await assert.rejects(prisma.devisLigne.update({ where: { id: ligne.id }, data }), /DevisLigne_temps_passe_check/, nom);
@@ -19688,6 +19729,10 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(transactionVerifieeTest((tx) => tx.devisLigne.delete({ where: { id: ligne.id } })), /exactement une ligne de main d’œuvre au temps passé \(0 trouvée/);
       await assert.rejects(transactionVerifieeTest((tx) => tx.devisLigne.update({ where: { id: ligne.id }, data: { tempsPasse: false, tarifTempsPasse: null } })), /exactement une ligne de main d’œuvre au temps passé \(0 trouvée/);
       await assert.rejects(transactionVerifieeTest((tx) => tx.devis.update({ where: { id: devis.id }, data: { auTempsPasse: false, pasTempsPasseMinutes: null } })), /Devis ordinaire/);
+      // Une ligne ordinaire reprise d'une main d'œuvre, rendue au temps passé sur un devis ordinaire.
+      const ordinaireMo = await creerOk([{ designation: 'TEST Main d’œuvre ordinaire', nature: 'MAIN_OEUVRE', quantite: '1', prixUnitaireHt: '45.50', tauxTva: '20', unite: 'heure', catalogueFamille: 'prestations', catalogueId: mo.elec.id }], { auTempsPasse: false });
+      const [ligneMo] = await lignesEnBase(ordinaireMo.id);
+      await assert.rejects(transactionVerifieeTest((tx) => tx.devisLigne.update({ where: { id: ligneMo.id }, data: { tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT' } })), /Devis ordinaire : une ligne au temps passé n’existe que sur un devis au temps passé/);
       // Déplacée vers un autre devis au temps passé, dont la ligne est retirée : c'est le devis quitté
       // qui n'en a plus.
       const autre = await creerOk([ligneTp(mo.plomb)]);
@@ -19722,6 +19767,13 @@ if (!TEST_DATABASE_URL) {
         const cree = await tx.intervention.create({ data: { reference: reference(), clientId: client.id, titre: 'TEST Non marquée, devis au temps passé' } });
         await conversion(tx, tpSigne, cree.id);
       }), /porte le marqueur « au temps passé » de son devis/);
+      // La conversion d'un devis ordinaire enregistrée avant l'intervention (sa cible n'a pas de clé
+      // étrangère) ne fait pas naître une intervention marquée.
+      const cibleAvance = randomUUID();
+      await assert.rejects(transactionVerifieeTest(async (tx) => {
+        await conversion(tx, ordinaireSigne, cibleAvance);
+        await tx.intervention.create({ data: { id: cibleAvance, reference: reference(), clientId: client.id, titre: 'TEST Marquée après la conversion d’un devis ordinaire', auTempsPasse: true } });
+      }), /ne naît que de la conversion d’un devis au temps passé/);
       // Témoin : le report exact passe, puis le marqueur vrai ne change plus non plus.
       let marquee = null;
       await transactionVerifieeTest(async (tx) => {

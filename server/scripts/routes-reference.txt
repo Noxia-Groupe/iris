@@ -199,7 +199,7 @@ PUT /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b319
 PUT /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > modifierFicheCatalogue#6bed41e242c5
 DELETE /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > desactiverFicheCatalogue#775098fdc77c
 DELETE /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > desactiverFicheCatalogue#775098fdc77c
-GET /api/devis/catalogue requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#be6ce7fa7492
+GET /api/devis/catalogue requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#8c85d098bcfd
 GET /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > listerDevis#1b0df21d4732
 GET /api/v1/devis <anonymous>{scope="devis:read"}#4aeb6d464b38 > listerDevis#1b0df21d4732
 POST /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerDevis#d2bf54cdded8

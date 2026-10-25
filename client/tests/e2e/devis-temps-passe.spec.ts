@@ -19,8 +19,8 @@ async function envoyer(request: APIRequestContext, token: string, methode: 'post
 const lirePas = async (request: APIRequestContext, token: string) => (await (await request.get(`${api}/parametres`, { headers: { Authorization: `Bearer ${token}` } })).json()).pasTempsPasseMinutes as number | null;
 const reglerPas = (request: APIRequestContext, token: string, pas: number | null) => envoyer(request, token, 'put', '/parametres', { pasTempsPasseMinutes: pas === null ? '' : pas });
 const devisDuClient = async (request: APIRequestContext, token: string, clientId: string) => ((await (await request.get(`${api}/devis`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { client: { id: string } }[]).filter((d) => d.client.id === clientId);
-const creerMainOeuvre = (request: APIRequestContext, token: string, suffixe: string) => envoyer(request, token, 'post', '/catalogue/prestations', {
-  estMainOeuvre: true, reference: `E2E-TP-${suffixe}`, nom: `Électricien temps passé E2E ${suffixe}`, tauxTva: '20',
+const creerMainOeuvre = (request: APIRequestContext, token: string, suffixe: string, tauxTva = '20') => envoyer(request, token, 'post', '/catalogue/prestations', {
+  estMainOeuvre: true, reference: `E2E-TP-${suffixe}`, nom: `Électricien temps passé E2E ${suffixe}`, tauxTva,
   prixVenteHt: '45.50', prixJourHorsContratHt: '320', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7',
 }) as Promise<{ id: string; reference: string; nom: string }>;
 
@@ -67,6 +67,11 @@ test('le pas du temps passé se règle dans l’administration ; vide, un devis 
     await expect(entree).toContainText('Pas du temps passé (minutes) : —');
     await expect(entree).toContainText('Pas du temps passé (minutes) : 15');
     await page.getByRole('button', { name: 'Marges & Commissions' }).click();
+    // Une minute : au singulier.
+    await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('spinbutton', { name: 'Pas du temps passé (minutes)' }).fill('1');
+    await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('button', { name: 'Enregistrer le pas' }).click();
+    await expect(page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('status')).toHaveText('Pas du temps passé enregistré : 1 minute.');
+    expect(await lirePas(request, session.token)).toBe(1);
     // Vidé depuis l'écran : retiré.
     await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('spinbutton', { name: 'Pas du temps passé (minutes)' }).fill('');
     await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('button', { name: 'Enregistrer le pas' }).click();
@@ -130,7 +135,7 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     const item = page.getByRole('listitem').filter({ hasText: objet });
     await expect(item).toContainText('Au temps passé');
     await expect(item).toContainText('HT 110.00 € · TVA 22.00 € · TTC 132.00 €');
-    await expect(item.getByTestId('mention-temps-passe')).toHaveText('Devis au temps passé : une heure minimum facturée au prix de 40,00 € HT de l’heure (tarif à l’heure sous contrat), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de 15 minutes, toute tranche commencée étant due. Le total de ce devis est un minimum.');
+    await expect(item.getByTestId('mention-temps-passe')).toHaveText('Devis au temps passé : 2 heures minimum facturées au prix de 40,00 € HT de l’heure (tarif à l’heure sous contrat), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de 15 minutes, toute tranche commencée étant due. Le total de ce devis est un minimum.');
     const [enregistre] = await devisDuClient(request, session.token, client.id) as unknown as { id: string; auTempsPasse: boolean; pasTempsPasseMinutes: number; lignes: { tempsPasse: boolean; tarifTempsPasse: string; prixUnitaireHt: number; quantite: number }[] }[];
     expect([enregistre.auTempsPasse, enregistre.pasTempsPasseMinutes]).toEqual([true, 15]);
     expect(enregistre.lignes.filter((l) => l.tempsPasse).map((l) => [l.tarifTempsPasse, l.prixUnitaireHt, l.quantite])).toEqual([['SOUS_CONTRAT', 40, 2]]);
@@ -146,7 +151,7 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     await ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' }).fill('3');
     await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
     await expect(item).toContainText('HT 150.00 € · TVA 30.00 € · TTC 180.00 €');
-    await expect(item.getByTestId('mention-temps-passe')).toContainText('au prix de 40,00 € HT de l’heure');
+    await expect(item.getByTestId('mention-temps-passe')).toContainText('3 heures minimum facturées au prix de 40,00 € HT de l’heure');
 
     // Signé, il se convertit en intervention depuis l'écran : l'intervention porte le marqueur.
     await envoyer(request, session.token, 'post', `/devis/${enregistre.id}/signature`, { signataire: 'Client temps passé E2E', confirme: true });
@@ -170,7 +175,7 @@ test('rendu à 375 px : formulaire du devis au temps passé, mention, réglage e
   const pasAvant = await lirePas(request, session.token);
   try {
     await reglerPas(request, session.token, 30);
-    const mainOeuvre = await creerMainOeuvre(request, session.token, suffixe);
+    const mainOeuvre = await creerMainOeuvre(request, session.token, suffixe, '5.5');
     const client = await creerClient('Temps passé mobile');
     await page.setViewportSize({ width: 375, height: 812 });
     await allerSurPageAdmin('/devis');
@@ -181,6 +186,8 @@ test('rendu à 375 px : formulaire du devis au temps passé, mention, réglage e
     await page.getByRole('checkbox', { name: 'Devis au temps passé' }).check();
     await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);
     const ligne = page.getByRole('group', { name: 'Ligne au temps passé' });
+    // La TVA de la main d'œuvre, affichée au format français.
+    await expect(ligne).toContainText('5,5 %');
     for (const element of [page.getByRole('combobox', { name: 'Tarif de l’heure' }), ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' }), ligne.getByTestId('prix-heure-temps-passe')]) {
       await element.scrollIntoViewIfNeeded();
       const boite = await element.boundingBox();

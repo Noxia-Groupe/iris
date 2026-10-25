@@ -444,7 +444,8 @@ export function enregistrerRoutesDevis(app: Express): void {
   // désignation ; 50 fiches au plus, triées par désignation (choix par défaut, à confirmer).
   // Devis au temps passé : une main d'œuvre expose aussi son prix à l'heure sous contrat, et son
   // drapeau, pour le choix du tarif ; jamais ses forfaits jour ni ses heures par jour. `mainOeuvre=1`
-  // ne propose que les mains d'œuvre actives (prestations).
+  // ne propose que les mains d'œuvre actives (prestations), toutes, sans la limite de 50 fiches : l'écran
+  // du devis au temps passé les liste sans recherche (choix par défaut, à confirmer).
   app.get('/api/devis/catalogue', requireAuth, requirePermission('devis:write'), async (req, res) => {
     try {
       const recherche = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
@@ -457,7 +458,7 @@ export function enregistrerRoutesDevis(app: Express): void {
       const voitPrixAchat = voitPrixAchatDevis(req);
       const fiches = (await Promise.all(familles.map(async (f) => {
         const lignes = await (catalogueModels[f] as unknown as { findMany: (args: unknown) => Promise<Record<string, unknown>[]> })
-          .findMany({ where: mainsOeuvreSeules ? { ...filtre, estMainOeuvre: true } : filtre, orderBy: { nom: 'asc' }, take: 50 });
+          .findMany({ where: mainsOeuvreSeules ? { ...filtre, estMainOeuvre: true } : filtre, orderBy: { nom: 'asc' }, take: mainsOeuvreSeules ? undefined : 50 });
         return lignes.map((fiche) => ({
           famille: f, id: fiche.id, reference: fiche.reference, nom: fiche.nom,
           unite: (fiche.unite as string | undefined) ?? null, nature: NATURE_DEVIS_PAR_FAMILLE[f],
@@ -465,7 +466,7 @@ export function enregistrerRoutesDevis(app: Express): void {
           ...(fiche.estMainOeuvre === true ? { estMainOeuvre: true, prixHeureSousContratHt: fiche.prixHeureSousContratHt } : {}),
           ...(voitPrixAchat ? { prixAchatHt: fiche.prixAchatHt ?? null } : {}),
         }));
-      }))).flat().sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr')).slice(0, 50);
+      }))).flat().sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr')).slice(0, mainsOeuvreSeules ? undefined : 50);
       res.json(decimalToNumber(fiches));
     } catch {
       res.status(500).json({ error: 'Lecture du catalogue impossible.' });

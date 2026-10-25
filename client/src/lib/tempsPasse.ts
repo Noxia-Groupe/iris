@@ -56,12 +56,21 @@ export function erreurTempsPasse(auTempsPasse: boolean, lignes: LigneDevisSaisie
   return null;
 }
 
-// Mention du devis au temps passé, tirée de ses seules données figées : le prix et le tarif de sa ligne
-// au temps passé, et son pas. Le même texte que le PDF.
-export function mentionTempsPasse(devis: { auTempsPasse?: boolean; pasTempsPasseMinutes?: number | null; lignes: { tempsPasse?: boolean; tarifTempsPasse?: TarifTempsPasse | null; prixUnitaireHt: number }[] }): string | null {
+// Heures minimum de la mention, comme le PDF : la quantité de la ligne au temps passé, une heure au moins,
+// que l'on peut porter vers le haut ; au singulier en dessous de deux heures.
+export function heuresMinimum(quantite: number): string {
+  const heures = Number(quantite);
+  if (heures === 1) return 'une heure minimum facturée';
+  const pluriel = heures >= 2 ? 's' : '';
+  return `${heures.toLocaleString('fr-FR', { maximumFractionDigits: 3 })} heure${pluriel} minimum facturée${pluriel}`;
+}
+
+// Mention du devis au temps passé, tirée de ses seules données figées : la quantité, le prix et le tarif de
+// sa ligne au temps passé, et son pas. Le même texte que le PDF.
+export function mentionTempsPasse(devis: { auTempsPasse?: boolean; pasTempsPasseMinutes?: number | null; lignes: { tempsPasse?: boolean; tarifTempsPasse?: TarifTempsPasse | null; prixUnitaireHt: number; quantite: number }[] }): string | null {
   if (!devis.auTempsPasse || devis.pasTempsPasseMinutes == null) return null;
   const ligne = devis.lignes.find((l) => l.tempsPasse);
   if (!ligne || !ligne.tarifTempsPasse) return null;
   const pas = `${devis.pasTempsPasseMinutes} minute${devis.pasTempsPasseMinutes > 1 ? 's' : ''}`;
-  return `Devis au temps passé : une heure minimum facturée au prix de ${formatPrix(ligne.prixUnitaireHt)} HT de l’heure (${LIBELLES_TARIF_MENTION[ligne.tarifTempsPasse]}), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de ${pas}, toute tranche commencée étant due. Le total de ce devis est un minimum.`;
+  return `Devis au temps passé : ${heuresMinimum(ligne.quantite)} au prix de ${formatPrix(ligne.prixUnitaireHt)} HT de l’heure (${LIBELLES_TARIF_MENTION[ligne.tarifTempsPasse]}), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de ${pas}, toute tranche commencée étant due. Le total de ce devis est un minimum.`;
 }
