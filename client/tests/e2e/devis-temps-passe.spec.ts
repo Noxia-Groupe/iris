@@ -54,6 +54,7 @@ test('le pas du temps passé se règle dans l’administration ; vide, un devis 
     await champ.fill('15');
     await section.getByRole('button', { name: 'Enregistrer le pas' }).click();
     await expect(section.getByRole('status')).toHaveText('Pas du temps passé enregistré : 15 minutes.');
+    await expect(section).not.toContainText('Pas non réglé');
     expect(await lirePas(request, session.token)).toBe(15);
     await page.reload({ waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Marges & Commissions' }).click();
@@ -72,10 +73,16 @@ test('le pas du temps passé se règle dans l’administration ; vide, un devis 
     await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('button', { name: 'Enregistrer le pas' }).click();
     await expect(page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('status')).toHaveText('Pas du temps passé enregistré : 1 minute.');
     expect(await lirePas(request, session.token)).toBe(1);
+    // Deux minutes : au pluriel.
+    await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('spinbutton', { name: 'Pas du temps passé (minutes)' }).fill('2');
+    await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('button', { name: 'Enregistrer le pas' }).click();
+    await expect(page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('status')).toHaveText('Pas du temps passé enregistré : 2 minutes.');
+    expect(await lirePas(request, session.token)).toBe(2);
     // Vidé depuis l'écran : retiré.
     await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('spinbutton', { name: 'Pas du temps passé (minutes)' }).fill('');
     await page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('button', { name: 'Enregistrer le pas' }).click();
     await expect(page.getByRole('region', { name: 'Devis au temps passé' }).getByRole('status')).toContainText('Pas du temps passé retiré');
+    await expect(page.getByRole('region', { name: 'Devis au temps passé' })).toContainText('Pas non réglé : les devis au temps passé sont refusés.');
     expect(await lirePas(request, session.token)).toBeNull();
   } finally {
     await reglerPas(request, session.token, pasAvant);

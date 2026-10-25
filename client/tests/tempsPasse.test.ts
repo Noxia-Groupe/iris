@@ -28,6 +28,9 @@ test('ligne créée à une heure, à l’heure, au prix et à la TVA de la main 
   const existante = ligneEnEdition({ id: 'l-1', designation: 'MO', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 45.5, tauxTva: 20, unite: 'heure', reference: 'MO-ELEC', catalogueFamille: 'prestations', catalogueId: 'mo-1', tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT', prixAchatUnitaireHt: null }, true);
   assert.deepEqual([existante.ligneId, existante.tempsPasse, existante.tarifTempsPasse, existante.prixUnitaireHt, 'prixAchatUnitaireHt' in existante], ['l-1', true, 'HORS_CONTRAT', 45.5, false]);
   assert.deepEqual(ligneAEnvoyer(existante, true), { ligneId: 'l-1', tempsPasse: true, designation: 'MO', quantite: 2, prixUnitaireHt: 45.5, tauxTva: 20, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: 'mo-1' });
+  // Heures au millième : envoyées et remises en édition telles quelles.
+  assert.equal(ligneAEnvoyer({ ...ligne, quantite: 1.25 }, true).quantite, 1.25);
+  assert.equal(ligneEnEdition({ id: 'l-2', designation: 'MO', nature: 'MAIN_OEUVRE', quantite: 1.25, prixUnitaireHt: 45.5, tauxTva: 20, unite: 'heure', reference: 'MO-ELEC', catalogueFamille: 'prestations', catalogueId: 'mo-1', tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT' }, true).quantite, 1.25);
 });
 
 test('une heure au moins ; une ligne au temps passé et une seule sur un devis au temps passé', () => {
@@ -59,4 +62,7 @@ test('mention : prix, tarif et pas figés du devis, le même texte que le PDF ; 
   assert.equal(mentionTempsPasse({ ...devis, auTempsPasse: false }), null);
   assert.equal(mentionTempsPasse({ ...devis, pasTempsPasseMinutes: null }), null);
   assert.equal(formatPrix(1234.5).replace(/\s/g, ' '), '1 234,50 €');
+  // Prix au centime et pas de deux minutes : le prix exact, et le pluriel dès deux minutes.
+  assert.equal(formatPrix(45.55), '45,55 €');
+  assert.match(mentionTempsPasse({ ...devis, pasTempsPasseMinutes: 2, lignes: [{ tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT', prixUnitaireHt: 45.55, quantite: 1 }] })!, /au prix de 45,55 € HT de l’heure \(tarif à l’heure hors contrat\).*tranches de 2 minutes, toute/);
 });

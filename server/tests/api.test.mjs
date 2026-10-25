@@ -19293,6 +19293,7 @@ if (!TEST_DATABASE_URL) {
         [{ prixUnitaireHt: 0 }, /fixé par Iris/],
         [{ prixUnitaireHt: '45.501' }, /Ligne de devis invalide/],
         [{ tauxTva: '10' }, /TVA de la ligne au temps passé est celle de la main d’œuvre : 20 %/],
+        [{ tauxTva: '19.99' }, /TVA de la ligne au temps passé est celle de la main d’œuvre : 20 %/],
         [{ tauxTva: '101' }, /Ligne de devis invalide/],
         [{ unite: 'h' }, /comptée à l’heure/],
         [{ nature: 'FOURNITURE' }, /comptée à l’heure/],
@@ -19343,6 +19344,12 @@ if (!TEST_DATABASE_URL) {
         const [ligneExacte] = exact.body.lignes;
         assert.deepEqual([ligneExacte.prixUnitaireHt, ligneExacte.tauxTva, ligneExacte.totalHt, ligneExacte.totalTtc, exact.body.totalHt, exact.body.totalTva, exact.body.totalTtc], [prix, 1.75, ht, ttc, ht, tva, ttc], tarif);
       }
+      // Montant maximal exact, celui des colonnes DECIMAL(12, 2) : la ligne et le devis l'acceptent.
+      const auMaximum = await creerMainOeuvre('MAXIMUM', { tauxTva: '0', prixVenteHt: '9999999999.99' });
+      const maximal = await creer([ligneTp(auMaximum, { tauxTva: '0' })]);
+      assert.equal(maximal.status, 201, JSON.stringify(maximal.body));
+      assert.deepEqual([maximal.body.lignes[0].totalHt, maximal.body.lignes[0].totalTtc, maximal.body.totalHt, maximal.body.totalTva, maximal.body.totalTtc], [9999999999.99, 9999999999.99, 9999999999.99, 0, 9999999999.99]);
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${auMaximum.id}`).set(admin)).status, 200);
     });
 
     test('un devis au temps passé porte exactement une ligne au temps passé, un devis ordinaire aucune', async () => {
@@ -19402,12 +19409,13 @@ if (!TEST_DATABASE_URL) {
         const devis = suivre(await creerOk([ligneTp(mainOeuvre), FOURNITURE]));
         const modifier = (lignes, extra = {}) => envoyer('patch', `/api/devis/${devis.id}`, admin, corpsDevis(lignes, extra));
         const modifierOk = async (lignes, extra) => { const res = await modifier(lignes, extra); assert.equal(res.status, 200, JSON.stringify(res.body)); return suivre(res.body); };
-        // La main d'œuvre change de prix et le réglage du pas aussi : la ligne et le pas du devis restent.
-        await changerPrix(mainOeuvre, { prixVenteHt: '52', prixHeureSousContratHt: '47' });
+        // La main d'œuvre change de prix et de TVA, et le réglage du pas aussi : la ligne (prix et TVA) et le pas du
+        // devis restent.
+        await changerPrix(mainOeuvre, { prixVenteHt: '52', prixHeureSousContratHt: '47', tauxTva: '10' });
         assert.equal((await regler(30)).status, 200);
         const deuxHeures = await modifierOk([ligneTp(mainOeuvre, { ligneId: ids.tp, quantite: 2 }), fourniture()]);
         const tp = deuxHeures.lignes.find((l) => l.tempsPasse);
-        assert.deepEqual([tp.prixUnitaireHt, tp.tarifTempsPasse, tp.reference, tp.quantite, tp.totalHt, tp.totalTtc, deuxHeures.pasTempsPasseMinutes], [45.5, 'HORS_CONTRAT', mainOeuvre.reference, 2, 91, 109.2, 15]);
+        assert.deepEqual([tp.prixUnitaireHt, tp.tauxTva, tp.tarifTempsPasse, tp.reference, tp.quantite, tp.totalHt, tp.totalTtc, deuxHeures.pasTempsPasseMinutes], [45.5, 20, 'HORS_CONTRAT', mainOeuvre.reference, 2, 91, 109.2, 15]);
         assert.deepEqual([deuxHeures.totalHt, deuxHeures.totalTva, deuxHeures.totalTtc], [101, 20.2, 121.2]);
         assert.deepEqual(enTexte((await lignesEnBase(devis.id))[0]), ['45.5', '20', '2', '91', '109.2']);
         // Le prix courant de la fiche, envoyé, est refusé : la ligne garde le sien, qui est accepté.
@@ -19429,7 +19437,7 @@ if (!TEST_DATABASE_URL) {
         // Une nouvelle ligne prend le prix courant de la main d'œuvre, au tarif choisi.
         const nouvelle = await modifierOk([ligneTp(mainOeuvre, { tarifTempsPasse: 'SOUS_CONTRAT' }), fourniture()]);
         const ligneSous = nouvelle.lignes.find((l) => l.tempsPasse);
-        assert.deepEqual([ligneSous.prixUnitaireHt, ligneSous.tarifTempsPasse, nouvelle.totalHt], [47, 'SOUS_CONTRAT', 57]);
+        assert.deepEqual([ligneSous.prixUnitaireHt, ligneSous.tauxTva, ligneSous.tarifTempsPasse, nouvelle.totalHt], [47, 10, 'SOUS_CONTRAT', 57]);
         // Une ligne existante ne change pas de nature.
         const versOrdinaire = await modifier([{ ...FOURNITURE, ligneId: ids.tp }], { auTempsPasse: false });
         assert.equal(versOrdinaire.status, 400, JSON.stringify(versOrdinaire.body));
@@ -19694,6 +19702,16 @@ if (!TEST_DATABASE_URL) {
           const texteMillieme = await texteDuPdf(millieme.id);
           assert.ok(sansBlancs(texteMillieme).includes(sansBlancs(mention('45,50 €', 'hors contrat', '1 minute', heures))), `${quantite} : ${texteMillieme}`);
         }
+        // La ligne au temps passé après une autre ligne, un prix au centime dont le TTC tombe sur la demie (arrondi
+        // vers le haut, comme le CHECK de la base) et un pas de deux minutes : la mention reprend la ligne au temps
+        // passé, son prix exact, et le pluriel dès deux minutes.
+        assert.equal((await regler(2)).status, 200);
+        const moCentime = await creerMainOeuvre('PDFCENTIME', { tauxTva: '10', prixVenteHt: '45.55', prixHeureSousContratHt: '40.05' });
+        const seconde = await creerOk([FOURNITURE, ligneTp(moCentime)]);
+        const tpSeconde = seconde.lignes.find((l) => l.tempsPasse);
+        assert.deepEqual([tpSeconde.ordre, tpSeconde.totalHt, tpSeconde.totalTtc, seconde.totalHt, seconde.totalTva, seconde.totalTtc], [1, 45.55, 50.11, 55.55, 6.56, 62.11]);
+        const texteSeconde = await texteDuPdf(seconde.id);
+        assert.ok(sansBlancs(texteSeconde).includes(sansBlancs(mention('45,55 €', 'hors contrat', '2 minutes'))), texteSeconde);
         // Signé ou non, le devis imprime ses propres valeurs figées : la main d'œuvre et le réglage
         // changent ensuite sans effet.
         await signer(devis.id);
