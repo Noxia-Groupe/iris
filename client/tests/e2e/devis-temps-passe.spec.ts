@@ -113,11 +113,16 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     await expect(ligne.getByTestId('prix-heure-temps-passe')).toHaveText('45,50 € HT');
     await tarif.selectOption('SOUS_CONTRAT');
     await expect(ligne.getByTestId('prix-heure-temps-passe')).toHaveText('40,00 € HT');
+    await expect(ligne).toContainText('À l’heure sous contrat');
     await expect(ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' })).toHaveValue('1');
     // Décocher retire la ligne au temps passé ; recocher la propose de nouveau, à choisir.
     await page.getByRole('checkbox', { name: 'Devis au temps passé' }).uncheck();
     await expect(ligne).toHaveCount(0);
     await expect(page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' })).toHaveCount(0);
+    // Le devis garde une ligne, vierge, aux valeurs d'une nouvelle ligne : une heure, 0 € HT, TVA à 20 %.
+    await expect(page.getByRole('spinbutton', { name: 'Qté' })).toHaveValue('1');
+    await expect(page.getByRole('spinbutton', { name: 'PU HT' })).toHaveValue('0');
+    await expect(page.getByRole('spinbutton', { name: 'TVA %' })).toHaveValue('20');
     await page.getByRole('checkbox', { name: 'Devis au temps passé' }).check();
     await expect(ligne).toHaveCount(0);
     await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);

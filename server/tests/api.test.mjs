@@ -19313,6 +19313,11 @@ if (!TEST_DATABASE_URL) {
         [{ catalogueFamille: undefined, catalogueId: undefined }, /reprend une main d’œuvre du catalogue/],
         [{ tempsPasse: 'oui' }, /« tempsPasse » doit valoir true ou false/],
         [{ quantite: '999999999' }, /Montant de ligne hors des limites acceptées/],
+        // HT sous le plafond, TTC au-dessus : le plafond de la ligne porte sur son TTC.
+        [{ quantite: '200000000' }, /Montant de ligne hors des limites acceptées/],
+        // Prix et TVA envoyés hors de leur format (11 chiffres entiers, TVA au millième) : illisibles, refusés, jamais ignorés.
+        [{ prixUnitaireHt: '10000000000' }, /Ligne de devis invalide/],
+        [{ tauxTva: '20.001' }, /Ligne de devis invalide/],
       ]) {
         const refus = await creer([ligneTp(mo.elec, extra)]);
         assert.equal(refus.status, 400, `${JSON.stringify(extra)} : ${JSON.stringify(refus.body)}`);
@@ -19322,6 +19327,10 @@ if (!TEST_DATABASE_URL) {
       const tropGros = await creer([ligneTp(mo.elec, { quantite: '109890110' }), { designation: 'TEST Gros matériel', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: '5000000000', tauxTva: 20 }]);
       assert.equal(tropGros.status, 400, JSON.stringify(tropGros.body));
       assert.equal(tropGros.body.error, 'Montant de devis hors des limites acceptées.');
+      // HT du devis sous le plafond, TTC au-dessus (chaque ligne y restant) : le plafond du devis porte sur son TTC.
+      const ttcTropGros = await creer([ligneTp(mo.elec, { quantite: '109890109' }), { designation: 'TEST Gros matériel', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: '4999999999.99', tauxTva: 20 }]);
+      assert.equal(ttcTropGros.status, 400, JSON.stringify(ttcTropGros.body));
+      assert.equal(ttcTropGros.body.error, 'Montant de devis hors des limites acceptées.');
       // TVA de la main d'œuvre aux bornes comprises, 0 et 100 %, et envoyée identique : acceptée.
       for (const [taux, tva, ttc] of [['0', 0, 45.5], ['100', 45.5, 91]]) {
         const borne = await creerMainOeuvre(`TVA${taux}`, { tauxTva: taux });
@@ -19344,9 +19353,14 @@ if (!TEST_DATABASE_URL) {
         const [ligneExacte] = exact.body.lignes;
         assert.deepEqual([ligneExacte.prixUnitaireHt, ligneExacte.tauxTva, ligneExacte.totalHt, ligneExacte.totalTtc, exact.body.totalHt, exact.body.totalTva, exact.body.totalTtc], [prix, 1.75, ht, ttc, ht, tva, ttc], tarif);
       }
+      // Une autre TVA envoyée est refusée, et le refus rappelle celle de la main d'œuvre au format français.
+      const autreTva = await creer([ligneTp(auCentime, { quantite: '1.5', tauxTva: '1.76' })]);
+      assert.equal(autreTva.status, 400, JSON.stringify(autreTva.body));
+      assert.match(autreTva.body.error, /TVA de la ligne au temps passé est celle de la main d’œuvre : 1,75 %/);
       // Montant maximal exact, celui des colonnes DECIMAL(12, 2) : la ligne et le devis l'acceptent.
       const auMaximum = await creerMainOeuvre('MAXIMUM', { tauxTva: '0', prixVenteHt: '9999999999.99' });
-      const maximal = await creer([ligneTp(auMaximum, { tauxTva: '0' })]);
+      // Le prix est envoyé, comme le fait l'écran : un prix à dix chiffres entiers se lit.
+      const maximal = await creer([ligneTp(auMaximum, { tauxTva: '0', prixUnitaireHt: '9999999999.99' })]);
       assert.equal(maximal.status, 201, JSON.stringify(maximal.body));
       assert.deepEqual([maximal.body.lignes[0].totalHt, maximal.body.lignes[0].totalTtc, maximal.body.totalHt, maximal.body.totalTva, maximal.body.totalTtc], [9999999999.99, 9999999999.99, 9999999999.99, 0, 9999999999.99]);
       assert.equal((await request(app).delete(`/api/catalogue/prestations/${auMaximum.id}`).set(admin)).status, 200);
@@ -19782,6 +19796,12 @@ if (!TEST_DATABASE_URL) {
         await tx.devisLigne.deleteMany({ where: { devisId: autre.id } });
         await tx.devisLigne.update({ where: { id: ligne.id }, data: { devisId: autre.id } });
       }), /exactement une ligne de main d’œuvre au temps passé \(0 trouvée/);
+      // Déplacée vers un devis ordinaire, le devis quitté en recevant une copie : c'est le devis d'arrivée,
+      // ordinaire, qui est refusé.
+      await assert.rejects(transactionVerifieeTest(async (tx) => {
+        await tx.devisLigne.update({ where: { id: ligne.id }, data: { devisId: ordinaire.id, ordre: 7 } });
+        await copierLigneSql(tx, ligne.id, devis.id, 0);
+      }), /Devis ordinaire : une ligne au temps passé n’existe que sur un devis au temps passé/);
       // Témoins : une modification cohérente (lignes remplacées) et la suppression d'un brouillon passent.
       await transactionVerifieeTest(async (tx) => {
         await tx.devisLigne.delete({ where: { id: ligne.id } });
@@ -19815,6 +19835,11 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(transactionVerifieeTest(async (tx) => {
         await conversion(tx, ordinaireSigne, cibleAvance);
         await tx.intervention.create({ data: { id: cibleAvance, reference: reference(), clientId: client.id, titre: 'TEST Marquée après la conversion d’un devis ordinaire', auTempsPasse: true } });
+      }), /ne naît que de la conversion d’un devis au temps passé/);
+      // La conversion du même devis au temps passé, mais en chantier, ne fait pas naître une intervention marquée.
+      await assert.rejects(transactionVerifieeTest(async (tx) => {
+        const cree = await tx.intervention.create({ data: { reference: reference(), clientId: client.id, titre: 'TEST Marquée, conversion en chantier', auTempsPasse: true } });
+        await tx.devisConversion.create({ data: { devisId: tpSigne.id, dossierId: tpSigne.dossierId, cibleType: 'CHANTIER', cibleId: cree.id } });
       }), /ne naît que de la conversion d’un devis au temps passé/);
       // Témoin : le report exact passe, puis le marqueur vrai ne change plus non plus.
       let marquee = null;

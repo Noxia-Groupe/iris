@@ -625,6 +625,16 @@ describe('Devis au temps passé : saisie de la ligne', () => {
     // Une ligne existante peut omettre son tarif et sa fiche : elle garde les siens.
     const existante = devisPayload({ clientId: 'client-test', objet: 'TEST Temps passé', lignes: [{ tempsPasse: true, ligneId: 'l-1', designation: 'Ligne gardée', quantite: '2.5' }] });
     assert.deepEqual([existante.auTempsPasse, existante.references[0].tempsPasse, existante.lignesCalculees[0].quantite], [undefined, { tarif: null, prixUnitaireHt: null, tauxTva: null }, 2.5]);
+    // Prix, TVA, unité ou nature laissés blancs, prix d'achat nul ou vide : comme absents.
+    for (const extra of [{ prixUnitaireHt: '  ', tauxTva: ' ', unite: ' ', nature: ' ' }, { prixAchatUnitaireHt: null }, { prixAchatUnitaireHt: '' }]) {
+      const vide = devisPayload({ clientId: 'client-test', objet: 'TEST Temps passé', auTempsPasse: true, lignes: [{ ...ligne, ...extra }] });
+      assert.deepEqual(vide.references[0].tempsPasse, { tarif: 'HORS_CONTRAT', prixUnitaireHt: null, tauxTva: null }, JSON.stringify(extra));
+    }
+    // Une ligne dont le drapeau vaut false ou null est une ligne ordinaire, chiffrée comme les autres.
+    for (const drapeau of [false, null]) {
+      const ordinaire = devisPayload({ clientId: 'client-test', objet: 'TEST Ordinaire', lignes: [{ tempsPasse: drapeau, designation: 'Câble', nature: 'FOURNITURE', quantite: '2', prixUnitaireHt: '3', tauxTva: '20' }] });
+      assert.deepEqual([ordinaire.lignesCalculees[0].totalHt, ordinaire.references[0].tempsPasse, ordinaire.totalTtc], [6, undefined, 7.2], String(drapeau));
+    }
   });
 
   test('une heure au moins, l’heure, à l’heure hors contrat ou sous contrat, d’une prestation du catalogue', () => {

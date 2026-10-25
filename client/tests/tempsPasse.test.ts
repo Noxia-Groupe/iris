@@ -31,6 +31,9 @@ test('ligne créée à une heure, à l’heure, au prix et à la TVA de la main 
   // Heures au millième : envoyées et remises en édition telles quelles.
   assert.equal(ligneAEnvoyer({ ...ligne, quantite: 1.25 }, true).quantite, 1.25);
   assert.equal(ligneEnEdition({ id: 'l-2', designation: 'MO', nature: 'MAIN_OEUVRE', quantite: 1.25, prixUnitaireHt: 45.5, tauxTva: 20, unite: 'heure', reference: 'MO-ELEC', catalogueFamille: 'prestations', catalogueId: 'mo-1', tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT' }, true).quantite, 1.25);
+  // Une ligne existante à un autre prix et une autre TVA les garde, en édition comme dans le corps envoyé.
+  const autre = ligneEnEdition({ id: 'l-3', designation: 'MO', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 47, tauxTva: 10, unite: 'heure', reference: 'MO-PLOMB', catalogueFamille: 'prestations', catalogueId: 'mo-2', tempsPasse: true, tarifTempsPasse: 'SOUS_CONTRAT' }, true);
+  assert.deepEqual([autre.prixUnitaireHt, autre.tauxTva, ligneAEnvoyer(autre, true).prixUnitaireHt, ligneAEnvoyer(autre, true).tauxTva], [47, 10, 47, 10]);
 });
 
 test('une heure au moins ; une ligne au temps passé et une seule sur un devis au temps passé', () => {
@@ -38,6 +41,7 @@ test('une heure au moins ; une ligne au temps passé et une seule sur un devis a
   assert.equal(quantiteTempsPasseValide(2.25), true);
   assert.equal(quantiteTempsPasseValide(0.999), false);
   assert.equal(quantiteTempsPasseValide(Number('')), false);
+  assert.equal(quantiteTempsPasseValide(Infinity), false);
   const ligne = ligneTempsPasse(mainOeuvre, 'HORS_CONTRAT')!;
   const libre = { designation: 'Câble', nature: 'FOURNITURE' as const, quantite: 2, prixUnitaireHt: 3, tauxTva: 20 };
   assert.equal(erreurTempsPasse(true, [ligne, libre]), null);
