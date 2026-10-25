@@ -19334,6 +19334,15 @@ if (!TEST_DATABASE_URL) {
       assert.equal(refusTva.status, 400, JSON.stringify(refusTva.body));
       assert.match(refusTva.body.error, /TVA de la main d’œuvre invalide pour un devis/);
       assert.equal(await devisDuClient(), avant + 2, 'aucun refus n’écrit de devis (les deux bornes de TVA sont acceptées)');
+      // Prix au centime et TVA au centième : la ligne et le devis se calculent sur leurs valeurs exactes,
+      // à chaque tarif, et la base les accepte.
+      const auCentime = await creerMainOeuvre('CENTIME', { tauxTva: '1.75', prixVenteHt: '45.55', prixHeureSousContratHt: '40.05' });
+      for (const [tarif, prix, ht, tva, ttc] of [['HORS_CONTRAT', 45.55, 68.33, 1.2, 69.53], ['SOUS_CONTRAT', 40.05, 60.08, 1.05, 61.13]]) {
+        const exact = await creer([ligneTp(auCentime, { tarifTempsPasse: tarif, quantite: '1.5', prixUnitaireHt: String(prix), tauxTva: '1.75' })]);
+        assert.equal(exact.status, 201, `${tarif} : ${JSON.stringify(exact.body)}`);
+        const [ligneExacte] = exact.body.lignes;
+        assert.deepEqual([ligneExacte.prixUnitaireHt, ligneExacte.tauxTva, ligneExacte.totalHt, ligneExacte.totalTtc, exact.body.totalHt, exact.body.totalTva, exact.body.totalTtc], [prix, 1.75, ht, ttc, ht, tva, ttc], tarif);
+      }
     });
 
     test('un devis au temps passé porte exactement une ligne au temps passé, un devis ordinaire aucune', async () => {
@@ -19440,6 +19449,15 @@ if (!TEST_DATABASE_URL) {
         assert.equal(garde.status, 200, JSON.stringify(garde.body));
         assert.deepEqual([garde.body.auTempsPasse, garde.body.pasTempsPasseMinutes], [true, 15]);
         suivre(garde.body);
+        // Un marqueur nul est lu comme absent (passation, section 4) : le devis le garde, et sans ligne au
+        // temps passé la modification est refusée, au lieu de le rendre ordinaire.
+        const nul = await envoyer('patch', `/api/devis/${devis.id}`, admin, { clientId: client.id, objet: 'TEST Marqueur nul', auTempsPasse: null, lignes: [ligneTp(mainOeuvre, { ligneId: ids.tp, tarifTempsPasse: 'SOUS_CONTRAT', quantite: 3 }), fourniture()] });
+        assert.equal(nul.status, 200, JSON.stringify(nul.body));
+        assert.deepEqual([nul.body.auTempsPasse, nul.body.pasTempsPasseMinutes], [true, 15]);
+        suivre(nul.body);
+        const nulSansLigne = await envoyer('patch', `/api/devis/${devis.id}`, admin, { clientId: client.id, objet: 'TEST Marqueur nul', auTempsPasse: null, lignes: [fourniture()] });
+        assert.equal(nulSansLigne.status, 400, JSON.stringify(nulSansLigne.body));
+        assert.match(nulSansLigne.body.error, /exactement une ligne/);
         const sansLigne = await envoyer('patch', `/api/devis/${devis.id}`, admin, { clientId: client.id, objet: 'TEST Marqueur gardé', lignes: [fourniture()] });
         assert.equal(sansLigne.status, 400, JSON.stringify(sansLigne.body));
         assert.match(sansLigne.body.error, /exactement une ligne/);
@@ -19670,6 +19688,12 @@ if (!TEST_DATABASE_URL) {
         // Plus d'une heure : la quantité de la ligne est le minimum facturé, au pluriel dès deux heures.
         const deux = await creerOk([ligneTp(mainOeuvre, { quantite: '2' })]);
         assert.ok(sansBlancs(await texteDuPdf(deux.id)).includes(sansBlancs(mention('45,50 €', 'hors contrat', '1 minute', '2 heures minimum facturées'))));
+        // Quantités au millième : la mention reprend la quantité exacte de la ligne, au singulier sous deux heures.
+        for (const [quantite, heures] of [['1.001', '1,001 heure minimum facturée'], ['1.999', '1,999 heure minimum facturée'], ['10.125', '10,125 heures minimum facturées']]) {
+          const millieme = await creerOk([ligneTp(mainOeuvre, { quantite })]);
+          const texteMillieme = await texteDuPdf(millieme.id);
+          assert.ok(sansBlancs(texteMillieme).includes(sansBlancs(mention('45,50 €', 'hors contrat', '1 minute', heures))), `${quantite} : ${texteMillieme}`);
+        }
         // Signé ou non, le devis imprime ses propres valeurs figées : la main d'œuvre et le réglage
         // changent ensuite sans effet.
         await signer(devis.id);

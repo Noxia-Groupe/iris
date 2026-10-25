@@ -51,6 +51,11 @@ test('mention : prix, tarif et pas figés du devis, le même texte que le PDF ; 
   // Plus d'une heure : la quantité de la ligne est le minimum facturé, au pluriel dès deux heures.
   assert.match(mentionTempsPasse({ ...devis, lignes: [{ tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT', prixUnitaireHt: 45.5, quantite: 2 }] })!, /^Devis au temps passé : 2 heures minimum facturées au prix de 45,50 €/);
   assert.match(mentionTempsPasse({ ...devis, lignes: [{ tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT', prixUnitaireHt: 45.5, quantite: 1.5 }] })!, /^Devis au temps passé : 1,5 heure minimum facturée au prix de 45,50 €/);
+  // Quantités au millième : la quantité exacte de la ligne, au singulier sous deux heures, comme le PDF.
+  for (const [quantite, heures] of [[1.001, '1,001 heure minimum facturée'], [1.999, '1,999 heure minimum facturée'], [10.125, '10,125 heures minimum facturées']] as const) {
+    const texte = mentionTempsPasse({ ...devis, lignes: [{ tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT', prixUnitaireHt: 45.5, quantite }] })!;
+    assert.ok(texte.startsWith(`Devis au temps passé : ${heures} au prix de 45,50 € HT de l’heure`), `${quantite} : ${texte}`);
+  }
   assert.equal(mentionTempsPasse({ ...devis, auTempsPasse: false }), null);
   assert.equal(mentionTempsPasse({ ...devis, pasTempsPasseMinutes: null }), null);
   assert.equal(formatPrix(1234.5).replace(/\s/g, ' '), '1 234,50 €');
