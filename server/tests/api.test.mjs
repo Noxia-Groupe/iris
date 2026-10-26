@@ -19211,6 +19211,18 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await regler(30)).body.pasTempsPasseMinutes, 30);
       assert.equal((await regler(null)).body.pasTempsPasseMinutes, null);
       assert.equal((await regler(15)).status, 200);
+      // Saisie en texte avec des zéros en tête (le champ de l'écran envoie le texte tapé) : lue comme l'entier
+      // écrit, quel que soit le nombre de zéros, comme les autres réglages entiers ; hors bornes, refusée de même.
+      for (const [saisie, pas] of [['015', 15], ['0060', 60], ['00001', 1]]) {
+        const lu = await regler(saisie);
+        assert.deepEqual([lu.status, lu.body.pasTempsPasseMinutes, await pasEnBase()], [200, pas, pas], saisie);
+      }
+      for (const saisie of ['000', '0061']) {
+        const refus = await regler(saisie);
+        assert.equal(refus.status, 400, saisie);
+        assert.match(refus.body.error, /nombre entier de minutes entre 1 et 60/);
+      }
+      assert.equal((await regler(15)).status, 200);
       // Un autre réglage enregistré seul ne touche pas au pas.
       const { tauxAcompteDefaut } = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
       assert.equal((await envoyer('put', '/api/parametres', admin, { tauxAcompteDefaut: tauxAcompteDefaut.toString() })).status, 200);
