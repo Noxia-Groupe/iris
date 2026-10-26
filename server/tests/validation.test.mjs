@@ -653,6 +653,9 @@ describe('Devis au temps passé : saisie de la ligne', () => {
       // Prix d'achat envoyé : lu sur dix chiffres entiers, comme sur une ligne saisie, puis refusé ; au-delà, illisible.
       [{ prixAchatUnitaireHt: '9999999999.99' }, /pas de prix d’achat prévu/],
       [{ prixAchatUnitaireHt: '10000000000' }, /Prix d’achat prévu invalide/],
+      // Blancs autour retirés : le prix d'achat est lu, puis refusé ; fait de blancs seuls, il n'est pas vide : illisible.
+      [{ prixAchatUnitaireHt: ' 5 ' }, /pas de prix d’achat prévu/],
+      [{ prixAchatUnitaireHt: '   ' }, /Prix d’achat prévu invalide/],
       [{ tempsPasse: 1 }, /« tempsPasse » doit valoir true ou false/],
     ]) assert.throws(() => devisPayload({ clientId: 'client-test', objet: 'TEST Temps passé invalide', auTempsPasse: true, lignes: [{ ...ligne, ...extra }] }), message, JSON.stringify(extra));
     assert.throws(() => devisPayload({ clientId: 'client-test', objet: 'TEST', auTempsPasse: 'oui', lignes: [ligne] }), /« auTempsPasse » doit valoir true ou false/);

@@ -19187,7 +19187,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await regler(15)).body.pasTempsPasseMinutes, 15);
       const entrees = () => prisma.journalAdministration.count({ where: { domaine: 'REGLAGES', type: 'PARAMETRES' } });
       const avantRefus = await entrees();
-      for (const valeur of [0, 61, -1, 1.5, '15.0', '1e1', 'abc', ' 7 8', true, {}, [15]]) {
+      // Fait de blancs seuls, le pas n'est pas vide (null ou chaîne vide) : refusé, comme les autres réglages entiers.
+      for (const valeur of [0, 61, -1, 1.5, '15.0', '1e1', 'abc', ' 7 8', '   ', true, {}, [15]]) {
         const refus = await regler(valeur);
         assert.equal(refus.status, 400, `${JSON.stringify(valeur)} : ${JSON.stringify(refus.body)}`);
         assert.match(refus.body.error, /nombre entier de minutes entre 1 et 60/);
