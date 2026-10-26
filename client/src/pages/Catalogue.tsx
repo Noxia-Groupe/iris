@@ -209,7 +209,8 @@ const Catalogue = () => {
         </form>
       </section>
 
-      <section className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+      {/* Le tableau défile latéralement sur téléphone et tablette, au lieu d'être rogné par son cadre (#327). */}
+      <section className="bg-white border border-gray-100 rounded-xl overflow-x-auto">
         {chargement ? <p className="p-6 text-gray-500">Chargement…</p> : fichesAffichees.length === 0 ? (
           <p className="p-8 text-center text-gray-500">Aucune fiche dans cette famille. Créez la première ci-dessus.</p>
         ) : (
