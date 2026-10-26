@@ -409,6 +409,8 @@ const Planning = () => {
                               >
                                 {badge && <span className="block font-bold opacity-90" style={{ fontSize: '10px' }}>{badge}</span>}
                                 <span className="block truncate">{libelleEvent(ev)}</span>
+                                {/* Intervention terminée « à suivre » : la marque se voit aussi au planning (point 29). */}
+                                {ev.intervention?.aSuivre && <span className="inline-block rounded-full bg-violet-100 px-1.5 text-violet-800" style={{ fontSize: '10px' }}>À suivre</span>}
                                 {ev.intervenants.length > 1 && (
                                   <span className="inline-flex items-center gap-0.5 opacity-90" style={{ fontSize: '10px' }}>
                                     <Users size={10} /> ×{ev.intervenants.length}
@@ -428,7 +430,7 @@ const Planning = () => {
         </div>
       )}
 
-      {aSuivre && <CreationSuite intervention={aSuivre} onClose={() => setASuivre(null)} onCreee={(suite) => { setASuivre(null); setSuiteCreee(`Suite ${suite.reference} créée : elle est dans la file, à placer.`); fetchQueue(); }} />}
+      {aSuivre && <CreationSuite intervention={aSuivre} onClose={() => setASuivre(null)} onCreee={(suite) => { setASuivre(null); setSuiteCreee(`Suite ${suite.reference} créée : elle est dans la file, à placer.`); fetchQueue(); fetchEvents(); }} />}
       {toPlace && <ContractPlacement item={toPlace} intervenants={intervenants} onClose={() => setToPlace(null)} onSaved={() => { setToPlace(null); fetchQueue(); fetchEvents(); }} />}
 
       {modal && (

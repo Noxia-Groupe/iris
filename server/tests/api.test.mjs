@@ -18330,7 +18330,7 @@ if (!TEST_DATABASE_URL) {
       // Le planning porte de quoi proposer l'action : référence, statut et contrat de la visite.
       const semaine = await request(app).get('/api/planning/events?start=2099-03-02&end=2099-03-08').set(admin());
       assert.equal(semaine.status, 200, JSON.stringify(semaine.body));
-      assert.deepEqual(semaine.body.find((ev) => ev.id === projection.id)?.intervention, { reference: visite.reference, statut: 'PLANIFIEE', contratMaintenanceId: visite.contratMaintenanceId });
+      assert.deepEqual(semaine.body.find((ev) => ev.id === projection.id)?.intervention, { reference: visite.reference, statut: 'PLANIFIEE', contratMaintenanceId: visite.contratMaintenanceId, aSuivre: false });
       assert.equal(await prisma.interventionAffectation.count({ where: { interventionId: visite.id } }), 1);
 
       const res = await remettre(visite.id, jeton('admin'), { motif: `  ${MOTIF}  ` });
@@ -18423,7 +18423,7 @@ if (!TEST_DATABASE_URL) {
       const { curative, projection } = await curativePlanifiee('TEST Remise curative nominale');
       assert.equal(await dansLaFile(curative.id), false);
       // Le planning porte de quoi proposer l'action : la référence, le statut, et aucun contrat.
-      assert.deepEqual((await semaineAuPlanning(admin())).find((ev) => ev.id === projection.id)?.intervention, { reference: curative.reference, statut: 'PLANIFIEE', contratMaintenanceId: null });
+      assert.deepEqual((await semaineAuPlanning(admin())).find((ev) => ev.id === projection.id)?.intervention, { reference: curative.reference, statut: 'PLANIFIEE', contratMaintenanceId: null, aSuivre: false });
       // Le technicien affecté la voit à son planning et l'ouvre.
       assert.equal(await voitAuPlanning(jeton('technicien'), curative.id), true);
       assert.equal((await request(app).get(`/api/interventions/${curative.id}`).set(jeton('technicien'))).status, 200);
@@ -20095,6 +20095,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await creerSuite(planifiee.id)).status, 201);
       assert.equal((await statut(planifiee.id, { statut: 'EN_COURS' })).status, 200);
       assert.equal((await creerSuite(planifiee.id)).status, 201);
+      // Une priorité vide reprend celle de l'intervention initiale (HAUTE), comme une priorité absente.
+      const prioriteVide = await creerSuite(planifiee.id, { priorite: '' });
+      assert.equal(prioriteVide.status, 201, JSON.stringify(prioriteVide.body));
+      assert.equal(prioriteVide.body.priorite, 'HAUTE');
       // Annulée : refusée, sans rien écrire.
       const annulee = (await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Suivi annulée' })).body;
       assert.equal((await statut(annulee.id, { statut: 'ANNULEE', motif: 'TEST annulation' }, admin())).status, 200);
@@ -20249,6 +20253,146 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.intervention.create({ data: { reference: reference(), clientId, titre: 'TEST Suivi d’une annulée', interventionInitialeId: autre.id } }), /Une intervention annulée n'a pas de suite/);
       // Témoin : une intervention terminée porte la marque.
       assert.equal((await prisma.intervention.update({ where: { id: aPlanifier.id }, data: { statut: 'TERMINEE', aSuivre: true } })).aSuivre, true);
+    });
+
+    test('la marque « à suivre » se voit au planning, sur l’affectation de l’intervention terminée, jusqu’à la création de la suite', async () => {
+      const marquee = await curativePlanifiee('TEST Suivi C1 marque au planning');
+      assert.equal((await terminer(marquee.id, { aSuivre: true })).status, 200);
+      const projection = async (enTete = admin()) => {
+        const semaine = await request(app).get('/api/planning/events?start=2099-03-02&end=2099-03-08').set(enTete);
+        assert.equal(semaine.status, 200, JSON.stringify(semaine.body));
+        return semaine.body.find((evenement) => evenement.interventionId === marquee.id);
+      };
+      assert.deepEqual((await projection()).intervention, { reference: marquee.reference, statut: 'TERMINEE', contratMaintenanceId: null, aSuivre: true });
+      // Le technicien affecté la voit aussi sur son affectation.
+      assert.equal((await projection(jeton('technicien'))).intervention.aSuivre, true);
+      assert.equal((await creerSuite(marquee.id)).status, 201);
+      assert.equal((await projection()).intervention.aSuivre, false, 'la marque disparaît une fois la suite créée');
+    });
+
+    // --- Droits, périmètre relu sous verrou, file, fuseau et gardes en base (audit interne n° 1 de la PR) ---
+    // Attente d'une requête bloquée sur un verrou de ligne, comme les autres tests de course.
+    const attendreUnVerrou = async () => {
+      for (let tour = 0; tour < 150; tour += 1) {
+        const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock'`;
+        if (n >= 1) return true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return false;
+    };
+    const numerosTires = async () => (await prisma.sequenceIntervention.aggregate({ _sum: { dernierNumero: true } }))._sum.dernierNumero ?? 0;
+
+    test('un compte ADMIN, comme le super administrateur, pose et retire la marque et crée la suite', async () => {
+      const initiale = await curativeTerminee('TEST Suivi audit T1 compte ADMIN');
+      const pose = await marquer(initiale.id, true, jeton('admin'));
+      assert.equal(pose.status, 200, JSON.stringify(pose.body));
+      const retrait = await marquer(initiale.id, false, jeton('admin'));
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      const suite = await creerSuite(initiale.id, {}, jeton('admin'));
+      assert.equal(suite.status, 201, JSON.stringify(suite.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: suite.body.id } })).createdById, comptes.admin.id);
+      assert.deepEqual((await journal(initiale.id)).slice(-3).map((entree) => [entree.action, entree.auteurId]),
+        [['MARQUE_A_SUIVRE', comptes.admin.id], ['MARQUE_A_SUIVRE', comptes.admin.id], ['SUITE_CREEE', comptes.admin.id]]);
+    });
+
+    test('une suite hors du périmètre du demandeur n’est citée ni sur la fiche ni dans la liste de l’intervention initiale', async () => {
+      const duConducteur = await curativePlanifiee('TEST Suivi audit T2 initiale du conducteur', { enTete: jeton('conducteur') });
+      // Suite créée par l'administration, sans affaire ni affectation : hors du périmètre du conducteur.
+      const suite = await creerSuite(duConducteur.id);
+      assert.equal(suite.status, 201, JSON.stringify(suite.body));
+      assert.equal((await fiche_(suite.body.id, jeton('conducteur'))).status, 404, 'la suite est hors de son périmètre');
+      const vue = await fiche_(duConducteur.id, jeton('conducteur'));
+      assert.equal(vue.status, 200, JSON.stringify(vue.body));
+      assert.deepEqual(vue.body.suites, [], 'fiche : suite hors périmètre non citée');
+      const liste = await request(app).get('/api/interventions').set(jeton('conducteur'));
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      assert.deepEqual(liste.body.find((item) => item.id === duConducteur.id).suites, [], 'liste : suite hors périmètre non citée');
+      // Témoin : l'administration la voit.
+      assert.deepEqual((await fiche_(duConducteur.id)).body.suites.map((lien) => lien.id), [suite.body.id]);
+    });
+
+    test('une intervention ne se crée pas comme sa propre suite (garde en base, à l’insertion)', async () => {
+      const id = randomUUID();
+      await assert.rejects(
+        prisma.intervention.create({ data: { id, reference: `T${randomUUID().slice(0, 8)}`, clientId, titre: 'TEST Suivi audit T3 auto-suite', interventionInitialeId: id } }),
+        /Intervention_suite_non_reflexive_check/,
+      );
+      assert.equal(await prisma.intervention.count({ where: { id } }), 0);
+    });
+
+    test('la file montre une visite terminée « à suivre » d’un contrat suspendu ; sa suite est refusée, sans rien écrire', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set(admin()).send({ clientId, siteId, titre: 'TEST Suivi audit T4 contrat suspendu', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2026' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(admin());
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      assert.equal((await placer(visite.body.id)).status, 200);
+      const fin = await terminer(visite.body.id, { aSuivre: true });
+      assert.equal(fin.status, 200, JSON.stringify(fin.body));
+      const suspension = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(admin()).send({ statut: 'SUSPENDU', motif: 'TEST suspension audit' });
+      assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+      const ligne = (await file()).find((item) => item.id === visite.body.id);
+      assert.ok(ligne, 'visite « à suivre » dans la file, contrat suspendu');
+      assert.deepEqual([ligne.statut, ligne.aSuivre], ['TERMINEE', true]);
+      const numeros = await numerosTires();
+      await refusSansEcriture(visite.body.id, () => creerSuite(visite.body.id), 409, 'Le contrat de cette visite est suspendu : une suite couverte par le contrat demande un contrat actif.', 'contrat suspendu');
+      assert.equal(await numerosTires(), numeros, 'aucun numéro d’intervention consommé par le refus');
+    });
+
+    test('la date de demande d’une suite est le jour civil de la société, et non celui de Paris', async () => {
+      const initiale = (await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Suivi audit T5 fuseau' })).body;
+      const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+      const jourDans = (fuseau) => new Intl.DateTimeFormat('en-CA', { timeZone: fuseau, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      try {
+        figerHorlogeA21hUtc();
+        assert.notEqual(jourDans('Pacific/Wallis'), jourDans('Europe/Paris'), 'le jour de la société diffère de celui de Paris');
+        assert.equal((await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: 'Pacific/Wallis' })).status, 200);
+        const suite = await creerSuite(initiale.id);
+        assert.equal(suite.status, 201, JSON.stringify(suite.body));
+        assert.equal(suite.body.dateDemande, `${jourDans('Pacific/Wallis')}T00:00:00.000Z`);
+      } finally {
+        mock.timers.reset();
+        await request(app).put('/api/company').set(admin()).send({ fuseauHoraire: societe?.fuseauHoraire || 'Europe/Paris' });
+      }
+    });
+
+    test('périmètre relu sous le verrou de l’intervention initiale : un responsable retiré pendant l’attente la trouve introuvable, sans suite ni numéro consommé', async () => {
+      const initiale = await curativePlanifiee('TEST Suivi audit T6 périmètre relu', { intervenantIds: [ficheResponsable.id] });
+      assert.equal((await fiche_(initiale.id, jeton('responsable'))).status, 200, 'dans son périmètre par l’affectation');
+      const numeros = await numerosTires();
+      const journalAvant = await journal(initiale.id);
+      let reponse;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${initiale.id} FOR UPDATE`;
+        reponse = creerSuite(initiale.id, {}, jeton('responsable')).then((r) => r);
+        assert.equal(await attendreUnVerrou(), true, 'la création attend le verrou de l’intervention initiale');
+        // Comme un placement concurrent : la projection et l'affectation passent à la fiche du technicien.
+        await tx.planningEvent.update({ where: { interventionId: initiale.id }, data: { intervenants: { set: [{ id: fiche.id }] } } });
+        await tx.interventionAffectation.deleteMany({ where: { interventionId: initiale.id } });
+        await tx.interventionAffectation.create({ data: { interventionId: initiale.id, intervenantId: fiche.id } });
+      }, { timeout: 20000 });
+      const refus = await reponse;
+      assert.equal(refus.status, 404, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Intervention introuvable.');
+      assert.equal(await prisma.intervention.count({ where: { interventionInitialeId: initiale.id } }), 0, 'aucune suite créée');
+      assert.deepEqual(await journal(initiale.id), journalAvant, 'rien n’est écrit au journal');
+      assert.equal(await numerosTires(), numeros, 'aucun numéro d’intervention consommé');
+    });
+
+    test('marque relue sous le verrou : un technicien retiré pendant l’attente ne retire pas la marque', async () => {
+      const initiale = await curativeTerminee('TEST Suivi audit T7 marque et périmètre', { aSuivre: true });
+      const journalAvant = await journal(initiale.id);
+      let reponse;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${initiale.id} FOR UPDATE`;
+        reponse = marquer(initiale.id, false, jeton('technicien')).then((r) => r);
+        assert.equal(await attendreUnVerrou(), true, 'le retrait attend le verrou de l’intervention');
+        await tx.interventionAffectation.deleteMany({ where: { interventionId: initiale.id } });
+        await tx.interventionAffectation.create({ data: { interventionId: initiale.id, intervenantId: ficheResponsable.id } });
+      }, { timeout: 20000 });
+      const refus = await reponse;
+      assert.equal(refus.status, 404, JSON.stringify(refus.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: initiale.id } })).aSuivre, true, 'la marque reste');
+      assert.deepEqual(await journal(initiale.id), journalAvant, 'rien n’est écrit au journal');
     });
   });
 }

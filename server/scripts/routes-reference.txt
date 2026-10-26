@@ -88,7 +88,7 @@ GET /api/planning/interventions-a-planifier requireAuth#07b983da0ce5 > blockComm
 PUT /api/interventions/:id/planning requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#ba586194cd56
 POST /api/interventions/:id/remise-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#c275a1579ba9
 PUT /api/interventions/:id/a-suivre requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > <anonymous>#4d746e2fe3f6
-POST /api/interventions/:id/suites requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > <anonymous>#58e36853eabe
+POST /api/interventions/:id/suites requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > <anonymous>#5477922d6281
 GET /api/health <anonymous>#8e6d60bb30d8
 GET /api/config <anonymous>#8496550e7475
 POST /api/auth/sso <anonymous>#29d388e00d09
@@ -123,7 +123,7 @@ PUT /api/intervenants/:id/compte requireAuth#07b983da0ce5 > requireAdmin#72440b3
 PUT /api/intervenants/:id/main-oeuvre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > rattacherMainOeuvre#6b47f279f68e
 DELETE /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c87065a29eb2
 GET /api/planning/chantiers requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#35c56b70d597
-GET /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#48e661370296
+GET /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#72fc077cb353
 POST /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#d20ba39cc1f2
 PATCH /api/planning/events/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#72ed95d3b1f9
 DELETE /api/planning/events/:id requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#59692ae83863

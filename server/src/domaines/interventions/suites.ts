@@ -132,7 +132,7 @@ export function enregistrerSuites(app: Express): void {
       // souhaitée) ; le site et le contact repris sont relus pour le client repris, et la date de demande
       // est le jour même, au fuseau de la société.
       const details = await lireDetailsIntervention(prisma, {
-        description: req.body?.description, priorite: req.body?.priorite ?? initiale.priorite, dateSouhaitee: req.body?.dateSouhaitee,
+        description: req.body?.description, priorite: req.body?.priorite || initiale.priorite, dateSouhaitee: req.body?.dateSouhaitee,
         siteId: initiale.siteId, contactId: initiale.contactId,
       }, initiale.clientId, fuseauHoraire);
       const annee = anneeEntreprise(new Date(), fuseauHoraire);

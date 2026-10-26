@@ -83,6 +83,9 @@ test('le technicien termine « à suivre » ; l’encadrement crée la suite dep
   const file = page.getByRole('region', { name: 'Interventions à planifier' });
   const ligne = file.getByRole('row', { name: new RegExp(initiale.reference) });
   await expect(ligne).toContainText('À suivre');
+  // La marque se voit aussi au planning, sur l'affectation de l'intervention terminée (point 29).
+  const affectation = page.locator('td [draggable="true"]', { hasText: initiale.titre });
+  await expect(affectation).toContainText('À suivre');
   await expect(ligne.getByRole('button', { name: 'Placer' })).toHaveCount(0);
   await ligne.getByRole('button', { name: 'Créer la suite' }).click();
   const dialogue = page.getByRole('dialog', { name: `Créer la suite de ${initiale.reference}` });
@@ -101,6 +104,7 @@ test('le technicien termine « à suivre » ; l’encadrement crée la suite dep
   const ligneSuite = file.getByRole('row', { name: new RegExp(suite.reference) });
   await expect(ligneSuite.getByRole('button', { name: 'Placer' })).toBeVisible();
   await expect(ligneSuite).not.toContainText('À suivre');
+  await expect(affectation).not.toContainText('À suivre');
 
   // 3. Côté serveur : marque retirée, lien posé, client repris.
   const ficheInitiale = await envoyer('get', `/interventions/${initiale.id}`) as { aSuivre: boolean; suites: Intervention[] };
@@ -163,4 +167,36 @@ test('depuis la fiche, l’encadrement marque « à suivre », crée la suite (u
   expect(journal.slice(0, 3).map((entree) => [entree.action, entree.motif])).toEqual([
     ['MARQUE_A_SUIVRE', 'Marque « à suivre » retirée'], ['MARQUE_A_SUIVRE', 'Marquée « à suivre »'], ['SUITE_CREEE', expect.stringMatching(/^Suite créée : I\d{2}-\d{4}$/)],
   ]);
+});
+
+test('sur son intervention terminée sans marque, le technicien ne voit ni « Marquer « à suivre » » ni « Créer la suite »', async ({ session, request, creerClient, browser }) => {
+  const { technicien, envoyer, enCours } = await preparer(request, session.token, creerClient, 'suivi-tech');
+  const terminee = await enCours('Dépannage terminé sans marque');
+  await envoyer('patch', `/interventions/${terminee.id}/statut`, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+  const telephone = await pageTelephone(browser, technicien);
+  await telephone.goto('/interventions', { waitUntil: 'networkidle' });
+  const carte = telephone.locator('article', { hasText: terminee.titre });
+  await expect(carte.getByText('Terminée', { exact: true })).toBeVisible();
+  await expect(carte.getByRole('button', { name: 'Marquer « à suivre »' })).toHaveCount(0);
+  await expect(carte.getByRole('button', { name: 'Créer la suite' })).toHaveCount(0);
+  await expect(carte.getByRole('button', { name: 'Retirer la marque « à suivre »' })).toHaveCount(0);
+  await telephone.context().close();
+});
+
+test('dialogue « Créer la suite » sur téléphone : focus sur le titre, Échap le ferme sans rien créer, aucun débordement à 375 px', async ({ session, request, creerClient, browser }) => {
+  const { envoyer, enCours } = await preparer(request, session.token, creerClient, 'suivi-dialogue');
+  const terminee = await enCours('Dépannage dialogue');
+  await envoyer('patch', `/interventions/${terminee.id}/statut`, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+  const telephone = await pageTelephone(browser, session.user as Compte);
+  await telephone.goto(`/interventions/${terminee.id}`, { waitUntil: 'networkidle' });
+  const carte = telephone.locator('article', { hasText: terminee.titre });
+  await carte.getByRole('button', { name: 'Créer la suite' }).click();
+  const dialogue = telephone.getByRole('dialog', { name: `Créer la suite de ${terminee.reference}` });
+  await expect(dialogue.getByLabel('Titre de la suite')).toBeFocused();
+  expect(await telephone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await telephone.keyboard.press('Escape');
+  await expect(dialogue).toHaveCount(0);
+  const fiche = await envoyer('get', `/interventions/${terminee.id}`) as { suites: Intervention[] };
+  expect(fiche.suites).toEqual([]);
+  await telephone.context().close();
 });

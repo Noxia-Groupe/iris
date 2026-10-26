@@ -129,7 +129,7 @@ export function getInterventionFilterForUser(authUser: { id: string; role: strin
     // Le responsable crée la suite d'une intervention de son périmètre (intervention de suivi liée,
     // décision de Nelson du 24-10-2026, point 16) : il reste rattaché aux suites qu'il a créées, comme le
     // conducteur créateur (choix par défaut, à confirmer). Il ne crée aucune autre intervention : une
-    // intervention qu'il aurait créée sous un autre type de compte ne lui revient pas.
+    // intervention ordinaire qu'il aurait créée sous un autre type de compte ne lui revient pas, une suite si.
     return { OR: [
       parAffectation,
       { createdById: authUser.id, interventionInitialeId: { not: null } },
