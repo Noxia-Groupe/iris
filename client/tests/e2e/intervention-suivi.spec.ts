@@ -200,3 +200,44 @@ test('dialogue « Créer la suite » sur téléphone : focus sur le titre, Écha
   expect(fiche.suites).toEqual([]);
   await telephone.context().close();
 });
+
+// L'écran suit l'API pour le responsable (issue #336, audit 2 de #335).
+test('le responsable, sur une intervention de son affaire, voit « Marquer « à suivre » » et « Créer la suite », et crée la suite', async ({ session, request, creerClient, browser }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const envoyer = async (methode: 'post' | 'put' | 'patch', path: string, data?: object) => {
+    const response = await request[methode](`${api}${path}`, { headers, data });
+    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+    return response.json();
+  };
+  const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+  const responsable: Compte = await envoyer('post', '/users', { email: `suivi-resp.${suffixe}@iris.test`, name: `Responsable suivi ${suffixe}`, role: 'RESPONSABLE' });
+  const fiche = await envoyer('post', '/intervenants', { nom: `Fiche suivi-resp ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 });
+  const client = await creerClient(`suivi-resp ${suffixe}`);
+  // Affaire dont le responsable est titulaire : l'intervention qui s'y rattache est dans son périmètre.
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Affaire suivi ${suffixe}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: responsable.id });
+  const terminee = await envoyer('post', '/interventions', { clientId: client.id, titre: `Dépannage de l’affaire ${suffixe}`, chantierId: chantier.id }) as Intervention;
+  const jour = dateDuJour().split('-').reverse().join('-');
+  await envoyer('put', `/interventions/${terminee.id}/planning`, { dateDebut: jour, creneau: 'HEURES', heureDebut: '10:00', heureFin: '11:00', intervenantIds: [fiche.id] });
+  await envoyer('patch', `/interventions/${terminee.id}/statut`, { statut: 'EN_COURS' });
+  await envoyer('post', `/interventions/${terminee.id}/rapports`, { contenu: 'Retour nécessaire.', cleEnvoi: randomUUID() });
+  await envoyer('patch', `/interventions/${terminee.id}/statut`, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+
+  const page = await pageTelephone(browser, responsable);
+  await page.goto(`/interventions/${terminee.id}`, { waitUntil: 'networkidle' });
+  const carte = page.locator('article', { hasText: terminee.titre });
+  await carte.getByRole('button', { name: 'Marquer « à suivre »' }).click();
+  await expect(carte.getByText('À suivre', { exact: true })).toBeVisible();
+  await carte.getByRole('button', { name: 'Créer la suite' }).click();
+  const dialogue = page.getByRole('dialog', { name: `Créer la suite de ${terminee.reference}` });
+  const creation = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/interventions/${terminee.id}/suites`));
+  await dialogue.getByRole('button', { name: 'Créer la suite' }).click();
+  expect((await creation).status()).toBe(201);
+  await expect(dialogue).toHaveCount(0);
+  await expect(carte.getByText('À suivre', { exact: true })).toHaveCount(0);
+  await expect(carte).toContainText('Suite : ');
+  await page.context().close();
+});

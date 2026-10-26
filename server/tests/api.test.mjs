@@ -20394,5 +20394,21 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: initiale.id } })).aSuivre, true, 'la marque reste');
       assert.deepEqual(await journal(initiale.id), journalAvant, 'rien n’est écrit au journal');
     });
+
+    // --- File : une intervention « à suivre » reste dans le périmètre du demandeur (issue #336, audit 2 de #335) ---
+    test('la file ne montre une intervention terminée « à suivre » que dans le périmètre du demandeur', async () => {
+      // Curative de l'administration, affectée au technicien : hors du périmètre du conducteur et du responsable.
+      const marquee = await curativeTerminee('TEST Suivi audit 2 file hors périmètre', { aSuivre: true });
+      assert.equal((await file()).some((item) => item.id === marquee.id), true, 'témoin : l’administration la voit dans la file');
+      for (const cle of ['conducteur', 'responsable']) {
+        assert.equal((await fiche_(marquee.id, jeton(cle))).status, 404, `${cle} : hors de son périmètre`);
+        assert.equal((await file(jeton(cle))).some((item) => item.id === marquee.id), false, `${cle} : absente de sa file`);
+      }
+      // Le conducteur qui l'a créée voit sa propre intervention marquée dans sa file ; un autre conducteur, non.
+      const duConducteur = await curativePlanifiee('TEST Suivi audit 2 file du conducteur', { enTete: jeton('conducteur') });
+      assert.equal((await terminer(duConducteur.id, { aSuivre: true })).status, 200);
+      assert.equal((await file(jeton('conducteur'))).some((item) => item.id === duConducteur.id), true, 'conducteur créateur : dans sa file');
+      assert.equal((await file(jeton('conducteurAutre'))).some((item) => item.id === duConducteur.id), false, 'autre conducteur : absente de sa file');
+    });
   });
 }
