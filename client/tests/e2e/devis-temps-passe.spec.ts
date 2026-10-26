@@ -97,18 +97,24 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     await reglerPas(request, session.token, 15);
     const mainOeuvre = await creerMainOeuvre(request, session.token, suffixe);
     const cable = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-TP-CAB-${suffixe}`, nom: `Câble temps passé E2E ${suffixe}`, unite: 'm', prixVenteHt: '2.50', tauxTva: '20' }) as { nom: string };
-    const prestation = await envoyer(request, session.token, 'post', '/catalogue/prestations', { reference: `E2E-TP-POSE-${suffixe}`, nom: `Pose temps passé E2E ${suffixe}`, unite: 'forfait', prixVenteHt: '250', tauxTva: '20' }) as { nom: string };
     const client = await creerClient('Temps passé');
     const objet = `Dépannage au temps passé E2E ${suffixe}`;
     await allerSurPageAdmin('/devis');
     await choisirClient(page, client);
     await page.getByRole('textbox', { name: 'Objet' }).fill(objet);
+    // Seules les mains d'œuvre sont proposées, pas une prestation ordinaire : l'écran demande au serveur les
+    // seules mains d'œuvre actives, toutes (`mainOeuvre=1`, que vérifie le test API de la recherche), et non
+    // les prestations, ordinaires comprises. Rien n'est ajouté au catalogue : une prestation ordinaire
+    // laissée en base serait listée par /catalogue, que contrôle entetes-mobile sur une base neuve (#327).
+    const demandeMainsOeuvre = page.waitForRequest((requete) => {
+      const url = new URL(requete.url());
+      return requete.method() === 'GET' && url.pathname.endsWith('/devis/catalogue') && !url.searchParams.has('q');
+    });
     await page.getByRole('checkbox', { name: 'Devis au temps passé' }).check();
+    expect(new URL((await demandeMainsOeuvre).url()).searchParams.toString()).toBe('mainOeuvre=1');
     const tarif = page.getByRole('combobox', { name: 'Tarif de l’heure' });
     await expect(tarif).toBeDisabled();
     await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);
-    // Seules les mains d'œuvre sont proposées, pas une prestation ordinaire.
-    await expect(page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).locator('option', { hasText: prestation.nom })).toHaveCount(0);
     // Les deux prix à l'heure sont proposés, jamais le forfait jour.
     await expect(tarif.locator('option')).toHaveText(['À l’heure hors contrat — 45,50 € HT', 'À l’heure sous contrat — 40,00 € HT']);
     const ligne = page.getByRole('group', { name: 'Ligne au temps passé' });
