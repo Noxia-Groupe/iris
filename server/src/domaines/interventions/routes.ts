@@ -23,6 +23,7 @@ import {
 } from './comptesRendus';
 import { enregistrerLecturesInterventions } from './lectures';
 import { enregistrerRemiseAPlanifier } from './remiseAPlanifier';
+import { enregistrerSuites } from './suites';
 
 class ChantierInterventionIntrouvable extends Error {}
 // Refus métier relevé sous verrou, dans la transaction : il l'annule et devient un 409.
@@ -361,6 +362,12 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const motif = motifClotureValide(req.body?.motifSansSignature, req.body?.precisionMotif);
       if ('erreur' in motif) return res.status(400).json({ error: motif.erreur });
       if (statut !== 'TERMINEE' && motif.texte) return res.status(400).json({ error: 'Un motif sans signature ne s’indique qu’en terminant l’intervention.' });
+      // « Terminé » ou « À suivre » (intervention de suivi liée, décisions de Nelson du 24-10-2026, points
+      // 28, 29 et 31) : la marque se pose en terminant, selon la règle de clôture normale ; sans le champ,
+      // l'intervention se termine sans marque.
+      if (req.body?.aSuivre !== undefined && typeof req.body.aSuivre !== 'boolean') return res.status(400).json({ error: 'Indiquez si l’intervention est à suivre (oui ou non).' });
+      const aSuivre = req.body?.aSuivre === true;
+      if (statut !== 'TERMINEE' && req.body?.aSuivre !== undefined) return res.status(400).json({ error: 'La marque « à suivre » ne s’indique qu’en terminant l’intervention.' });
       // Le journal compare avant/apres : les deux instantanés doivent avoir la même forme,
       // sinon une simple transition se lit comme si le client venait d'être ajouté au dossier.
       const intervention = await prisma.intervention.findFirst({
@@ -396,8 +403,10 @@ export function enregistrerRoutesInterventions(app: Express): void {
         const instantane = annulation ? INSTANTANE_CRENEAU : AVEC_CLIENT;
         const avant = await tx.intervention.findUniqueOrThrow({ where: { id: intervention.id }, include: instantane });
         if (annulation) await retirerCreneauIntervention(tx, intervention.id);
-        const modifiee = await tx.intervention.update({ where: { id: intervention.id }, data: { statut }, include: instantane });
-        await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, avant, annulation ? `Annulation : ${motifAnnulation}` : motif.texte ?? undefined);
+        const modifiee = await tx.intervention.update({ where: { id: intervention.id }, data: aSuivre ? { statut, aSuivre } : { statut }, include: instantane });
+        // La marque figure dans l'« après » du journal ; le motif le dit aussi, à côté du motif sans signature.
+        const motifJournal = annulation ? `Annulation : ${motifAnnulation}` : [motif.texte, aSuivre ? 'Terminée « à suivre »' : null].filter(Boolean).join(' · ') || undefined;
+        await journaliserIntervention(tx, req, 'CHANGEMENT_STATUT', modifiee, avant, motifJournal);
         return modifiee;
       });
       res.json(decimalToNumber(updated));
@@ -411,18 +420,26 @@ export function enregistrerRoutesInterventions(app: Express): void {
   });
 
   // La file contient les interventions encore dépourvues de projection : visites d'un contrat actif et
-  // curatives. Le même filtre de périmètre gouverne la fiche SAV et son placement.
+  // curatives. Le même filtre de périmètre gouverne la fiche SAV et son placement. Elle montre aussi les
+  // interventions terminées « à suivre », jusqu'à la création de leur suite (intervention de suivi liée,
+  // décision de Nelson du 24-10-2026, point 35), quel que soit l'état du contrat d'une visite : la
+  // création de la suite dit alors pourquoi elle est refusée.
   app.get('/api/planning/interventions-a-planifier', requireAuth, blockCommercialEtAssimiles, requirePlanningActif, async (req: AuthRequest, res) => {
     try {
       // Visites d'un contrat actif, et interventions curatives (SAV hors contrat, lot pilote 3) : toute
       // intervention à affecter qui n'a pas encore de projection, dans le périmètre du demandeur.
       const interventions = await prisma.intervention.findMany({
         where: { AND: [
-          { statut: { in: ['A_PLANIFIER', 'PLANIFIEE'] }, planningEvent: { is: null } },
-          { OR: [{ contratMaintenanceId: null }, { contratMaintenance: { is: { statut: 'ACTIF' } } }] },
+          { OR: [
+            { AND: [
+              { statut: { in: ['A_PLANIFIER', 'PLANIFIEE'] }, planningEvent: { is: null } },
+              { OR: [{ contratMaintenanceId: null }, { contratMaintenance: { is: { statut: 'ACTIF' } } }] },
+            ] },
+            { statut: 'TERMINEE', aSuivre: true },
+          ] },
           getInterventionFilterForUser(req.user!),
         ] },
-        select: { id: true, reference: true, titre: true, echeanceContrat: true, dateSouhaitee: true, priorite: true,
+        select: { id: true, reference: true, titre: true, statut: true, aSuivre: true, echeanceContrat: true, dateSouhaitee: true, priorite: true,
           client: { select: { raisonSociale: true } }, site: { select: { nom: true, ville: true } },
           contratMaintenance: { select: { id: true, titre: true, dureePrevisionnelleMinutes: true } } },
         orderBy: [{ reference: 'asc' }],
@@ -497,4 +514,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
   // planifier », son créneau libéré (décisions de Nelson des 23-10-2026, nuit, réponse 2, et 24-10-2026 ;
   // cf. remiseAPlanifier.ts).
   enregistrerRemiseAPlanifier(app);
+
+  // Marque « à suivre » et création d'une suite (intervention de suivi liée ; cf. suites.ts).
+  enregistrerSuites(app);
 }

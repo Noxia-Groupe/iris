@@ -126,8 +126,13 @@ export function getInterventionFilterForUser(authUser: { id: string; role: strin
     return { OR: [parAffectation, { createdById: authUser.id }, { chantier: { responsableId: authUser.id, annuleLe: null } }] };
   }
   if (authUser.role === ROLE_RESPONSABLE) {
+    // Le responsable crée la suite d'une intervention de son périmètre (intervention de suivi liée,
+    // décision de Nelson du 24-10-2026, point 16) : il reste rattaché aux suites qu'il a créées, comme le
+    // conducteur créateur (choix par défaut, à confirmer). Il ne crée aucune autre intervention : une
+    // intervention qu'il aurait créée sous un autre type de compte ne lui revient pas.
     return { OR: [
       parAffectation,
+      { createdById: authUser.id, interventionInitialeId: { not: null } },
       { chantier: { responsableId: { in: [authUser.id, ...(authUser.equipeIds || [])] }, annuleLe: null } },
     ] };
   }
@@ -216,7 +221,12 @@ export async function prochaineReferenceIntervention(tx: Prisma.TransactionClien
 export async function creerInterventionNumerotee(
   tx: Prisma.TransactionClient, req: AuthRequest, annee: number,
   // `auTempsPasse` : seule la conversion d'un devis au temps passé le pose (lot « devis au temps passé »).
-  donnees: { clientId: string; titre: string; chantierId: string | null; auTempsPasse?: boolean } & Awaited<ReturnType<typeof lireDetailsIntervention>>,
+  // `interventionInitialeId`, `contratMaintenanceId` et `couvertureContrat` : seule la création d'une suite
+  // les pose, repris de l'intervention initiale (intervention de suivi liée, suites.ts).
+  donnees: {
+    clientId: string; titre: string; chantierId: string | null; auTempsPasse?: boolean;
+    interventionInitialeId?: string; contratMaintenanceId?: string | null; couvertureContrat?: Prisma.InputJsonValue;
+  } & Awaited<ReturnType<typeof lireDetailsIntervention>>,
   motif?: string,
 ) {
   const reference = await prochaineReferenceIntervention(tx, annee);

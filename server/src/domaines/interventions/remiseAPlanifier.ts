@@ -18,8 +18,8 @@ import { interventionDansPerimetre, motifInterventionValide, verrouillerInterven
 //    statut est refusé (409) ;
 //  - point 2, précisé par la réponse complémentaire : une intervention qui porte des heures ou du
 //    matériel non archivés ne se remet pas à planifier (409) ; son créneau se déplace toujours au
-//    planning (décision du même jour) ; si une suite est nécessaire, on ouvre une intervention SAV de
-//    suivi (le lien entre les deux interventions est prévu par un lot suivant).
+//    planning (décision du même jour) ; si une suite est nécessaire, on la marque « à suivre » en la
+//    terminant, puis on crée sa suite, une intervention liée (lot « intervention de suivi liée », suites.ts).
 //    Des saisies archivées ne la retiennent pas (choix par défaut, à confirmer, docs/ROADMAP-PASSATION.md,
 //    section 4) ;
 //  - point 3 : aucun contrôle du statut du contrat (suspendu ou clos, le créneau se libère aussi) ;
@@ -50,9 +50,9 @@ const LIBELLE_STATUT: Record<string, string> = { A_PLANIFIER: 'déjà à planifi
 // Refus d'une intervention commencée (décision de Nelson du 24-10-2026, réponse complémentaire au
 // point 2) : les deux compteurs disent ce qui la retient, puis ce qui reste possible aujourd'hui. Son
 // créneau se déplace toujours au planning (même décision, réponse sur le déplacement) ; une suite passe
-// par une nouvelle intervention, le lien avec l'intervention initiale étant prévu par un lot suivant.
+// par une nouvelle intervention liée à l'intervention initiale (lot « intervention de suivi liée »).
 function refusRemiseSaisies(heures: number, achats: number): string {
-  return `Remise impossible : cette intervention porte déjà ${heures} saisie(s) d’heures du technicien et ${achats} achat(s) de matériel non archivés. Une intervention commencée ne se remet pas à planifier : déplacez son créneau au planning, ou terminez-la et, si une suite est nécessaire, ouvrez une nouvelle intervention SAV.`;
+  return `Remise impossible : cette intervention porte déjà ${heures} saisie(s) d’heures du technicien et ${achats} achat(s) de matériel non archivés. Une intervention commencée ne se remet pas à planifier : déplacez son créneau au planning, ou terminez-la et, si une suite est nécessaire, créez sa suite, une intervention liée.`;
 }
 
 export function enregistrerRemiseAPlanifier(app: Express): void {

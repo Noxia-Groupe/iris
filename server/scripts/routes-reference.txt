@@ -72,9 +72,9 @@ PATCH /api/contrats-maintenance/:id/statut requireAuth#07b983da0ce5 > requireAdm
 POST /api/contrats-maintenance/:id/avancer-echeance requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#6c7a62204870
 POST /api/contrats-maintenance/:id/generer-intervention requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#ff2867025ef0
 POST /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#051bd6c57c60 > <anonymous>#5f8877e44fed
-GET /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#174bd48a1244
+GET /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3367306260fa
 GET /api/interventions/journee requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
-GET /api/interventions/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#68266b8fd47c
+GET /api/interventions/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#4d7dee0b11a1
 GET /api/interventions/:id/couts requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3bbada459c05
 POST /api/interventions/:id/couts/heures requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#971650f71db2
 POST /api/interventions/:id/couts/achats requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#aaaf5b8c9ae8
@@ -83,10 +83,12 @@ POST /api/interventions/:id/couts/:type/:coutId/:action requireAuth#07b983da0ce5
 GET /api/interventions/:id/journal-saisies requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#6d9623c26cdd
 POST /api/interventions/:id/rapports requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#a829e5e2fbfc
 POST /api/interventions/rapports/:rapportId/signature requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#c8a45558077c
-PATCH /api/interventions/:id/statut requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#4bebc7b920df
-GET /api/planning/interventions-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#02fa19bc763a
+PATCH /api/interventions/:id/statut requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#097fb338a311
+GET /api/planning/interventions-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#d0d28a1f1c3d
 PUT /api/interventions/:id/planning requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#ba586194cd56
 POST /api/interventions/:id/remise-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#c275a1579ba9
+PUT /api/interventions/:id/a-suivre requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > <anonymous>#4d746e2fe3f6
+POST /api/interventions/:id/suites requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > <anonymous>#58e36853eabe
 GET /api/health <anonymous>#8e6d60bb30d8
 GET /api/config <anonymous>#8496550e7475
 POST /api/auth/sso <anonymous>#29d388e00d09

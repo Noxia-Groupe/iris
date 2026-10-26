@@ -18213,8 +18213,8 @@ if (!TEST_DATABASE_URL) {
     const refusStatut = (libelle) => `Seule une intervention planifiée se remet « à planifier » : celle-ci est ${libelle}.`;
     // Décisions de Nelson du 24-10-2026 : une intervention commencée ne se remet pas à planifier (réponse
     // complémentaire au point 2), mais son créneau se déplace au planning (réponse sur le déplacement) ;
-    // une suite passe par une nouvelle intervention, dont le lien est prévu par un lot suivant.
-    const refusSaisies = (heures, achats) => `Remise impossible : cette intervention porte déjà ${heures} saisie(s) d’heures du technicien et ${achats} achat(s) de matériel non archivés. Une intervention commencée ne se remet pas à planifier : déplacez son créneau au planning, ou terminez-la et, si une suite est nécessaire, ouvrez une nouvelle intervention SAV.`;
+    // une suite passe par une nouvelle intervention liée (lot « intervention de suivi liée »).
+    const refusSaisies = (heures, achats) => `Remise impossible : cette intervention porte déjà ${heures} saisie(s) d’heures du technicien et ${achats} achat(s) de matériel non archivés. Une intervention commencée ne se remet pas à planifier : déplacez son créneau au planning, ou terminez-la et, si une suite est nécessaire, créez sa suite, une intervention liée.`;
     const remettre = (id, enTete = jeton('admin'), corps = { motif: MOTIF }) => request(app).post(`/api/interventions/${id}/remise-a-planifier`).set(enTete).send(corps);
     const placer = (id, corps = {}, enTete = admin()) => request(app).put(`/api/interventions/${id}/planning`).set(enTete)
       .send({ dateDebut: '2099-03-04', creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:30', intervenantIds: [fiche.id], ...corps });
@@ -19871,6 +19871,384 @@ if (!TEST_DATABASE_URL) {
       });
       await assert.rejects(prisma.intervention.update({ where: { id: marquee.id }, data: { auTempsPasse: false } }), /ne change plus/);
       assert.equal((await prisma.intervention.update({ where: { id: marquee.id }, data: { statut: 'PLANIFIEE' } })).auTempsPasse, true);
+    });
+  });
+
+  describe('Intervention de suivi liée : « À suivre » et la suite liée (première PR, sans montants)', () => {
+    let session = '';
+    let clientId = '';
+    let siteId = '';
+    let contactId = '';
+    let fiche = null;
+    let ficheResponsable = null;
+    const comptes = {};
+    const admin = () => ({ Authorization: `Bearer ${session}` });
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    const jetonBrut = (cle) => jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET);
+    const placer = (id, intervenantIds = [fiche.id], enTete = admin()) => request(app).put(`/api/interventions/${id}/planning`).set(enTete)
+      .send({ dateDebut: '2099-03-04', creneau: 'HEURES', heureDebut: '09:00', heureFin: '10:30', intervenantIds });
+    const statut = (id, corps, enTete = jeton('technicien')) => request(app).patch(`/api/interventions/${id}/statut`).set(enTete).send(corps);
+    const marquer = (id, aSuivre, enTete = admin()) => request(app).put(`/api/interventions/${id}/a-suivre`).set(enTete).send({ aSuivre });
+    const creerSuite = (id, corps = {}, enTete = admin()) => request(app).post(`/api/interventions/${id}/suites`).set(enTete).send(corps);
+    const fiche_ = (id, enTete = admin()) => request(app).get(`/api/interventions/${id}`).set(enTete);
+    const file = async (enTete = admin()) => {
+      const res = await request(app).get('/api/planning/interventions-a-planifier').set(enTete);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body;
+    };
+    const journal = (id) => prisma.journalSaisieChantier.findMany({ where: { interventionId: id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    const etat = async (id) => ({
+      intervention: await prisma.intervention.findUniqueOrThrow({ where: { id } }),
+      suites: await prisma.intervention.findMany({ where: { interventionInitialeId: id }, orderBy: { id: 'asc' } }),
+      journal: await journal(id),
+    });
+    const refusSansEcriture = async (id, reponse, code, message, contexte) => {
+      const avant = await etat(id);
+      const res = await reponse();
+      assert.equal(res.status, code, `${contexte} : ${JSON.stringify(res.body)}`);
+      if (message !== undefined) assert.equal(res.body.error, message, contexte);
+      assert.deepEqual(await etat(id), avant, `${contexte} : rien n’est écrit`);
+      return res;
+    };
+    // Curative de ce client (site et contact), créée par `enTete`, placée avec `intervenantIds` : planifiée.
+    const curativePlanifiee = async (titre, { enTete = admin(), intervenantIds = [fiche.id], chantierId } = {}) => {
+      const cree = await request(app).post('/api/interventions').set(enTete).send({ clientId, siteId, contactId, titre, priorite: 'HAUTE', ...(chantierId ? { chantierId } : {}) });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const placement = await placer(cree.body.id, intervenantIds, enTete);
+      assert.equal(placement.status, 200, JSON.stringify(placement.body));
+      return cree.body;
+    };
+    // Démarrée puis terminée par le technicien affecté, avec un compte rendu et le motif « client absent ».
+    const terminer = async (id, extra = {}) => {
+      assert.equal((await statut(id, { statut: 'EN_COURS' })).status, 200);
+      const compteRendu = await ajouterCompteRendu(id, jetonBrut('technicien'));
+      assert.equal(compteRendu.status, 201, JSON.stringify(compteRendu.body));
+      return statut(id, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT', ...extra });
+    };
+    const curativeTerminee = async (titre, { aSuivre = false, chantierId } = {}) => {
+      const curative = await curativePlanifiee(titre, { chantierId });
+      const fin = await terminer(curative.id, aSuivre ? { aSuivre: true } : {});
+      assert.equal(fin.status, 200, JSON.stringify(fin.body));
+      return curative;
+    };
+    // Jour civil au fuseau réglé de la société : un test antérieur peut l'avoir changé.
+    const aujourdhuiSociete = async () => jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
+
+    before(async () => {
+      session = (await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN })).body.token;
+      for (const [cle, role] of [
+        ['admin', 'ADMIN'], ['conducteur', 'CONDUCTEUR_TRAVAUX'], ['conducteurAutre', 'CONDUCTEUR_TRAVAUX'], ['responsable', 'RESPONSABLE'],
+        ['responsableAutre', 'RESPONSABLE'], ['technicien', 'TECHNICIEN'], ['commercial', 'COMMERCIAL'], ['directeur', 'DIRECTEUR'],
+        ['directeurCommercial', 'DIRECTEUR_COMMERCIAL'], ['assistante', 'ASSISTANTE_COMMERCIALE'], ['comptable', 'COMPTABLE'],
+      ]) {
+        const email = `suite-liee.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Suivi ${cle}`, role } });
+      }
+      const client = await request(app).post('/api/clients').set(admin()).send({ raisonSociale: 'TEST Client intervention de suivi' });
+      assert.equal(client.status, 201, JSON.stringify(client.body));
+      clientId = client.body.id;
+      siteId = (await prisma.clientSite.create({ data: { clientId, nom: 'TEST Suivi site', adresse: '3 rue du Suivi', codePostal: '14000', ville: 'Caen' } })).id;
+      contactId = (await prisma.clientContact.create({ data: { clientId, nom: 'Suivi', prenom: 'Lucie', telephone: '06 00 00 00 01' } })).id;
+      fiche = await prisma.intervenant.create({ data: { nom: 'TEST Suivi fiche du technicien', role: 'Technicien', tauxHoraireCharge: 40 } });
+      const liaison = await request(app).put(`/api/intervenants/${fiche.id}/compte`).set(admin()).send({ userId: comptes.technicien.id });
+      assert.equal(liaison.status, 200, JSON.stringify(liaison.body));
+      // Fiche intervenant d'un responsable qui intervient lui-même : l'écran ne relie qu'un technicien,
+      // la fixture la relie en base pour éprouver le périmètre du responsable par l'affectation.
+      ficheResponsable = await prisma.intervenant.create({ data: { nom: 'TEST Suivi fiche du responsable', role: 'Responsable', tauxHoraireCharge: 45, userId: comptes.responsable.id } });
+    });
+
+    test('le technicien termine « à suivre » : terminée et marquée, journal, file des interventions à planifier ; « Terminé » ne marque rien', async () => {
+      const marquee = await curativePlanifiee('TEST Suivi terminée à suivre');
+      const fin = await terminer(marquee.id, { aSuivre: true });
+      assert.equal(fin.status, 200, JSON.stringify(fin.body));
+      const lue = await prisma.intervention.findUniqueOrThrow({ where: { id: marquee.id } });
+      assert.deepEqual([lue.statut, lue.aSuivre], ['TERMINEE', true]);
+      const derniere = (await journal(marquee.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.motif, derniere.auteurId], ['CHANGEMENT_STATUT', 'Clôture sans signature du client : Client absent · Terminée « à suivre »', comptes.technicien.id]);
+      assert.deepEqual([derniere.avant.statut, derniere.apres.statut, derniere.apres.aSuivre], ['EN_COURS', 'TERMINEE', true]);
+      // La file de l'encadrement la montre, terminée et marquée, jusqu'à la création de la suite.
+      const ligne = (await file()).find((item) => item.id === marquee.id);
+      assert.ok(ligne, 'intervention à suivre dans la file');
+      assert.deepEqual([ligne.statut, ligne.aSuivre, ligne.reference], ['TERMINEE', true, marquee.reference]);
+      // La fiche et la liste portent la marque.
+      assert.equal((await fiche_(marquee.id)).body.aSuivre, true);
+      // « Terminé », sans le champ ou avec aSuivre: false : aucune marque, absente de la file.
+      for (const extra of [{}, { aSuivre: false }]) {
+        const terminee = await curativePlanifiee(`TEST Suivi terminée ${JSON.stringify(extra)}`);
+        assert.equal((await terminer(terminee.id, extra)).status, 200);
+        assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: terminee.id } })).aSuivre, false);
+        assert.equal((await file()).some((item) => item.id === terminee.id), false);
+        assert.equal((await journal(terminee.id)).at(-1).motif, 'Clôture sans signature du client : Client absent');
+      }
+    });
+
+    test('la marque ne s’indique qu’en terminant, et vaut oui ou non', async () => {
+      const curative = await curativePlanifiee('TEST Suivi marque hors clôture');
+      await refusSansEcriture(curative.id, () => statut(curative.id, { statut: 'EN_COURS', aSuivre: true }), 400, 'La marque « à suivre » ne s’indique qu’en terminant l’intervention.', 'démarrage marqué');
+      await refusSansEcriture(curative.id, () => statut(curative.id, { statut: 'EN_COURS', aSuivre: false }), 400, 'La marque « à suivre » ne s’indique qu’en terminant l’intervention.', 'démarrage non marqué');
+      assert.equal((await statut(curative.id, { statut: 'EN_COURS' })).status, 200);
+      assert.equal((await ajouterCompteRendu(curative.id, jetonBrut('technicien'))).status, 201);
+      for (const valeur of ['oui', 1, null, 'true']) {
+        await refusSansEcriture(curative.id, () => statut(curative.id, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT', aSuivre: valeur }), 400, 'Indiquez si l’intervention est à suivre (oui ou non).', `aSuivre ${JSON.stringify(valeur)}`);
+      }
+      // Une annulation ne porte pas non plus la marque.
+      await refusSansEcriture(curative.id, () => statut(curative.id, { statut: 'ANNULEE', motif: 'TEST annulation', aSuivre: true }, admin()), 400, 'La marque « à suivre » ne s’indique qu’en terminant l’intervention.', 'annulation marquée');
+    });
+
+    test('marque hors clôture : l’encadrement la pose et la retire, le technicien la retire seulement ; chaque changement est journalisé', async () => {
+      const terminee = await curativeTerminee('TEST Suivi marque posée par l’encadrement');
+      const pose = await marquer(terminee.id, true);
+      assert.equal(pose.status, 200, JSON.stringify(pose.body));
+      assert.equal(pose.body.aSuivre, true);
+      let derniere = (await journal(terminee.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.motif, derniere.avant.aSuivre, derniere.apres.aSuivre], ['MARQUE_A_SUIVRE', 'Marquée « à suivre »', false, true]);
+      // À l'identique : rien n'est écrit.
+      await refusSansEcriture(terminee.id, () => marquer(terminee.id, true), 200, undefined, 'marque déjà posée');
+      // Le technicien affecté ne la pose pas, mais la retire.
+      await refusSansEcriture(terminee.id, () => marquer(terminee.id, true, jeton('technicien')), 403, 'Le technicien marque son intervention « à suivre » en la terminant ; il peut seulement retirer la marque ensuite.', 'technicien qui pose');
+      const retrait = await marquer(terminee.id, false, jeton('technicien'));
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      assert.equal(retrait.body.aSuivre, false);
+      derniere = (await journal(terminee.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.motif, derniere.auteurId, derniere.apres.aSuivre], ['MARQUE_A_SUIVRE', 'Marque « à suivre » retirée', comptes.technicien.id, false]);
+      // Corps invalide, intervention non terminée.
+      for (const corps of [{}, { aSuivre: 'oui' }, { aSuivre: null }]) {
+        await refusSansEcriture(terminee.id, () => request(app).put(`/api/interventions/${terminee.id}/a-suivre`).set(admin()).send(corps), 400, 'Indiquez si l’intervention est à suivre (oui ou non).', `corps ${JSON.stringify(corps)}`);
+      }
+      const planifiee = await curativePlanifiee('TEST Suivi marque sur une planifiée');
+      await refusSansEcriture(planifiee.id, () => marquer(planifiee.id, true), 409, 'Seule une intervention terminée porte la marque « à suivre ».', 'intervention planifiée');
+      // Hors périmètre : conducteur et responsable sans rattachement, introuvable.
+      for (const cle of ['conducteur', 'responsable']) {
+        await refusSansEcriture(terminee.id, () => marquer(terminee.id, true, jeton(cle)), 404, 'Intervention introuvable.', `${cle} hors périmètre`);
+      }
+      // Types sans SAV ni planning : refusés avant toute lecture.
+      for (const [cle, message] of [
+        ['commercial', 'Accès non autorisé pour un compte commercial.'], ['directeur', 'Accès non autorisé pour un compte directeur.'],
+        ['directeurCommercial', 'Accès non autorisé pour un compte directeur commercial.'], ['assistante', 'Accès non autorisé pour un compte assistante commerciale.'],
+        ['comptable', 'Accès non autorisé pour un compte comptable.'],
+      ]) {
+        await refusSansEcriture(terminee.id, () => marquer(terminee.id, true, jeton(cle)), 403, message, cle);
+      }
+      // Le conducteur qui a créé l'intervention la marque dans son périmètre.
+      const duConducteur = await curativePlanifiee('TEST Suivi intervention du conducteur', { enTete: jeton('conducteur') });
+      assert.equal((await terminer(duConducteur.id)).status, 200);
+      assert.equal((await marquer(duConducteur.id, true, jeton('conducteur'))).status, 200);
+      assert.equal((await marquer(duConducteur.id, false, jeton('conducteur'))).status, 200);
+    });
+
+    test('créer une suite : client, site, contact, affaire et priorité repris ; date de demande du jour ; marque retirée ; journal des deux interventions ; la suite entre dans la file', async () => {
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Suivi affaire', client: 'TEST Client intervention de suivi', clientId, responsableId: comptes.conducteur.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const initiale = await curativeTerminee('TEST Suivi intervention initiale', { aSuivre: true, chantierId: chantier.id });
+      const res = await creerSuite(initiale.id, { dateSouhaitee: '15-03-2099', description: 'TEST Revenir avec la pièce' });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const suite = await prisma.intervention.findUniqueOrThrow({ where: { id: res.body.id } });
+      assert.deepEqual(
+        [suite.clientId, suite.siteId, suite.contactId, suite.chantierId, suite.interventionInitialeId, suite.statut, suite.titre, suite.priorite, suite.description, suite.aSuivre, suite.contratMaintenanceId, suite.echeanceContrat],
+        [clientId, siteId, contactId, chantier.id, initiale.id, 'A_PLANIFIER', 'Suite — TEST Suivi intervention initiale', 'HAUTE', 'TEST Revenir avec la pièce', false, null, null],
+      );
+      assert.equal(suite.dateSouhaitee.toISOString().slice(0, 10), '2099-03-15');
+      assert.equal(suite.dateDemande.toISOString().slice(0, 10), await aujourdhuiSociete());
+      assert.notEqual(suite.reference, initiale.reference);
+      // La marque de l'intervention initiale disparaît ; la création est au journal des deux.
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: initiale.id } })).aSuivre, false);
+      const journalInitiale = (await journal(initiale.id)).at(-1);
+      assert.deepEqual([journalInitiale.action, journalInitiale.motif, journalInitiale.avant.aSuivre, journalInitiale.apres.aSuivre], ['SUITE_CREEE', `Suite créée : ${suite.reference}`, true, false]);
+      const journalSuite = await journal(suite.id);
+      assert.deepEqual(journalSuite.map((entree) => [entree.action, entree.motif]), [['CREATION', `Suite de ${initiale.reference}`]]);
+      assert.equal(journalSuite[0].apres.interventionInitialeId, initiale.id);
+      // La file montre la suite, à placer, et plus l'intervention initiale.
+      const laFile = await file();
+      assert.equal(laFile.some((item) => item.id === initiale.id), false);
+      const ligne = laFile.find((item) => item.id === suite.id);
+      assert.deepEqual([ligne.statut, ligne.aSuivre], ['A_PLANIFIER', false]);
+      // Les deux fiches portent le lien ; la liste aussi.
+      const ficheInitiale = await fiche_(initiale.id);
+      assert.deepEqual(ficheInitiale.body.suites, [{ id: suite.id, reference: suite.reference, titre: suite.titre, statut: 'A_PLANIFIER' }]);
+      assert.equal(ficheInitiale.body.interventionInitiale, null);
+      const ficheSuite = await fiche_(suite.id);
+      assert.deepEqual(ficheSuite.body.interventionInitiale, { id: initiale.id, reference: initiale.reference, titre: initiale.titre, statut: 'TERMINEE' });
+      assert.deepEqual(ficheSuite.body.suites, []);
+      const liste = await request(app).get('/api/interventions').set(admin());
+      assert.equal(liste.body.find((item) => item.id === suite.id).interventionInitiale.id, initiale.id);
+      // Titre et priorité choisis ; la suite se place comme toute intervention.
+      const choisie = await creerSuite(initiale.id, { titre: '  TEST Suite au titre choisi  ', priorite: 'URGENTE' });
+      assert.equal(choisie.status, 201, JSON.stringify(choisie.body));
+      assert.deepEqual([choisie.body.titre, choisie.body.priorite], ['TEST Suite au titre choisi', 'URGENTE']);
+      assert.equal((await placer(choisie.body.id)).status, 200);
+    });
+
+    test('plusieurs suites, et la suite d’une suite ; depuis tout statut sauf annulée, avec ou sans marque', async () => {
+      const aPlanifier = (await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Suivi à planifier' })).body;
+      const premiere = await creerSuite(aPlanifier.id);
+      const seconde = await creerSuite(aPlanifier.id);
+      assert.deepEqual([premiere.status, seconde.status], [201, 201]);
+      const deSuite = await creerSuite(premiere.body.id);
+      assert.equal(deSuite.status, 201, JSON.stringify(deSuite.body));
+      assert.equal(deSuite.body.titre, 'Suite — Suite — TEST Suivi à planifier');
+      assert.deepEqual((await fiche_(aPlanifier.id)).body.suites.map((suite) => suite.id).sort(), [premiere.body.id, seconde.body.id].sort());
+      assert.deepEqual((await fiche_(premiere.body.id)).body.suites.map((suite) => suite.id), [deSuite.body.id]);
+      // Sans marque, rien d'autre ne change sur l'intervention initiale que son journal.
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: aPlanifier.id } })).aSuivre, false);
+      assert.deepEqual((await journal(aPlanifier.id)).slice(-2).map((entree) => entree.action), ['SUITE_CREEE', 'SUITE_CREEE']);
+      // Planifiée ou en cours : la suite se crée aussi.
+      const planifiee = await curativePlanifiee('TEST Suivi planifiée');
+      assert.equal((await creerSuite(planifiee.id)).status, 201);
+      assert.equal((await statut(planifiee.id, { statut: 'EN_COURS' })).status, 200);
+      assert.equal((await creerSuite(planifiee.id)).status, 201);
+      // Annulée : refusée, sans rien écrire.
+      const annulee = (await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Suivi annulée' })).body;
+      assert.equal((await statut(annulee.id, { statut: 'ANNULEE', motif: 'TEST annulation' }, admin())).status, 200);
+      await refusSansEcriture(annulee.id, () => creerSuite(annulee.id), 409, 'Une intervention annulée n’a pas de suite.', 'intervention annulée');
+    });
+
+    test('suite d’une visite : couverte par le contrat (contrat et couverture repris, sans échéance) ; un contrat actif et commencé est exigé', async () => {
+      const contrat = await request(app).post('/api/contrats-maintenance').set(admin()).send({ clientId, siteId, titre: 'TEST Suivi contrat', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2026' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(admin());
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      const visiteLue = await prisma.intervention.findUniqueOrThrow({ where: { id: visite.body.id } });
+      const res = await creerSuite(visite.body.id);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const suite = await prisma.intervention.findUniqueOrThrow({ where: { id: res.body.id } });
+      assert.deepEqual([suite.contratMaintenanceId, suite.echeanceContrat, suite.couvertureContrat, suite.siteId], [contrat.body.id, null, visiteLue.couvertureContrat, visiteLue.siteId]);
+      // La suite d'une visite figure dans la file comme une visite du contrat.
+      assert.equal((await file()).find((item) => item.id === suite.id).contratMaintenance.id, contrat.body.id);
+      // Contrat suspendu : refus, sans rien écrire.
+      const suspension = await request(app).patch(`/api/contrats-maintenance/${contrat.body.id}/statut`).set(admin()).send({ statut: 'SUSPENDU', motif: 'TEST suspension' });
+      assert.equal(suspension.status, 200, JSON.stringify(suspension.body));
+      await refusSansEcriture(visite.body.id, () => creerSuite(visite.body.id), 409, 'Le contrat de cette visite est suspendu : une suite couverte par le contrat demande un contrat actif.', 'contrat suspendu');
+      // Contrat qui n'a pas commencé : la suite, demandée le jour même, ne précède pas son début (garde en
+      // base sur la date de demande) ; refus clair, sans rien écrire.
+      const futur = await request(app).post('/api/contrats-maintenance').set(admin()).send({ clientId, siteId, titre: 'TEST Suivi contrat futur', periodiciteMois: 12, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2099' });
+      assert.equal(futur.status, 201, JSON.stringify(futur.body));
+      const visiteFuture = await request(app).post(`/api/contrats-maintenance/${futur.body.id}/generer-intervention`).set(admin());
+      assert.equal(visiteFuture.status, 201, JSON.stringify(visiteFuture.body));
+      await refusSansEcriture(visiteFuture.body.id, () => creerSuite(visiteFuture.body.id), 409, 'Le contrat de cette visite commence le 01-01-2099 : une suite couverte par le contrat se crée à partir de ce jour.', 'contrat futur');
+    });
+
+    test('suite d’une visite d’un contrat issu d’un devis : elle suit les visites du contrat à l’annulation du devis (refus si en cours, annulée si non réalisée)', async () => {
+      await completerIdentiteClient(clientId);
+      const devis = await request(app).post('/api/devis').set(admin()).send({ clientId, objet: 'TEST Suivi contrat issu d’un devis', lignes: [{ designation: 'Visite annuelle', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await request(app).put(`/api/devis/${devis.body.id}/statut`).set(admin()).send({ statut: 'ENVOYE' })).status, 200);
+      assert.equal((await request(app).post(`/api/devis/${devis.body.id}/signature`).set(admin()).send({ signataire: 'TEST Signataire', confirme: true })).status, 201);
+      const contrat = await request(app).post(`/api/devis/${devis.body.id}/convertir`).set(admin()).send({ cible: 'CONTRAT', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-01-2026' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const visite = await request(app).post(`/api/contrats-maintenance/${contrat.body.id}/generer-intervention`).set(admin());
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      // Deux suites de la visite : l'une reste à planifier, l'autre est placée et commencée.
+      const aPlanifier = await creerSuite(visite.body.id, { titre: 'TEST Suivi suite à planifier' });
+      const commencee = await creerSuite(visite.body.id, { titre: 'TEST Suivi suite commencée' });
+      assert.deepEqual([aPlanifier.status, commencee.status], [201, 201]);
+      assert.equal((await placer(commencee.body.id)).status, 200);
+      assert.equal((await statut(commencee.body.id, { statut: 'EN_COURS' })).status, 200);
+      const annuler = () => request(app).post(`/api/devis/${devis.body.id}/annulation`).set(admin()).send({ motif: 'TEST annulation du devis du contrat' });
+      const refus = await annuler();
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, `Annulation impossible : la visite ${commencee.body.reference} du contrat issu de ce devis est en cours. Terminez-la ou annulez-la d’abord depuis sa fiche.`);
+      // Terminée, la suite reste ; la visite et la suite à planifier sont annulées avec le contrat.
+      assert.equal((await ajouterCompteRendu(commencee.body.id, jetonBrut('technicien'))).status, 201);
+      assert.equal((await statut(commencee.body.id, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' })).status, 200);
+      const annulation = await annuler();
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual([...annulation.body.interventionsAnnulees].sort(), [visite.body.id, aPlanifier.body.id].sort());
+      const statuts = await prisma.intervention.findMany({ where: { id: { in: [visite.body.id, aPlanifier.body.id, commencee.body.id] } }, select: { id: true, statut: true } });
+      assert.deepEqual(Object.fromEntries(statuts.map((i) => [i.id, i.statut])), { [visite.body.id]: 'ANNULEE', [aPlanifier.body.id]: 'ANNULEE', [commencee.body.id]: 'TERMINEE' });
+    });
+
+    test('droits : l’encadrement du SAV dans son périmètre ; le responsable reste rattaché à la suite qu’il crée ; technicien et autres types refusés', async () => {
+      const initiale = await curativeTerminee('TEST Suivi droits', { aSuivre: true });
+      await refusSansEcriture(initiale.id, () => creerSuite(initiale.id, {}, jeton('technicien')), 403, 'Création d’une suite réservée à l’encadrement du SAV.', 'technicien');
+      for (const [cle, message] of [
+        ['commercial', 'Accès non autorisé pour un compte commercial.'], ['directeur', 'Accès non autorisé pour un compte directeur.'],
+        ['directeurCommercial', 'Accès non autorisé pour un compte directeur commercial.'], ['assistante', 'Accès non autorisé pour un compte assistante commerciale.'],
+        ['comptable', 'Accès non autorisé pour un compte comptable.'],
+      ]) {
+        await refusSansEcriture(initiale.id, () => creerSuite(initiale.id, {}, jeton(cle)), 403, message, cle);
+      }
+      for (const cle of ['conducteur', 'responsable']) {
+        await refusSansEcriture(initiale.id, () => creerSuite(initiale.id, {}, jeton(cle)), 404, 'Intervention introuvable.', `${cle} hors périmètre`);
+      }
+      // Le conducteur, sur l'intervention qu'il a créée ; la suite lui reste visible.
+      const duConducteur = await curativePlanifiee('TEST Suivi intervention du conducteur pour suite', { enTete: jeton('conducteur') });
+      const suiteConducteur = await creerSuite(duConducteur.id, {}, jeton('conducteur'));
+      assert.equal(suiteConducteur.status, 201, JSON.stringify(suiteConducteur.body));
+      assert.equal((await fiche_(suiteConducteur.body.id, jeton('conducteur'))).status, 200);
+      // Un autre conducteur ne la voit pas.
+      assert.equal((await fiche_(suiteConducteur.body.id, jeton('conducteurAutre'))).status, 404);
+      // Le responsable, sur l'affaire dont il est titulaire.
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Suivi affaire du responsable', client: 'TEST Client intervention de suivi', clientId, responsableId: comptes.responsable.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const surSonAffaire = (await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Suivi sur l’affaire du responsable', chantierId: chantier.id })).body;
+      const suiteAffaire = await creerSuite(surSonAffaire.id, {}, jeton('responsable'));
+      assert.equal(suiteAffaire.status, 201, JSON.stringify(suiteAffaire.body));
+      assert.equal(suiteAffaire.body.chantier.id, chantier.id);
+      // Le responsable affecté à une intervention sans affaire : il crée sa suite, qui n'a ni affaire ni
+      // affectation, et elle lui reste visible parce qu'il l'a créée ; un autre responsable ne la voit pas.
+      const ouIlEstAffecte = await curativePlanifiee('TEST Suivi où le responsable est affecté', { intervenantIds: [ficheResponsable.id] });
+      const suiteResponsable = await creerSuite(ouIlEstAffecte.id, {}, jeton('responsable'));
+      assert.equal(suiteResponsable.status, 201, JSON.stringify(suiteResponsable.body));
+      assert.equal((await fiche_(suiteResponsable.body.id, jeton('responsable'))).status, 200);
+      assert.equal((await fiche_(suiteResponsable.body.id, jeton('responsableAutre'))).status, 404);
+      assert.equal((await file(jeton('responsable'))).some((item) => item.id === suiteResponsable.body.id), true);
+      // Seules ses suites lui reviennent : une intervention dont il serait l'auteur sans être une suite (créée
+      // sous un autre type de compte, écrite ici en base) reste hors de son périmètre.
+      const horsSuite = await curativePlanifiee('TEST Suivi intervention ordinaire dont le responsable est l’auteur', { intervenantIds: [fiche.id] });
+      await prisma.intervention.update({ where: { id: horsSuite.id }, data: { createdById: comptes.responsable.id } });
+      assert.equal((await fiche_(horsSuite.id, jeton('responsable'))).status, 404);
+    });
+
+    test('refus : client désactivé, affaire annulée, saisie invalide ; rien n’est écrit', async () => {
+      // Saisie invalide.
+      const initiale = await curativeTerminee('TEST Suivi refus de saisie');
+      for (const [corps, message] of [
+        [{ dateSouhaitee: '31-02-2099' }, 'La date souhaitée doit être valide au format JJ-MM-AAAA.'],
+        [{ titre: 'x'.repeat(201) }, 'Le titre de la suite ne dépasse pas 200 caractères.'],
+        [{ priorite: 'CRITIQUE' }, 'Priorité d’intervention invalide.'],
+      ]) {
+        await refusSansEcriture(initiale.id, () => creerSuite(initiale.id, corps), 400, message, JSON.stringify(corps).slice(0, 40));
+      }
+      // Affaire annulée depuis la création de l'intervention.
+      const chantier = await prisma.chantier.create({ data: { nom: 'TEST Suivi affaire annulée', client: 'TEST Client intervention de suivi', clientId, responsableId: comptes.conducteur.id, dateDebut: new Date(), budgetGlobalVendu: 1000 } });
+      const surAffaire = (await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Suivi sur une affaire annulée ensuite', chantierId: chantier.id })).body;
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'ANNULE', annuleLe: new Date() } });
+      await refusSansEcriture(surAffaire.id, () => creerSuite(surAffaire.id), 409, 'L’affaire de cette intervention est annulée ou n’est plus celle de son client : aucune suite ne lui est rattachée.', 'affaire annulée');
+      // Client désactivé : refus ; réactivé, la suite se crée.
+      const autreClient = await request(app).post('/api/clients').set(admin()).send({ raisonSociale: 'TEST Client suivi désactivé' });
+      const deCeClient = (await request(app).post('/api/interventions').set(admin()).send({ clientId: autreClient.body.id, titre: 'TEST Suivi client désactivé ensuite' })).body;
+      await prisma.client.update({ where: { id: autreClient.body.id }, data: { actif: false } });
+      await refusSansEcriture(deCeClient.id, () => creerSuite(deCeClient.id), 409, 'Le client de cette intervention est désactivé : réactivez-le avant de créer une suite.', 'client désactivé');
+      await prisma.client.update({ where: { id: autreClient.body.id }, data: { actif: true } });
+      assert.equal((await creerSuite(deCeClient.id)).status, 201);
+    });
+
+    test('liens dans le périmètre : le technicien affecté à la suite ne voit pas l’intervention initiale qui ne le concerne pas', async () => {
+      const initiale = (await request(app).post('/api/interventions').set(admin()).send({ clientId, titre: 'TEST Suivi initiale sans le technicien' })).body;
+      const suite = await creerSuite(initiale.id);
+      assert.equal((await placer(suite.body.id)).status, 200);
+      const vueTechnicien = await fiche_(suite.body.id, jeton('technicien'));
+      assert.equal(vueTechnicien.status, 200, JSON.stringify(vueTechnicien.body));
+      assert.equal(vueTechnicien.body.interventionInitiale, null);
+      assert.equal((await fiche_(suite.body.id)).body.interventionInitiale.id, initiale.id);
+      // Une suite annulée reste citée, avec son statut, sur la fiche de l'intervention initiale.
+      assert.equal((await statut(suite.body.id, { statut: 'ANNULEE', motif: 'TEST annulation de la suite' }, admin())).status, 200);
+      assert.deepEqual((await fiche_(initiale.id)).body.suites.map((lien) => [lien.id, lien.statut]), [[suite.body.id, 'ANNULEE']]);
+    });
+
+    test('gardes en base : marque sur une intervention terminée seulement, lien non réflexif, figé, même client, jamais vers une intervention annulée', async () => {
+      const reference = () => `T${randomUUID().slice(0, 8)}`;
+      const aPlanifier = await prisma.intervention.create({ data: { reference: reference(), clientId, titre: 'TEST Suivi garde de la marque' } });
+      await assert.rejects(prisma.intervention.update({ where: { id: aPlanifier.id }, data: { aSuivre: true } }), /Intervention_a_suivre_terminee_check/);
+      await assert.rejects(prisma.intervention.update({ where: { id: aPlanifier.id }, data: { interventionInitialeId: aPlanifier.id } }), /figé|Intervention_suite_non_reflexive_check/);
+      const suite = await prisma.intervention.create({ data: { reference: reference(), clientId, titre: 'TEST Suivi garde du lien', interventionInitialeId: aPlanifier.id } });
+      const autre = await prisma.intervention.create({ data: { reference: reference(), clientId, titre: 'TEST Suivi autre intervention' } });
+      await assert.rejects(prisma.intervention.update({ where: { id: suite.id }, data: { interventionInitialeId: autre.id } }), /Le lien d'une intervention de suivi est figé/);
+      await assert.rejects(prisma.intervention.update({ where: { id: suite.id }, data: { interventionInitialeId: null } }), /Le lien d'une intervention de suivi est figé/);
+      const autreClient = await request(app).post('/api/clients').set(admin()).send({ raisonSociale: 'TEST Client suivi autre client' });
+      await assert.rejects(prisma.intervention.create({ data: { reference: reference(), clientId: autreClient.body.id, titre: 'TEST Suivi autre client', interventionInitialeId: aPlanifier.id } }), /Une suite reprend le client de l'intervention initiale/);
+      await prisma.intervention.update({ where: { id: autre.id }, data: { statut: 'ANNULEE' } });
+      await assert.rejects(prisma.intervention.create({ data: { reference: reference(), clientId, titre: 'TEST Suivi d’une annulée', interventionInitialeId: autre.id } }), /Une intervention annulée n'a pas de suite/);
+      // Témoin : une intervention terminée porte la marque.
+      assert.equal((await prisma.intervention.update({ where: { id: aPlanifier.id }, data: { statut: 'TERMINEE', aSuivre: true } })).aSuivre, true);
     });
   });
 }
