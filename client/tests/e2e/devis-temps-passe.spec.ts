@@ -102,7 +102,16 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     await allerSurPageAdmin('/devis');
     await choisirClient(page, client);
     await page.getByRole('textbox', { name: 'Objet' }).fill(objet);
+    // Seules les mains d'œuvre sont proposées, pas une prestation ordinaire : l'écran demande au serveur les
+    // seules mains d'œuvre actives, toutes (`mainOeuvre=1`, que vérifie le test API de la recherche), et non
+    // les prestations, ordinaires comprises. Rien n'est ajouté au catalogue : une prestation ordinaire
+    // laissée en base serait listée par /catalogue, que contrôle entetes-mobile sur une base neuve (#327).
+    const demandeMainsOeuvre = page.waitForRequest((requete) => {
+      const url = new URL(requete.url());
+      return requete.method() === 'GET' && url.pathname.endsWith('/devis/catalogue') && !url.searchParams.has('q');
+    });
     await page.getByRole('checkbox', { name: 'Devis au temps passé' }).check();
+    expect(new URL((await demandeMainsOeuvre).url()).searchParams.toString()).toBe('mainOeuvre=1');
     const tarif = page.getByRole('combobox', { name: 'Tarif de l’heure' });
     await expect(tarif).toBeDisabled();
     await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);
@@ -200,6 +209,9 @@ test('rendu à 375 px : formulaire du devis au temps passé, mention, réglage e
     const ligne = page.getByRole('group', { name: 'Ligne au temps passé' });
     // La TVA de la main d'œuvre, affichée au format français.
     await expect(ligne).toContainText('5,5 %');
+    // Les heures se règlent au millième, flèches comprises.
+    await ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' }).press('ArrowUp');
+    await expect(ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' })).toHaveValue('1.001');
     for (const element of [page.getByRole('combobox', { name: 'Tarif de l’heure' }), ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' }), ligne.getByTestId('prix-heure-temps-passe')]) {
       await element.scrollIntoViewIfNeeded();
       const boite = await element.boundingBox();
