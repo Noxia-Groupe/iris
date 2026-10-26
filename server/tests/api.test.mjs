@@ -19297,6 +19297,8 @@ if (!TEST_DATABASE_URL) {
       }
       // Une heure exactement est acceptée.
       assert.equal((await creer([ligneTp(mo.elec, { quantite: '1.000' })])).status, 201);
+      // Un identifiant de ligne nul désigne une nouvelle ligne.
+      assert.equal((await creer([ligneTp(mo.elec, { ligneId: null })])).status, 201);
       // Tout le reste est refusé, sans rien écrire.
       const avant = await devisDuClient();
       for (const [extra, message] of [
@@ -19318,6 +19320,7 @@ if (!TEST_DATABASE_URL) {
         [{ quantite: '1.0001' }, /Ligne de devis invalide/],
         [{ quantite: '1000000000' }, /Ligne de devis invalide/],
         [{ designation: '  ' }, /Ligne de devis invalide/],
+        [{ designation: 'x'.repeat(501) }, /Ligne de devis invalide/],
         [{ prixAchatUnitaireHt: '10' }, /pas de prix d’achat prévu/],
         [{ catalogueFamille: 'articles', catalogueId: fiches.cable.id }, /reprend une main d’œuvre du catalogue/],
         [{ catalogueId: fiches.pose.id }, /reprend une main d’œuvre du catalogue/],
@@ -19461,6 +19464,9 @@ if (!TEST_DATABASE_URL) {
         }
         const sansTarif = await modifierOk([ligneTp(mainOeuvre, { ligneId: ids.tp, tarifTempsPasse: undefined, catalogueFamille: undefined, catalogueId: undefined, quantite: '1.5' }), fourniture()]);
         assert.deepEqual([sansTarif.lignes[0].tarifTempsPasse, sansTarif.lignes[0].prixUnitaireHt, sansTarif.lignes[0].totalHt], ['HORS_CONTRAT', 45.5, 68.25]);
+        // Tarif et fiche nuls : comme absents, la ligne existante garde les siens.
+        const tarifNul = await modifierOk([ligneTp(mainOeuvre, { ligneId: ids.tp, tarifTempsPasse: null, catalogueFamille: null, catalogueId: null, quantite: '1.5' }), fourniture()]);
+        assert.deepEqual([tarifNul.lignes[0].tarifTempsPasse, tarifNul.lignes[0].prixUnitaireHt, tarifNul.lignes[0].totalHt], ['HORS_CONTRAT', 45.5, 68.25]);
         const refusQuantite = await modifier([ligneTp(mainOeuvre, { ligneId: ids.tp, quantite: '0.5' }), fourniture()]);
         assert.equal(refusQuantite.status, 400, JSON.stringify(refusQuantite.body));
         assert.match(refusQuantite.body.error, /au moins une heure/);
@@ -19692,15 +19698,15 @@ if (!TEST_DATABASE_URL) {
       assert.ok(seules.body.every((f) => f.estMainOeuvre === true && f.famille === 'prestations'));
       const sansRecherche = await recherche({ mainOeuvre: '1' });
       assert.ok(sansRecherche.body.length > 0 && sansRecherche.body.every((f) => f.estMainOeuvre === true), JSON.stringify(sansRecherche.body));
-      // Toutes les mains d'œuvre actives, au-delà des 50 fiches de la recherche générale : l'écran du devis
-      // au temps passé les propose toutes, sans recherche.
+      // Toutes les mains d'œuvre actives, au-delà des 50 fiches de la recherche générale (et au-delà de 100) :
+      // l'écran du devis au temps passé les propose toutes, sans recherche.
       const nombreAvant = sansRecherche.body.length;
-      await prisma.cataloguePrestation.createMany({ data: Array.from({ length: 51 }, (_, i) => ({
-        reference: `TEST-TP-NOMBRE-${suffixe}-${i}`, nom: `TEST Main d’œuvre en nombre ${suffixe} ${String(i).padStart(2, '0')}`, unite: 'heure', tauxTva: 20,
+      await prisma.cataloguePrestation.createMany({ data: Array.from({ length: 101 }, (_, i) => ({
+        reference: `TEST-TP-NOMBRE-${suffixe}-${i}`, nom: `TEST Main d’œuvre en nombre ${suffixe} ${String(i).padStart(3, '0')}`, unite: 'heure', tauxTva: 20,
         prixVenteHt: 40, estMainOeuvre: true, prixJourHorsContratHt: 300, prixHeureSousContratHt: 35, prixJourSousContratHt: 260, heuresParJour: 7,
       })) });
       const toutes = await recherche({ mainOeuvre: '1' });
-      assert.equal(toutes.body.length, nombreAvant + 51);
+      assert.equal(toutes.body.length, nombreAvant + 101);
       assert.ok(toutes.body.every((f) => f.estMainOeuvre === true && !('prixJourHorsContratHt' in f) && !('heuresParJour' in f)));
       // La recherche générale garde sa limite de 50 fiches.
       assert.equal((await recherche({ q: 'TEST' })).body.length, 50);

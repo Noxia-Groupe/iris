@@ -97,6 +97,7 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     await reglerPas(request, session.token, 15);
     const mainOeuvre = await creerMainOeuvre(request, session.token, suffixe);
     const cable = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-TP-CAB-${suffixe}`, nom: `Câble temps passé E2E ${suffixe}`, unite: 'm', prixVenteHt: '2.50', tauxTva: '20' }) as { nom: string };
+    const prestation = await envoyer(request, session.token, 'post', '/catalogue/prestations', { reference: `E2E-TP-POSE-${suffixe}`, nom: `Pose temps passé E2E ${suffixe}`, unite: 'forfait', prixVenteHt: '250', tauxTva: '20' }) as { nom: string };
     const client = await creerClient('Temps passé');
     const objet = `Dépannage au temps passé E2E ${suffixe}`;
     await allerSurPageAdmin('/devis');
@@ -106,6 +107,8 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     const tarif = page.getByRole('combobox', { name: 'Tarif de l’heure' });
     await expect(tarif).toBeDisabled();
     await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);
+    // Seules les mains d'œuvre sont proposées, pas une prestation ordinaire.
+    await expect(page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).locator('option', { hasText: prestation.nom })).toHaveCount(0);
     // Les deux prix à l'heure sont proposés, jamais le forfait jour.
     await expect(tarif.locator('option')).toHaveText(['À l’heure hors contrat — 45,50 € HT', 'À l’heure sous contrat — 40,00 € HT']);
     const ligne = page.getByRole('group', { name: 'Ligne au temps passé' });
@@ -200,6 +203,9 @@ test('rendu à 375 px : formulaire du devis au temps passé, mention, réglage e
     const ligne = page.getByRole('group', { name: 'Ligne au temps passé' });
     // La TVA de la main d'œuvre, affichée au format français.
     await expect(ligne).toContainText('5,5 %');
+    // Les heures se règlent au millième, flèches comprises.
+    await ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' }).press('ArrowUp');
+    await expect(ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' })).toHaveValue('1.001');
     for (const element of [page.getByRole('combobox', { name: 'Tarif de l’heure' }), ligne.getByRole('spinbutton', { name: 'Heures (1 minimum)' }), ligne.getByTestId('prix-heure-temps-passe')]) {
       await element.scrollIntoViewIfNeeded();
       const boite = await element.boundingBox();
