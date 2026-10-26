@@ -609,6 +609,60 @@ describe('Arrondi commercial des devis', () => {
   });
 });
 
+// Lot « devis au temps passé » : la ligne au temps passé est validée sans prix ; son prix, sa TVA et ses
+// totaux sont fixés par le serveur depuis la main d'œuvre, à la résolution en base (tests HTTP).
+describe('Devis au temps passé : saisie de la ligne', () => {
+  const ligne = { tempsPasse: true, designation: 'Main d’œuvre au temps passé', quantite: '1', tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: 'mo-1' };
+  test('la ligne au temps passé attend son prix du serveur ; ses totaux et ceux du devis aussi', () => {
+    const devis = devisPayload({ clientId: 'client-test', objet: 'TEST Temps passé', auTempsPasse: true, lignes: [ligne, { designation: 'Câble', nature: 'FOURNITURE', quantite: '2', prixUnitaireHt: '3', tauxTva: '20' }] });
+    assert.equal(devis.auTempsPasse, true);
+    assert.deepEqual(devis.lignesCalculees[0], { ordre: 0, designation: 'Main d’œuvre au temps passé', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: null, tauxTva: null, totalHt: null, totalTtc: null, unite: null });
+    assert.deepEqual(devis.references[0], { ligneId: null, catalogue: { famille: 'prestations', id: 'mo-1' }, prixAchatUnitaireHt: undefined, tempsPasse: { tarif: 'HORS_CONTRAT', prixUnitaireHt: null, tauxTva: null } });
+    assert.deepEqual([devis.totalHt, devis.totalTva, devis.totalTtc], [null, null, null]);
+    // Le prix et la TVA envoyés sont gardés pour être comparés à ceux de la main d'œuvre.
+    const avecPrix = devisPayload({ clientId: 'client-test', objet: 'TEST Temps passé', auTempsPasse: true, lignes: [{ ...ligne, prixUnitaireHt: '45,50', tauxTva: '20' }] });
+    assert.deepEqual(avecPrix.references[0].tempsPasse, { tarif: 'HORS_CONTRAT', prixUnitaireHt: 45.5, tauxTva: 20 });
+    // Une ligne existante peut omettre son tarif et sa fiche : elle garde les siens.
+    const existante = devisPayload({ clientId: 'client-test', objet: 'TEST Temps passé', lignes: [{ tempsPasse: true, ligneId: 'l-1', designation: 'Ligne gardée', quantite: '2.5' }] });
+    assert.deepEqual([existante.auTempsPasse, existante.references[0].tempsPasse, existante.lignesCalculees[0].quantite], [undefined, { tarif: null, prixUnitaireHt: null, tauxTva: null }, 2.5]);
+    // Prix, TVA, unité ou nature laissés blancs, prix d'achat nul ou vide : comme absents.
+    for (const extra of [{ prixUnitaireHt: '  ', tauxTva: ' ', unite: ' ', nature: ' ' }, { prixAchatUnitaireHt: null }, { prixAchatUnitaireHt: '' }]) {
+      const vide = devisPayload({ clientId: 'client-test', objet: 'TEST Temps passé', auTempsPasse: true, lignes: [{ ...ligne, ...extra }] });
+      assert.deepEqual(vide.references[0].tempsPasse, { tarif: 'HORS_CONTRAT', prixUnitaireHt: null, tauxTva: null }, JSON.stringify(extra));
+    }
+    // Une ligne dont le drapeau vaut false ou null est une ligne ordinaire, chiffrée comme les autres.
+    for (const drapeau of [false, null]) {
+      const ordinaire = devisPayload({ clientId: 'client-test', objet: 'TEST Ordinaire', lignes: [{ tempsPasse: drapeau, designation: 'Câble', nature: 'FOURNITURE', quantite: '2', prixUnitaireHt: '3', tauxTva: '20' }] });
+      assert.deepEqual([ordinaire.lignesCalculees[0].totalHt, ordinaire.references[0].tempsPasse, ordinaire.totalTtc], [6, undefined, 7.2], String(drapeau));
+    }
+  });
+
+  test('une heure au moins, l’heure, à l’heure hors contrat ou sous contrat, d’une prestation du catalogue', () => {
+    for (const [extra, message] of [
+      [{ quantite: '0.999' }, /au moins une heure/],
+      [{ quantite: '1.0001' }, /Ligne de devis invalide/],
+      [{ tarifTempsPasse: 'JOUR_HORS_CONTRAT' }, /forfait jour n’est pas proposé/],
+      [{ tarifTempsPasse: undefined }, /forfait jour n’est pas proposé/],
+      [{ unite: 'h' }, /comptée à l’heure/],
+      [{ nature: 'FOURNITURE' }, /comptée à l’heure/],
+      [{ catalogueFamille: 'articles' }, /reprend une main d’œuvre du catalogue/],
+      [{ catalogueFamille: undefined, catalogueId: undefined }, /reprend une main d’œuvre du catalogue/],
+      [{ prixUnitaireHt: '-1' }, /Ligne de devis invalide/],
+      [{ tauxTva: '100.01' }, /Ligne de devis invalide/],
+      [{ prixAchatUnitaireHt: '5' }, /pas de prix d’achat prévu/],
+      // Prix d'achat envoyé : lu sur dix chiffres entiers, comme sur une ligne saisie, puis refusé ; au-delà, illisible.
+      [{ prixAchatUnitaireHt: '9999999999.99' }, /pas de prix d’achat prévu/],
+      [{ prixAchatUnitaireHt: '10000000000' }, /Prix d’achat prévu invalide/],
+      // Blancs autour retirés : le prix d'achat est lu, puis refusé ; fait de blancs seuls, il n'est pas vide : illisible.
+      [{ prixAchatUnitaireHt: ' 5 ' }, /pas de prix d’achat prévu/],
+      [{ prixAchatUnitaireHt: '   ' }, /Prix d’achat prévu invalide/],
+      [{ tempsPasse: 1 }, /« tempsPasse » doit valoir true ou false/],
+    ]) assert.throws(() => devisPayload({ clientId: 'client-test', objet: 'TEST Temps passé invalide', auTempsPasse: true, lignes: [{ ...ligne, ...extra }] }), message, JSON.stringify(extra));
+    assert.throws(() => devisPayload({ clientId: 'client-test', objet: 'TEST', auTempsPasse: 'oui', lignes: [ligne] }), /« auTempsPasse » doit valoir true ou false/);
+    assert.equal(devisPayload({ clientId: 'client-test', objet: 'TEST', auTempsPasse: true, lignes: [{ ...ligne, quantite: '1', prixUnitaireHt: '', tauxTva: null, unite: ' heure ', nature: 'MAIN_OEUVRE' }] }).lignesCalculees[0].quantite, 1);
+  });
+});
+
 test('peutVoirFinance : jamais pour un technicien, même avec un accès financier enregistré', () => {
   assert.equal(peutVoirFinance({ role: 'TECHNICIEN', accesFinance: true }), false);
   assert.equal(peutVoirFinance({ role: 'CONDUCTEUR_TRAVAUX', accesFinance: true }), true);

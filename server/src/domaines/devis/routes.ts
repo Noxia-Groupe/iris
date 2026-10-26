@@ -24,15 +24,16 @@ import { SaisieInterventionInvalide, creerInterventionNumerotee, estEncadrementC
 import { SaisieContratInvalide, creerContratMaintenance, lireSaisieContrat } from '../contrats/metier';
 import {
   DevisSaisieError, DevisConflitError, DevisDroitError, devisPayload, NATURE_DEVIS_PAR_FAMILLE, devisPourLecteur, resoudreLignesDevis,
-  devisInclude, contenuDevisSigne, copieLigneDevis, verrouillerDevis, acompteDevisPayload, nouveauNumeroDevis,
+  devisInclude, contenuDevisSigne, copieLigneDevis, verrouillerDevis, acompteDevisPayload, nouveauNumeroDevis, totauxDevis,
 } from './metier';
+import { REFUS_PAS_NON_REGLE, TempsPasseConflitError, TempsPasseSaisieError, exigerCoherenceTempsPasse, pasDuDevis } from './tempsPasse';
 import { rendreDocumentDevisPdf } from './document';
 import { annulerDevisEnCascade } from './annulation';
 import { DEVIS_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiDevis, validerDestinataire } from '../documents/envois';
 
 function devisErreur(res: express.Response, error: unknown) {
-  if (error instanceof DevisSaisieError) return res.status(400).json({ error: error.message });
-  if (error instanceof DevisConflitError) return res.status(409).json({ error: error.message });
+  if (error instanceof DevisSaisieError || error instanceof TempsPasseSaisieError) return res.status(400).json({ error: error.message });
+  if (error instanceof DevisConflitError || error instanceof TempsPasseConflitError) return res.status(409).json({ error: error.message });
   if (error instanceof DevisDroitError) return res.status(403).json({ error: error.message });
   if (error instanceof IdentiteEmetteurIncompleteError || error instanceof IdentiteClientIncompleteError) return res.status(409).json({ error: error.message });
   if (error instanceof DestinataireInvalideError) return res.status(400).json({ error: error.message });
@@ -40,12 +41,23 @@ function devisErreur(res: express.Response, error: unknown) {
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
 
+// Un devis au temps passé (décisions de Nelson des 24 et 25-10-2026) fige le pas du réglage de la
+// société à sa création, comme le taux d'acompte, et il est refusé (409) tant que ce réglage est vide,
+// sans rien écrire ni consommer de numéro. Le prix de sa ligne au temps passé est fixé par le serveur
+// depuis la main d'œuvre (./tempsPasse.ts), et les totaux sont calculés sur les lignes ainsi résolues.
+// L'écriture passe par une transaction vérifiée : la cohérence du marqueur et de la ligne au temps
+// passé est contrôlée par la base à la validation (migration 20261025120000_devis_temps_passe).
 const creerDevis: express.RequestHandler = async (req, res) => { try {
   const payload = devisPayload((req.body ?? {}) as Record<string, unknown>);
   if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
+  const auTempsPasse = payload.auTempsPasse ?? false;
+  exigerCoherenceTempsPasse(auTempsPasse, payload.references);
+  const pasTempsPasseMinutes = await pasDuDevis(prisma, auTempsPasse);
   const lignes = await resoudreLignesDevis(prisma, payload, [], ecritPrixAchatDevis(req));
+  const totaux = totauxDevis(lignes);
   const { acompteExige, tauxAcompte } = await acompteDevisPayload((req.body ?? {}) as Record<string, unknown>);
-  const devis = await prisma.devis.create({ data: { dossierId: crypto.randomUUID(), numero: await nouveauNumeroDevis(), version: 1, clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, acompteExige, tauxAcompte, lignes: { create: lignes } }, include: devisInclude });
+  const numero = await nouveauNumeroDevis();
+  const devis = await transactionVerifiee(tx => tx.devis.create({ data: { dossierId: crypto.randomUUID(), numero, version: 1, clientId: payload.clientId, objet: payload.objet, ...totaux, acompteExige, tauxAcompte, auTempsPasse, pasTempsPasseMinutes, lignes: { create: lignes } }, include: devisInclude }));
   res.status(201).json(devisPourLecteur(req, decimalToNumber(devis)));
 } catch (error) { devisErreur(res, error); } };
 const listerDevis: express.RequestHandler = async (req, res) => { try { res.json(devisPourLecteur(req, decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } })))); } catch (error) { devisErreur(res, error); } };
@@ -59,11 +71,17 @@ const modifierDevis: express.RequestHandler = async (req, res) => { try {
     if (precedent.conversions.length) throw new DevisConflitError('Ce devis est déjà converti : il ne peut plus être modifié.');
     if (!['BROUILLON', 'ENVOYE'].includes(precedent.statut)) throw new DevisConflitError('Seuls les devis brouillon ou envoyés, non signés, peuvent être modifiés.');
     if (!await tx.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
+    // Sans « auTempsPasse » dans le corps, le devis garde son marqueur. Un devis déjà au temps passé
+    // garde son pas figé ; celui qui y passe prend le réglage du moment, refusé s'il est vide ; celui
+    // qui en sort le perd. Le réglage est lu dans cette transaction, sur sa connexion.
+    const auTempsPasse = payload.auTempsPasse ?? precedent.auTempsPasse;
+    exigerCoherenceTempsPasse(auTempsPasse, payload.references);
+    const pasTempsPasseMinutes = await pasDuDevis(tx, auTempsPasse, precedent);
     const acompte = await acompteDevisPayload(body, precedent);
     const lignes = await resoudreLignesDevis(tx, payload, precedent.lignes, ecritPrixAchatDevis(req));
     return tx.devis.update({
       where: { id: precedent.id },
-      data: { clientId: payload.clientId, objet: payload.objet, totalHt: payload.totalHt, totalTva: payload.totalTva, totalTtc: payload.totalTtc, ...acompte,
+      data: { clientId: payload.clientId, objet: payload.objet, ...totauxDevis(lignes), ...acompte, auTempsPasse, pasTempsPasseMinutes,
         lignes: { deleteMany: {}, create: lignes } }, include: devisInclude,
     });
   });
@@ -82,6 +100,8 @@ const creerRevision: express.RequestHandler = async (req, res) => { try {
       dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet,
       totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc,
       acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte,
+      // Une révision reprend le devis signé à l'identique : marqueur et pas figé du temps passé compris.
+      auTempsPasse: precedent.auTempsPasse, pasTempsPasseMinutes: precedent.pasTempsPasseMinutes,
       acompteRecuLe: precedent.acompteRecuLe, acompteMontant: precedent.acompteMontant,
       acompteReference: precedent.acompteReference, acompteConstateParId: precedent.acompteConstateParId,
       lignes: { create: precedent.lignes.map(copieLigneDevis) },
@@ -378,7 +398,9 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
       const titre = typeof body.titre === 'string' && body.titre.trim() ? body.titre.trim() : devis.objet;
       if (cible === 'INTERVENTION') {
         const details = await lireDetailsIntervention(tx, body, devis.clientId, fuseau);
-        const intervention = await creerInterventionNumerotee(tx, req as AuthRequest, anneeEntreprise(new Date(), fuseau), { clientId: devis.clientId, titre, chantierId: null, ...details }, motif);
+        // Le marqueur du devis au temps passé est reporté sur l'intervention (décision de Nelson du
+        // 25-10-2026, « Lot suivant ») ; la base vérifie ce report (migration 20261025120000).
+        const intervention = await creerInterventionNumerotee(tx, req as AuthRequest, anneeEntreprise(new Date(), fuseau), { clientId: devis.clientId, titre, chantierId: null, ...details, auTempsPasse: devis.auTempsPasse }, motif);
         await tx.devisConversion.create({ data: { ...conversion, cibleType: 'INTERVENTION', cibleId: intervention.id } });
         return exposerIntervention(intervention);
       }
@@ -420,24 +442,31 @@ export function enregistrerRoutesDevis(app: Express): void {
   // Fiches actives du catalogue, pour composer un devis : réservé aux porteurs du droit devis
   // (jamais le technicien, qui ne l'a jamais). La recherche porte sur la référence et la
   // désignation ; 50 fiches au plus, triées par désignation (choix par défaut, à confirmer).
+  // Devis au temps passé : une main d'œuvre expose aussi son prix à l'heure sous contrat, et son
+  // drapeau, pour le choix du tarif ; jamais ses forfaits jour ni ses heures par jour. `mainOeuvre=1`
+  // ne propose que les mains d'œuvre actives (prestations), toutes, sans la limite de 50 fiches : l'écran
+  // du devis au temps passé les liste sans recherche (choix par défaut, à confirmer).
   app.get('/api/devis/catalogue', requireAuth, requirePermission('devis:write'), async (req, res) => {
     try {
       const recherche = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
       const famille = req.query.famille === undefined ? null : catalogueFamily(String(req.query.famille));
       if (req.query.famille !== undefined && !famille) return void res.status(400).json({ error: 'Famille de catalogue inconnue.' });
+      const mainsOeuvreSeules = req.query.mainOeuvre === '1';
+      if (mainsOeuvreSeules && famille && famille !== 'prestations') return void res.status(400).json({ error: 'Une main d’œuvre est une prestation du catalogue.' });
       const filtre = { actif: true, ...(recherche ? { OR: [{ reference: { contains: recherche, mode: 'insensitive' as const } }, { nom: { contains: recherche, mode: 'insensitive' as const } }] } : {}) };
-      const familles = famille ? [famille] : (['prestations', 'articles', 'equipements'] as CatalogueFamily[]);
+      const familles = mainsOeuvreSeules ? (['prestations'] as CatalogueFamily[]) : famille ? [famille] : (['prestations', 'articles', 'equipements'] as CatalogueFamily[]);
       const voitPrixAchat = voitPrixAchatDevis(req);
       const fiches = (await Promise.all(familles.map(async (f) => {
         const lignes = await (catalogueModels[f] as unknown as { findMany: (args: unknown) => Promise<Record<string, unknown>[]> })
-          .findMany({ where: filtre, orderBy: { nom: 'asc' }, take: 50 });
+          .findMany({ where: mainsOeuvreSeules ? { ...filtre, estMainOeuvre: true } : filtre, orderBy: { nom: 'asc' }, take: mainsOeuvreSeules ? undefined : 50 });
         return lignes.map((fiche) => ({
           famille: f, id: fiche.id, reference: fiche.reference, nom: fiche.nom,
           unite: (fiche.unite as string | undefined) ?? null, nature: NATURE_DEVIS_PAR_FAMILLE[f],
           prixVenteHt: fiche.prixVenteHt, tauxTva: fiche.tauxTva,
+          ...(fiche.estMainOeuvre === true ? { estMainOeuvre: true, prixHeureSousContratHt: fiche.prixHeureSousContratHt } : {}),
           ...(voitPrixAchat ? { prixAchatHt: fiche.prixAchatHt ?? null } : {}),
         }));
-      }))).flat().sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr')).slice(0, 50);
+      }))).flat().sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr')).slice(0, mainsOeuvreSeules ? undefined : 50);
       res.json(decimalToNumber(fiches));
     } catch {
       res.status(500).json({ error: 'Lecture du catalogue impossible.' });
@@ -561,13 +590,19 @@ export function enregistrerRoutesDevis(app: Express): void {
   // Le taux et le numéro d'affaire sont lus avant, sur le client global : pendant la transaction,
   // chaque appel réclamerait une seconde connexion du pool en gardant la première, et des
   // duplications simultanées l'épuiseraient. Un devis introuvable ne consomme pas de numéro.
+  // Devis au temps passé : le marqueur et la ligne au temps passé (son tarif et son prix figés)
+  // suivent la copie à l'identique ; le pas, comme le taux d'acompte, est relu du réglage du jour, et
+  // la duplication est refusée (409) tant qu'il est vide, sans consommer de numéro.
   app.post('/api/devis/:id/duplication', requireAuth, requirePermission('devis:write'), async (req, res) => { try {
-    if (!await prisma.devis.findUnique({ where: { id: paramId(req) }, select: { id: true } })) return void res.status(404).json({ error: 'Devis introuvable.' });
-    const { tauxAcompteDefaut } = await getParametres();
+    const apercu = await prisma.devis.findUnique({ where: { id: paramId(req) }, select: { id: true, auTempsPasse: true } });
+    if (!apercu) return void res.status(404).json({ error: 'Devis introuvable.' });
+    const { tauxAcompteDefaut, pasTempsPasseMinutes } = await getParametres();
+    if (apercu.auTempsPasse && pasTempsPasseMinutes === null) throw new TempsPasseConflitError(REFUS_PAS_NON_REGLE);
     const numero = await nouveauNumeroDevis();
     const duplicata = await transactionVerifiee(async tx => {
       if (!await verrouillerDevis(tx, paramId(req))) return null;
       const source = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: devisInclude });
+      if (source.auTempsPasse && pasTempsPasseMinutes === null) throw new TempsPasseConflitError(REFUS_PAS_NON_REGLE);
       return tx.devis.create({
         data: {
           dossierId: crypto.randomUUID(), numero, version: 1,
@@ -575,6 +610,8 @@ export function enregistrerRoutesDevis(app: Express): void {
           totalHt: source.totalHt, totalTva: source.totalTva, totalTtc: source.totalTtc,
           acompteExige: source.acompteExige,
           tauxAcompte: source.acompteExige ? tauxAcompteDefaut : null,
+          auTempsPasse: source.auTempsPasse,
+          pasTempsPasseMinutes: source.auTempsPasse ? pasTempsPasseMinutes : null,
           origineDevisId: source.id,
           lignes: { create: source.lignes.map(copieLigneDevis) },
         },

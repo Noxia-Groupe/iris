@@ -86,6 +86,7 @@ const CHAMPS_JOURNAL: Record<string, string> = {
   seuilMargeFaible: 'Seuil de marge faible (%)',
   joursSansSaisie: 'Jours sans saisie',
   anticipationVisitesJours: 'Anticipation des visites (jours)',
+  pasTempsPasseMinutes: 'Pas du temps passé (minutes)',
   rentabiliteConducteur: 'Rentabilité : conducteur',
   rentabiliteHierarchie: 'Rentabilité : hiérarchie',
   rentabiliteDirecteurs: 'Rentabilité : directeurs',

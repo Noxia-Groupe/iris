@@ -215,7 +215,8 @@ export async function prochaineReferenceIntervention(tx: Prisma.TransactionClien
 // Numérote et crée l'intervention, puis l'écrit au journal SAV, dans la transaction de l'appelant.
 export async function creerInterventionNumerotee(
   tx: Prisma.TransactionClient, req: AuthRequest, annee: number,
-  donnees: { clientId: string; titre: string; chantierId: string | null } & Awaited<ReturnType<typeof lireDetailsIntervention>>,
+  // `auTempsPasse` : seule la conversion d'un devis au temps passé le pose (lot « devis au temps passé »).
+  donnees: { clientId: string; titre: string; chantierId: string | null; auTempsPasse?: boolean } & Awaited<ReturnType<typeof lireDetailsIntervention>>,
   motif?: string,
 ) {
   const reference = await prochaineReferenceIntervention(tx, annee);

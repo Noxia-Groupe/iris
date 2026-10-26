@@ -17,6 +17,10 @@ export type FicheCatalogueDevis = {
   tauxTva: number;
   // Présent seulement pour qui voit le prix d'achat prévu (administration).
   prixAchatHt?: number | null;
+  // Main d'œuvre (devis au temps passé) : son drapeau et son prix à l'heure sous contrat, jamais ses
+  // forfaits jour ni ses heures par jour.
+  estMainOeuvre?: true;
+  prixHeureSousContratHt?: number;
 };
 
 export type LigneDevisSaisie = {
@@ -32,6 +36,9 @@ export type LigneDevisSaisie = {
   catalogueId?: string | null;
   // Saisie libre de l'administrateur (« 12,50 ») ; vide = pas de prix d'achat prévu.
   prixAchatUnitaireHt?: string;
+  // Ligne « main d'œuvre au temps passé » d'un devis au temps passé : son tarif (cf. ./tempsPasse.ts).
+  tempsPasse?: boolean;
+  tarifTempsPasse?: 'HORS_CONTRAT' | 'SOUS_CONTRAT' | null;
 };
 
 export const LIBELLES_FAMILLES: Record<FamilleCatalogue, string> = {
@@ -68,6 +75,21 @@ export function ligneVierge(ligne: LigneDevisSaisie): boolean {
 // n'est jamais envoyée : le serveur la recopie de la fiche.
 export function ligneAEnvoyer(ligne: LigneDevisSaisie, ecritPrixAchat: boolean) {
   const prixAchat = (ligne.prixAchatUnitaireHt ?? '').trim();
+  // Ligne au temps passé : le serveur fixe son prix, sa TVA, son unité et sa nature depuis la main
+  // d'œuvre ; l'écran envoie le prix et la TVA qu'il affiche, que le serveur refuse s'ils ne sont plus
+  // les siens. Jamais de prix d'achat prévu.
+  if (ligne.tempsPasse) {
+    return {
+      ...(ligne.ligneId ? { ligneId: ligne.ligneId } : {}),
+      tempsPasse: true,
+      designation: ligne.designation,
+      quantite: ligne.quantite,
+      prixUnitaireHt: ligne.prixUnitaireHt,
+      tauxTva: ligne.tauxTva,
+      tarifTempsPasse: ligne.tarifTempsPasse ?? null,
+      ...(ligne.catalogueId ? { catalogueFamille: 'prestations' as const, catalogueId: ligne.catalogueId } : {}),
+    };
+  }
   return {
     ...(ligne.ligneId ? { ligneId: ligne.ligneId } : {}),
     designation: ligne.designation,
@@ -86,7 +108,15 @@ export function ligneAEnvoyer(ligne: LigneDevisSaisie, ecritPrixAchat: boolean) 
 export function ligneEnEdition(ligne: {
   id: string; designation: string; nature: NatureLigneDevis; quantite: number; prixUnitaireHt: number; tauxTva: number;
   unite?: string | null; reference?: string | null; catalogueFamille?: FamilleCatalogue | null; catalogueId?: string | null; prixAchatUnitaireHt?: number | null;
+  tempsPasse?: boolean; tarifTempsPasse?: 'HORS_CONTRAT' | 'SOUS_CONTRAT' | null;
 }, voitPrixAchat: boolean): LigneDevisSaisie {
+  if (ligne.tempsPasse) {
+    return {
+      ligneId: ligne.id, tempsPasse: true, tarifTempsPasse: ligne.tarifTempsPasse ?? null,
+      designation: ligne.designation, nature: ligne.nature, quantite: ligne.quantite, prixUnitaireHt: ligne.prixUnitaireHt, tauxTva: ligne.tauxTva,
+      unite: ligne.unite ?? null, reference: ligne.reference ?? null, catalogueFamille: ligne.catalogueFamille ?? null, catalogueId: ligne.catalogueId ?? null,
+    };
+  }
   return {
     ligneId: ligne.id,
     designation: ligne.designation,
