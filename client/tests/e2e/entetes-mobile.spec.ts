@@ -150,6 +150,10 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
     const emise = await envoyer('post', '/factures', { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Écrans sur téléphone, règlement', dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'Prestation réglée en partie', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] }) as { id: string };
     await envoyer('post', `/factures/${emise.id}/emettre`, {});
     await envoyer('post', '/reglements', { clientId: client.id, dateReglement: dateDuJour(), montant: 200, moyen: 'VIREMENT', reference: `Virement de la société de maintenance des installations thermiques ${suffixe}`, affectations: [{ factureId: emise.id, montant: 200 }] });
+    // Une prestation ordinaire aux référence et libellé longs : le tableau du catalogue, plus large que
+    // l'écran, doit défiler au lieu d'être rogné par son cadre (#327), sans dépendre des fiches laissées
+    // en base par un autre parcours.
+    await envoyer('post', '/catalogue/prestations', { reference: `E2E-ECRANS-PRESTATION-${suffixe}`, nom: `Remise en service complète de la chaufferie collective ${suffixe}`, unite: 'forfait', prixVenteHt: '1250', tauxTva: '20' });
 
     const routes = ['/', '/chantiers', `/chantiers/${chantier.id}`, '/devis', '/interventions', '/contrats-maintenance', '/factures',
       '/prete-a-facturer', '/mentions-legales', '/comptabilite', '/clients', `/clients/${client.id}`, '/societe', '/catalogue',

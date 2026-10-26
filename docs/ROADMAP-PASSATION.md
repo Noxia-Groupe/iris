@@ -650,6 +650,8 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
 - À l'écran, le refus s'affiche tel quel, en alerte, en tête de l'écran Devis (au-dessus du formulaire de signature, qui reste ouvert) ou Factures, et l'écran y remonte pour qu'il reste en vue sous une longue liste ou à 375 px.
 - Inchangé par ce lot : la raison sociale imprimée sur une facture reste celle copiée à la création du brouillon ; les PDF n'impriment pas le SIREN du client ; l'écran Prêt à facturer ne signale que les clients actifs sans aucun site (contrôle non bloquant), et non ceux sans SIREN ni ceux dont le site retenu est incomplet ; le PDF d'un devis non signé reste imprimable pour un client incomplet.
 
+**Tableau du catalogue sur téléphone et tablette** (#327, micro-arbitrage d'affichage, règle 5) : choix par défaut, à confirmer, le tableau des fiches défile latéralement dans son cadre (`overflow-x-auto`, comme le plan comptable), plutôt que de passer en cartes sous une largeur donnée ; à 320, 375 et 1024 px, la colonne « Actions » n'est plus rognée. **Appliqué** (#327).
+
 ## 5. Préalables à la mise en service et contrat d'une PR
 
 ### Contrat d'une PR et critères de sortie
