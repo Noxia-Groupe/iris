@@ -137,6 +137,10 @@ export function FormulaireCloture({ interventionId, nombreComptesRendus, signe, 
 }) {
   const [motif, setMotif] = useState('');
   const [precision, setPrecision] = useState('');
+  // « Terminé » ou « À suivre » (intervention de suivi liée, décisions de Nelson du 24-10-2026, points 28 et
+  // 29) : « Terminé » est proposé d'office ; « À suivre » termine l'intervention avec la marque, que voit
+  // l'encadrement, qui créera la suite.
+  const [aSuivre, setASuivre] = useState(false);
   const [erreur, setErreur] = useState('');
   const { envoi, executer } = useEnvoiUnique();
   // Longueur en caractères (points de code), comme le serveur : deux emoji n'en font pas quatre.
@@ -148,7 +152,8 @@ export function FormulaireCloture({ interventionId, nombreComptesRendus, signe, 
     if (!valide) return;
     void executer(async () => {
       setErreur('');
-      const corps = signe ? { statut: 'TERMINEE' } : { statut: 'TERMINEE', motifSansSignature: motif, ...(motif === 'AUTRE' ? { precisionMotif: precision.trim() } : {}) };
+      const base = { statut: 'TERMINEE', ...(aSuivre ? { aSuivre: true } : {}) };
+      const corps = signe ? base : { ...base, motifSansSignature: motif, ...(motif === 'AUTRE' ? { precisionMotif: precision.trim() } : {}) };
       const reponse = await envoyer(`/interventions/${interventionId}/statut`, 'PATCH', corps);
       if (!reponse) {
         // Relecture silencieuse : le message reste affiché ; si l'intervention est terminée, la liste
@@ -185,6 +190,10 @@ export function FormulaireCloture({ interventionId, nombreComptesRendus, signe, 
       </fieldset>
       {motif === 'AUTRE' && <label className="block text-sm font-medium">Précision (3 à 200 caractères)<input aria-label="Précision du motif" className="form-input mt-1 w-full" maxLength={200} value={precision} onChange={(event) => setPrecision(event.target.value)} disabled={envoi} /></label>}
     </>}
+    <fieldset className="space-y-1"><legend className="text-sm font-medium">Suite de l’intervention</legend>
+      <label className="flex items-center gap-2 text-sm"><input type="radio" name={`suite-${interventionId}`} checked={!aSuivre} onChange={() => setASuivre(false)} disabled={envoi} />Terminé</label>
+      <label className="flex items-center gap-2 text-sm"><input type="radio" name={`suite-${interventionId}`} checked={aSuivre} onChange={() => setASuivre(true)} disabled={envoi} />À suivre : une autre intervention est nécessaire</label>
+    </fieldset>
     {erreur && <p role="alert" className="text-sm text-red-700">{erreur}</p>}
     <div className="flex flex-wrap gap-2"><button type="submit" className="btn btn-primary" disabled={envoi || !valide}>{envoi ? 'Enregistrement…' : signe ? 'Confirmer la fin de l’intervention' : 'Terminer sans signature'}</button><button type="button" className="btn btn-secondary" onClick={onAnnuler} disabled={envoi}>Annuler</button></div>
   </form>;

@@ -15,6 +15,7 @@ import { jourCivilEntrepriseIso, jourFrancais, jourSemaineFrancais } from '../li
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { type ContractQueueItem, dateDue } from '../lib/fileAPlanifier';
 import { ContractPlacement } from '../components/PlanningPlacementIntervention';
+import { CreationSuite } from '../components/CreationSuite';
 import { EventModal, type ModalState } from '../components/PlanningModaleAffectation';
 import { TypesModal } from '../components/PlanningModaleTypes';
 
@@ -51,6 +52,9 @@ const Planning = () => {
   const [events, setEvents] = useState<PlanningEvent[]>([]);
   const [contractQueue, setContractQueue] = useState<ContractQueueItem[]>([]);
   const [toPlace, setToPlace] = useState<ContractQueueItem | null>(null);
+  // Intervention terminée « à suivre » dont on crée la suite depuis la file (intervention de suivi liée).
+  const [aSuivre, setASuivre] = useState<ContractQueueItem | null>(null);
+  const [suiteCreee, setSuiteCreee] = useState('');
   const [loading, setLoading] = useState(true);
   // Équipe illisible (panne, refus) : l'écran le dit, au lieu d'annoncer une équipe vide ou une fiche non reliée.
   const [equipeIllisible, setEquipeIllisible] = useState(false);
@@ -282,15 +286,17 @@ const Planning = () => {
       {!lectureSeule && (
       <section aria-label="Interventions à planifier" className="mb-4 bg-white rounded-xl border p-4">
         <h2 className="font-bold mb-2">Interventions à planifier</h2>
+        {suiteCreee && <p role="status" className="mb-2 text-sm text-emerald-800">{suiteCreee}</p>}
         {/* Le tableau défile dans son cadre sur téléphone, au lieu de couper le bouton « Placer ». */}
         {contractQueue.length === 0 ? <p className="text-sm text-muted">Aucune intervention en attente.</p> : (
           <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th>Date due</th><th>Référence</th><th>Client / site</th><th>Origine</th><th>Durée</th><th></th></tr></thead>
             <tbody>{contractQueue.map(item => <tr key={item.id} className="border-t">
               <td>{dateDue(item) || '—'}</td><td>{item.reference}</td>
               <td>{item.client.raisonSociale} — {item.site?.nom || 'Sans site'} {item.site?.ville || ''}</td>
-              <td>{item.contratMaintenance ? item.contratMaintenance.titre : 'SAV hors contrat'}</td>
+              <td>{item.contratMaintenance ? item.contratMaintenance.titre : 'SAV hors contrat'}{item.aSuivre && <span className="ml-2 inline-block rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">À suivre</span>}</td>
               <td>{item.dureePrevisionnelleMinutes ? `${item.dureePrevisionnelleMinutes} min` : '—'}</td>
-              <td><button className="btn btn-primary" onClick={() => setToPlace(item)}>Placer</button></td>
+              {/* Terminée « à suivre » : elle ne se place pas elle-même, on crée sa suite, qui entre dans la file. */}
+              <td>{item.aSuivre ? <button className="btn btn-primary" onClick={() => { setSuiteCreee(''); setASuivre(item); }}>Créer la suite</button> : <button className="btn btn-primary" onClick={() => setToPlace(item)}>Placer</button>}</td>
             </tr>)}</tbody>
           </table></div>
         )}
@@ -403,6 +409,8 @@ const Planning = () => {
                               >
                                 {badge && <span className="block font-bold opacity-90" style={{ fontSize: '10px' }}>{badge}</span>}
                                 <span className="block truncate">{libelleEvent(ev)}</span>
+                                {/* Intervention terminée « à suivre » : la marque se voit aussi au planning (point 29). */}
+                                {ev.intervention?.aSuivre && <span className="inline-block rounded-full bg-violet-100 px-1.5 text-violet-800" style={{ fontSize: '10px' }}>À suivre</span>}
                                 {ev.intervenants.length > 1 && (
                                   <span className="inline-flex items-center gap-0.5 opacity-90" style={{ fontSize: '10px' }}>
                                     <Users size={10} /> ×{ev.intervenants.length}
@@ -422,6 +430,7 @@ const Planning = () => {
         </div>
       )}
 
+      {aSuivre && <CreationSuite intervention={aSuivre} onClose={() => setASuivre(null)} onCreee={(suite) => { setASuivre(null); setSuiteCreee(`Suite ${suite.reference} créée : elle est dans la file, à placer.`); fetchQueue(); fetchEvents(); }} />}
       {toPlace && <ContractPlacement item={toPlace} intervenants={intervenants} onClose={() => setToPlace(null)} onSaved={() => { setToPlace(null); fetchQueue(); fetchEvents(); }} />}
 
       {modal && (

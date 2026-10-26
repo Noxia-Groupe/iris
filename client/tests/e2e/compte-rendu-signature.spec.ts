@@ -148,7 +148,9 @@ test('sur téléphone, le technicien rédige le compte rendu, le fait signer au 
     // 4. Compte rendu signé : la clôture ne demande pas de motif.
     await carte.getByRole('button', { name: 'Terminer' }).click();
     await expect(cloture.getByText('Le compte rendu est signé par le client.')).toBeVisible();
-    await expect(cloture.getByRole('radio')).toHaveCount(0);
+    // Aucun motif à choisir ; seul reste le choix « Terminé » ou « À suivre » (intervention de suivi liée).
+    await expect(cloture.getByRole('group', { name: 'Motif sans signature' })).toHaveCount(0);
+    await expect(cloture.getByRole('radio', { name: 'Terminé' })).toBeChecked();
     const fin = page.waitForResponse((reponse) => reponse.request().method() === 'PATCH' && reponse.url().endsWith(`/interventions/${intervention.id}/statut`));
     await cloture.getByRole('button', { name: 'Confirmer la fin de l’intervention' }).click();
     expect((await fin).status()).toBe(200);
@@ -178,8 +180,8 @@ test('l’encadrement termine sans signature avec un motif, « Autre » exigeant
   const terminer = cloture.getByRole('button', { name: 'Terminer sans signature' });
   await expect(cloture.getByText('Aucun compte rendu n’est signé.', { exact: false })).toBeVisible();
   await expect(terminer, 'un motif est exigé').toBeDisabled();
-  for (const libelle of ['Client absent', 'Refus de signer', 'Signature impossible', 'Autre']) await expect(cloture.getByRole('radio', { name: libelle })).toBeVisible();
-  await cloture.getByRole('radio', { name: 'Autre' }).check();
+  for (const libelle of ['Client absent', 'Refus de signer', 'Signature impossible', 'Autre']) await expect(cloture.getByRole('group', { name: 'Motif sans signature' }).getByRole('radio', { name: libelle })).toBeVisible();
+  await cloture.getByRole('group', { name: 'Motif sans signature' }).getByRole('radio', { name: 'Autre' }).check();
   const precision = cloture.getByLabel('Précision du motif');
   await precision.fill('ab');
   await expect(terminer, 'précision trop courte').toBeDisabled();
@@ -271,7 +273,7 @@ test('une clôture sur un état périmé se remet d’elle-même à jour', async
   await cloture.getByRole('button', { name: 'Terminer sans signature' }).click();
   await expect(cloture.getByRole('alert')).toContainText('aucun motif');
   await expect(carte.getByText(/Signé par Client Ailleurs/)).toBeVisible();
-  await expect(cloture.getByRole('radio')).toHaveCount(0);
+  await expect(cloture.getByRole('group', { name: 'Motif sans signature' })).toHaveCount(0);
   await cloture.getByRole('button', { name: 'Confirmer la fin de l’intervention' }).click();
   await expect(carte.getByText('Terminée', { exact: true })).toBeVisible();
 });

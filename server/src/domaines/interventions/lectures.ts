@@ -8,11 +8,14 @@ import { decimalToNumber } from '../../commun/montants';
 import { getCompanySettings } from '../administration/metier';
 import { CHANTIER_INTERVENTION_SELECT, exposerIntervention, getInterventionFilterForUser } from './metier';
 import { RAPPORT_SELECT, SIGNATURE_SELECT } from './comptesRendus';
+import { liensSuivi } from './suites';
 
 // --- Lectures des interventions SAV : liste, journée du technicien et fiche (lot pilote 3b-4) ---
 
 // Ce que portent la liste, la journée et la fiche : de quoi se rendre sur place (adresse du site ou
-// de l'affaire, téléphone du contact) et le créneau planifié, jamais un montant.
+// de l'affaire, téléphone du contact) et le créneau planifié, jamais un montant. Les liens d'une
+// intervention de suivi (intervention initiale et suites, dans le périmètre du demandeur) s'ajoutent à la
+// liste et à la fiche (cf. liensSuivi).
 const INTERVENTION_INCLUDE = {
   client: { select: { id: true, raisonSociale: true } }, site: true, contact: true, chantier: CHANTIER_INTERVENTION_SELECT,
   rapports: { select: { ...RAPPORT_SELECT, signature: { select: SIGNATURE_SELECT } }, orderBy: { createdAt: 'asc' } },
@@ -50,7 +53,7 @@ export function enregistrerLecturesInterventions(app: Express): void {
         include: INTERVENTION_INCLUDE,
         orderBy: [{ dateSouhaitee: 'asc' }, { createdAt: 'desc' }],
       });
-      res.json(decimalToNumber(interventions.map(exposerIntervention)));
+      res.json(decimalToNumber((await liensSuivi(interventions, req.user!)).map(exposerIntervention)));
     } catch (error) {
       console.error('Erreur liste interventions SAV', error);
       res.status(500).json({ error: 'Erreur lors de la lecture des interventions.' });
@@ -108,7 +111,7 @@ export function enregistrerLecturesInterventions(app: Express): void {
         include: INTERVENTION_INCLUDE,
       });
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
-      res.json(decimalToNumber(exposerIntervention(intervention)));
+      res.json(decimalToNumber(exposerIntervention((await liensSuivi([intervention], req.user!))[0])));
     } catch (error) {
       console.error('Erreur fiche intervention SAV', error);
       res.status(500).json({ error: 'Erreur lors de la lecture de l’intervention.' });

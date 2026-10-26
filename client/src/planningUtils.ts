@@ -26,9 +26,10 @@ export interface PlanningEvent {
   commentaire: string | null;
   intervenants: Intervenant[];
   // Projection d'une intervention SAV (le planning des comptes connectés seulement) : sa référence,
-  // son statut et son contrat, pour proposer la remise « à planifier » d'une visite planifiée.
+  // son statut et son contrat, pour proposer la remise « à planifier » d'une visite planifiée ; sa marque
+  // « à suivre », affichée sur l'affectation (intervention de suivi liée).
   interventionId?: string | null;
-  intervention?: { reference: string; statut: string; contratMaintenanceId: string | null } | null;
+  intervention?: { reference: string; statut: string; contratMaintenanceId: string | null; aSuivre?: boolean } | null;
 }
 
 // Lignes de la grille. Le technicien voit d'abord la sienne, celle de la fiche intervenant reliée à

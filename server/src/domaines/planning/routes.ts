@@ -78,12 +78,14 @@ export function enregistrerRoutesPlanning(app: Express): void {
       ] }] : [];
       // Une projection porte la référence, le statut et le contrat de son intervention, toujours dans
       // le périmètre du demandeur (filtre ci-dessous) : l'écran y propose la remise « à planifier »
-      // d'une intervention planifiée, visite de contrat ou curative.
+      // d'une intervention planifiée, visite de contrat ou curative. Elle porte aussi la marque « à suivre »
+      // d'une intervention terminée, que l'encadrement voit au planning (décision de Nelson du 24-10-2026,
+      // point 29 : la marque se voit dans la file, au planning et dans la liste).
       const events = await prisma.planningEvent.findMany({
         where: { dateDebut: { lte: end }, dateFin: { gte: start }, OR: [
           { interventionId: null }, { intervention: { is: getInterventionFilterForUser(req.user!) } },
         ], AND: chargeDe },
-        include: { ...PLANNING_EVENT_INCLUDE, intervention: { select: { reference: true, statut: true, contratMaintenanceId: true } } },
+        include: { ...PLANNING_EVENT_INCLUDE, intervention: { select: { reference: true, statut: true, contratMaintenanceId: true, aSuivre: true } } },
         orderBy: [{ dateDebut: 'asc' }, { createdAt: 'asc' }],
       });
       res.json(events);

@@ -1079,6 +1079,14 @@ model Intervention {
   // change plus ensuite, et la base n'accepte un marqueur vrai que d'une conversion d'un devis au temps
   // passé (gardes de la migration 20261025120000_devis_temps_passe).
   auTempsPasse   Boolean  @default(false)
+  // Intervention de suivi liée (décisions de Nelson des 24 et 26-10-2026) : marque « à suivre », posée en
+  // terminant (une intervention terminée seulement), qui disparaît une fois la suite créée ; lien d'une
+  // suite vers l'intervention initiale, posé à sa création puis figé (gardes de la migration
+  // 20261026120000_intervention_suivi). Une intervention peut avoir plusieurs suites.
+  aSuivre                Boolean  @default(false)
+  interventionInitialeId String?
+  interventionInitiale   Intervention?  @relation("SuiteIntervention", fields: [interventionInitialeId], references: [id], onDelete: NoAction)
+  suites                 Intervention[] @relation("SuiteIntervention")
   createdById    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -1094,6 +1102,7 @@ model Intervention {
   @@index([contactId])
   @@index([chantierId])
   @@index([contratMaintenanceId])
+  @@index([interventionInitialeId])
   @@unique([contratMaintenanceId, echeanceContrat])
   @@index([statut, dateSouhaitee])
 }

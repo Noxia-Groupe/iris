@@ -9,6 +9,7 @@ import { TraceSignature } from '../components/TraceSignature';
 import { AlerteGenerationVisites } from '../components/GenerationVisites';
 import { RemiseAPlanifier } from '../components/RemiseAPlanifier';
 import { AnnulationIntervention } from '../components/AnnulationIntervention';
+import { CreationSuite } from '../components/CreationSuite';
 import type { TraceSignature as Trace } from '../lib/traceSignature';
 import { resumeCoutsIntervention } from '../lib/coutsIntervention';
 import { isAdminRole, peutConsulterPlanning, useCurrentUser } from '../roles';
@@ -24,8 +25,12 @@ type ClientDetail = Client & { sites: { id: string; nom: string; ville: string }
 type Chantier = { id: string; nom: string; clientId?: string | null; numeroDevis?: string | null };
 type Fournisseur = { id: string; nom: string };
 type CoutsIntervention = { totalMainOeuvreHT?: number | null; totalMaterielHT?: number | null; totalCoutsHT?: number | null; heures?: { id: string; date: string; nbrHeures: number; commentaire?: string | null; createdAt: string }[] };
+// Intervention liée (intervention de suivi liée) : l'intervention initiale d'une suite, ou une suite.
+type LienSuivi = { id: string; reference: string; titre: string; statut: string };
 type Intervention = {
   id: string; reference: string; titre: string; description?: string | null; priorite: string; statut: string;
+  // Marque « à suivre », posée en terminant ; liens dans le périmètre du compte (décisions des 24 et 26-10-2026).
+  aSuivre?: boolean; interventionInitiale?: LienSuivi | null; suites?: LienSuivi[];
   // Marqueur reporté depuis un devis au temps passé, à sa conversion ; sans aucun prix.
   auTempsPasse?: boolean;
   dateSouhaitee?: string | null; dateDemande?: string | null; client: Client; contratMaintenanceId?: string | null;
@@ -70,6 +75,10 @@ export default function Interventions({ interventionId }: { interventionId?: str
   const user = useCurrentUser();
   const estEncadrement = isAdminRole(user?.role) || user?.role === 'CONDUCTEUR_TRAVAUX';
   const estTechnicien = user?.role === 'TECHNICIEN';
+  // Encadrement du suivi, comme le serveur : administration, conducteur, responsable (son périmètre).
+  const estEncadrementSuivi = estEncadrement || user?.role === 'RESPONSABLE';
+  const [suite, setSuite] = useState<{ id: string; reference: string; titre: string; priorite: string } | null>(null);
+  const [info, setInfo] = useState('');
   // Remise « à planifier » d'une intervention planifiée, visite de contrat ou curative, comme depuis le
   // planning : mêmes comptes que le planning (hors technicien, en consultation seule), module actif.
   const { planningActif } = useModules();
@@ -183,6 +192,16 @@ export default function Interventions({ interventionId }: { interventionId?: str
     await load();
   };
 
+  // Marque « à suivre » posée ou retirée hors de la clôture (le technicien la retire seulement).
+  const marquer = async (id: string, aSuivre: boolean) => {
+    setError('');
+    setInfo('');
+    const res = await apiFetch(`/interventions/${id}/a-suivre`, { method: 'PUT', body: JSON.stringify({ aSuivre }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setError(data.error || 'Marque « à suivre » impossible à enregistrer.');
+    await load(true);
+  };
+
   // Après un enregistrement, le formulaire se ferme et la liste est relue.
   const apresEnregistrement = async () => {
     setFormulaire(null);
@@ -233,6 +252,7 @@ export default function Interventions({ interventionId }: { interventionId?: str
     </div>
     {isAdminRole(user?.role) && !interventionId && <AlerteGenerationVisites />}
     {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{error}</div>}
+    {info && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">{info}</div>}
     {formOpen && <form onSubmit={create} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
       <h2 className="font-semibold">Nouvelle intervention SAV</h2>
       <SelecteurClient id="client-intervention" name="clientId" label="Client de l’intervention" required valeur={clientIdFormulaire} onChange={(client) => { setClientIdFormulaire(client?.id ?? ''); void choisirClient(client?.id ?? ''); }} />
@@ -243,7 +263,12 @@ export default function Interventions({ interventionId }: { interventionId?: str
       <div className="flex gap-2"><button className="btn btn-primary" type="submit">Créer</button><button className="btn btn-secondary" type="button" onClick={fermerFormulaire}>Annuler</button></div>
     </form>}
     {loading ? <p className="text-gray-500">Chargement…</p> : interventions.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />{interventionId ? (introuvable ? 'Intervention introuvable : annulée, ou retirée de vos dossiers.' : 'Fiche indisponible pour le moment.') : 'Aucune intervention active.'}</div> : <div className="grid grid-cols-1 gap-3">{interventions.map((item) => <article key={item.id} className="rounded-xl border bg-white p-5 shadow-sm break-words">
-      <div className="flex justify-between gap-3"><div className="min-w-0 break-words"><p className="text-xs font-semibold text-blue-700">{item.reference}{item.auTempsPasse && <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">Au temps passé</span>}{!interventionId && <> · <Link to={`/interventions/${item.id}`} className="underline">Ouvrir la fiche</Link></>}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale}{item.dateDemande && ` · Demandée le ${formatDateOnlyOrEmpty(item.dateDemande)}`} · Souhaitée le {formatDateOnlyOrEmpty(item.dateSouhaitee)}</p>{(item.site || item.contact || item.chantier) && <p className="text-sm text-gray-500">{item.site && `Site : ${item.site.nom}${item.site.ville ? ` (${item.site.ville})` : ''}`}{item.contact && `${item.site ? ' · ' : ''}Contact : ${[item.contact.prenom, item.contact.nom].filter(Boolean).join(' ')}`}{item.chantier && `${item.site || item.contact ? ' · ' : ''}Affaire : ${item.chantier.numeroDevis ? `${item.chantier.numeroDevis} — ` : ''}${item.chantier.nom}`}</p>}</div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>
+      <div className="flex justify-between gap-3"><div className="min-w-0 break-words"><p className="text-xs font-semibold text-blue-700">{item.reference}{item.auTempsPasse && <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">Au temps passé</span>}{item.aSuivre && <span className="ml-2 inline-block rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-800">À suivre</span>}{!interventionId && <> · <Link to={`/interventions/${item.id}`} className="underline">Ouvrir la fiche</Link></>}</p><h2 className="font-semibold text-gray-900">{item.titre}</h2><p className="text-sm text-gray-600">{item.client.raisonSociale}{item.dateDemande && ` · Demandée le ${formatDateOnlyOrEmpty(item.dateDemande)}`} · Souhaitée le {formatDateOnlyOrEmpty(item.dateSouhaitee)}</p>{(item.site || item.contact || item.chantier) && <p className="text-sm text-gray-500">{item.site && `Site : ${item.site.nom}${item.site.ville ? ` (${item.site.ville})` : ''}`}{item.contact && `${item.site ? ' · ' : ''}Contact : ${[item.contact.prenom, item.contact.nom].filter(Boolean).join(' ')}`}{item.chantier && `${item.site || item.contact ? ' · ' : ''}Affaire : ${item.chantier.numeroDevis ? `${item.chantier.numeroDevis} — ` : ''}${item.chantier.nom}`}</p>}</div><div className="text-right text-sm"><p className="font-medium">{libelleStatut[item.statut] || item.statut}</p><p className="text-gray-500">Priorité {libellePriorite[item.priorite] || item.priorite}</p></div></div>
+      {(item.interventionInitiale || (item.suites || []).length > 0) && <p className="mt-2 text-sm text-gray-600">
+        {item.interventionInitiale && <>Suite de {item.interventionInitiale.statut === 'ANNULEE' ? `${item.interventionInitiale.reference} (annulée)` : <Link to={`/interventions/${item.interventionInitiale.id}`} className="font-medium text-blue-700 underline">{item.interventionInitiale.reference}</Link>}</>}
+        {item.interventionInitiale && (item.suites || []).length > 0 && ' · '}
+        {(item.suites || []).length > 0 && <>Suite{item.suites!.length > 1 ? 's' : ''} : {item.suites!.map((lien, rang) => <span key={lien.id}>{rang > 0 && ', '}{lien.statut === 'ANNULEE' ? `${lien.reference} (annulée)` : <Link to={`/interventions/${lien.id}`} className="font-medium text-blue-700 underline">{lien.reference}</Link>}</span>)}</>}
+      </p>}
       <CoordonneesIntervention intervention={item} />
       {item.description && <p className="mt-3 text-sm text-gray-600">{item.description}</p>}
       {item.couvertureContrat && <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">Couverture contractuelle figée : main-d’œuvre {item.couvertureContrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {item.couvertureContrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{item.couvertureContrat.noteCouverture ? ` · ${item.couvertureContrat.noteCouverture}` : ''}</p>}
@@ -262,9 +287,10 @@ export default function Interventions({ interventionId }: { interventionId?: str
       {formulaire?.interventionId === item.id && formulaire.type === 'compteRendu' && <FormulaireCompteRendu interventionId={item.id} onEnregistre={apresEnregistrement} onRelire={() => load(true)} onAnnuler={() => setFormulaire(null)} />}
       {formulaire?.interventionId === item.id && formulaire.type === 'signature' && (() => { const rapport = (item.rapports || []).find((candidat) => candidat.id === formulaire.rapportId); return rapport && <FormulaireSignature rapport={rapport} enregistrePar={user?.name || 'Session interne active'} onEnregistre={apresEnregistrement} onRelire={() => load(true)} onAnnuler={() => setFormulaire(null)} />; })()}
       {formulaire?.interventionId === item.id && formulaire.type === 'cloture' && item.statut === 'EN_COURS' && <FormulaireCloture interventionId={item.id} nombreComptesRendus={(item.rapports || []).length} signe={(item.rapports || []).some((rapport) => rapport.signature)} onTermine={apresEnregistrement} onRelire={() => load(true)} onAjouterCompteRendu={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} onAnnuler={() => setFormulaire(null)} />}
-      {!formulaire && <div className="mt-4 flex flex-wrap gap-2">{(transitions[item.statut] || []).filter((action) => !estTechnicien || action.statut === 'EN_COURS' || action.statut === 'TERMINEE').map((action) => <button key={action.statut} type="button" onClick={() => action.statut === 'ANNULEE' ? setAnnulation({ id: item.id, reference: item.reference, contratMaintenanceId: item.contratMaintenanceId }) : void transition(item.id, action.statut)} className={action.statut === 'ANNULEE' ? 'btn btn-secondary text-red-700' : 'btn btn-primary'}>{action.libelle}</button>)}{item.statut === 'EN_COURS' && <button type="button" onClick={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} className="btn btn-secondary">Ajouter un compte rendu</button>}{peutRemettre && interventionRemettable(item) && <button type="button" onClick={() => setRemise({ id: item.id, reference: item.reference, contratMaintenanceId: item.contratMaintenanceId })} className="btn btn-secondary">Remettre à planifier</button>}</div>}
+      {!formulaire && <div className="mt-4 flex flex-wrap gap-2">{(transitions[item.statut] || []).filter((action) => !estTechnicien || action.statut === 'EN_COURS' || action.statut === 'TERMINEE').map((action) => <button key={action.statut} type="button" onClick={() => action.statut === 'ANNULEE' ? setAnnulation({ id: item.id, reference: item.reference, contratMaintenanceId: item.contratMaintenanceId }) : void transition(item.id, action.statut)} className={action.statut === 'ANNULEE' ? 'btn btn-secondary text-red-700' : 'btn btn-primary'}>{action.libelle}</button>)}{item.statut === 'EN_COURS' && <button type="button" onClick={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} className="btn btn-secondary">Ajouter un compte rendu</button>}{peutRemettre && interventionRemettable(item) && <button type="button" onClick={() => setRemise({ id: item.id, reference: item.reference, contratMaintenanceId: item.contratMaintenanceId })} className="btn btn-secondary">Remettre à planifier</button>}{estEncadrementSuivi && item.statut !== 'ANNULEE' && <button type="button" onClick={() => { setInfo(''); setSuite({ id: item.id, reference: item.reference, titre: item.titre, priorite: item.priorite }); }} className="btn btn-secondary">Créer la suite</button>}{estEncadrementSuivi && item.statut === 'TERMINEE' && !item.aSuivre && <button type="button" onClick={() => void marquer(item.id, true)} className="btn btn-secondary">Marquer « à suivre »</button>}{item.aSuivre && (estEncadrementSuivi || estTechnicien) && <button type="button" onClick={() => void marquer(item.id, false)} className="btn btn-secondary">Retirer la marque « à suivre »</button>}</div>}
     </article>)}</div>}
     {remise && <RemiseAPlanifier interventionId={remise.id} reference={remise.reference} contratMaintenanceId={remise.contratMaintenanceId} onClose={() => setRemise(null)} onRemise={() => { setRemise(null); void load(true); }} />}
+    {suite && <CreationSuite intervention={suite} onClose={() => setSuite(null)} onCreee={(creee) => { setSuite(null); setError(''); setInfo(`Suite ${creee.reference} créée : elle est dans la file des interventions à planifier.`); void load(true); }} />}
     {annulation && <AnnulationIntervention interventionId={annulation.id} reference={annulation.reference} contratMaintenanceId={annulation.contratMaintenanceId} onClose={() => setAnnulation(null)} onAnnulee={() => { setAnnulation(null); setError(''); void load(); }} />}
   </div>;
 }
