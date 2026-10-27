@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resumeCoutsIntervention } from '../src/lib/coutsIntervention.ts';
+import { resumeCoutsIntervention, libelleDevisMarge } from '../src/lib/coutsIntervention.ts';
 
 test('coûts SAV : coût réel pour l’administration, main-d’œuvre seule hors contrat, matériel seul pour un conducteur, rien sans total', () => {
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 96.5, totalMaterielHT: 12.5 }), { libelle: 'Coût réel cumulé', montant: 96.5 });
@@ -14,4 +14,10 @@ test('coûts SAV : coût réel pour l’administration, main-d’œuvre seule ho
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: null, totalMaterielHT: 0 }), { libelle: 'Matériel cumulé', montant: 0 });
   // Le technicien ne reçoit que ses heures, sans aucun total.
   assert.equal(resumeCoutsIntervention({}), null);
+});
+
+test('marge d’une intervention issue d’un devis : numéro du devis, version précisée au-delà de la première', () => {
+  const marge = { totalDevisHT: 500, coutsInterventionHT: 100, coutsSuitesHT: 50, nombreSuites: 1, margeHT: 350 };
+  assert.equal(libelleDevisMarge({ ...marge, devis: { id: 'd1', numero: 'DEV-2026-0007', version: 1 } }), 'DEV-2026-0007');
+  assert.equal(libelleDevisMarge({ ...marge, devis: { id: 'd2', numero: 'DEV-2026-0007', version: 3 } }), 'DEV-2026-0007 (version 3)');
 });

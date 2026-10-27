@@ -5,6 +5,7 @@ import { decimalToNumber, sommeExacte, differenceExacte, produitExact, regleDeTr
 import type { Parametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { chantierSansCoutMainOeuvre, chantierSansMontants } from './droits';
+import type { CoutsSuitesChantier } from './coutsSuites';
 
 // --- Contexte du suivi des chantiers ---
 // Ce que le calcul d'un chantier ne peut pas lire sur le chantier lui-même : le jour civil
@@ -65,13 +66,27 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
 
   // Sommes exactes, indépendantes de l'ordre des lignes (#198) : les alertes de
   // dépassement ci-dessous comparent ces totaux au vendu, au centime près.
-  const materielReel = achats.reduce((s: number, a: any) => sommeExacte(s, a.montantHT), 0);
+  let materielReel = achats.reduce((s: number, a: any) => sommeExacte(s, a.montantHT), 0);
   let heuresRealisees = 0;
   let moReel = 0;
   for (const p of pointages) {
     heuresRealisees = sommeExacte(heuresRealisees, p.nbrHeures);
     moReel = sommeExacte(moReel, produitExact(p.nbrHeures, p.tauxHoraireApplique));
   }
+  // Coûts des suites rattachées à l'affaire (cf. avecCoutsSuites) : ils s'ajoutent au réel du
+  // chantier, donc à sa marge et à ses alertes, ses heures aux heures réalisées (choix par défaut,
+  // à confirmer). Le détail est renvoyé à part pour que l'écran dise d'où vient l'écart avec les
+  // journaux du chantier.
+  const suites: CoutsSuitesChantier = chantier.coutsSuites ?? { heures: [], achats: [] };
+  const coutsSuites = { heures: 0, coutMainOeuvre: 0, materiel: 0 };
+  for (const h of suites.heures) {
+    coutsSuites.heures = sommeExacte(coutsSuites.heures, h.nbrHeures);
+    coutsSuites.coutMainOeuvre = sommeExacte(coutsSuites.coutMainOeuvre, produitExact(h.nbrHeures, h.tauxHoraireApplique));
+  }
+  for (const a of suites.achats) coutsSuites.materiel = sommeExacte(coutsSuites.materiel, a.montantHT);
+  materielReel = sommeExacte(materielReel, coutsSuites.materiel);
+  heuresRealisees = sommeExacte(heuresRealisees, coutsSuites.heures);
+  moReel = sommeExacte(moReel, coutsSuites.coutMainOeuvre);
   const totalDepenses = sommeExacte(materielReel, moReel);
   const diffHeures = differenceExacte(chantier.heuresVendues, heuresRealisees);
   const pctMateriel = chantier.budgetMaterielVendu > 0 ? (materielReel / chantier.budgetMaterielVendu) * 100 : 0;
@@ -101,7 +116,7 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
     if (params.joursSansSaisie != null && joursSansSaisie >= params.joursSansSaisie) alertes.push('SANS_SAISIE');
   }
 
-  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures, pctMainOeuvre, derniereSaisie, joursSansSaisie, alertes };
+  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures, pctMainOeuvre, derniereSaisie, joursSansSaisie, alertes, coutsSuites };
 
   if (!canSeeMarge || !params.margeCommercialeActive) {
     return { ...base, margeBrute: null, margeCommerciale: null, margePct: null, margeEstimee: null, margeEstimeePct: null, estimation: null };
@@ -176,8 +191,11 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
 // administrateurs, ni taux ni coût de main-d'œuvre (cf. voitCoutMainOeuvre).
 export function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, montantsVisibles = true, coutMainOeuvreVisible = true) {
   const c = decimalToNumber(chantier);
+  // Les lignes de coûts des suites ne servent qu'au calcul : seuls leurs totaux sortent, dans
+  // metrics.coutsSuites, masqués comme les autres montants.
+  const { coutsSuites: _coutsSuites, ...chantierSansCoutsSuites } = c;
   const serialise = {
-    ...c,
+    ...chantierSansCoutsSuites,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
     metrics: computeChantierMetrics(c, params, canSeeMarge, contexte),
   };

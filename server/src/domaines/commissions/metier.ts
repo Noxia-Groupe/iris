@@ -3,6 +3,7 @@ import { AFFAIRE_NON_ANNULEE } from '../../droits/perimetres';
 import { decimalToNumber, sommeExacte } from '../../commun/montants';
 import { type Parametres, remunerationNeutre } from '../parametres/metier';
 import { computeChantierMetrics } from '../chantiers/suivi';
+import { avecCoutsSuites } from '../chantiers/coutsSuites';
 
 export function commissionBaremeProgressif(marge: number, bareme: { plafond: number; taux: number }[]): number {
   if (marge <= 0) return 0;
@@ -50,11 +51,11 @@ export function dateClotureChantier(c: any): Date | null {
 export async function computeCommissionsParCommercial(commercialIds: string[], start: Date, endExclusive: Date, params: Parametres) {
   const regles = remunerationNeutre();
   const commercialIdSet = new Set(commercialIds);
-  const chantiers = decimalToNumber(await prisma.chantier.findMany({
+  const chantiers = await avecCoutsSuites(decimalToNumber(await prisma.chantier.findMany({
     // Une affaire annulée n'a jamais existé commercialement : ni CA, ni marge, ni commission.
     where: { ...AFFAIRE_NON_ANNULEE, commercialId: { in: commercialIds } },
     include: { achats: { where: { archivedAt: null } }, pointages: { where: { archivedAt: null } } },
-  }));
+  })) as any[]);
 
   const moisPeriode = moisKeysDansPeriode(start, endExclusive);
   const primesAdmin = await prisma.primeMensuelleCommercial.findMany({

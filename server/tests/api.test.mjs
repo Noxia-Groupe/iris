@@ -20411,4 +20411,208 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await file(jeton('conducteurAutre'))).some((item) => item.id === duConducteur.id), false, 'autre conducteur : absente de sa file');
     });
   });
+
+  describe('Intervention de suivi liée, seconde PR : coûts des suites dans la marge du chantier, marge de l’intervention issue d’un devis', () => {
+    let admin = {};
+    let adminId = '';
+    const comptes = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    let fiche = null;
+    let fournisseur = null;
+    let margeActiveInitiale = true;
+    const enTete = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const creerChantier = (nom, responsableId) => prisma.chantier.create({ data: {
+      nom: `TEST Marge suites ${nom} ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date('2026-10-01T00:00:00Z'),
+      budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 20, responsableId,
+    } });
+    const interventionSur = async (titre, chantierId) => {
+      const res = await envoyer('post', '/api/interventions', admin, { clientId: client.id, titre: `TEST Marge suites ${titre}`, ...(chantierId ? { chantierId } : {}) });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const suiteDe = async (id) => {
+      const res = await envoyer('post', `/api/interventions/${id}/suites`, admin, {});
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    // Lignes de coûts écrites en base : le calcul se vérifie au centime, sans dépendre des règles de saisie.
+    const heure = (interventionId, nbrHeures, tauxHoraireApplique, archivee = false) => prisma.coutInterventionHeure.create({ data: {
+      interventionId, intervenantId: fiche.id, date: new Date('2026-10-20T00:00:00Z'), nbrHeures, tauxHoraireApplique, createdById: adminId,
+      ...(archivee ? { archivedAt: new Date(), archivedById: adminId, motifArchivage: 'TEST archivée' } : {}),
+    } });
+    const achat = (interventionId, montantHT, archive = false) => prisma.coutInterventionAchat.create({ data: {
+      interventionId, fournisseurId: fournisseur.id, date: new Date('2026-10-20T00:00:00Z'), description: 'TEST matériel de la suite', montantHT, createdById: adminId,
+      ...(archive ? { archivedAt: new Date(), archivedById: adminId, motifArchivage: 'TEST archivé' } : {}),
+    } });
+    const annuler = async (id) => {
+      const res = await envoyer('patch', `/api/interventions/${id}/statut`, admin, { statut: 'ANNULEE', motif: 'TEST annulation de la suite' });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    const ficheChantier = async (id, auth = admin) => {
+      const res = await request(app).get(`/api/chantiers/${id}`).set(auth);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body;
+    };
+    const couts = (id, auth = admin) => request(app).get(`/api/interventions/${id}/couts`).set(auth);
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      for (const [cle, role] of [['conducteur', 'CONDUCTEUR_TRAVAUX'], ['conducteurAutre', 'CONDUCTEUR_TRAVAUX'], ['technicien', 'TECHNICIEN']]) {
+        const email = `marge-suites.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Marge suites ${cle}`, role } });
+      }
+      margeActiveInitiale = (await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).margeCommercialeActive;
+      assert.equal((await envoyer('put', '/api/parametres', admin, { margeCommercialeActive: true })).status, 200);
+      const cree = await envoyer('post', '/api/clients', admin, { raisonSociale: `TEST Client marge des suites ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, admin, { nom: 'TEST Facturation marge des suites', adresse: '9 rue des Suites', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      fiche = await prisma.intervenant.create({ data: { nom: `TEST Marge suites fiche ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+      fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Marge suites fournisseur ${suffixe}` } });
+    });
+
+    after(async () => {
+      await prisma.parametres.update({ where: { id: 'singleton' }, data: { margeCommercialeActive: margeActiveInitiale } });
+    });
+
+    test('les coûts des suites rattachées à l’affaire, et d’elles seules, entrent dans la marge du chantier', async () => {
+      const chantier = await creerChantier('principal', comptes.conducteur.id);
+      const autreChantier = await creerChantier('autre', comptes.conducteurAutre.id);
+      // Heures du chantier lui-même : 2 h à 40 €.
+      await prisma.pointageHeure.create({ data: { date: new Date('2026-10-02T00:00:00Z'), intervenantId: fiche.id, chantierId: chantier.id, nbrHeures: 2, tauxHoraireApplique: 40, createdById: adminId, updatedById: adminId } });
+      const initiale = await interventionSur('initiale', chantier.id);
+      await heure(initiale.id, 2, 40); // hors marge : l'intervention initiale n'est pas une suite
+      const suite = await suiteDe(initiale.id);
+      assert.equal(suite.chantierId, chantier.id, 'la suite reprend l’affaire');
+      await heure(suite.id, 1.5, 40);
+      await heure(suite.id, 3, 40, true); // archivée : hors marge
+      await achat(suite.id, 25.5);
+      await achat(suite.id, 99, true); // archivé : hors marge
+      const suiteDeSuite = await suiteDe(suite.id);
+      await heure(suiteDeSuite.id, 0.25, 37.5); // produit exact 9,375 €
+      const suiteAnnulee = await suiteDe(initiale.id);
+      await heure(suiteAnnulee.id, 1, 40);
+      await annuler(suiteAnnulee.id); // la dépense faite reste comptée
+      const ordinaire = await interventionSur('ordinaire de l’affaire', chantier.id);
+      await heure(ordinaire.id, 4, 40); // hors marge : pas une suite
+      const initialeAutre = await interventionSur('initiale d’une autre affaire', autreChantier.id);
+      await heure((await suiteDe(initialeAutre.id)).id, 5, 40); // autre affaire
+
+      const attendu = { heuresRealisees: 4.75, moReel: 189.375, materielReel: 25.5, totalDepenses: 214.875, margeCommerciale: 785.125 };
+      const coutsSuitesAttendus = { heures: 2.75, coutMainOeuvre: 109.375, materiel: 25.5 };
+      const detail = await ficheChantier(chantier.id);
+      for (const [cle, valeur] of Object.entries(attendu)) assert.equal(detail.metrics[cle], valeur, `fiche : ${cle}`);
+      assert.deepEqual(detail.metrics.coutsSuites, coutsSuitesAttendus);
+      // Les lignes des suites ne sortent jamais telles quelles.
+      assert.equal('coutsSuites' in detail, false, 'pas de lignes brutes');
+      // La liste dit la même marge que la fiche.
+      const liste = await request(app).get('/api/chantiers').set(admin);
+      assert.equal(liste.status, 200);
+      const ligne = liste.body.find((c) => c.id === chantier.id);
+      for (const [cle, valeur] of Object.entries(attendu)) assert.equal(ligne.metrics[cle], valeur, `liste : ${cle}`);
+      assert.deepEqual(ligne.metrics.coutsSuites, coutsSuitesAttendus);
+      assert.equal('coutsSuites' in ligne, false);
+      // L'autre affaire ne compte que sa propre suite.
+      const autre = await ficheChantier(autreChantier.id);
+      assert.deepEqual([autre.metrics.heuresRealisees, autre.metrics.moReel, autre.metrics.coutsSuites], [5, 200, { heures: 5, coutMainOeuvre: 200, materiel: 0 }]);
+      // Statistiques des conducteurs : mêmes dépenses et même marge.
+      const stats = await request(app).get('/api/stats/conducteurs').set(admin);
+      assert.equal(stats.status, 200, JSON.stringify(stats.body));
+      const duConducteur = stats.body.find((u) => u.id === comptes.conducteur.id);
+      assert.deepEqual([duConducteur.depensesTotal, duConducteur.margeTotal], [214.875, 785.125]);
+    });
+
+    test('détail des suites masqué comme le reste du réel : sans coût de main-d’œuvre pour le conducteur, sans montant pour le technicien', async () => {
+      const chantier = await creerChantier('masquage', comptes.conducteur.id);
+      const suite = await suiteDe((await interventionSur('initiale masquage', chantier.id)).id);
+      await heure(suite.id, 1, 40);
+      await achat(suite.id, 12.25);
+      const vueConducteur = await ficheChantier(chantier.id, enTete('conducteur'));
+      assert.deepEqual(vueConducteur.metrics.coutsSuites, { heures: 1, coutMainOeuvre: null, materiel: 12.25 });
+      assert.deepEqual([vueConducteur.metrics.moReel, vueConducteur.metrics.materielReel, vueConducteur.metrics.heuresRealisees], [null, 12.25, 1]);
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { responsableId: comptes.technicien.id } });
+      const vueTechnicien = await ficheChantier(chantier.id, enTete('technicien'));
+      assert.deepEqual(vueTechnicien.metrics.coutsSuites, { heures: 1, coutMainOeuvre: null, materiel: null });
+      assert.deepEqual([vueTechnicien.metrics.moReel, vueTechnicien.metrics.materielReel, vueTechnicien.metrics.heuresRealisees], [null, null, 1]);
+      for (const vue of [vueConducteur, vueTechnicien]) {
+        assert.ok(!/tauxHoraireApplique/.test(JSON.stringify(vue.metrics)), 'aucun taux dans les métriques');
+        assert.equal('coutsSuites' in vue, false);
+      }
+    });
+
+    test('marge de l’intervention issue d’un devis, sans chantier : total HT du devis moins les coûts de l’intervention et de ses suites, pour l’administration seule', async () => {
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Devis marge des suites ${suffixe}`, lignes: [
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 150, tauxTva: 20 },
+        { designation: 'TEST Fourniture', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: 'TEST Signataire marge', confirme: true })).status, 201);
+      const conversion = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible: 'INTERVENTION' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      const intervention = conversion.body;
+      assert.equal(intervention.chantierId, null);
+      await heure(intervention.id, 1.5, 40); // 60,00 €
+      const suite = await suiteDe(intervention.id);
+      await heure(suite.id, 1.25, 33.33); // 41,6625 € arrondi à la ligne : 41,66 €
+      await heure(suite.id, 8, 40, true); // archivée : hors marge
+      const suiteDeSuite = await suiteDe(suite.id);
+      await heure(suiteDeSuite.id, 0.5, 40); // 20,00 €
+      await achat(suiteDeSuite.id, 5.55);
+      const suiteAnnulee = await suiteDe(intervention.id);
+      await heure(suiteAnnulee.id, 0.25, 40); // 10,00 €, comptés malgré l'annulation
+      await annuler(suiteAnnulee.id);
+
+      const lecture = await couts(intervention.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.deepEqual(lecture.body.margeDevis, {
+        devis: { id: devis.body.id, numero: devis.body.numero, version: 1 },
+        totalDevisHT: 400, coutsInterventionHT: 60, coutsSuitesHT: 77.21, nombreSuites: 3, margeHT: 262.79,
+      });
+      // Une suite n'a pas de marge propre : elle pèse sur celle de l'intervention initiale.
+      assert.equal((await couts(suite.id)).body.margeDevis, null);
+      // Une intervention ordinaire, sans devis, non plus.
+      assert.equal((await couts((await interventionSur('sans devis')).id)).body.margeDevis, null);
+      // Le conducteur affecté lit les coûts, sans la marge ; le technicien affecté ses heures seulement.
+      const ficheConducteur = await prisma.intervenant.create({ data: { nom: `TEST Marge suites conducteur ${suffixe}`, role: 'Conducteur', tauxHoraireCharge: 50, userId: comptes.conducteur.id } });
+      const ficheTechnicien = await prisma.intervenant.create({ data: { nom: `TEST Marge suites technicien ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 35, userId: comptes.technicien.id } });
+      await prisma.interventionAffectation.createMany({ data: [{ interventionId: intervention.id, intervenantId: ficheConducteur.id }, { interventionId: intervention.id, intervenantId: ficheTechnicien.id }] });
+      for (const cle of ['conducteur', 'technicien']) {
+        const vue = await couts(intervention.id, enTete(cle));
+        assert.equal(vue.status, 200, `${cle} : ${JSON.stringify(vue.body)}`);
+        assert.equal('margeDevis' in vue.body, false, `${cle} : pas de marge`);
+      }
+    });
+
+    test('une intervention issue d’un devis au temps passé n’a pas de marge de devis : elle se facture au temps passé', async () => {
+      const pasInitial = (await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).pasTempsPasseMinutes;
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 15 })).status, 200);
+        const mainOeuvre = await envoyer('post', '/api/catalogue/prestations', admin, {
+          estMainOeuvre: true, reference: `TEST-MS-MO-${suffixe}`, nom: `TEST Main d’œuvre marge ${suffixe}`, tauxTva: '20',
+          prixVenteHt: '45', prixJourHorsContratHt: '300', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7',
+        });
+        assert.equal(mainOeuvre.status, 201, JSON.stringify(mainOeuvre.body));
+        const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Devis temps passé marge ${suffixe}`, auTempsPasse: true, lignes: [
+          { tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: mainOeuvre.body.id },
+        ] });
+        assert.equal(devis.status, 201, JSON.stringify(devis.body));
+        assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: 'TEST Signataire temps passé marge', confirme: true })).status, 201);
+        const conversion = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible: 'INTERVENTION' });
+        assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+        assert.equal(conversion.body.auTempsPasse, true);
+        await heure(conversion.body.id, 2, 40);
+        const lecture = await couts(conversion.body.id);
+        assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+        assert.equal(lecture.body.margeDevis, null);
+      } finally {
+        await prisma.parametres.update({ where: { id: 'singleton' }, data: { pasTempsPasseMinutes: pasInitial } });
+      }
+    });
+  });
 }

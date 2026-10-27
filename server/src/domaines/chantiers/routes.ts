@@ -20,6 +20,7 @@ import {
   chantierSelonRentabilite,
 } from './droits';
 import { contexteSuivi, serializeChantier } from './suivi';
+import { avecCoutsSuites } from './coutsSuites';
 
 // Champs publics d'un responsable ou d'un commercial rattaché à un chantier : jamais le
 // hash de mot de passe, et jamais le rôle non plus — l'application n'en a pas l'usage ici,
@@ -49,7 +50,7 @@ function avecDroitDeCloture<T extends { responsableId: string | null; responsabl
 const listerChantiers: express.RequestHandler = async (req, res) => {
   try {
     const params = await getParametres();
-    const chantiers = await prisma.chantier.findMany({
+    const chantiers = await avecCoutsSuites(await prisma.chantier.findMany({
       where: perimetreChantiers(req),
       include: {
         responsable: RESPONSABLE_SELECT_AVEC_ROLE,
@@ -57,7 +58,7 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
         achats: { where: { archivedAt: null } },
         pointages: { where: { archivedAt: null } },
       }
-    });
+    }));
     // Rentabilité décidée chantier par chantier : un responsable la voit sur ceux de sa
     // branche, pas forcément sur tous ceux de sa liste (cf. voitRentabilite).
     const visibles = chantiers.map((c) => voitRentabilite(req, c, params));
@@ -131,8 +132,9 @@ export function enregistrerRoutesChantiers(app: Express): void {
       // `serializeChantier` étale son entrée : sortir les factures avant sérialisation
       // évite toute fuite de montants vers les rôles qui ne voient pas la marge.
       const { factures, ...chantierSansFactures } = chantier;
+      const [chantierAvecSuites] = await avecCoutsSuites([chantierSansFactures]);
       const contexte = await contexteSuivi(canSeeMarge && params.margeCommercialeActive);
-      const detail = serializeChantier(avecDroitDeCloture(authUser, chantierSansFactures), params, canSeeMarge, contexte, voitMontantsChantier(req), voitCoutMainOeuvre(req)) as Record<string, unknown>;
+      const detail = serializeChantier(avecDroitDeCloture(authUser, chantierAvecSuites), params, canSeeMarge, contexte, voitMontantsChantier(req), voitCoutMainOeuvre(req)) as Record<string, unknown>;
       if (canSeeMarge) {
         // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
         // facture annulée est visible mais ne contribue plus, son avoir la neutralise.

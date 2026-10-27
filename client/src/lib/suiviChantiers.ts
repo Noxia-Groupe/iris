@@ -11,8 +11,12 @@ import { arrondiCentime, arrondiEuro, differenceExacte } from './montants';
 export const ALERTES_CHANTIER = ['EN_PERTE', 'MARGE_FAIBLE', 'HEURES_DEPASSEES', 'MAIN_OEUVRE_DEPASSEE', 'MATERIEL_DEPASSE', 'SANS_SAISIE'] as const;
 export type AlerteChantier = typeof ALERTES_CHANTIER[number];
 
+/** Coûts des suites SAV de l'affaire, comptés dans le réel ; montants nuls pour qui ne les voit pas. */
+export interface CoutsSuites { heures: number; coutMainOeuvre: number | null; materiel: number | null }
+
 export interface MetriquesChantier {
   heuresRealisees?: number;
+  coutsSuites?: CoutsSuites | null;
   /** Null pour un compte technicien, qui ne voit aucun coût. */
   materielReel?: number | null;
   moReel?: number | null;

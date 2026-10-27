@@ -17,6 +17,7 @@ import { formatCompanyDate, formatDateOnly, jourCivilChantier, jourCivilChantier
 import { archivagesRestaurables } from '../lib/archivesRestaurables';
 import { changementAffaire, titreEntreeJournal } from '../lib/journalChantier';
 import { AlertesChantier } from '../components/AlertesChantier';
+import { CoutsSuitesChantier } from '../components/CoutsSuitesChantier';
 import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
 import { sommeExacte, differenceExacte, arrondiEuro, arrondiCentime } from '../lib/montants';
 
@@ -989,6 +990,8 @@ const ChantierDetail = () => {
               </div>
             </div>
           </div>
+
+          <CoutsSuitesChantier couts={metrics.coutsSuites} />
 
           {/* Répartitions */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
