@@ -234,3 +234,34 @@ test('fiche chantier : pas de ligne des suites sans coût de suite, puis des heu
   await page.reload({ waitUntil: 'networkidle' });
   await expect(page.locator('[data-couts-suites]')).toHaveText(/comptées dans le réel : 1,5 h · matériel 0,00\s€ · main-d’œuvre 60,00\s€\.$/);
 });
+
+// Audit interne 4 de #339 : sur la fiche d'un chantier en cours, les hypothèses de la marge estimée disent le coût
+// réel des suites, avec son montant et son taux pour l'administration, sans montant horaire pour le conducteur.
+test('fiche chantier en cours : les hypothèses de la marge estimée disent le coût des suites, pour l’administration et le conducteur', async ({ session, request, creerClient, allerSurPageAdmin, browser }) => {
+  const { envoyer, client, suffixe, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'marge-estimee');
+  const conducteur = await envoyer('post', '/users', { email: `marge-estimee.cond.${suffixe}@iris.test`, name: `Conducteur ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' }) as { id: string; name: string; email: string; role: string };
+  const devis = await devisSigne('Affaire estimée'); // 2 h vendues
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: conducteur.id });
+  const intervenant = await envoyer('post', '/intervenants', { nom: `Fiche estimée ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 }) as { id: string };
+  await envoyer('post', '/heures', { chantierId: chantier.id, intervenantId: intervenant.id, date: dateDuJour(), nbrHeures: 1 });
+  const initiale = await envoyer('post', '/interventions', { clientId: client.id, titre: 'Dépannage estimé', chantierId: chantier.id }) as { id: string };
+  const suite = await envoyer('post', `/interventions/${initiale.id}/suites`, {}) as { id: string };
+  await heuresDuTechnicien(suite.id, 1.5); // 60 € de main-d'œuvre SAV
+
+  // Administration : 2 h vendues à 40 €, plus les 60 € de la suite.
+  const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  await expect(page.locator('[data-estimation]')).toContainText('Main-d’œuvre attendue : 140 € — heures vendues à 40 €/h, coût moyen réellement appliqué sur ce chantier, plus le coût réel des 1,5 h de suites SAV.');
+
+  const contexte = await browser.newContext();
+  const vueConducteur = await contexte.newPage();
+  await vueConducteur.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [jetonPour(conducteur.id), JSON.stringify({ ...conducteur, permissions: ['chantiers:read', 'clients:read'] })]);
+  await vueConducteur.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
+  const estimation = vueConducteur.locator('[data-estimation]');
+  await expect(estimation).toContainText('Main-d’œuvre attendue : heures vendues au coût moyen réellement appliqué sur ce chantier, plus le coût réel des 1,5 h de suites SAV.');
+  await expect(estimation).not.toContainText('€/h');
+  await contexte.close();
+});

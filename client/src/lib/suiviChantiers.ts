@@ -199,16 +199,15 @@ export function ancienneteSaisie(jours: number): string {
 }
 
 /** Libellé de l'hypothèse de coût horaire retenue pour l'estimation. Le coût horaire n'est
- * transmis qu'à l'administration : sans lui, l'hypothèse est décrite sans montant. Les heures des
- * suites SAV, non vendues, s'ajoutent aux heures vendues (cf. computeChantierMetrics). */
+ * transmis qu'à l'administration : sans lui, l'hypothèse est décrite sans montant. Le coût réel des
+ * heures des suites SAV, non vendues, s'ajoute à la projection du chantier (cf. computeChantierMetrics). */
 export function hypotheseCoutHoraire(e: EstimationMarge, heuresSuites = 0): string {
   const taux = e.coutHoraireReference != null ? `à ${nombre(e.coutHoraireReference, 2)} €/h, ` : 'au ';
+  const suites = heuresSuites > 0 ? `, plus le coût réel des ${nombre(heuresSuites, 2)} h de suites SAV` : '';
   switch (e.sourceCoutHoraire) {
-    case 'CHANTIER': return heuresSuites > 0
-      ? `heures vendues et ${nombre(heuresSuites, 2)} h de suites SAV ${taux}coût moyen réellement appliqué sur ce chantier et ses suites`
-      : `heures vendues ${taux}coût moyen réellement appliqué sur ce chantier`;
-    case 'SOCIETE': return `heures vendues ${taux}coût moyen de la société (aucune heure encore saisie ici)`;
-    case 'VENDU': return 'budget main-d’œuvre vendu (aucun coût horaire connu)';
+    case 'CHANTIER': return `heures vendues ${taux}coût moyen réellement appliqué sur ce chantier${suites}`;
+    case 'SOCIETE': return `heures vendues ${taux}coût moyen de la société (aucune heure encore saisie ici)${suites}`;
+    case 'VENDU': return `budget main-d’œuvre vendu (aucun coût horaire connu)${suites}`;
     case 'REEL': return 'coût réel (chantier terminé)';
   }
 }

@@ -140,7 +140,7 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
   // réel déjà engagé :
   //  - main-d'œuvre : heures vendues × coût horaire de référence (celui réellement
   //    appliqué sur ce chantier ; à défaut, la moyenne de la société ; à défaut, le
-  //    budget main-d'œuvre vendu) ;
+  //    budget main-d'œuvre vendu), plus le coût réel des suites ;
   //  - matériel : matériel vendu × ce que coûte en moyenne un euro de matériel vendu sur
   //    les chantiers terminés ; sans historique, le matériel restant est compté à son prix
   //    de vente — hypothèse prudente. Le prix d'achat prévu des lignes de devis (lot pilote 2)
@@ -157,18 +157,23 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
     let ratioMateriel: number | null = null;
     let sourceMateriel = 'REEL';
     if (chantier.statut === 'EN_COURS') {
+      // Reste à faire du chantier, à son propre coût horaire : les heures des suites, comptées dans les
+      // heures réalisées (alerte « heures dépassées »), ne sont ni de l'avancement des heures vendues ni
+      // un coût horaire du chantier. Leur coût réel s'ajoute ensuite à la projection, comme leur matériel :
+      // la marge estimée baisse exactement de ce coût, comme la marge du jour, quel que soit le coût
+      // horaire des suites (audits n° 3 et 4 de #339 ; choix par défaut, à confirmer). Sans suite, le
+      // calcul est inchangé.
+      const heuresChantier = differenceExacte(heuresRealisees, coutsSuites.heures);
+      const moChantier = differenceExacte(moReel, coutsSuites.coutMainOeuvre);
+      coutHoraireReference = heuresChantier > 0 ? moChantier / heuresChantier : null;
       sourceCoutHoraire = coutHoraireReference != null ? 'CHANTIER' : contexte.coutHoraireSociete != null ? 'SOCIETE' : 'VENDU';
       coutHoraireReference ??= contexte.coutHoraireSociete;
       // Au coût horaire du chantier : heures vendues × main-d'œuvre réelle ÷ heures réalisées, en
       // décimal (#198), pour retomber exactement sur le réel quand les heures vendues sont faites.
-      // Les heures des suites, comptées dans les heures réalisées, ne sont pas des heures vendues : elles
-      // s'ajoutent aux heures attendues au lieu d'en tenir lieu, sinon leur coût disparaîtrait de la
-      // marge estimée (audit n° 3 de #339 ; choix par défaut, à confirmer). Sans heure réalisée, aucune
-      // heure de suite : les deux autres hypothèses ne changent pas.
       const mainOeuvrePrevue = sourceCoutHoraire === 'CHANTIER'
-        ? regleDeTroisExacte(sommeExacte(chantier.heuresVendues, coutsSuites.heures), moReel, heuresRealisees)
+        ? regleDeTroisExacte(chantier.heuresVendues, moChantier, heuresChantier)
         : coutHoraireReference != null ? chantier.heuresVendues * coutHoraireReference : chantier.budgetMainOeuvreVendu;
-      coutMainOeuvreAttendu = Math.max(moReel, mainOeuvrePrevue);
+      coutMainOeuvreAttendu = sommeExacte(Math.max(moChantier, mainOeuvrePrevue), coutsSuites.coutMainOeuvre);
       ratioMateriel = contexte.ratioMaterielHistorique ?? 1;
       sourceMateriel = contexte.ratioMaterielHistorique != null ? 'HISTORIQUE' : 'VENDU';
       // Même lecture pour le matériel : celui des suites, non vendu, s'ajoute au matériel attendu.

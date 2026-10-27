@@ -116,12 +116,15 @@ test('coût de main-d’œuvre réservé à l’administration : alerte et hypot
   assert.equal(hypotheseCoutHoraire(estimation('CHANTIER', 42.5)), 'heures vendues à 42,5 €/h, coût moyen réellement appliqué sur ce chantier');
 });
 
-test('marge estimée : les heures et le matériel des suites SAV, non vendus, s’ajoutent aux hypothèses (audit n° 3 de #339)', () => {
+test('marge estimée : le coût réel et le matériel des suites SAV, non vendus, s’ajoutent aux hypothèses (audits n° 3 et 4 de #339)', () => {
   const estimation = (source: EstimationMarge['sourceCoutHoraire'], coutHoraireReference: number | null): EstimationMarge => ({
     coutEstime: null, coutMainOeuvreAttendu: null, coutMaterielAttendu: 300, coutHoraireReference, sourceCoutHoraire: source, ratioMateriel: 0.8, sourceMateriel: 'HISTORIQUE',
   });
-  assert.equal(hypotheseCoutHoraire(estimation('CHANTIER', 40), 1.5), 'heures vendues et 1,5 h de suites SAV à 40 €/h, coût moyen réellement appliqué sur ce chantier et ses suites');
-  assert.equal(hypotheseCoutHoraire(estimation('CHANTIER', null), 5), 'heures vendues et 5 h de suites SAV au coût moyen réellement appliqué sur ce chantier et ses suites');
+  assert.equal(hypotheseCoutHoraire(estimation('CHANTIER', 40), 1.5), 'heures vendues à 40 €/h, coût moyen réellement appliqué sur ce chantier, plus le coût réel des 1,5 h de suites SAV');
+  assert.equal(hypotheseCoutHoraire(estimation('CHANTIER', null), 5), 'heures vendues au coût moyen réellement appliqué sur ce chantier, plus le coût réel des 5 h de suites SAV');
+  assert.equal(hypotheseCoutHoraire(estimation('SOCIETE', 35), 2), 'heures vendues à 35 €/h, coût moyen de la société (aucune heure encore saisie ici), plus le coût réel des 2 h de suites SAV');
+  assert.equal(hypotheseCoutHoraire(estimation('VENDU', null), 2), 'budget main-d’œuvre vendu (aucun coût horaire connu), plus le coût réel des 2 h de suites SAV');
+  assert.equal(hypotheseCoutHoraire(estimation('REEL', 40), 2), 'coût réel (chantier terminé)');
   assert.equal(hypotheseCoutHoraire(estimation('CHANTIER', 40), 0), 'heures vendues à 40 €/h, coût moyen réellement appliqué sur ce chantier');
   assert.equal(hypotheseMateriel(estimation('CHANTIER', 40), 12.25), 'matériel vendu × 80 %, ratio d’achat observé sur les chantiers terminés, plus le matériel des suites SAV');
   assert.equal(hypotheseMateriel(estimation('CHANTIER', 40), null), 'matériel vendu × 80 %, ratio d’achat observé sur les chantiers terminés');
