@@ -694,7 +694,7 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin. Rien n'est co
 3. **Place de la facture au temps passé** (« Fais le apres l’intervention de suivi »). Le lot vient après l'intervention de suivi liée. L'ordre devient : la main d'œuvre paramétrable et le devis au temps passé, fusionnés, puis l'intervention de suivi liée, puis la facture au temps passé ; les deux lots de droits (Directeur aligné sur l'administration, assistante technique) quand Nelson le voudra. La question de la place de ce lot est retirée de la section 3 de la passation.
 4. **Tableau du catalogue** (« Affichage du catalogue : fait le defiler »). Le choix par défaut appliqué par #331 est confirmé : sur téléphone et tablette, le tableau des fiches défile latéralement dans son cadre, plutôt que de passer en cartes.
 
-La section « En cours au 26-10-2026 » (plus haut), rédigée avant ces réponses, garde sa rédaction ; la validation comptable qu'elle attend, la place de la facture au temps passé qu'elle dit en question et l'affichage du tableau du catalogue qu'elle dit à confirmer sont réglés par la présente section.
+La section « En cours au 26-10-2026 » (plus haut), rédigée avant ces réponses, garde sur ces points sa rédaction ; la validation comptable qu'elle attend, la place de la facture au temps passé qu'elle dit en question et l'affichage du tableau du catalogue qu'elle dit à confirmer sont réglés par la présente section. De même, le point 4 des décisions du 25-10-2026, qui dit la place de la facture au temps passé posée en question, et la ligne de #331 des lots du 23 au 26-10-2026, qui dit son choix par défaut à confirmer, gardent leur rédaction d'origine ; ces mentions sont levées par la présente section (points 3 et 4).
 
 ## Décisions du 26-10-2026 sur l'intervention de suivi liée
 
@@ -719,3 +719,152 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin. Rien n'est co
 Restent ouvertes, en section 3 de la passation : ce que la file des interventions à planifier montre et propose pour une intervention terminée « à suivre », et la place des lots prévus par rapport au premier jour du pilote ; pour la seconde PR (montants), le suivi de marge de la suite d'une intervention issue d'un devis converti en intervention, sans chantier, la facturation de la suite d'une intervention au temps passé avant le lot « facture au temps passé », et les questions du lot « main d'œuvre au catalogue » sur la valorisation des heures et la marge. Les comptes qui créent la suite sont ceux des décisions du 24-10-2026 (points 12 et 16) ; la passation fait dépendre ces comptes des deux lots de droits (section 2), et l'assistante technique viendra avec son lot.
 
 Le point 11 de la section « Décisions du 24-10-2026 sur la remise à planifier » (plus haut) garde sa rédaction d'origine ; les deux questions qu'il dit posées en section 3 de la passation, la projection d'une intervention SAV sur plusieurs jours et la suite d'une intervention SAV issue d'un devis ou rattachée à une affaire, sont tranchées par la présente section (points 4 et 2).
+
+## Lots du 26-10-2026
+
+*Rédigé le 27-10-2026.* Fusions faites par Claude Code selon la décision de Nelson du 20-10-2026, chacune avec une CI verte et un audit interne fusionnable sur la même SHA ; les tests manquants hors montants relevés par les audits sont versés à des issues de suivi, selon la règle du 23-10-2026. Aucun de ces lots n'est validé pour mise en service.
+
+### Lots fusionnés
+
+- #333 : passation, historique et README après #326, #330 et #331 (section « Lots du 23 au 26-10-2026 », plus haut).
+- #334 : décisions du 26-10-2026 sur le temps passé, le catalogue et l'intervention de suivi liée consignées (deux sections précédentes) ; passation et README.
+- #335 (lot « intervention de suivi liée », première PR) : « À suivre » et la suite liée, sans montants (décisions des 24 et 26-10-2026) ; deux audits internes, le premier ayant fait afficher la marque sur l'affectation de la grille du planning (point 29 du 24-10-2026) et mettre à jour le README.
+- #337 : deux tests hors montants de l'audit 2 de #335, versés à #336 : la file des interventions à planifier ne montre une intervention terminée « à suivre » que dans le périmètre du demandeur ; le responsable voit à l'écran « Marquer « à suivre » » et « Créer la suite ».
+
+### Suivis ouverts pendant ces lots
+
+Étiquette `suivi-audit` : #336 (intervention de suivi liée : les deux tests versés par #337, et deux notes de documentation, N2 et N5, traitées par la PR qui consigne la section suivante).
+
+## Décisions de la nuit du 26 au 27-10-2026 sur les questions de montants
+
+*Rédigé le 27-10-2026.* Après la fusion de [#337](https://github.com/Noxia-Groupe/iris/pull/337), Nelson a demandé (message de la session de travail, 26-10-2026, 22:33 UTC), cité mot pour mot :
+
+« Quels sont les questions sur les montants ? »
+
+Claude Code a répondu (22:36 UTC) en listant les questions de montants encore ouvertes, tirées de la section 3 de la [passation](ROADMAP-PASSATION.md#3-questions-ouvertes-pour-nelson) et de choix par défaut à confirmer de sa section 4, regroupées par lot. Son message est cité mot pour mot à partir de son deuxième paragraphe, le premier rendant compte de la fusion de #337 :
+
+```text
+Voici les questions de montants encore ouvertes, regroupées par lot. Pour chacune, ma proposition n'est qu'une proposition : rien n'est tranché tant que vous n'avez pas répondu.
+
+## 1. Seconde PR de l'intervention de suivi (facturation et marge) : bloquant pour la suite
+
+1. **Coûts d'une suite et marge du chantier.** Aujourd'hui, les heures et le matériel des interventions SAV n'entrent dans la marge d'aucun chantier. Faut-il y compter seulement les coûts des suites, ou ceux de toutes les interventions rattachées à l'affaire ?
+   *Proposition : les suites seulement, au plus près de votre décision.*
+2. **Suite d'une intervention issue d'un devis converti en intervention, sans chantier.** Elle n'est pas facturée en plus, mais sur quel suivi de marge pèsent ses coûts ?
+   *Proposition : une marge de l'intervention initiale, égale au total HT du devis moins les coûts de l'intervention et de ses suites, visible de l'administration.*
+3. **Suite d'une intervention au temps passé** (« une incedence »). Comment se facture-t-elle ? Faut-il attendre le lot « facture au temps passé » ? Aujourd'hui, la suite ne reprend pas le marqueur « au temps passé ».
+   *Proposition : ses heures s'ajoutent à la facture au temps passé de l'intervention initiale, au prix et au pas du devis, dans le lot « facture au temps passé ».*
+
+## 2. Mains d'œuvre : marge d'un SAV hors contrat, sans devis ni chantier
+
+4. **Intervenant rattaché à aucune main d'œuvre** : ses heures ne sont pas valorisées et sont signalées, ou bien on applique une main d'œuvre par défaut de la société, ou bien on refuse ?
+5. **Quel prix ?** Le prix sous contrat pour les visites et leurs suites, et le prix hors contrat pour le SAV hors contrat ? La marge se calcule-t-elle à l'heure, ou au forfait jour au-delà des heures par jour de la main d'œuvre ?
+6. **Prix du jour de saisie, figé sur l'heure comme le taux chargé, ou prix courant ?** Une main d'œuvre désactivée valorise-t-elle encore les heures ?
+7. **Historique des prix** : celui du journal, conservé 90 jours au plus, suffit-il ?
+
+*Propositions pour 4 à 6 : aucune valorisation et un signalement ; le prix à l'heure, hors contrat ou sous contrat selon le cas ; le prix figé à la saisie.*
+
+## 3. Facture au temps passé (lot suivant)
+
+8. **Unité et bornes** du réglage « temps minimum facturé » : en minutes comme le pas ? De combien à combien ?
+9. **Ce réglage peut-il être vidé ?** Comme le pas, ce qui refuserait alors les devis au temps passé. Ou revient-il à 1 h ? Ou reste-t-il toujours renseigné ?
+10. **Plancher de la facture** : les heures de la ligne au temps passé du devis, qui valent au moins le minimum figé, ou le minimum figé lui-même ?
+11. **Le pas s'applique-t-il au-delà du temps minimum réglé** (par exemple 30 min ou 2 h), et non plus au-delà de la première heure, comme le dit aujourd'hui la mention du devis ?
+
+## 4. Choix par défaut déjà en place, à confirmer
+
+- **Devis au temps passé** :
+  - bornes du pas de 1 à 60 minutes ;
+  - au-delà d'une heure, quantité au millième plutôt qu'en multiples du pas ;
+  - refus d'un prix différent de celui de la main d'œuvre ;
+  - devis convertible en chantier ou en contrat sans le marqueur « au temps passé » ;
+  - faut-il borner la TVA du catalogue, que le catalogue accepte aujourd'hui hors de 0 à 100 % ?
+- **Devis annulé (lot 4 suite)** : un contrat ou une intervention annulés avec leur devis peuvent encore être facturés. Faut-il le refuser ?
+- **Catalogue dans les devis** : le prix d'achat prévu des lignes doit-il alimenter le budget du chantier ? Une prestation au forfait compte-t-elle pour une heure vendue ?
+
+Les questions 1 à 3 bloquent la seconde PR du suivi, et les questions 8 à 11 la facture au temps passé. Si vous le souhaitez, je vous les pose sous forme de choix à cocher, ma proposition en premier.
+```
+
+Nelson a répondu (23:23 UTC). Sa réponse est citée mot pour mot, retours à la ligne gardés ; dans le message, la ligne « 3. » porte en outre une espace finale, omise ici :
+
+```text
+1.
+1. Les suites seulement
+2. Je suis ta proposition
+3. Je suis ta proposition
+
+2.
+4. Ses heures ne sont pas valorisée et sont signalées
+5. Les prix sous contrat et hirs contrat serint’marametrer des les parametres de la societé. La marge se calcule a l’heure
+6. Oui une main d’oeuvre desactivé valorise encore les heures.
+7. Oui cela suffit
+
+3.
+8. Oui en minutes avec pas de 15minuntes
+9. Il revient a 1h
+10. Oui le minimum figé
+11. Oui
+ 4.borne du pas de 15 minutes minimum et pas de 15 minutes au minimum, au dela d’une heure pas de 15 minutes minimum le tout est en parametrage de la societe l’heure minimum du temps passé ainsi que le pas en cas de depassement.oui refus d’un prix differents
+Oui devis convertible en chantier ou en contrat sans marqueur temps passer
+Il faut les tva francaise que ce soit l’autoliquidation a 0%, 5,5%, ou 10% ou 20%
+Devis annulé : il faut refuser zn cas d’annulation car pas d’intervention ou contrat donc pas de facture
+Catalogue dans les devis :  oui ca alimente forcément le budget. Un forfait compte pour un forfait donc d’une journee ou d’une demi journée. L’heure est une heure de main d’oeuvre, donc soit on compte un ou plusizur forfait pour le calcul des heures prevu poivr le chantier et ainsi le prix soit a l’heure eg dans ces cas la on precise le nombre d’heure au total pour le devis. Cela peut etre des heures special.
+```
+
+Claude Code a ensuite posé quatre questions à choix (23:24 UTC) sur les points qui lui restaient ambigus ; Nelson a choisi une option à chacune (23:32 UTC), chaque fois l'option recommandée. Question, option choisie et sa description, options écartées et leurs descriptions, citées mot pour mot :
+
+- Question : « Point 6, première partie : les heures d'un SAV hors contrat se valorisent-elles au prix de la main d'œuvre du jour où l'heure est saisie (prix figé sur l'heure, comme le taux chargé), ou au prix actuel de la main d'œuvre (recalculé si le prix change) ? » (en-tête « Prix figé »). Option choisie : « Figé à la saisie (Recommandé) », décrite ainsi : « Le prix de vente de la main d'œuvre est copié sur l'heure le jour de sa saisie ; un changement de tarif ne modifie pas la marge des heures déjà saisies. ». Option écartée : « Prix actuel » (« La marge est recalculée au prix courant de la main d'œuvre : un changement de tarif modifie la marge des heures passées. »).
+- Question : « Temps passé, réglages de la société en minutes par pas de 15 minutes : quelles bornes ? Et, sur le devis, la quantité de la ligne au temps passé au-delà du minimum suit-elle le pas (par exemple 1 h 15, 1 h 30) ? » (en-tête « Bornes »). Option choisie : « 15 min à 8 h, ligne au pas (Recommandé) », décrite ainsi : « Minimum facturé et pas : multiples de 15 minutes, le pas de 15 à 60 min, le minimum de 15 min à 8 h ; vidé, le minimum revient à 1 h. La quantité de la ligne vaut le minimum, puis des multiples du pas. ». Options écartées : « 15 min, sans plafond, ligne au pas » (« Multiples de 15 minutes sans maximum ; la quantité de la ligne suit le pas au-delà du minimum. ») ; « Bornes au choix, ligne libre » (« Multiples de 15 minutes pour les réglages, mais la quantité de la ligne reste libre (au millième), le pas ne jouant qu'à la facture. »).
+- Question : « TVA limitée aux taux français, 0 % (autoliquidation), 5,5 %, 10 % et 20 % : où l'appliquer ? » (en-tête « TVA »). Option choisie : « Catalogue, devis, factures (Recommandé) », décrite ainsi : « Seuls ces quatre taux sont acceptés sur les fiches du catalogue, les lignes de devis et les lignes de facture créées ensuite ; les factures déjà émises restent figées. ». Options écartées : « Catalogue et devis » (« Les quatre taux sont imposés au catalogue et aux devis ; les factures gardent la saisie actuelle. ») ; « Catalogue seulement » (« Seules les fiches du catalogue sont limitées aux quatre taux. »).
+- Question : « Heures prévues d'un chantier à partir du devis : une ligne de main d'œuvre au forfait journée compte-t-elle les heures par jour de sa main d'œuvre (par exemple 7 h), une demi-journée la moitié, et une ligne à l'heure son nombre d'heures ? Et que sont les « heures spéciales » ? » (en-tête « Heures »). Option choisie : « Heures par jour de la MO (Recommandé) », décrite ainsi : « Forfait journée = heures par jour de la main d'œuvre ; demi-journée = la moitié ; ligne à l'heure = sa quantité. Les « heures spéciales » (nuit, week-end, astreinte ?) seront précisées dans un lot à part. ». Option écartée : « Nombre d'heures saisi sur le devis » (« Le devis indique lui-même le nombre total d'heures prévues, quelles que soient les lignes, et c'est ce nombre qui alimente le chantier. »).
+
+Réponse enregistrée par l'outil de questions, citée mot pour mot :
+
+« Your questions have been answered: "Point 6, première partie : les heures d'un SAV hors contrat se valorisent-elles au prix de la main d'œuvre du jour où l'heure est saisie (prix figé sur l'heure, comme le taux chargé), ou au prix actuel de la main d'œuvre (recalculé si le prix change) ?"="Figé à la saisie (Recommandé)", "Temps passé, réglages de la société en minutes par pas de 15 minutes : quelles bornes ? Et, sur le devis, la quantité de la ligne au temps passé au-delà du minimum suit-elle le pas (par exemple 1 h 15, 1 h 30) ?"="15 min à 8 h, ligne au pas (Recommandé)", "TVA limitée aux taux français, 0 % (autoliquidation), 5,5 %, 10 % et 20 % : où l'appliquer ?"="Catalogue, devis, factures (Recommandé)", "Heures prévues d'un chantier à partir du devis : une ligne de main d'œuvre au forfait journée compte-t-elle les heures par jour de sa main d'œuvre (par exemple 7 h), une demi-journée la moitié, et une ligne à l'heure son nombre d'heures ? Et que sont les « heures spéciales » ?"="Heures par jour de la MO (Recommandé)". You can now continue with these answers in mind. »
+
+Claude Code a posé une cinquième question à choix (23:33 UTC), sur le point 5 ; la session de travail s'est interrompue avant toute réponse, et la question reste ouverte (point 5 ci-dessous ; passation, section 3). Question et options, citées mot pour mot :
+
+- Question : « Point 5 : « Les prix sous contrat et hors contrat seront paramétrés dans les paramètres de la société ». Aujourd'hui, chaque main d'œuvre du catalogue (paramétrage de la société) porte déjà un prix hors contrat et un prix sous contrat. Est-ce bien ceci : la marge d'une visite de contrat et de ses suites utilise le prix sous contrat, celle d'un SAV hors contrat le prix hors contrat, à l'heure ? » (en-tête « Prix »). Options : « Oui, prix du catalogue (Recommandé) » (« On garde les prix déjà paramétrés sur chaque main d'œuvre du catalogue : sous contrat pour les visites et leurs suites, hors contrat pour le SAV hors contrat, à l'heure. ») ; « Nouveau réglage société » (« Un réglage général de la société, distinct des mains d'œuvre du catalogue, fixe le prix à l'heure sous contrat et hors contrat pour la marge. »).
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin. Rien n'est codé par la PR qui consigne ces décisions ; chaque lot concerné demandera sa propre validation comptable avant mise en service ([passation](ROADMAP-PASSATION.md#5-préalables-à-la-mise-en-service-et-contrat-dune-pr), section 5). Les numéros suivent ceux du message de Claude Code, la partie « 4. » de la réponse étant lue aux points 12 à 16 ; ce que Nelson n'a pas dit est signalé comme lecture ou choix par défaut, à confirmer, ou posé en question ([passation](ROADMAP-PASSATION.md#3-questions-ouvertes-pour-nelson), section 3).
+
+**Seconde PR de l'intervention de suivi liée (facturation et marge)**
+
+1. **Coûts des suites et marge du chantier** (« Les suites seulement »). Parmi les interventions rattachées à l'affaire d'un chantier, seules les suites voient leurs coûts entrer dans la marge du chantier : leurs heures, au taux horaire chargé figé sur chaque heure, et leur matériel s'ajoutent à ses dépenses réelles. Les autres interventions rattachées à l'affaire, dont l'intervention initiale d'une suite, restent hors de cette marge, comme aujourd'hui. Lecture à confirmer : une suite de suite compte comme une suite. Aujourd'hui, seule une visite d'un contrat actif reçoit du matériel ; une curative ne porte que des heures.
+2. **Suite d'une intervention issue d'un devis converti en intervention, sans chantier** (« Je suis ta proposition »). La proposition est suivie : « une marge de l'intervention initiale, égale au total HT du devis moins les coûts de l'intervention et de ses suites, visible de l'administration ». La suite n'est pas facturée en plus (point 13 du 24-10-2026). Lectures à confirmer : les coûts sont ceux du point 1 ; « ses suites » comprend les suites de ses suites ; le devis est celui de la conversion qui a créé l'intervention ; une intervention au temps passé, issue d'un devis au temps passé dont le total ne fixe pas le prix final, relève du point 3, et non de celui-ci.
+3. **Suite d'une intervention au temps passé** (« Je suis ta proposition »). La proposition est suivie : « ses heures s'ajoutent à la facture au temps passé de l'intervention initiale, au prix et au pas du devis, dans le lot « facture au temps passé » ». La seconde PR de l'intervention de suivi liée ne facture donc pas ces suites. Choix par défaut, à confirmer : la suite ne reçoit pas le marqueur « au temps passé », que la première PR ne reporte pas ; la facture la retrouve par son lien à l'intervention initiale. Question pour le lot (section 3) : le minimum figé et l'arrondi au pas s'appliquent-ils une fois au total des heures de l'intervention et de ses suites, ce que veut la lecture retenue (une seule facture), ou à chacune ?
+
+La seconde PR porte donc les points 1 et 2 et l'information du client à l'ouverture de la suite d'une curative, affichée dans le suivi SAV (points 13 et 23 du 24-10-2026) ; la suite d'une visite de contrat reste sans incidence de facturation (point 13).
+
+**Marge d'un SAV hors contrat, sans devis ni chantier**
+
+4. **Intervenant rattaché à aucune main d'œuvre** (« Ses heures ne sont pas valorisée et sont signalées »). Ses heures n'ont pas de prix de vente : elles ne sont pas valorisées dans la marge, et la marge le signale. Ni main d'œuvre par défaut, ni refus de la saisie. Lecture à confirmer : leur coût, au taux horaire chargé, reste compté, et le signalement dit la marge incomplète.
+5. **Prix et calcul de la marge** (« Les prix sous contrat et hirs contrat serint’marametrer des les parametres de la societé. La marge se calcule a l’heure »). La marge se calcule à l'heure, jamais au forfait jour, quel que soit le nombre d'heures. Lecture à confirmer, la cinquième question à choix étant restée sans réponse : les « parametres de la societé » sont les mains d'œuvre du catalogue, que la société paramètre et qui portent déjà chacune un prix à l'heure hors contrat et sous contrat (décision « Dans le catalogue » du 24-10-2026, préférée alors à un réglage à part) ; la marge d'un SAV hors contrat prend le prix à l'heure hors contrat de la main d'œuvre de l'intervenant, le prix sous contrat valant pour les visites de contrat et leurs suites. Un réglage général de la société, distinct des mains d'œuvre, reste l'autre lecture possible : la question est posée en section 3, et la PR de cette marge attend sa réponse.
+6. **Prix figé et main d'œuvre désactivée** (« Figé à la saisie » ; « Oui une main d’oeuvre desactivé valorise encore les heures. »). Le prix de vente à l'heure de la main d'œuvre de l'intervenant est copié sur l'heure le jour de sa saisie, comme le taux horaire chargé (`tauxHoraireApplique`) : un changement de tarif ne modifie pas la marge des heures déjà saisies. Un rattachement gardé vers une main d'œuvre désactivée valorise encore les heures, y compris celles saisies après la désactivation. Lectures à confirmer : comme le taux horaire chargé, le prix copié ne change pas quand l'heure est corrigée ; une heure saisie avant le lot n'a pas de prix copié (aucune reprise, Iris n'étant pas en production).
+7. **Historique des prix** (« Oui cela suffit »). L'historique des prix d'une main d'œuvre reste celui du journal des paramètres et des droits, conservé 90 jours au plus ; aucun historique plus long n'est créé. Le prix figé sur chaque heure (point 6) garde de toute façon le prix appliqué.
+
+**Facture au temps passé**
+
+8. **Unité et bornes des réglages** (« Oui en minutes avec pas de 15minuntes » ; partie « 4. » de la réponse : « borne du pas de 15 minutes minimum et pas de 15 minutes au minimum, au dela d’une heure pas de 15 minutes minimum le tout est en parametrage de la societe l’heure minimum du temps passé ainsi que le pas en cas de depassement » ; « 15 min à 8 h, ligne au pas »). Le temps minimum facturé et le pas du temps passé sont deux réglages de la société, en minutes, par multiples de 15 minutes : le minimum de 15 minutes à 8 heures, le pas de 15 à 60 minutes. Le pas, aujourd'hui un entier de 1 à 60 minutes, n'admettra plus que 15, 30, 45 ou 60 minutes ; un devis déjà fait garde son pas figé. Ces changements viendront avec le lot « facture au temps passé ».
+9. **Réglage vidé** (« Il revient a 1h »). Vidé, le temps minimum facturé revient à une heure : il a toujours une valeur. Le pas, lui, reste vide au démarrage, et un devis au temps passé est refusé tant qu'il n'est pas réglé (décision « Aucune, à régler » du 25-10-2026, inchangée).
+10. **Plancher de la facture** (« Oui le minimum figé »). La facture d'une intervention au temps passé reprend les heures saisies, arrondies au pas, avec au moins le temps minimum figé sur le devis, et non les heures de la ligne au temps passé quand celle-ci en compte davantage. Au-delà du minimum, les heures de la ligne sont donc une prévision, comptée dans le total du devis, et non un minimum facturé. Question pour le lot (section 3) : ce que dit alors la mention du devis, qui annonce aujourd'hui « H heures minimum facturées » et « Le total de ce devis est un minimum », ce qui n'est plus exact quand la ligne dépasse le minimum.
+11. **Pas au-delà du minimum** (« Oui »). Le pas s'applique au-delà du temps minimum figé sur le devis (par exemple 30 minutes ou 2 heures), et non plus au-delà de la première heure ; la mention du devis le dira avec le lot « facture au temps passé ».
+
+**Choix par défaut à confirmer et questions du catalogue (partie « 4. » de la réponse)**
+
+12. **Devis au temps passé**. Les bornes du pas deviennent 15 à 60 minutes, par multiples de 15 (point 8). La quantité de la ligne au temps passé vaut le minimum figé, puis des multiples du pas (« au dela d’une heure pas de 15 minutes minimum » ; « ligne au pas ») : par exemple 1 h, 1 h 15 ou 1 h 30 avec un minimum d'une heure et un pas de 15 minutes, au lieu du millième aujourd'hui ; changement du lot « facture au temps passé ». Le refus d'un prix différent de celui de la main d'œuvre est confirmé (« oui refus d’un prix differents »), comme les conversions en chantier ou en contrat sans marqueur (« Oui devis convertible en chantier ou en contrat sans marqueur temps passer »).
+13. **TVA française** (« Il faut les tva francaise que ce soit l’autoliquidation a 0%, 5,5%, ou 10% ou 20% » ; « Catalogue, devis, factures »). Seuls quatre taux sont acceptés : 0 % (autoliquidation), 5,5 %, 10 % et 20 %, sur les fiches du catalogue, mains d'œuvre comprises, sur les lignes de devis et sur les lignes de facture créées après le lot ; les factures déjà émises restent figées. Aujourd'hui, devis, factures et avoirs acceptent tout taux de 0 à 100 % au centième, et le catalogue un taux plus large (#324). Lecture à confirmer : les lignes d'un avoir partiel suivent les mêmes taux. Questions pour le lot, avec le cabinet (section 3) : la mention d'autoliquidation à imprimer sur une facture à 0 %, et l'usage du 0 % pour une exonération ou une vente hors de France, qui demandent d'autres mentions. Nouveau lot, prévu.
+14. **Contrat ou intervention annulés** (« Devis annulé : il faut refuser zn cas d’annulation car pas d’intervention ou contrat donc pas de facture »). Une facture ne se crée plus sur un contrat ou une intervention annulés avec leur devis, y compris pour les visites réalisées avant l'annulation du contrat. Aujourd'hui, l'écran Factures propose le contrat annulé, et l'API accepte l'intervention annulée. Lecture à confirmer : la raison donnée (« pas d’intervention ou contrat donc pas de facture ») vaut pour toute intervention annulée, depuis sa fiche comme avec son devis. Les deux constats rattachés à la question (une facture déjà créée sur le contrat n'empêche ni ne signale l'annulation du devis ; des heures ou du matériel saisis avant le début d'une intervention ne refusent pas l'annulation du devis) ne sont pas tranchés par cette réponse et restent en question (section 3). Nouveau lot, prévu.
+15. **Budget du chantier** (« Catalogue dans les devis :  oui ca alimente forcément le budget. »). Le prix d'achat prévu des lignes de devis alimente le chantier ouvert par la conversion (budget matériel prévu, marge estimée), à la place de l'estimation par la moyenne des chantiers terminés. Question pour le lot (section 3) : une ligne de fourniture sans prix d'achat prévu, facultatif aujourd'hui. Nouveau lot, prévu, avec le point 16.
+16. **Heures prévues du chantier** (« Un forfait compte pour un forfait donc d’une journee ou d’une demi journée. L’heure est une heure de main d’oeuvre, donc soit on compte un ou plusizur forfait pour le calcul des heures prevu poivr le chantier et ainsi le prix soit a l’heure eg dans ces cas la on precise le nombre d’heure au total pour le devis. Cela peut etre des heures special. » ; « Heures par jour de la MO »). Les heures prévues d'un chantier ouvert depuis un devis comptent une ligne de main d'œuvre au forfait journée pour les heures par jour de sa main d'œuvre, une demi-journée pour la moitié, une ligne à l'heure pour sa quantité ; une prestation au forfait n'y compte plus pour une heure. Le nombre d'heures n'est pas saisi sur le devis (option écartée). Lecture à confirmer : « on precise le nombre d’heure au total pour le devis » veut dire que le devis affiche le total des heures prévues ainsi calculé. Questions pour le lot (section 3) : comment une ligne de devis se déclare au forfait journée ou demi-journée, son unité étant un libellé libre et aucun devis ne proposant aujourd'hui le forfait jour d'une main d'œuvre ; le prix d'une demi-journée ; les heures d'une prestation au forfait qui n'est pas une main d'œuvre du catalogue ; ce que sont les « heures spéciales » (nuit, week-end, astreinte ?), à préciser dans un lot à part.
+
+**Découpage et ordre des lots** (choix par défaut, à confirmer). La seconde PR de l'intervention de suivi liée porte les points 1 et 2 et l'information d'une curative. La marge d'un SAV hors contrat (points 4 à 7), que la description de cette seconde PR citait (« hors contrat », décision « Deux PR » du 26-10-2026), vient dans une PR à part, après la facture au temps passé : sa question de prix (point 5) attend une réponse, et la facture au temps passé reste juste après l'intervention de suivi liée, comme Nelson l'a décidé le 26-10-2026. Ordre proposé : la seconde PR de l'intervention de suivi liée, la facture au temps passé (points 3 et 8 à 12), la marge d'un SAV hors contrat, puis les nouveaux lots : refus de facturer un contrat ou une intervention annulés (point 14), TVA française (point 13), budget et heures prévues du chantier (points 15 et 16) ; les deux lots de droits quand Nelson le voudra.
+
+**Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; les mentions suivantes y sont levées ou modifiées par la présente section :
+
+- décisions du 24-10-2026 sur la remise à planifier : point 13 (« au temps passé : la suite a une incidence ; elle se facture au temps passé » ; « les coûts SAV n'entrent dans la marge d'aucun chantier, même rattaché »), précisé par les points 1 à 3 ; point 20 (« il facture obligatoirement au moins une heure, hors coût du matériel, et le temps au-delà d'une heure en plus »), le minimum étant un réglage de la société depuis les décisions du 26-10-2026 et le pas jouant au-delà de ce minimum (point 11) ;
+- décisions du 24-10-2026 sur les lots prévus : point 6 (« ses questions (intervenant sans main d'œuvre, prix sous contrat, forfait jour) sont posées en section 3 »), tranchées par les points 4 à 6, sauf la lecture du point 5 ; point 7 (« Au-delà de la première heure, le temps se facture par un pas réglé par la société »), le pas jouant au-delà du minimum figé (point 11), dans les bornes du point 8 ;
+- validation du 24-10-2026 sur la main d'œuvre au catalogue, point 2 (« Les questions ouvertes du lot … restent ouvertes »), tranchées par les points 4 à 7, sauf la lecture du point 5 ;
+- décisions du 25-10-2026 sur le devis au temps passé : point 1 (refus d'un prix différent, choix par défaut), confirmé par le point 12 ; point 2 (« Les heures de la ligne sont le minimum facturé » ; quantité au millième au-delà d'une heure, choix par défaut ; « au-delà de la première heure » dans la mention), modifié par les points 10 à 12 ; point 3 (pas de 1 à 60 minutes, choix par défaut), remplacé par le point 8 ; point 4 (« avec au moins les heures de la ligne au temps passé » ; conversions sans marqueur, choix par défaut), modifié par le point 10 et confirmé par le point 12 ;
+- décisions du 26-10-2026 sur le temps passé et le catalogue : point 1 (« ses cinq questions encore ouvertes (section 3) le restent ») et point 2 (« Restent à cadrer avec ce lot, sans rien de tranché : l'unité et les bornes du réglage, la possibilité de le vider, le plancher de la facture et le pas au-delà du minimum »), tranchés par les points 8 à 13 ;
+- décisions du 26-10-2026 sur l'intervention de suivi liée, avant-dernier paragraphe (« pour la seconde PR (montants), le suivi de marge de la suite d'une intervention issue d'un devis converti en intervention, sans chantier, la facturation de la suite d'une intervention au temps passé avant le lot « facture au temps passé », et les questions du lot « main d'œuvre au catalogue » sur la valorisation des heures et la marge »), tranchés par les points 2 à 7, sauf la lecture du point 5.
