@@ -161,13 +161,18 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
       coutHoraireReference ??= contexte.coutHoraireSociete;
       // Au coût horaire du chantier : heures vendues × main-d'œuvre réelle ÷ heures réalisées, en
       // décimal (#198), pour retomber exactement sur le réel quand les heures vendues sont faites.
+      // Les heures des suites, comptées dans les heures réalisées, ne sont pas des heures vendues : elles
+      // s'ajoutent aux heures attendues au lieu d'en tenir lieu, sinon leur coût disparaîtrait de la
+      // marge estimée (audit n° 3 de #339 ; choix par défaut, à confirmer). Sans heure réalisée, aucune
+      // heure de suite : les deux autres hypothèses ne changent pas.
       const mainOeuvrePrevue = sourceCoutHoraire === 'CHANTIER'
-        ? regleDeTroisExacte(chantier.heuresVendues, moReel, heuresRealisees)
+        ? regleDeTroisExacte(sommeExacte(chantier.heuresVendues, coutsSuites.heures), moReel, heuresRealisees)
         : coutHoraireReference != null ? chantier.heuresVendues * coutHoraireReference : chantier.budgetMainOeuvreVendu;
       coutMainOeuvreAttendu = Math.max(moReel, mainOeuvrePrevue);
       ratioMateriel = contexte.ratioMaterielHistorique ?? 1;
       sourceMateriel = contexte.ratioMaterielHistorique != null ? 'HISTORIQUE' : 'VENDU';
-      coutMaterielAttendu = Math.max(materielReel, chantier.budgetMaterielVendu * ratioMateriel);
+      // Même lecture pour le matériel : celui des suites, non vendu, s'ajoute au matériel attendu.
+      coutMaterielAttendu = Math.max(materielReel, sommeExacte(chantier.budgetMaterielVendu * ratioMateriel, coutsSuites.materiel));
     }
     const coutEstime = sommeExacte(coutMainOeuvreAttendu, coutMaterielAttendu);
     margeEstimee = differenceExacte(chantier.budgetGlobalVendu, coutEstime);

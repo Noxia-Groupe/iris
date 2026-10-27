@@ -199,22 +199,26 @@ export function ancienneteSaisie(jours: number): string {
 }
 
 /** Libellé de l'hypothèse de coût horaire retenue pour l'estimation. Le coût horaire n'est
- * transmis qu'à l'administration : sans lui, l'hypothèse est décrite sans montant. */
-export function hypotheseCoutHoraire(e: EstimationMarge): string {
+ * transmis qu'à l'administration : sans lui, l'hypothèse est décrite sans montant. Les heures des
+ * suites SAV, non vendues, s'ajoutent aux heures vendues (cf. computeChantierMetrics). */
+export function hypotheseCoutHoraire(e: EstimationMarge, heuresSuites = 0): string {
   const taux = e.coutHoraireReference != null ? `à ${nombre(e.coutHoraireReference, 2)} €/h, ` : 'au ';
   switch (e.sourceCoutHoraire) {
-    case 'CHANTIER': return `heures vendues ${taux}coût moyen réellement appliqué sur ce chantier`;
+    case 'CHANTIER': return heuresSuites > 0
+      ? `heures vendues et ${nombre(heuresSuites, 2)} h de suites SAV ${taux}coût moyen réellement appliqué sur ce chantier et ses suites`
+      : `heures vendues ${taux}coût moyen réellement appliqué sur ce chantier`;
     case 'SOCIETE': return `heures vendues ${taux}coût moyen de la société (aucune heure encore saisie ici)`;
     case 'VENDU': return 'budget main-d’œuvre vendu (aucun coût horaire connu)';
     case 'REEL': return 'coût réel (chantier terminé)';
   }
 }
 
-/** Libellé de l'hypothèse retenue pour le matériel. */
-export function hypotheseMateriel(e: EstimationMarge): string {
+/** Libellé de l'hypothèse retenue pour le matériel ; celui des suites SAV, non vendu, s'y ajoute. */
+export function hypotheseMateriel(e: EstimationMarge, materielSuites?: number | null): string {
+  const suites = materielSuites ? ', plus le matériel des suites SAV' : '';
   switch (e.sourceMateriel) {
-    case 'HISTORIQUE': return `matériel vendu × ${nombre((e.ratioMateriel ?? 1) * 100, 0)} %, ratio d’achat observé sur les chantiers terminés`;
-    case 'VENDU': return 'matériel restant compté à son prix de vente (aucun chantier terminé pour l’instant)';
+    case 'HISTORIQUE': return `matériel vendu × ${nombre((e.ratioMateriel ?? 1) * 100, 0)} %, ratio d’achat observé sur les chantiers terminés${suites}`;
+    case 'VENDU': return `matériel restant compté à son prix de vente (aucun chantier terminé pour l’instant)${suites}`;
     case 'REEL': return 'achats réels (chantier terminé)';
   }
 }

@@ -909,8 +909,8 @@ const ChantierDetail = () => {
                     </div>
                   </div>
                   <ul className="mt-2 mb-0 pl-4 text-xs text-gray-600 space-y-0.5">
-                    <li>Main-d’œuvre attendue : {estimation.coutMainOeuvreAttendu != null && <><strong>{fmtEuro(estimation.coutMainOeuvreAttendu)}</strong> — </>}{hypotheseCoutHoraire(estimation)}.</li>
-                    <li>Matériel attendu : <strong>{fmtEuro(estimation.coutMaterielAttendu)}</strong> — {hypotheseMateriel(estimation)}.</li>
+                    <li>Main-d’œuvre attendue : {estimation.coutMainOeuvreAttendu != null && <><strong>{fmtEuro(estimation.coutMainOeuvreAttendu)}</strong> — </>}{hypotheseCoutHoraire(estimation, metrics.coutsSuites?.heures)}.</li>
+                    <li>Matériel attendu : <strong>{fmtEuro(estimation.coutMaterielAttendu)}</strong> — {hypotheseMateriel(estimation, metrics.coutsSuites?.materiel)}.</li>
                     <li>Un poste n’est jamais estimé sous ce qui a déjà été dépensé.</li>
                   </ul>
                 </div>

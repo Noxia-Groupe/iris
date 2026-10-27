@@ -164,6 +164,14 @@ test('file du planning : « Créer la suite » d’une visite à suivre sans rap
     await dialogue.getByRole('button', { name: 'Annuler' }).click();
     await expect(dialogue).toHaveCount(0);
   }
+  // Audit interne 3 de #339 : sur sa fiche, la suite d'une visite n'a pas le rappel du hors contrat, celle d'une curative l'a.
+  for (const [intervention, rappels] of [[visite, 0], [curative, 1]] as const) {
+    const suite = await envoyer('post', `/interventions/${intervention.id}/suites`, {}) as { id: string; reference: string };
+    await page.goto(`/interventions/${suite.id}`, { waitUntil: 'networkidle' });
+    const carteSuite = page.locator('article', { hasText: suite.reference });
+    await expect(carteSuite.getByRole('button', { name: 'Créer la suite' })).toBeVisible();
+    await expect(carteSuite.getByRole('note')).toHaveCount(rappels);
+  }
 });
 
 // Audit interne 2 de #339 : l'écran du technicien suit l'API (heures seules, aucun montant), et le rappel
@@ -207,4 +215,22 @@ test('rappel annoncé par le dialogue et absent de la fiche de l’intervention 
   expect((await dialogue.getAttribute('aria-describedby'))?.split(' ')).toContain(noteId);
   await dialogue.getByRole('button', { name: 'Annuler' }).click();
   await expect(dialogue).toHaveCount(0);
+});
+
+// Audit interne 3 de #339 : sans coût de suite, la fiche chantier n'a pas de ligne des suites ; ensuite, des heures
+// décimales s'y lisent au format français.
+test('fiche chantier : pas de ligne des suites sans coût de suite, puis des heures au format français', async ({ session, request, creerClient, allerSurPageAdmin }) => {
+  const { envoyer, client, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'marge-sans-suite');
+  const devis = await devisSigne('Affaire sans coût de suite');
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  const initiale = await envoyer('post', '/interventions', { clientId: client.id, titre: 'Dépannage sans coût de suite', chantierId: chantier.id }) as { id: string };
+  await heuresDuTechnicien(initiale.id, 3); // l'intervention initiale n'est pas une suite
+  const suite = await envoyer('post', `/interventions/${initiale.id}/suites`, {}) as { id: string };
+  const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  // Les métriques sont affichées (aucune heure au réel du chantier) : la suite, sans saisie, n'a pas de ligne.
+  await expect(page.getByText('0.00 h', { exact: true }).first()).toBeVisible();
+  await expect(page.locator('[data-couts-suites]')).toHaveCount(0);
+  await heuresDuTechnicien(suite.id, 1.5);
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.locator('[data-couts-suites]')).toHaveText(/comptées dans le réel : 1,5 h · matériel 0,00\s€ · main-d’œuvre 60,00\s€\.$/);
 });
