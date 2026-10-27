@@ -20959,6 +20959,21 @@ if (!TEST_DATABASE_URL) {
       assert.equal(surInitiale.status, 201, JSON.stringify(surInitiale.body));
     });
 
+    test('chantier clôturé : aucune suite ne peut plus y être créée, administration comprise, jusqu’à sa réouverture', async () => {
+      const chantier = await creerChantier('clôturé sans suite');
+      const initiale = await interventionSur('initiale du chantier clôturé sans suite', chantier.id);
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-15T00:00:00Z') } });
+      for (const auth of [admin, jeton('conducteur')]) {
+        const refus = await envoyer('post', `/api/interventions/${initiale.id}/suites`, auth, {});
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /clôturé/);
+      }
+      assert.equal(await prisma.intervention.count({ where: { interventionInitialeId: initiale.id } }), 0, 'aucune suite créée');
+      // Rouvert, le chantier accepte de nouveau une suite.
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'EN_COURS' } });
+      await suiteDe(initiale.id);
+    });
+
     test('affaire annulée : les coûts de ses suites se refusent à tous, administration comprise', async () => {
       const chantier = await creerChantier('annulé');
       const suite = await suiteDe((await interventionSur('initiale du chantier annulé', chantier.id)).id);
@@ -20970,8 +20985,26 @@ if (!TEST_DATABASE_URL) {
         assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
         assert.match(reponse.body.error, /annulée/);
       }
-      // Le conducteur ne voit plus les interventions d'une affaire annulée (périmètre SAV, inchangé).
+      // Le conducteur qui ne voyait la suite que comme responsable de l'affaire ne la voit plus (périmètre SAV,
+      // inchangé) ; s'il l'a créée, il la voit encore et reçoit le refus (409, test suivant).
       assert.equal((await archiver(suite.id, heureSuite.id, jeton('conducteur'))).status, 404);
+      assert.equal(await heuresVivantes(suite.id), 1, 'rien n’est écrit');
+    });
+
+    test('affaire annulée : le conducteur qui a créé la suite la voit encore et reçoit le refus (409), non un 404', async () => {
+      const chantier = await creerChantier('annulé, suite du conducteur');
+      const initiale = await interventionSur('initiale, suite du conducteur', chantier.id);
+      const creation = await envoyer('post', `/api/interventions/${initiale.id}/suites`, jeton('conducteur'), {});
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const suite = creation.body;
+      await affecter(suite.id);
+      assert.equal((await saisir(suite.id)).status, 201);
+      const heureSuite = await prisma.coutInterventionHeure.findFirstOrThrow({ where: { interventionId: suite.id } });
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: adminId, motifAnnulation: 'TEST affaire annulée' } });
+      assert.equal((await request(app).get(`/api/interventions/${suite.id}`).set(jeton('conducteur'))).status, 200, 'le créateur voit encore la suite');
+      const refus = await archiver(suite.id, heureSuite.id, jeton('conducteur'));
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'L’affaire de cette suite est annulée : plus aucun coût ne peut y être saisi.');
       assert.equal(await heuresVivantes(suite.id), 1, 'rien n’est écrit');
     });
 
@@ -21019,6 +21052,121 @@ if (!TEST_DATABASE_URL) {
       const annulation = await annulerDevis(devis.id);
       assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
       assert.equal((await saisir(suite.id)).status, 409);
+    });
+
+    // --- Tests proposés par l'audit indépendant de la PR #341 ---
+    // Une transaction de test tient une ligne ; la requête doit l'attendre, puis relire l'état validé entre-temps.
+    const attendreBlocage = async (tx) => {
+      const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+      for (let tour = 0; tour < 150; tour += 1) {
+        if ((await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0) return true;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return false;
+    };
+
+    test('clôture concurrente : saisie, correction et archivage relisent l’affaire sous verrou, et rien n’est écrit', async () => {
+      const chantier = await creerChantier('clôturé pendant la saisie');
+      const suite = await suiteDe((await interventionSur('initiale clôturée pendant la saisie', chantier.id)).id);
+      await affecter(suite.id);
+      assert.equal((await saisir(suite.id)).status, 201);
+      const heureSuite = await prisma.coutInterventionHeure.findFirstOrThrow({ where: { interventionId: suite.id } });
+      const cloturerPendant = async (requete) => {
+        let reponse;
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'EN_COURS' } });
+        // La clôture, écrite mais pas encore validée, laisse passer la lecture faite avant la transaction ;
+        // seule la garde relue sous le verrou partagé de l'affaire peut l'attendre.
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`UPDATE "Chantier" SET "statut" = 'TERMINE' WHERE "id" = ${chantier.id}`;
+          reponse = requete().then((r) => r);
+          assert.equal(await attendreBlocage(tx), true, 'la requête attend le verrou de l’affaire');
+        }, { timeout: 20000 });
+        return reponse;
+      };
+      // Saisie et correction du technicien (transactions sérialisables) : refus de sérialisation, 409.
+      const saisie = await cloturerPendant(() => saisir(suite.id));
+      assert.equal(saisie.status, 409, JSON.stringify(saisie.body));
+      const correction = await cloturerPendant(() => envoyer('patch', `/api/interventions/${suite.id}/couts/heures/${heureSuite.id}`, jeton('technicien'), { nbrHeures: 3, motifCorrection: 'TEST correction concurrente' }));
+      assert.equal(correction.status, 409, JSON.stringify(correction.body));
+      // Archivage du conducteur (lecture validée) : l'affaire relue clôturée, 403.
+      const archivage = await cloturerPendant(() => archiver(suite.id, heureSuite.id, jeton('conducteur')));
+      assert.equal(archivage.status, 403, JSON.stringify(archivage.body));
+      assert.equal(archivage.body.error, 'Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés.');
+      const heures = await prisma.coutInterventionHeure.findMany({ where: { interventionId: suite.id } });
+      assert.deepEqual(heures.map((heure) => [Number(heure.nbrHeures), heure.archivedAt]), [[1.5, null]], 'ni heure ajoutée, ni correction, ni archivage');
+    });
+
+    test('restauration : refusée au conducteur sur un chantier clôturé, et à l’administration sur une affaire annulée', async () => {
+      const chantier = await creerChantier('restauration');
+      const suite = await suiteDe((await interventionSur('initiale restauration', chantier.id)).id);
+      await affecter(suite.id);
+      assert.equal((await saisir(suite.id)).status, 201);
+      const heureSuite = await prisma.coutInterventionHeure.findFirstOrThrow({ where: { interventionId: suite.id } });
+      assert.equal((await archiver(suite.id, heureSuite.id, admin)).status, 200);
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-15T00:00:00Z') } });
+      const conducteur = await archiver(suite.id, heureSuite.id, jeton('conducteur'), 'restaurer');
+      assert.equal(conducteur.status, 403, JSON.stringify(conducteur.body));
+      assert.equal(conducteur.body.error, 'Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés.');
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: adminId, motifAnnulation: 'TEST affaire annulée' } });
+      const administration = await archiver(suite.id, heureSuite.id, admin, 'restaurer');
+      assert.equal(administration.status, 409, JSON.stringify(administration.body));
+      assert.equal(administration.body.error, 'L’affaire de cette suite est annulée : plus aucun coût ne peut y être saisi.');
+      assert.equal(await heuresVivantes(suite.id), 0, 'l’heure reste archivée, hors de la marge');
+    });
+
+    test('annulation du devis : une suite créée ou démarrée pendant l’attente des verrous la fait refuser, sans rien écrire', async () => {
+      // Suite créée pendant que l'annulation attend le verrou de l'intervention issue du devis.
+      const { devis, cree: sav } = await devisConverti('Devis à suite concurrente', 'INTERVENTION');
+      const suite = await suiteDe(sav.id);
+      let reponse; let nouvelle;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${sav.id} FOR UPDATE`;
+        reponse = annulerDevis(devis.id).then((r) => r);
+        assert.equal(await attendreBlocage(tx), true, 'l’annulation attend le verrou de l’intervention');
+        nouvelle = await tx.intervention.create({ data: { reference: `TEST-${randomUUID()}`, clientId: client.id, interventionInitialeId: sav.id, titre: 'TEST Suite créée pendant l’attente', dateDemande: new Date('2026-10-01T00:00:00.000Z') } });
+      }, { timeout: 20000 });
+      const relance = await reponse;
+      assert.equal(relance.status, 409, JSON.stringify(relance.body));
+      assert.equal(relance.body.error, 'Une suite vient d’être créée pour l’intervention de ce devis : relancez l’annulation.');
+      assert.deepEqual([await statutDe(sav.id), await statutDe(suite.id), await statutDe(nouvelle.id)], ['A_PLANIFIER', 'A_PLANIFIER', 'A_PLANIFIER']);
+      assert.notEqual((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ANNULE');
+      // Relancée, elle annule aussi cette suite.
+      const reprise = await annulerDevis(devis.id);
+      assert.equal(reprise.status, 200, JSON.stringify(reprise.body));
+      assert.deepEqual([...reprise.body.interventionsAnnulees].sort(), [sav.id, suite.id, nouvelle.id].sort());
+
+      // Suite démarrée pendant que l'annulation attend son verrou : relue sous ce verrou, elle refuse l'annulation.
+      const second = await devisConverti('Devis à suite démarrée', 'INTERVENTION');
+      const suiteDemarree = await suiteDe(second.cree.id);
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${suiteDemarree.id} FOR UPDATE`;
+        reponse = annulerDevis(second.devis.id).then((r) => r);
+        assert.equal(await attendreBlocage(tx), true, 'l’annulation attend le verrou de la suite');
+        await tx.intervention.update({ where: { id: suiteDemarree.id }, data: { statut: 'EN_COURS' } });
+      }, { timeout: 20000 });
+      const refus = await reponse;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, `Annulation impossible : la suite ${suiteDemarree.reference} de l’intervention ${second.cree.reference} est en cours. Une affaire commencée ne s’annule pas.`);
+      assert.deepEqual([await statutDe(second.cree.id), await statutDe(suiteDemarree.id)], ['A_PLANIFIER', 'EN_COURS']);
+      assert.notEqual((await prisma.devis.findUniqueOrThrow({ where: { id: second.devis.id } })).statut, 'ANNULE');
+    });
+
+    test('saisie concurrente d’une annulation : les coûts des suites se comptent sous le verrou de l’affaire', async () => {
+      const { devis, cree: chantier } = await devisConverti('Devis au chantier, saisie concurrente', 'CHANTIER');
+      const suite = await suiteDe((await interventionSur('initiale, saisie concurrente', chantier.id)).id);
+      let reponse;
+      await prisma.$transaction(async (tx) => {
+        // Une saisie en cours : l'affaire tenue en partage, l'heure de la suite écrite mais pas encore validée.
+        await tx.$queryRaw`SELECT "id" FROM "Chantier" WHERE "id" = ${chantier.id} FOR SHARE`;
+        await tx.coutInterventionHeure.create({ data: { interventionId: suite.id, intervenantId: ficheTechnicien.id, date: new Date('2026-10-01T00:00:00Z'), nbrHeures: 1, tauxHoraireApplique: 40, createdById: comptes.technicien.id } });
+        reponse = annulerDevis(devis.id).then((r) => r);
+        assert.equal(await attendreBlocage(tx), true, 'l’annulation attend la saisie');
+      }, { timeout: 20000 });
+      const refus = await reponse;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /suites SAV de ce chantier portent déjà 1 coût/);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, 'EN_COURS');
+      assert.notEqual((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ANNULE');
     });
   });
 }

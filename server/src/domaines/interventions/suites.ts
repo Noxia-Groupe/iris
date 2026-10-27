@@ -154,10 +154,15 @@ export function enregistrerSuites(app: Express): void {
             throw new RefusSuivi(`Le contrat de cette visite commence le ${dateFrancaise(contrat.dateDebut)} : une suite couverte par le contrat se crée à partir de ce jour.`);
           }
         }
-        // Affaire reprise, en partage comme à la création d'une intervention : une annulation en cours de
-        // l'affaire est attendue, puis la suite est refusée.
-        if (actuelle.chantierId && !(await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "Chantier" WHERE "id" = ${actuelle.chantierId} AND "clientId" = ${actuelle.clientId} AND "annuleLe" IS NULL FOR SHARE`)).length) {
-          throw new RefusSuivi('L’affaire de cette intervention est annulée ou n’est plus celle de son client : aucune suite ne lui est rattachée.');
+        // Affaire reprise, en partage comme à la création d'une intervention : une annulation ou une clôture
+        // en cours de l'affaire est attendue, puis la suite est refusée. Sur une affaire clôturée, les coûts
+        // d'une suite se refusent (affaireSuite.ts) : la suite elle-même aussi, pour tous (décision de Nelson
+        // du 27-10-2026 à 21:41 UTC, « Oui refuser cette creation » ; choix par défaut, à confirmer : même
+        // l'administration, qui rouvre le chantier au besoin).
+        if (actuelle.chantierId) {
+          const affaire = (await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${actuelle.chantierId} AND "clientId" = ${actuelle.clientId} AND "annuleLe" IS NULL FOR SHARE`))[0];
+          if (!affaire) throw new RefusSuivi('L’affaire de cette intervention est annulée ou n’est plus celle de son client : aucune suite ne lui est rattachée.');
+          if (affaire.statut !== 'EN_COURS') throw new RefusSuivi('Le chantier de cette intervention est clôturé : aucune suite ne peut plus lui être rattachée. Rouvrez-le d’abord.');
         }
         const creee = await creerInterventionNumerotee(tx, req, annee, {
           clientId: actuelle.clientId, titre, chantierId: actuelle.chantierId, ...details,

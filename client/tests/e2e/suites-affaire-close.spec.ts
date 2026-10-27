@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import type { APIRequestContext, Browser, Page } from '@playwright/test';
 import { test, expect, dateDuJour } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
@@ -15,7 +16,11 @@ function jetonPour(userId: string) {
   return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
 }
 
-test('chantier clôturé : le technicien ne peut plus saisir ses heures sur une suite de l’affaire, et l’écran dit pourquoi', async ({ session, request, creerClient, browser }) => {
+// Prépare une suite d'affaire planifiée pour un technicien, sur un chantier ensuite clôturé, puis ouvre la
+// liste des interventions dans la session du technicien, à la taille d'écran demandée.
+type Outils = { session: { token: string }; request: APIRequestContext; creerClient: (libelle: string) => Promise<{ id: string }>; browser: Browser };
+
+async function suiteSurChantierClos({ session, request, creerClient, browser }: Outils, viewport?: { width: number; height: number }) {
   const envoyer = async (methode: 'post' | 'put' | 'patch', path: string, data?: object) => {
     const response = await request[methode](`${api}${path}`, { headers: { Authorization: `Bearer ${session.token}` }, data });
     expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
@@ -38,22 +43,47 @@ test('chantier clôturé : le technicien ne peut plus saisir ses heures sur une 
   await envoyer('put', `/interventions/${suite.id}/planning`, { dateDebut: jourIso, creneau: 'HEURES', heureDebut: '08:30', heureFin: '09:30', intervenantIds: [fiche.id] });
   await envoyer('patch', `/chantiers/${chantier.id}/statut`, { statut: 'TERMINE' });
 
-  const contexte = await browser.newContext();
+  const contexte = await browser.newContext(viewport ? { viewport } : {});
   const page = await contexte.newPage();
   await page.addInitScript(([token, user]) => {
     localStorage.setItem('token', token as string);
     localStorage.setItem('user', user as string);
   }, [jetonPour(technicien.id), JSON.stringify({ ...technicien, permissions: ['chantiers:read', 'clients:read'] })]);
+  await page.goto('/interventions', { waitUntil: 'networkidle' });
+  return { contexte, page, suite };
+}
+
+const REFUS = 'Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés.';
+
+async function saisirHeuresRefusees(page: Page, suite: { id: string; titre: string }) {
+  const carte = page.locator('article', { hasText: suite.titre });
+  await carte.getByPlaceholder('Date (JJ-MM-AAAA)').fill(dateDuJour());
+  await carte.getByPlaceholder('Heures').fill('1,5');
+  const saisie = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/interventions/${suite.id}/couts/heures`));
+  await carte.getByRole('button', { name: 'Enregistrer mes heures' }).click();
+  expect((await saisie).status()).toBe(403);
+  return carte;
+}
+
+test('chantier clôturé : le technicien ne peut plus saisir ses heures sur une suite de l’affaire, et l’écran dit pourquoi', async ({ session, request, creerClient, browser }) => {
+  const { contexte, page, suite } = await suiteSurChantierClos({ session, request, creerClient, browser });
   try {
-    await page.goto('/interventions', { waitUntil: 'networkidle' });
-    const carte = page.locator('article', { hasText: suite.titre });
-    await carte.getByPlaceholder('Date (JJ-MM-AAAA)').fill(dateDuJour());
-    await carte.getByPlaceholder('Heures').fill('1,5');
-    const saisie = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/interventions/${suite.id}/couts/heures`));
-    await carte.getByRole('button', { name: 'Enregistrer mes heures' }).click();
-    expect((await saisie).status()).toBe(403);
-    await expect(page.getByText('Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés.')).toBeVisible();
+    const carte = await saisirHeuresRefusees(page, suite);
+    await expect(page.getByText(REFUS)).toBeVisible();
     await expect(carte.getByText(`${dateDuJour()} — 1.5 h`)).toHaveCount(0);
+  } finally {
+    await contexte.close();
+  }
+});
+
+// Audit n° 1 de #341, note 8 : sur téléphone, le formulaire est bas dans la page ; le refus, affiché en tête,
+// doit revenir dans la vue.
+test('chantier clôturé, sur téléphone (375 px) : le refus des heures de la suite revient dans la vue', async ({ session, request, creerClient, browser }) => {
+  const { contexte, page, suite } = await suiteSurChantierClos({ session, request, creerClient, browser }, { width: 375, height: 740 });
+  try {
+    await saisirHeuresRefusees(page, suite);
+    await expect(page.getByText(REFUS)).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   } finally {
     await contexte.close();
   }

@@ -11,10 +11,12 @@ import { isAdminRole } from '../../droits/roles';
 // L'intervention initiale et les autres interventions de l'affaire, dont les coûts restent hors de la
 // marge du chantier, ne sont pas concernées.
 //
-// Verrou : l'affaire en partage, après l'intervention et son contrat, comme à la création d'une suite ou
-// d'une intervention rattachée à un chantier ; sa clôture, sa réouverture et l'annulation de son devis
-// l'écrivent sous un verrou exclusif, et la saisie concurrente les attend ou les fait attendre. L'annulation
-// d'un devis ne verrouille jamais une intervention rattachée à une affaire : pas d'interblocage.
+// Verrou : l'affaire en partage. À la création et à la correction, après l'intervention et son contrat
+// (verrouillerContexteCout), comme à la création d'une suite ou d'une intervention rattachée à un chantier ;
+// à l'archivage et à la restauration, qui ne verrouillent pas l'intervention, seule, avant la ligne du coût.
+// Sa clôture, sa réouverture et l'annulation de son devis l'écrivent sous un verrou exclusif, et la saisie
+// concurrente les attend ou les fait attendre. L'annulation d'un devis ne verrouille jamais une intervention
+// rattachée à une affaire : pas d'interblocage.
 export class RefusAffaireSuite extends Error {
   constructor(readonly status: 403 | 409, message: string) { super(message); }
 }
