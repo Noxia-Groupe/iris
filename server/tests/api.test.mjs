@@ -20823,5 +20823,47 @@ if (!TEST_DATABASE_URL) {
       assert.equal(auCentime(avec.estimation.coutMainOeuvreAttendu - sans.estimation.coutMainOeuvreAttendu), 66.85);
       assert.equal(auCentime(sans.margeEstimee - avec.margeEstimee), 66.85);
     });
+
+    // --- Audit interne 5 de #339 : plancher de la marge estimée avec des suites, chantier terminé (montants, avant fusion) ---
+    test('marge estimée d’un chantier au-delà de ses heures et de son matériel vendus, puis terminé : le coût réel des suites s’ajoute une seule fois au réel', async () => {
+      const categorie = await prisma.categorie.create({ data: { nom: `TEST Marge suites plancher ${suffixe}` } });
+      const achatsChantier = [];
+      let avecSuite = null;
+      try {
+        const temoin = await creerChantier('plancher, témoin', comptes.conducteur.id);
+        avecSuite = await creerChantier('plancher, avec suite', comptes.conducteur.id);
+        // Même réel du chantier, au-delà de sa projection : 22 h faites sur 20 h vendues, à 40 € (880 €), et
+        // 5 000 € d'achats pour 300 € de matériel vendu.
+        for (const chantier of [temoin, avecSuite]) {
+          await prisma.pointageHeure.create({ data: { date: new Date('2026-10-02T00:00:00Z'), intervenantId: fiche.id, chantierId: chantier.id, nbrHeures: 22, tauxHoraireApplique: 40, createdById: adminId, updatedById: adminId } });
+          achatsChantier.push(await prisma.achatReel.create({ data: {
+            date: new Date('2026-10-02T00:00:00Z'), fournisseurId: fournisseur.id, categorieId: categorie.id, chantierId: chantier.id,
+            description: 'TEST achat au-delà du matériel vendu', montantHT: 5000, createdById: adminId, updatedById: adminId,
+          } }));
+        }
+        const suite = await suiteDe((await interventionSur('initiale du plancher', avecSuite.id)).id);
+        await heure(suite.id, 5, 10); // 50 € de main-d'œuvre SAV
+        await achat(suite.id, 12.25); // matériel de la suite, écrit en base
+        const [sans, avec] = [(await ficheChantier(temoin.id)).metrics, (await ficheChantier(avecSuite.id)).metrics];
+        // Précondition : chaque poste attendu du témoin est déjà son réel (plancher).
+        assert.deepEqual([sans.estimation.coutMainOeuvreAttendu, sans.estimation.coutMaterielAttendu], [sans.moReel, sans.materielReel]);
+        assert.deepEqual([sans.moReel, sans.materielReel, avec.moReel, avec.materielReel], [880, 5000, 930, 5012.25]);
+        // Le réel du chantier plus le coût réel de la suite, une seule fois : 930 € et 5 012,25 €, et non 980 € et
+        // 5 024,50 € (suite comptée dans le plancher puis ajoutée encore).
+        assert.deepEqual([auCentime(avec.estimation.coutMainOeuvreAttendu), auCentime(avec.estimation.coutMaterielAttendu)], [930, 5012.25]);
+        assert.deepEqual([auCentime(sans.margeCommerciale - avec.margeCommerciale), auCentime(sans.margeEstimee - avec.margeEstimee)], [62.25, 62.25]);
+        // Terminé, le chantier n'a plus de reste à faire : son estimation est son réel, suites comprises une seule fois.
+        await prisma.chantier.update({ where: { id: avecSuite.id }, data: { statut: 'TERMINE' } });
+        const termine = (await ficheChantier(avecSuite.id)).metrics;
+        assert.equal(termine.estimation.sourceCoutHoraire, 'REEL');
+        assert.deepEqual([termine.estimation.coutMainOeuvreAttendu, termine.estimation.coutMaterielAttendu, termine.margeEstimee], [930, 5012.25, termine.margeCommerciale]);
+      } finally {
+        // Le chantier repasse en cours avant le retrait de ses achats : aucun chantier terminé sans achat ne reste
+        // pour fausser le ratio d'achat des autres tests.
+        if (avecSuite) await prisma.chantier.update({ where: { id: avecSuite.id }, data: { statut: 'EN_COURS' } });
+        for (const achatChantier of achatsChantier) await prisma.achatReel.delete({ where: { id: achatChantier.id } });
+        await prisma.categorie.delete({ where: { id: categorie.id } });
+      }
+    });
   });
 }
