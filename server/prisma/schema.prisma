@@ -288,9 +288,10 @@ model PointageHeure {
 
 // Heures SAV : celles d'une intervention de contrat et, depuis le lot pilote 3b, celles d'une
 // intervention hors contrat. Séparées des coûts Chantier : elles n'alimentent ni le CA, ni les
-// journaux ou flux d'intégration Travaux. Seules celles d'une suite (intervention de suivi liée)
-// rattachée à une affaire entrent, en totaux, dans la marge du chantier (décision de Nelson de la
-// nuit du 26 au 27-10-2026, cf. src/domaines/chantiers/coutsSuites.ts).
+// journaux d'achats et d'heures Travaux (/api/heures, /api/achats et leurs routes /api/v1). Seules
+// celles d'une suite (intervention de suivi liée) rattachée à une affaire entrent, en totaux, dans la
+// marge du chantier, donc aussi dans les métriques que /api/v1/chantiers transmet (décision de Nelson
+// de la nuit du 26 au 27-10-2026, cf. src/domaines/chantiers/coutsSuites.ts).
 model CoutInterventionHeure {
   id                  String       @id @default(uuid())
   interventionId      String

@@ -11,7 +11,12 @@ import { totalHeuresInterventionAuCentime } from './metier';
 // comptent ; les coûts sont les heures non archivées, chaque ligne au taux horaire chargé figé et
 // arrondie au centime comme la main-d'œuvre cumulée d'une intervention, et le matériel non archivé,
 // celui d'une suite annulée compris ; une intervention au temps passé n'a pas cette marge (elle se
-// facture au temps passé), ni une intervention rattachée à un chantier.
+// facture au temps passé), ni une intervention rattachée à un chantier. Pas de marge non plus, faute de
+// recette, pour une intervention annulée ou issue d'un devis annulé (« pas d’intervention ou contrat donc
+// pas de facture », décision 14 de la même nuit ; choix par défaut, à confirmer, pour une intervention
+// annulée depuis sa fiche), ni pour celle d'un devis converti aussi en chantier : son total HT est déjà
+// le vendu du chantier, et le point 2 ne vise que l'intervention « sans chantier » (question à Nelson
+// sur le suivi de marge qui reçoit alors ses coûts et ceux de ses suites).
 export type MargeDevisIntervention = {
   devis: { id: string; numero: string; version: number };
   totalDevisHT: Prisma.Decimal;
@@ -23,13 +28,13 @@ export type MargeDevisIntervention = {
 
 const auCentime = (montant: Prisma.Decimal) => montant.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 
-export async function margeDevisIntervention(intervention: { id: string; chantierId: string | null; auTempsPasse: boolean }): Promise<MargeDevisIntervention | null> {
-  if (intervention.chantierId || intervention.auTempsPasse) return null;
+export async function margeDevisIntervention(intervention: { id: string; chantierId: string | null; auTempsPasse: boolean; statut: string }): Promise<MargeDevisIntervention | null> {
+  if (intervention.chantierId || intervention.auTempsPasse || intervention.statut === 'ANNULEE') return null;
   const conversion = await prisma.devisConversion.findFirst({
     where: { cibleType: 'INTERVENTION', cibleId: intervention.id },
-    select: { devis: { select: { id: true, numero: true, version: true, totalHt: true } } },
+    select: { devis: { select: { id: true, numero: true, version: true, totalHt: true, statut: true, conversions: { where: { cibleType: 'CHANTIER' }, select: { id: true } } } } },
   });
-  if (!conversion) return null;
+  if (!conversion || conversion.devis.statut === 'ANNULE' || conversion.devis.conversions.length > 0) return null;
   // Le lien d'une suite est figé et ne boucle pas (garde en base) ; UNION écarte tout doublon.
   const suites = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     WITH RECURSIVE chaine AS (

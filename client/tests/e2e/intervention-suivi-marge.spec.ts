@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { APIRequestContext } from '@playwright/test';
 import { test, expect, dateDuJour } from './fixtures';
 
@@ -112,4 +112,56 @@ test('fiche chantier : les coûts des suites de l’affaire sont comptés dans l
   await expect(page.locator('[data-couts-suites]')).toHaveText(/Dont suites SAV de l’affaire, comptées dans le réel : 2 h · matériel 0,00\s€ · main-d’œuvre 80,00\s€\./);
   // Le réel du chantier comprend les 2 h de la suite, et elles seules.
   await expect(page.getByText('2.00 h', { exact: true })).toBeVisible();
+});
+
+// Audit interne 1 de #339 : l'écran suit l'API pour le conducteur, et le rappel ouvert depuis la file du
+// planning ne vaut que pour une intervention sans contrat.
+test('fiche chantier vue du conducteur : la part des suites, sans coût de main-d’œuvre', async ({ session, request, creerClient, browser }) => {
+  const { envoyer, client, suffixe, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'marge-conducteur');
+  const conducteur = await envoyer('post', '/users', { email: `marge-conducteur.cond.${suffixe}@iris.test`, name: `Conducteur ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' }) as { id: string; name: string; email: string; role: string };
+  const devis = await devisSigne('Affaire du conducteur');
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: conducteur.id });
+  const initiale = await envoyer('post', '/interventions', { clientId: client.id, titre: 'Dépannage du conducteur', chantierId: chantier.id }) as { id: string };
+  const suite = await envoyer('post', `/interventions/${initiale.id}/suites`, {}) as { id: string };
+  await heuresDuTechnicien(suite.id, 2);
+
+  const contexte = await browser.newContext();
+  const page = await contexte.newPage();
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [jetonPour(conducteur.id), JSON.stringify({ ...conducteur, permissions: ['chantiers:read', 'clients:read'] })]);
+  await page.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
+  // Le serveur ne lui envoie pas le coût de main-d'œuvre : l'écran ne l'affiche pas, même à zéro.
+  await expect(page.locator('[data-couts-suites]')).toHaveText(/Dont suites SAV de l’affaire, comptées dans le réel : 2 h · matériel 0,00\s€\.$/);
+  await contexte.close();
+});
+
+test('file du planning : « Créer la suite » d’une visite à suivre sans rappel, d’une curative à suivre avec rappel', async ({ session, request, creerClient, allerSurPageAdmin }) => {
+  const { envoyer, client, suffixe, heuresDuTechnicien } = await preparer(request, session.token, creerClient, 'marge-file');
+  // Placée avec le technicien, en cours, terminée avec un compte rendu, puis marquée « à suivre ».
+  const terminerASuivre = async (id: string) => {
+    await heuresDuTechnicien(id, 0.5);
+    await envoyer('patch', `/interventions/${id}/statut`, { statut: 'EN_COURS' });
+    await envoyer('post', `/interventions/${id}/rapports`, { contenu: 'Retour nécessaire.', cleEnvoi: randomUUID() });
+    await envoyer('patch', `/interventions/${id}/statut`, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
+    await envoyer('put', `/interventions/${id}/a-suivre`, { aSuivre: true });
+  };
+  const contrat = await envoyer('post', '/contrats-maintenance', { clientId: client.id, titre: `Contrat file ${suffixe}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: dateDuJour() }) as { id: string };
+  const visite = await envoyer('post', `/contrats-maintenance/${contrat.id}/generer-intervention`) as { id: string; reference: string };
+  await terminerASuivre(visite.id);
+  const curative = await envoyer('post', '/interventions', { clientId: client.id, titre: `Curative file ${suffixe}` }) as { id: string; reference: string };
+  await terminerASuivre(curative.id);
+
+  const page = await allerSurPageAdmin('/planning');
+  const file = page.getByRole('region', { name: 'Interventions à planifier' });
+  for (const [intervention, rappels] of [[visite, 0], [curative, 1]] as const) {
+    await file.getByRole('row', { name: new RegExp(intervention.reference) }).getByRole('button', { name: 'Créer la suite' }).click();
+    const dialogue = page.getByRole('dialog', { name: `Créer la suite de ${intervention.reference}` });
+    await expect(dialogue.getByRole('heading', { name: `Créer la suite de ${intervention.reference}` })).toBeVisible();
+    await expect(dialogue.getByRole('note')).toHaveCount(rappels);
+    await dialogue.getByRole('button', { name: 'Annuler' }).click();
+    await expect(dialogue).toHaveCount(0);
+  }
 });

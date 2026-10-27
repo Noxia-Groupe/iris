@@ -23,6 +23,7 @@ export const CreationSuite = ({ intervention, onClose, onCreee }: {
 }) => {
   const titreId = useId();
   const aideId = useId();
+  const rappelId = useId();
   const [titre, setTitre] = useState(() => titreSuite(intervention.titre));
   const [dateSouhaitee, setDateSouhaitee] = useState('');
   const [priorite, setPriorite] = useState(intervention.priorite && PRIORITES[intervention.priorite] ? intervention.priorite : 'NORMALE');
@@ -57,10 +58,10 @@ export const CreationSuite = ({ intervention, onClose, onCreee }: {
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={fermer} onKeyDown={(e) => { if (e.key === 'Escape') fermer(); }}>
-      <div role="dialog" aria-modal="true" aria-labelledby={titreId} aria-describedby={aideId} className="bg-white rounded-xl shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto p-6 break-words" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-labelledby={titreId} aria-describedby={intervention.horsContrat ? `${aideId} ${rappelId}` : aideId} className="bg-white rounded-xl shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto p-6 break-words" onClick={(e) => e.stopPropagation()}>
         <h2 id={titreId} className="text-lg font-bold text-primary-dark m-0 mb-2">Créer la suite de {intervention.reference}</h2>
         <p id={aideId} className="text-sm text-muted mb-4">La suite reprend le client, le site, le contact, l’affaire et, pour une visite, le contrat de {intervention.reference}. Elle entre dans la file des interventions à planifier.</p>
-        {intervention.horsContrat && <p role="note" className="text-sm rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 mb-4">{INFORMATION_SUITE_HORS_CONTRAT}</p>}
+        {intervention.horsContrat && <p id={rappelId} role="note" className="text-sm rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 mb-4">{INFORMATION_SUITE_HORS_CONTRAT}</p>}
         <form onSubmit={confirmer} noValidate className="flex flex-col gap-3">
           <label className="form-label mb-0">Titre de la suite
             <input autoFocus required maxLength={200} className="form-input mt-1" value={titre} onChange={(e) => setTitre(e.target.value)} />

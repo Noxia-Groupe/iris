@@ -346,6 +346,7 @@ if (!TEST_DATABASE_URL) {
       'replanif.admin@iris.test', 'replanif.conducteur@iris.test', 'replanif.responsable@iris.test', 'replanif.technicien@iris.test', 'replanif.commercial@iris.test',
       'replanif.directeur@iris.test', 'replanif.directeurCommercial@iris.test', 'replanif.assistante@iris.test', 'replanif.comptable@iris.test',
       'tp.commercial@iris.test', 'tp.conducteur@iris.test', 'tp.technicien@iris.test', 'tp.directeur@iris.test', 'tp.assistante@iris.test',
+      'marge-suites.conducteur@iris.test', 'marge-suites.conducteurAutre@iris.test', 'marge-suites.technicien@iris.test', 'marge-suites.commercial@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
@@ -20613,6 +20614,96 @@ if (!TEST_DATABASE_URL) {
       } finally {
         await prisma.parametres.update({ where: { id: 'singleton' }, data: { pasTempsPasseMinutes: pasInitial } });
       }
+    });
+
+    // --- Audit interne 1 de #339 : tests de montants, à verser avant fusion ---
+    const devisConverti = async (objet, cibles = ['INTERVENTION']) => {
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST ${objet} ${suffixe}`, lignes: [
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 150, tauxTva: 20 },
+        { designation: 'TEST Fourniture', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: `TEST Signataire ${objet}`, confirme: true })).status, 201);
+      const crees = {};
+      for (const cible of cibles) {
+        const conversion = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible });
+        assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+        crees[cible] = conversion.body;
+      }
+      return { devis: devis.body, ...crees };
+    };
+
+    test('marge du devis : chaque heure est arrondie au centime avant d’être sommée', async () => {
+      const { INTERVENTION: intervention } = await devisConverti('Devis arrondi à la ligne');
+      await heure(intervention.id, 0.25, 33.33); // 8,3325 € → 8,33 €
+      await heure(intervention.id, 0.25, 33.33);
+      const suite = await suiteDe(intervention.id);
+      await heure(suite.id, 0.25, 33.33);
+      await heure(suite.id, 0.25, 33.33);
+      const { body } = await couts(intervention.id);
+      // À la ligne : 8,33 + 8,33 = 16,66 € ; une somme exacte arrondie ensuite donnerait 16,67 €.
+      assert.deepEqual([body.margeDevis.coutsInterventionHT, body.margeDevis.coutsSuitesHT, body.margeDevis.margeHT], [16.66, 16.66, 366.68]);
+    });
+
+    test('résultat commercial : la marge d’un chantier y compte les coûts de ses suites, comme sur sa fiche', async () => {
+      const email = 'marge-suites.commercial@iris.test';
+      const commercial = await prisma.user.upsert({ where: { email }, update: { role: 'COMMERCIAL', actif: true, permissions: [] }, create: { email, name: 'TEST Marge suites commercial', role: 'COMMERCIAL' } });
+      const chantier = await creerChantier('commercial', comptes.conducteur.id);
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { commercialId: commercial.id } });
+      const suite = await suiteDe((await interventionSur('initiale du résultat commercial', chantier.id)).id);
+      await heure(suite.id, 2, 40); // 80 €
+      await achat(suite.id, 20);
+      const res = await request(app).get('/api/stats/commerciaux').set(admin);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      const ligne = res.body.commerciaux.find((c) => c.id === commercial.id).chantiers.find((c) => c.id === chantier.id);
+      assert.equal(ligne.margeCommerciale, 900);
+      assert.equal(ligne.margeCommerciale, (await ficheChantier(chantier.id)).metrics.margeCommerciale);
+    });
+
+    test('répartition des chantiers terminés : le matériel d’une suite compte dans le dépassement', async () => {
+      const chantier = await creerChantier('répartition', comptes.conducteur.id);
+      const suite = await suiteDe((await interventionSur('initiale de la répartition', chantier.id)).id);
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE' } });
+      const repartition = async () => {
+        const res = await request(app).get('/api/stats/chantiers-repartition').set(admin);
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        return Object.fromEntries(res.body.categories.map((c) => [c.key, c.count]));
+      };
+      const avant = await repartition();
+      await achat(suite.id, 300.01); // matériel vendu 300 € : dépassé d'un centime par la seule suite
+      const apres = await repartition();
+      assert.deepEqual([apres.positif, apres.materielSeul], [avant.positif - 1, avant.materielSeul + 1]);
+    });
+
+    // --- Audit interne 1 de #339 : défauts R1 et R2 ---
+    test('devis converti en chantier et en intervention : pas de marge de devis, son total étant déjà le vendu du chantier', async () => {
+      const { CHANTIER: chantier, INTERVENTION: intervention } = await devisConverti('Devis chantier et intervention', ['CHANTIER', 'INTERVENTION']);
+      assert.equal(Number(chantier.budgetGlobalVendu), 400);
+      assert.equal(intervention.chantierId, null);
+      await heure(intervention.id, 1.5, 40);
+      const lecture = await couts(intervention.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.equal(lecture.body.margeDevis, null);
+    });
+
+    test('devis annulé : l’intervention annulée avec lui n’a plus de marge de devis', async () => {
+      const { devis, INTERVENTION: intervention } = await devisConverti('Devis annulé marge');
+      await heure(intervention.id, 1.5, 40); // saisie avant le début : elle ne refuse pas l'annulation
+      const annulation = await envoyer('post', `/api/devis/${devis.id}/annulation`, admin, { motif: 'TEST client renonce' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: intervention.id } })).statut, 'ANNULEE');
+      const lecture = await couts(intervention.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.equal(lecture.body.margeDevis, null);
+    });
+
+    test('intervention issue d’un devis annulée depuis sa fiche : plus de marge de devis (choix par défaut, à confirmer)', async () => {
+      const { INTERVENTION: intervention } = await devisConverti('Devis intervention annulée');
+      await heure(intervention.id, 1.5, 40);
+      await annuler(intervention.id);
+      const lecture = await couts(intervention.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.equal(lecture.body.margeDevis, null);
     });
   });
 }
