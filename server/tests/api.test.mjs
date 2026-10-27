@@ -20705,5 +20705,27 @@ if (!TEST_DATABASE_URL) {
       assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
       assert.equal(lecture.body.margeDevis, null);
     });
+
+    // --- Audit interne 2 de #339 : tests de montants, à verser avant fusion ---
+    test('marge du devis : le matériel archivé de l’intervention et de ses suites n’y compte pas', async () => {
+      const { INTERVENTION: intervention } = await devisConverti('Devis matériel archivé');
+      const suite = await suiteDe(intervention.id);
+      await achat(intervention.id, 10);
+      await achat(intervention.id, 60, true); // archivé : hors marge
+      await achat(suite.id, 7.5);
+      await achat(suite.id, 50, true); // archivé : hors marge
+      const { body } = await couts(intervention.id);
+      assert.deepEqual([body.margeDevis.coutsInterventionHT, body.margeDevis.coutsSuitesHT, body.margeDevis.margeHT], [10, 7.5, 382.5]);
+    });
+
+    test('devis converti en intervention et en contrat : la marge de l’intervention reprend tout le total HT du devis (choix par défaut, question en section 3)', async () => {
+      const { devis, INTERVENTION: intervention } = await devisConverti('Devis intervention et contrat');
+      const contrat = await envoyer('post', `/api/devis/${devis.id}/convertir`, admin, { cible: 'CONTRAT', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: '01-11-2026' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      await heure(intervention.id, 1.5, 40);
+      const lecture = await couts(intervention.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.deepEqual([lecture.body.margeDevis?.totalDevisHT, lecture.body.margeDevis?.coutsInterventionHT, lecture.body.margeDevis?.margeHT], [400, 60, 340]);
+    });
   });
 }

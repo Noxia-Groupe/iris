@@ -165,3 +165,46 @@ test('file du planning : « Créer la suite » d’une visite à suivre sans rap
     await expect(dialogue).toHaveCount(0);
   }
 });
+
+// Audit interne 2 de #339 : l'écran du technicien suit l'API (heures seules, aucun montant), et le rappel
+// est annoncé à l'ouverture du dialogue sans figurer sur la fiche de l'intervention initiale.
+test('fiche chantier vue du technicien titulaire : la part des suites en heures seules, sans montant', async ({ session, request, creerClient, browser }) => {
+  const { envoyer, client, suffixe, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'marge-technicien');
+  const titulaire = await envoyer('post', '/users', { email: `marge-technicien.tit.${suffixe}@iris.test`, name: `Titulaire ${suffixe}`, role: 'TECHNICIEN' }) as { id: string; name: string; email: string; role: string };
+  const devis = await devisSigne('Affaire du technicien');
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: titulaire.id });
+  const initiale = await envoyer('post', '/interventions', { clientId: client.id, titre: 'Dépannage du technicien', chantierId: chantier.id }) as { id: string };
+  const suite = await envoyer('post', `/interventions/${initiale.id}/suites`, {}) as { id: string };
+  await heuresDuTechnicien(suite.id, 2);
+  const contexte = await browser.newContext();
+  const page = await contexte.newPage();
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [jetonPour(titulaire.id), JSON.stringify({ ...titulaire, permissions: ['chantiers:read'] })]);
+  await page.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
+  // Le serveur ne lui envoie ni matériel ni main-d'œuvre : l'écran ne dit que les heures, sans « 0,00 € ».
+  await expect(page.locator('[data-couts-suites]')).toHaveText(/Dont suites SAV de l’affaire, comptées dans le réel : 2 h\.$/);
+  await contexte.close();
+});
+
+test('rappel annoncé par le dialogue et absent de la fiche de l’intervention initiale', async ({ session, request, creerClient, allerSurPageAdmin }) => {
+  const { envoyer, client, suffixe } = await preparer(request, session.token, creerClient, 'marge-annonce');
+  const curative = await envoyer('post', '/interventions', { clientId: client.id, titre: `Curative annoncée ${suffixe}` }) as { id: string; reference: string; titre: string };
+  const page = await allerSurPageAdmin(`/interventions/${curative.id}`);
+  const carte = page.locator('article', { hasText: curative.titre });
+  await expect(carte.getByRole('button', { name: 'Créer la suite' })).toBeVisible();
+  // Lecture du moment (section 4) : pas de rappel sur la fiche de l'intervention initiale.
+  await expect(carte.getByRole('note')).toHaveCount(0);
+  await carte.getByRole('button', { name: 'Créer la suite' }).click();
+  const dialogue = page.getByRole('dialog', { name: `Créer la suite de ${curative.reference}` });
+  const note = dialogue.getByRole('note');
+  await expect(note).toHaveText(RAPPEL);
+  // Annoncé à l'ouverture : le rappel est cité par l'aria-describedby du dialogue.
+  const noteId = await note.getAttribute('id');
+  expect(noteId).toBeTruthy();
+  expect((await dialogue.getAttribute('aria-describedby'))?.split(' ')).toContain(noteId);
+  await dialogue.getByRole('button', { name: 'Annuler' }).click();
+  await expect(dialogue).toHaveCount(0);
+});
