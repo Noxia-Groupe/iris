@@ -347,6 +347,7 @@ if (!TEST_DATABASE_URL) {
       'replanif.directeur@iris.test', 'replanif.directeurCommercial@iris.test', 'replanif.assistante@iris.test', 'replanif.comptable@iris.test',
       'tp.commercial@iris.test', 'tp.conducteur@iris.test', 'tp.technicien@iris.test', 'tp.directeur@iris.test', 'tp.assistante@iris.test',
       'marge-suites.conducteur@iris.test', 'marge-suites.conducteurAutre@iris.test', 'marge-suites.technicien@iris.test', 'marge-suites.commercial@iris.test',
+      'suites-affaire.conducteur@iris.test', 'suites-affaire.technicien@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
@@ -20864,6 +20865,160 @@ if (!TEST_DATABASE_URL) {
         for (const achatChantier of achatsChantier) await prisma.achatReel.delete({ where: { id: achatChantier.id } });
         await prisma.categorie.delete({ where: { id: categorie.id } });
       }
+    });
+  });
+
+  // Décisions de Nelson du 27-10-2026 à 15:50 UTC : « oui, il faut egalement refusé aussi ces saisies »
+  // (coûts d'une suite sur une affaire close ou annulée) et « annule l'intervention initiale » (suites de
+  // l'intervention issue d'un devis annulé).
+  describe('Suites d’une affaire close ou annulée : refus des coûts et annulation avec le devis', () => {
+    let admin = {};
+    let adminId = '';
+    const comptes = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    let ficheTechnicien = null;
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const creerChantier = (nom) => prisma.chantier.create({ data: {
+      nom: `TEST Suites affaire ${nom} ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date('2026-10-01T00:00:00Z'),
+      budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 20, responsableId: comptes.conducteur.id,
+    } });
+    const interventionSur = async (titre, chantierId) => {
+      const res = await envoyer('post', '/api/interventions', admin, { clientId: client.id, titre: `TEST Suites affaire ${titre}`, ...(chantierId ? { chantierId } : {}) });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const suiteDe = async (id) => {
+      const res = await envoyer('post', `/api/interventions/${id}/suites`, admin, {});
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    // Le technicien affecté saisit ses heures par l'API, comme sur le terrain.
+    const affecter = (interventionId) => prisma.interventionAffectation.create({ data: { interventionId, intervenantId: ficheTechnicien.id } });
+    const saisir = (interventionId) => envoyer('post', `/api/interventions/${interventionId}/couts/heures`, jeton('technicien'), { date: '01-10-2026', nbrHeures: 1.5 });
+    const archiver = (interventionId, coutId, auth, action = 'archiver') => envoyer('post', `/api/interventions/${interventionId}/couts/heures/${coutId}/${action}`, auth, { motif: `TEST ${action} sur une affaire close` });
+    const heuresVivantes = (interventionId) => prisma.coutInterventionHeure.count({ where: { interventionId, archivedAt: null } });
+    const devisConverti = async (objet, cible) => {
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST ${objet} ${suffixe}`, lignes: [
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 150, tauxTva: 20 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: `TEST Signataire ${objet}`, confirme: true })).status, 201);
+      const conversion = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      return { devis: devis.body, cree: conversion.body };
+    };
+    const annulerDevis = (devisId) => envoyer('post', `/api/devis/${devisId}/annulation`, admin, { motif: 'TEST client renonce' });
+    const statutDe = async (id) => (await prisma.intervention.findUniqueOrThrow({ where: { id }, select: { statut: true } })).statut;
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      for (const [cle, role] of [['conducteur', 'CONDUCTEUR_TRAVAUX'], ['technicien', 'TECHNICIEN']]) {
+        const email = `suites-affaire.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Suites affaire ${cle}`, role } });
+      }
+      await prisma.intervenant.updateMany({ where: { userId: comptes.technicien.id }, data: { userId: null } });
+      ficheTechnicien = await prisma.intervenant.create({ data: { nom: `TEST Suites affaire fiche ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40, userId: comptes.technicien.id } });
+      const cree = await envoyer('post', '/api/clients', admin, { raisonSociale: `TEST Client suites affaire ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, admin, { nom: 'TEST Facturation suites affaire', adresse: '3 rue des Suites', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+    });
+
+    test('chantier clôturé : les coûts de ses suites se refusent hors administration ; ceux de l’intervention initiale restent ouverts', async () => {
+      const chantier = await creerChantier('clôturé');
+      const initiale = await interventionSur('initiale du chantier clôturé', chantier.id);
+      const suite = await suiteDe(initiale.id);
+      for (const intervention of [initiale, suite]) await affecter(intervention.id);
+      const avant = await saisir(suite.id);
+      assert.equal(avant.status, 201, JSON.stringify(avant.body));
+      const heureSuite = await prisma.coutInterventionHeure.findFirstOrThrow({ where: { interventionId: suite.id } });
+
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-15T00:00:00Z') } });
+      const refus = await saisir(suite.id);
+      assert.equal(refus.status, 403, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /clôturé/);
+      const correction = await envoyer('patch', `/api/interventions/${suite.id}/couts/heures/${heureSuite.id}`, jeton('technicien'), { nbrHeures: 2, motifCorrection: 'TEST correction refusée' });
+      assert.equal(correction.status, 403, JSON.stringify(correction.body));
+      const archivageConducteur = await archiver(suite.id, heureSuite.id, jeton('conducteur'));
+      assert.equal(archivageConducteur.status, 403, JSON.stringify(archivageConducteur.body));
+      assert.equal(await heuresVivantes(suite.id), 1, 'rien n’est écrit');
+      assert.equal(Number((await prisma.coutInterventionHeure.findUniqueOrThrow({ where: { id: heureSuite.id } })).nbrHeures), 1.5);
+
+      // L'administration garde la main, comme sur les saisies du chantier.
+      assert.equal((await archiver(suite.id, heureSuite.id, admin)).status, 200);
+      assert.equal((await archiver(suite.id, heureSuite.id, admin, 'restaurer')).status, 200);
+      assert.equal(await heuresVivantes(suite.id), 1);
+      // L'intervention initiale, hors de la marge du chantier, n'est pas concernée.
+      const surInitiale = await saisir(initiale.id);
+      assert.equal(surInitiale.status, 201, JSON.stringify(surInitiale.body));
+    });
+
+    test('affaire annulée : les coûts de ses suites se refusent à tous, administration comprise', async () => {
+      const chantier = await creerChantier('annulé');
+      const suite = await suiteDe((await interventionSur('initiale du chantier annulé', chantier.id)).id);
+      await affecter(suite.id);
+      assert.equal((await saisir(suite.id)).status, 201);
+      const heureSuite = await prisma.coutInterventionHeure.findFirstOrThrow({ where: { interventionId: suite.id } });
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: adminId, motifAnnulation: 'TEST affaire annulée' } });
+      for (const reponse of [await saisir(suite.id), await archiver(suite.id, heureSuite.id, admin)]) {
+        assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
+        assert.match(reponse.body.error, /annulée/);
+      }
+      // Le conducteur ne voit plus les interventions d'une affaire annulée (périmètre SAV, inchangé).
+      assert.equal((await archiver(suite.id, heureSuite.id, jeton('conducteur'))).status, 404);
+      assert.equal(await heuresVivantes(suite.id), 1, 'rien n’est écrit');
+    });
+
+    test('annuler le devis annule l’intervention issue du devis et ses suites, toutes générations, au journal', async () => {
+      const { devis, cree: sav } = await devisConverti('Devis aux suites annulées', 'INTERVENTION');
+      const suite = await suiteDe(sav.id);
+      const suiteDeSuite = await suiteDe(suite.id);
+      const annulation = await annulerDevis(devis.id);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual([await statutDe(sav.id), await statutDe(suite.id), await statutDe(suiteDeSuite.id)], ['ANNULEE', 'ANNULEE', 'ANNULEE']);
+      assert.deepEqual([...annulation.body.interventionsAnnulees].sort(), [sav.id, suite.id, suiteDeSuite.id].sort());
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: { in: [suite.id, suiteDeSuite.id] }, action: 'CHANGEMENT_STATUT' } });
+      assert.equal(journal.length, 2);
+      assert.ok(journal.every((entree) => /^Annulation du devis /.test(entree.motif ?? '')), JSON.stringify(journal.map((entree) => entree.motif)));
+    });
+
+    test('une suite commencée refuse l’annulation du devis, sans rien écrire', async () => {
+      for (const statut of ['EN_COURS', 'TERMINEE']) {
+        const { devis, cree: sav } = await devisConverti(`Devis à suite ${statut}`, 'INTERVENTION');
+        const suite = await suiteDe(sav.id);
+        const suiteDeSuite = await suiteDe(suite.id);
+        await prisma.intervention.update({ where: { id: suiteDeSuite.id }, data: { statut } });
+        const refus = await annulerDevis(devis.id);
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.match(refus.body.error, new RegExp(`suite ${suiteDeSuite.reference} .* ${statut === 'EN_COURS' ? 'en cours' : 'terminée'}`));
+        assert.deepEqual([await statutDe(sav.id), await statutDe(suite.id), await statutDe(suiteDeSuite.id)], ['A_PLANIFIER', 'A_PLANIFIER', statut]);
+        assert.notEqual((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ANNULE');
+      }
+    });
+
+    test('les coûts vivants des suites du chantier disent l’affaire commencée ; ceux de l’intervention initiale, non', async () => {
+      const { devis, cree: chantier } = await devisConverti('Devis au chantier à suite', 'CHANTIER');
+      const initiale = await interventionSur('initiale du chantier du devis', chantier.id);
+      const suite = await suiteDe(initiale.id);
+      for (const intervention of [initiale, suite]) await affecter(intervention.id);
+      assert.equal((await saisir(initiale.id)).status, 201);
+      assert.equal((await saisir(suite.id)).status, 201);
+      const refus = await annulerDevis(devis.id);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /suites SAV de ce chantier portent déjà 1 coût/);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, 'EN_COURS');
+      // Archivé, le coût de la suite n'engage plus rien : l'affaire s'annule, et la suite n'accepte plus de saisie.
+      const heureSuite = await prisma.coutInterventionHeure.findFirstOrThrow({ where: { interventionId: suite.id } });
+      assert.equal((await archiver(suite.id, heureSuite.id, admin)).status, 200);
+      const annulation = await annulerDevis(devis.id);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal((await saisir(suite.id)).status, 409);
     });
   });
 }

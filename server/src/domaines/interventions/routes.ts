@@ -25,6 +25,7 @@ import { enregistrerLecturesInterventions } from './lectures';
 import { enregistrerRemiseAPlanifier } from './remiseAPlanifier';
 import { enregistrerSuites } from './suites';
 import { margeDevisIntervention } from './margeDevis';
+import { RefusAffaireSuite, verifierAffaireDeLaSuite } from './affaireSuite';
 
 class ChantierInterventionIntrouvable extends Error {}
 // Refus métier relevé sous verrou, dans la transaction : il l'annule et devient un 409.
@@ -126,6 +127,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       if (req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Saisie d’heures réservée au technicien affecté.' });
       if (!interventionHeuresEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      await verifierAffaireDeLaSuite(prisma, intervention, req.user!.role, false);
       const dateSaisie = dateIsoStricte(req.body?.date); const nbrHeures = nombreDecimalNonNegatif(req.body?.nbrHeures, 8, true);
       const motif = motifCorrectionValide(req.body?.motif);
       if (!dateSaisie || nbrHeures === null) return res.status(400).json({ error: 'Date ou nombre d’heures invalide.' });
@@ -137,6 +139,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const cree = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, intervenant.id, req.user!.id);
         if (!interventionActuelle || !interventionHeuresEligible(interventionActuelle)) return null;
+        await verifierAffaireDeLaSuite(tx, interventionActuelle, req.user!.role, true);
         const intervenantActuel = await tx.intervenant.findFirst({ where: { id: intervenant.id, userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
         if (!intervenantActuel) return null;
         const cout = await tx.coutInterventionHeure.create({ data: { interventionId: interventionActuelle.id, intervenantId: intervenantActuel.id, date, nbrHeures, tauxHoraireApplique: intervenantActuel.tauxHoraireCharge, commentaire: req.body?.commentaire ? String(req.body.commentaire).trim() : null, createdById: req.user!.id } });
@@ -145,7 +148,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       if (!cree) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       res.status(201).json(decimalToNumber(cree));
-    } catch (error) { if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la saisie des heures n’a pas été enregistrée.' }); console.error('Erreur saisie heures intervention', error); res.status(500).json({ error: 'Saisie des heures impossible.' }); }
+    } catch (error) { if (error instanceof RefusAffaireSuite) return res.status(error.status).json({ error: error.message }); if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la saisie des heures n’a pas été enregistrée.' }); console.error('Erreur saisie heures intervention', error); res.status(500).json({ error: 'Saisie des heures impossible.' }); }
   });
 
   app.post('/api/interventions/:id/couts/achats', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
@@ -154,6 +157,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       if (!estEncadrementCoutIntervention(req.user!.role)) return res.status(403).json({ error: 'Saisie de matériel réservée à l’encadrement.' });
       if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      await verifierAffaireDeLaSuite(prisma, intervention, req.user!.role, false);
       const date = dateIsoStricte(req.body?.date); const montantHT = nombreDecimalNonNegatif(req.body?.montantHT, 10, true); const motif = motifCorrectionValide(req.body?.motif);
       const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
       if (!date || montantHT === null || !description) return res.status(400).json({ error: 'Date, description ou montant HT invalide.' });
@@ -163,13 +167,14 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const cree = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id);
         if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
+        await verifierAffaireDeLaSuite(tx, interventionActuelle, req.user!.role, true);
         const cout = await tx.coutInterventionAchat.create({ data: { interventionId: interventionActuelle.id, fournisseurId: fournisseur.id, date, description, montantHT, createdById: req.user!.id } });
         await journaliserCoutIntervention(tx, req, 'COUT_INTERVENTION_ACHAT', 'CREATION', cout.id, interventionActuelle.id, null, cout, montantHT === 0 ? motif! : undefined);
         return cout;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       if (!cree) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       res.status(201).json(decimalToNumber(cree));
-    } catch (error) { if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : l’achat n’a pas été enregistré.' }); console.error('Erreur saisie achat intervention', error); res.status(500).json({ error: 'Saisie du matériel impossible.' }); }
+    } catch (error) { if (error instanceof RefusAffaireSuite) return res.status(error.status).json({ error: error.message }); if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : l’achat n’a pas été enregistré.' }); console.error('Erreur saisie achat intervention', error); res.status(500).json({ error: 'Saisie du matériel impossible.' }); }
   });
 
   // Les mutations sont toutes conditionnelles sur archivedAt : une concurrence ne peut créer
@@ -196,6 +201,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Aucun champ à corriger.' });
       const eligible = heures ? interventionHeuresEligible : interventionCoutEligible;
       if (!eligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      await verifierAffaireDeLaSuite(prisma, intervention, req.user!.role, false);
       const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat;
       const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
       if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
@@ -204,6 +210,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const resultat = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, heures ? cout.intervenantId : undefined, heures ? req.user!.id : undefined);
         if (!interventionActuelle || !eligible(interventionActuelle)) return null;
+        await verifierAffaireDeLaSuite(tx, interventionActuelle, req.user!.role, true);
         const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat;
         const coutActuel = await delegate.findFirst({ where: { id: cout.id, interventionId: interventionActuelle.id, archivedAt: null } });
         if (!coutActuel) return null;
@@ -222,7 +229,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       if (!resultat) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts ou le coût a été modifié concurremment.' });
       res.json(decimalToNumber(resultat));
-    } catch (error) { if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la correction n’a pas été enregistrée.' }); console.error('Erreur correction coût intervention', error); res.status(500).json({ error: 'Correction impossible.' }); }
+    } catch (error) { if (error instanceof RefusAffaireSuite) return res.status(error.status).json({ error: error.message }); if (estConflitTransactionCout(error)) return res.status(409).json({ error: 'Conflit concurrent : la correction n’a pas été enregistrée.' }); console.error('Erreur correction coût intervention', error); res.status(500).json({ error: 'Correction impossible.' }); }
   });
 
   app.post('/api/interventions/:id/couts/:type/:coutId/:action', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
@@ -231,17 +238,19 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       // L'archivage et la restauration sont des actes de conservation : l'encadrement peut
       // les accomplir après la clôture, sans jamais réautoriser une création ou correction. Hors
-      // contrat, seules des heures existent : aucun matériel à archiver ni à restaurer.
+      // contrat, seules des heures existent : aucun matériel à archiver ni à restaurer. Ceux d'une
+      // suite changent la marge de son chantier : ils suivent la règle de son affaire (affaireSuite.ts).
       const heures = type === 'heures'; const achats = type === 'achats';
       if (achats && !intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       if ((!heures && !achats) || !['archiver', 'restaurer'].includes(action) || !estEncadrementCoutIntervention(req.user!.role)) return res.status(403).json({ error: 'Accès non autorisé.' });
+      await verifierAffaireDeLaSuite(prisma, intervention, req.user!.role, false);
       const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat; const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
       if (!cout) return res.status(404).json({ error: 'Coût introuvable.' });
       const motif = motifRestaurationValide(req.body?.motif); if (!motif) return res.status(400).json({ error: 'Le motif doit contenir entre 3 et 500 caractères.' });
       const archivage = action === 'archiver'; if ((archivage && cout.archivedAt) || (!archivage && !cout.archivedAt)) return res.status(409).json({ error: archivage ? 'Ce coût est déjà archivé.' : 'Ce coût est déjà actif.' });
-      const resultat = await transactionVerifiee(async (tx) => { const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat; const updated = await delegate.updateMany({ where: { id: cout.id, archivedAt: archivage ? null : { not: null } }, data: archivage ? { archivedAt: new Date(), archivedById: req.user!.id, motifArchivage: motif } : { archivedAt: null, archivedById: null, motifArchivage: null } }); if (!updated.count) return null; const apres = await delegate.findUniqueOrThrow({ where: { id: cout.id } }); await journaliserCoutIntervention(tx, req, heures ? 'COUT_INTERVENTION_HEURE' : 'COUT_INTERVENTION_ACHAT', archivage ? 'ARCHIVAGE' : 'RESTAURATION', cout.id, intervention.id, cout, apres, motif); return apres; });
+      const resultat = await transactionVerifiee(async (tx) => { await verifierAffaireDeLaSuite(tx, intervention, req.user!.role, true); const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat; const updated = await delegate.updateMany({ where: { id: cout.id, archivedAt: archivage ? null : { not: null } }, data: archivage ? { archivedAt: new Date(), archivedById: req.user!.id, motifArchivage: motif } : { archivedAt: null, archivedById: null, motifArchivage: null } }); if (!updated.count) return null; const apres = await delegate.findUniqueOrThrow({ where: { id: cout.id } }); await journaliserCoutIntervention(tx, req, heures ? 'COUT_INTERVENTION_HEURE' : 'COUT_INTERVENTION_ACHAT', archivage ? 'ARCHIVAGE' : 'RESTAURATION', cout.id, intervention.id, cout, apres, motif); return apres; });
       if (!resultat) return res.status(409).json({ error: 'État du coût modifié concurremment.' }); res.json(saisieSelonDroits(req)(decimalToNumber(resultat)));
-    } catch (error) { console.error('Erreur archivage coût intervention', error); res.status(500).json({ error: 'Opération impossible.' }); }
+    } catch (error) { if (error instanceof RefusAffaireSuite) return res.status(error.status).json({ error: error.message }); console.error('Erreur archivage coût intervention', error); res.status(500).json({ error: 'Opération impossible.' }); }
   });
 
   // Journal append-only du dossier SAV, soumis au même filtre de non-divulgation que les
