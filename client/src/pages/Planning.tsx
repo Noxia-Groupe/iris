@@ -430,7 +430,7 @@ const Planning = () => {
         </div>
       )}
 
-      {aSuivre && <CreationSuite intervention={aSuivre} onClose={() => setASuivre(null)} onCreee={(suite) => { setASuivre(null); setSuiteCreee(`Suite ${suite.reference} créée : elle est dans la file, à placer.`); fetchQueue(); fetchEvents(); }} />}
+      {aSuivre && <CreationSuite intervention={{ ...aSuivre, horsContrat: !aSuivre.contratMaintenance }} onClose={() => setASuivre(null)} onCreee={(suite) => { setASuivre(null); setSuiteCreee(`Suite ${suite.reference} créée : elle est dans la file, à placer.`); fetchQueue(); fetchEvents(); }} />}
       {toPlace && <ContractPlacement item={toPlace} intervenants={intervenants} onClose={() => setToPlace(null)} onSaved={() => { setToPlace(null); fetchQueue(); fetchEvents(); }} />}
 
       {modal && (

@@ -12,6 +12,7 @@ import { getCompanySettings } from '../administration/metier';
 import { TYPES_CHANTIER } from '../chantiers/metier';
 import { voitRentabilite } from '../chantiers/droits';
 import { jourCivilDeDebut, computeChantierMetrics } from '../chantiers/suivi';
+import { avecCoutsSuites } from '../chantiers/coutsSuites';
 import { computeCommissionsParCommercial } from '../commissions/metier';
 import { weekBoundsFrom, periodBounds } from './metier';
 
@@ -141,10 +142,10 @@ export function enregistrerRoutesStatistiques(app: Express): void {
       if (!isAdmin && authUser.role !== ROLE_RESPONSABLE) return res.status(403).json({ error: 'Accès réservé à l’administration et aux responsables.' });
       const params = await getParametres();
       const users = await prisma.user.findMany({ where: { role: 'CONDUCTEUR_TRAVAUX', ...(authUser.role === ROLE_RESPONSABLE ? { id: { in: authUser.equipeIds } } : {}) }, select: { id: true, name: true, email: true } });
-      const chantiers = decimalToNumber(await prisma.chantier.findMany({
+      const chantiers = await avecCoutsSuites(decimalToNumber(await prisma.chantier.findMany({
         where: perimetreChantiers(req),
         include: { achats: { where: { archivedAt: null } }, pointages: { where: { archivedAt: null } } },
-      }));
+      })) as any[]);
 
       const byUser: Record<string, any> = {};
       for (const u of users) {
@@ -331,10 +332,10 @@ export function enregistrerRoutesStatistiques(app: Express): void {
   app.get('/api/stats/chantiers-repartition', requireAuth, requireAdmin, async (req, res) => {
     try {
       const params = await getParametres();
-      const chantiers = decimalToNumber(await prisma.chantier.findMany({
+      const chantiers = await avecCoutsSuites(decimalToNumber(await prisma.chantier.findMany({
         where: { statut: 'TERMINE' },
         include: { achats: true, pointages: true },
-      }));
+      })) as any[]);
 
       let positif = 0, tempsSeul = 0, materielSeul = 0, lesDeux = 0;
       for (const c of chantiers) {

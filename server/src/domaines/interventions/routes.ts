@@ -24,6 +24,7 @@ import {
 import { enregistrerLecturesInterventions } from './lectures';
 import { enregistrerRemiseAPlanifier } from './remiseAPlanifier';
 import { enregistrerSuites } from './suites';
+import { margeDevisIntervention } from './margeDevis';
 
 class ChantierInterventionIntrouvable extends Error {}
 // Refus métier relevé sous verrou, dans la transaction : il l'annule et devient un 409.
@@ -76,8 +77,9 @@ export function enregistrerRoutesInterventions(app: Express): void {
 
   enregistrerLecturesInterventions(app);
 
-  // Coûts SAV : jamais exposés dans les flux Travaux ou /api/v1. Hors contrat, une intervention ne
-  // porte que les heures du technicien (lot pilote 3b), sans matériel.
+  // Coûts SAV : leurs lignes ne sont jamais exposées dans les flux Travaux ou /api/v1 ; seuls les totaux
+  // des suites rattachées à une affaire entrent dans la marge du chantier (cf. coutsSuites). Hors
+  // contrat, une intervention ne porte que les heures du technicien (lot pilote 3b), sans matériel.
   app.get('/api/interventions/:id/couts', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       const intervention = await chargerInterventionCout(req);
@@ -111,7 +113,10 @@ export function enregistrerRoutesInterventions(app: Express): void {
       // total qui l'inclut (cf. voitCoutMainOeuvre).
       if (!voitCoutMainOeuvre(req)) return res.json(decimalToNumber({ heures: heures.map(sansTauxHoraire), achats, totalMainOeuvreHT: null, totalMaterielHT, totalCoutsHT: null }));
       const totalCoutsHT = totalMaterielHT === null ? totalMainOeuvreHT : totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-      res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT }));
+      // Intervention issue d'un devis, sans chantier : sa marge, suites comprises, pour l'administration
+      // seule (décision de Nelson de la nuit du 26 au 27-10-2026, cf. margeDevisIntervention).
+      const margeDevis = await margeDevisIntervention(intervention);
+      res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT, margeDevis }));
     } catch (error) { console.error('Erreur lecture coûts intervention', error); res.status(500).json({ error: 'Lecture des coûts impossible.' }); }
   });
 

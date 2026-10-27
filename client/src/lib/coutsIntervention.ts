@@ -13,3 +13,15 @@ export function resumeCoutsIntervention(couts: TotauxCoutsIntervention): { libel
   if (couts.totalMaterielHT != null) return { libelle: 'Matériel cumulé', montant: couts.totalMaterielHT };
   return null;
 }
+
+/**
+ * Marge d'une intervention issue d'un devis converti en intervention, sans chantier : total HT du devis
+ * moins les coûts de l'intervention et de ses suites (décision de Nelson de la nuit du 26 au 27-10-2026,
+ * point 2). Le serveur ne l'envoie qu'à l'administration.
+ */
+export type MargeDevisIntervention = {
+  devis: { id: string; numero: string; version: number };
+  totalDevisHT: number; coutsInterventionHT: number; coutsSuitesHT: number; nombreSuites: number; margeHT: number;
+};
+
+export const libelleDevisMarge = (marge: MargeDevisIntervention) => marge.devis.version > 1 ? `${marge.devis.numero} (version ${marge.devis.version})` : marge.devis.numero;

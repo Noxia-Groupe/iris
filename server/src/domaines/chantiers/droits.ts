@@ -46,6 +46,7 @@ export function chantierSansCoutMainOeuvre(c: any) {
     ...(c.metrics ? { metrics: {
       ...c.metrics,
       moReel: null, totalDepenses: null, pctMainOeuvre: null,
+      ...(c.metrics.coutsSuites ? { coutsSuites: { ...c.metrics.coutsSuites, coutMainOeuvre: null } } : {}),
       ...(estimation ? { estimation: { ...estimation, coutEstime: null, coutMainOeuvreAttendu: null, coutHoraireReference: null } } : {}),
     } } : {}),
   };
@@ -63,6 +64,7 @@ export function chantierSansMontants(c: any) {
     ...(c.metrics ? { metrics: {
       ...c.metrics,
       materielReel: null, moReel: null, totalDepenses: null, pctMateriel: null, pctMainOeuvre: null,
+      ...(c.metrics.coutsSuites ? { coutsSuites: { ...c.metrics.coutsSuites, coutMainOeuvre: null, materiel: null } } : {}),
       alertes: (c.metrics.alertes ?? []).filter((alerte: string) => !ALERTES_DEPASSEMENT.has(alerte)),
     } } : {}),
   };

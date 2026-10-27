@@ -17,6 +17,7 @@ import { formatCompanyDate, formatDateOnly, jourCivilChantier, jourCivilChantier
 import { archivagesRestaurables } from '../lib/archivesRestaurables';
 import { changementAffaire, titreEntreeJournal } from '../lib/journalChantier';
 import { AlertesChantier } from '../components/AlertesChantier';
+import { CoutsSuitesChantier } from '../components/CoutsSuitesChantier';
 import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
 import { sommeExacte, differenceExacte, arrondiEuro, arrondiCentime } from '../lib/montants';
 
@@ -908,8 +909,8 @@ const ChantierDetail = () => {
                     </div>
                   </div>
                   <ul className="mt-2 mb-0 pl-4 text-xs text-gray-600 space-y-0.5">
-                    <li>Main-d’œuvre attendue : {estimation.coutMainOeuvreAttendu != null && <><strong>{fmtEuro(estimation.coutMainOeuvreAttendu)}</strong> — </>}{hypotheseCoutHoraire(estimation)}.</li>
-                    <li>Matériel attendu : <strong>{fmtEuro(estimation.coutMaterielAttendu)}</strong> — {hypotheseMateriel(estimation)}.</li>
+                    <li>Main-d’œuvre attendue : {estimation.coutMainOeuvreAttendu != null && <><strong>{fmtEuro(estimation.coutMainOeuvreAttendu)}</strong> — </>}{hypotheseCoutHoraire(estimation, metrics.coutsSuites?.heures)}.</li>
+                    <li>Matériel attendu : <strong>{fmtEuro(estimation.coutMaterielAttendu)}</strong> — {hypotheseMateriel(estimation, metrics.coutsSuites?.materiel)}.</li>
                     <li>Un poste n’est jamais estimé sous ce qui a déjà été dépensé.</li>
                   </ul>
                 </div>
@@ -989,6 +990,8 @@ const ChantierDetail = () => {
               </div>
             </div>
           </div>
+
+          <CoutsSuitesChantier couts={metrics.coutsSuites} />
 
           {/* Répartitions */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
