@@ -346,6 +346,7 @@ if (!TEST_DATABASE_URL) {
       'replanif.admin@iris.test', 'replanif.conducteur@iris.test', 'replanif.responsable@iris.test', 'replanif.technicien@iris.test', 'replanif.commercial@iris.test',
       'replanif.directeur@iris.test', 'replanif.directeurCommercial@iris.test', 'replanif.assistante@iris.test', 'replanif.comptable@iris.test',
       'tp.commercial@iris.test', 'tp.conducteur@iris.test', 'tp.technicien@iris.test', 'tp.directeur@iris.test', 'tp.assistante@iris.test',
+      'marge-suites.conducteurHeures@iris.test', 'marge-suites.conducteurTermine@iris.test',
       'marge-suites.conducteur@iris.test', 'marge-suites.conducteurAutre@iris.test', 'marge-suites.technicien@iris.test', 'marge-suites.commercial@iris.test',
       'suites-affaire.conducteur@iris.test', 'suites-affaire.technicien@iris.test', 'suites-affaire.responsable@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
@@ -20464,7 +20465,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(secours.status, 200);
       admin = { Authorization: `Bearer ${secours.body.token}` };
       adminId = secours.body.user.id;
-      for (const [cle, role] of [['conducteur', 'CONDUCTEUR_TRAVAUX'], ['conducteurAutre', 'CONDUCTEUR_TRAVAUX'], ['technicien', 'TECHNICIEN']]) {
+      for (const [cle, role] of [['conducteur', 'CONDUCTEUR_TRAVAUX'], ['conducteurAutre', 'CONDUCTEUR_TRAVAUX'], ['technicien', 'TECHNICIEN'], ['conducteurHeures', 'CONDUCTEUR_TRAVAUX'], ['conducteurTermine', 'CONDUCTEUR_TRAVAUX']]) {
         const email = `marge-suites.${cle}@iris.test`;
         comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Marge suites ${cle}`, role } });
       }
@@ -20508,7 +20509,9 @@ if (!TEST_DATABASE_URL) {
       const initialeAutre = await interventionSur('initiale d’une autre affaire', autreChantier.id);
       await heure((await suiteDe(initialeAutre.id)).id, 5, 40); // autre affaire
 
-      const attendu = { heuresRealisees: 4.75, moReel: 189.375, materielReel: 25.5, totalDepenses: 214.875, margeCommerciale: 785.125 };
+      // Heures réalisées : les 2 h du chantier seules ; les 2,75 h des suites en restent hors, leur coût compté
+      // (décision de Nelson du 27-10-2026 à 21:41 UTC, « Oui il faut sortir les heures »).
+      const attendu = { heuresRealisees: 2, moReel: 189.375, materielReel: 25.5, totalDepenses: 214.875, margeCommerciale: 785.125 };
       const coutsSuitesAttendus = { heures: 2.75, coutMainOeuvre: 109.375, materiel: 25.5 };
       const detail = await ficheChantier(chantier.id);
       for (const [cle, valeur] of Object.entries(attendu)) assert.equal(detail.metrics[cle], valeur, `fiche : ${cle}`);
@@ -20524,7 +20527,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal('coutsSuites' in ligne, false);
       // L'autre affaire ne compte que sa propre suite.
       const autre = await ficheChantier(autreChantier.id);
-      assert.deepEqual([autre.metrics.heuresRealisees, autre.metrics.moReel, autre.metrics.coutsSuites], [5, 200, { heures: 5, coutMainOeuvre: 200, materiel: 0 }]);
+      assert.deepEqual([autre.metrics.heuresRealisees, autre.metrics.moReel, autre.metrics.coutsSuites], [0, 200, { heures: 5, coutMainOeuvre: 200, materiel: 0 }]);
       // Statistiques des conducteurs : mêmes dépenses et même marge.
       const stats = await request(app).get('/api/stats/conducteurs').set(admin);
       assert.equal(stats.status, 200, JSON.stringify(stats.body));
@@ -20539,11 +20542,11 @@ if (!TEST_DATABASE_URL) {
       await achat(suite.id, 12.25);
       const vueConducteur = await ficheChantier(chantier.id, enTete('conducteur'));
       assert.deepEqual(vueConducteur.metrics.coutsSuites, { heures: 1, coutMainOeuvre: null, materiel: 12.25 });
-      assert.deepEqual([vueConducteur.metrics.moReel, vueConducteur.metrics.materielReel, vueConducteur.metrics.heuresRealisees], [null, 12.25, 1]);
+      assert.deepEqual([vueConducteur.metrics.moReel, vueConducteur.metrics.materielReel, vueConducteur.metrics.heuresRealisees], [null, 12.25, 0]);
       await prisma.chantier.update({ where: { id: chantier.id }, data: { responsableId: comptes.technicien.id } });
       const vueTechnicien = await ficheChantier(chantier.id, enTete('technicien'));
       assert.deepEqual(vueTechnicien.metrics.coutsSuites, { heures: 1, coutMainOeuvre: null, materiel: null });
-      assert.deepEqual([vueTechnicien.metrics.moReel, vueTechnicien.metrics.materielReel, vueTechnicien.metrics.heuresRealisees], [null, null, 1]);
+      assert.deepEqual([vueTechnicien.metrics.moReel, vueTechnicien.metrics.materielReel, vueTechnicien.metrics.heuresRealisees], [null, null, 0]);
       for (const vue of [vueConducteur, vueTechnicien]) {
         assert.ok(!/tauxHoraireApplique/.test(JSON.stringify(vue.metrics)), 'aucun taux dans les métriques');
         assert.equal('coutsSuites' in vue, false);
@@ -20678,6 +20681,61 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([apres.positif, apres.materielSeul], [avant.positif - 1, avant.materielSeul + 1]);
     });
 
+    // --- Décision de Nelson du 27-10-2026 à 21:41 UTC, « Oui il faut sortir les heures » : les heures des suites
+    // sortent des heures réalisées du chantier, leur coût restant dans sa marge (montants) ---
+    const pointer = (chantierId, nbrHeures, tauxHoraireApplique) => prisma.pointageHeure.create({ data: {
+      date: new Date('2026-10-02T00:00:00Z'), intervenantId: fiche.id, chantierId, nbrHeures, tauxHoraireApplique, createdById: adminId, updatedById: adminId,
+    } });
+
+    test('heures des suites hors des heures réalisées : ni alerte « heures dépassées » ni retard du conducteur, leur coût restant dans la marge', async () => {
+      const chantier = await creerChantier('heures hors du réalisé', comptes.conducteurHeures.id);
+      await pointer(chantier.id, 18, 40); // 18 h faites sur 20 h vendues, 720 €
+      const suite = await suiteDe((await interventionSur('initiale des heures hors du réalisé', chantier.id)).id);
+      await heure(suite.id, 5, 10); // 5 h de suite à 10 €, 50 € : 23 h en tout si on les mêlait
+      const m = (await ficheChantier(chantier.id)).metrics;
+      assert.deepEqual([m.heuresRealisees, m.diffHeures, Math.round(m.pctHeures), m.coutsSuites.heures], [18, 2, 90, 5]);
+      assert.ok(!m.alertes.includes('HEURES_DEPASSEES'), 'les heures de la suite ne consomment pas les heures vendues');
+      assert.deepEqual([m.moReel, m.totalDepenses, m.margeCommerciale], [770, 770, 230], 'le coût de la suite reste dans le réel');
+      const ligne = (await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id);
+      assert.deepEqual([ligne.metrics.heuresRealisees, ligne.metrics.alertes.includes('HEURES_DEPASSEES')], [18, false], 'la liste dit la même chose');
+      const stats = await request(app).get('/api/stats/conducteurs').set(admin);
+      assert.equal(stats.status, 200, JSON.stringify(stats.body));
+      const duConducteur = stats.body.find((u) => u.id === comptes.conducteurHeures.id);
+      assert.deepEqual([duConducteur.nbEnAvanceHeures, duConducteur.nbEnRetardHeures, duConducteur.depensesTotal], [1, 0, 770]);
+    });
+
+    test('chantiers terminés : manque à gagner au coût horaire du chantier, dépassement d’heures et répartition sans les heures des suites', async () => {
+      const repartition = async () => {
+        const res = await request(app).get('/api/stats/chantiers-repartition').set(admin);
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        return Object.fromEntries(res.body.categories.map((c) => [c.key, c.count]));
+      };
+      const avant = await repartition();
+      const auDela = await creerChantier('terminé au-delà de ses heures', comptes.conducteurTermine.id);
+      const dansLesClous = await creerChantier('terminé dans ses heures', comptes.conducteurTermine.id);
+      try {
+        await pointer(auDela.id, 22, 40); // 22 h sur 20 h vendues, 880 €
+        await heure((await suiteDe((await interventionSur('initiale du terminé au-delà', auDela.id)).id)).id, 5, 10); // 50 €
+        await pointer(dansLesClous.id, 15, 40); // 15 h sur 20 h vendues, 600 €
+        await heure((await suiteDe((await interventionSur('initiale du terminé dans ses heures', dansLesClous.id)).id)).id, 6, 10); // 60 € : 21 h si on les mêlait
+        await prisma.chantier.updateMany({ where: { id: { in: [auDela.id, dansLesClous.id] } }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-25T00:00:00Z') } });
+        const stats = await request(app).get('/api/stats/conducteurs').set(admin);
+        assert.equal(stats.status, 200, JSON.stringify(stats.body));
+        const duConducteur = stats.body.find((u) => u.id === comptes.conducteurTermine.id);
+        // 2 h en trop, au coût horaire du chantier : 880 € ÷ 22 h = 40 €, soit 80 €. Avec les heures des suites,
+        // 7 h en trop à 34,44 € (241,11 €), plus 1 h à 31,43 € sur l'autre chantier.
+        assert.deepEqual([duConducteur.heuresVenduesTermineTotal, duConducteur.heuresRealiseesTermineTotal, Math.round(duConducteur.manqueAGagnerMainOeuvre * 100) / 100], [40, 37, 80]);
+        assert.deepEqual([duConducteur.nbTermineEnAvanceHeures, duConducteur.nbTermineEnRetardHeures, duConducteur.tauxDepassementHeures], [1, 1, 0]);
+        // Répartition : 15 h du chantier sur 20 vendues, 660 € de main-d'œuvre (suite comprise) sur 700 € vendus, aucun
+        // matériel : dans les clous ; l'autre dépasse sur le temps.
+        const apres = await repartition();
+        assert.deepEqual([apres.positif - avant.positif, apres.tempsSeul - avant.tempsSeul, apres.materielSeul - avant.materielSeul, apres.lesDeux - avant.lesDeux], [1, 1, 0, 0]);
+      } finally {
+        // Aucun chantier terminé sans achat ne reste pour fausser le ratio d'achat des autres tests.
+        await prisma.chantier.updateMany({ where: { id: { in: [auDela.id, dansLesClous.id] } }, data: { statut: 'EN_COURS', dateFin: null } });
+      }
+    });
+
     // --- Audit interne 1 de #339 : défauts R1 et R2 ---
     test('devis converti en chantier et en intervention : pas de marge de devis, son total étant déjà le vendu du chantier', async () => {
       const { CHANTIER: chantier, INTERVENTION: intervention } = await devisConverti('Devis chantier et intervention', ['CHANTIER', 'INTERVENTION']);
@@ -20779,7 +20837,8 @@ if (!TEST_DATABASE_URL) {
       const suite = await suiteDe((await interventionSur('initiale de la marge estimée', avecSuite.id)).id);
       await heure(suite.id, 5, 40); // 200 € de main-d'œuvre SAV, non vendue
       const [sans, avec] = [(await ficheChantier(sansSuite.id)).metrics, (await ficheChantier(avecSuite.id)).metrics];
-      assert.deepEqual([sans.heuresRealisees, avec.heuresRealisees, sans.margeCommerciale - avec.margeCommerciale], [10, 15, 200]);
+      // Les 5 h de la suite restent hors des heures réalisées ; leurs 200 € pèsent sur la marge.
+      assert.deepEqual([sans.heuresRealisees, avec.heuresRealisees, sans.margeCommerciale - avec.margeCommerciale], [10, 10, 200]);
       // 20 h vendues à 40 € : 800 € attendus pour le chantier, plus les 200 € de la suite, et non 800 € en tout.
       assert.deepEqual([sans.estimation.coutMainOeuvreAttendu, avec.estimation.coutMainOeuvreAttendu], [800, 1000]);
       assert.equal(avec.estimation.coutMaterielAttendu, sans.estimation.coutMaterielAttendu);
@@ -20816,7 +20875,7 @@ if (!TEST_DATABASE_URL) {
       const avecSuite = await creerChantier('estimée sans heure, avec suite', comptes.conducteur.id);
       await heure((await suiteDe((await interventionSur('initiale sans heure de chantier', avecSuite.id)).id)).id, 5, 13.37); // 66,85 €
       const [sans, avec] = [(await ficheChantier(temoin.id)).metrics, (await ficheChantier(avecSuite.id)).metrics];
-      assert.deepEqual([avec.heuresRealisees, auCentime(sans.margeCommerciale - avec.margeCommerciale)], [5, 66.85]);
+      assert.deepEqual([avec.heuresRealisees, auCentime(sans.margeCommerciale - avec.margeCommerciale)], [0, 66.85]);
       // Même hypothèse que le témoin (coût moyen de la société, ou budget vendu), et non le taux de la suite.
       assert.equal(avec.estimation.sourceCoutHoraire, sans.estimation.sourceCoutHoraire);
       assert.notEqual(avec.estimation.sourceCoutHoraire, 'CHANTIER');
@@ -20857,6 +20916,9 @@ if (!TEST_DATABASE_URL) {
         await prisma.chantier.update({ where: { id: avecSuite.id }, data: { statut: 'TERMINE' } });
         const termine = (await ficheChantier(avecSuite.id)).metrics;
         assert.equal(termine.estimation.sourceCoutHoraire, 'REEL');
+        // Son coût horaire réel est celui du chantier, 880 € pour 22 h, suites exclues des deux côtés : 40 €, et non
+        // 930 € pour 22 h ni pour 27 h.
+        assert.equal(termine.estimation.coutHoraireReference, 40);
         assert.deepEqual([termine.estimation.coutMainOeuvreAttendu, termine.estimation.coutMaterielAttendu, termine.margeEstimee], [930, 5012.25, termine.margeCommerciale]);
       } finally {
         // Le chantier repasse en cours avant le retrait de ses achats : aucun chantier terminé sans achat ne reste

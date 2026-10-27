@@ -621,8 +621,11 @@ const ChantierDetail = () => {
   // au taux horaire moyen réellement appliqué sur ce chantier — pas la différence avec le
   // budget main d'œuvre vendu (qui peut s'écarter du taux horaire pour d'autres raisons,
   // ex: marge intégrée au devis, et fausserait alors le montant du dépassement lui-même).
+  // Les heures des suites sont hors des heures réalisées : leur coût, resté dans le réel, sort
+  // aussi du taux (décision de Nelson du 27-10-2026 à 21:41 UTC).
   const heuresDepassement = Math.max(0, differenceExacte(heuresRealisees, chantier.heuresVendues));
-  const tauxHoraireMoyen = heuresRealisees > 0 ? coutMainOeuvreReel / heuresRealisees : 0;
+  const coutMainOeuvreChantier = differenceExacte(coutMainOeuvreReel, metrics.coutsSuites?.coutMainOeuvre ?? 0);
+  const tauxHoraireMoyen = heuresRealisees > 0 ? coutMainOeuvreChantier / heuresRealisees : 0;
   const manqueAGagnerMainOeuvre = heuresDepassement * tauxHoraireMoyen;
   const margeCommerciale: number | null = metrics.margeCommerciale ?? null;
   const showMarge = margeCommerciale !== null;
