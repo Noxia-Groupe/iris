@@ -17,6 +17,8 @@ export interface CoutsSuites { heures: number; coutMainOeuvre: number | null; ma
 export interface MetriquesChantier {
   heuresRealisees?: number;
   coutsSuites?: CoutsSuites | null;
+  /** Coûts de l'intervention issue du devis du chantier, rattachée à lui : déjà comptés dans le réel et, pour ses heures, dans les heures réalisées. Même masquage. */
+  coutsInterventionDevis?: CoutsSuites | null;
   /** Null pour un compte technicien, qui ne voit aucun coût. */
   materielReel?: number | null;
   moReel?: number | null;

@@ -99,6 +99,30 @@ test('la suite d’une visite de contrat ne porte pas le rappel du hors contrat'
   await expect(dialogue).toHaveCount(0);
 });
 
+// Décision de Nelson du 27-10-2026 à 21:41 UTC (« Elle vont au chantier auquel il est rattaché si c’est un chantier
+// issue d’un devis, ce n’est pas une intervention sav de toute facon ») : l'intervention d'un devis qui a aussi ouvert
+// le chantier lui est rattachée et compte comme son travail (choix par défaut, à confirmer).
+test('fiche chantier : l’intervention issue du devis du chantier compte comme son travail, ses suites comme des suites, et l’écran le dit', async ({ session, request, creerClient, allerSurPageAdmin }) => {
+  const { envoyer, fiche, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'devis-chantier');
+  const devis = await devisSigne('Affaire chantier et intervention');
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  const intervention = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'INTERVENTION' }) as { id: string; chantierId: string | null };
+  expect(intervention.chantierId).toBe(chantier.id);
+  const suite = await envoyer('post', `/interventions/${intervention.id}/suites`, {}) as { id: string };
+  await heuresDuTechnicien(intervention.id, 1.5); // 60 €, dans les heures réalisées
+  await heuresDuTechnicien(suite.id, 0.5); // 20 €, hors des heures réalisées
+  // 1 h pointée sur le chantier, à 40 €, pour 2 h vendues.
+  await envoyer('post', '/heures', { chantierId: chantier.id, intervenantId: fiche.id, date: dateDuJour(), nbrHeures: 1 });
+
+  const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  await expect(page.locator('[data-couts-intervention-devis]')).toHaveText(/^Dont l’intervention issue du devis du chantier, comptée comme son travail : 1,5 h dans les heures réalisées · main-d’œuvre 60,00\s€\.$/);
+  await expect(page.locator('[data-couts-suites]')).toHaveText(/^Dont suites SAV de l’affaire, comptées dans le réel : matériel 0,00\s€ · main-d’œuvre 20,00\s€\. Heures des suites SAV de l’affaire, hors des heures réalisées : 0,5 h\.$/);
+  // 1 h pointée et 1,5 h de l'intervention du devis : 2,5 h réalisées pour 2 h vendues ; la demi-heure en trop au coût
+  // horaire du chantier, (40 + 60) € ÷ 2,5 h = 40 €, soit 20 €.
+  await expect(page.getByText('2.50 h', { exact: true })).toBeVisible();
+  await expect(page.getByText('Manque à gagner : -20 €', { exact: true })).toBeVisible();
+});
+
 test('fiche chantier : les coûts des suites de l’affaire sont comptés dans le réel, leurs heures hors des heures réalisées, et l’écran le dit', async ({ session, request, creerClient, allerSurPageAdmin }) => {
   const { envoyer, client, fiche, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'marge-chantier');
   const devis = await devisSigne('Affaire avec suites');
@@ -302,4 +326,42 @@ test('fiche chantier en cours : les hypothèses de la marge estimée disent le c
   await expect(estimation).toContainText('Main-d’œuvre attendue : heures vendues au coût moyen réellement appliqué sur ce chantier, plus le coût réel des 1,5 h de suites SAV.');
   await expect(estimation).not.toContainText('€/h');
   await contexte.close();
+});
+
+// Audit interne n° 1 de #344 : l'écran suit l'API pour le conducteur et pour le technicien titulaires du chantier ; la part
+// de l'intervention du devis s'y dit en heures seules, sans montant qu'ils ne reçoivent pas, même à zéro.
+test('fiche chantier vue du conducteur, puis du technicien titulaire : la part de l’intervention du devis, en heures seules', async ({ session, request, creerClient, browser }) => {
+  const { envoyer, suffixe, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'devis-chantier-vues');
+  type Compte = { id: string; name: string; email: string; role: string };
+  const conducteur = await envoyer('post', '/users', { email: `devis-chantier-vues.cond.${suffixe}@iris.test`, name: `Conducteur ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' }) as Compte;
+  const technicien = await envoyer('post', '/users', { email: `devis-chantier-vues.tech.${suffixe}@iris.test`, name: `Technicien titulaire ${suffixe}`, role: 'TECHNICIEN' }) as Compte;
+  const devis = await devisSigne('Affaire vue des titulaires');
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: conducteur.id });
+  const intervention = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'INTERVENTION' }) as { id: string; chantierId: string | null };
+  expect(intervention.chantierId).toBe(chantier.id);
+  await heuresDuTechnicien(intervention.id, 1.5); // 60 €, dans les heures réalisées
+
+  const ouvrir = async (compte: Compte, permissions: string[]) => {
+    const contexte = await browser.newContext();
+    const page = await contexte.newPage();
+    await page.addInitScript(([token, user]) => {
+      localStorage.setItem('token', token as string);
+      localStorage.setItem('user', user as string);
+    }, [jetonPour(compte.id), JSON.stringify({ ...compte, permissions })]);
+    await page.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
+    return { contexte, page };
+  };
+  const PHRASE = /^Dont l’intervention issue du devis du chantier, comptée comme son travail : 1,5 h dans les heures réalisées\.$/;
+  // Le conducteur ne reçoit pas la main-d'œuvre ; le matériel, nul hors contrat, n'est pas cité.
+  const vueConducteur = await ouvrir(conducteur, ['chantiers:read', 'clients:read']);
+  await expect(vueConducteur.page.locator('[data-couts-intervention-devis]')).toHaveText(PHRASE);
+  await expect(vueConducteur.page.getByText('1.50 h', { exact: true })).toBeVisible();
+  await vueConducteur.contexte.close();
+  // Le technicien titulaire ne reçoit aucun montant : l'écran n'en affiche aucun.
+  await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: technicien.id });
+  const vueTechnicien = await ouvrir(technicien, []);
+  await expect(vueTechnicien.page.locator('[data-couts-intervention-devis]')).toHaveText(PHRASE);
+  await expect(vueTechnicien.page.locator('main')).not.toContainText('€');
+  await vueTechnicien.contexte.close();
 });

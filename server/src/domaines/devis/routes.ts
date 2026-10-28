@@ -29,6 +29,7 @@ import {
 import { REFUS_PAS_NON_REGLE, TempsPasseConflitError, TempsPasseSaisieError, exigerCoherenceTempsPasse, pasDuDevis } from './tempsPasse';
 import { rendreDocumentDevisPdf } from './document';
 import { annulerDevisEnCascade } from './annulation';
+import { chantierPourInterventionDuDevis, rattacherInterventionDuDevis } from './rattachement';
 import { DEVIS_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiDevis, validerDestinataire } from '../documents/envois';
 
 function devisErreur(res: express.Response, error: unknown) {
@@ -267,7 +268,8 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
 // du devis. Le verrou du devis fait passer l'une après l'autre deux conversions du même devis ; les
 // contraintes de DevisConversion (un type par dossier et par devis, rang 1 ou 2 unique par
 // dossier) restent le filet. Les combinaisons avec un abonnement viendront avec le lot qui créera
-// les abonnements (prévu).
+// les abonnements (prévu). Chantier + intervention : l'intervention et ses suites sont rattachées au
+// chantier, dans les deux ordres (décision de Nelson du 27-10-2026 à 21:41 UTC, rattachement.ts).
 //
 // L'intervention et le contrat ne se créent que depuis une session, avec les droits de leur
 // création directe : l'encadrement SAV pour l'intervention, l'administration pour le contrat.
@@ -398,9 +400,11 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
       const titre = typeof body.titre === 'string' && body.titre.trim() ? body.titre.trim() : devis.objet;
       if (cible === 'INTERVENTION') {
         const details = await lireDetailsIntervention(tx, body, devis.clientId, fuseau);
+        // Devis qui a déjà ouvert son chantier : l'intervention naît rattachée à ce chantier (rattachement.ts).
+        const chantierId = await chantierPourInterventionDuDevis(tx, devis);
         // Le marqueur du devis au temps passé est reporté sur l'intervention (décision de Nelson du
         // 25-10-2026, « Lot suivant ») ; la base vérifie ce report (migration 20261025120000).
-        const intervention = await creerInterventionNumerotee(tx, req as AuthRequest, anneeEntreprise(new Date(), fuseau), { clientId: devis.clientId, titre, chantierId: null, ...details, auTempsPasse: devis.auTempsPasse }, motif);
+        const intervention = await creerInterventionNumerotee(tx, req as AuthRequest, anneeEntreprise(new Date(), fuseau), { clientId: devis.clientId, titre, chantierId, ...details, auTempsPasse: devis.auTempsPasse }, motif);
         await tx.devisConversion.create({ data: { ...conversion, cibleType: 'INTERVENTION', cibleId: intervention.id } });
         return exposerIntervention(intervention);
       }
@@ -420,6 +424,8 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
       responsableId: ouverture.responsableId, commercialId: ouverture.commercialId, types: ouverture.types,
     } });
     await tx.devisConversion.create({ data: { ...conversion, cibleType: 'CHANTIER', cibleId: chantier.id } });
+    // Devis qui a déjà créé son intervention : elle et ses suites sont rattachées au chantier (rattachement.ts).
+    await rattacherInterventionDuDevis(tx, req as AuthRequest, devis, chantier.id);
     return chantier;
   });
   res.status(201).json(decimalToNumber(resultat));

@@ -73,6 +73,21 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
     heuresRealisees = sommeExacte(heuresRealisees, p.nbrHeures);
     moReel = sommeExacte(moReel, produitExact(p.nbrHeures, p.tauxHoraireApplique));
   }
+  // Intervention issue du devis qui a aussi ouvert le chantier (cf. avecCoutsSuites) : rattachée au
+  // chantier, elle n'est pas une intervention SAV (décision de Nelson du 27-10-2026 à 21:41 UTC). Elle
+  // compte comme son travail (choix par défaut, à confirmer) : ses heures avec les heures réalisées, sa
+  // main-d'œuvre avec celle du chantier, donc dans son coût horaire, son matériel avec son matériel, et
+  // ses saisies dans la dernière saisie du chantier. Le détail est renvoyé à part, comme celui des suites.
+  const interventionDevis: CoutsSuitesChantier = chantier.coutsInterventionDevis ?? { heures: [], achats: [] };
+  const coutsInterventionDevis = { heures: 0, coutMainOeuvre: 0, materiel: 0 };
+  for (const h of interventionDevis.heures) {
+    coutsInterventionDevis.heures = sommeExacte(coutsInterventionDevis.heures, h.nbrHeures);
+    coutsInterventionDevis.coutMainOeuvre = sommeExacte(coutsInterventionDevis.coutMainOeuvre, produitExact(h.nbrHeures, h.tauxHoraireApplique));
+  }
+  for (const a of interventionDevis.achats) coutsInterventionDevis.materiel = sommeExacte(coutsInterventionDevis.materiel, a.montantHT);
+  heuresRealisees = sommeExacte(heuresRealisees, coutsInterventionDevis.heures);
+  moReel = sommeExacte(moReel, coutsInterventionDevis.coutMainOeuvre);
+  materielReel = sommeExacte(materielReel, coutsInterventionDevis.materiel);
   // Coûts des suites rattachées à l'affaire (cf. avecCoutsSuites) : ils s'ajoutent au réel du
   // chantier, donc à sa marge et à ses alertes de coût. Leurs heures restent hors des heures
   // réalisées, qui ne comptent que les pointages du chantier : elles ne consomment pas les heures
@@ -86,8 +101,8 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
   }
   for (const a of suites.achats) coutsSuites.materiel = sommeExacte(coutsSuites.materiel, a.montantHT);
   materielReel = sommeExacte(materielReel, coutsSuites.materiel);
-  // Main-d'œuvre des seuls pointages du chantier, sur les mêmes heures que les heures réalisées :
-  // c'est elle qui donne le coût horaire du chantier.
+  // Main-d'œuvre du chantier (pointages et intervention du devis), sur les mêmes heures que les heures
+  // réalisées : c'est elle qui donne le coût horaire du chantier.
   const moChantier = moReel;
   moReel = sommeExacte(moReel, coutsSuites.coutMainOeuvre);
   const totalDepenses = sommeExacte(materielReel, moReel);
@@ -105,10 +120,10 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
   if (materielReel > chantier.budgetMaterielVendu) alertes.push('MATERIEL_DEPASSE');
   if (moReel > chantier.budgetMainOeuvreVendu) alertes.push('MAIN_OEUVRE_DEPASSEE');
 
-  // Dernière saisie : date métier du dernier achat ou pointage actif. Un chantier en cours
-  // sans aucune saisie compte son délai depuis son début.
+  // Dernière saisie : date métier du dernier achat ou pointage actif, ou de la dernière saisie active
+  // de l'intervention du devis. Un chantier en cours sans aucune saisie compte son délai depuis son début.
   let derniereSaisie: string | null = null;
-  for (const ligne of [...achats, ...pointages]) {
+  for (const ligne of [...achats, ...pointages, ...interventionDevis.heures, ...interventionDevis.achats]) {
     if (!ligne.date || Number.isNaN(new Date(ligne.date).getTime())) continue;
     const jour = dateSeuleEnJourCivil(new Date(ligne.date));
     if (!derniereSaisie || jour > derniereSaisie) derniereSaisie = jour;
@@ -119,7 +134,7 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
     if (params.joursSansSaisie != null && joursSansSaisie >= params.joursSansSaisie) alertes.push('SANS_SAISIE');
   }
 
-  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures, pctMainOeuvre, derniereSaisie, joursSansSaisie, alertes, coutsSuites };
+  const base = { materielReel, moReel, totalDepenses, heuresRealisees, diffHeures, pctMateriel, pctHeures, pctMainOeuvre, derniereSaisie, joursSansSaisie, alertes, coutsSuites, coutsInterventionDevis };
 
   if (!canSeeMarge || !params.margeCommercialeActive) {
     return { ...base, margeBrute: null, margeCommerciale: null, margePct: null, margeEstimee: null, margeEstimeePct: null, estimation: null };
@@ -203,7 +218,7 @@ export function serializeChantier(chantier: any, params: Parametres, canSeeMarge
   const c = decimalToNumber(chantier);
   // Les lignes de coûts des suites ne servent qu'au calcul : seuls leurs totaux sortent, dans
   // metrics.coutsSuites, masqués comme les autres montants.
-  const { coutsSuites: _coutsSuites, ...chantierSansCoutsSuites } = c;
+  const { coutsSuites: _coutsSuites, coutsInterventionDevis: _coutsInterventionDevis, ...chantierSansCoutsSuites } = c;
   const serialise = {
     ...chantierSansCoutsSuites,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,

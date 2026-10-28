@@ -24,7 +24,9 @@ import { DevisConflitError, DevisSaisieError, devisInclude, verrouillerDevis } f
 //    ou terminée refuse l'annulation, comme l'intervention elle-même (choix par défaut, à confirmer).
 //    Les suites d'une visite sont des visites du même contrat : elles suivent déjà la règle des visites ;
 //  - les coûts des suites rattachées au chantier, qui entrent dans sa marge (#339), le disent commencé
-//    comme ses heures et ses achats (choix par défaut, à confirmer).
+//    comme ses heures et ses achats (choix par défaut, à confirmer), ainsi que ceux de l'intervention
+//    issue du devis, rattachée au chantier quand le devis a ouvert les deux (rattachement.ts ; choix par
+//    défaut, à confirmer, ses coûts entrant dans la marge du chantier).
 // Chaque intervention annulée l'est comme depuis sa fiche (changement de statut journalisé) : son
 // créneau est retiré du planning, projection et affectations SAV, sous son verrou déjà pris, et son
 // journal les garde dans l'« avant » (décision de Nelson du 24-10-2026, point 7). Les
@@ -33,15 +35,17 @@ import { DevisConflitError, DevisSaisieError, devisInclude, verrouillerDevis } f
 // un chantier ne se supprime pas (DELETE /api/chantiers/:id répond 410). Tous les contrôles
 // précèdent toute écriture.
 //
-// Ordre des verrous, toujours le même : le devis (comme la conversion, qui l'attend), puis le
-// chantier (FOR NO KEY UPDATE, le verrou que prenait sa mise à jour), puis les interventions (SAV
-// du devis, ses suites et visites du contrat, par identifiant croissant), enfin le contrat. La saisie
-// d'un coût sur une suite du chantier prend l'affaire en partage après la suite : elle attend ce verrou
-// ou le fait attendre, et aucune intervention verrouillée ici n'est rattachée à une affaire. Les interventions
-// passent avant le contrat comme dans le placement d'une visite et les coûts SAV (intervention,
-// puis contrat) ; le changement de statut d'une intervention ne prend que l'intervention, et ceux
-// du contrat et la génération des visites ne prennent que le contrat avant d'insérer. Aucune de
-// ces routes ne prend un verrou dans l'ordre inverse : pas d'interblocage. Seule la génération
+// Ordre des verrous, toujours le même : le devis (comme la conversion, qui l'attend), puis les
+// interventions (SAV du devis, ses suites et visites du contrat, par identifiant croissant), puis le
+// contrat, enfin le chantier (FOR NO KEY UPDATE, le verrou que prenait sa mise à jour). C'est l'ordre
+// des coûts SAV (intervention, puis contrat, puis affaire en partage, affaireSuite.ts) et de la création
+// d'une suite (intervention initiale, contrat, affaire) : l'intervention du devis et ses suites peuvent
+// être rattachées au chantier (rattachement.ts). Les interventions passent avant le contrat comme dans
+// le placement d'une visite ; le changement de statut d'une intervention ne prend que l'intervention,
+// ceux du contrat et la génération des visites ne prennent que le contrat avant d'insérer, et la
+// création d'une intervention rattachée, la clôture, la réouverture et le changement de client d'un
+// chantier ne prennent, de ces lignes, que le chantier. Aucune de ces routes ne prend un verrou dans
+// l'ordre inverse : pas d'interblocage. Seule la génération
 // peut créer une visite entre la lecture des visites et le verrou du contrat : relue sous ce verrou,
 // une visite nouvelle refuse l'annulation (409, à relancer) plutôt que d'être verrouillée hors ordre.
 // De même, une suite créée entre la lecture des suites et leurs verrous (la création verrouille
@@ -50,7 +54,7 @@ const STATUTS_NON_REALISES = ['A_PLANIFIER', 'PLANIFIEE'];
 
 // Suites, toutes générations, d'une intervention : le lien est figé et ne boucle pas (garde en base),
 // UNION écarte tout doublon.
-const lireSuites = (tx: Prisma.TransactionClient, interventionId: string | null) => interventionId
+export const lireSuites = (tx: Prisma.TransactionClient, interventionId: string | null) => interventionId
   ? tx.$queryRaw<Array<{ id: string; reference: string; statut: string }>>(Prisma.sql`
     WITH RECURSIVE chaine AS (
       SELECT "id", "reference", "statut" FROM "Intervention" WHERE "interventionInitialeId" = ${interventionId}
@@ -69,6 +73,16 @@ export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisI
   const cible = (type: string) => devis.conversions.find(c => c.cibleType === type)?.cibleId ?? null;
   const chantierId = cible('CHANTIER'), contratId = cible('CONTRAT'), interventionId = cible('INTERVENTION');
 
+  const lireVisites = () => contratId
+    ? tx.intervention.findMany({ where: { contratMaintenanceId: contratId }, select: { id: true, reference: true, statut: true }, orderBy: { id: 'asc' } })
+    : Promise.resolve([]);
+  const aVerrouiller = [...new Set([...(interventionId ? [interventionId] : []), ...(await lireSuites(tx, interventionId)).map(s => s.id), ...(await lireVisites()).map(v => v.id)])].sort();
+  for (const id of aVerrouiller) await verrouillerIntervention(tx, id, 'FOR UPDATE');
+  let contrat: ContratMaintenance | null = null;
+  if (contratId) {
+    await verrouillerContratMaintenance(tx, contratId);
+    contrat = await tx.contratMaintenance.findUnique({ where: { id: contratId } });
+  }
   if (chantierId) {
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} FOR NO KEY UPDATE`);
     // Le verrou porte sur les écritures VIVANTES : une ligne déjà archivée n'engage rien. Les
@@ -81,22 +95,20 @@ export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisI
     if (heures > 0 || achats > 0) {
       throw new DevisConflitError(`Annulation impossible : ce chantier porte déjà ${heures} pointage(s) d’heures et ${achats} achat(s). Une affaire commencée ne s’annule pas.`);
     }
+    // Coûts de l'intervention du devis, rattachée au chantier, puis de ses suites : ils entrent dans sa
+    // marge (avecCoutsSuites). Ceux de l'intervention ne sont lus que si elle est rattachée au chantier.
+    if (interventionId) {
+      const deLIntervention = { archivedAt: null, intervention: { id: interventionId, chantierId } };
+      const coutsIntervention = (await tx.coutInterventionHeure.count({ where: deLIntervention })) + (await tx.coutInterventionAchat.count({ where: deLIntervention }));
+      if (coutsIntervention > 0) {
+        throw new DevisConflitError(`Annulation impossible : l’intervention issue de ce devis porte déjà ${coutsIntervention} coût(s), comptés dans la marge de son chantier. Une affaire commencée ne s’annule pas.`);
+      }
+    }
     const suitesDuChantier = { archivedAt: null, intervention: { chantierId, interventionInitialeId: { not: null } } };
     const coutsSuites = (await tx.coutInterventionHeure.count({ where: suitesDuChantier })) + (await tx.coutInterventionAchat.count({ where: suitesDuChantier }));
     if (coutsSuites > 0) {
       throw new DevisConflitError(`Annulation impossible : les suites SAV de ce chantier portent déjà ${coutsSuites} coût(s), comptés dans sa marge. Une affaire commencée ne s’annule pas.`);
     }
-  }
-
-  const lireVisites = () => contratId
-    ? tx.intervention.findMany({ where: { contratMaintenanceId: contratId }, select: { id: true, reference: true, statut: true }, orderBy: { id: 'asc' } })
-    : Promise.resolve([]);
-  const aVerrouiller = [...new Set([...(interventionId ? [interventionId] : []), ...(await lireSuites(tx, interventionId)).map(s => s.id), ...(await lireVisites()).map(v => v.id)])].sort();
-  for (const id of aVerrouiller) await verrouillerIntervention(tx, id, 'FOR UPDATE');
-  let contrat: ContratMaintenance | null = null;
-  if (contratId) {
-    await verrouillerContratMaintenance(tx, contratId);
-    contrat = await tx.contratMaintenance.findUnique({ where: { id: contratId } });
   }
   const visites = await lireVisites();
   if (visites.some(v => !aVerrouiller.includes(v.id))) {

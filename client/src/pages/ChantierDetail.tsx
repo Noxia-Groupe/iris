@@ -994,7 +994,7 @@ const ChantierDetail = () => {
             </div>
           </div>
 
-          <CoutsSuitesChantier couts={metrics.coutsSuites} />
+          <CoutsSuitesChantier couts={metrics.coutsSuites} interventionDevis={metrics.coutsInterventionDevis} />
 
           {/* Répartitions */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

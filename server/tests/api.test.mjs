@@ -349,6 +349,8 @@ if (!TEST_DATABASE_URL) {
       'marge-suites.conducteurHeures@iris.test', 'marge-suites.conducteurTermine@iris.test',
       'marge-suites.conducteur@iris.test', 'marge-suites.conducteurAutre@iris.test', 'marge-suites.technicien@iris.test', 'marge-suites.commercial@iris.test',
       'suites-affaire.conducteur@iris.test', 'suites-affaire.technicien@iris.test', 'suites-affaire.responsable@iris.test',
+      'devis-chantier.conducteur@iris.test', 'devis-chantier.conducteurTermine@iris.test', 'devis-chantier.technicien@iris.test', 'devis-chantier.commercial@iris.test',
+      ...['a2superadmin', 'a2admin', 'a2adminCommercial', 'a2conducteurDevis', 'a2commercial', 'a2assistante', 'a2comptable', 'a2directeurCommercial', 'a2directeurDevis', 'a2responsableDevis', 'a2commercialVerrou'].map((cle) => `devis-chantier.${cle}@iris.test`),
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
@@ -5830,7 +5832,8 @@ if (!TEST_DATABASE_URL) {
               assert.deepEqual([res.body.nom, res.body.clientId, res.body.numeroDevis, res.body.statut, res.body.budgetGlobalVendu, res.body.budgetMaterielVendu, res.body.budgetMainOeuvreVendu, res.body.heuresVendues],
                 [objet, clientId, devis.numero, 'EN_COURS', 200, 0, 200, 2], `${objet} : chantier`);
             } else if (cible === 'INTERVENTION') {
-              assert.deepEqual([res.body.titre, res.body.client.id, res.body.statut, res.body.chantierId, res.body.contratMaintenanceId], [objet, clientId, 'A_PLANIFIER', null, null], `${objet} : intervention`);
+              // Après le chantier du même devis, elle naît rattachée à lui (décision de Nelson du 27-10-2026 à 21:41 UTC).
+              assert.deepEqual([res.body.titre, res.body.client.id, res.body.statut, res.body.chantierId, res.body.contratMaintenanceId], [objet, clientId, 'A_PLANIFIER', crees.CHANTIER?.id ?? null, null], `${objet} : intervention`);
               assert.deepEqual((await journalIntervention(res.body.id)).map((e) => [e.action, e.motif]), [['CREATION', motif]]);
             } else {
               assert.deepEqual([res.body.titre, res.body.client.id, res.body.statut, res.body.dateDebut, res.body.prochaineEcheance, res.body.periodiciteMois, res.body.annuleLe],
@@ -5842,6 +5845,8 @@ if (!TEST_DATABASE_URL) {
             assert.equal(await aConvertir(devis.id), rang === 1 && cible !== 'CHANTIER', `${objet} : liste des devis à convertir après ${cible}`);
           }
           assert.deepEqual(await conversionsDe(devis.id), [[premiere, crees[premiere].id, 1], [seconde, crees[seconde].id, 2]]);
+          // Chantier + intervention : l'intervention est rattachée au chantier, dans les deux ordres.
+          if (crees.CHANTIER && crees.INTERVENTION) assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: crees.INTERVENTION.id } })).chantierId, crees.CHANTIER.id, objet);
           const lu = (await request(app).get('/api/devis').set(admin())).body.find((d) => d.id === devis.id);
           assert.deepEqual(lu.conversions.map((c) => [c.cibleType, c.cibleId, c.rang]), [[premiere, crees[premiere].id, 1], [seconde, crees[seconde].id, 2]]);
           const parCle = (await request(app).get('/api/v1/devis').set('Authorization', `Bearer ${cle.body.apiKey}`)).body.find((d) => d.id === devis.id);
@@ -20766,11 +20771,16 @@ if (!TEST_DATABASE_URL) {
     test('devis converti en chantier et en intervention : pas de marge de devis, son total étant déjà le vendu du chantier', async () => {
       const { CHANTIER: chantier, INTERVENTION: intervention } = await devisConverti('Devis chantier et intervention', ['CHANTIER', 'INTERVENTION']);
       assert.equal(Number(chantier.budgetGlobalVendu), 400);
-      assert.equal(intervention.chantierId, null);
+      // Rattachée au chantier du devis (décision de Nelson du 27-10-2026 à 21:41 UTC), ses coûts vont à sa marge.
+      assert.equal(intervention.chantierId, chantier.id);
       await heure(intervention.id, 1.5, 40);
       const lecture = await couts(intervention.id);
       assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
       assert.equal(lecture.body.margeDevis, null);
+      // Même sans rattachement (conversion d'avant ce lot, écrite ici en base), le devis converti aussi en chantier
+      // ne donne pas de marge de devis.
+      await prisma.intervention.update({ where: { id: intervention.id }, data: { chantierId: null } });
+      assert.equal((await couts(intervention.id)).body.margeDevis, null);
     });
 
     test('devis annulé : l’intervention annulée avec lui n’a plus de marge de devis', async () => {
@@ -21295,6 +21305,561 @@ if (!TEST_DATABASE_URL) {
       } finally {
         await prisma.user.update({ where: { id: comptes.conducteur.id }, data: { responsableHierarchiqueId: null } });
       }
+    });
+  });
+
+  // --- Intervention d'un devis converti aussi en chantier (décision de Nelson du 27-10-2026 à 21:41 UTC, « Elle vont
+  // au chantier auquel il est rattaché si c’est un chantier issue d’un devis, ce n’est pas une intervention sav de toute
+  // facon ») : rattachée au chantier, avec ses suites, dans les deux ordres ; ses coûts dans sa marge (montants) ---
+  describe('Intervention d’un devis converti aussi en chantier : rattachée au chantier, ses coûts dans sa marge', () => {
+    let admin = {};
+    let adminId = '';
+    const comptes = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    let autreClient = null;
+    let ficheTechnicien = null;
+    let fournisseur = null;
+    let margeActiveInitiale = true;
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    // Devis de 20 h de pose à 50 € et 300 € de fourniture : 1 300 € vendus, dont 1 000 € de main-d'œuvre et 300 € de matériel.
+    const devisSigne = async (objet) => {
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Devis chantier ${objet} ${suffixe}`, lignes: [
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 20, prixUnitaireHt: 50, tauxTva: 20 },
+        { designation: 'TEST Fourniture', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 300, tauxTva: 20 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: `TEST Signataire ${objet}`, confirme: true })).status, 201);
+      return devis.body;
+    };
+    const convertir = (devisId, cible, titulaire = 'conducteur') => envoyer('post', `/api/devis/${devisId}/convertir`, admin, { cible, ...(cible === 'CHANTIER' ? { responsableId: comptes[titulaire].id } : {}) });
+    const converti = async (devisId, cible, titulaire) => {
+      const res = await convertir(devisId, cible, titulaire);
+      assert.equal(res.status, 201, `${cible} : ${JSON.stringify(res.body)}`);
+      return res.body;
+    };
+    const suiteDe = async (id) => {
+      const res = await envoyer('post', `/api/interventions/${id}/suites`, admin, {});
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const chantierDe = async (id) => (await prisma.intervention.findUniqueOrThrow({ where: { id }, select: { chantierId: true } })).chantierId;
+    const statutDe = async (id) => (await prisma.intervention.findUniqueOrThrow({ where: { id }, select: { statut: true } })).statut;
+    // Lignes de coûts écrites en base : le calcul se vérifie au centime, sans dépendre des règles de saisie.
+    const heure = (interventionId, nbrHeures, tauxHoraireApplique, date = '2026-10-20') => prisma.coutInterventionHeure.create({ data: {
+      interventionId, intervenantId: ficheTechnicien.id, date: new Date(`${date}T00:00:00Z`), nbrHeures, tauxHoraireApplique, createdById: adminId,
+    } });
+    const achat = (interventionId, montantHT, date = '2026-10-20') => prisma.coutInterventionAchat.create({ data: {
+      interventionId, fournisseurId: fournisseur.id, date: new Date(`${date}T00:00:00Z`), description: 'TEST matériel', montantHT, createdById: adminId,
+    } });
+    const pointer = (chantierId, nbrHeures, tauxHoraireApplique) => prisma.pointageHeure.create({ data: {
+      date: new Date('2026-10-02T00:00:00Z'), intervenantId: ficheTechnicien.id, chantierId, nbrHeures, tauxHoraireApplique, createdById: adminId, updatedById: adminId,
+    } });
+    // Le technicien affecté saisit ses heures par l'API, comme sur le terrain.
+    const affecter = (interventionId) => prisma.interventionAffectation.create({ data: { interventionId, intervenantId: ficheTechnicien.id } });
+    const saisir = (interventionId) => envoyer('post', `/api/interventions/${interventionId}/couts/heures`, jeton('technicien'), { date: '01-10-2026', nbrHeures: 1.5 });
+    const archiver = (interventionId, coutId, auth, action = 'archiver') => envoyer('post', `/api/interventions/${interventionId}/couts/heures/${coutId}/${action}`, auth, { motif: `TEST ${action} de l’intervention du devis` });
+    const ficheChantier = async (id, auth = admin) => {
+      const res = await request(app).get(`/api/chantiers/${id}`).set(auth);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body;
+    };
+    const annulerDevis = (devisId) => envoyer('post', `/api/devis/${devisId}/annulation`, admin, { motif: 'TEST client renonce' });
+    const attendreBlocage = async (tx) => {
+      const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+      for (let tour = 0; tour < 150; tour += 1) {
+        if ((await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0) return true;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return false;
+    };
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      for (const [cle, role] of [['conducteur', 'CONDUCTEUR_TRAVAUX'], ['conducteurTermine', 'CONDUCTEUR_TRAVAUX'], ['technicien', 'TECHNICIEN']]) {
+        const email = `devis-chantier.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Devis chantier ${cle}`, role } });
+      }
+      margeActiveInitiale = (await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).margeCommercialeActive;
+      assert.equal((await envoyer('put', '/api/parametres', admin, { margeCommercialeActive: true })).status, 200);
+      await prisma.intervenant.updateMany({ where: { userId: comptes.technicien.id }, data: { userId: null } });
+      ficheTechnicien = await prisma.intervenant.create({ data: { nom: `TEST Devis chantier fiche ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40, userId: comptes.technicien.id } });
+      fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Devis chantier fournisseur ${suffixe}` } });
+      for (const [cle, nom] of [['client', 'principal'], ['autreClient', 'autre']]) {
+        const cree = await envoyer('post', '/api/clients', admin, { raisonSociale: `TEST Client devis chantier ${nom} ${suffixe}`, siren: await sirenLibre() });
+        assert.equal(cree.status, 201, JSON.stringify(cree.body));
+        const site = await envoyer('post', `/api/clients/${cree.body.id}/sites`, admin, { nom: `TEST Facturation devis chantier ${nom}`, adresse: '5 rue des Devis', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+        assert.equal(site.status, 201, JSON.stringify(site.body));
+        if (cle === 'client') client = cree.body; else autreClient = cree.body;
+      }
+    });
+
+    after(async () => {
+      await prisma.parametres.update({ where: { id: 'singleton' }, data: { margeCommercialeActive: margeActiveInitiale } });
+    });
+
+    test('chantier puis intervention : l’intervention naît rattachée au chantier, et ses suites le reprennent', async () => {
+      const devis = await devisSigne('chantier puis intervention');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      assert.equal(intervention.chantierId, chantier.id);
+      assert.deepEqual((await prisma.journalSaisieChantier.findMany({ where: { interventionId: intervention.id } })).map((e) => [e.action, e.motif]), [['CREATION', `Conversion du devis ${devis.numero} (version 1).`]]);
+      const suite = await suiteDe(intervention.id);
+      assert.equal(suite.chantierId, chantier.id, 'la suite reprend l’affaire');
+      // Rattachée à l'affaire, elle entre dans le périmètre du conducteur titulaire du chantier.
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}`).set(jeton('conducteur'))).status, 200);
+      // Son total HT étant le vendu du chantier, elle n'a pas de marge de devis.
+      const couts = await request(app).get(`/api/interventions/${intervention.id}/couts`).set(admin);
+      assert.equal(couts.status, 200, JSON.stringify(couts.body));
+      assert.equal(couts.body.margeDevis, null);
+    });
+
+    test('intervention puis chantier : l’intervention et ses suites, toutes générations et annulées comprises, sont rattachées au chantier, au journal', async () => {
+      const devis = await devisSigne('intervention puis chantier');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      const suite = await suiteDe(intervention.id);
+      const suiteDeSuite = await suiteDe(suite.id);
+      const suiteAnnulee = await suiteDe(intervention.id);
+      assert.equal((await envoyer('patch', `/api/interventions/${suiteAnnulee.id}/statut`, admin, { statut: 'ANNULEE', motif: 'TEST suite annulée' })).status, 200);
+      // Témoin : une intervention du même client, hors du devis, n'est pas rattachée.
+      const ordinaire = await envoyer('post', '/api/interventions', admin, { clientId: client.id, titre: `TEST Devis chantier ordinaire ${suffixe}` });
+      assert.equal(ordinaire.status, 201, JSON.stringify(ordinaire.body));
+      await heure(intervention.id, 2, 40);
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}`).set(jeton('conducteur'))).status, 404, 'hors du périmètre du conducteur, avant le chantier');
+      assert.notEqual((await request(app).get(`/api/interventions/${intervention.id}/couts`).set(admin)).body.margeDevis, null, 'marge du devis, avant le chantier');
+
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const arbre = [intervention, suite, suiteDeSuite, suiteAnnulee];
+      for (const noeud of arbre) assert.equal(await chantierDe(noeud.id), chantier.id, noeud.reference);
+      assert.equal(await chantierDe(ordinaire.body.id), null);
+      assert.equal(await statutDe(suiteAnnulee.id), 'ANNULEE', 'le rattachement ne change pas les statuts');
+      const motif = `Conversion du devis ${devis.numero} (version 1) en chantier : rattachée au chantier ouvert par le même devis.`;
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: { in: arbre.map((noeud) => noeud.id) }, action: 'RATTACHEMENT_CHANTIER' } });
+      assert.deepEqual(journal.map((entree) => entree.interventionId).sort(), arbre.map((noeud) => noeud.id).sort());
+      assert.ok(journal.every((entree) => entree.motif === motif && entree.avant.chantierId === null && entree.apres.chantierId === chantier.id), JSON.stringify(journal.map((e) => [e.motif, e.avant?.chantierId, e.apres?.chantierId])));
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}`).set(jeton('conducteur'))).status, 200, 'dans le périmètre du titulaire du chantier');
+      assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set(admin)).body.margeDevis, null);
+      // Ses heures, saisies avant le chantier, comptent avec lui.
+      const m = (await ficheChantier(chantier.id)).metrics;
+      assert.deepEqual([m.heuresRealisees, m.moReel, m.coutsInterventionDevis], [2, 80, { heures: 2, coutMainOeuvre: 80, materiel: 0 }]);
+    });
+
+    test('marge du chantier : l’intervention du devis compte comme son travail, ses suites comme des suites', async () => {
+      const devis = await devisSigne('marge');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      const suite = await suiteDe(intervention.id);
+      await pointer(chantier.id, 10, 40); // 400 €, le 02-10
+      await heure(intervention.id, 5, 16, '2026-10-25'); // 80 €
+      await achat(intervention.id, 25, '2026-10-25');
+      await heure(suite.id, 1.5, 40); // 60 €, le 20-10
+      await achat(suite.id, 10);
+      const m = (await ficheChantier(chantier.id)).metrics;
+      // Heures : 10 h pointées + 5 h de l'intervention du devis ; celles de la suite restent à part.
+      assert.deepEqual([m.heuresRealisees, m.diffHeures, m.coutsSuites.heures], [15, 5, 1.5]);
+      assert.deepEqual([m.moReel, m.materielReel, m.totalDepenses, m.margeCommerciale], [540, 35, 575, 725]);
+      assert.deepEqual(m.coutsInterventionDevis, { heures: 5, coutMainOeuvre: 80, materiel: 25 });
+      assert.deepEqual(m.coutsSuites, { heures: 1.5, coutMainOeuvre: 60, materiel: 10 });
+      // Coût horaire du chantier : (400 + 80) € ÷ 15 h = 32 € ; projection des 20 h vendues à ce coût (640 €), plus la suite (60 €).
+      assert.deepEqual([m.estimation.coutHoraireReference, m.estimation.sourceCoutHoraire, m.estimation.coutMainOeuvreAttendu], [32, 'CHANTIER', 700]);
+      // Dernière saisie : celle de l'intervention du devis, et non celle de la suite.
+      assert.equal(m.derniereSaisie, '2026-10-25');
+      const ligne = (await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id);
+      assert.deepEqual([ligne.metrics.heuresRealisees, ligne.metrics.margeCommerciale, ligne.metrics.coutsInterventionDevis], [15, 725, m.coutsInterventionDevis], 'la liste dit la même chose');
+      assert.equal('coutsInterventionDevis' in ligne, false, 'les lignes de coûts ne sortent jamais');
+      // Le conducteur titulaire garde les heures et le matériel, sans coût de main-d'œuvre.
+      const vue = (await ficheChantier(chantier.id, jeton('conducteur'))).metrics;
+      assert.deepEqual([vue.heuresRealisees, vue.moReel, vue.coutsInterventionDevis], [15, null, { heures: 5, coutMainOeuvre: null, materiel: 25 }]);
+    });
+
+    test('chantier terminé : le manque à gagner valorise les heures en trop au coût horaire du chantier, intervention du devis comprise', async () => {
+      const devis = await devisSigne('terminé');
+      const chantier = await converti(devis.id, 'CHANTIER', 'conducteurTermine');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      try {
+        await pointer(chantier.id, 18, 40); // 720 €
+        await heure(intervention.id, 4, 10); // 40 € : 22 h sur 20 vendues
+        await heure((await suiteDe(intervention.id)).id, 5, 10); // 50 €, hors des heures et du coût horaire
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-25T00:00:00Z') } });
+        const stats = await request(app).get('/api/stats/conducteurs').set(admin);
+        assert.equal(stats.status, 200, JSON.stringify(stats.body));
+        const duConducteur = stats.body.find((u) => u.id === comptes.conducteurTermine.id);
+        // 2 h en trop à (720 + 40) € ÷ 22 h, soit 69,09 €.
+        assert.deepEqual([duConducteur.heuresVenduesTermineTotal, duConducteur.heuresRealiseesTermineTotal, Math.round(duConducteur.manqueAGagnerMainOeuvre * 100) / 100], [20, 22, 69.09]);
+        assert.deepEqual([duConducteur.nbTermineEnRetardHeures, duConducteur.depensesTotal], [1, 810]);
+      } finally {
+        // Aucun chantier terminé sans achat ne reste pour fausser le ratio d'achat des autres tests.
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'EN_COURS', dateFin: null } });
+      }
+    });
+
+    test('coûts de l’intervention du devis : la règle des suites sur un chantier clôturé ou une affaire annulée', async () => {
+      const devis = await devisSigne('garde');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      // Témoin : une intervention ordinaire rattachée au même chantier, hors de sa marge.
+      const ordinaire = await envoyer('post', '/api/interventions', admin, { clientId: client.id, titre: `TEST Devis chantier ordinaire rattachée ${suffixe}`, chantierId: chantier.id });
+      assert.equal(ordinaire.status, 201, JSON.stringify(ordinaire.body));
+      for (const id of [intervention.id, ordinaire.body.id]) await affecter(id);
+      assert.equal((await saisir(intervention.id)).status, 201);
+      const heureDevis = await prisma.coutInterventionHeure.findFirstOrThrow({ where: { interventionId: intervention.id } });
+
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-15T00:00:00Z') } });
+      const refus = await saisir(intervention.id);
+      assert.equal(refus.status, 403, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Le chantier de cette intervention est clôturé : ses coûts ne peuvent plus être saisis ni modifiés.');
+      assert.equal((await archiver(intervention.id, heureDevis.id, jeton('conducteur'))).status, 403);
+      assert.equal((await archiver(intervention.id, heureDevis.id, admin)).status, 200, 'l’administration garde la main');
+      assert.equal((await archiver(intervention.id, heureDevis.id, admin, 'restaurer')).status, 200);
+      assert.equal((await saisir(ordinaire.body.id)).status, 201, 'l’intervention ordinaire n’est pas concernée');
+
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: adminId, motifAnnulation: 'TEST affaire annulée' } });
+      const annulee = await archiver(intervention.id, heureDevis.id, admin);
+      assert.equal(annulee.status, 409, JSON.stringify(annulee.body));
+      assert.equal(annulee.body.error, 'L’affaire de cette intervention est annulée : plus aucun coût ne peut y être saisi.');
+      assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: intervention.id, archivedAt: null } }), 1, 'rien n’est écrit');
+    });
+
+    test('intervention convertie après un chantier clôturé, annulé ou passé à un autre client : refusée, sans rien créer', async () => {
+      const cas = [
+        ['clôturé', { statut: 'TERMINE', dateFin: new Date('2026-10-15T00:00:00Z') }, 'Le chantier ouvert par ce devis est clôturé : l’intervention, qui lui serait rattachée, ne peut pas être créée tant qu’il n’est pas rouvert.'],
+        ['annulé', { statut: 'ANNULE', annuleLe: new Date(), annuleParId: adminId, motifAnnulation: 'TEST affaire annulée' }, 'Le chantier ouvert par ce devis est annulé : l’intervention, qui lui serait rattachée, ne peut pas être créée.'],
+        ['réaffecté', { clientId: autreClient.id, client: autreClient.raisonSociale }, 'Le chantier ouvert par ce devis n’est plus celui de son client : l’intervention, qui lui serait rattachée, ne peut pas être créée.'],
+      ];
+      for (const [nom, data, message] of cas) {
+        const devis = await devisSigne(`refus ${nom}`);
+        const chantier = await converti(devis.id, 'CHANTIER');
+        await prisma.chantier.update({ where: { id: chantier.id }, data });
+        const refus = await convertir(devis.id, 'INTERVENTION');
+        assert.equal(refus.status, 409, `${nom} : ${JSON.stringify(refus.body)}`);
+        assert.equal(refus.body.error, message);
+        assert.equal(await prisma.intervention.count({ where: { titre: devis.objet } }), 0, `${nom} : aucune intervention`);
+        assert.deepEqual((await prisma.devisConversion.findMany({ where: { devisId: devis.id } })).map((c) => c.cibleType), ['CHANTIER']);
+      }
+      // Témoin : rouvert, le chantier reçoit l'intervention, rattachée.
+      const devis = await devisSigne('rouvert');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE' } });
+      assert.equal((await convertir(devis.id, 'INTERVENTION')).status, 409);
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'EN_COURS' } });
+      assert.equal((await converti(devis.id, 'INTERVENTION')).chantierId, chantier.id);
+    });
+
+    test('clé d’intégration : elle n’ouvre pas le chantier d’un devis qui a déjà créé son intervention (403), sans rien créer', async () => {
+      const cle = await envoyer('post', '/api/admin/api-keys', admin, { nom: `TEST Devis chantier clé ${suffixe}`, scopes: ['devis:write'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      const parCle = (devisId) => request(app).post(`/api/v1/devis/${devisId}/convertir`).set('Authorization', `Bearer ${cle.body.apiKey}`).send({ cible: 'CHANTIER' });
+      const devis = await devisSigne('clé après intervention');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      const refus = await parCle(devis.id);
+      assert.equal(refus.status, 403, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Ce devis a déjà créé son intervention : le chantier, qui la reçoit avec ses suites, ne s’ouvre que dans une session de l’application.');
+      assert.equal(await prisma.chantier.count({ where: { nom: devis.objet } }), 0, 'aucun chantier ouvert');
+      assert.equal(await chantierDe(intervention.id), null);
+      // Témoin : sans intervention, la clé ouvre toujours le chantier d'un devis.
+      const seul = await devisSigne('clé sans intervention');
+      assert.equal((await parCle(seul.id)).status, 201);
+    });
+
+    // Audit interne n° 1 de #344, note N2 (règle 2) : le droit devis seul n'ouvre pas ce chantier, qui modifie l'intervention
+    // et ses suites ; il faut les droits de la création de l'intervention, l'encadrement SAV.
+    test('porteur du droit devis sans accès SAV : il n’ouvre pas le chantier d’un devis qui a déjà créé son intervention (403), sans rien créer', async () => {
+      const email = 'devis-chantier.commercial@iris.test';
+      comptes.commercial = await prisma.user.upsert({ where: { email }, update: { role: 'COMMERCIAL', actif: true, permissions: [] }, create: { email, name: 'TEST Devis chantier commercial', role: 'COMMERCIAL' } });
+      const parCommercial = (devisId) => envoyer('post', `/api/devis/${devisId}/convertir`, jeton('commercial'), { cible: 'CHANTIER' });
+      const devis = await devisSigne('commercial après intervention');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      const refus = await parCommercial(devis.id);
+      assert.equal(refus.status, 403, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Ce devis a déjà créé son intervention : le chantier, qui la reçoit avec ses suites, ne s’ouvre que par l’encadrement SAV, comme l’intervention elle-même.');
+      assert.equal(await prisma.chantier.count({ where: { nom: devis.objet } }), 0, 'aucun chantier ouvert');
+      assert.equal(await chantierDe(intervention.id), null);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: intervention.id, action: 'RATTACHEMENT_CHANTIER' } }), 0);
+      // Témoins : sans intervention, le commercial ouvre toujours le chantier d'un devis ; le conducteur, encadrement SAV
+      // porteur du droit devis, ouvre celui qui reçoit l'intervention.
+      const seul = await devisSigne('commercial sans intervention');
+      assert.equal((await parCommercial(seul.id)).status, 201);
+      await prisma.user.update({ where: { id: comptes.conducteur.id }, data: { permissions: ['devis:write'] } });
+      try {
+        const parConducteur = await envoyer('post', `/api/devis/${devis.id}/convertir`, jeton('conducteur'), { cible: 'CHANTIER' });
+        assert.equal(parConducteur.status, 201, JSON.stringify(parConducteur.body));
+        assert.equal(await chantierDe(intervention.id), parConducteur.body.id);
+      } finally {
+        await prisma.user.update({ where: { id: comptes.conducteur.id }, data: { permissions: [] } });
+      }
+    });
+
+    test('chantier ouvert après une intervention déjà rattachée à une autre affaire : refusé, sans rien créer', async () => {
+      const devis = await devisSigne('déjà rattachée');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      // Écrit en base : aucune route ne rattache ensuite une intervention à une affaire.
+      const autre = await prisma.chantier.create({ data: {
+        nom: `TEST Devis chantier autre affaire ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date('2026-10-01T00:00:00Z'),
+        budgetGlobalVendu: 100, budgetMaterielVendu: 0, budgetMainOeuvreVendu: 100, heuresVendues: 2, responsableId: comptes.conducteur.id,
+      } });
+      await prisma.intervention.update({ where: { id: intervention.id }, data: { chantierId: autre.id } });
+      const refus = await convertir(devis.id, 'CHANTIER');
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'L’intervention de ce devis ou l’une de ses suites n’est plus de son client, ou déjà rattachée à une affaire : elle ne peut pas être rattachée au chantier.');
+      assert.equal(await prisma.chantier.count({ where: { nom: devis.objet } }), 0, 'aucun chantier ouvert');
+      assert.equal(await chantierDe(intervention.id), autre.id);
+    });
+
+    test('annulation du devis : les coûts vivants de l’intervention rattachée la refusent ; archivés, l’affaire s’annule', async () => {
+      const devis = await devisSigne('annulation');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      const ligne = await heure(intervention.id, 1, 40);
+      const refus = await annulerDevis(devis.id);
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Annulation impossible : l’intervention issue de ce devis porte déjà 1 coût(s), comptés dans la marge de son chantier. Une affaire commencée ne s’annule pas.');
+      assert.deepEqual([(await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, await statutDe(intervention.id)], ['EN_COURS', 'A_PLANIFIER']);
+      assert.equal((await archiver(intervention.id, ligne.id, admin)).status, 200);
+      const annulation = await annulerDevis(devis.id);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual([(await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, await statutDe(intervention.id)], ['ANNULE', 'ANNULEE']);
+      // Témoin : sans chantier, l'intervention d'un devis garde la règle du statut seul.
+      const seul = await devisSigne('annulation sans chantier');
+      const sav = await converti(seul.id, 'INTERVENTION');
+      await heure(sav.id, 1, 40);
+      assert.equal((await annulerDevis(seul.id)).status, 200);
+    });
+
+    // Avant ce lot, l'annulation verrouillait le chantier avant les interventions ; la saisie verrouille l'intervention,
+    // puis l'affaire. L'intervention du devis étant rattachée, l'ordre inverse s'interbloquerait.
+    test('saisie sur l’intervention du devis pendant l’annulation : pas d’interblocage, la saisie validée refuse l’annulation', async () => {
+      const devis = await devisSigne('verrous');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      let reponse;
+      await prisma.$transaction(async (tx) => {
+        // Une saisie en cours : l'intervention verrouillée, puis l'affaire en partage, comme verrouillerContexteCout et la garde.
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${intervention.id} FOR UPDATE`;
+        reponse = annulerDevis(devis.id).then((r) => r);
+        assert.equal(await attendreBlocage(tx), true, 'l’annulation attend le verrou de l’intervention');
+        await tx.$queryRaw`SELECT "id" FROM "Chantier" WHERE "id" = ${chantier.id} FOR SHARE`;
+        await tx.coutInterventionHeure.create({ data: { interventionId: intervention.id, intervenantId: ficheTechnicien.id, date: new Date('2026-10-01T00:00:00Z'), nbrHeures: 1, tauxHoraireApplique: 40, createdById: comptes.technicien.id } });
+      }, { timeout: 20000 });
+      const refus = await reponse;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /l’intervention issue de ce devis porte déjà 1 coût/);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, 'EN_COURS');
+      assert.notEqual((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ANNULE');
+    });
+
+    test('chantier ouvert pendant la création d’une suite : la suite créée entre la lecture et les verrous fait refuser la conversion, à relancer', async () => {
+      const devis = await devisSigne('suite concurrente');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      const suite = await suiteDe(intervention.id);
+      let reponse; let nouvelle;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${intervention.id} FOR UPDATE`;
+        reponse = convertir(devis.id, 'CHANTIER').then((r) => r);
+        assert.equal(await attendreBlocage(tx), true, 'la conversion attend le verrou de l’intervention');
+        nouvelle = await tx.intervention.create({ data: { reference: `TEST-${randomUUID()}`, clientId: client.id, interventionInitialeId: intervention.id, titre: 'TEST Suite créée pendant la conversion', dateDemande: new Date('2026-10-01T00:00:00.000Z') } });
+      }, { timeout: 20000 });
+      const relance = await reponse;
+      assert.equal(relance.status, 409, JSON.stringify(relance.body));
+      assert.equal(relance.body.error, 'Une suite vient d’être créée pour l’intervention de ce devis : relancez la conversion.');
+      assert.equal(await prisma.chantier.count({ where: { nom: devis.objet } }), 0, 'aucun chantier ouvert');
+      for (const id of [intervention.id, suite.id, nouvelle.id]) assert.equal(await chantierDe(id), null);
+      // Relancée, elle rattache aussi cette suite.
+      const chantier = await converti(devis.id, 'CHANTIER');
+      for (const id of [intervention.id, suite.id, nouvelle.id]) assert.equal(await chantierDe(id), chantier.id);
+    });
+
+    // Audit interne n° 1 de #344 : seules les lignes vivantes de l'intervention issue du devis qui a ouvert ce chantier,
+    // et rattachée à lui, comptent comme son travail ; ni une ligne archivée, ni une intervention ordinaire de l'affaire,
+    // ni celle d'un autre devis (écrite en base, aucune route ne la rattacherait).
+    test('audit 1 — marge du chantier : ni ligne archivée, ni intervention ordinaire de l’affaire, ni intervention d’un autre devis', async () => {
+      const devis = await devisSigne('audit lignes');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      await pointer(chantier.id, 4, 40); // 160 €, le 02-10
+      await heure(intervention.id, 2, 30, '2026-10-10'); // 60 €, vivante
+      const archiverLigne = { archivedAt: new Date(), archivedById: adminId, motifArchivage: 'TEST ligne archivée' };
+      const heureArchivee = await heure(intervention.id, 3, 50, '2026-10-26'); // 150 €, archivée
+      await prisma.coutInterventionHeure.update({ where: { id: heureArchivee.id }, data: archiverLigne });
+      const achatArchive = await achat(intervention.id, 70, '2026-10-26'); // archivé
+      await prisma.coutInterventionAchat.update({ where: { id: achatArchive.id }, data: archiverLigne });
+      // Intervention ordinaire rattachée à la même affaire : hors de sa marge.
+      const ordinaire = await envoyer('post', '/api/interventions', admin, { clientId: client.id, titre: `TEST Devis chantier audit ordinaire ${suffixe}`, chantierId: chantier.id });
+      assert.equal(ordinaire.status, 201, JSON.stringify(ordinaire.body));
+      await heure(ordinaire.body.id, 7, 40, '2026-10-27');
+      await achat(ordinaire.body.id, 90, '2026-10-27');
+      // Intervention d'un autre devis du même client, convertie seule, écrite rattachée à ce chantier.
+      const autreDevis = await devisSigne('audit autre devis');
+      const autreIntervention = await converti(autreDevis.id, 'INTERVENTION');
+      await prisma.intervention.update({ where: { id: autreIntervention.id }, data: { chantierId: chantier.id } });
+      await heure(autreIntervention.id, 5, 40, '2026-10-27');
+
+      const m = (await ficheChantier(chantier.id)).metrics;
+      assert.deepEqual(m.coutsInterventionDevis, { heures: 2, coutMainOeuvre: 60, materiel: 0 });
+      assert.deepEqual(m.coutsSuites, { heures: 0, coutMainOeuvre: 0, materiel: 0 });
+      // 4 h pointées + 2 h vivantes de l'intervention du devis ; 160 + 60 = 220 € ; 1 300 € vendus.
+      assert.deepEqual([m.heuresRealisees, m.diffHeures, m.moReel, m.materielReel, m.totalDepenses, m.margeCommerciale, m.derniereSaisie], [6, 14, 220, 0, 220, 1080, '2026-10-10']);
+      // Coût horaire du chantier : 220 € ÷ 6 h ; projection des 20 h vendues à ce coût, 733,33 €.
+      assert.deepEqual([Math.round(m.estimation.coutHoraireReference * 1e4) / 1e4, m.estimation.sourceCoutHoraire, Math.round(m.estimation.coutMainOeuvreAttendu * 100) / 100], [36.6667, 'CHANTIER', 733.33]);
+      const ligne = (await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id);
+      assert.deepEqual([ligne.metrics.heuresRealisees, ligne.metrics.moReel, ligne.metrics.margeCommerciale, ligne.metrics.coutsInterventionDevis], [6, 220, 1080, m.coutsInterventionDevis], 'la liste dit la même chose');
+    });
+
+    // Règle 4 : une conversion d'avant ce lot (intervention du devis non rattachée, écrite en base) reste hors de la marge
+    // du chantier, et ses coûts vivants ne refusent pas l'annulation du devis : seule l'intervention rattachée la refuse.
+    test('audit 1 — intervention du devis non rattachée (conversion d’avant ce lot) : hors de la marge, et ses coûts ne refusent pas l’annulation', async () => {
+      const devis = await devisSigne('audit non rattachée');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      await prisma.intervention.update({ where: { id: intervention.id }, data: { chantierId: null } });
+      await heure(intervention.id, 1, 40);
+      const m = (await ficheChantier(chantier.id)).metrics;
+      assert.deepEqual([m.heuresRealisees, m.moReel, m.coutsInterventionDevis], [0, 0, { heures: 0, coutMainOeuvre: 0, materiel: 0 }]);
+      const annulation = await annulerDevis(devis.id);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual([(await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, await statutDe(intervention.id)], ['ANNULE', 'ANNULEE']);
+    });
+
+    // Règle 2 : le technicien titulaire du chantier voit les heures de l'intervention du devis, jamais un montant ; une clé
+    // d'intégration voit les totaux, comme ceux des suites.
+    test('audit 1 — masquage de metrics.coutsInterventionDevis : technicien titulaire sans montant, clé d’intégration avec', async () => {
+      const devis = await devisSigne('audit technicien');
+      const chantier = await converti(devis.id, 'CHANTIER', 'technicien');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      await heure(intervention.id, 2, 30); // 60 €
+      await achat(intervention.id, 15);
+      const fiche = await ficheChantier(chantier.id, jeton('technicien'));
+      assert.deepEqual([fiche.metrics.heuresRealisees, fiche.metrics.moReel, fiche.metrics.materielReel, fiche.metrics.coutsInterventionDevis], [2, null, null, { heures: 2, coutMainOeuvre: null, materiel: null }]);
+      const liste = (await request(app).get('/api/chantiers').set(jeton('technicien'))).body.find((c) => c.id === chantier.id);
+      assert.deepEqual(liste.metrics.coutsInterventionDevis, { heures: 2, coutMainOeuvre: null, materiel: null });
+      const cle = await envoyer('post', '/api/admin/api-keys', admin, { nom: `TEST Devis chantier audit clé ${suffixe}`, scopes: ['chantiers:read'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      const parCle = (await request(app).get('/api/v1/chantiers').set('Authorization', `Bearer ${cle.body.apiKey}`)).body.find((c) => c.id === chantier.id);
+      assert.deepEqual(parCle.metrics.coutsInterventionDevis, { heures: 2, coutMainOeuvre: 60, materiel: 15 });
+      assert.equal('coutsInterventionDevis' in parCle, false, 'les lignes de coûts ne sortent jamais');
+    });
+
+    // Une clôture en cours du chantier du devis (la route l'écrit sous son verrou) est attendue par la conversion de
+    // l'intervention, qui lit le chantier en partage, puis refusée : l'intervention ne naît pas rattachée à un chantier clôturé.
+    test('audit 1 — intervention convertie pendant la clôture du chantier du devis : attendue, puis refusée, sans rien créer', async () => {
+      const devis = await devisSigne('audit clôture concurrente');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      let reponse;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-25T00:00:00Z') } });
+          reponse = convertir(devis.id, 'INTERVENTION').then((r) => r);
+          assert.equal(await attendreBlocage(tx), true, 'la conversion attend la clôture');
+        }, { timeout: 20000 });
+        const refus = await reponse;
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.equal(refus.body.error, 'Le chantier ouvert par ce devis est clôturé : l’intervention, qui lui serait rattachée, ne peut pas être créée tant qu’il n’est pas rouvert.');
+        assert.equal(await prisma.intervention.count({ where: { titre: devis.objet } }), 0);
+      } finally {
+        await reponse;
+        // Aucun chantier terminé sans achat ne reste pour fausser le ratio d'achat des autres tests.
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'EN_COURS', dateFin: null } });
+      }
+    });
+
+    // Audit interne n° 2 de #344 (note N2 de l'audit n° 1, corrigée) : chaque type de compte porteur du droit devis,
+    // par défaut ou accordé individuellement. L'ouverture du chantier d'un devis qui a déjà créé son intervention suit les
+    // droits de la création de cette intervention ; sans intervention, le seul droit devis suffit, comme avant.
+    test('audit 2 — chaque porteur du droit devis : chantier d’un devis qui a déjà son intervention, mêmes droits que sa création', async () => {
+      const REFUS_ROLE = 'Ce devis a déjà créé son intervention : le chantier, qui la reçoit avec ses suites, ne s’ouvre que par l’encadrement SAV, comme l’intervention elle-même.';
+      const cas = [
+        ['a2superadmin', 'SUPERADMIN', [], true],
+        ['a2admin', 'ADMIN', [], true],
+        ['a2adminCommercial', 'ADMIN', [], true, { estCommercial: true }],
+        ['a2conducteurDevis', 'CONDUCTEUR_TRAVAUX', ['devis:write'], true],
+        ['a2commercial', 'COMMERCIAL', [], false],
+        ['a2assistante', 'ASSISTANTE_COMMERCIALE', [], false],
+        ['a2comptable', 'COMPTABLE', [], false],
+        ['a2directeurCommercial', 'DIRECTEUR_COMMERCIAL', [], false],
+        ['a2directeurDevis', 'DIRECTEUR', ['devis:write'], false],
+        ['a2responsableDevis', 'RESPONSABLE', ['devis:write'], false],
+      ];
+      const constats = [];
+      for (const [cle, role, permissions, encadrement, extra = {}] of cas) {
+        const email = `devis-chantier.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions, ...extra }, create: { email, name: `TEST Devis chantier ${cle}`, role, permissions, ...extra } });
+        const auth = jeton(cle);
+        // Création de l'intervention depuis un devis, par ce compte.
+        const devisI = await devisSigne(`${cle} création intervention`);
+        const creation = await envoyer('post', `/api/devis/${devisI.id}/convertir`, auth, { cible: 'INTERVENTION' });
+        assert.equal(creation.status, encadrement ? 201 : 403, `${cle} intervention : ${JSON.stringify(creation.body)}`);
+        if (!encadrement) assert.equal(creation.body.error, 'Création réservée à l’encadrement SAV.');
+        // Chantier d'un devis dont l'administration a créé l'intervention, avec une suite.
+        const devis = await devisSigne(`${cle} après intervention`);
+        const intervention = await converti(devis.id, 'INTERVENTION');
+        const suite = await suiteDe(intervention.id);
+        const arbre = [intervention.id, suite.id];
+        const avant = await prisma.intervention.findMany({ where: { id: { in: arbre } }, orderBy: { id: 'asc' } });
+        const ouverture = await envoyer('post', `/api/devis/${devis.id}/convertir`, auth, { cible: 'CHANTIER' });
+        const journal = await prisma.journalSaisieChantier.findMany({ where: { interventionId: { in: arbre }, action: 'RATTACHEMENT_CHANTIER' } });
+        if (encadrement) {
+          assert.equal(ouverture.status, 201, `${cle} chantier : ${JSON.stringify(ouverture.body)}`);
+          for (const id of arbre) assert.equal(await chantierDe(id), ouverture.body.id, cle);
+          assert.equal(journal.length, 2, cle);
+          assert.ok(journal.every((e) => e.auteurId === comptes[cle].id), `${cle} : journal à son nom`);
+        } else {
+          assert.equal(ouverture.status, 403, `${cle} chantier : ${JSON.stringify(ouverture.body)}`);
+          assert.equal(ouverture.body.error, REFUS_ROLE, cle);
+          // Rien d'écrit : ni chantier, ni conversion, ni rattachement, ni journal ; l'intervention et sa suite inchangées.
+          assert.equal(await prisma.chantier.count({ where: { OR: [{ nom: devis.objet }, { numeroDevis: devis.numero }] } }), 0, cle);
+          assert.deepEqual((await prisma.devisConversion.findMany({ where: { devisId: devis.id } })).map((c) => c.cibleType), ['INTERVENTION'], cle);
+          assert.equal(journal.length, 0, cle);
+          assert.deepEqual(await prisma.intervention.findMany({ where: { id: { in: arbre } }, orderBy: { id: 'asc' } }), avant, cle);
+          // Le même devis s'ouvre ensuite par l'administration : le refus n'a rien laissé qui le bloque.
+          const reprise = await converti(devis.id, 'CHANTIER');
+          for (const id of arbre) assert.equal(await chantierDe(id), reprise.id, cle);
+        }
+        // Sans intervention : le seul droit devis ouvre toujours le chantier, comme avant ce lot.
+        const seul = await devisSigne(`${cle} sans intervention`);
+        const libre = await envoyer('post', `/api/devis/${seul.id}/convertir`, auth, { cible: 'CHANTIER' });
+        assert.equal(libre.status, 201, `${cle} sans intervention : ${JSON.stringify(libre.body)}`);
+        constats.push([cle, creation.status, ouverture.status, libre.status]);
+      }
+      // Clé d'intégration porteuse du droit devis : refus de session, avant le rôle ; sans intervention, elle ouvre.
+      const cle = await envoyer('post', '/api/admin/api-keys', admin, { nom: `TEST Devis chantier audit 2 clé ${suffixe}`, scopes: ['devis:write'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      const parCle = (devisId, cible) => request(app).post(`/api/v1/devis/${devisId}/convertir`).set('Authorization', `Bearer ${cle.body.apiKey}`).send({ cible });
+      const devisI = await devisSigne('clé audit 2 création intervention');
+      const creationParCle = await parCle(devisI.id, 'INTERVENTION');
+      assert.equal(creationParCle.status, 403);
+      const devis = await devisSigne('clé audit 2 après intervention');
+      await converti(devis.id, 'INTERVENTION');
+      const refusCle = await parCle(devis.id, 'CHANTIER');
+      assert.equal(refusCle.status, 403);
+      assert.equal(refusCle.body.error, 'Ce devis a déjà créé son intervention : le chantier, qui la reçoit avec ses suites, ne s’ouvre que dans une session de l’application.');
+      assert.deepEqual((await prisma.devisConversion.findMany({ where: { devisId: devis.id } })).map((c) => c.cibleType), ['INTERVENTION']);
+      const seul = await devisSigne('clé audit 2 sans intervention');
+      const libreCle = await parCle(seul.id, 'CHANTIER');
+      assert.equal(libreCle.status, 201);
+      constats.push(['cle', creationParCle.status, refusCle.status, libreCle.status]);
+      console.log('AUDIT2-PARCOURS', JSON.stringify(constats));
+    });
+
+    // Le refus précède les verrous de l'intervention et de ses suites : un compte refusé ne fait pas la queue derrière une
+    // saisie en cours sur l'intervention, et n'y prend aucun verrou.
+    test('audit 2 — le refus de rôle précède les verrous de l’intervention : pas d’attente derrière une saisie en cours', async () => {
+      const devis = await devisSigne('audit 2 refus avant verrou');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      const email = 'devis-chantier.a2commercialVerrou@iris.test';
+      comptes.a2commercialVerrou = await prisma.user.upsert({ where: { email }, update: { role: 'COMMERCIAL', actif: true, permissions: [] }, create: { email, name: 'TEST Devis chantier a2commercialVerrou', role: 'COMMERCIAL' } });
+      let requete;
+      let resultat;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${intervention.id} FOR UPDATE`;
+        requete = envoyer('post', `/api/devis/${devis.id}/convertir`, jeton('a2commercialVerrou'), { cible: 'CHANTIER' }).then((r) => r);
+        resultat = await Promise.race([requete, new Promise((r) => setTimeout(() => r('bloqué'), 4000))]);
+      }, { timeout: 20000 });
+      await requete;
+      assert.notEqual(resultat, 'bloqué', 'le refus attend le verrou de l’intervention');
+      assert.equal(resultat.status, 403, JSON.stringify(resultat.body));
     });
   });
 }
