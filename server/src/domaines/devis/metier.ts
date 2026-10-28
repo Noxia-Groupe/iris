@@ -208,18 +208,21 @@ function montantDevisFige(value: Prisma.Decimal | number | string | null, decima
 export function contenuDevisSigne(devis: {
   id: string; dossierId: string; numero: string; version: number; clientId: string; objet: string;
   acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; totalHt: Prisma.Decimal; totalTva: Prisma.Decimal; totalTtc: Prisma.Decimal;
-  auTempsPasse: boolean; pasTempsPasseMinutes: number | null;
+  auTempsPasse: boolean; pasTempsPasseMinutes: number | null; tempsMinimumMinutes: number | null;
   lignes: { ordre: number; designation: string; nature: string; reference: string | null; unite: string | null; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal; tempsPasse: boolean; tarifTempsPasse: string | null }[];
 }) {
   // Le prix d'achat prévu, donnée interne, n'entre jamais dans ce que le client signe. Le marqueur et
   // le pas d'un devis au temps passé, et le tarif de sa ligne au temps passé, y entrent ; ils ne
-  // figurent pas dans le contenu d'un devis ordinaire, dont l'empreinte reste celle d'avant ce lot.
+  // figurent pas dans le contenu d'un devis ordinaire, dont l'empreinte reste celle d'avant ce lot. Le
+  // temps minimum facturé y entre depuis le lot « facture au temps passé », sauf sur un devis antérieur
+  // (minimum vide), dont le contenu reste celui d'alors.
   return {
     devisId: devis.id, dossierId: devis.dossierId, numero: devis.numero, version: devis.version,
     clientId: devis.clientId, objet: devis.objet, acompteExige: devis.acompteExige,
     tauxAcompte: montantDevisFige(devis.tauxAcompte, 2), totalHt: montantDevisFige(devis.totalHt, 2),
     totalTva: montantDevisFige(devis.totalTva, 2), totalTtc: montantDevisFige(devis.totalTtc, 2),
     ...(devis.auTempsPasse ? { auTempsPasse: true, pasTempsPasseMinutes: devis.pasTempsPasseMinutes } : {}),
+    ...(devis.auTempsPasse && devis.tempsMinimumMinutes !== null ? { tempsMinimumMinutes: devis.tempsMinimumMinutes } : {}),
     lignes: devis.lignes.map(ligne => ({
       ordre: ligne.ordre, designation: ligne.designation, nature: ligne.nature, reference: ligne.reference, unite: ligne.unite,
       quantite: montantDevisFige(ligne.quantite, 3), prixUnitaireHt: montantDevisFige(ligne.prixUnitaireHt, 2),

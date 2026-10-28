@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { erreurTempsPasse, formatPrix, ligneTempsPasse, mentionTempsPasse, prixDuTarif, quantiteTempsPasseValide, REFUS_QUANTITE, REFUS_SANS_LIGNE } from '../src/lib/tempsPasse.ts';
+import { dureeTempsPasse, erreurTempsPasse, formatPrix, ligneTempsPasse, mentionTempsPasse, prixDuTarif, refusQuantiteTempsPasse, REFUS_QUANTITE, REFUS_QUANTITE_POSITIVE, REFUS_SANS_LIGNE } from '../src/lib/tempsPasse.ts';
 import { ligneAEnvoyer, ligneEnEdition, type FicheCatalogueDevis } from '../src/lib/catalogueDevis.ts';
 
 const mainOeuvre: FicheCatalogueDevis = { famille: 'prestations', id: 'mo-1', reference: 'MO-ELEC', nom: 'Électricien', unite: 'heure', nature: 'MAIN_OEUVRE', prixVenteHt: 45.5, tauxTva: 20, estMainOeuvre: true, prixHeureSousContratHt: 40 };
@@ -36,22 +36,39 @@ test('ligne créée à une heure, à l’heure, au prix et à la TVA de la main 
   assert.deepEqual([autre.prixUnitaireHt, autre.tauxTva, ligneAEnvoyer(autre, true).prixUnitaireHt, ligneAEnvoyer(autre, true).tauxTva], [47, 10, 47, 10]);
 });
 
-test('une heure au moins ; une ligne au temps passé et une seule sur un devis au temps passé', () => {
-  assert.equal(quantiteTempsPasseValide(1), true);
-  assert.equal(quantiteTempsPasseValide(2.25), true);
-  assert.equal(quantiteTempsPasseValide(0.999), false);
-  assert.equal(quantiteTempsPasseValide(Number('')), false);
-  assert.equal(quantiteTempsPasseValide(Infinity), false);
+test('quantité : le minimum figé puis des multiples du pas ; une heure au moins sans minimum ; positive seulement quand les réglages sont inconnus', () => {
+  const reglages = { tempsMinimumMinutes: 60, pasTempsPasseMinutes: 15 };
+  for (const quantite of [1, 1.25, 1.5, 2, 10]) assert.equal(refusQuantiteTempsPasse(quantite, reglages), null, String(quantite));
+  const refus = 'La ligne au temps passé vaut le temps minimum facturé du devis (1 h), puis des tranches de 15 minutes : en heures, 1 ; 1,25 ; 1,5…';
+  for (const quantite of [0.25, 0.75, 0.999, 1.001, 1.1, 1.333]) assert.equal(refusQuantiteTempsPasse(quantite, reglages), refus, String(quantite));
+  const autres = { tempsMinimumMinutes: 30, pasTempsPasseMinutes: 45 };
+  for (const quantite of [0.5, 1.25, 2]) assert.equal(refusQuantiteTempsPasse(quantite, autres), null, String(quantite));
+  for (const quantite of [1, 0.75, 1.5]) assert.equal(refusQuantiteTempsPasse(quantite, autres), 'La ligne au temps passé vaut le temps minimum facturé du devis (30 min), puis des tranches de 45 minutes : en heures, 0,5 ; 1,25 ; 2…', String(quantite));
+  // Devis antérieur au lot : minimum vide, une heure au moins, au millième.
+  const ancien = { tempsMinimumMinutes: null, pasTempsPasseMinutes: 10 };
+  assert.equal(refusQuantiteTempsPasse(1, ancien), null, 'une heure tout juste, comme avant le lot');
+  assert.equal(refusQuantiteTempsPasse(1.001, ancien), null);
+  assert.equal(refusQuantiteTempsPasse(0.999, ancien), REFUS_QUANTITE);
+  // Nouveau devis : réglages inconnus de l'écran, le serveur contrôle le reste.
+  assert.equal(refusQuantiteTempsPasse(0.25, null), null);
+  for (const quantite of [0, -1, Number(''), Infinity, NaN]) assert.equal(refusQuantiteTempsPasse(quantite, null), REFUS_QUANTITE_POSITIVE, String(quantite));
+  for (const [minutes, texte] of [[15, '15 min'], [60, '1 h'], [75, '1 h 15 min'], [480, '8 h']] as const) assert.equal(dureeTempsPasse(minutes), texte);
+});
+
+test('une ligne au temps passé et une seule sur un devis au temps passé, à la quantité permise par le devis', () => {
   const ligne = ligneTempsPasse(mainOeuvre, 'HORS_CONTRAT')!;
   const libre = { designation: 'Câble', nature: 'FOURNITURE' as const, quantite: 2, prixUnitaireHt: 3, tauxTva: 20 };
   assert.equal(erreurTempsPasse(true, [ligne, libre]), null);
-  assert.equal(erreurTempsPasse(true, [{ ...ligne, quantite: 0.5 }]), REFUS_QUANTITE);
+  assert.equal(erreurTempsPasse(true, [{ ...ligne, quantite: 0.5 }]), null);
+  assert.equal(erreurTempsPasse(true, [{ ...ligne, quantite: 0 }]), REFUS_QUANTITE_POSITIVE);
+  assert.equal(erreurTempsPasse(true, [{ ...ligne, quantite: 0.5 }], { tempsMinimumMinutes: null, pasTempsPasseMinutes: 15 }), REFUS_QUANTITE);
+  assert.match(erreurTempsPasse(true, [{ ...ligne, quantite: 1.1 }], { tempsMinimumMinutes: 60, pasTempsPasseMinutes: 15 })!, /tranches de 15 minutes/);
   assert.equal(erreurTempsPasse(true, [libre]), REFUS_SANS_LIGNE);
   assert.equal(erreurTempsPasse(true, [ligne, { ...ligne }]), REFUS_SANS_LIGNE);
   assert.equal(erreurTempsPasse(false, [libre]), null);
 });
 
-test('mention : prix, tarif et pas figés du devis, le même texte que le PDF ; aucune pour un devis ordinaire', () => {
+test('mention d’un devis antérieur au temps minimum (minimum vide) : prix, tarif et pas figés du devis, le texte d’alors, comme le PDF ; aucune pour un devis ordinaire', () => {
   const devis = { auTempsPasse: true, pasTempsPasseMinutes: 15, lignes: [{ tempsPasse: false, prixUnitaireHt: 3, quantite: 2 }, { tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT' as const, prixUnitaireHt: 45.5, quantite: 1 }] };
   assert.equal(mentionTempsPasse(devis), 'Devis au temps passé : une heure minimum facturée au prix de 45,50 € HT de l’heure (tarif à l’heure hors contrat), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de 15 minutes, toute tranche commencée étant due. Le total de ce devis est un minimum.');
   assert.match(mentionTempsPasse({ ...devis, pasTempsPasseMinutes: 1, lignes: [{ tempsPasse: true, tarifTempsPasse: 'SOUS_CONTRAT', prixUnitaireHt: 40, quantite: 1 }] })!, /40,00 € HT de l’heure \(tarif à l’heure sous contrat\).*tranches de 1 minute, toute/);
@@ -69,4 +86,14 @@ test('mention : prix, tarif et pas figés du devis, le même texte que le PDF ; 
   // Prix au centime et pas de deux minutes : le prix exact, et le pluriel dès deux minutes.
   assert.equal(formatPrix(45.55), '45,55 €');
   assert.match(mentionTempsPasse({ ...devis, pasTempsPasseMinutes: 2, lignes: [{ tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT', prixUnitaireHt: 45.55, quantite: 1 }] })!, /au prix de 45,55 € HT de l’heure \(tarif à l’heure hors contrat\).*tranches de 2 minutes, toute/);
+});
+
+test('mention avec le minimum figé : minimum et pas, total minimum ou estimation au-delà, le même texte que le PDF', () => {
+  const devis = (quantite: number, tempsMinimumMinutes = 60, pasTempsPasseMinutes = 15) => ({ auTempsPasse: true, pasTempsPasseMinutes, tempsMinimumMinutes, lignes: [{ tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT' as const, prixUnitaireHt: 45.5, quantite }] });
+  const regle = (minimum: string, pas: number) => `Devis au temps passé : au prix de 45,50 € HT de l’heure (tarif à l’heure hors contrat), hors matériel, le temps passé se facture avec un minimum de ${minimum}, puis par tranches de ${pas} minutes au-delà, toute tranche commencée étant due.`;
+  assert.equal(mentionTempsPasse(devis(1)), `${regle('1 h', 15)} Le total de ce devis est un minimum.`);
+  assert.equal(mentionTempsPasse(devis(1.5)), `${regle('1 h', 15)} Ce devis prévoit 1 h 30 min : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`);
+  assert.equal(mentionTempsPasse(devis(0.5, 30, 45)), `${regle('30 min', 45)} Le total de ce devis est un minimum.`);
+  assert.equal(mentionTempsPasse(devis(2.75, 30, 45)), `${regle('30 min', 45)} Ce devis prévoit 2 h 45 min : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`);
+  assert.equal(mentionTempsPasse(devis(8, 480, 60)), `${regle('8 h', 60)} Le total de ce devis est un minimum.`);
 });

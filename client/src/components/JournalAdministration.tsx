@@ -87,6 +87,7 @@ const CHAMPS_JOURNAL: Record<string, string> = {
   joursSansSaisie: 'Jours sans saisie',
   anticipationVisitesJours: 'Anticipation des visites (jours)',
   pasTempsPasseMinutes: 'Pas du temps passé (minutes)',
+  tempsMinimumMinutes: 'Temps minimum facturé (minutes)',
   rentabiliteConducteur: 'Rentabilité : conducteur',
   rentabiliteHierarchie: 'Rentabilité : hiérarchie',
   rentabiliteDirecteurs: 'Rentabilité : directeurs',

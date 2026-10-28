@@ -6,7 +6,7 @@ import { decimalToNumber } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { changementsJournal, journaliserAdministration, verrouillerReglage } from '../../commun/journal-administration';
 import { getParametres, validerBareme, montantPositif, getReglesRemuneration, serialiseBareme } from './metier';
-import { TempsPasseSaisieError, lireReglagePasTempsPasse } from '../devis/tempsPasse';
+import { TempsPasseSaisieError, lireReglagePasTempsPasse, lireReglageTempsMinimum } from '../devis/tempsPasse';
 
 export function enregistrerRoutesParametres(app: Express): void {
   // Paramètres globaux (admin uniquement)
@@ -111,7 +111,7 @@ export function enregistrerRoutesRemunerationEtReglages(app: Express): void {
     }
   });
 
-  // N'écrit QUE les réglages de marge, d'acompte, d'alertes, d'anticipation des visites et de pas du temps passé : l'activation des modules (planningActif) est
+  // N'écrit QUE les réglages de marge, d'acompte, d'alertes, d'anticipation des visites et du temps passé (pas, minimum) : l'activation des modules (planningActif) est
   // réservée au superadmin et passe par PUT /api/modules — un ADMIN ne doit pas pouvoir la
   // modifier, même en glissant le champ dans le corps de cette requête.
   app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
@@ -173,16 +173,17 @@ export function enregistrerRoutesRemunerationEtReglages(app: Express): void {
         }
       }
       // Pas du temps passé (lot « devis au temps passé ») : vide au démarrage, les devis au temps passé
-      // étant refusés tant qu'il n'est pas fixé ; de 1 à 60 minutes (choix par défaut, à confirmer) ;
-      // vide (null ou chaîne vide), il est retiré. Sans effet sur les devis déjà au temps passé, qui
-      // gardent leur pas figé.
-      if ('pasTempsPasseMinutes' in req.body) {
-        try {
-          data.pasTempsPasseMinutes = lireReglagePasTempsPasse(req.body.pasTempsPasseMinutes);
-        } catch (error) {
-          if (error instanceof TempsPasseSaisieError) return res.status(400).json({ error: error.message });
-          throw error;
-        }
+      // étant refusés tant qu'il n'est pas fixé ; 15, 30, 45 ou 60 minutes depuis le lot « facture au
+      // temps passé » (décision de la nuit du 26 au 27-10-2026, point 8) ; vide (null ou chaîne vide), il
+      // est retiré. Temps minimum facturé (même lot, points 8 et 9) : un multiple de 15 minutes, de
+      // 15 minutes à 8 heures ; vide, il revient à une heure. Sans effet sur les devis déjà au temps
+      // passé, qui gardent leur pas et leur minimum figés.
+      try {
+        if ('pasTempsPasseMinutes' in req.body) data.pasTempsPasseMinutes = lireReglagePasTempsPasse(req.body.pasTempsPasseMinutes);
+        if ('tempsMinimumMinutes' in req.body) data.tempsMinimumMinutes = lireReglageTempsMinimum(req.body.tempsMinimumMinutes);
+      } catch (error) {
+        if (error instanceof TempsPasseSaisieError) return res.status(400).json({ error: error.message });
+        throw error;
       }
       // Destinataires du suivi de rentabilité (cf. voitRentabilite) : chaque case absente du
       // corps garde sa valeur ; une valeur présente doit être un vrai booléen, pour qu'une

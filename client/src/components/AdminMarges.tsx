@@ -106,10 +106,11 @@ export function AdminMarges({ isSuper, parametres, setParametres, remuneration, 
             </form>)}
           </div>
 
-          {/* Pas du temps passé (devis au temps passé) : son propre formulaire, qui n'envoie que ce réglage. */}
+          {/* Réglages du temps passé (temps minimum facturé et pas) : leur propre formulaire, qui n'envoie que ces deux réglages. */}
           {parametres && <ReglageTempsPasse
             pasTempsPasseMinutes={parametres.pasTempsPasseMinutes ?? null}
-            onEnregistre={(pas) => setParametres((actuels: any) => ({ ...actuels, pasTempsPasseMinutes: pas }))}
+            tempsMinimumMinutes={parametres.tempsMinimumMinutes ?? 60}
+            onEnregistre={(reglages) => setParametres((actuels: any) => ({ ...actuels, ...reglages }))}
           />}
 
           {/* Règles de rémunération commerciale : stockées en base, éditables par un

@@ -26,7 +26,10 @@ import {
   DevisSaisieError, DevisConflitError, DevisDroitError, devisPayload, NATURE_DEVIS_PAR_FAMILLE, devisPourLecteur, resoudreLignesDevis,
   devisInclude, contenuDevisSigne, copieLigneDevis, verrouillerDevis, acompteDevisPayload, nouveauNumeroDevis, totauxDevis,
 } from './metier';
-import { REFUS_PAS_NON_REGLE, TempsPasseConflitError, TempsPasseSaisieError, exigerCoherenceTempsPasse, pasDuDevis } from './tempsPasse';
+import {
+  TempsPasseConflitError, TempsPasseSaisieError, exigerCoherenceTempsPasse, exigerQuantiteTempsPasse, reglagesTempsPasseDeLaSociete, reglagesTempsPasseDuDevis,
+  dureeTempsPasse, type ReglagesTempsPasseDevis,
+} from './tempsPasse';
 import { rendreDocumentDevisPdf } from './document';
 import { annulerDevisEnCascade } from './annulation';
 import { chantierPourInterventionDuDevis, rattacherInterventionDuDevis } from './rattachement';
@@ -42,9 +45,18 @@ function devisErreur(res: express.Response, error: unknown) {
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
 
+// La quantité de la ligne au temps passé suit le minimum et le pas que le devis fige (./tempsPasse.ts).
+function exigerLigneAuPas(payload: ReturnType<typeof devisPayload>, reglages: ReglagesTempsPasseDevis) {
+  payload.references.forEach((reference, index) => {
+    if (reference.tempsPasse) exigerQuantiteTempsPasse(payload.lignesCalculees[index].quantite, reglages);
+  });
+}
+
 // Un devis au temps passé (décisions de Nelson des 24 et 25-10-2026) fige le pas du réglage de la
 // société à sa création, comme le taux d'acompte, et il est refusé (409) tant que ce réglage est vide,
-// sans rien écrire ni consommer de numéro. Le prix de sa ligne au temps passé est fixé par le serveur
+// sans rien écrire ni consommer de numéro. Depuis le lot « facture au temps passé », il fige aussi le
+// temps minimum facturé, sa ligne au temps passé vaut ce minimum puis des multiples du pas (400 sinon),
+// et un pas réglé avant ce lot, hors de 15, 30, 45 ou 60 minutes, est refusé (409). Le prix de sa ligne au temps passé est fixé par le serveur
 // depuis la main d'œuvre (./tempsPasse.ts), et les totaux sont calculés sur les lignes ainsi résolues.
 // L'écriture passe par une transaction vérifiée : la cohérence du marqueur et de la ligne au temps
 // passé est contrôlée par la base à la validation (migration 20261025120000_devis_temps_passe).
@@ -53,12 +65,13 @@ const creerDevis: express.RequestHandler = async (req, res) => { try {
   if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
   const auTempsPasse = payload.auTempsPasse ?? false;
   exigerCoherenceTempsPasse(auTempsPasse, payload.references);
-  const pasTempsPasseMinutes = await pasDuDevis(prisma, auTempsPasse);
+  const reglagesTempsPasse = await reglagesTempsPasseDuDevis(prisma, auTempsPasse);
+  exigerLigneAuPas(payload, reglagesTempsPasse);
   const lignes = await resoudreLignesDevis(prisma, payload, [], ecritPrixAchatDevis(req));
   const totaux = totauxDevis(lignes);
   const { acompteExige, tauxAcompte } = await acompteDevisPayload((req.body ?? {}) as Record<string, unknown>);
   const numero = await nouveauNumeroDevis();
-  const devis = await transactionVerifiee(tx => tx.devis.create({ data: { dossierId: crypto.randomUUID(), numero, version: 1, clientId: payload.clientId, objet: payload.objet, ...totaux, acompteExige, tauxAcompte, auTempsPasse, pasTempsPasseMinutes, lignes: { create: lignes } }, include: devisInclude }));
+  const devis = await transactionVerifiee(tx => tx.devis.create({ data: { dossierId: crypto.randomUUID(), numero, version: 1, clientId: payload.clientId, objet: payload.objet, ...totaux, acompteExige, tauxAcompte, auTempsPasse, ...reglagesTempsPasse, lignes: { create: lignes } }, include: devisInclude }));
   res.status(201).json(devisPourLecteur(req, decimalToNumber(devis)));
 } catch (error) { devisErreur(res, error); } };
 const listerDevis: express.RequestHandler = async (req, res) => { try { res.json(devisPourLecteur(req, decimalToNumber(await prisma.devis.findMany({ include: devisInclude, orderBy: { createdAt: 'desc' } })))); } catch (error) { devisErreur(res, error); } };
@@ -73,16 +86,19 @@ const modifierDevis: express.RequestHandler = async (req, res) => { try {
     if (!['BROUILLON', 'ENVOYE'].includes(precedent.statut)) throw new DevisConflitError('Seuls les devis brouillon ou envoyés, non signés, peuvent être modifiés.');
     if (!await tx.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
     // Sans « auTempsPasse » dans le corps, le devis garde son marqueur. Un devis déjà au temps passé
-    // garde son pas figé ; celui qui y passe prend le réglage du moment, refusé s'il est vide ; celui
-    // qui en sort le perd. Le réglage est lu dans cette transaction, sur sa connexion.
+    // garde son pas et son minimum figés (vide pour un devis antérieur au lot « facture au temps
+    // passé ») ; celui qui y passe prend les réglages du moment, refusés si le pas est vide ou n'est
+    // plus admis ; celui qui en sort les perd. Les réglages sont lus dans cette transaction, sur sa
+    // connexion.
     const auTempsPasse = payload.auTempsPasse ?? precedent.auTempsPasse;
     exigerCoherenceTempsPasse(auTempsPasse, payload.references);
-    const pasTempsPasseMinutes = await pasDuDevis(tx, auTempsPasse, precedent);
+    const reglagesTempsPasse = await reglagesTempsPasseDuDevis(tx, auTempsPasse, precedent);
+    exigerLigneAuPas(payload, reglagesTempsPasse);
     const acompte = await acompteDevisPayload(body, precedent);
     const lignes = await resoudreLignesDevis(tx, payload, precedent.lignes, ecritPrixAchatDevis(req));
     return tx.devis.update({
       where: { id: precedent.id },
-      data: { clientId: payload.clientId, objet: payload.objet, ...totauxDevis(lignes), ...acompte, auTempsPasse, pasTempsPasseMinutes,
+      data: { clientId: payload.clientId, objet: payload.objet, ...totauxDevis(lignes), ...acompte, auTempsPasse, ...reglagesTempsPasse,
         lignes: { deleteMany: {}, create: lignes } }, include: devisInclude,
     });
   });
@@ -101,8 +117,9 @@ const creerRevision: express.RequestHandler = async (req, res) => { try {
       dossierId: precedent.dossierId, numero: precedent.numero, version, clientId: precedent.clientId, objet: precedent.objet,
       totalHt: precedent.totalHt, totalTva: precedent.totalTva, totalTtc: precedent.totalTtc,
       acompteExige: precedent.acompteExige, tauxAcompte: precedent.tauxAcompte,
-      // Une révision reprend le devis signé à l'identique : marqueur et pas figé du temps passé compris.
-      auTempsPasse: precedent.auTempsPasse, pasTempsPasseMinutes: precedent.pasTempsPasseMinutes,
+      // Une révision reprend le devis signé à l'identique : marqueur, pas et minimum figés du temps
+      // passé compris (un devis antérieur au lot « facture au temps passé » garde son minimum vide).
+      auTempsPasse: precedent.auTempsPasse, pasTempsPasseMinutes: precedent.pasTempsPasseMinutes, tempsMinimumMinutes: precedent.tempsMinimumMinutes,
       acompteRecuLe: precedent.acompteRecuLe, acompteMontant: precedent.acompteMontant,
       acompteReference: precedent.acompteReference, acompteConstateParId: precedent.acompteConstateParId,
       lignes: { create: precedent.lignes.map(copieLigneDevis) },
@@ -597,18 +614,32 @@ export function enregistrerRoutesDevis(app: Express): void {
   // chaque appel réclamerait une seconde connexion du pool en gardant la première, et des
   // duplications simultanées l'épuiseraient. Un devis introuvable ne consomme pas de numéro.
   // Devis au temps passé : le marqueur et la ligne au temps passé (son tarif et son prix figés)
-  // suivent la copie à l'identique ; le pas, comme le taux d'acompte, est relu du réglage du jour, et
-  // la duplication est refusée (409) tant qu'il est vide, sans consommer de numéro.
+  // suivent la copie à l'identique ; le pas et le temps minimum facturé, comme le taux d'acompte, sont
+  // relus des réglages du jour, et la duplication est refusée (409), sans consommer de numéro, tant que
+  // le pas est vide ou n'est plus admis, ou si la quantité de la ligne copiée ne suit pas ces réglages
+  // (choix par défaut, à confirmer : refus plutôt qu'une quantité ajustée en silence).
   app.post('/api/devis/:id/duplication', requireAuth, requirePermission('devis:write'), async (req, res) => { try {
-    const apercu = await prisma.devis.findUnique({ where: { id: paramId(req) }, select: { id: true, auTempsPasse: true } });
+    const apercu = await prisma.devis.findUnique({ where: { id: paramId(req) }, select: { id: true, auTempsPasse: true, lignes: { where: { tempsPasse: true }, select: { quantite: true } } } });
     if (!apercu) return void res.status(404).json({ error: 'Devis introuvable.' });
-    const { tauxAcompteDefaut, pasTempsPasseMinutes } = await getParametres();
-    if (apercu.auTempsPasse && pasTempsPasseMinutes === null) throw new TempsPasseConflitError(REFUS_PAS_NON_REGLE);
+    const { tauxAcompteDefaut, pasTempsPasseMinutes, tempsMinimumMinutes } = await getParametres();
+    const reglagesDuJour = () => reglagesTempsPasseDeLaSociete({ pasTempsPasseMinutes, tempsMinimumMinutes });
+    // Ligne au temps passé copiée : elle doit suivre le minimum et le pas du jour, que la copie fige.
+    const exigerLigneCopiee = (ligne: { quantite: unknown } | undefined, reglages: ReglagesTempsPasseDevis) => {
+      if (!ligne) return;
+      try {
+        exigerQuantiteTempsPasse(Number(ligne.quantite), reglages);
+      } catch (error) {
+        if (!(error instanceof TempsPasseSaisieError)) throw error;
+        throw new TempsPasseConflitError(`Duplication impossible : la ligne au temps passé du devis copié (${Number(ligne.quantite).toLocaleString('fr-FR', { maximumFractionDigits: 3 })} h) ne suit pas les réglages du jour, un minimum de ${dureeTempsPasse(reglages.tempsMinimumMinutes!)} puis des tranches de ${reglages.pasTempsPasseMinutes} minutes. Créez un nouveau devis.`);
+      }
+    };
+    if (apercu.auTempsPasse) exigerLigneCopiee(apercu.lignes[0], reglagesDuJour());
     const numero = await nouveauNumeroDevis();
     const duplicata = await transactionVerifiee(async tx => {
       if (!await verrouillerDevis(tx, paramId(req))) return null;
       const source = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: devisInclude });
-      if (source.auTempsPasse && pasTempsPasseMinutes === null) throw new TempsPasseConflitError(REFUS_PAS_NON_REGLE);
+      const reglagesTempsPasse: ReglagesTempsPasseDevis = source.auTempsPasse ? reglagesDuJour() : { pasTempsPasseMinutes: null, tempsMinimumMinutes: null };
+      if (source.auTempsPasse) exigerLigneCopiee(source.lignes.find((ligne) => ligne.tempsPasse), reglagesTempsPasse);
       return tx.devis.create({
         data: {
           dossierId: crypto.randomUUID(), numero, version: 1,
@@ -617,7 +648,7 @@ export function enregistrerRoutesDevis(app: Express): void {
           acompteExige: source.acompteExige,
           tauxAcompte: source.acompteExige ? tauxAcompteDefaut : null,
           auTempsPasse: source.auTempsPasse,
-          pasTempsPasseMinutes: source.auTempsPasse ? pasTempsPasseMinutes : null,
+          ...reglagesTempsPasse,
           origineDevisId: source.id,
           lignes: { create: source.lignes.map(copieLigneDevis) },
         },
