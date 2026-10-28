@@ -22861,5 +22861,53 @@ if (!TEST_DATABASE_URL) {
       const relance = await creerFacture(intervention.id, { totalHtAttendu: 55.5 });
       assert.deepEqual([relance.status, relance.body.error], [409, `La facture au temps passé attend la fin de toutes les suites de l’intervention : ${creeeSuite.body.reference} n’est ni terminée ni annulée.`]);
     });
+
+    // Test ajouté par l'audit interne n° 3 de #351 : facture au temps passé réglée, puis règlement contre-passé
+    // (message d'unicité de N1 de l'audit n° 2 et passation, section 4, puce « Unicité » ; montants).
+    test('audit 3 — montants : réglée, la facture au temps passé reste unique ; son règlement contre-passé, elle s’annule en totalité et se refait avec les heures du jour', async () => {
+      await assurerFacturation();
+      const { intervention } = await interventionTempsPasse('réglée puis contre-passée');
+      await heure(intervention.id, 1);
+      const creee = await creerFacture(intervention.id, { totalHtAttendu: 55.5 });
+      assert.equal(creee.status, 201, JSON.stringify(creee.body));
+      const emise = await request(app).post(`/api/factures/${creee.body.id}/emettre`).set(admin);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      assert.deepEqual([emise.body.totalHt, emise.body.totalTtc], [55.5, 66.6]);
+      // Réglée en totalité : la facture reste la facture vivante de l'intervention.
+      const reglement = await envoyer('post', '/api/reglements', admin, { clientId: client.id, dateReglement: await aujourdhui(), montant: 66.6, moyen: 'VIREMENT', affectations: [{ factureId: creee.body.id, montant: 66.6 }] });
+      assert.equal(reglement.status, 201, JSON.stringify(reglement.body));
+      const statut = async () => (await prisma.facture.findUniqueOrThrow({ where: { id: creee.body.id } })).statut;
+      assert.equal(await statut(), 'REGLEE');
+      const message = `Cette intervention ou l’une de ses suites a déjà une facture (${emise.body.numero}) : la facture au temps passé est unique. Pour la refaire, annulez d’abord la facture émise par son avoir total (un brouillon s’émet d’abord) ; une facture qui a reçu un avoir partiel, ou un règlement qui n’est pas contre-passé, ne s’annule plus en totalité et se corrige par des avoirs partiels.`;
+      for (const refus of [await apercu(intervention.id), await creerFacture(intervention.id, { totalHtAttendu: 55.5 })]) {
+        assert.deepEqual([refus.status, refus.body.error], [409, message]);
+      }
+      // Tant que le règlement n'est pas contre-passé, l'annulation totale est refusée (réglée, la facture n'est plus
+      // « émise »), sans avoir.
+      const refusee = await request(app).post(`/api/factures/${creee.body.id}/annuler`).set(admin);
+      assert.deepEqual([refusee.status, refusee.body.error], [409, 'Seule une facture émise peut être annulée.']);
+      assert.equal(await prisma.facture.count({ where: { factureOrigineId: creee.body.id } }), 0);
+      assert.equal(await statut(), 'REGLEE');
+      // Le règlement saisi par erreur se contre-passe : la facture redevient émise, toujours unique.
+      const contrepasse = await envoyer('post', `/api/reglements/${reglement.body.id}/contrepasser`, admin, { motif: 'TEST règlement saisi par erreur' });
+      assert.equal(contrepasse.status, 200, JSON.stringify(contrepasse.body));
+      assert.equal(await statut(), 'EMISE');
+      const encore = await apercu(intervention.id);
+      assert.deepEqual([encore.status, encore.body.error], [409, message]);
+      // Elle s'annule alors en totalité, et la facture au temps passé se refait avec les heures du jour : une demi-heure
+      // omise, saisie depuis, y entre (1,5 h, soit le minimum puis deux tranches de 15 minutes, et la fourniture).
+      const annulee = await request(app).post(`/api/factures/${creee.body.id}/annuler`).set(admin);
+      assert.equal(annulee.status, 200, JSON.stringify(annulee.body));
+      assert.deepEqual([annulee.body.statut, annulee.body.avoir.totalTtc], ['ANNULEE', 66.6]);
+      await heure(intervention.id, 0.5);
+      const relu = await apercu(intervention.id);
+      assert.equal(relu.status, 200, JSON.stringify(relu.body));
+      assert.deepEqual([relu.body.heures.facturees, relu.body.totalHt, relu.body.totalTva, relu.body.totalTtc], [1.5, 78.25, 15.65, 93.9]);
+      const refaite = await creerFacture(intervention.id, { totalHtAttendu: 78.25 });
+      assert.equal(refaite.status, 201, JSON.stringify(refaite.body));
+      assert.deepEqual([refaite.body.statut, refaite.body.tempsPasse, refaite.body.totalHt, refaite.body.totalTtc], ['BROUILLON', true, 78.25, 93.9]);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id, type: 'FACTURE', tempsPasse: true } }), 2);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id, type: 'FACTURE', statut: { not: 'ANNULEE' } } }), 1);
+    });
   });
 }
