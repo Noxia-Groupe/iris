@@ -88,3 +88,45 @@ test('chantier clôturé, sur téléphone (375 px) : le refus des heures de la s
     await contexte.close();
   }
 });
+
+// Audit n° 2 de #341 : le défilement vaut aussi pour le formulaire du matériel, que l'encadrement remplit sur
+// la visite d'un contrat ; un refus du serveur (ici un montant illisible) doit revenir dans la vue.
+test('sur téléphone (375 px), le refus d’un achat de matériel revient aussi dans la vue', async ({ session, request, creerClient, browser }) => {
+  const envoyer = async (methode: 'post' | 'put', path: string, data?: object) => {
+    const response = await request[methode](`${api}${path}`, { headers: { Authorization: `Bearer ${session.token}` }, data });
+    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+    return response.json();
+  };
+  const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+  const client = await creerClient(`suites-affaire materiel ${suffixe}`);
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Maintenance ${suffixe}`, lignes: [
+    { designation: 'Maintenance', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 200, tauxTva: 20 },
+  ] }) as { id: string };
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const contrat = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CONTRAT', periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: dateDuJour() }) as { id: string };
+  const visite = await envoyer('post', `/contrats-maintenance/${contrat.id}/generer-intervention`, {}) as { id: string; titre: string };
+  const fournisseur = await envoyer('post', '/fournisseurs', { nom: `Fournisseur suites-affaire ${suffixe}` }) as { id: string };
+
+  const contexte = await browser.newContext({ viewport: { width: 375, height: 740 } });
+  const page = await contexte.newPage();
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [session.token, JSON.stringify(session.user)]);
+  try {
+    await page.goto(`/interventions/${visite.id}`, { waitUntil: 'networkidle' });
+    const formulaire = page.locator('article', { hasText: visite.titre }).locator('form', { has: page.getByRole('button', { name: 'Enregistrer l’achat matériel' }) });
+    await formulaire.getByPlaceholder('Date (JJ-MM-AAAA)').fill(dateDuJour());
+    await formulaire.locator('select[name="fournisseurId"]').selectOption(fournisseur.id);
+    await formulaire.getByPlaceholder('Description du matériel').fill('Détecteur');
+    await formulaire.getByPlaceholder('Montant HT').fill('abc');
+    const saisie = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/interventions/${visite.id}/couts/achats`));
+    await formulaire.getByRole('button', { name: 'Enregistrer l’achat matériel' }).click();
+    expect((await saisie).status()).toBe(400);
+    await expect(page.getByText('Date, description ou montant HT invalide.')).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  } finally {
+    await contexte.close();
+  }
+});

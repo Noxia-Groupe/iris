@@ -347,7 +347,7 @@ if (!TEST_DATABASE_URL) {
       'replanif.directeur@iris.test', 'replanif.directeurCommercial@iris.test', 'replanif.assistante@iris.test', 'replanif.comptable@iris.test',
       'tp.commercial@iris.test', 'tp.conducteur@iris.test', 'tp.technicien@iris.test', 'tp.directeur@iris.test', 'tp.assistante@iris.test',
       'marge-suites.conducteur@iris.test', 'marge-suites.conducteurAutre@iris.test', 'marge-suites.technicien@iris.test', 'marge-suites.commercial@iris.test',
-      'suites-affaire.conducteur@iris.test', 'suites-affaire.technicien@iris.test',
+      'suites-affaire.conducteur@iris.test', 'suites-affaire.technicien@iris.test', 'suites-affaire.responsable@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
@@ -21167,6 +21167,46 @@ if (!TEST_DATABASE_URL) {
       assert.match(refus.body.error, /suites SAV de ce chantier portent déjà 1 coût/);
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, 'EN_COURS');
       assert.notEqual((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).statut, 'ANNULE');
+    });
+
+    // --- Tests proposés par l'audit interne n° 2 de la PR #341 (création d'une suite sur un chantier clôturé) ---
+    test('clôture concurrente : la création d’une suite attend le verrou de l’affaire, puis la refuse, sans rien écrire', async () => {
+      const chantier = await creerChantier('clôturé pendant la création d’une suite');
+      const initiale = await interventionSur('initiale clôturée pendant la création d’une suite', chantier.id);
+      let reponse;
+      // La clôture, écrite mais pas encore validée : seule l'affaire relue en partage sous le verrou de
+      // l'intervention initiale peut l'attendre.
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`UPDATE "Chantier" SET "statut" = 'TERMINE' WHERE "id" = ${chantier.id}`;
+        reponse = envoyer('post', `/api/interventions/${initiale.id}/suites`, admin, {}).then((r) => r);
+        assert.equal(await attendreBlocage(tx), true, 'la création attend le verrou de l’affaire');
+      }, { timeout: 20000 });
+      const refus = await reponse;
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Le chantier de cette intervention est clôturé : aucune suite ne peut plus lui être rattachée. Rouvrez-le d’abord.');
+      assert.equal(await prisma.intervention.count({ where: { interventionInitialeId: initiale.id } }), 0, 'aucune suite créée');
+    });
+
+    test('chantier clôturé : le responsable de l’équipe du titulaire ne crée pas non plus de suite (409), jusqu’à sa réouverture', async () => {
+      const email = 'suites-affaire.responsable@iris.test';
+      comptes.responsable = await prisma.user.upsert({ where: { email }, update: { role: 'RESPONSABLE', actif: true, permissions: [] }, create: { email, name: 'TEST Suites affaire responsable', role: 'RESPONSABLE' } });
+      // Le conducteur titulaire entre dans l'équipe du responsable le temps du test.
+      await prisma.user.update({ where: { id: comptes.conducteur.id }, data: { responsableHierarchiqueId: comptes.responsable.id } });
+      try {
+        const chantier = await creerChantier('clôturé, suite du responsable');
+        const initiale = await interventionSur('initiale, suite du responsable', chantier.id);
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-15T00:00:00Z') } });
+        const refus = await envoyer('post', `/api/interventions/${initiale.id}/suites`, jeton('responsable'), {});
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.equal(refus.body.error, 'Le chantier de cette intervention est clôturé : aucune suite ne peut plus lui être rattachée. Rouvrez-le d’abord.');
+        assert.equal(await prisma.intervention.count({ where: { interventionInitialeId: initiale.id } }), 0, 'aucune suite créée');
+        // Témoin : rouvert, le chantier laisse le responsable créer la suite.
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'EN_COURS' } });
+        const creation = await envoyer('post', `/api/interventions/${initiale.id}/suites`, jeton('responsable'), {});
+        assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      } finally {
+        await prisma.user.update({ where: { id: comptes.conducteur.id }, data: { responsableHierarchiqueId: null } });
+      }
     });
   });
 }
