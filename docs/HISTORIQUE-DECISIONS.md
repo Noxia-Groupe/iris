@@ -830,7 +830,7 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin. Rien n'est co
 
 **Seconde PR de l'intervention de suivi liée (facturation et marge)**
 
-1. **Coûts des suites et marge du chantier** (« Les suites seulement »). Parmi les interventions rattachées à l'affaire d'un chantier, seules les suites voient leurs coûts entrer dans la marge du chantier : leurs heures, au taux horaire chargé figé sur chaque heure, et leur matériel s'ajoutent à ses dépenses réelles. Les autres interventions rattachées à l'affaire, dont l'intervention initiale d'une suite, restent hors de cette marge, comme aujourd'hui. Lecture à confirmer : une suite de suite compte comme une suite. Aujourd'hui, seule une visite d'un contrat actif reçoit du matériel ; une curative ne porte que des heures.
+1. **Coûts des suites et marge du chantier** (« Les suites seulement »). Parmi les interventions rattachées à l'affaire d'un chantier, seules les suites voient leurs coûts entrer dans la marge du chantier : leurs heures, au taux horaire chargé figé sur chaque heure, et leur matériel s'ajoutent à ses dépenses réelles. Les autres interventions rattachées à l'affaire, dont l'intervention initiale d'une suite, restent hors de cette marge, comme aujourd'hui. Lecture à confirmer : une suite de suite compte comme une suite. Aujourd'hui, seule une intervention d'un contrat actif, visite ou suite d'une visite, reçoit du matériel ; une curative, comme sa suite, ne porte que des heures.
 2. **Suite d'une intervention issue d'un devis converti en intervention, sans chantier** (« Je suis ta proposition »). La proposition est suivie : « une marge de l'intervention initiale, égale au total HT du devis moins les coûts de l'intervention et de ses suites, visible de l'administration ». La suite n'est pas facturée en plus (point 13 du 24-10-2026). Lectures à confirmer : les coûts sont ceux du point 1 ; « ses suites » comprend les suites de ses suites ; le devis est celui de la conversion qui a créé l'intervention ; une intervention au temps passé, issue d'un devis au temps passé dont le total ne fixe pas le prix final, relève du point 3, et non de celui-ci.
 3. **Suite d'une intervention au temps passé** (« Je suis ta proposition »). La proposition est suivie : « ses heures s'ajoutent à la facture au temps passé de l'intervention initiale, au prix et au pas du devis, dans le lot « facture au temps passé » ». La seconde PR de l'intervention de suivi liée ne facture donc pas ces suites. Choix par défaut, à confirmer : la suite ne reçoit pas le marqueur « au temps passé », que la première PR ne reporte pas ; la facture la retrouve par son lien à l'intervention initiale. Question pour le lot (section 3) : le minimum figé et l'arrondi au pas s'appliquent-ils une fois au total des heures de l'intervention et de ses suites, ce que veut la lecture retenue (une seule facture), ou à chacune ?
 
@@ -870,3 +870,97 @@ La seconde PR porte donc les points 1 et 2 et l'information du client à l'ouver
 - décisions du 26-10-2026 sur le temps passé et le catalogue : point 1 (« ses cinq questions encore ouvertes (section 3) le restent ») et point 2 (« Restent à cadrer avec ce lot, sans rien de tranché : l'unité et les bornes du réglage, la possibilité de le vider, le plancher de la facture et le pas au-delà du minimum »), tranchés par les points 8 à 13 ;
 - décisions du 26-10-2026 sur l'intervention de suivi liée, point 1 (« La seconde porte la facturation et la marge de la suite (temps passé, hors contrat, information du client) ») : la facturation au temps passé de la suite vient avec le lot « facture au temps passé » (point 3), et la marge d'un SAV hors contrat dans une PR à part selon le découpage proposé, à confirmer ;
 - décisions du 26-10-2026 sur l'intervention de suivi liée, avant-dernier paragraphe (« pour la seconde PR (montants), le suivi de marge de la suite d'une intervention issue d'un devis converti en intervention, sans chantier, la facturation de la suite d'une intervention au temps passé avant le lot « facture au temps passé », et les questions du lot « main d'œuvre au catalogue » sur la valorisation des heures et la marge »), tranchés par les points 2 à 7, sauf la lecture du point 5.
+
+## Décisions du 27-10-2026 sur la marge des suites et l'intervention d'un devis
+
+*Rédigé le 28-10-2026.* Trois messages de Nelson de la session de travail du 27-10-2026, chacun en réponse à des questions de Claude Code. Réponses et questions sont citées mot pour mot, retours à la ligne gardés ; les heures sont celles du journal de la session, en UTC. Chaque lecture retenue par Claude Code est à corriger par Nelson si besoin. Les lots qui les appliquent sont tous fusionnés (section suivante), aucun n'est validé pour mise en service : ils touchent aux montants du chantier, et la validation comptable de Nelson est attendue ([passation](ROADMAP-PASSATION.md#5-préalables-à-la-mise-en-service-et-contrat-dune-pr), section 5).
+
+### 10:27 UTC : source des prix de la marge d'un SAV hors contrat
+
+La cinquième question à choix de la nuit (« Point 5 », 26-10-2026, 23:33 UTC, section précédente) était restée sans réponse. Claude Code l'a rappelée à 10:16 UTC, en fin de compte rendu sur la seconde PR de l'intervention de suivi liée : « Vos trois questions de la PR documentaire restent posées : la source des prix de la marge d'un SAV hors contrat, les visites réalisées d'un contrat annulé, et le découpage proposé. »
+
+Nelson a répondu (10:27 UTC) :
+
+« Oui prix du catalogue, continue »
+
+Claude Code a pris acte (10:30 UTC) : « Votre réponse est notée : « Oui prix du catalogue, continue » (27-10-2026, 10:27 UTC). La marge d'un SAV hors contrat prendra les prix déjà saisis sur chaque main d'œuvre du catalogue : le prix sous contrat pour les visites et leurs suites, le prix hors contrat pour le SAV hors contrat, à l'heure. Je la consignerai mot pour mot dans la prochaine PR documentaire ; la PR de cette marge n'a plus de question en attente. »
+
+Lecture retenue :
+
+1. **Source des prix** (« Oui prix du catalogue »). La réponse reprend l'option recommandée de la question à choix, « Oui, prix du catalogue (Recommandé) » : « On garde les prix déjà paramétrés sur chaque main d'œuvre du catalogue : sous contrat pour les visites et leurs suites, hors contrat pour le SAV hors contrat, à l'heure. » Le point 5 de la nuit est donc tranché : les « parametres de la societé » sont les mains d'œuvre du catalogue, et aucun réglage général de la société n'est créé pour la marge. La marge d'un SAV hors contrat, lot prévu, n'attend plus cette réponse ([passation](ROADMAP-PASSATION.md#lots-prévus-par-les-décisions-du-24-10-2026-ordre-décidé-le-24-10-2026), section 2) ; restent ses lectures à confirmer et la question du matériel d'une curative (passation, section 3). Rien n'en est codé.
+2. **« continue »** est lu comme la consigne de poursuivre le travail en cours. Il ne tranche ni la question des visites réalisées d'un contrat annulé, ni le découpage et l'ordre proposés des lots, que le même rappel citait : tous deux restent à confirmer (passation, sections 2 et 3).
+
+### 15:50 UTC : coûts d'une suite sur un chantier clos, suite d'une intervention annulée avec son devis
+
+Claude Code a posé deux questions (14:09 UTC), en rendant compte du deuxième audit de la seconde PR de l'intervention de suivi liée ([#339](https://github.com/Noxia-Groupe/iris/pull/339)) et du lancement du troisième :
+
+```text
+**Deux nouvelles questions pour vous**, posées en section 3 de la passation :
+1. **Chantier clos.** Les coûts d'une suite saisis après la clôture ou l'encaissement d'un chantier modifient encore sa marge, alors que les saisies directes sur un chantier clos sont refusées. Faut-il refuser aussi ces saisies, ou les garder ? Et quand un plan de commission existera, la commission d'un mois déjà clos devra-t-elle bouger avec elles ?
+2. **Suite d'une intervention annulée avec son devis.** La suite reste active, et ses coûts ne comptent alors dans aucune marge. Faut-il l'annuler avec l'intervention initiale, ou compter ses coûts ailleurs ?
+
+En attendant votre réponse, le comportement actuel reste en place ; il est déclaré comme « choix par défaut, à confirmer ».
+```
+
+Nelson a répondu (15:50 UTC) ; dans le message, la première ligne porte en outre une espace finale, omise ici :
+
+```text
+Questions:
+
+1. oui, il faut egalement refusé aussi ces saisies.
+2. annule l'intervention initiale
+```
+
+Lecture retenue, à confirmer :
+
+1. **Coûts d'une suite sur une affaire close ou annulée** (« oui, il faut egalement refusé aussi ces saisies »). Les heures et le matériel d'une suite rattachée à une affaire, qui entrent dans la marge du chantier depuis #339, se refusent comme les saisies du chantier lui-même : sur une affaire annulée, pour tous ; sur un chantier clôturé, hors administration ; en création, correction, archivage et restauration. L'intervention initiale et les autres interventions de l'affaire, dont les coûts restent hors de cette marge, ne sont pas concernées. La seconde partie de la question, la commission d'un mois déjà clos, n'a pas reçu de réponse explicite : par la même règle, elle ne bouge plus que par une saisie de l'administration, comme pour les saisies du chantier ; elle reste à confirmer avec le plan commercial (lot (i)). **Appliqué** par [#341](https://github.com/Noxia-Groupe/iris/pull/341).
+2. **Suite d'une intervention annulée avec son devis** (« annule l'intervention initiale »). La réponse est lue comme le premier terme de l'alternative : la suite est annulée avec l'intervention initiale, quand l'annulation du devis annule celle-ci. Les suites de suites le sont aussi, chacune journalisée et retirée du planning ; choix par défaut, à confirmer : une suite en cours ou terminée refuse l'annulation du devis, comme l'intervention elle-même, et les coûts vivants des suites du chantier, suites annulées comprises, la refusent aussi, comme ses heures et ses achats. **Appliqué** par #341.
+
+### 21:41 UTC : création d'une suite sur une affaire clôturée, suites d'une intervention annulée depuis sa fiche, heures des suites, intervention d'un devis converti aussi en chantier
+
+Claude Code a posé deux nouvelles questions et rappelé trois questions en attente (21:37 UTC), en rendant compte de la fusion de #339 et de l'ouverture de #341 :
+
+```text
+**Deux nouvelles questions pour vous :**
+1. Une suite peut encore être créée sur un chantier clôturé, mais le technicien ne pourra pas y saisir ses heures. Faut-il refuser aussi cette création ?
+2. Une intervention annulée depuis sa fiche garde ses suites, selon la règle de la première PR. Votre réponse « annule l'intervention initiale » vaut-elle aussi dans ce cas ?
+
+Questions toujours en attente : faut-il sortir les heures des suites des heures réalisées du chantier ? Où vont les coûts d'une intervention issue d'un devis converti à la fois en chantier et en intervention ? Faut-il garder ou adapter le rappel au client pour la suite d'une intervention issue d'un devis ?
+```
+
+Nelson a répondu (21:41 UTC) :
+
+```text
+1. Oui refuser cette creation
+2. Oui on gardr ses suites
+Oui il faut sortir les heures
+Elle vont au chantier auquel il est rattaché si c’est un chantier issue d’un devis, ce n’est pas une intervention sav de toute facon
+```
+
+Lecture retenue, à confirmer. Les deux lignes numérotées répondent aux deux nouvelles questions ; les deux lignes suivantes, aux deux premières questions en attente, dans leur ordre. La troisième, le rappel au client, reste sans réponse ([passation](ROADMAP-PASSATION.md#3-questions-ouvertes-pour-nelson), section 3).
+
+1. **Création d'une suite sur une affaire clôturée** (« Oui refuser cette creation »). Aucune suite ne se crée sur une affaire clôturée, comme sur une affaire annulée. Choix par défaut, à confirmer : le refus vaut pour tous, administration comprise, qui rouvre le chantier au besoin. **Appliqué** par #341.
+2. **Suites d'une intervention annulée depuis sa fiche** (« Oui on gardr ses suites »). Le message dit le sort des suites : une intervention annulée depuis sa fiche garde ses suites, comme aujourd'hui ; la réponse de 15:50 ne vaut que pour l'annulation avec le devis. Le « Oui » qui ouvre la ligne est lu comme l'accord sur cette règle, et non comme l'extension à ce cas de la réponse de 15:50, qui contredirait « on gardr ses suites ». Rien n'est à coder.
+3. **Heures des suites** (« Oui il faut sortir les heures »). Les heures des suites sortent des heures réalisées du chantier, leur coût restant dans sa marge. **Appliqué** par [#343](https://github.com/Noxia-Groupe/iris/pull/343), avec deux choix par défaut, à confirmer : le coût horaire du chantier, qui valorise le manque à gagner des heures en trop, exclut les suites de ses heures comme de sa main-d'œuvre ; le coût des suites reste dans la main-d'œuvre réelle, donc dans l'alerte « main-d'œuvre dépassée ».
+4. **Intervention d'un devis converti aussi en chantier** (« Elle vont au chantier auquel il est rattaché si c’est un chantier issue d’un devis, ce n’est pas une intervention sav de toute facon »). L'intervention issue d'un devis qui a aussi ouvert un chantier est rattachée à ce chantier, avec ses suites, quel que soit l'ordre des deux conversions ; ses coûts et ceux de ses suites entrent dans sa marge ; ce n'est pas une intervention SAV. **Appliqué** par [#344](https://github.com/Noxia-Groupe/iris/pull/344), avec ses choix par défaut, à confirmer, dont le premier touche aux montants : ses heures comptent comme le travail du chantier, dans ses heures réalisées et son coût horaire, et non comme celles d'une suite ; ses coûts suivent la garde d'une suite sur une affaire close ou annulée ; le chantier d'un devis qui a déjà créé son intervention ne s'ouvre qu'avec les droits de la création de l'intervention, l'encadrement SAV en session ; ses coûts vivants refusent l'annulation du devis ([passation](ROADMAP-PASSATION.md#4-choix-par-défaut-à-confirmer), section 4).
+
+**Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; les mentions suivantes y sont levées ou modifiées par la présente section :
+
+- décisions de la nuit du 26 au 27-10-2026 : la cinquième question à choix, « la question reste ouverte », et le point 5, « Lecture à confirmer, la cinquième question à choix étant restée sans réponse » et « la PR de cette marge attend sa réponse », tranchés à 10:27 UTC, comme les trois « sauf la lecture du point 5 » de ses propres mentions antérieures ; le découpage et l'ordre des lots, « sa question de prix (point 5) attend une réponse », de même, le reste du découpage restant à confirmer ;
+- décisions de la nuit du 26 au 27-10-2026, point 1 : « Les autres interventions rattachées à l'affaire, dont l'intervention initiale d'une suite, restent hors de cette marge », sauf, depuis 21:41 UTC, l'intervention issue du devis qui a aussi ouvert le chantier, rattachée à lui et comptée dans sa marge.
+
+## Lots du 27 au 28-10-2026
+
+*Rédigé le 28-10-2026.* Fusions faites par Claude Code selon la décision de Nelson du 20-10-2026, chacune avec une CI verte et un audit interne fusionnable sur la même SHA ; les tests manquants hors montants relevés par les audits sont versés à des issues de suivi, selon la règle du 23-10-2026. Aucun de ces lots n'est validé pour mise en service : #339, #341, #343 et #344 touchent aux montants du chantier, et attendent la validation comptable de Nelson.
+
+### Lots fusionnés
+
+- #338 : décisions de la nuit du 26 au 27-10-2026 sur les questions de montants consignées (section « Décisions de la nuit du 26 au 27-10-2026 », plus haut) ; passation, inventaire du paramétrage et README.
+- #339 (lot « intervention de suivi liée », seconde PR) : coûts des suites dans la marge du chantier ; marge d'une intervention issue d'un devis converti en intervention, sans chantier ; rappel d'informer le client pour la suite d'une intervention hors contrat (points 1 et 2 de la nuit du 26 au 27-10-2026, points 13 et 23 du 24-10-2026) ; six audits internes.
+- #341 : suites d'une affaire close ou annulée, décisions de 15:50 UTC et première décision de 21:41 UTC (section précédente) ; coûts d'une suite refusés sur une affaire close ou annulée ; suites annulées avec l'intervention issue d'un devis annulé ; création d'une suite refusée sur une affaire clôturée ; quatre audits internes.
+- #343 : heures des suites hors des heures réalisées du chantier (21:41 UTC, « Oui il faut sortir les heures ») ; deux audits internes.
+- #344 : intervention d'un devis converti aussi en chantier, rattachée à ce chantier, ses coûts dans sa marge (21:41 UTC) ; trois audits internes, le premier ayant fait réserver l'ouverture du chantier d'un devis qui a déjà créé son intervention à l'encadrement SAV.
+
+### Suivis ouverts pendant ces lots
+
+Étiquette `suivi-audit` : #340 (garde en base de l'affaire d'une suite, lectures des coûts en N+1 sur l'écran des interventions ; audit de #339 ; puis « matériel 0,00 € » lu par le conducteur et taille de `ChantierDetail.tsx`, audit n° 1 de #343), #342 (refus contrôlés dans le navigateur hors de la vue à 375 px, message « Rouvrez-le d’abord. », file du planning, test du 404 à la création d'une suite ; audits de #341), #345 (clôture d'un chantier concurrente de l'annulation de son devis, arrondi de la main-d'œuvre, journal des heures de la fiche chantier, reste à facturer, bouton « Ouvrir le chantier » de l'écran Devis, lot « Directeur aligné sur l'administration », comptes de test non nettoyés ; audits de #344). Les notes de ces audits destinées à la documentation sont traitées par la PR qui consigne ces deux sections.
