@@ -31,7 +31,8 @@ EXECUTE FUNCTION figer_marque_temps_passe_facture();
 
 -- L'intervention facturée au temps passé l'est elle-même (marqueur reporté de son devis) et n'est pas
 -- une suite : une suite se facture avec son intervention initiale. Vérifié à la validation de la
--- transaction, comme les autres gardes du temps passé.
+-- transaction, comme les autres gardes du temps passé, à la création comme au changement d'intervention
+-- d'un brouillon (une facture émise garde déjà son origine).
 CREATE FUNCTION verifier_intervention_facture_temps_passe() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
   marqueur boolean;
@@ -45,7 +46,7 @@ BEGIN
   RETURN NULL;
 END;
 $$;
-CREATE CONSTRAINT TRIGGER facture_temps_passe_intervention AFTER INSERT ON "Facture"
+CREATE CONSTRAINT TRIGGER facture_temps_passe_intervention AFTER INSERT OR UPDATE OF "interventionId" ON "Facture"
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
 WHEN (NEW."tempsPasse")
 EXECUTE FUNCTION verifier_intervention_facture_temps_passe();

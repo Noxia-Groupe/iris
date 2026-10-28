@@ -72,6 +72,25 @@ export async function referenceTempsPasse(db: Db, interventionId: string): Promi
   return lignes[0]?.reference ?? null;
 }
 
+// Pour la facture saisie ligne par ligne : l'intervention au temps passé de la chaîne, et si elle se facture
+// avec le chantier de son affaire, comme la facture au temps passé le dit en la refusant (rattachée à ce
+// chantier, ou issue d'un devis converti aussi en chantier).
+export async function tempsPasseDeLaChaine(db: Db, interventionId: string): Promise<{ reference: string; avecLeChantier: boolean } | null> {
+  const lignes = await db.$queryRaw<Array<{ id: string; reference: string; chantierId: string | null }>>(Prisma.sql`
+    WITH RECURSIVE ascendance AS (
+      SELECT "id", "reference", "interventionInitialeId", "auTempsPasse", "chantierId" FROM "Intervention" WHERE "id" = ${interventionId}
+      UNION
+      SELECT i."id", i."reference", i."interventionInitialeId", i."auTempsPasse", i."chantierId" FROM "Intervention" i JOIN ascendance a ON i."id" = a."interventionInitialeId"
+    )
+    SELECT "id", "reference", "chantierId" FROM ascendance WHERE "auTempsPasse" LIMIT 1`);
+  const initiale = lignes[0];
+  if (!initiale) return null;
+  const avecLeChantier = initiale.chantierId !== null || await db.devisConversion.count({
+    where: { cibleType: 'CHANTIER', devis: { conversions: { some: { cibleType: 'INTERVENTION', cibleId: initiale.id } } } },
+  }) > 0;
+  return { reference: initiale.reference, avecLeChantier };
+}
+
 async function idsDesSuites(db: Db, interventionId: string): Promise<string[]> {
   // Le lien d'une suite est figé et ne boucle pas (garde en base) ; UNION écarte tout doublon.
   const suites = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -84,20 +103,22 @@ async function idsDesSuites(db: Db, interventionId: string): Promise<string[]> {
   return suites.map((suite) => suite.id);
 }
 
-// Verrouille l'intervention et toutes ses suites, dans cet ordre : une heure saisie, une suite créée, une
-// clôture ou une annulation concurrentes attendent la facture, ou la précèdent et sont relues. Une suite
-// créée pendant la lecture de la chaîne (sous une suite non encore verrouillée) est rattrapée par la
-// relecture, jusqu'à une chaîne stable.
+// Verrouille l'intervention et toutes ses suites, ensemble, par identifiant croissant : l'ordre de
+// l'annulation du devis (devis/annulation.ts) et du rattachement au chantier (devis/rattachement.ts), qui
+// verrouillent les mêmes lignes ; verrouiller l'intervention d'abord pourrait interbloquer avec eux. Une
+// heure saisie, une suite créée, une clôture ou une annulation concurrentes attendent la facture, ou la
+// précèdent et sont relues. Une suite créée entre la lecture de la chaîne et ses verrous (la création
+// verrouille son intervention initiale) refuse la facture, à relancer, plutôt que d'être verrouillée hors
+// de cet ordre.
 async function verrouillerChaine(db: Db, interventionId: string): Promise<string[]> {
-  await db.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" = ${interventionId} FOR UPDATE`);
-  let ids = await idsDesSuites(db, interventionId);
-  for (let essai = 0; essai < 5; essai += 1) {
-    if (ids.length) await db.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
-    const relus = await idsDesSuites(db, interventionId);
-    if (relus.length === ids.length && relus.every((id, index) => id === ids[index])) return ids;
-    ids = relus;
+  const chaine = async () => [interventionId, ...await idsDesSuites(db, interventionId)].sort();
+  const lus = await chaine();
+  for (const id of lus) await db.$queryRaw(Prisma.sql`SELECT "id" FROM "Intervention" WHERE "id" = ${id} FOR UPDATE`);
+  const relus = await chaine();
+  if (relus.length !== lus.length || relus.some((id, index) => id !== lus[index])) {
+    throw new RefusFactureTempsPasse(409, 'Les suites de cette intervention changent en ce moment : réessayez.');
   }
-  throw new RefusFactureTempsPasse(409, 'Les suites de cette intervention changent en ce moment : réessayez.');
+  return relus.filter((id) => id !== interventionId);
 }
 
 export type LigneFactureTempsPasse = {
@@ -162,7 +183,7 @@ export async function preparerFactureTempsPasse(db: Db, interventionId: string, 
     select: { numero: true }, orderBy: { createdAt: 'asc' },
   });
   if (existantes.length) {
-    throw new RefusFactureTempsPasse(409, `Cette intervention ou l’une de ses suites a déjà une facture (${libelles(existantes.map((f) => f.numero ?? 'brouillon'))}) : la facture au temps passé est unique. Pour la refaire, annulez d’abord la facture émise par son avoir total.`);
+    throw new RefusFactureTempsPasse(409, `Cette intervention ou l’une de ses suites a déjà une facture (${libelles(existantes.map((f) => f.numero ?? 'brouillon'))}) : la facture au temps passé est unique. Pour la refaire, annulez d’abord la facture émise par son avoir total ; une facture qui a reçu un avoir partiel ou un règlement ne s’annule plus en totalité et se corrige par des avoirs partiels.`);
   }
 
   const facturables = [intervention.id, ...suites.filter((suite) => suite.statut !== 'ANNULEE').map((suite) => suite.id)];

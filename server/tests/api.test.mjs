@@ -22410,6 +22410,29 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    test('saisie ligne par ligne d’une intervention au temps passé rattachée au chantier : le refus renvoie à la facture du chantier', async () => {
+      // Devis converti aussi en chantier (#344) : l'intervention et sa suite y sont rattachées et se facturent avec lui ;
+      // le refus de la saisie ligne par ligne ne renvoie pas à la facture au temps passé, qui les refuse aussi.
+      const { devis, intervention } = await interventionTempsPasse('saisie libre sur chantier', { terminee: false });
+      const ouverture = await envoyer('post', `/api/devis/${devis.id}/convertir`, admin, { cible: 'CHANTIER', responsableId: comptes.conducteur.id });
+      assert.equal(ouverture.status, 201, JSON.stringify(ouverture.body));
+      const suite = await suiteDe(intervention.id);
+      await prisma.intervention.update({ where: { id: intervention.id }, data: { statut: 'TERMINEE' } });
+      await heure(intervention.id, 1);
+      const message = `L’intervention ${intervention.reference} est au temps passé et se facture avec le chantier de son affaire, comme ses suites : créez la facture du chantier.`;
+      for (const cible of [intervention, suite]) {
+        const libre = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'INTERVENTION', interventionId: cible.id, ...DATES, lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }] });
+        assert.deepEqual([libre.status, libre.body.error], [409, message], cible.reference);
+      }
+      const lu = await apercu(intervention.id);
+      assert.deepEqual([lu.status, lu.body.error], [409, 'Cette intervention est rattachée au chantier de son affaire : elle se facture avec le chantier, et non au temps passé.']);
+      // Sans le rattachement (écrit en base), le devis converti aussi en chantier suffit, comme pour la facture au temps passé.
+      await prisma.intervention.updateMany({ where: { id: { in: [intervention.id, suite.id] } }, data: { chantierId: null } });
+      const libre = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'INTERVENTION', interventionId: suite.id, ...DATES, lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }] });
+      assert.deepEqual([libre.status, libre.body.error], [409, message]);
+      assert.equal(await prisma.facture.count({ where: { interventionId: { in: [intervention.id, suite.id] } } }), 0);
+    });
+
     test('droits : l’administration seule lit l’aperçu et crée la facture', async () => {
       const { intervention } = await interventionTempsPasse('droits');
       await heure(intervention.id, 1);
@@ -22441,6 +22464,42 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await creerFacture(intervention.id, { totalHtAttendu: 78.25 })).status, 201);
     });
 
+    test('concurrence : l’annulation du devis et la facture au temps passé verrouillent dans le même ordre, sans interblocage', async () => {
+      // L'annulation du devis verrouille l'intervention et ses suites par identifiant croissant (devis/annulation.ts) :
+      // on retient une suite dont l'identifiant précède celui de l'intervention.
+      let cas = null;
+      for (let essai = 0; essai < 20 && !cas; essai += 1) {
+        const tp = await interventionTempsPasse(`ordre des verrous ${essai}`);
+        const suite = await suiteDe(tp.intervention.id);
+        if (suite.id < tp.intervention.id) cas = { ...tp, suite };
+      }
+      assert.ok(cas, 'une suite dont l’identifiant précède celui de l’intervention');
+      await heure(cas.intervention.id, 1);
+      const attendreBloques = async (nombre) => {
+        for (let tour = 0; tour < 250; tour += 1) {
+          const [{ bloques }] = await prisma.$queryRaw`SELECT count(*)::int AS bloques FROM pg_stat_activity WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0`;
+          if (bloques >= nombre) return true;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        return false;
+      };
+      let annulation = null;
+      let creation = null;
+      // La suite verrouillée ici : l'annulation l'attend la première, puis la création. Sans le même ordre,
+      // la création tiendrait l'intervention que l'annulation attend, et PostgreSQL romprait l'interblocage
+      // par une erreur (500).
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${cas.suite.id} FOR UPDATE`;
+        annulation = envoyer('post', `/api/devis/${cas.devis.id}/annulation`, admin, { motif: 'TEST annulation concurrente' }).then((r) => r);
+        assert.equal(await attendreBloques(1), true, 'l’annulation attend la suite');
+        creation = creerFacture(cas.intervention.id, { totalHtAttendu: 55.5 }).then((r) => r);
+        assert.equal(await attendreBloques(2), true, 'la création attend la suite');
+      }, { timeout: 20000 });
+      const [annulee, creee] = await Promise.all([annulation, creation]);
+      assert.deepEqual([annulee.status, annulee.body.error], [409, `Annulation impossible : l’intervention ${cas.intervention.reference} issue de ce devis est terminée. Une affaire commencée ne s’annule pas.`]);
+      assert.equal(creee.status, 201, JSON.stringify(creee.body));
+    });
+
     test('gardes en base : marque réservée à la facture d’une intervention au temps passé, figée, une seule facture vivante', async () => {
       const { intervention } = await interventionTempsPasse('gardes');
       await heure(intervention.id, 1);
@@ -22463,9 +22522,277 @@ if (!TEST_DATABASE_URL) {
       for (const cible of [ordinaire.body.id, suite.id]) {
         await assert.rejects(transactionVerifieeTest((tx) => tx.facture.create({ data: copie({ interventionId: cible }) })), /Une facture au temps passé porte sur une intervention au temps passé, et non sur une suite/);
       }
+      // Le changement d'intervention d'un brouillon marqué est vérifié de même (note N2 de l'audit n° 1 de #351).
+      for (const cible of [ordinaire.body.id, suite.id]) {
+        await assert.rejects(transactionVerifieeTest((tx) => tx.facture.update({ where: { id: facture.id }, data: { interventionId: cible } })), /Une facture au temps passé porte sur une intervention au temps passé, et non sur une suite/);
+      }
+      assert.equal((await prisma.facture.findUniqueOrThrow({ where: { id: facture.id } })).interventionId, intervention.id);
       // L'index unique ne retient que les factures vivantes : une facture annulée libère la place.
       const [{ definition }] = await prisma.$queryRaw`SELECT pg_get_indexdef('"Facture_temps_passe_unique"'::regclass) AS definition`;
       assert.match(definition, /WHERE \("tempsPasse" AND \(statut <> 'ANNULEE'::text\)\)/);
+    });
+  });
+  // Tests ajoutés par l'audit interne n° 1 de la PR #351 (lot « facture au temps passé », seconde PR) : montants
+  // comparés à la saisie ligne par ligne, cycle émission-avoir, garde de l'avoir, plafonds, conditions, droits et
+  // créations simultanées.
+  describe('Audit FTP : facture au temps passé, compléments de l’audit n° 1', () => {
+    let admin = {};
+    let adminId = '';
+    const comptes = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    let fiche = null;
+    let mainOeuvre = null;
+    let mainOeuvreChere = null;
+    let reglagesInitiaux = null;
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const apercu = (id, auth = admin) => request(app).get(`/api/interventions/${id}/facture-temps-passe`).set(auth);
+    // Jour civil de la société : la numérotation est chronologique, et une émission future est refusée.
+    const aujourdhui = async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      return jourCivilEntreprise(new Date(), fuseau).split('-').reverse().join('-');
+    };
+    const creerFacture = async (id, corps, auth = admin) => {
+      const jour = await aujourdhui();
+      return envoyer('post', `/api/interventions/${id}/facture-temps-passe`, auth, { dateEmission: jour, dateEcheance: jour, ...corps });
+    };
+    const ligneTempsPasse = (mo = mainOeuvre) => ({ tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: mo.id });
+    const interventionTempsPasse = async (objet, lignes = [ligneTempsPasse(), { designation: 'TEST Fourniture', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }]) => {
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Audit FTP ${objet} ${suffixe}`, auTempsPasse: true, lignes });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: `TEST Signataire ${objet}`, confirme: true })).status, 201);
+      const conversion = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible: 'INTERVENTION' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      await prisma.intervention.update({ where: { id: conversion.body.id }, data: { statut: 'TERMINEE' } });
+      return { devis: devis.body, intervention: conversion.body };
+    };
+    const suiteDe = async (id, statut = 'TERMINEE') => {
+      const res = await envoyer('post', `/api/interventions/${id}/suites`, admin, {});
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      if (statut) await prisma.intervention.update({ where: { id: res.body.id }, data: { statut } });
+      return res.body;
+    };
+    const heure = (interventionId, nbrHeures) => prisma.coutInterventionHeure.create({ data: {
+      interventionId, intervenantId: fiche.id, date: new Date('2026-10-01T00:00:00Z'), nbrHeures, tauxHoraireApplique: 40, createdById: adminId,
+    } });
+    // Sessions de la base de test qui attendent un verrou.
+    const attendreBloques = async (nombre) => {
+      for (let tour = 0; tour < 250; tour += 1) {
+        const [{ bloques }] = await prisma.$queryRaw`SELECT count(*)::int AS bloques FROM pg_stat_activity WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0`;
+        if (bloques >= nombre) return true;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return false;
+    };
+    // Prérequis comptables de l'émission, posés s'ils manquent : le bloc reste exécutable seul.
+    const assurerFacturation = async () => {
+      const compte = async (code, nature) => (await prisma.compteComptable.upsert({ where: { code }, create: { code, nature, libelle: `TEST ${code}` }, update: { actif: true } })).id;
+      const regles = await prisma.regleComptable.findMany({ include: { compte: true } });
+      for (const [cle, code, nature] of [['CLIENT', '411351', 'ACTIF'], ['VENTE_PRESTATION', '706351', 'PRODUIT'], ['VENTE_ARTICLE', '707351', 'PRODUIT']]) {
+        const actuelle = regles.find((r) => r.cle === cle);
+        if (!actuelle?.compte?.actif || actuelle.compte.nature !== nature) await regleFixture(cle, await compte(code, nature));
+      }
+      if (!regles.find((r) => r.cle === 'JOURNAL_VENTES')?.journal) await regleFixture('JOURNAL_VENTES', 'VTE');
+      const tva = (await prisma.regleTvaComptable.findMany({ include: { compte: true } })).find((r) => Number(r.taux) === 20);
+      if (!tva?.compte?.actif || tva.compte.nature !== 'TVA') await tvaFixture(20, await compte('445351', 'TVA'));
+    };
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      for (const [cle, role] of [['admin', 'ADMIN'], ['responsable', 'RESPONSABLE'], ['comptable', 'COMPTABLE'], ['assistante', 'ASSISTANTE_COMMERCIALE'], ['directeurCommercial', 'DIRECTEUR_COMMERCIAL'], ['commercial', 'COMMERCIAL']]) {
+        const email = `audit-ftp.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Audit FTP ${cle}`, role } });
+      }
+      reglagesInitiaux = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' }, select: { pasTempsPasseMinutes: true, tempsMinimumMinutes: true } });
+      assert.equal((await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 15, tempsMinimumMinutes: 60 })).status, 200);
+      const creerMainOeuvre = async (code, prix) => {
+        const mo = await envoyer('post', '/api/catalogue/prestations', admin, {
+          estMainOeuvre: true, reference: `TEST-AFTP-${code}-${suffixe}`, nom: `TEST Main d’œuvre audit FTP ${code} ${suffixe}`, tauxTva: '20',
+          prixVenteHt: prix, prixJourHorsContratHt: '320', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7',
+        });
+        assert.equal(mo.status, 201, JSON.stringify(mo.body));
+        return mo.body;
+      };
+      mainOeuvre = await creerMainOeuvre('MO', '45.50');
+      mainOeuvreChere = await creerMainOeuvre('CHERE', '99999.99');
+      const cree = await envoyer('post', '/api/clients', admin, { raisonSociale: `TEST Client audit FTP ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, admin, { nom: 'TEST Facturation audit FTP', adresse: '5 rue des Tranches', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      fiche = await prisma.intervenant.create({ data: { nom: `TEST Audit FTP fiche ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+    });
+
+    after(async () => {
+      await prisma.parametres.update({ where: { id: 'singleton' }, data: reglagesInitiaux });
+    });
+
+    test('montants : lignes, ventilation de TVA et totaux identiques à une facture saisie ligne par ligne (trois taux, base cumulée, ordre du devis)', async () => {
+      const { intervention } = await interventionTempsPasse('deux taux', [
+        { designation: 'TEST Joint', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 0.1, tauxTva: 5.5 },
+        ligneTempsPasse(),
+        { designation: 'TEST Collier', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 0.1, tauxTva: 5.5 },
+        { designation: 'TEST Déplacement', nature: 'MAIN_OEUVRE', quantite: 1.5, prixUnitaireHt: 33.33, tauxTva: 10 },
+      ]);
+      await heure(intervention.id, 1.01); // 60,6 min : le minimum d'une heure, puis une tranche de 15 minutes commencée
+      const lu = await apercu(intervention.id);
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      const lignes = lu.body.lignes.map(({ designation, nature, quantite, prixUnitaireHt, tauxTva }) => ({ designation, nature, quantite, prixUnitaireHt, tauxTva }));
+      assert.deepEqual(lignes, [
+        { designation: 'TEST Joint', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 0.1, tauxTva: 5.5 },
+        { designation: 'TEST Main d’œuvre au temps passé', nature: 'PRESTATION', quantite: 1.25, prixUnitaireHt: 45.5, tauxTva: 20 },
+        { designation: 'TEST Collier', nature: 'ARTICLE', quantite: 1, prixUnitaireHt: 0.1, tauxTva: 5.5 },
+        { designation: 'TEST Déplacement', nature: 'PRESTATION', quantite: 1.5, prixUnitaireHt: 33.33, tauxTva: 10 },
+      ]);
+      assert.deepEqual(lu.body.lignes.map((l) => [l.ordre, l.totalHt, l.totalTtc]), [[0, 0.1, 0.11], [1, 56.88, 68.26], [2, 0.1, 0.11], [3, 50, 55]]);
+      // La TVA à 5,5 % s'arrondit sur la base cumulée du taux (0,20 € donne 0,01 €), et non ligne par ligne (0,01 € + 0,01 €).
+      assert.deepEqual(lu.body.ventilationTva, [
+        { tauxTva: 5.5, totalHt: 0.2, totalTva: 0.01, totalTtc: 0.21 },
+        { tauxTva: 10, totalHt: 50, totalTva: 5, totalTtc: 55 },
+        { tauxTva: 20, totalHt: 56.88, totalTva: 11.38, totalTtc: 68.26 },
+      ]);
+      assert.deepEqual([lu.body.totalHt, lu.body.totalTva, lu.body.totalTtc], [107.08, 16.39, 123.47]);
+      // La même facture saisie ligne par ligne (hors affaire) : mêmes lignes, même ventilation, mêmes totaux, en base.
+      const jour = await aujourdhui();
+      const libre = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST comparaison au temps passé', dateEmission: jour, dateEcheance: jour, lignes });
+      assert.equal(libre.status, 201, JSON.stringify(libre.body));
+      const cree = await creerFacture(intervention.id, { totalHtAttendu: lu.body.totalHt });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const lire = async (id) => {
+        const f = await prisma.facture.findUniqueOrThrow({ where: { id }, include: { lignes: { orderBy: { ordre: 'asc' } }, ventilationTva: { orderBy: { tauxTva: 'asc' } } } });
+        return {
+          lignes: f.lignes.map((l) => [l.ordre, l.designation, l.nature, l.quantite.toString(), l.prixUnitaireHt.toString(), l.tauxTva.toString(), l.totalHt.toString(), l.totalTtc.toString()]),
+          ventilation: f.ventilationTva.map((v) => [v.tauxTva.toString(), v.totalHt.toString(), v.totalTva.toString(), v.totalTtc.toString()]),
+          totaux: [f.totalHt.toString(), f.totalTva.toString(), f.totalTtc.toString()],
+        };
+      };
+      const enBase = await lire(cree.body.id);
+      assert.deepEqual(enBase, await lire(libre.body.id));
+      assert.deepEqual(enBase.totaux, ['107.08', '16.39', '123.47']);
+    });
+
+    test('montants : émission, avoir total, puis nouvelle facture au temps passé ; un avoir partiel la laisse vivante', async () => {
+      await assurerFacturation();
+      const { intervention } = await interventionTempsPasse('cycle');
+      await heure(intervention.id, 1);
+      const premiere = await creerFacture(intervention.id, { totalHtAttendu: 55.5 });
+      assert.equal(premiere.status, 201, JSON.stringify(premiere.body));
+      const emise = await request(app).post(`/api/factures/${premiere.body.id}/emettre`).set(admin);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      assert.deepEqual([emise.body.statut, emise.body.tempsPasse, emise.body.totalHt], ['EMISE', true, 55.5]);
+      const bloquee = await apercu(intervention.id);
+      assert.equal(bloquee.status, 409);
+      assert.ok(bloquee.body.error.includes(`déjà une facture (${emise.body.numero})`), bloquee.body.error);
+      const annulee = await request(app).post(`/api/factures/${premiere.body.id}/annuler`).set(admin);
+      assert.equal(annulee.status, 200, JSON.stringify(annulee.body));
+      const avoir = await prisma.facture.findUniqueOrThrow({ where: { id: annulee.body.avoir.id } });
+      assert.deepEqual([avoir.type, avoir.tempsPasse, avoir.interventionId, avoir.origine, avoir.totalHt.toString()], ['AVOIR', false, intervention.id, 'INTERVENTION', '55.5']);
+      // La facture annulée par son avoir total libère la place : même aperçu, nouvelle facture.
+      const relu = await apercu(intervention.id);
+      assert.equal(relu.status, 200, JSON.stringify(relu.body));
+      assert.equal(relu.body.totalHt, 55.5);
+      const seconde = await creerFacture(intervention.id, { totalHtAttendu: 55.5 });
+      assert.equal(seconde.status, 201, JSON.stringify(seconde.body));
+      assert.equal(seconde.body.tempsPasse, true);
+      assert.equal((await request(app).post(`/api/factures/${seconde.body.id}/emettre`).set(admin)).status, 200);
+      // Un avoir partiel corrige la facture sans l'annuler : elle reste la facture vivante de l'intervention.
+      const partiel = await envoyer('post', `/api/factures/${seconde.body.id}/avoirs`, admin, { lignes: [{ designation: 'TEST Geste commercial', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 5, tauxTva: 20 }] });
+      assert.equal(partiel.status, 201, JSON.stringify(partiel.body));
+      assert.equal(partiel.body.tempsPasse, false);
+      assert.equal((await apercu(intervention.id)).status, 409);
+      assert.equal((await creerFacture(intervention.id, { totalHtAttendu: 55.5 })).status, 409);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id, tempsPasse: true } }), 2);
+    });
+
+    test('gardes en base : un avoir ne porte jamais la marque « au temps passé »', async () => {
+      // L'avoir d'une facture au temps passé, rattaché à une autre intervention au temps passé sans facture.
+      const origine = await interventionTempsPasse('avoir marqué, origine');
+      await heure(origine.intervention.id, 1);
+      const facture = await creerFacture(origine.intervention.id, { totalHtAttendu: 55.5 });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      const { intervention } = await interventionTempsPasse('avoir marqué');
+      const avoir = { type: 'AVOIR', factureOrigineId: facture.body.id, clientId: client.id, clientRaisonSociale: client.raisonSociale, origine: 'INTERVENTION', interventionId: intervention.id, dateEmission: new Date('2026-10-01T00:00:00Z'), dateEcheance: new Date('2026-10-01T00:00:00Z'), totalHt: 0, totalTva: 0, totalTtc: 0 };
+      // Témoin : le même avoir sans la marque s'insère (puis la transaction est annulée) ; avec elle, la contrainte le refuse.
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        await tx.facture.create({ data: { ...avoir, tempsPasse: false } });
+        throw new Error('TEMOIN_INSERE');
+      }), /TEMOIN_INSERE/);
+      await assert.rejects(prisma.facture.create({ data: { ...avoir, tempsPasse: true } }), /Facture_temps_passe_check/);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id } }), 0);
+    });
+
+    test('plafonds : une ligne ou une facture hors des limites est refusée (409), sans rien écrire', async () => {
+      // 99 999,99 € HT de l'heure : 100 000 h saisies font une ligne de 11 999 998 800 € TTC, au-delà du plafond.
+      const ligneSeule = await interventionTempsPasse('plafond ligne', [ligneTempsPasse(mainOeuvreChere)]);
+      await heure(ligneSeule.intervention.id, 100000);
+      for (const reponse of [await apercu(ligneSeule.intervention.id), await creerFacture(ligneSeule.intervention.id, { totalHtAttendu: 1 })]) {
+        assert.deepEqual([reponse.status, reponse.body.error], [409, 'Montant de ligne hors des limites acceptées.']);
+      }
+      // 70 000 h font une ligne de 8 399 999 160 € TTC, sous le plafond ; la fourniture de 1,8 milliard TTC fait passer la facture au-delà.
+      const facture = await interventionTempsPasse('plafond facture', [ligneTempsPasse(mainOeuvreChere), { designation: 'TEST Fourniture chère', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 1500000000, tauxTva: 20 }]);
+      await heure(facture.intervention.id, 70000);
+      for (const reponse of [await apercu(facture.intervention.id), await creerFacture(facture.intervention.id, { totalHtAttendu: 1 })]) {
+        assert.deepEqual([reponse.status, reponse.body.error], [409, 'Montant de facture hors des limites acceptées.']);
+      }
+      assert.equal(await prisma.facture.count({ where: { interventionId: { in: [ligneSeule.intervention.id, facture.intervention.id] } } }), 0);
+    });
+
+    test('conditions : l’intervention elle-même marquée « à suivre » attend sa suite', async () => {
+      const { intervention } = await interventionTempsPasse('à suivre');
+      await heure(intervention.id, 1);
+      await prisma.intervention.update({ where: { id: intervention.id }, data: { aSuivre: true } });
+      const message = `${intervention.reference} est marquée « à suivre » : créez la suite ou retirez la marque avant la facture au temps passé.`;
+      const lu = await apercu(intervention.id);
+      assert.deepEqual([lu.status, lu.body.error], [409, message]);
+      const cree = await creerFacture(intervention.id, { totalHtAttendu: 55.5 });
+      assert.deepEqual([cree.status, cree.body.error], [409, message]);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id } }), 0);
+    });
+
+    test('droits : un administrateur (ADMIN) lit et crée ; les autres types de compte reçoivent 403', async () => {
+      const { intervention } = await interventionTempsPasse('droits ADMIN');
+      await heure(intervention.id, 1);
+      for (const cle of ['responsable', 'comptable', 'assistante', 'directeurCommercial', 'commercial']) {
+        assert.equal((await apercu(intervention.id, jeton(cle))).status, 403, cle);
+        assert.equal((await creerFacture(intervention.id, { totalHtAttendu: 55.5 }, jeton(cle))).status, 403, cle);
+      }
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id } }), 0);
+      assert.equal((await apercu(intervention.id, jeton('admin'))).status, 200);
+      const cree = await creerFacture(intervention.id, { totalHtAttendu: 55.5 }, jeton('admin'));
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      assert.equal(cree.body.createdById, comptes.admin.id);
+    });
+
+    test('concurrence : une heure saisie sur l’intervention elle-même pendant la création est attendue, puis refuse l’aperçu périmé', async () => {
+      const { intervention } = await interventionTempsPasse('verrou de l’intervention');
+      await heure(intervention.id, 1);
+      const lu = await apercu(intervention.id);
+      assert.equal(lu.body.totalHt, 55.5);
+      let requete = null;
+      await prisma.$transaction(async (tx) => {
+        // La saisie d'une heure verrouille son intervention (verrouillerContexteCout), ici l'intervention elle-même.
+        await tx.$queryRaw`SELECT "id" FROM "Intervention" WHERE "id" = ${intervention.id} FOR UPDATE`;
+        requete = creerFacture(intervention.id, { totalHtAttendu: lu.body.totalHt }).then((r) => r);
+        assert.equal(await attendreBloques(1), true, 'la création attend le verrou de l’intervention');
+        await tx.coutInterventionHeure.create({ data: { interventionId: intervention.id, intervenantId: fiche.id, date: new Date('2026-10-01T00:00:00Z'), nbrHeures: 0.5, tauxHoraireApplique: 40, createdById: adminId } });
+      }, { timeout: 20000 });
+      const resultat = await requete;
+      assert.deepEqual([resultat.status, resultat.body.error], [409, 'La facture au temps passé a changé depuis l’aperçu (total HT 78,25 € au lieu de 55,50 €) : relisez l’aperçu avant de la créer.']);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id } }), 0);
+    });
+
+    test('concurrence : deux créations simultanées font une seule facture, l’autre est refusée sous verrou (409)', async () => {
+      const { intervention } = await interventionTempsPasse('simultanées');
+      await heure(intervention.id, 1);
+      const reponses = await Promise.all([creerFacture(intervention.id, { totalHtAttendu: 55.5 }), creerFacture(intervention.id, { totalHtAttendu: 55.5 })]);
+      assert.deepEqual(reponses.map((r) => r.status).sort(), [201, 409], JSON.stringify(reponses.map((r) => r.body)));
+      const refus = reponses.find((r) => r.status === 409);
+      assert.match(refus.body.error, /déjà une facture \(brouillon\) : la facture au temps passé est unique/);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id } }), 1);
     });
   });
 }
