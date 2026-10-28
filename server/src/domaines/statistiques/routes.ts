@@ -208,9 +208,11 @@ export function enregistrerRoutesStatistiques(app: Express): void {
           // Manque à gagner = uniquement le coût des heures EN TROP par rapport au vendu,
           // valorisées au taux horaire moyen réellement appliqué sur ce chantier — pas la
           // différence avec le budget main d'œuvre vendu (qui peut s'écarter du taux horaire
-          // pour d'autres raisons et fausserait le montant du dépassement lui-même).
+          // pour d'autres raisons et fausserait le montant du dépassement lui-même). Les heures
+          // des suites sont hors des heures réalisées : leur coût, resté dans le réel, sort aussi
+          // du taux (décision de Nelson du 27-10-2026 à 21:41 UTC).
           const heuresDepassement = Math.max(0, differenceExacte(m.heuresRealisees, c.heuresVendues));
-          const tauxHoraireMoyen = m.heuresRealisees > 0 ? m.moReel / m.heuresRealisees : 0;
+          const tauxHoraireMoyen = m.heuresRealisees > 0 ? differenceExacte(m.moReel, m.coutsSuites.coutMainOeuvre) / m.heuresRealisees : 0;
           agg.manqueAGagnerMainOeuvre = sommeExacte(agg.manqueAGagnerMainOeuvre, heuresDepassement * tauxHoraireMoyen);
         }
       }
@@ -328,6 +330,8 @@ export function enregistrerRoutesStatistiques(app: Express): void {
   // Répartition des chantiers TERMINÉS (admin uniquement) selon qu'ils ont été livrés
   // entièrement dans les clous (heures ET coût main d'œuvre en avance, matériel dans le
   // budget), ou en dépassement sur le temps (heures ou coût MO), le matériel, ou les deux.
+  // Les heures sont celles du chantier, suites exclues ; le coût de main-d'œuvre garde celui
+  // des suites, resté dans le réel (choix par défaut, à confirmer).
   // Alimente le camembert de l'onglet Statistiques > Chantiers.
   app.get('/api/stats/chantiers-repartition', requireAuth, requireAdmin, async (req, res) => {
     try {

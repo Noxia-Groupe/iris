@@ -74,9 +74,10 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
     moReel = sommeExacte(moReel, produitExact(p.nbrHeures, p.tauxHoraireApplique));
   }
   // Coûts des suites rattachées à l'affaire (cf. avecCoutsSuites) : ils s'ajoutent au réel du
-  // chantier, donc à sa marge et à ses alertes, ses heures aux heures réalisées (choix par défaut,
-  // à confirmer). Le détail est renvoyé à part pour que l'écran dise d'où vient l'écart avec les
-  // journaux du chantier.
+  // chantier, donc à sa marge et à ses alertes de coût. Leurs heures restent hors des heures
+  // réalisées, qui ne comptent que les pointages du chantier : elles ne consomment pas les heures
+  // vendues (décision de Nelson du 27-10-2026 à 21:41 UTC, « Oui il faut sortir les heures »). Le
+  // détail est renvoyé à part pour que l'écran dise d'où vient l'écart avec les journaux du chantier.
   const suites: CoutsSuitesChantier = chantier.coutsSuites ?? { heures: [], achats: [] };
   const coutsSuites = { heures: 0, coutMainOeuvre: 0, materiel: 0 };
   for (const h of suites.heures) {
@@ -85,7 +86,9 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
   }
   for (const a of suites.achats) coutsSuites.materiel = sommeExacte(coutsSuites.materiel, a.montantHT);
   materielReel = sommeExacte(materielReel, coutsSuites.materiel);
-  heuresRealisees = sommeExacte(heuresRealisees, coutsSuites.heures);
+  // Main-d'œuvre des seuls pointages du chantier, sur les mêmes heures que les heures réalisées :
+  // c'est elle qui donne le coût horaire du chantier.
+  const moChantier = moReel;
   moReel = sommeExacte(moReel, coutsSuites.coutMainOeuvre);
   const totalDepenses = sommeExacte(materielReel, moReel);
   const diffHeures = differenceExacte(chantier.heuresVendues, heuresRealisees);
@@ -152,26 +155,23 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
   if (contexte) {
     let coutMainOeuvreAttendu = moReel;
     let coutMaterielAttendu = materielReel;
-    let coutHoraireReference: number | null = heuresRealisees > 0 ? moReel / heuresRealisees : null;
+    // Coût horaire du chantier : sa main-d'œuvre sur ses heures, suites exclues des deux côtés.
+    let coutHoraireReference: number | null = heuresRealisees > 0 ? moChantier / heuresRealisees : null;
     let sourceCoutHoraire = 'REEL';
     let ratioMateriel: number | null = null;
     let sourceMateriel = 'REEL';
     if (chantier.statut === 'EN_COURS') {
-      // Reste à faire du chantier, à son propre coût horaire : les heures des suites, comptées dans les
-      // heures réalisées (alerte « heures dépassées »), ne sont ni de l'avancement des heures vendues ni
-      // un coût horaire du chantier. Leur coût réel s'ajoute ensuite à la projection, comme leur matériel :
-      // la marge estimée baisse exactement de ce coût, comme la marge du jour, quel que soit le coût
-      // horaire des suites (audits n° 3 et 4 de #339 ; choix par défaut, à confirmer). Sans suite, le
-      // calcul est inchangé.
-      const heuresChantier = differenceExacte(heuresRealisees, coutsSuites.heures);
-      const moChantier = differenceExacte(moReel, coutsSuites.coutMainOeuvre);
-      coutHoraireReference = heuresChantier > 0 ? moChantier / heuresChantier : null;
+      // Reste à faire du chantier, à son propre coût horaire : les heures des suites, hors des heures
+      // réalisées, ne sont ni de l'avancement des heures vendues ni un coût horaire du chantier. Leur coût
+      // réel s'ajoute ensuite à la projection, comme leur matériel : la marge estimée baisse exactement de
+      // ce coût, comme la marge du jour, quel que soit le coût horaire des suites (audits n° 3 et 4 de
+      // #339 ; choix par défaut, à confirmer). Sans suite, le calcul est inchangé.
       sourceCoutHoraire = coutHoraireReference != null ? 'CHANTIER' : contexte.coutHoraireSociete != null ? 'SOCIETE' : 'VENDU';
       coutHoraireReference ??= contexte.coutHoraireSociete;
       // Au coût horaire du chantier : heures vendues × main-d'œuvre réelle ÷ heures réalisées, en
       // décimal (#198), pour retomber exactement sur le réel quand les heures vendues sont faites.
       const mainOeuvrePrevue = sourceCoutHoraire === 'CHANTIER'
-        ? regleDeTroisExacte(chantier.heuresVendues, moChantier, heuresChantier)
+        ? regleDeTroisExacte(chantier.heuresVendues, moChantier, heuresRealisees)
         : coutHoraireReference != null ? chantier.heuresVendues * coutHoraireReference : chantier.budgetMainOeuvreVendu;
       coutMainOeuvreAttendu = sommeExacte(Math.max(moChantier, mainOeuvrePrevue), coutsSuites.coutMainOeuvre);
       ratioMateriel = contexte.ratioMaterielHistorique ?? 1;

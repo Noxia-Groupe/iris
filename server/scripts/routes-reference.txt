@@ -236,7 +236,7 @@ GET /api/journal-administration requireAuth#07b983da0ce5 > requireAdmin#72440b31
 GET /api/journal-administration/export.csv requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#72c377372775
 PUT /api/journal-administration/conservation requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#3483eb2d5d53
 GET /api/stats/global requireAuth#07b983da0ce5 > <anonymous>#df5b32801d07
-GET /api/stats/conducteurs requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#d5aece745cff
+GET /api/stats/conducteurs requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#fb7aa65608c6
 GET /api/stats/conducteurs/assiduite requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#a9e036d8d362
 GET /api/stats/chantiers-repartition requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#a6d4620276c4
 GET /api/stats/intervenants requireAuth#07b983da0ce5 > requireTravauxRead#7ee74c0efa19 > <anonymous>#6930e6226651

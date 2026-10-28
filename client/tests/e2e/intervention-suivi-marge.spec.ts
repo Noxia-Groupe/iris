@@ -46,7 +46,7 @@ async function preparer(request: APIRequestContext, token: string, creerClient: 
     await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
     return devis;
   };
-  return { envoyer, client, suffixe, heuresDuTechnicien, devisSigne };
+  return { envoyer, client, suffixe, fiche, heuresDuTechnicien, devisSigne };
 }
 
 test('intervention issue d’un devis : l’administration voit sa marge, suites comprises ; la suite d’une curative rappelle d’informer le client', async ({ session, request, creerClient, allerSurPageAdmin }) => {
@@ -99,19 +99,41 @@ test('la suite d’une visite de contrat ne porte pas le rappel du hors contrat'
   await expect(dialogue).toHaveCount(0);
 });
 
-test('fiche chantier : les coûts des suites de l’affaire sont comptés dans le réel, et l’écran le dit', async ({ session, request, creerClient, allerSurPageAdmin }) => {
-  const { envoyer, client, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'marge-chantier');
+test('fiche chantier : les coûts des suites de l’affaire sont comptés dans le réel, leurs heures hors des heures réalisées, et l’écran le dit', async ({ session, request, creerClient, allerSurPageAdmin }) => {
+  const { envoyer, client, fiche, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'marge-chantier');
   const devis = await devisSigne('Affaire avec suites');
   const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
   const initiale = await envoyer('post', '/interventions', { clientId: client.id, titre: 'Dépannage de l’affaire', chantierId: chantier.id }) as { id: string };
   const suite = await envoyer('post', `/interventions/${initiale.id}/suites`, {}) as { id: string };
   await heuresDuTechnicien(initiale.id, 3); // l'intervention initiale reste hors du réel du chantier
   await heuresDuTechnicien(suite.id, 2);
+  // 3 h pointées sur le chantier, à 40 € (120 €), pour 2 h vendues.
+  await envoyer('post', '/heures', { chantierId: chantier.id, intervenantId: fiche.id, date: dateDuJour(), nbrHeures: 3 });
 
   const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
-  await expect(page.locator('[data-couts-suites]')).toHaveText(/Dont suites SAV de l’affaire, comptées dans le réel : 2 h · matériel 0,00\s€ · main-d’œuvre 80,00\s€\./);
-  // Le réel du chantier comprend les 2 h de la suite, et elles seules.
-  await expect(page.getByText('2.00 h', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-couts-suites]')).toHaveText(/Dont suites SAV de l’affaire, comptées dans le réel : matériel 0,00\s€ · main-d’œuvre 80,00\s€\. Heures des suites SAV de l’affaire, hors des heures réalisées : 2 h\./);
+  // Décision de Nelson du 27-10-2026 à 21:41 UTC (« Oui il faut sortir les heures ») : les heures réalisées sont
+  // les 3 h du chantier seules, et non 5 h ; l'heure en trop est valorisée au coût horaire du chantier, 40 €, et
+  // non au coût mêlé de la suite (200 € pour 3 h, 66,67 €).
+  await expect(page.getByText('3.00 h', { exact: true })).toBeVisible();
+  await expect(page.getByText('Manque à gagner : -40 €', { exact: true })).toBeVisible();
+});
+
+// Audit n° 1 de #343 : avec une suite à un autre coût horaire que le chantier, le manque à gagner de la fiche reste
+// valorisé au coût horaire du chantier, et non au coût moyen du chantier et de ses suites.
+test('fiche chantier : manque à gagner au coût horaire du chantier, la suite ayant un autre coût horaire', async ({ session, request, creerClient, allerSurPageAdmin }) => {
+  const { envoyer, client, suffixe, heuresDuTechnicien, devisSigne } = await preparer(request, session.token, creerClient, 'marge-taux');
+  const devis = await devisSigne('Affaire à deux taux'); // 2 h vendues
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  const initiale = await envoyer('post', '/interventions', { clientId: client.id, titre: 'Dépannage à deux taux', chantierId: chantier.id }) as { id: string };
+  const suite = await envoyer('post', `/interventions/${initiale.id}/suites`, {}) as { id: string };
+  await heuresDuTechnicien(suite.id, 2); // 80 € de main-d'œuvre SAV, à 40 €/h
+  const intervenant = await envoyer('post', '/intervenants', { nom: `Fiche à 30 € ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 30 }) as { id: string };
+  await envoyer('post', '/heures', { chantierId: chantier.id, intervenantId: intervenant.id, date: dateDuJour(), nbrHeures: 3 }); // 90 €
+  const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  await expect(page.getByText('3.00 h', { exact: true })).toBeVisible();
+  // 1 h en trop à 30 €, coût horaire du chantier ; et non 34 € (170 € pour 5 h) ni 56,67 € (170 € pour 3 h).
+  await expect(page.getByText('Manque à gagner : -30 €', { exact: true })).toBeVisible();
 });
 
 // Audit interne 1 de #339 : l'écran suit l'API pour le conducteur, et le rappel ouvert depuis la file du
@@ -134,7 +156,7 @@ test('fiche chantier vue du conducteur : la part des suites, sans coût de main-
   }, [jetonPour(conducteur.id), JSON.stringify({ ...conducteur, permissions: ['chantiers:read', 'clients:read'] })]);
   await page.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
   // Le serveur ne lui envoie pas le coût de main-d'œuvre : l'écran ne l'affiche pas, même à zéro.
-  await expect(page.locator('[data-couts-suites]')).toHaveText(/Dont suites SAV de l’affaire, comptées dans le réel : 2 h · matériel 0,00\s€\.$/);
+  await expect(page.locator('[data-couts-suites]')).toHaveText(/^Dont suites SAV de l’affaire, comptées dans le réel : matériel 0,00\s€\. Heures des suites SAV de l’affaire, hors des heures réalisées : 2 h\.$/);
   await contexte.close();
 });
 
@@ -193,7 +215,7 @@ test('fiche chantier vue du technicien titulaire : la part des suites en heures 
   }, [jetonPour(titulaire.id), JSON.stringify({ ...titulaire, permissions: ['chantiers:read'] })]);
   await page.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
   // Le serveur ne lui envoie ni matériel ni main-d'œuvre : l'écran ne dit que les heures, sans « 0,00 € ».
-  await expect(page.locator('[data-couts-suites]')).toHaveText(/Dont suites SAV de l’affaire, comptées dans le réel : 2 h\.$/);
+  await expect(page.locator('[data-couts-suites]')).toHaveText(/^Heures des suites SAV de l’affaire, hors des heures réalisées : 2 h\.$/);
   await contexte.close();
 });
 
@@ -232,7 +254,23 @@ test('fiche chantier : pas de ligne des suites sans coût de suite, puis des heu
   await expect(page.locator('[data-couts-suites]')).toHaveCount(0);
   await heuresDuTechnicien(suite.id, 1.5);
   await page.reload({ waitUntil: 'networkidle' });
-  await expect(page.locator('[data-couts-suites]')).toHaveText(/comptées dans le réel : 1,5 h · matériel 0,00\s€ · main-d’œuvre 60,00\s€\.$/);
+  await expect(page.locator('[data-couts-suites]')).toHaveText(/comptées dans le réel : matériel 0,00\s€ · main-d’œuvre 60,00\s€\. Heures des suites SAV de l’affaire, hors des heures réalisées : 1,5 h\.$/);
+});
+
+// Audit n° 1 de #343 : une suite sans heure ne fait dire aucune heure de suite. Aucun écran ne saisit aujourd'hui le
+// matériel d'une suite d'affaire : la réponse de la fiche est complétée dans le navigateur.
+test('fiche chantier : sans heure de suite, la fiche ne dit que la part des montants', async ({ session, request, creerClient, allerSurPageAdmin, page }) => {
+  const { envoyer, devisSigne } = await preparer(request, session.token, creerClient, 'marge-sans-heure');
+  const devis = await devisSigne('Affaire sans heure de suite');
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  await page.route(`**/api/chantiers/${chantier.id}`, async (route) => {
+    const reponse = await route.fetch();
+    const corps = await reponse.json();
+    corps.metrics.coutsSuites = { heures: 0, coutMainOeuvre: 0, materiel: 12.25 };
+    await route.fulfill({ response: reponse, json: corps });
+  });
+  const fiche = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  await expect(fiche.locator('[data-couts-suites]')).toHaveText(/^Dont suites SAV de l’affaire, comptées dans le réel : matériel 12,25\s€ · main-d’œuvre 0,00\s€\.$/);
 });
 
 // Audit interne 4 de #339 : sur la fiche d'un chantier en cours, les hypothèses de la marge estimée disent le coût
