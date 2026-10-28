@@ -371,3 +371,53 @@ test('nouveau devis : le champ des heures admet un temps minimum réglé sous un
     await reglerMinimum(request, session.token, minimumAvant);
   }
 });
+
+// Audit interne n° 3 de #348 : un devis ordinaire que l'on modifie pour le passer au temps passé, et le nouveau
+// devis saisi après la modification d'un devis au temps passé, n'ont pas de réglages figés que l'écran
+// connaisse : leur champ va par quarts d'heure, et le serveur applique les réglages du jour.
+test('devis ordinaire modifié pour passer au temps passé, puis nouveau devis après une modification : le champ va par quarts d’heure', async ({ allerSurPageAdmin, request, session, creerClient, page }) => {
+  const suffixe = `${Date.now()}`;
+  const pasAvant = await lirePas(request, session.token);
+  const minimumAvant = await lireMinimum(request, session.token);
+  try {
+    await reglerPas(request, session.token, 15);
+    await reglerMinimum(request, session.token, 30);
+    const mainOeuvre = await creerMainOeuvre(request, session.token, suffixe);
+    const client = await creerClient('Temps passé devis ordinaire modifié');
+    const objet = `Ordinaire passé au temps passé E2E ${suffixe}`;
+    await envoyer(request, session.token, 'post', '/devis', { clientId: client.id, objet, lignes: [{ designation: `Fourniture E2E ${suffixe}`, nature: 'FOURNITURE', quantite: '1', prixUnitaireHt: '10', tauxTva: '20' }] });
+    await allerSurPageAdmin('/devis');
+    const item = page.getByRole('listitem').filter({ hasText: objet });
+    const ligne = page.getByRole('group', { name: 'Ligne au temps passé' });
+    const auQuartDHeure = async () => {
+      const heures = ligne.getByRole('spinbutton', { name: 'Heures', exact: true });
+      await expect(heures).toHaveAttribute('min', '0.25');
+      await expect(heures).toHaveAttribute('step', '0.25');
+      return heures;
+    };
+    // Le devis ordinaire, modifié et passé au temps passé, prendra les réglages du jour (30 minutes, puis 15).
+    await item.getByRole('button', { name: 'Modifier' }).click();
+    await page.getByRole('checkbox', { name: 'Devis au temps passé' }).check();
+    await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);
+    const heures = await auQuartDHeure();
+    await heures.fill('0.5');
+    expect(await heures.evaluate((element) => (element as HTMLInputElement).validity.valid), 'le navigateur admet 0,5 h').toBe(true);
+    await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
+    await expect(item).toContainText('Au temps passé');
+    await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('45,50 €', 'hors contrat', '30 min', 15)} Le total de ce devis est un minimum.`);
+    // Modifié de nouveau, il connaît ses réglages figés ; une fois enregistré, le nouveau devis ne les garde pas.
+    await item.getByRole('button', { name: 'Modifier' }).click();
+    const figees = ligne.getByRole('spinbutton', { name: 'Heures (30 min minimum)' });
+    await expect(figees).toHaveAttribute('min', '0.5');
+    await figees.fill('0.75');
+    await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
+    await expect(item.getByTestId('mention-temps-passe')).toContainText('Ce devis prévoit 45 min');
+    await expect(page.getByRole('button', { name: 'Créer le brouillon' })).toBeVisible();
+    await page.getByRole('checkbox', { name: 'Devis au temps passé' }).check();
+    await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);
+    await auQuartDHeure();
+  } finally {
+    await reglerPas(request, session.token, pasAvant);
+    await reglerMinimum(request, session.token, minimumAvant);
+  }
+});

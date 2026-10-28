@@ -20152,6 +20152,31 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(prisma.devis.update({ where: { id: ancien.id }, data: { tempsMinimumMinutes: 60, pasTempsPasseMinutes: 15 } }), /temps passé \(marqueur, pas et minimum\) sont figés/);
       assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: ancien.id } })).tempsMinimumMinutes, null);
     });
+
+    // --- Audit interne n° 3 de #348 : test de montants ajouté (T7). ---
+    test('révision : le nouveau devis reprend le temps minimum figé du devis signé, et non celui du jour ; sa ligne et sa mention le suivent', async () => {
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 15, tempsMinimumMinutes: 60 })).status, 200);
+        const source = await creerOk([ligneTp(mo.elec, { quantite: '1.5' })]);
+        assert.deepEqual([source.tempsMinimumMinutes, source.pasTempsPasseMinutes], [60, 15]);
+        await signer(source.id);
+        // Le minimum de la société passe à 30 minutes : la ligne de la source (1,5 h) le suivrait aussi.
+        assert.equal((await envoyer('put', '/api/parametres', admin, { tempsMinimumMinutes: 30 })).status, 200);
+        const revision = await envoyer('post', `/api/devis/${source.id}/revisions`, admin);
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        assert.deepEqual([revision.body.tempsMinimumMinutes, revision.body.pasTempsPasseMinutes, revision.body.lignes[0].quantite, revision.body.lignes[0].totalHt, revision.body.totalHt], [60, 15, 1.5, 68.25, 68.25]);
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: revision.body.id } })).tempsMinimumMinutes, 60);
+        // Sa mention annonce le minimum du devis signé (une heure), dépassé par sa ligne : total estimé.
+        const texte = await texteDuPdf(revision.body.id);
+        assert.ok(sansBlancs(texte).includes(sansBlancs('le temps passé se facture avec un minimum de 1 h, puis par tranches de 15 minutes au-delà, toute tranche commencée étant due. Ce devis prévoit 1 h 30 min : son total est une estimation')), texte);
+        // Et sa ligne suit ce minimum : 0,75 h, admise par les réglages du jour, ne l'est pas.
+        const refus = await envoyer('patch', `/api/devis/${revision.body.id}`, admin, corpsDevis([ligneTp(mo.elec, { ligneId: revision.body.lignes[0].id, quantite: '0.75', tarifTempsPasse: undefined, catalogueFamille: undefined, catalogueId: undefined })]));
+        assert.equal(refus.status, 400, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /\(1 h\), puis des tranches de 15 minutes/);
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 15, tempsMinimumMinutes: '' })).status, 200);
+      }
+    });
   });
 
   describe('Intervention de suivi liée : « À suivre » et la suite liée (première PR, sans montants)', () => {
