@@ -97,7 +97,7 @@ Domaines :
 | `interventions` | SAV, coûts, comptes rendus, placement au planning (**déplacé**), remise « à planifier » d'une intervention planifiée, visite de contrat ou curative, son créneau libéré (lot « visite à replanifier », `remiseAPlanifier.ts`, étendue par le lot « remise et annulation » du 24-10-2026), créneau retiré du planning à l'annulation (`retirerCreneauIntervention`, `metier.ts`), motif obligatoire de la remise et de l'annulation (`motifInterventionValide`, `comptesRendus.ts`) |
 | `contrats` | contrats de maintenance et visites (**déplacé**), statut « annulé » avec le devis (lot 4 suite) |
 | `planning` | affectations, types d'événement, partage public (**déplacé**) |
-| `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**), envoi par la messagerie (lot 6a-3), facture au temps passé d'une intervention (seconde PR du lot « facture au temps passé ») |
+| `factures` | factures, avoirs, mentions légales, export comptable (**déplacé**), envoi par la messagerie (lot 6a-3), facture au temps passé d'une intervention (seconde PR du lot « facture au temps passé », #351) |
 | `documents` | modèle PDF commun, identité de l'émetteur figée à l'émission, logo des documents (lot 6a-1) ; identité minimale du client pour signer un devis et émettre une facture (lot 6a-2 bis) ; envoi d'un document par la messagerie et journal des envois (lot 6a-3) |
 | `reglements` | encaissements et affectations (**déplacé**) |
 | `comptabilite` | plan comptable, règles, TVA, import, écritures (**déplacé**) |
