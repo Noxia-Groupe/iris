@@ -19619,6 +19619,35 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Audit interne n° 1 de #348 (T4) : la course entre l'aperçu et la transaction de la duplication.
+    test('duplication sous verrou : une ligne au temps passé changée pendant l’attente, qui ne suit plus les réglages du jour, est refusée (409) sans rien écrire', async () => {
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 15, tempsMinimumMinutes: 30 })).status, 200);
+        const source = await creerOk([ligneTp(mo.elec, { quantite: '1.25' })]);
+        assert.equal((await envoyer('put', '/api/parametres', admin, { tempsMinimumMinutes: 60 })).status, 200);
+        let reponse;
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "Devis" WHERE "id" = ${source.id} FOR UPDATE`;
+          const [{ pid: pidVerrou }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          reponse = envoyer('post', `/api/devis/${source.id}/duplication`, admin).then((r) => r);
+          let attente = false;
+          for (let tour = 0; tour < 150 && !attente; tour += 1) {
+            attente = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidVerrou}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0;
+            if (!attente) await new Promise((r) => setTimeout(r, 20));
+          }
+          assert.equal(attente, true, 'la duplication attend le verrou de la source');
+          // 0,75 h suit les réglages figés de la source (30 minutes, puis 15), mais non ceux du jour (une heure, puis 15).
+          await tx.$executeRaw`UPDATE "DevisLigne" SET "quantite" = 0.75, "totalHt" = round(0.75 * "prixUnitaireHt", 2), "totalTtc" = round(round(0.75 * "prixUnitaireHt", 2) * (100 + "tauxTva") / 100, 2) WHERE "devisId" = ${source.id} AND "tempsPasse"`;
+        }, { timeout: 20000 });
+        const refus = await reponse;
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.equal(refus.body.error, 'Duplication impossible : la ligne au temps passé du devis copié (0,75 h) ne suit pas les réglages du jour, un minimum de 1 h puis des tranches de 15 minutes. Créez un nouveau devis.');
+        assert.equal(await prisma.devis.count({ where: { origineDevisId: source.id } }), 0);
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 15, tempsMinimumMinutes: '' })).status, 200);
+      }
+    });
+
     test('signature : marqueur, pas, minimum et tarif entrent dans l’empreinte ; le devis signé et sa ligne au temps passé sont figés en base', async () => {
       const devis = await creerOk([ligneTp(mo.elec, { quantite: 2 })]);
       const signature = await signer(devis.id);
@@ -20073,6 +20102,51 @@ if (!TEST_DATABASE_URL) {
       } finally {
         assert.equal((await regler(15)).status, 200);
       }
+    });
+
+    // --- Audit interne n° 1 de #348 : tests de montants ajoutés (T1, T2). ---
+    test('duplication : le nouveau devis fige le temps minimum du jour, et non celui du devis copié ; sa ligne et sa mention le suivent', async () => {
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 15, tempsMinimumMinutes: 30 })).status, 200);
+        const source = await creerOk([ligneTp(mo.elec, { quantite: '1.5' })]);
+        assert.deepEqual([source.tempsMinimumMinutes, source.pasTempsPasseMinutes], [30, 15]);
+        // Le minimum de la société passe à une heure et demie : la ligne copiée (1,5 h) le suit encore.
+        assert.equal((await envoyer('put', '/api/parametres', admin, { tempsMinimumMinutes: 90 })).status, 200);
+        const copie = await envoyer('post', `/api/devis/${source.id}/duplication`, admin);
+        assert.equal(copie.status, 201, JSON.stringify(copie.body));
+        assert.deepEqual([copie.body.tempsMinimumMinutes, copie.body.pasTempsPasseMinutes, copie.body.lignes[0].quantite, copie.body.lignes[0].totalHt, copie.body.totalHt], [90, 15, 1.5, 68.25, 68.25]);
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: copie.body.id } })).tempsMinimumMinutes, 90);
+        assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: source.id } })).tempsMinimumMinutes, 30, 'la source garde le sien');
+        // La copie vaut son minimum : sa mention le dit (total minimum), au lieu d'une estimation au-delà de 30 minutes.
+        const texte = await texteDuPdf(copie.body.id);
+        assert.ok(sansBlancs(texte).includes(sansBlancs('le temps passé se facture avec un minimum de 1 h 30 min, puis par tranches de 15 minutes au-delà, toute tranche commencée étant due. Le total de ce devis est un minimum.')), texte);
+        // Et sa ligne suit ce minimum : 1,25 h, admise par la source, ne l'est plus.
+        const refus = await envoyer('patch', `/api/devis/${copie.body.id}`, admin, corpsDevis([ligneTp(mo.elec, { ligneId: copie.body.lignes[0].id, quantite: '1.25', tarifTempsPasse: undefined, catalogueFamille: undefined, catalogueId: undefined })]));
+        assert.equal(refus.status, 400, JSON.stringify(refus.body));
+        assert.match(refus.body.error, /\(1 h 30 min\), puis des tranches de 15 minutes/);
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 15, tempsMinimumMinutes: '' })).status, 200);
+      }
+    });
+
+    test('signature d’un devis antérieur au temps minimum (minimum vide) : son empreinte reste celle d’avant le lot, sans minimum, et il ne reçoit pas de minimum ensuite', async () => {
+      const ancien = await creerOk([ligneTp(mo.elec)]);
+      await transactionVerifieeTest(async (tx) => {
+        await tx.$executeRaw`UPDATE "Devis" SET "tempsMinimumMinutes" = NULL, "pasTempsPasseMinutes" = 10, "totalHt" = 60.65, "totalTva" = 12.13, "totalTtc" = 72.78 WHERE "id" = ${ancien.id}`;
+        await tx.$executeRaw`UPDATE "DevisLigne" SET "quantite" = 1.333, "totalHt" = 60.65, "totalTtc" = 72.78 WHERE "devisId" = ${ancien.id}`;
+      });
+      const signature = await signer(ancien.id);
+      // Contenu signé tel que l'écrivait main avant le lot : marqueur et pas, aucune clé « tempsMinimumMinutes ».
+      const contenu = {
+        devisId: ancien.id, dossierId: ancien.dossierId, numero: ancien.numero, version: 1, clientId: client.id, objet: ancien.objet,
+        acompteExige: false, tauxAcompte: null, totalHt: '60.65', totalTva: '12.13', totalTtc: '72.78',
+        auTempsPasse: true, pasTempsPasseMinutes: 10,
+        lignes: [{ ordre: 0, designation: ancien.lignes[0].designation, nature: 'MAIN_OEUVRE', reference: mo.elec.reference, unite: 'heure', quantite: '1.333', prixUnitaireHt: '45.50', tauxTva: '20.00', totalHt: '60.65', totalTtc: '72.78', tempsPasse: true, tarifTempsPasse: 'HORS_CONTRAT' }],
+      };
+      assert.equal(signature.empreinte, createHash('sha256').update(JSON.stringify(contenu), 'utf8').digest('hex'));
+      // Signé, il ne reçoit pas de minimum : la base le refuse.
+      await assert.rejects(prisma.devis.update({ where: { id: ancien.id }, data: { tempsMinimumMinutes: 60, pasTempsPasseMinutes: 15 } }), /temps passé \(marqueur, pas et minimum\) sont figés/);
+      assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: ancien.id } })).tempsMinimumMinutes, null);
     });
   });
 

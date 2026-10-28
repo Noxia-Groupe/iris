@@ -152,6 +152,10 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     });
     await page.getByRole('checkbox', { name: 'Devis au temps passé' }).check();
     expect(new URL((await demandeMainsOeuvre).url()).searchParams.toString()).toBe('mainOeuvre=1');
+    // L'aide de la case n'annonce plus une heure au moins : la ligne suit le minimum et le pas du devis.
+    const aideCase = page.getByRole('group', { name: 'Devis au temps passé' });
+    await expect(aideCase).toContainText('Le temps minimum facturé et le pas du temps passé, réglés par la société, sont figés sur le devis.');
+    await expect(aideCase).not.toContainText('d’une heure au moins');
     const tarif = page.getByRole('combobox', { name: 'Tarif de l’heure' });
     await expect(tarif).toBeDisabled();
     await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);
@@ -332,6 +336,36 @@ test('rendu à 375 px : formulaire du devis au temps passé, mention, réglages 
     const boiteBadge = await badge.boundingBox();
     expect(boiteBadge!.x + boiteBadge!.width).toBeLessThanOrEqual(375);
     expect(await debordement(), 'fiche élargie').toBeLessThanOrEqual(0);
+  } finally {
+    await reglerPas(request, session.token, pasAvant);
+    await reglerMinimum(request, session.token, minimumAvant);
+  }
+});
+
+// Audit interne n° 1 de #348 (T3) : l'écran d'un nouveau devis ne connaît pas les réglages ; son champ ne doit
+// refuser aucune quantité que le serveur admet, par exemple un minimum réglé à 30 minutes.
+test('nouveau devis : le champ des heures admet un temps minimum réglé sous une heure (30 minutes), que le serveur accepte', async ({ allerSurPageAdmin, request, session, creerClient, page }) => {
+  const suffixe = `${Date.now()}`;
+  const pasAvant = await lirePas(request, session.token);
+  const minimumAvant = await lireMinimum(request, session.token);
+  try {
+    await reglerPas(request, session.token, 15);
+    await reglerMinimum(request, session.token, 30);
+    const mainOeuvre = await creerMainOeuvre(request, session.token, suffixe);
+    const client = await creerClient('Temps passé demi-heure');
+    const objet = `Demi-heure au temps passé E2E ${suffixe}`;
+    await allerSurPageAdmin('/devis');
+    await choisirClient(page, client);
+    await page.getByRole('textbox', { name: 'Objet' }).fill(objet);
+    await page.getByRole('checkbox', { name: 'Devis au temps passé' }).check();
+    await page.getByRole('combobox', { name: 'Main d’œuvre au temps passé' }).selectOption(mainOeuvre.id);
+    const heures = page.getByRole('group', { name: 'Ligne au temps passé' }).getByRole('spinbutton', { name: 'Heures', exact: true });
+    await heures.fill('0.5');
+    expect(await heures.evaluate((element) => (element as HTMLInputElement).validity.valid), 'le navigateur admet 0,5 h').toBe(true);
+    await page.getByRole('button', { name: 'Créer le brouillon' }).click();
+    const item = page.getByRole('listitem').filter({ hasText: objet });
+    await expect(item).toContainText('HT 22.75 € · TVA 4.55 € · TTC 27.30 €');
+    await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('45,50 €', 'hors contrat', '30 min', 15)} Le total de ce devis est un minimum.`);
   } finally {
     await reglerPas(request, session.token, pasAvant);
     await reglerMinimum(request, session.token, minimumAvant);

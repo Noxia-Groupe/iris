@@ -8,7 +8,8 @@ const LIGNE_VIDE: LigneDevisSaisie = { designation: '', nature: 'MAIN_OEUVRE', q
 
 // Case « Devis au temps passé » et choix de la ligne de main d'œuvre au temps passé (décisions de Nelson
 // des 24 et 25-10-2026) : une main d'œuvre active du catalogue et son tarif à l'heure, hors contrat ou
-// sous contrat, avec le prix affiché ; la ligne est créée à une heure. Changer de main d'œuvre ou de
+// sous contrat, avec le prix affiché ; la ligne est créée à une heure (sa quantité suit ensuite le minimum
+// et le pas du devis, cf. LigneTempsPasse). Changer de main d'œuvre ou de
 // tarif crée une nouvelle ligne, au prix du moment ; une ligne existante garde le sien, figé.
 export function ChoixTempsPasse({ auTempsPasse, lignes, onChange }: {
   auTempsPasse: boolean;
@@ -56,7 +57,7 @@ export function ChoixTempsPasse({ auTempsPasse, lignes, onChange }: {
     <legend className="sr-only">Devis au temps passé</legend>
     <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" className="w-4 h-4" checked={auTempsPasse} onChange={(e) => cocher(e.target.checked)}/><Clock size={16} aria-hidden="true"/><span>Devis au temps passé</span></label>
     {auTempsPasse && <>
-      <p className="text-xs text-gray-600">Une ligne de main d’œuvre au temps passé, d’une heure au moins, au prix de l’heure choisi, figé et compté dans le total ; le matériel s’ajoute en lignes à part. Le pas du temps passé, réglé par la société, est figé sur le devis.</p>
+      <p className="text-xs text-gray-600">Une ligne de main d’œuvre au temps passé, au prix de l’heure choisi, figé et compté dans le total ; le matériel s’ajoute en lignes à part. Le temps minimum facturé et le pas du temps passé, réglés par la société, sont figés sur le devis.</p>
       {erreur && <p role="alert" className="text-sm text-red-600">{erreur}</p>}
       {mainsOeuvre && mainsOeuvre.length === 0 && <p role="status" className="text-sm text-gray-600">Aucune main d’œuvre active au catalogue : l’administration la crée dans Catalogue &gt; Main d’œuvre.</p>}
       <div className="grid gap-2 sm:grid-cols-2">
