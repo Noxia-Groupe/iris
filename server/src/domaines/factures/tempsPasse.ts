@@ -13,9 +13,10 @@ import { ventilationTvaDerivee } from './metier';
 // (minimum vide) a pour plancher les heures de sa ligne au temps passé (« Les heures de la ligne »).
 //
 // Lectures et choix par défaut, à confirmer (passation, section 4) :
-//  - devis antérieur au temps minimum : son pas joue au-delà de son plancher, les heures de sa ligne, et
-//    non de la première heure que nomme sa mention (les deux lectures coïncident pour une ligne d'une
-//    heure ; au-delà, 2 h passées sur un devis de 2 h se facturent 2 h, et non 2 h 30 au pas de 45 min) ;
+//  - devis sans minimum figé (fait avant le temps minimum, ou révision d'un tel devis) : son pas joue
+//    au-delà de son plancher, les heures de sa ligne, et non de la première heure que nomme sa mention ;
+//    les deux lectures coïncident quand la ligne vaut une heure plus un multiple du pas (par exemple,
+//    2 h passées sur un devis de 2 h se facturent 2 h, et non 2 h 30 au pas de 45 min) ;
 //  - la facture reprend les autres lignes du devis telles que signées, la ligne au temps passé valant les
 //    heures facturées ; une fourniture devient un article, une main-d'œuvre une prestation ;
 //  - les heures non archivées comptent, celles d'une suite annulée non (« pas d’intervention […] donc pas
