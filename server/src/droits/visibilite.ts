@@ -13,9 +13,9 @@ export function voitMontantsChantier(req: express.Request): boolean {
   return (req as AuthRequest).user?.role !== ROLE_TECHNICIEN;
 }
 
-// Clés monétaires des saisies (achats, pointages, intervenants), y compris dans les
-// instantanés du journal des saisies.
-const CLES_MONTANTS_SAISIE = ['montantHT', 'tauxHoraireApplique', 'tauxHoraireCharge'] as const;
+// Clés monétaires des saisies (achats, pointages, intervenants, heures SAV et leur prix de vente
+// horaire figé), y compris dans les instantanés du journal des saisies.
+const CLES_MONTANTS_SAISIE = ['montantHT', 'tauxHoraireApplique', 'tauxHoraireCharge', 'prixVenteHoraireApplique'] as const;
 
 export function sansMontantsSaisie<T>(valeur: T): T {
   if (!valeur || typeof valeur !== 'object' || Array.isArray(valeur)) return valeur;
@@ -35,7 +35,10 @@ export function voitCoutMainOeuvre(req: express.Request): boolean {
   return isAdminRole((req as AuthRequest).user?.role);
 }
 
-const CLES_TAUX_HORAIRE = ['tauxHoraireApplique', 'tauxHoraireCharge'] as const;
+// Le prix de vente à l'heure figé sur une heure SAV hors contrat (lot « marge d'un SAV hors contrat ») suit
+// le taux : il vient du catalogue des mains d'œuvre, que l'administration seule voit en session, et sert à
+// une marge qui lui est réservée.
+const CLES_TAUX_HORAIRE = ['tauxHoraireApplique', 'tauxHoraireCharge', 'prixVenteHoraireApplique'] as const;
 
 export function sansTauxHoraire<T>(valeur: T): T {
   if (!valeur || typeof valeur !== 'object' || Array.isArray(valeur)) return valeur;

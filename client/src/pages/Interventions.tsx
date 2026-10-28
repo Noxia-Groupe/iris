@@ -11,7 +11,7 @@ import { RemiseAPlanifier } from '../components/RemiseAPlanifier';
 import { AnnulationIntervention } from '../components/AnnulationIntervention';
 import { CreationSuite } from '../components/CreationSuite';
 import type { TraceSignature as Trace } from '../lib/traceSignature';
-import { resumeCoutsIntervention, libelleDevisMarge, type MargeDevisIntervention } from '../lib/coutsIntervention';
+import { resumeCoutsIntervention, libelleDevisMarge, detailMargeSav, alerteMargeSav, type MargeDevisIntervention, type MargeSavHorsContrat } from '../lib/coutsIntervention';
 import { INFORMATION_SUITE_HORS_CONTRAT } from '../lib/suiteIntervention';
 import { isAdminRole, peutConsulterPlanning, useCurrentUser } from '../roles';
 import { useModules } from '../modules';
@@ -25,7 +25,7 @@ type Client = { id: string; raisonSociale: string };
 type ClientDetail = Client & { sites: { id: string; nom: string; ville: string }[]; contacts: { id: string; prenom?: string | null; nom: string }[] };
 type Chantier = { id: string; nom: string; clientId?: string | null; numeroDevis?: string | null };
 type Fournisseur = { id: string; nom: string };
-type CoutsIntervention = { totalMainOeuvreHT?: number | null; totalMaterielHT?: number | null; totalCoutsHT?: number | null; margeDevis?: MargeDevisIntervention | null; heures?: { id: string; date: string; nbrHeures: number; commentaire?: string | null; createdAt: string }[] };
+type CoutsIntervention = { totalMainOeuvreHT?: number | null; totalMaterielHT?: number | null; totalCoutsHT?: number | null; margeDevis?: MargeDevisIntervention | null; margeSav?: MargeSavHorsContrat | null; heures?: { id: string; date: string; nbrHeures: number; commentaire?: string | null; createdAt: string }[] };
 // Intervention liée (intervention de suivi liée) : l'intervention initiale d'une suite, ou une suite.
 type LienSuivi = { id: string; reference: string; titre: string; statut: string };
 type Intervention = {
@@ -289,6 +289,8 @@ export default function Interventions({ interventionId }: { interventionId?: str
         {estEncadrement && (() => { const resume = resumeCoutsIntervention(couts[item.id]); return resume && <p className="font-medium text-slate-800">{resume.libelle} : {montantEuros(resume.montant)} HT</p>; })()}
         {/* Intervention issue d'un devis, sans chantier : sa marge, suites comprises, pour l'administration (décision de la nuit du 26 au 27-10-2026). */}
         {estEncadrement && couts[item.id].margeDevis && (() => { const marge = couts[item.id].margeDevis!; return <div data-marge-devis className="mt-1"><p className="font-medium text-slate-800">Marge sur le devis {libelleDevisMarge(marge)} : {montantEuros(marge.margeHT)} HT</p><p className="text-xs text-slate-600">Total HT du devis {montantEuros(marge.totalDevisHT)}, moins les coûts de l’intervention ({montantEuros(marge.coutsInterventionHT)} HT){marge.nombreSuites === 0 ? ' ; aucune suite pour l’instant.' : ` et de ${marge.nombreSuites > 1 ? `ses ${marge.nombreSuites} suites` : 'sa suite'} (${montantEuros(marge.coutsSuitesHT)} HT).`}</p></div>; })()}
+        {/* Intervention SAV hors contrat, sans devis ni chantier : sa marge à l'heure, au prix figé des mains d'œuvre, pour l'administration (lot « marge d'un SAV hors contrat »). */}
+        {estEncadrement && couts[item.id].margeSav && (() => { const marge = couts[item.id].margeSav!; const alerte = alerteMargeSav(marge); return <div data-marge-sav className="mt-1"><p className="font-medium text-slate-800">Marge à l’heure : {montantEuros(marge.margeHT)} HT</p><p className="text-xs text-slate-600">{detailMargeSav(marge, montantEuros)}</p>{alerte && <p role="note" className="mt-1 text-xs text-amber-800">{alerte}</p>}</div>; })()}
         {estTechnicien && <>
           {(couts[item.id].heures || []).length > 0 && <ul className="mb-3 space-y-1 text-slate-700">{couts[item.id].heures!.map((heure) => <li key={heure.id}>{formatDateOnlyOrEmpty(heure.date)} — {heure.nbrHeures} h{heure.commentaire ? ` — ${heure.commentaire}` : ''}</li>)}</ul>}
           <form onSubmit={(event) => void enregistrerHeures(event, item.id)} className="grid gap-2 sm:grid-cols-2"><input required name="date" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date (JJ-MM-AAAA)" className="form-input" /><input required name="nbrHeures" inputMode="decimal" placeholder="Heures" className="form-input" /><input name="commentaire" maxLength={500} placeholder="Commentaire" className="form-input sm:col-span-2" /><input name="motif" maxLength={500} placeholder="Motif (obligatoire si 0)" className="form-input" /><button type="submit" className="btn btn-secondary">Enregistrer mes heures</button></form>

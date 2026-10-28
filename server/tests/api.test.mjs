@@ -20883,6 +20883,8 @@ if (!TEST_DATABASE_URL) {
         devis: { id: devis.body.id, numero: devis.body.numero, version: 1 },
         totalDevisHT: 400, coutsInterventionHT: 60, coutsSuitesHT: 77.21, nombreSuites: 3, margeHT: 262.79,
       });
+      // Issue d'un devis, elle n'a pas la marge à l'heure d'un SAV hors contrat (lot « marge d'un SAV hors contrat »).
+      assert.equal(lecture.body.margeSav, null);
       // Une suite n'a pas de marge propre : elle pèse sur celle de l'intervention initiale.
       assert.equal((await couts(suite.id)).body.margeDevis, null);
       // Une intervention ordinaire, sans devis, non plus.
@@ -20919,6 +20921,7 @@ if (!TEST_DATABASE_URL) {
         const lecture = await couts(conversion.body.id);
         assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
         assert.equal(lecture.body.margeDevis, null);
+        assert.equal(lecture.body.margeSav, null, 'ni la marge à l’heure d’un SAV hors contrat');
       } finally {
         await prisma.parametres.update({ where: { id: 'singleton' }, data: { pasTempsPasseMinutes: pasInitial } });
       }
@@ -21266,6 +21269,195 @@ if (!TEST_DATABASE_URL) {
   // Décisions de Nelson du 27-10-2026 à 15:50 UTC : « oui, il faut egalement refusé aussi ces saisies »
   // (coûts d'une suite sur une affaire close ou annulée) et « annule l'intervention initiale » (suites de
   // l'intervention issue d'un devis annulé).
+  // Lot « marge d'un SAV hors contrat » (décisions de Nelson de la nuit du 26 au 27-10-2026, points 4 à 7,
+  // et du 27-10-2026 à 10:27 UTC) : prix de vente à l'heure hors contrat de la main d'œuvre de
+  // l'intervenant figé sur l'heure le jour de sa saisie ; marge à l'heure de l'intervention initiale et de
+  // ses suites, pour l'administration seule ; choix par défaut en section 4 de la passation.
+  describe('Marge d’un SAV hors contrat : prix de vente figé à la saisie, marge à l’heure de l’intervention et de ses suites', () => {
+    let admin = {};
+    let adminId = '';
+    let client = null;
+    const suffixe = `${Date.now()}`;
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const parJeton = (id) => ({ Authorization: `Bearer ${jwt.sign({ id }, process.env.JWT_SECRET)}` });
+    const couts = (id, auth = admin) => request(app).get(`/api/interventions/${id}/couts`).set(auth);
+    const corpsMainOeuvre = (reference, prixVenteHt) => ({
+      estMainOeuvre: true, reference: `${reference}-${suffixe}`, nom: `TEST Main d’œuvre ${reference} ${suffixe}`, tauxTva: '20',
+      prixVenteHt, prixJourHorsContratHt: '300', prixHeureSousContratHt: '41', prixJourSousContratHt: '280', heuresParJour: '7',
+    });
+    const creerMainOeuvre = async (reference, prixVenteHt) => {
+      const res = await envoyer('post', '/api/catalogue/prestations', admin, corpsMainOeuvre(reference, prixVenteHt));
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const technicien = async (cle, tauxHoraireCharge, mainOeuvreId) => {
+      const compte = await prisma.user.create({ data: { email: `marge-sav.${cle}.${suffixe}@iris.test`, name: `TEST Marge SAV ${cle}`, role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: `TEST Marge SAV ${cle} ${suffixe}`, role: 'Technicien', tauxHoraireCharge, userId: compte.id } });
+      if (mainOeuvreId) assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/main-oeuvre`, admin, { mainOeuvreId })).status, 200);
+      return { compte, fiche, auth: parJeton(compte.id) };
+    };
+    const curative = async (titre, auth = admin, extra = {}) => {
+      const res = await envoyer('post', '/api/interventions', auth, { clientId: client.id, titre: `TEST Marge SAV ${titre}`, ...extra });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const suiteDe = async (id) => {
+      const res = await envoyer('post', `/api/interventions/${id}/suites`, admin, {});
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const affecter = (interventionId, ...fiches) => prisma.interventionAffectation.createMany({ data: fiches.map((fiche) => ({ interventionId, intervenantId: fiche.id })) });
+    const aujourdhui = async () => {
+      const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+      return jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris').split('-').reverse().join('-');
+    };
+    const saisir = async (tech, interventionId, nbrHeures) => {
+      const res = await envoyer('post', `/api/interventions/${interventionId}/couts/heures`, tech.auth, { date: await aujourdhui(), nbrHeures });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const prixEnBase = async (id) => {
+      const ligne = await prisma.coutInterventionHeure.findUniqueOrThrow({ where: { id } });
+      return ligne.prixVenteHoraireApplique === null ? null : Number(ligne.prixVenteHoraireApplique);
+    };
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      const cree = await envoyer('post', '/api/clients', admin, { raisonSociale: `TEST Client marge SAV ${suffixe}` });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+    });
+
+    test('le prix de vente à l’heure hors contrat de la main d’œuvre est figé sur l’heure le jour de sa saisie, et jamais montré hors de l’administration', async () => {
+      const electricien = await creerMainOeuvre('TEST-MSAV-ELEC', '45.50');
+      const avecMainOeuvre = await technicien('avec-mo', 30, electricien.id);
+      const sansMainOeuvre = await technicien('sans-mo', 32);
+      const conducteur = await prisma.user.create({ data: { email: `marge-sav.conducteur.${suffixe}@iris.test`, name: 'TEST Marge SAV conducteur', role: 'CONDUCTEUR_TRAVAUX' } });
+      const intervention = await curative('prix figé', parJeton(conducteur.id));
+      await affecter(intervention.id, avecMainOeuvre.fiche, sansMainOeuvre.fiche);
+
+      const premiere = await saisir(avecMainOeuvre, intervention.id, 1.5);
+      assert.equal(premiere.prixVenteHoraireApplique, undefined, 'aucun prix renvoyé au technicien');
+      assert.equal(await prixEnBase(premiere.id), 45.5);
+      assert.equal(await prixEnBase((await saisir(sansMainOeuvre, intervention.id, 1)).id), null, 'intervenant sans main d’œuvre : aucun prix');
+
+      // Un changement de tarif ne touche pas l'heure déjà saisie ; la suivante prend le nouveau prix.
+      const changement = await envoyer('put', `/api/catalogue/prestations/${electricien.id}`, admin, corpsMainOeuvre('TEST-MSAV-ELEC', '50'));
+      assert.equal(changement.status, 200, JSON.stringify(changement.body));
+      assert.equal(await prixEnBase(premiere.id), 45.5);
+      const apresTarif = await saisir(avecMainOeuvre, intervention.id, 0.5);
+      assert.equal(await prixEnBase(apresTarif.id), 50);
+      // La correction de l'heure par le technicien ne recopie pas le prix.
+      const correction = await envoyer('patch', `/api/interventions/${intervention.id}/couts/heures/${premiere.id}`, avecMainOeuvre.auth, { nbrHeures: 2, motifCorrection: 'TEST correction des heures' });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      assert.equal(await prixEnBase(premiere.id), 45.5);
+      // Une main d'œuvre désactivée valorise encore les heures de ses intervenants, saisies après comprises.
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${electricien.id}`).set(admin)).status, 200);
+      assert.equal(await prixEnBase((await saisir(avecMainOeuvre, intervention.id, 0.25)).id), 50);
+      // En base : le prix est figé, et jamais négatif.
+      await assert.rejects(prisma.coutInterventionHeure.update({ where: { id: premiere.id }, data: { prixVenteHoraireApplique: 60 } }), /prix de vente horaire appliqué immuable/);
+      await assert.rejects(prisma.coutInterventionHeure.create({ data: {
+        interventionId: intervention.id, intervenantId: avecMainOeuvre.fiche.id, date: new Date('2026-10-20T00:00:00Z'), nbrHeures: 1, tauxHoraireApplique: 30, prixVenteHoraireApplique: -1, createdById: adminId,
+      } }), /CoutInterventionHeure_prix_vente_check/);
+
+      // L'administration lit le prix ; le conducteur, créateur du dossier, lit les heures sans prix, ni dans
+      // la liste des coûts ni dans le journal ; le technicien, ses heures seulement.
+      const lectureAdmin = await couts(intervention.id);
+      assert.equal(lectureAdmin.status, 200, JSON.stringify(lectureAdmin.body));
+      assert.deepEqual(lectureAdmin.body.heures.map((heure) => heure.prixVenteHoraireApplique).sort(), [45.5, 50, 50, null].sort());
+      const lectureConducteur = await couts(intervention.id, parJeton(conducteur.id));
+      assert.equal(lectureConducteur.status, 200, JSON.stringify(lectureConducteur.body));
+      assert.equal(lectureConducteur.body.heures.length, 4);
+      assert.equal(lectureConducteur.body.heures.some((heure) => 'prixVenteHoraireApplique' in heure), false);
+      assert.equal('margeSav' in lectureConducteur.body, false);
+      const journalConducteur = await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set(parJeton(conducteur.id));
+      assert.equal(journalConducteur.status, 200, JSON.stringify(journalConducteur.body));
+      assert.ok(journalConducteur.body.length >= 4);
+      assert.equal(journalConducteur.body.some((entree) => (entree.avant && 'prixVenteHoraireApplique' in entree.avant) || (entree.apres && 'prixVenteHoraireApplique' in entree.apres)), false);
+      const journalAdmin = await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set(admin);
+      assert.ok(journalAdmin.body.some((entree) => entree.apres?.prixVenteHoraireApplique === 45.5), 'le journal garde le prix figé pour l’administration');
+      const lectureTechnicien = await couts(intervention.id, avecMainOeuvre.auth);
+      assert.equal(lectureTechnicien.status, 200, JSON.stringify(lectureTechnicien.body));
+      assert.equal(lectureTechnicien.body.heures.some((heure) => 'prixVenteHoraireApplique' in heure), false);
+      assert.equal('margeSav' in lectureTechnicien.body, false);
+    });
+
+    test('une heure saisie sur une visite de contrat ne reçoit pas de prix de vente hors contrat', async () => {
+      const mainOeuvre = await creerMainOeuvre('TEST-MSAV-VISITE', '45.50');
+      const tech = await technicien('visite', 30, mainOeuvre.id);
+      const contrat = await prisma.contratMaintenance.create({ data: {
+        clientId: client.id, titre: `TEST Contrat marge SAV ${suffixe}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60,
+        dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z'),
+      } });
+      const visite = await prisma.intervention.create({ data: {
+        reference: `I26-MSAV-${suffixe}`, clientId: client.id, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance, titre: 'TEST Marge SAV visite',
+      } });
+      await affecter(visite.id, tech.fiche);
+      assert.equal(await prixEnBase((await saisir(tech, visite.id, 1)).id), null);
+      const lecture = await couts(visite.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.equal(lecture.body.margeSav, null, 'une visite de contrat n’a pas de marge à l’heure hors contrat');
+    });
+
+    test('marge à l’heure : intervention et suites, au prix figé de chaque heure arrondi à la ligne, heures archivées exclues, suite annulée à son coût seul, heures sans prix signalées', async () => {
+      const fiche = await prisma.intervenant.create({ data: { nom: `TEST Marge SAV fiche ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 30 } });
+      const sansPrix = await prisma.intervenant.create({ data: { nom: `TEST Marge SAV Zoé sans main d’œuvre ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 30 } });
+      const heure = (interventionId, nbrHeures, tauxHoraireApplique, prixVenteHoraireApplique, { archivee = false, intervenant = fiche } = {}) => prisma.coutInterventionHeure.create({ data: {
+        interventionId, intervenantId: intervenant.id, date: new Date('2026-10-20T00:00:00Z'), nbrHeures, tauxHoraireApplique, prixVenteHoraireApplique, createdById: adminId,
+        ...(archivee ? { archivedAt: new Date(), archivedById: adminId, motifArchivage: 'TEST archivée' } : {}),
+      } });
+      const initiale = await curative('initiale');
+      await heure(initiale.id, 0.11, 30, 45.5); // vente 5,005 → 5,01 ; coût 3,30
+      await heure(initiale.id, 0.11, 30, 45.5); // vente 5,01 (et non 10,01 sur le total) ; coût 3,30
+      await heure(initiale.id, 1.25, 35, 60); // vente 75,00 ; coût 43,75
+      await heure(initiale.id, 5, 30, 45.5, { archivee: true }); // archivée : ni vendue ni coûtée
+      await heure(initiale.id, 0.5, 30, null, { intervenant: sansPrix }); // coût 15,00, sans vente : signalée
+      const suite = await suiteDe(initiale.id);
+      await heure(suite.id, 2, 30, 45.5); // vente 91,00 ; coût 60,00
+      const suiteDeSuite = await suiteDe(suite.id);
+      await heure(suiteDeSuite.id, 1, 35, 60); // vente 60,00 ; coût 35,00
+      const suiteAnnulee = await suiteDe(initiale.id);
+      await heure(suiteAnnulee.id, 1.5, 30, 45.5); // coût 45,00, sans vente
+      const annulation = await envoyer('patch', `/api/interventions/${suiteAnnulee.id}/statut`, admin, { statut: 'ANNULEE', motif: 'TEST annulation de la suite' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+
+      const lecture = await couts(initiale.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.equal(lecture.body.margeDevis, null);
+      // Ventes : 5,01 + 5,01 + 75 + 91 + 60 = 236,02 ; coûts : 3,30 + 3,30 + 43,75 + 15 + 60 + 35 + 45 = 205,35.
+      assert.deepEqual(lecture.body.margeSav, {
+        ventesHT: 236.02, coutsHT: 205.35, margeHT: 30.67, nombreSuites: 3,
+        heuresNonValorisees: 0.5, intervenantsNonValorises: [sansPrix.nom], heuresSuitesAnnulees: 1.5,
+      });
+      // La main-d'œuvre cumulée de l'intervention reste la sienne seule.
+      assert.equal(lecture.body.totalMainOeuvreHT, 65.35);
+      // Une suite n'a pas de marge propre : elle pèse sur l'intervention initiale.
+      for (const id of [suite.id, suiteDeSuite.id]) assert.equal((await couts(id)).body.margeSav, null);
+      // Sans heure, la marge vaut zéro, sans signalement.
+      assert.deepEqual((await couts((await curative('sans heure')).id)).body.margeSav, {
+        ventesHT: 0, coutsHT: 0, margeHT: 0, nombreSuites: 0, heuresNonValorisees: 0, intervenantsNonValorises: [], heuresSuitesAnnulees: 0,
+      });
+    });
+
+    test('pas de marge à l’heure pour une intervention annulée ou rattachée à un chantier', async () => {
+      const annulee = await curative('annulée');
+      const annulation = await envoyer('patch', `/api/interventions/${annulee.id}/statut`, admin, { statut: 'ANNULEE', motif: 'TEST annulation de l’intervention' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal((await couts(annulee.id)).body.margeSav, null);
+      const chantier = await prisma.chantier.create({ data: {
+        nom: `TEST Marge SAV chantier ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date('2026-10-01T00:00:00Z'),
+        budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 20,
+      } });
+      const surChantier = await curative('sur chantier', admin, { chantierId: chantier.id });
+      const lecture = await couts(surChantier.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.equal(lecture.body.margeSav, null);
+    });
+  });
+
   describe('Suites d’une affaire close ou annulée : refus des coûts et annulation avec le devis', () => {
     let admin = {};
     let adminId = '';

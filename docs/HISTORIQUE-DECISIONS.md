@@ -1015,3 +1015,15 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin :
 ### Suivi ouvert pendant ce lot
 
 Étiquette `suivi-audit` : #352 (audits de #351 : questions pour Nelson sur la conversion en chantier d'un devis dont l'intervention porte déjà une facture et sur le brouillon au temps passé que la numérotation chronologique empêche d'émettre ; suite d'une intervention au temps passé non signalée à l'écran Factures ; refus d'annulation d'une facture réglée ; saisie ligne par ligne d'une intervention au temps passé annulée, à reprendre avec le lot du point 14 ; périmètre de la « dernière facture émise », à garder par le futur lot « abandon d'un brouillon »).
+
+## Décision du 28-10-2026 sur le matériel des interventions curatives
+
+*Rédigé le 28-10-2026.* Pendant le cadrage du lot « marge d'un SAV hors contrat », Claude Code a rappelé à Nelson la question que la passation gardait ouverte (section 3, « marge d'un SAV hors contrat ») dans son message de 21:17 UTC (heure du journal de la session), cité mot pour mot : « Reste une question pour vous. Une intervention curative ne reçoit pas de matériel aujourd'hui : sa marge ne compterait donc que ses heures. Faut-il ouvrir la saisie du matériel aux curatives ? Sans réponse de votre part, je garde l'option la plus restrictive : la marge compte les heures seules, et c'est déclaré « choix par défaut, à confirmer ». »
+
+Réponse de Nelson (21:34 UTC), citée mot pour mot :
+
+« Oui il faut pouvoir saisir du materiel pour une intervention curative »
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin : la saisie du matériel, réservée jusqu'ici aux interventions d'un contrat actif, s'ouvre aux interventions curatives (hors contrat). **À appliquer** par un lot à part, « matériel d'une intervention curative », placé juste après le lot « marge d'un SAV hors contrat », qui reste limité aux heures ; rien n'en est codé. Ce que la décision ne dit pas reste à cadrer avec ce lot, en choix par défaut à confirmer : qui saisit le matériel d'une curative (aujourd'hui l'encadrement, sur un contrat), et comment il compte dans la marge à l'heure d'un SAV hors contrat (à son coût seul, ou vendu, et à quel prix).
+
+**Mentions antérieures.** Décisions de la nuit du 26 au 27-10-2026 et passation, section 3 : « une curative ne reçoit pas aujourd'hui de matériel (réservé aux interventions d'un contrat actif : visites et suites de visites) : sa marge ne compterait que ses heures. Faut-il ouvrir la saisie du matériel aux curatives ? », tranchée par la présente section.
