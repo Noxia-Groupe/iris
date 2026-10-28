@@ -349,7 +349,7 @@ if (!TEST_DATABASE_URL) {
       'marge-suites.conducteurHeures@iris.test', 'marge-suites.conducteurTermine@iris.test',
       'marge-suites.conducteur@iris.test', 'marge-suites.conducteurAutre@iris.test', 'marge-suites.technicien@iris.test', 'marge-suites.commercial@iris.test',
       'suites-affaire.conducteur@iris.test', 'suites-affaire.technicien@iris.test', 'suites-affaire.responsable@iris.test',
-      'devis-chantier.conducteur@iris.test', 'devis-chantier.conducteurTermine@iris.test', 'devis-chantier.technicien@iris.test',
+      'devis-chantier.conducteur@iris.test', 'devis-chantier.conducteurTermine@iris.test', 'devis-chantier.technicien@iris.test', 'devis-chantier.commercial@iris.test',
       ...Array.from({ length: 20 }, (_, i) => `pilote3.course.${i}@iris.test`),
       ...Array.from({ length: 12 }, (_, i) => `pilote3.trio.${i}@iris.test`),
       ...Array.from({ length: 10 }, (_, i) => `pilote3.suppression.${i}@iris.test`),
@@ -21564,6 +21564,34 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await parCle(seul.id)).status, 201);
     });
 
+    // Audit interne n° 1 de #344, note N2 (règle 2) : le droit devis seul n'ouvre pas ce chantier, qui modifie l'intervention
+    // et ses suites ; il faut les droits de la création de l'intervention, l'encadrement SAV.
+    test('porteur du droit devis sans accès SAV : il n’ouvre pas le chantier d’un devis qui a déjà créé son intervention (403), sans rien créer', async () => {
+      const email = 'devis-chantier.commercial@iris.test';
+      comptes.commercial = await prisma.user.upsert({ where: { email }, update: { role: 'COMMERCIAL', actif: true, permissions: [] }, create: { email, name: 'TEST Devis chantier commercial', role: 'COMMERCIAL' } });
+      const parCommercial = (devisId) => envoyer('post', `/api/devis/${devisId}/convertir`, jeton('commercial'), { cible: 'CHANTIER' });
+      const devis = await devisSigne('commercial après intervention');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      const refus = await parCommercial(devis.id);
+      assert.equal(refus.status, 403, JSON.stringify(refus.body));
+      assert.equal(refus.body.error, 'Ce devis a déjà créé son intervention : le chantier, qui la reçoit avec ses suites, ne s’ouvre que par l’encadrement SAV, comme l’intervention elle-même.');
+      assert.equal(await prisma.chantier.count({ where: { nom: devis.objet } }), 0, 'aucun chantier ouvert');
+      assert.equal(await chantierDe(intervention.id), null);
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: intervention.id, action: 'RATTACHEMENT_CHANTIER' } }), 0);
+      // Témoins : sans intervention, le commercial ouvre toujours le chantier d'un devis ; le conducteur, encadrement SAV
+      // porteur du droit devis, ouvre celui qui reçoit l'intervention.
+      const seul = await devisSigne('commercial sans intervention');
+      assert.equal((await parCommercial(seul.id)).status, 201);
+      await prisma.user.update({ where: { id: comptes.conducteur.id }, data: { permissions: ['devis:write'] } });
+      try {
+        const parConducteur = await envoyer('post', `/api/devis/${devis.id}/convertir`, jeton('conducteur'), { cible: 'CHANTIER' });
+        assert.equal(parConducteur.status, 201, JSON.stringify(parConducteur.body));
+        assert.equal(await chantierDe(intervention.id), parConducteur.body.id);
+      } finally {
+        await prisma.user.update({ where: { id: comptes.conducteur.id }, data: { permissions: [] } });
+      }
+    });
+
     test('chantier ouvert après une intervention déjà rattachée à une autre affaire : refusé, sans rien créer', async () => {
       const devis = await devisSigne('déjà rattachée');
       const intervention = await converti(devis.id, 'INTERVENTION');
@@ -21641,6 +21669,99 @@ if (!TEST_DATABASE_URL) {
       // Relancée, elle rattache aussi cette suite.
       const chantier = await converti(devis.id, 'CHANTIER');
       for (const id of [intervention.id, suite.id, nouvelle.id]) assert.equal(await chantierDe(id), chantier.id);
+    });
+
+    // Audit interne n° 1 de #344 : seules les lignes vivantes de l'intervention issue du devis qui a ouvert ce chantier,
+    // et rattachée à lui, comptent comme son travail ; ni une ligne archivée, ni une intervention ordinaire de l'affaire,
+    // ni celle d'un autre devis (écrite en base, aucune route ne la rattacherait).
+    test('audit 1 — marge du chantier : ni ligne archivée, ni intervention ordinaire de l’affaire, ni intervention d’un autre devis', async () => {
+      const devis = await devisSigne('audit lignes');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      await pointer(chantier.id, 4, 40); // 160 €, le 02-10
+      await heure(intervention.id, 2, 30, '2026-10-10'); // 60 €, vivante
+      const archiverLigne = { archivedAt: new Date(), archivedById: adminId, motifArchivage: 'TEST ligne archivée' };
+      const heureArchivee = await heure(intervention.id, 3, 50, '2026-10-26'); // 150 €, archivée
+      await prisma.coutInterventionHeure.update({ where: { id: heureArchivee.id }, data: archiverLigne });
+      const achatArchive = await achat(intervention.id, 70, '2026-10-26'); // archivé
+      await prisma.coutInterventionAchat.update({ where: { id: achatArchive.id }, data: archiverLigne });
+      // Intervention ordinaire rattachée à la même affaire : hors de sa marge.
+      const ordinaire = await envoyer('post', '/api/interventions', admin, { clientId: client.id, titre: `TEST Devis chantier audit ordinaire ${suffixe}`, chantierId: chantier.id });
+      assert.equal(ordinaire.status, 201, JSON.stringify(ordinaire.body));
+      await heure(ordinaire.body.id, 7, 40, '2026-10-27');
+      await achat(ordinaire.body.id, 90, '2026-10-27');
+      // Intervention d'un autre devis du même client, convertie seule, écrite rattachée à ce chantier.
+      const autreDevis = await devisSigne('audit autre devis');
+      const autreIntervention = await converti(autreDevis.id, 'INTERVENTION');
+      await prisma.intervention.update({ where: { id: autreIntervention.id }, data: { chantierId: chantier.id } });
+      await heure(autreIntervention.id, 5, 40, '2026-10-27');
+
+      const m = (await ficheChantier(chantier.id)).metrics;
+      assert.deepEqual(m.coutsInterventionDevis, { heures: 2, coutMainOeuvre: 60, materiel: 0 });
+      assert.deepEqual(m.coutsSuites, { heures: 0, coutMainOeuvre: 0, materiel: 0 });
+      // 4 h pointées + 2 h vivantes de l'intervention du devis ; 160 + 60 = 220 € ; 1 300 € vendus.
+      assert.deepEqual([m.heuresRealisees, m.diffHeures, m.moReel, m.materielReel, m.totalDepenses, m.margeCommerciale, m.derniereSaisie], [6, 14, 220, 0, 220, 1080, '2026-10-10']);
+      // Coût horaire du chantier : 220 € ÷ 6 h ; projection des 20 h vendues à ce coût, 733,33 €.
+      assert.deepEqual([Math.round(m.estimation.coutHoraireReference * 1e4) / 1e4, m.estimation.sourceCoutHoraire, Math.round(m.estimation.coutMainOeuvreAttendu * 100) / 100], [36.6667, 'CHANTIER', 733.33]);
+      const ligne = (await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id);
+      assert.deepEqual([ligne.metrics.heuresRealisees, ligne.metrics.moReel, ligne.metrics.margeCommerciale, ligne.metrics.coutsInterventionDevis], [6, 220, 1080, m.coutsInterventionDevis], 'la liste dit la même chose');
+    });
+
+    // Règle 4 : une conversion d'avant ce lot (intervention du devis non rattachée, écrite en base) reste hors de la marge
+    // du chantier, et ses coûts vivants ne refusent pas l'annulation du devis : seule l'intervention rattachée la refuse.
+    test('audit 1 — intervention du devis non rattachée (conversion d’avant ce lot) : hors de la marge, et ses coûts ne refusent pas l’annulation', async () => {
+      const devis = await devisSigne('audit non rattachée');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      await prisma.intervention.update({ where: { id: intervention.id }, data: { chantierId: null } });
+      await heure(intervention.id, 1, 40);
+      const m = (await ficheChantier(chantier.id)).metrics;
+      assert.deepEqual([m.heuresRealisees, m.moReel, m.coutsInterventionDevis], [0, 0, { heures: 0, coutMainOeuvre: 0, materiel: 0 }]);
+      const annulation = await annulerDevis(devis.id);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual([(await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, await statutDe(intervention.id)], ['ANNULE', 'ANNULEE']);
+    });
+
+    // Règle 2 : le technicien titulaire du chantier voit les heures de l'intervention du devis, jamais un montant ; une clé
+    // d'intégration voit les totaux, comme ceux des suites.
+    test('audit 1 — masquage de metrics.coutsInterventionDevis : technicien titulaire sans montant, clé d’intégration avec', async () => {
+      const devis = await devisSigne('audit technicien');
+      const chantier = await converti(devis.id, 'CHANTIER', 'technicien');
+      const intervention = await converti(devis.id, 'INTERVENTION');
+      await heure(intervention.id, 2, 30); // 60 €
+      await achat(intervention.id, 15);
+      const fiche = await ficheChantier(chantier.id, jeton('technicien'));
+      assert.deepEqual([fiche.metrics.heuresRealisees, fiche.metrics.moReel, fiche.metrics.materielReel, fiche.metrics.coutsInterventionDevis], [2, null, null, { heures: 2, coutMainOeuvre: null, materiel: null }]);
+      const liste = (await request(app).get('/api/chantiers').set(jeton('technicien'))).body.find((c) => c.id === chantier.id);
+      assert.deepEqual(liste.metrics.coutsInterventionDevis, { heures: 2, coutMainOeuvre: null, materiel: null });
+      const cle = await envoyer('post', '/api/admin/api-keys', admin, { nom: `TEST Devis chantier audit clé ${suffixe}`, scopes: ['chantiers:read'] });
+      assert.equal(cle.status, 201, JSON.stringify(cle.body));
+      const parCle = (await request(app).get('/api/v1/chantiers').set('Authorization', `Bearer ${cle.body.apiKey}`)).body.find((c) => c.id === chantier.id);
+      assert.deepEqual(parCle.metrics.coutsInterventionDevis, { heures: 2, coutMainOeuvre: 60, materiel: 15 });
+      assert.equal('coutsInterventionDevis' in parCle, false, 'les lignes de coûts ne sortent jamais');
+    });
+
+    // Une clôture en cours du chantier du devis (la route l'écrit sous son verrou) est attendue par la conversion de
+    // l'intervention, qui lit le chantier en partage, puis refusée : l'intervention ne naît pas rattachée à un chantier clôturé.
+    test('audit 1 — intervention convertie pendant la clôture du chantier du devis : attendue, puis refusée, sans rien créer', async () => {
+      const devis = await devisSigne('audit clôture concurrente');
+      const chantier = await converti(devis.id, 'CHANTIER');
+      let reponse;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-25T00:00:00Z') } });
+          reponse = convertir(devis.id, 'INTERVENTION').then((r) => r);
+          assert.equal(await attendreBlocage(tx), true, 'la conversion attend la clôture');
+        }, { timeout: 20000 });
+        const refus = await reponse;
+        assert.equal(refus.status, 409, JSON.stringify(refus.body));
+        assert.equal(refus.body.error, 'Le chantier ouvert par ce devis est clôturé : l’intervention, qui lui serait rattachée, ne peut pas être créée tant qu’il n’est pas rouvert.');
+        assert.equal(await prisma.intervention.count({ where: { titre: devis.objet } }), 0);
+      } finally {
+        await reponse;
+        // Aucun chantier terminé sans achat ne reste pour fausser le ratio d'achat des autres tests.
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'EN_COURS', dateFin: null } });
+      }
     });
   });
 }

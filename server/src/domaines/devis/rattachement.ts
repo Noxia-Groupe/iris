@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import type { AuthRequest } from '../../http/auth';
-import { journaliserIntervention } from '../interventions/metier';
+import { estEncadrementCoutIntervention, journaliserIntervention } from '../interventions/metier';
 import { verrouillerIntervention } from '../interventions/comptesRendus';
 import { lireSuites } from './annulation';
 import { DevisConflitError, DevisDroitError } from './metier';
@@ -14,9 +14,10 @@ import { DevisConflitError, DevisDroitError } from './metier';
 //  - intervention après le chantier : elle naît rattachée au chantier, qui doit être en cours, du client du
 //    devis (chantierPourInterventionDuDevis) ; ses suites le reprennent à leur création ;
 //  - chantier après l'intervention : elle et ses suites lui sont rattachées à sa création, quels que soient
-//    leurs statuts, chaque rattachement écrit à leur journal (rattacherInterventionDuDevis) ; comme aucune
-//    clé d'intégration ne crée l'intervention, aucune n'ouvre ce chantier, qui la modifie (403 ; choix par
-//    défaut, à confirmer, le plus restrictif : le journal SAV exige un compte auteur).
+//    leurs statuts, chaque rattachement écrit à leur journal (rattacherInterventionDuDevis). Ce chantier, qui
+//    modifie l'intervention et ses suites, ne s'ouvre qu'avec les droits de la création de l'intervention :
+//    l'encadrement SAV, en session ; ni une clé d'intégration (le journal SAV exige un compte auteur), ni un
+//    autre porteur du droit devis (403 ; choix par défaut, à confirmer, le plus restrictif).
 // Ses coûts et ceux de ses suites entrent alors dans la marge du chantier (avecCoutsSuites). Aucune reprise
 // des conversions faites avant ce lot (règle 4 : aucune donnée réelle).
 type DevisConverti = { numero: string; version: number; clientId: string; conversions: Array<{ cibleType: string; cibleId: string }> };
@@ -45,6 +46,7 @@ export async function rattacherInterventionDuDevis(tx: Prisma.TransactionClient,
   const interventionId = devis.conversions.find(c => c.cibleType === 'INTERVENTION')?.cibleId;
   if (!interventionId) return;
   if (!req.user) throw new DevisDroitError('Ce devis a déjà créé son intervention : le chantier, qui la reçoit avec ses suites, ne s’ouvre que dans une session de l’application.');
+  if (!estEncadrementCoutIntervention(req.user.role)) throw new DevisDroitError('Ce devis a déjà créé son intervention : le chantier, qui la reçoit avec ses suites, ne s’ouvre que par l’encadrement SAV, comme l’intervention elle-même.');
   const arbre = async () => [interventionId, ...(await lireSuites(tx, interventionId)).map(s => s.id)].sort();
   const lues = await arbre();
   for (const id of lues) await verrouillerIntervention(tx, id, 'FOR UPDATE');
