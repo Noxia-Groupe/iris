@@ -1,0 +1,132 @@
+import { createHmac } from 'node:crypto';
+import type { APIRequestContext, Browser, Page } from '@playwright/test';
+import { test, expect, dateDuJour } from './fixtures';
+
+const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+
+// Décision de Nelson du 27-10-2026 à 15:50 UTC : « oui, il faut egalement refusé aussi ces saisies ». Les
+// coûts d'une suite rattachée à une affaire entrent dans la marge du chantier (#339) : chantier clôturé, le
+// technicien ne peut plus y saisir ses heures, et l'écran lui dit pourquoi.
+
+// Même procédé que les autres parcours : un jeton signé avec le secret du backend jetable ouvre la session
+// du technicien.
+const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toString('base64url');
+function jetonPour(userId: string) {
+  const corps = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
+  return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
+}
+
+// Prépare une suite d'affaire planifiée pour un technicien, sur un chantier ensuite clôturé, puis ouvre la
+// liste des interventions dans la session du technicien, à la taille d'écran demandée.
+type Outils = { session: { token: string }; request: APIRequestContext; creerClient: (libelle: string) => Promise<{ id: string }>; browser: Browser };
+
+async function suiteSurChantierClos({ session, request, creerClient, browser }: Outils, viewport?: { width: number; height: number }) {
+  const envoyer = async (methode: 'post' | 'put' | 'patch', path: string, data?: object) => {
+    const response = await request[methode](`${api}${path}`, { headers: { Authorization: `Bearer ${session.token}` }, data });
+    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+    return response.json();
+  };
+  const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+  const technicien = await envoyer('post', '/users', { email: `suites.affaire.${suffixe}@iris.test`, name: `Technicien affaire ${suffixe}`, role: 'TECHNICIEN' }) as { id: string; name: string; email: string; role: string };
+  const fiche = await envoyer('post', '/intervenants', { nom: `Fiche affaire ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 }) as { id: string };
+  await envoyer('put', `/intervenants/${fiche.id}/compte`, { userId: technicien.id });
+  const client = await creerClient(`suites-affaire ${suffixe}`);
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Affaire close ${suffixe}`, lignes: [
+    { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 150, tauxTva: 20 },
+  ] }) as { id: string };
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
+  const initiale = await envoyer('post', '/interventions', { clientId: client.id, titre: `Dépannage de l’affaire ${suffixe}`, chantierId: chantier.id }) as { id: string };
+  const suite = await envoyer('post', `/interventions/${initiale.id}/suites`, { titre: `Suite de l’affaire close ${suffixe}` }) as { id: string; titre: string };
+  const jourIso = dateDuJour().split('-').reverse().join('-');
+  await envoyer('put', `/interventions/${suite.id}/planning`, { dateDebut: jourIso, creneau: 'HEURES', heureDebut: '08:30', heureFin: '09:30', intervenantIds: [fiche.id] });
+  await envoyer('patch', `/chantiers/${chantier.id}/statut`, { statut: 'TERMINE' });
+
+  const contexte = await browser.newContext(viewport ? { viewport } : {});
+  const page = await contexte.newPage();
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [jetonPour(technicien.id), JSON.stringify({ ...technicien, permissions: ['chantiers:read', 'clients:read'] })]);
+  await page.goto('/interventions', { waitUntil: 'networkidle' });
+  return { contexte, page, suite };
+}
+
+const REFUS = 'Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés.';
+
+async function saisirHeuresRefusees(page: Page, suite: { id: string; titre: string }) {
+  const carte = page.locator('article', { hasText: suite.titre });
+  await carte.getByPlaceholder('Date (JJ-MM-AAAA)').fill(dateDuJour());
+  await carte.getByPlaceholder('Heures').fill('1,5');
+  const saisie = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/interventions/${suite.id}/couts/heures`));
+  await carte.getByRole('button', { name: 'Enregistrer mes heures' }).click();
+  expect((await saisie).status()).toBe(403);
+  return carte;
+}
+
+test('chantier clôturé : le technicien ne peut plus saisir ses heures sur une suite de l’affaire, et l’écran dit pourquoi', async ({ session, request, creerClient, browser }) => {
+  const { contexte, page, suite } = await suiteSurChantierClos({ session, request, creerClient, browser });
+  try {
+    const carte = await saisirHeuresRefusees(page, suite);
+    await expect(page.getByText(REFUS)).toBeVisible();
+    await expect(carte.getByText(`${dateDuJour()} — 1.5 h`)).toHaveCount(0);
+  } finally {
+    await contexte.close();
+  }
+});
+
+// Audit n° 1 de #341, note 8 : sur téléphone, le formulaire est bas dans la page ; le refus, affiché en tête,
+// doit revenir dans la vue.
+test('chantier clôturé, sur téléphone (375 px) : le refus des heures de la suite revient dans la vue', async ({ session, request, creerClient, browser }) => {
+  const { contexte, page, suite } = await suiteSurChantierClos({ session, request, creerClient, browser }, { width: 375, height: 740 });
+  try {
+    await saisirHeuresRefusees(page, suite);
+    await expect(page.getByText(REFUS)).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  } finally {
+    await contexte.close();
+  }
+});
+
+// Audit n° 2 de #341 : le défilement vaut aussi pour le formulaire du matériel, que l'encadrement remplit sur
+// la visite d'un contrat ; un refus du serveur (ici un montant illisible) doit revenir dans la vue.
+test('sur téléphone (375 px), le refus d’un achat de matériel revient aussi dans la vue', async ({ session, request, creerClient, browser }) => {
+  const envoyer = async (methode: 'post' | 'put', path: string, data?: object) => {
+    const response = await request[methode](`${api}${path}`, { headers: { Authorization: `Bearer ${session.token}` }, data });
+    expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+    return response.json();
+  };
+  const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+  const client = await creerClient(`suites-affaire materiel ${suffixe}`);
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Maintenance ${suffixe}`, lignes: [
+    { designation: 'Maintenance', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 200, tauxTva: 20 },
+  ] }) as { id: string };
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const contrat = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CONTRAT', periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: dateDuJour() }) as { id: string };
+  const visite = await envoyer('post', `/contrats-maintenance/${contrat.id}/generer-intervention`, {}) as { id: string; titre: string };
+  const fournisseur = await envoyer('post', '/fournisseurs', { nom: `Fournisseur suites-affaire ${suffixe}` }) as { id: string };
+
+  const contexte = await browser.newContext({ viewport: { width: 375, height: 740 } });
+  const page = await contexte.newPage();
+  await page.addInitScript(([token, user]) => {
+    localStorage.setItem('token', token as string);
+    localStorage.setItem('user', user as string);
+  }, [session.token, JSON.stringify(session.user)]);
+  try {
+    await page.goto(`/interventions/${visite.id}`, { waitUntil: 'networkidle' });
+    const formulaire = page.locator('article', { hasText: visite.titre }).locator('form', { has: page.getByRole('button', { name: 'Enregistrer l’achat matériel' }) });
+    await formulaire.getByPlaceholder('Date (JJ-MM-AAAA)').fill(dateDuJour());
+    await formulaire.locator('select[name="fournisseurId"]').selectOption(fournisseur.id);
+    await formulaire.getByPlaceholder('Description du matériel').fill('Détecteur');
+    await formulaire.getByPlaceholder('Montant HT').fill('abc');
+    const saisie = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/interventions/${visite.id}/couts/achats`));
+    await formulaire.getByRole('button', { name: 'Enregistrer l’achat matériel' }).click();
+    expect((await saisie).status()).toBe(400);
+    await expect(page.getByText('Date, description ou montant HT invalide.')).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  } finally {
+    await contexte.close();
+  }
+});

@@ -18,7 +18,13 @@ import { DevisConflitError, DevisSaisieError, devisInclude, verrouillerDevis } f
 //    restent, et une visite en cours refuse l'annulation (choix par défaut, à confirmer) ;
 //  - l'intervention SAV passe ANNULEE ; en cours ou terminée, elle refuse l'annulation (choix par
 //    défaut, à confirmer, comme le chantier qui porte des heures). Seul son statut compte : des
-//    coûts saisis sur une intervention pas encore commencée ne refusent pas l'annulation.
+//    coûts saisis sur une intervention pas encore commencée ne refusent pas l'annulation ;
+//  - ses suites, toutes générations, sont annulées avec elle (décision de Nelson du 27-10-2026 à
+//    15:50 UTC, « annule l'intervention initiale », lecture retenue, à confirmer) ; une suite en cours
+//    ou terminée refuse l'annulation, comme l'intervention elle-même (choix par défaut, à confirmer).
+//    Les suites d'une visite sont des visites du même contrat : elles suivent déjà la règle des visites ;
+//  - les coûts des suites rattachées au chantier, qui entrent dans sa marge (#339), le disent commencé
+//    comme ses heures et ses achats (choix par défaut, à confirmer).
 // Chaque intervention annulée l'est comme depuis sa fiche (changement de statut journalisé) : son
 // créneau est retiré du planning, projection et affectations SAV, sous son verrou déjà pris, et son
 // journal les garde dans l'« avant » (décision de Nelson du 24-10-2026, point 7). Les
@@ -29,14 +35,30 @@ import { DevisConflitError, DevisSaisieError, devisInclude, verrouillerDevis } f
 //
 // Ordre des verrous, toujours le même : le devis (comme la conversion, qui l'attend), puis le
 // chantier (FOR NO KEY UPDATE, le verrou que prenait sa mise à jour), puis les interventions (SAV
-// du devis et visites du contrat, par identifiant croissant), enfin le contrat. Les interventions
+// du devis, ses suites et visites du contrat, par identifiant croissant), enfin le contrat. La saisie
+// d'un coût sur une suite du chantier prend l'affaire en partage après la suite : elle attend ce verrou
+// ou le fait attendre, et aucune intervention verrouillée ici n'est rattachée à une affaire. Les interventions
 // passent avant le contrat comme dans le placement d'une visite et les coûts SAV (intervention,
 // puis contrat) ; le changement de statut d'une intervention ne prend que l'intervention, et ceux
 // du contrat et la génération des visites ne prennent que le contrat avant d'insérer. Aucune de
 // ces routes ne prend un verrou dans l'ordre inverse : pas d'interblocage. Seule la génération
 // peut créer une visite entre la lecture des visites et le verrou du contrat : relue sous ce verrou,
 // une visite nouvelle refuse l'annulation (409, à relancer) plutôt que d'être verrouillée hors ordre.
+// De même, une suite créée entre la lecture des suites et leurs verrous (la création verrouille
+// l'intervention initiale) refuse l'annulation, à relancer.
 const STATUTS_NON_REALISES = ['A_PLANIFIER', 'PLANIFIEE'];
+
+// Suites, toutes générations, d'une intervention : le lien est figé et ne boucle pas (garde en base),
+// UNION écarte tout doublon.
+const lireSuites = (tx: Prisma.TransactionClient, interventionId: string | null) => interventionId
+  ? tx.$queryRaw<Array<{ id: string; reference: string; statut: string }>>(Prisma.sql`
+    WITH RECURSIVE chaine AS (
+      SELECT "id", "reference", "statut" FROM "Intervention" WHERE "interventionInitialeId" = ${interventionId}
+      UNION
+      SELECT i."id", i."reference", i."statut" FROM "Intervention" i JOIN chaine c ON i."interventionInitialeId" = c."id"
+    )
+    SELECT "id", "reference", "statut" FROM chaine ORDER BY "id"`)
+  : Promise.resolve([]);
 
 export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisId: string, motif: string, req: AuthRequest) {
   const auteur = req.user!;
@@ -59,12 +81,17 @@ export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisI
     if (heures > 0 || achats > 0) {
       throw new DevisConflitError(`Annulation impossible : ce chantier porte déjà ${heures} pointage(s) d’heures et ${achats} achat(s). Une affaire commencée ne s’annule pas.`);
     }
+    const suitesDuChantier = { archivedAt: null, intervention: { chantierId, interventionInitialeId: { not: null } } };
+    const coutsSuites = (await tx.coutInterventionHeure.count({ where: suitesDuChantier })) + (await tx.coutInterventionAchat.count({ where: suitesDuChantier }));
+    if (coutsSuites > 0) {
+      throw new DevisConflitError(`Annulation impossible : les suites SAV de ce chantier portent déjà ${coutsSuites} coût(s), comptés dans sa marge. Une affaire commencée ne s’annule pas.`);
+    }
   }
 
   const lireVisites = () => contratId
     ? tx.intervention.findMany({ where: { contratMaintenanceId: contratId }, select: { id: true, reference: true, statut: true }, orderBy: { id: 'asc' } })
     : Promise.resolve([]);
-  const aVerrouiller = [...new Set([...(interventionId ? [interventionId] : []), ...(await lireVisites()).map(v => v.id)])].sort();
+  const aVerrouiller = [...new Set([...(interventionId ? [interventionId] : []), ...(await lireSuites(tx, interventionId)).map(s => s.id), ...(await lireVisites()).map(v => v.id)])].sort();
   for (const id of aVerrouiller) await verrouillerIntervention(tx, id, 'FOR UPDATE');
   let contrat: ContratMaintenance | null = null;
   if (contratId) {
@@ -79,6 +106,14 @@ export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisI
   if (sav && ['EN_COURS', 'TERMINEE'].includes(sav.statut)) {
     throw new DevisConflitError(`Annulation impossible : l’intervention ${sav.reference} issue de ce devis est ${sav.statut === 'EN_COURS' ? 'en cours' : 'terminée'}. Une affaire commencée ne s’annule pas.`);
   }
+  const suites = sav ? await lireSuites(tx, sav.id) : [];
+  if (suites.some(s => !aVerrouiller.includes(s.id))) {
+    throw new DevisConflitError('Une suite vient d’être créée pour l’intervention de ce devis : relancez l’annulation.');
+  }
+  const suiteCommencee = suites.find(s => ['EN_COURS', 'TERMINEE'].includes(s.statut));
+  if (sav && suiteCommencee) {
+    throw new DevisConflitError(`Annulation impossible : la suite ${suiteCommencee.reference} de l’intervention ${sav.reference} est ${suiteCommencee.statut === 'EN_COURS' ? 'en cours' : 'terminée'}. Une affaire commencée ne s’annule pas.`);
+  }
   const visiteEnCours = visites.find(v => v.statut === 'EN_COURS');
   if (visiteEnCours) {
     throw new DevisConflitError(`Annulation impossible : la visite ${visiteEnCours.reference} du contrat issu de ce devis est en cours. Terminez-la ou annulez-la d’abord depuis sa fiche.`);
@@ -91,7 +126,7 @@ export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisI
     await tx.chantier.update({ where: { id: chantierId }, data: { statut: 'ANNULE', annuleLe: maintenant, annuleParId: auteur.id, motifAnnulation: motif } });
   }
   const interventionsAnnulees: string[] = [];
-  for (const intervention of [...(sav ? [sav] : []), ...visites]) {
+  for (const intervention of [...(sav ? [sav] : []), ...suites, ...visites]) {
     if (!STATUTS_NON_REALISES.includes(intervention.statut)) continue;
     const avant = await tx.intervention.findUniqueOrThrow({ where: { id: intervention.id }, include: INSTANTANE_CRENEAU });
     await retirerCreneauIntervention(tx, intervention.id);

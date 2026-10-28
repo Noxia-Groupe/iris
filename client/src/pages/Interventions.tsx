@@ -221,7 +221,11 @@ export default function Interventions({ interventionId }: { interventionId?: str
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 409) setCouts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== interventionId)));
-      return setError(data.error || 'Saisie des heures impossible.');
+      // Le refus (chantier de la suite clôturé…) s'affiche en tête de page : on y remonte, sans quoi il
+      // resterait hors de vue sous la carte, notamment à 375 px.
+      setError(data.error || 'Saisie des heures impossible.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
     formulaire.reset();
     await chargerCouts(interventions);
@@ -239,7 +243,11 @@ export default function Interventions({ interventionId }: { interventionId?: str
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 409) setCouts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== interventionId)));
-      return setError(data.error || 'Saisie de l’achat matériel impossible.');
+      // Le refus (chantier de la suite clôturé…) s'affiche en tête de page : on y remonte, sans quoi il
+      // resterait hors de vue sous la carte, notamment à 375 px.
+      setError(data.error || 'Saisie de l’achat matériel impossible.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
     formulaire.reset();
     await chargerCouts(interventions);
