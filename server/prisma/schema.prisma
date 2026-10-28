@@ -389,8 +389,17 @@ model Parametres {
   // supérieur. Vide au démarrage (décision du 25-10-2026, « Aucune, à régler ») : un devis au temps passé
   // est refusé tant que l'administration ne l'a pas fixé. Choix par défaut, à confirmer : un entier de 1
   // à 60 minutes (CHECK en base). Réglé par un administrateur, et journalisé. Chaque devis au temps passé
-  // fige sa valeur (cf. Devis.pasTempsPasseMinutes).
+  // fige sa valeur (cf. Devis.pasTempsPasseMinutes). Depuis le lot « facture au temps passé » (décisions de
+  // Nelson de la nuit du 26 au 27-10-2026, point 8), l'API n'accepte plus que 15, 30, 45 ou 60 minutes ;
+  // la base garde les bornes de 1 à 60 pour une valeur réglée avant (aucune reprise, règle 4), qu'un
+  // nouveau devis refuse de figer.
   pasTempsPasseMinutes     Int?
+  // Temps minimum facturé d'un devis au temps passé (lot « facture au temps passé », décisions de Nelson
+  // de la nuit du 26 au 27-10-2026, points 8 et 9) : en minutes, par multiples de 15, de 15 minutes à
+  // 8 heures (CHECK en base) ; une heure à l'installation ; vidé, il revient à une heure. Réglé par un
+  // administrateur, et journalisé. Chaque nouveau devis au temps passé fige sa valeur
+  // (cf. Devis.tempsMinimumMinutes).
+  tempsMinimumMinutes      Int      @default(60)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -528,6 +537,11 @@ model Devis {
   // par une révision ; vide sur un devis ordinaire.
   auTempsPasse         Boolean   @default(false)
   pasTempsPasseMinutes Int?
+  // Temps minimum facturé, copié du réglage de la société et figé avec le pas (lot « facture au temps
+  // passé ») : la ligne au temps passé vaut ce minimum, puis des multiples du pas. Vide sur un devis
+  // ordinaire, et sur un devis au temps passé fait avant ce lot, qui garde la règle d'alors (une heure
+  // minimum, son pas figé, quantité au millième) : aucune reprise (règle 4).
+  tempsMinimumMinutes  Int?
 
   // --- Annulation, terminale ---
   // Un chantier ne se supprime plus : la seule façon de revenir sur une affaire ouverte par

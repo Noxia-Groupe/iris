@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Clock } from 'lucide-react';
 import { apiFetch } from '../api';
 import { ligneVierge, type FicheCatalogueDevis, type LigneDevisSaisie } from '../lib/catalogueDevis';
-import { LIBELLES_TARIF, TARIFS_TEMPS_PASSE, formatPrix, ligneTempsPasse, prixDuTarif, type TarifTempsPasse } from '../lib/tempsPasse';
+import { LIBELLES_TARIF, TARIFS_TEMPS_PASSE, dureeTempsPasse, formatPrix, ligneTempsPasse, prixDuTarif, type ReglagesTempsPasse, type TarifTempsPasse } from '../lib/tempsPasse';
 
 const LIGNE_VIDE: LigneDevisSaisie = { designation: '', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 0, tauxTva: 20 };
 
@@ -80,23 +80,37 @@ export function ChoixTempsPasse({ auTempsPasse, lignes, onChange }: {
   </fieldset>;
 }
 
-// Ligne au temps passé dans le formulaire : désignation et quantité modifiables (une heure au moins),
-// prix, TVA et unité fixés par la main d'œuvre, affichés sans être saisis.
-export function LigneTempsPasse({ ligne, onDesignation, onQuantite }: {
+// Ligne au temps passé dans le formulaire : désignation et quantité modifiables, prix, TVA et unité fixés
+// par la main d'œuvre, affichés sans être saisis. La quantité vaut le temps minimum facturé, puis des
+// tranches du pas : ceux figés sur le devis modifié, sinon ceux réglés par la société, que le serveur
+// applique (`reglages` null) ; un devis antérieur au lot « facture au temps passé » garde une heure au
+// moins, au millième.
+export function LigneTempsPasse({ ligne, reglages, onDesignation, onQuantite }: {
   ligne: LigneDevisSaisie;
+  reglages: ReglagesTempsPasse | null;
   onDesignation: (valeur: string) => void;
   onQuantite: (valeur: string) => void;
 }) {
+  const ancien = reglages !== null && reglages.tempsMinimumMinutes === null;
+  const minimum = reglages?.tempsMinimumMinutes ?? null;
+  const pas = reglages?.pasTempsPasseMinutes ?? null;
+  const libelle = ancien ? 'Heures (1 minimum)' : minimum !== null ? `Heures (${dureeTempsPasse(minimum)} minimum)` : 'Heures';
+  const champ = ancien ? { min: 1, step: 0.001 } : minimum !== null && pas !== null ? { min: minimum / 60, step: pas / 60 } : { min: 0.25, step: 0.25 };
+  const aide = ancien
+    ? 'Une heure au moins ; la quantité se modifie vers le haut. Le prix est celui de la main d’œuvre, figé sur le devis.'
+    : minimum !== null && pas !== null
+      ? `Le temps minimum facturé du devis (${dureeTempsPasse(minimum)}), puis des tranches de ${pas} minutes. Le prix est celui de la main d’œuvre, figé sur le devis.`
+      : 'Le temps minimum facturé, puis des tranches du pas, tous deux réglés par la société et figés sur le devis (par exemple 1 ; 1,25 ; 1,5 pour un minimum d’une heure et un pas de 15 minutes). Le prix est celui de la main d’œuvre, figé sur le devis.';
   return <div className="space-y-2 border-b border-gray-100 pb-3" aria-label="Ligne au temps passé" role="group">
     <label className="text-sm block">Désignation<input required className="mt-1 w-full border rounded px-2 py-2" value={ligne.designation} onChange={(e) => onDesignation(e.target.value)}/>
       <span className="block text-xs text-gray-500 mt-0.5">Main d’œuvre au temps passé{ligne.reference ? ` · Réf. ${ligne.reference}` : ''} · {ligne.tarifTempsPasse ? LIBELLES_TARIF[ligne.tarifTempsPasse] : ''}</span>
     </label>
     <div className="grid gap-2 items-end grid-cols-2 md:grid-cols-[150px_1fr_1fr_1fr]">
-      <label className="text-sm">Heures (1 minimum)<input required aria-describedby="aide-quantite-temps-passe" step="0.001" type="number" inputMode="decimal" className="mt-1 w-full border rounded px-2 py-2" value={ligne.quantite} onChange={(e) => onQuantite(e.target.value)}/></label>
+      <label className="text-sm">{libelle}<input required aria-describedby="aide-quantite-temps-passe" min={champ.min} step={champ.step} type="number" inputMode="decimal" className="mt-1 w-full border rounded px-2 py-2" value={ligne.quantite} onChange={(e) => onQuantite(e.target.value)}/></label>
       <p className="text-sm"><span className="block text-gray-600">Prix de l’heure</span><strong data-testid="prix-heure-temps-passe">{formatPrix(ligne.prixUnitaireHt)} HT</strong></p>
       <p className="text-sm"><span className="block text-gray-600">TVA</span>{String(ligne.tauxTva).replace('.', ',')} %</p>
       <p className="text-sm"><span className="block text-gray-600">Unité</span>{ligne.unite ?? 'heure'}</p>
     </div>
-    <p id="aide-quantite-temps-passe" className="text-xs text-gray-500">Une heure au moins ; la quantité se modifie vers le haut. Le prix est celui de la main d’œuvre, figé sur le devis.</p>
+    <p id="aide-quantite-temps-passe" className="text-xs text-gray-500">{aide}</p>
   </div>;
 }

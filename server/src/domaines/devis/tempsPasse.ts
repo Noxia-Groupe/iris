@@ -22,7 +22,14 @@ import { formatMontantFacture } from '../factures/metier';
 // Choix par défaut, à confirmer (passation, section 4) : le prix de la ligne est fixé par le serveur
 // depuis la main d'œuvre ; un prix (ou une TVA, une unité, une nature) envoyé pour cette ligne et
 // différent du sien est refusé (400), plutôt qu'ignoré, pour que personne ne croie avoir imposé un
-// prix ; au-delà d'une heure, la quantité suit la règle des autres lignes (au millième).
+// prix.
+//
+// Lot « facture au temps passé », première PR (décisions de Nelson de la nuit du 26 au 27-10-2026,
+// points 8, 9, 11 et 12) : le temps minimum facturé devient un réglage de la société, en minutes, par
+// multiples de 15, de 15 minutes à 8 heures (une heure à l'installation, et quand on le vide) ; le pas
+// n'admet plus que 15, 30, 45 ou 60 minutes. Un nouveau devis au temps passé fige le minimum avec le pas,
+// et sa ligne au temps passé vaut ce minimum, puis des multiples du pas. Un devis fait avant ce lot
+// (minimum vide) garde la règle d'alors : une heure au moins, au millième, son pas figé, et sa mention.
 
 export type TarifTempsPasse = 'HORS_CONTRAT' | 'SOUS_CONTRAT';
 export const TARIFS_TEMPS_PASSE: readonly TarifTempsPasse[] = ['HORS_CONTRAT', 'SOUS_CONTRAT'];
@@ -32,6 +39,9 @@ export const LIBELLES_TARIF_TEMPS_PASSE: Record<TarifTempsPasse, string> = {
 };
 
 export const REFUS_PAS_NON_REGLE = 'Réglez d’abord le pas du temps passé dans l’administration (Administration > Marges & Commissions) : un devis au temps passé est refusé tant qu’il n’est pas fixé.';
+export const PAS_TEMPS_PASSE_ADMIS: readonly number[] = [15, 30, 45, 60];
+export const TEMPS_MINIMUM_PAR_DEFAUT = 60;
+export const refusPasAncien = (pas: number) => `Le pas du temps passé réglé (${pas} minute${pas > 1 ? 's' : ''}) n’est plus admis : réglez-le de nouveau dans l’administration (Administration > Marges & Commissions), à 15, 30, 45 ou 60 minutes.`;
 export const REFUS_QUANTITE_TEMPS_PASSE = 'La ligne au temps passé compte au moins une heure : sa quantité est de 1 ou plus.';
 export const REFUS_TARIF_TEMPS_PASSE = 'Tarif de la ligne au temps passé : à l’heure hors contrat (HORS_CONTRAT) ou à l’heure sous contrat (SOUS_CONTRAT) ; le forfait jour n’est pas proposé sur un devis au temps passé.';
 export const REFUS_FICHE_TEMPS_PASSE = 'Une ligne au temps passé reprend une main d’œuvre du catalogue (prestation marquée main d’œuvre).';
@@ -70,7 +80,7 @@ export function lireLigneTempsPasse(
   if (drapeau !== true) throw new TempsPasseSaisieError('« tempsPasse » doit valoir true ou false.');
   const quantite = nombreDecimalNonNegatif(item.quantite, 9, false, 3);
   if (quantite === null) throw new TempsPasseSaisieError('Ligne de devis invalide.');
-  if (quantite < 1) throw new TempsPasseSaisieError(REFUS_QUANTITE_TEMPS_PASSE);
+  // Le minimum et le pas du devis, connus plus tard, bornent ensuite la quantité (exigerQuantiteTempsPasse).
   if (renseigne(item.nature) && item.nature !== 'MAIN_OEUVRE') throw new TempsPasseSaisieError(REFUS_UNITE_TEMPS_PASSE);
   if (renseigne(item.unite) && String(item.unite).trim() !== UNITE_MAIN_OEUVRE) throw new TempsPasseSaisieError(REFUS_UNITE_TEMPS_PASSE);
   let tarif: TarifTempsPasse | null = null;
@@ -93,28 +103,81 @@ export function exigerCoherenceTempsPasse(auTempsPasse: boolean, references: { t
   if (!auTempsPasse && nombre > 0) throw new TempsPasseSaisieError(REFUS_LIGNE_SUR_DEVIS_ORDINAIRE);
 }
 
-// Pas du temps passé du devis : celui déjà figé sur un devis au temps passé, sinon le réglage de la
-// société, refusé s'il est vide (décision « Aucune, à régler ») ; aucun pas sur un devis ordinaire.
-export async function pasDuDevis(
+export type ReglagesTempsPasseDevis = { pasTempsPasseMinutes: number | null; tempsMinimumMinutes: number | null };
+
+// Pas et minimum figés sur le devis : ceux déjà figés sur un devis au temps passé (un devis antérieur au
+// lot garde son minimum vide, donc la règle d'alors), sinon les réglages de la société, le pas étant
+// refusé s'il est vide (décision « Aucune, à régler ») ou s'il n'est plus admis (valeur réglée avant le
+// lot) ; ni pas ni minimum sur un devis ordinaire.
+export async function reglagesTempsPasseDuDevis(
   db: Prisma.TransactionClient | typeof prisma, auTempsPasse: boolean,
-  precedent?: { auTempsPasse: boolean; pasTempsPasseMinutes: number | null },
-): Promise<number | null> {
-  if (!auTempsPasse) return null;
-  if (precedent?.auTempsPasse && precedent.pasTempsPasseMinutes !== null) return precedent.pasTempsPasseMinutes;
-  const reglage = await db.parametres.findUnique({ where: { id: 'singleton' }, select: { pasTempsPasseMinutes: true } });
-  if (!reglage || reglage.pasTempsPasseMinutes === null) throw new TempsPasseConflitError(REFUS_PAS_NON_REGLE);
-  return reglage.pasTempsPasseMinutes;
+  precedent?: { auTempsPasse: boolean; pasTempsPasseMinutes: number | null; tempsMinimumMinutes: number | null },
+): Promise<ReglagesTempsPasseDevis> {
+  if (!auTempsPasse) return { pasTempsPasseMinutes: null, tempsMinimumMinutes: null };
+  if (precedent?.auTempsPasse && precedent.pasTempsPasseMinutes !== null) {
+    return { pasTempsPasseMinutes: precedent.pasTempsPasseMinutes, tempsMinimumMinutes: precedent.tempsMinimumMinutes };
+  }
+  const reglage = await db.parametres.findUnique({ where: { id: 'singleton' }, select: { pasTempsPasseMinutes: true, tempsMinimumMinutes: true } });
+  return reglagesTempsPasseDeLaSociete(reglage);
 }
 
-// Lecture du réglage dans le corps de PUT /api/parametres : vide (null ou chaîne vide) pour le retirer,
-// ce qui rend null, sinon un entier de minutes de 1 à 60 (choix par défaut, à confirmer).
+// Les réglages du jour, pour un devis qui les fige (création, passage au temps passé, duplication).
+export function reglagesTempsPasseDeLaSociete(reglage: { pasTempsPasseMinutes: number | null; tempsMinimumMinutes: number } | null): ReglagesTempsPasseDevis {
+  if (!reglage || reglage.pasTempsPasseMinutes === null) throw new TempsPasseConflitError(REFUS_PAS_NON_REGLE);
+  if (!PAS_TEMPS_PASSE_ADMIS.includes(reglage.pasTempsPasseMinutes)) throw new TempsPasseConflitError(refusPasAncien(reglage.pasTempsPasseMinutes));
+  return { pasTempsPasseMinutes: reglage.pasTempsPasseMinutes, tempsMinimumMinutes: reglage.tempsMinimumMinutes };
+}
+
+const minutesSaisies = (brut: unknown) => typeof brut === 'number' ? brut : typeof brut === 'string' && /^\d+$/.test(brut.trim()) ? Number(brut.trim()) : NaN;
+
+// Lecture du pas dans le corps de PUT /api/parametres : vide (null ou chaîne vide) pour le retirer, ce
+// qui rend null, sinon 15, 30, 45 ou 60 minutes (décision de la nuit du 26 au 27-10-2026, point 8).
 export function lireReglagePasTempsPasse(brut: unknown): number | null {
   if (brut === null || brut === '') return null;
-  const minutes = typeof brut === 'number' ? brut : typeof brut === 'string' && /^\d+$/.test(brut.trim()) ? Number(brut.trim()) : NaN;
-  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) {
-    throw new TempsPasseSaisieError('Le pas du temps passé doit être un nombre entier de minutes entre 1 et 60, ou vide pour le retirer (les devis au temps passé sont alors refusés).');
+  const minutes = minutesSaisies(brut);
+  if (!PAS_TEMPS_PASSE_ADMIS.includes(minutes)) {
+    throw new TempsPasseSaisieError('Le pas du temps passé est de 15, 30, 45 ou 60 minutes, ou vide pour le retirer (les devis au temps passé sont alors refusés).');
   }
   return minutes;
+}
+
+// Lecture du temps minimum facturé dans le corps de PUT /api/parametres : vide (null ou chaîne vide), il
+// revient à une heure (décision « Il revient a 1h ») ; sinon un multiple de 15 minutes, de 15 minutes à
+// 8 heures (décision « 15 min à 8 h »).
+export function lireReglageTempsMinimum(brut: unknown): number {
+  if (brut === null || brut === '') return TEMPS_MINIMUM_PAR_DEFAUT;
+  const minutes = minutesSaisies(brut);
+  if (!Number.isInteger(minutes) || minutes < 15 || minutes > 480 || minutes % 15 !== 0) {
+    throw new TempsPasseSaisieError('Le temps minimum facturé est un nombre de minutes multiple de 15, de 15 minutes à 8 heures (480 minutes), ou vide pour revenir à une heure.');
+  }
+  return minutes;
+}
+
+// Durée en minutes, à l'écran et sur le PDF : « 30 min », « 1 h », « 1 h 15 min », « 8 h ».
+export function dureeTempsPasse(minutes: number): string {
+  const heures = Math.floor(minutes / 60);
+  const reste = minutes % 60;
+  if (heures === 0) return `${reste} min`;
+  return reste === 0 ? `${heures} h` : `${heures} h ${reste} min`;
+}
+
+const quantiteFr = (heures: number) => heures.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+
+// Quantité de la ligne au temps passé, selon le devis : une heure au moins, au millième, sur un devis
+// antérieur au lot (minimum vide) ; sinon le minimum figé, puis des multiples du pas, en minutes entières
+// (décision « 15 min à 8 h, ligne au pas »). La base le vérifie aussi à la validation.
+export function exigerQuantiteTempsPasse(quantite: number, reglages: ReglagesTempsPasseDevis) {
+  const { tempsMinimumMinutes: minimum, pasTempsPasseMinutes: pas } = reglages;
+  if (minimum === null || pas === null) {
+    if (quantite < 1) throw new TempsPasseSaisieError(REFUS_QUANTITE_TEMPS_PASSE);
+    return;
+  }
+  const milliemes = Math.round(quantite * 1000);
+  const minutes = (milliemes * 60) / 1000;
+  if (!Number.isInteger(minutes) || minutes < minimum || (minutes - minimum) % pas !== 0) {
+    const exemples = [0, 1, 2].map((rang) => quantiteFr((minimum + rang * pas) / 60)).join(' ; ');
+    throw new TempsPasseSaisieError(`La ligne au temps passé vaut le temps minimum facturé du devis (${dureeTempsPasse(minimum)}), puis des tranches de ${pas} minutes : en heures, ${exemples}…`);
+  }
 }
 
 type LigneTempsPasseExistante = { catalogueId: string | null; reference: string | null; tarifTempsPasse: string | null; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal };
@@ -180,16 +243,28 @@ export function heuresMinimumTempsPasse(quantite: unknown): string {
 }
 
 // Mention du devis au temps passé, à l'écran et sur le PDF, tirée des seules données figées du devis :
-// la quantité, le prix et le tarif de sa ligne au temps passé, et son pas.
-// Rien d'autre n'est dit de la facture, qui viendra avec un lot suivant. Null pour un devis ordinaire.
+// la quantité, le prix et le tarif de sa ligne au temps passé, son pas et son minimum. Null pour un devis
+// ordinaire.
+// Un devis antérieur au lot (minimum vide) garde le texte d'alors. Sinon, la mention annonce le minimum
+// figé et le pas au-delà (décision de la nuit du 26 au 27-10-2026, point 11) ; quand la ligne compte plus
+// que le minimum, ses heures sont une prévision et le total une estimation (point 10 : la facture reprend
+// le temps passé, avec au moins le minimum). Texte : choix par défaut, à confirmer (passation, section 3).
 export function mentionTempsPasse(devis: {
-  auTempsPasse: boolean; pasTempsPasseMinutes: number | null;
+  auTempsPasse: boolean; pasTempsPasseMinutes: number | null; tempsMinimumMinutes?: number | null;
   lignes: { tempsPasse: boolean; tarifTempsPasse: string | null; prixUnitaireHt: unknown; quantite: unknown }[];
 }): string | null {
   if (!devis.auTempsPasse) return null;
   const ligne = devis.lignes.find((l) => l.tempsPasse);
   if (!ligne || devis.pasTempsPasseMinutes === null) return null;
   const tarif = LIBELLES_TARIF_TEMPS_PASSE[ligne.tarifTempsPasse as TarifTempsPasse] ?? '';
-  const pas = `${devis.pasTempsPasseMinutes} minute${devis.pasTempsPasseMinutes > 1 ? 's' : ''}`;
-  return `Devis au temps passé : ${heuresMinimumTempsPasse(ligne.quantite)} au prix de ${formatMontantFacture(ligne.prixUnitaireHt)} HT de l’heure (${tarif}), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de ${pas}, toute tranche commencée étant due. Le total de ce devis est un minimum.`;
+  const prix = formatMontantFacture(ligne.prixUnitaireHt);
+  const minimum = devis.tempsMinimumMinutes ?? null;
+  if (minimum === null) {
+    const pas = `${devis.pasTempsPasseMinutes} minute${devis.pasTempsPasseMinutes > 1 ? 's' : ''}`;
+    return `Devis au temps passé : ${heuresMinimumTempsPasse(ligne.quantite)} au prix de ${prix} HT de l’heure (${tarif}), hors matériel ; au-delà de la première heure, le temps passé se facture par tranches de ${pas}, toute tranche commencée étant due. Le total de ce devis est un minimum.`;
+  }
+  const regle = `Devis au temps passé : au prix de ${prix} HT de l’heure (${tarif}), hors matériel, le temps passé se facture avec un minimum de ${dureeTempsPasse(minimum)}, puis par tranches de ${devis.pasTempsPasseMinutes} minutes au-delà, toute tranche commencée étant due.`;
+  const minutesLigne = Math.round(Number(ligne.quantite) * 60);
+  if (minutesLigne <= minimum) return `${regle} Le total de ce devis est un minimum.`;
+  return `${regle} Ce devis prévoit ${dureeTempsPasse(minutesLigne)} : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`;
 }

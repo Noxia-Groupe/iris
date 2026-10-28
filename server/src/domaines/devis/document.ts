@@ -10,7 +10,7 @@ import { mentionTempsPasse } from './tempsPasse';
 export type DevisImprime = {
   numero: string; version: number; objet: string; statut: string; createdAt: Date;
   totalHt: unknown; totalTva: unknown; totalTtc: unknown; acompteExige: boolean; tauxAcompte: unknown;
-  auTempsPasse: boolean; pasTempsPasseMinutes: number | null;
+  auTempsPasse: boolean; pasTempsPasseMinutes: number | null; tempsMinimumMinutes: number | null;
   lignes: { designation: string; reference: string | null; unite: string | null; quantite: unknown; prixUnitaireHt: unknown; tauxTva: unknown; totalHt: unknown; tempsPasse: boolean; tarifTempsPasse: string | null }[];
   signature: { signataire: string; signeLe: Date; empreinte: string } | null;
 };
@@ -63,9 +63,9 @@ export async function rendreDocumentDevisPdf({ devis, identite, client, fuseau }
   }
   ligne(`TVA totale : ${formatMontantFacture(devis.totalTva)}`, { taille: 10, align: 'right' });
   ligne(`Total TTC : ${formatMontantFacture(devis.totalTtc)}`, { taille: 13, align: 'right' });
-  // Devis au temps passé (décision de Nelson du 25-10-2026, « Ligne minimum comptée ») : le devis dit
-  // que son total est un minimum, avec le prix, le tarif et le pas figés sur le devis (sa ligne au temps
-  // passé et son pas), et rien d'autre de la facture, qui viendra avec un lot suivant.
+  // Devis au temps passé (décision de Nelson du 25-10-2026, « Ligne minimum comptée », et lot « facture
+  // au temps passé ») : la mention tirée des données figées du devis (sa ligne au temps passé, son pas et
+  // son minimum), la même qu'à l'écran (./tempsPasse.ts).
   const mention = mentionTempsPasse(devis);
   if (mention) {
     pdf.moveDown();
