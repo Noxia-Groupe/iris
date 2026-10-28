@@ -20726,6 +20726,8 @@ if (!TEST_DATABASE_URL) {
         // 7 h en trop à 34,44 € (241,11 €), plus 1 h à 31,43 € sur l'autre chantier.
         assert.deepEqual([duConducteur.heuresVenduesTermineTotal, duConducteur.heuresRealiseesTermineTotal, Math.round(duConducteur.manqueAGagnerMainOeuvre * 100) / 100], [40, 37, 80]);
         assert.deepEqual([duConducteur.nbTermineEnAvanceHeures, duConducteur.nbTermineEnRetardHeures, duConducteur.tauxDepassementHeures], [1, 1, 0]);
+        // Le chantier terminé dans ses heures (15 h sur 20) tient son objectif malgré les 6 h de sa suite (audit n° 1 de #343).
+        assert.deepEqual([duConducteur.nbObjectifsRespectes, duConducteur.tauxObjectifsRespectes], [1, 50]);
         // Répartition : 15 h du chantier sur 20 vendues, 660 € de main-d'œuvre (suite comprise) sur 700 € vendus, aucun
         // matériel : dans les clous ; l'autre dépasse sur le temps.
         const apres = await repartition();
@@ -20733,6 +20735,30 @@ if (!TEST_DATABASE_URL) {
       } finally {
         // Aucun chantier terminé sans achat ne reste pour fausser le ratio d'achat des autres tests.
         await prisma.chantier.updateMany({ where: { id: { in: [auDela.id, dansLesClous.id] } }, data: { statut: 'EN_COURS', dateFin: null } });
+      }
+    });
+
+    // Audit n° 1 de #343 : la main-d'œuvre des suites reste dans le coût de main-d'œuvre (choix par défaut, à confirmer).
+    test('main-d’œuvre des suites gardée dans le coût : alerte « main-d’œuvre dépassée » et dépassement du budget temps de la répartition, sans dépassement d’heures', async () => {
+      const repartition = async () => {
+        const res = await request(app).get('/api/stats/chantiers-repartition').set(admin);
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        return Object.fromEntries(res.body.categories.map((c) => [c.key, c.count]));
+      };
+      const avant = await repartition();
+      const chantier = await creerChantier('main-d’œuvre des suites', comptes.conducteurAutre.id);
+      try {
+        await pointer(chantier.id, 15, 40); // 15 h sur 20 h vendues, 600 € pour 700 € de main-d'œuvre vendue
+        await heure((await suiteDe((await interventionSur('initiale de la main-d’œuvre des suites', chantier.id)).id)).id, 5, 40); // 200 €
+        const m = (await ficheChantier(chantier.id)).metrics;
+        assert.deepEqual([m.heuresRealisees, m.moReel, m.alertes.includes('HEURES_DEPASSEES'), m.alertes.includes('MAIN_OEUVRE_DEPASSEE')], [15, 800, false, true]);
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-25T00:00:00Z') } });
+        // Heures dans les clous, mais 800 € de main-d'œuvre, suite comprise, pour 700 € vendus : dépassement du budget temps.
+        const apres = await repartition();
+        assert.deepEqual([apres.positif - avant.positif, apres.tempsSeul - avant.tempsSeul, apres.materielSeul - avant.materielSeul, apres.lesDeux - avant.lesDeux], [0, 1, 0, 0]);
+      } finally {
+        // Aucun chantier terminé sans achat ne reste pour fausser le ratio d'achat des autres tests.
+        await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'EN_COURS', dateFin: null } });
       }
     });
 
