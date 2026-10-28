@@ -19892,6 +19892,10 @@ if (!TEST_DATABASE_URL) {
       await assert.rejects(transactionVerifieeTest((tx) => tx.devis.update({ where: { id: devis.id }, data: { tempsMinimumMinutes: 90 } })), /vaut le temps minimum facturé \(90 minutes\)/);
       await assert.rejects(transactionVerifieeTest((tx) => tx.devis.update({ where: { id: devis.id }, data: { pasTempsPasseMinutes: 45, tempsMinimumMinutes: 30 } })), /vaut le temps minimum facturé \(30 minutes\), puis des tranches de 45 minutes/);
       await transactionVerifieeTest((tx) => tx.devis.update({ where: { id: devis.id }, data: { pasTempsPasseMinutes: 30, tempsMinimumMinutes: 30 } }));
+      // Audit interne n° 2 de #348 : le seul pas qui change est vérifié aussi (déclencheur du devis) ; la ligne
+      // d'une heure ne suit pas un minimum de 30 minutes puis des tranches de 45 minutes.
+      await assert.rejects(transactionVerifieeTest((tx) => tx.devis.update({ where: { id: devis.id }, data: { pasTempsPasseMinutes: 45 } })), /vaut le temps minimum facturé \(30 minutes\), puis des tranches de 45 minutes/);
+      assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).pasTempsPasseMinutes, 30);
       await transactionVerifieeTest(async (tx) => { await tx.devis.update({ where: { id: devis.id }, data: { tempsMinimumMinutes: null } }); await quantite(tx, '1.001'); });
       await assert.rejects(transactionVerifieeTest((tx) => quantite(tx, '0.999')), /antérieur au temps minimum réglé : sa ligne au temps passé compte une heure au moins/);
       await transactionVerifieeTest(async (tx) => { await quantite(tx, '1'); await tx.devis.update({ where: { id: devis.id }, data: { tempsMinimumMinutes: 60, pasTempsPasseMinutes: 15 } }); });

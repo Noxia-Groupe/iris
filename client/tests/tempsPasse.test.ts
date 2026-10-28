@@ -46,6 +46,7 @@ test('quantité : le minimum figé puis des multiples du pas ; une heure au moin
   for (const quantite of [1, 0.75, 1.5]) assert.equal(refusQuantiteTempsPasse(quantite, autres), 'La ligne au temps passé vaut le temps minimum facturé du devis (30 min), puis des tranches de 45 minutes : en heures, 0,5 ; 1,25 ; 2…', String(quantite));
   // Devis antérieur au lot : minimum vide, une heure au moins, au millième.
   const ancien = { tempsMinimumMinutes: null, pasTempsPasseMinutes: 10 };
+  assert.equal(refusQuantiteTempsPasse(1, ancien), null, 'une heure tout juste, comme avant le lot');
   assert.equal(refusQuantiteTempsPasse(1.001, ancien), null);
   assert.equal(refusQuantiteTempsPasse(0.999, ancien), REFUS_QUANTITE);
   // Nouveau devis : réglages inconnus de l'écran, le serveur contrôle le reste.
