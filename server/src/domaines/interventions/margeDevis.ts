@@ -15,8 +15,9 @@ import { totalHeuresInterventionAuCentime } from './metier';
 // recette, pour une intervention annulée ou issue d'un devis annulé (« pas d’intervention ou contrat donc
 // pas de facture », décision 14 de la même nuit ; choix par défaut, à confirmer, pour une intervention
 // annulée depuis sa fiche), ni pour celle d'un devis converti aussi en chantier : son total HT est déjà
-// le vendu du chantier, et le point 2 ne vise que l'intervention « sans chantier » (question à Nelson
-// sur le suivi de marge qui reçoit alors ses coûts et ceux de ses suites).
+// le vendu du chantier, et le point 2 ne vise que l'intervention « sans chantier ». Ses coûts et ceux de
+// ses suites vont alors au chantier, auquel elle est rattachée (décision de Nelson du 27-10-2026 à 21:41
+// UTC, devis/rattachement.ts).
 export type MargeDevisIntervention = {
   devis: { id: string; numero: string; version: number };
   totalDevisHT: Prisma.Decimal;
