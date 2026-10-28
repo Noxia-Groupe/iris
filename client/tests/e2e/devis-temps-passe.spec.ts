@@ -107,7 +107,7 @@ test('le temps minimum facturé et le pas du temps passé se règlent dans l’a
     expect([await lirePas(request, session.token), await lireMinimum(request, session.token)]).toEqual([null, 60]);
     // Un pas réglé avant le lot (ici 10 minutes, lu tel quel du serveur) reste affiché, signalé comme
     // n'étant plus admis ; l'enregistrer de nouveau est refusé par le serveur, qui ne l'écrit pas.
-    await page.route(`${api}/parametres`, async (route) => {
+    await page.route('**/api/parametres', async (route) => {
       if (route.request().method() !== 'GET') return route.fallback();
       const reponse = await route.fetch();
       await route.fulfill({ response: reponse, json: { ...(await reponse.json()), pasTempsPasseMinutes: 10 } });
@@ -120,7 +120,7 @@ test('le temps minimum facturé et le pas du temps passé se règlent dans l’a
     await enregistrer.click();
     await expect(section.getByRole('alert')).toHaveText('Le pas du temps passé est de 15, 30, 45 ou 60 minutes, ou vide pour le retirer (les devis au temps passé sont alors refusés).');
     expect(await lirePas(request, session.token)).toBeNull();
-    await page.unroute(`${api}/parametres`);
+    await page.unroute('**/api/parametres');
   } finally {
     await reglerPas(request, session.token, pasAvant);
     await reglerMinimum(request, session.token, minimumAvant);
@@ -133,7 +133,7 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
   const pasAvant = await lirePas(request, session.token);
   const minimumAvant = await lireMinimum(request, session.token);
   try {
-    await reglerPas(request, session.token, 15);
+    await reglerPas(request, session.token, 30);
     await reglerMinimum(request, session.token, 60);
     const mainOeuvre = await creerMainOeuvre(request, session.token, suffixe);
     const cable = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-TP-CAB-${suffixe}`, nom: `Câble temps passé E2E ${suffixe}`, unite: 'm', prixVenteHt: '2.50', tauxTva: '20' }) as { nom: string };
@@ -185,18 +185,23 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     await page.getByRole('searchbox', { name: 'Rechercher dans le catalogue' }).fill(`E2E-TP-CAB-${suffixe}`);
     await page.getByRole('button', { name: `Ajouter ${cable.nom}` }).click();
     await page.getByRole('spinbutton', { name: 'Qté' }).fill('12');
-    // Quantité nulle : refusée par l'écran, avec un message clair, sans rien envoyer au serveur.
+    // Le navigateur refuse lui-même, sans rien envoyer, une quantité nulle ou hors des quarts d'heure (le
+    // champ d'un nouveau devis va par quarts d'heure, à partir d'un quart d'heure).
     const envois: string[] = [];
-    const surRequete = (requete: { method: () => string; url: () => string }) => { if (['POST', 'PUT'].includes(requete.method()) && /\/api\/devis(\/[0-9a-f-]+)?$/.test(requete.url())) envois.push(requete.url()); };
+    const surRequete = (requete: { method: () => string; url: () => string }) => { if (['POST', 'PATCH'].includes(requete.method()) && /\/api\/devis(\/[0-9a-f-]+)?$/.test(requete.url())) envois.push(requete.url()); };
     page.on('request', surRequete);
+    const validite = (champ: typeof heures) => champ.evaluate((element) => { const { rangeUnderflow, stepMismatch } = (element as HTMLInputElement).validity; return { rangeUnderflow, stepMismatch }; });
     await heures.fill('0');
     await page.getByRole('button', { name: 'Créer le brouillon' }).click();
-    await expect(page.getByRole('alert').filter({ hasText: 'heures' })).toHaveText('La quantité de la ligne au temps passé, en heures, est positive.');
-    expect(envois, 'aucune création envoyée').toHaveLength(0);
-    // Hors du minimum puis du pas réglés (une heure, puis 15 minutes) : refusée par le serveur, qui n'écrit rien.
+    expect(await validite(heures)).toEqual({ rangeUnderflow: true, stepMismatch: false });
     await heures.fill('1.1');
     await page.getByRole('button', { name: 'Créer le brouillon' }).click();
-    await expect(page.getByRole('alert').filter({ hasText: 'tranches' })).toHaveText('La ligne au temps passé vaut le temps minimum facturé du devis (1 h), puis des tranches de 15 minutes : en heures, 1 ; 1,25 ; 1,5…');
+    expect(await validite(heures)).toEqual({ rangeUnderflow: false, stepMismatch: true });
+    expect(envois, 'aucune création envoyée').toHaveLength(0);
+    // Hors du minimum puis du pas réglés (une heure, puis 30 minutes) : refusée par le serveur, qui n'écrit rien.
+    await heures.fill('1.25');
+    await page.getByRole('button', { name: 'Créer le brouillon' }).click();
+    await expect(page.getByRole('alert').filter({ hasText: 'tranches' })).toHaveText('La ligne au temps passé vaut le temps minimum facturé du devis (1 h), puis des tranches de 30 minutes : en heures, 1 ; 1,5 ; 2…');
     expect(envois, 'une création envoyée, refusée').toHaveLength(1);
     expect(await devisDuClient(request, session.token, client.id)).toHaveLength(0);
     await heures.fill('2');
@@ -204,36 +209,42 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     const item = page.getByRole('listitem').filter({ hasText: objet });
     await expect(item).toContainText('Au temps passé');
     await expect(item).toContainText('HT 110.00 € · TVA 22.00 € · TTC 132.00 €');
-    await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('40,00 €', 'sous contrat', '1 h', 15)} Ce devis prévoit 2 h : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`);
+    await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('40,00 €', 'sous contrat', '1 h', 30)} Ce devis prévoit 2 h : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`);
     const [enregistre] = await devisDuClient(request, session.token, client.id) as unknown as { id: string; auTempsPasse: boolean; pasTempsPasseMinutes: number; tempsMinimumMinutes: number; lignes: { tempsPasse: boolean; tarifTempsPasse: string; prixUnitaireHt: number; quantite: number }[] }[];
-    expect([enregistre.auTempsPasse, enregistre.pasTempsPasseMinutes, enregistre.tempsMinimumMinutes]).toEqual([true, 15, 60]);
+    expect([enregistre.auTempsPasse, enregistre.pasTempsPasseMinutes, enregistre.tempsMinimumMinutes]).toEqual([true, 30, 60]);
     expect(enregistre.lignes.filter((l) => l.tempsPasse).map((l) => [l.tarifTempsPasse, l.prixUnitaireHt, l.quantite])).toEqual([['SOUS_CONTRAT', 40, 2]]);
 
     // Modifier le brouillon : la ligne garde son prix figé, même si la main d'œuvre change de prix ; le
-    // devis garde son minimum et son pas, même si la société les change (ici deux heures, puis 30 minutes).
+    // devis garde son minimum et son pas, même si la société les change (ici deux heures, puis une heure).
     await envoyer(request, session.token, 'put', `/catalogue/prestations/${mainOeuvre.id}`, {
       estMainOeuvre: true, reference: mainOeuvre.reference, nom: mainOeuvre.nom, tauxTva: '20',
       prixVenteHt: '50', prixJourHorsContratHt: '320', prixHeureSousContratHt: '44', prixJourSousContratHt: '280', heuresParJour: '7',
     });
-    await reglerPas(request, session.token, 30);
+    await reglerPas(request, session.token, 60);
     await reglerMinimum(request, session.token, 120);
     await item.getByRole('button', { name: 'Modifier' }).click();
     await expect(page.getByRole('checkbox', { name: 'Devis au temps passé' })).toBeChecked();
     await expect(ligne.getByTestId('prix-heure-temps-passe')).toHaveText('40,00 € HT');
-    // Les réglages du devis modifié sont connus de l'écran, qui refuse lui-même une quantité hors du pas.
+    // Les réglages du devis modifié sont connus de l'écran : le champ part du minimum figé et avance au pas
+    // figé, et le navigateur refuse lui-même une quantité qui ne les suit pas.
     const heuresFigees = ligne.getByRole('spinbutton', { name: 'Heures (1 h minimum)' });
     await expect(heuresFigees).toHaveValue('2');
-    await expect(ligne).toContainText('Le temps minimum facturé du devis (1 h), puis des tranches de 15 minutes.');
-    await heuresFigees.fill('2.1');
-    await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
-    await expect(page.getByRole('alert').filter({ hasText: 'tranches' })).toHaveText('La ligne au temps passé vaut le temps minimum facturé du devis (1 h), puis des tranches de 15 minutes : en heures, 1 ; 1,25 ; 1,5…');
-    expect(envois, 'aucune modification envoyée : les deux créations seules').toHaveLength(2);
-    page.off('request', surRequete);
-    // 2 h 15 : au pas du devis, non à celui du jour.
+    await expect(ligne).toContainText('Le temps minimum facturé du devis (1 h), puis des tranches de 30 minutes.');
+    await expect(heuresFigees).toHaveAttribute('min', '1');
+    await expect(heuresFigees).toHaveAttribute('step', '0.5');
     await heuresFigees.fill('2.25');
     await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
-    await expect(item).toContainText('HT 120.00 € · TVA 24.00 € · TTC 144.00 €');
-    await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('40,00 €', 'sous contrat', '1 h', 15)} Ce devis prévoit 2 h 15 min : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`);
+    expect(await validite(heuresFigees)).toEqual({ rangeUnderflow: false, stepMismatch: true });
+    await heuresFigees.fill('0.5');
+    await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
+    expect(await validite(heuresFigees)).toEqual({ rangeUnderflow: true, stepMismatch: false });
+    expect(envois, 'aucune modification envoyée : les deux créations seules').toHaveLength(2);
+    page.off('request', surRequete);
+    // 2 h 30 : au pas du devis (une heure, puis 30 minutes), non à celui du jour (deux heures, puis une heure).
+    await heuresFigees.fill('2.5');
+    await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
+    await expect(item).toContainText('HT 130.00 € · TVA 26.00 € · TTC 156.00 €');
+    await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('40,00 €', 'sous contrat', '1 h', 30)} Ce devis prévoit 2 h 30 min : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`);
 
     // Signé, il se convertit en intervention depuis l'écran : l'intervention porte le marqueur.
     await envoyer(request, session.token, 'post', `/devis/${enregistre.id}/signature`, { signataire: 'Client temps passé E2E', confirme: true });
