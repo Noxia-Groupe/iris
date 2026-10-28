@@ -718,6 +718,46 @@ test('peutVoirFinance : jamais pour un technicien, même avec un accès financie
 });
 
 // Ajout du second audit interne de #293 : l'auteur du journal SAV.
+describe('Facture au temps passé : heures facturées (lot « facture au temps passé », seconde PR)', async () => {
+  const { grilleTempsPasse, minutesFacturees, heuresDesMinutes } = await import('../dist/src/domaines/factures/tempsPasse.js');
+  const facturees = (minutesSaisies, devis, quantiteLigne = 1) => {
+    const minutes = minutesFacturees(minutesSaisies, grilleTempsPasse(devis, quantiteLigne));
+    return [minutes.toString(), heuresDesMinutes(minutes).toString()];
+  };
+
+  test('devis fait depuis le temps minimum : au moins le minimum, puis toute tranche du pas commencée au-delà', () => {
+    const devis = { tempsMinimumMinutes: 60, pasTempsPasseMinutes: 15 };
+    // Décision « Une fois au total » : 40 min puis 30 min font 1 h 10, soit 1 h 15 facturée.
+    assert.deepEqual(facturees(70, devis), ['75', '1.25']);
+    for (const [saisies, attendu] of [[0, ['60', '1']], [10, ['60', '1']], [60, ['60', '1']], [60.6, ['75', '1.25']], [75, ['75', '1.25']], [75.6, ['90', '1.5']], [480, ['480', '8']]]) {
+      assert.deepEqual(facturees(saisies, devis), attendu, `${saisies} min`);
+    }
+    // Minimum de 30 min et pas de 45 min : l'ancre est le minimum, et non la première heure.
+    const court = { tempsMinimumMinutes: 30, pasTempsPasseMinutes: 45 };
+    for (const [saisies, attendu] of [[20, ['30', '0.5']], [31.2, ['75', '1.25']], [75, ['75', '1.25']], [76.2, ['120', '2']]]) {
+      assert.deepEqual(facturees(saisies, court), attendu, `${saisies} min`);
+    }
+    // Les heures de la ligne du devis ne sont qu'une prévision : elles ne changent rien au plancher.
+    assert.deepEqual(facturees(10, devis, 2), ['60', '1']);
+  });
+
+  test('devis antérieur au temps minimum : les heures de sa ligne pour plancher, puis le pas au-delà', () => {
+    // Décision « Les heures de la ligne » : la mention annonçait 2 heures minimum facturées.
+    const ancien = { tempsMinimumMinutes: null, pasTempsPasseMinutes: 45 };
+    for (const [saisies, attendu] of [[30, ['120', '2']], [120, ['120', '2']], [120.6, ['165', '2.75']], [165, ['165', '2.75']], [166.2, ['210', '3.5']]]) {
+      assert.deepEqual(facturees(saisies, ancien, 2), attendu, `${saisies} min`);
+    }
+    // Une ligne d'une heure : la règle d'alors (une heure au moins, puis le pas).
+    assert.deepEqual(facturees(61.2, { tempsMinimumMinutes: null, pasTempsPasseMinutes: 7 }, 1), ['67', '1.117']);
+    // Ligne au millième (1,333 h, soit 79,98 min) et pas qui ne divise pas l'heure : la quantité s'arrondit
+    // au millième le plus proche.
+    const vingt = { tempsMinimumMinutes: null, pasTempsPasseMinutes: 20 };
+    assert.deepEqual(facturees(60, vingt, '1.333'), ['79.98', '1.333']);
+    assert.deepEqual(facturees(81, vingt, '1.333'), ['99.98', '1.666']);
+    assert.deepEqual(facturees(100.2, vingt, '1.333'), ['119.98', '2']);
+  });
+});
+
 describe('Lot pilote 5 : auteur du journal SAV', () => {
   // Décision de Nelson du 22-10-2026 : la génération automatique écrit au nom du compte système.
   test('la génération automatique écrit au nom du compte système ; une requête sans compte est refusée', async () => {

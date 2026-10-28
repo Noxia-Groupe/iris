@@ -52,6 +52,7 @@ import { enregistrerRoutesInterventions } from './src/domaines/interventions/rou
 import { enregistrerRoutesPlanning } from './src/domaines/planning/routes';
 export { libelleComptableValide } from './src/domaines/comptabilite/metier';
 import { enregistrerRoutesFactures, enregistrerRoutesEmissionFactures } from './src/domaines/factures/routes';
+import { enregistrerRoutesFactureTempsPasse } from './src/domaines/factures/routesTempsPasse';
 import { enregistrerRoutesReglements } from './src/domaines/reglements/routes';
 import { enregistrerRoutesComptabilite } from './src/domaines/comptabilite/routes';
 import { weekBoundsFrom, periodBounds } from './src/domaines/statistiques/metier';
@@ -84,6 +85,9 @@ enregistrerRoutesComptabilite(app);
 
 // --- Factures : export comptable, mentions légales, émission, annulation, avoirs (src/domaines/factures/routes.ts) ---
 enregistrerRoutesEmissionFactures(app);
+
+// --- Facture au temps passé d'une intervention : aperçu et brouillon (src/domaines/factures/routesTempsPasse.ts) ---
+enregistrerRoutesFactureTempsPasse(app);
 
 // --- Règlements clients (src/domaines/reglements/routes.ts) ---
 enregistrerRoutesReglements(app);
