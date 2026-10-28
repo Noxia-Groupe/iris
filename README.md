@@ -148,7 +148,8 @@ conversions simultanées, et une référence d'affaire déjà portée par un aut
 (409). Depuis le lot 4 suite (décisions de Nelson des 22 et 23-10-2026), une affaire se convertit
 au plus deux fois, en deux cibles de types différents parmi chantier, intervention et contrat de
 maintenance ; l'annulation du devis annule aussi le contrat, ses visites non réalisées (choix
-par défaut, à confirmer) et l'intervention qu'il a créés. Le chantier s'ouvre depuis l'écran Devis (« Ouvrir le chantier ») ou depuis **Administration >
+par défaut, à confirmer) et l'intervention qu'il a créés, avec les suites de celle-ci (lecture
+retenue de la décision de Nelson du 27-10-2026, à confirmer). Le chantier s'ouvre depuis l'écran Devis (« Ouvrir le chantier ») ou depuis **Administration >
 Chantiers** (« Ouvrir le chantier d'une affaire »). Ce second formulaire part du devis signé,
 dont le chantier reprend le client, la référence, le montant et les heures vendus, et fixe en
 même temps le responsable, le commercial, les types et la date de début ; ces choix
@@ -163,7 +164,7 @@ BROUILLON → ENVOYÉ → ACCEPTÉ ─┬─ valider ─────────
 ACCEPTÉ ou converti ──[annulation administrateur + motif]──→ ANNULÉ (terminal)
                                                              ↳ chantier archivé, motif conservé
                                                              ↳ contrat annulé, visites non réalisées annulées
-                                                             ↳ intervention annulée
+                                                             ↳ intervention annulée, avec ses suites
                                                              ↳ créneaux des interventions annulées retirés du planning
 ```
 
@@ -179,9 +180,12 @@ erreur. Réservée aux administrateurs, elle exige un motif, **archive** le chan
 lieu de le détruire — sa raison doit rester lisible — et elle est **refusée dès qu'une
 heure ou un achat y a été saisi** : une affaire commencée se mène à son terme, elle ne
 s'efface pas. Depuis le lot 4 suite, elle annule aussi le contrat de maintenance issu du devis
-et ses visites non réalisées, ainsi que l'intervention SAV qu'il a créée ; elle est également
-refusée si cette intervention est en cours ou terminée, ou si une visite du contrat est en cours
-(sort des visites et refus : choix par défaut, à confirmer, passation section 4) ; chaque
+et ses visites non réalisées, ainsi que l'intervention SAV qu'il a créée et, depuis la décision
+de Nelson du 27-10-2026 (lecture retenue, à confirmer), les suites de celle-ci ; elle est
+également refusée si cette intervention ou l'une de ses suites est en cours ou terminée, si une
+visite du contrat est en cours, ou si les suites rattachées au chantier, ou l'intervention du
+devis rattachée à lui, portent des coûts non archivés (sort des visites et refus : choix par
+défaut, à confirmer, passation section 4) ; chaque
 intervention annulée perd son créneau au planning (décision de Nelson du 24-10-2026). Une affaire
 archivée sort des listes, des coûts, des marges et des commissions, n'accepte plus aucune
 écriture, mais reste consultable avec son motif.
