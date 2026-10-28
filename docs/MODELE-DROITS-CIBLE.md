@@ -62,7 +62,7 @@ Une permission = **un domaine et une action**, écrite en langage clair. Une seu
 | | `devis.convertir` | Convertir un devis signé |
 | | `devis.ouvrirChantier` | Choisir le titulaire, le commercial, les types et la date de début lors de la conversion |
 | | `devis.acompte` | Constater l'acompte |
-| | `devis.annuler` | Annuler un devis, et ce qu'il a créé : le chantier, le contrat de maintenance et ses visites non réalisées, l'intervention (lot 4 suite) |
+| | `devis.annuler` | Annuler un devis, et ce qu'il a créé : le chantier, le contrat de maintenance et ses visites non réalisées, l'intervention (lot 4 suite) et ses suites (#341) |
 | Chantiers | `chantiers.consulter` | Consulter la liste, la fiche et le journal d'un chantier |
 | | `chantiers.modifier` | Modifier la fiche (nom, référence, budgets, dates, adresse, types, barème réduit) |
 | | `chantiers.reattribuer` | Changer le titulaire ou le commercial d'un chantier existant |

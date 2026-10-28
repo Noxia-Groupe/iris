@@ -892,7 +892,7 @@ Lecture retenue :
 
 ### 15:50 UTC : coûts d'une suite sur un chantier clos, suite d'une intervention annulée avec son devis
 
-Claude Code a posé deux questions (14:09 UTC), en rendant compte du troisième audit de la seconde PR de l'intervention de suivi liée ([#339](https://github.com/Noxia-Groupe/iris/pull/339)) :
+Claude Code a posé deux questions (14:09 UTC), en rendant compte du deuxième audit de la seconde PR de l'intervention de suivi liée ([#339](https://github.com/Noxia-Groupe/iris/pull/339)) et du lancement du troisième :
 
 ```text
 **Deux nouvelles questions pour vous**, posées en section 3 de la passation :
@@ -946,7 +946,7 @@ Lecture retenue, à confirmer. Les deux lignes numérotées répondent aux deux 
 
 **Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; les mentions suivantes y sont levées ou modifiées par la présente section :
 
-- décisions de la nuit du 26 au 27-10-2026 : la cinquième question à choix, « la question reste ouverte », et le point 5, « Lecture à confirmer, la cinquième question à choix étant restée sans réponse » et « la PR de cette marge attend sa réponse », tranchés à 10:27 UTC ; le découpage et l'ordre des lots, « sa question de prix (point 5) attend une réponse », de même, le reste du découpage restant à confirmer ;
+- décisions de la nuit du 26 au 27-10-2026 : la cinquième question à choix, « la question reste ouverte », et le point 5, « Lecture à confirmer, la cinquième question à choix étant restée sans réponse » et « la PR de cette marge attend sa réponse », tranchés à 10:27 UTC, comme les trois « sauf la lecture du point 5 » de ses propres mentions antérieures ; le découpage et l'ordre des lots, « sa question de prix (point 5) attend une réponse », de même, le reste du découpage restant à confirmer ;
 - décisions de la nuit du 26 au 27-10-2026, point 1 : « Les autres interventions rattachées à l'affaire, dont l'intervention initiale d'une suite, restent hors de cette marge », sauf, depuis 21:41 UTC, l'intervention issue du devis qui a aussi ouvert le chantier, rattachée à lui et comptée dans sa marge.
 
 ## Lots du 27 au 28-10-2026
@@ -963,4 +963,4 @@ Lecture retenue, à confirmer. Les deux lignes numérotées répondent aux deux 
 
 ### Suivis ouverts pendant ces lots
 
-Étiquette `suivi-audit` : #340 (garde en base de l'affaire d'une suite, lectures des coûts en N+1 sur l'écran des interventions ; audit de #339), #342 (refus contrôlés dans le navigateur hors de la vue à 375 px, message « Rouvrez-le d’abord. », file du planning, test du 404 à la création d'une suite ; audits de #341), #345 (clôture d'un chantier concurrente de l'annulation de son devis, arrondi de la main-d'œuvre, journal des heures de la fiche chantier, reste à facturer, bouton « Ouvrir le chantier » de l'écran Devis, lot « Directeur aligné sur l'administration », comptes de test non nettoyés ; audits de #344). Les notes de ces audits destinées à la documentation sont traitées par la PR qui consigne ces deux sections.
+Étiquette `suivi-audit` : #340 (garde en base de l'affaire d'une suite, lectures des coûts en N+1 sur l'écran des interventions ; audit de #339 ; puis « matériel 0,00 € » lu par le conducteur et taille de `ChantierDetail.tsx`, audit n° 1 de #343), #342 (refus contrôlés dans le navigateur hors de la vue à 375 px, message « Rouvrez-le d’abord. », file du planning, test du 404 à la création d'une suite ; audits de #341), #345 (clôture d'un chantier concurrente de l'annulation de son devis, arrondi de la main-d'œuvre, journal des heures de la fiche chantier, reste à facturer, bouton « Ouvrir le chantier » de l'écran Devis, lot « Directeur aligné sur l'administration », comptes de test non nettoyés ; audits de #344). Les notes de ces audits destinées à la documentation sont traitées par la PR qui consigne ces deux sections.
