@@ -1001,3 +1001,17 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin :
 ### Suivi ouvert pendant ce lot
 
 Étiquette `suivi-audit` : #349 (numéro de devis consommé par un refus de duplication sous verrou, en cas de course ; nouvelle ligne au temps passé créée à une heure quand le minimum figé est connu ; devis antérieur modifié à l'écran non couvert par l'E2E ; aide de la case « Devis au temps passé » sur un devis antérieur ; réserve sur la puce « Pas réglé avant le lot » de la passation ; audits de #348). La réserve destinée à la documentation (N13) est versée par la PR qui consigne cette section ; le correctif de code reste dans #349.
+
+## Lot du 28-10-2026 (soir)
+
+*Rédigé le 28-10-2026.* Fusion faite par Claude Code selon la décision de Nelson du 20-10-2026, avec une CI verte et un audit interne fusionnable sur la même SHA. Le lot touche aux montants des factures : il n'est pas validé pour mise en service, la validation comptable de Nelson étant attendue.
+
+### Lot fusionné
+
+- #351 (lot « facture au temps passé », seconde PR) : facture au temps passé d'une intervention et de ses suites, au prix figé sur le devis, au moins le minimum figé (pour un devis sans minimum figé, les heures de sa ligne), puis toute tranche du pas commencée, appliqués une fois au total des heures (décisions de la nuit du 26 au 27-10-2026, points 3 et 8 à 12, et du 28-10-2026, points 1 et 2) ; une seule facture vivante pour l'intervention et ses suites, garantie aussi en base ; facture saisie ligne par ligne refusée pour elles ; quatre audits internes : le premier a relevé un interblocage avec l'annulation du devis et le rattachement au chantier (R1), deux erreurs (C1, C2) et des tests manquants, dont quatre sur les montants, le deuxième une documentation inexacte d'un montant (C1) et des tests manquants, dont un sur les montants, le troisième un test manquant sur les montants, tous corrigés ou ajoutés à la PR avant fusion ; le quatrième, vérification de clôture, l'a dite fusionnable sur `72eddb3`.
+
+**Mentions antérieures.** Décisions du 28-10-2026 sur la facture au temps passé, points 1 (« **À appliquer** par la seconde PR du lot, prévue ; rien n'en est codé ») et 2 (« **À appliquer** par la seconde PR du lot ») : appliqués par #351, non validée pour mise en service.
+
+### Suivi ouvert pendant ce lot
+
+Étiquette `suivi-audit` : #352 (audits de #351 : questions pour Nelson sur la conversion en chantier d'un devis dont l'intervention porte déjà une facture et sur le brouillon au temps passé que la numérotation chronologique empêche d'émettre ; suite d'une intervention au temps passé non signalée à l'écran Factures ; refus d'annulation d'une facture réglée ; saisie ligne par ligne d'une intervention au temps passé annulée, à reprendre avec le lot du point 14 ; périmètre de la « dernière facture émise », à garder par le futur lot « abandon d'un brouillon »).
