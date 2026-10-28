@@ -50,9 +50,10 @@ export function minutesFacturees(minutesSaisies: Prisma.Decimal.Value, grille: G
   return grille.plancherMinutes.plus(depassement.div(grille.pasMinutes).ceil().times(grille.pasMinutes));
 }
 
-// Quantité de la ligne, en heures au millième comme les lignes de facture : exacte pour un devis fait
-// depuis le temps minimum (minutes multiples de 15) ; arrondie au plus proche sur un devis antérieur dont
-// le pas ne divise pas l'heure.
+// Quantité de la ligne, en heures au millième comme les lignes de facture : exacte quand le pas est un
+// multiple de 3 minutes (une tranche vaut alors un nombre entier de millièmes d'heure), donc pour tout devis
+// au minimum figé (pas de 15, 30, 45 ou 60 minutes) ; sinon, sur un devis sans minimum figé, arrondie au
+// plus proche, même quand le pas divise l'heure (au pas de 20 minutes, 1 h 20 vaut 1,333 h).
 export const heuresDesMinutes = (minutes: Prisma.Decimal) => minutes.div(60).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
 
 const STATUTS_SUITE_CLOSE = ['TERMINEE', 'ANNULEE'];
@@ -183,7 +184,7 @@ export async function preparerFactureTempsPasse(db: Db, interventionId: string, 
     select: { numero: true }, orderBy: { createdAt: 'asc' },
   });
   if (existantes.length) {
-    throw new RefusFactureTempsPasse(409, `Cette intervention ou l’une de ses suites a déjà une facture (${libelles(existantes.map((f) => f.numero ?? 'brouillon'))}) : la facture au temps passé est unique. Pour la refaire, annulez d’abord la facture émise par son avoir total ; une facture qui a reçu un avoir partiel ou un règlement ne s’annule plus en totalité et se corrige par des avoirs partiels.`);
+    throw new RefusFactureTempsPasse(409, `Cette intervention ou l’une de ses suites a déjà une facture (${libelles(existantes.map((f) => f.numero ?? 'brouillon'))}) : la facture au temps passé est unique. Pour la refaire, annulez d’abord la facture émise par son avoir total (un brouillon s’émet d’abord) ; une facture qui a reçu un avoir partiel, ou un règlement qui n’est pas contre-passé, ne s’annule plus en totalité et se corrige par des avoirs partiels.`);
   }
 
   const facturables = [intervention.id, ...suites.filter((suite) => suite.statut !== 'ANNULEE').map((suite) => suite.id)];

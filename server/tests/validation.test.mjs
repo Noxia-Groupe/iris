@@ -749,12 +749,17 @@ describe('Facture au temps passé : heures facturées (lot « facture au temps p
     }
     // Une ligne d'une heure : la règle d'alors (une heure au moins, puis le pas).
     assert.deepEqual(facturees(61.2, { tempsMinimumMinutes: null, pasTempsPasseMinutes: 7 }, 1), ['67', '1.117']);
-    // Ligne au millième (1,333 h, soit 79,98 min) et pas qui ne divise pas l'heure : la quantité s'arrondit
-    // au millième le plus proche.
+    // Ligne au millième (1,333 h, soit 79,98 min) et pas de 20 minutes, qui divise l'heure mais ne vaut pas un
+    // nombre entier de millièmes d'heure : la quantité s'arrondit au millième le plus proche.
     const vingt = { tempsMinimumMinutes: null, pasTempsPasseMinutes: 20 };
     assert.deepEqual(facturees(60, vingt, '1.333'), ['79.98', '1.333']);
     assert.deepEqual(facturees(81, vingt, '1.333'), ['99.98', '1.666']);
     assert.deepEqual(facturees(100.2, vingt, '1.333'), ['119.98', '2']);
+    // L'arrondi vient du pas, et non de la ligne : sur une ligne d'une heure, une tranche de 20 minutes
+    // s'arrondit (1 h 20, soit 1,333 h), une tranche de 9 minutes, qui ne divise pas l'heure, est exacte
+    // (1 h 09, soit 1,15 h). La quantité n'est exacte que pour un pas multiple de 3 minutes.
+    assert.deepEqual(facturees(66, vingt, 1), ['80', '1.333']);
+    assert.deepEqual(facturees(61, { tempsMinimumMinutes: null, pasTempsPasseMinutes: 9 }, 1), ['69', '1.15']);
   });
 });
 

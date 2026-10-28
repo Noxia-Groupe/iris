@@ -22794,5 +22794,72 @@ if (!TEST_DATABASE_URL) {
       assert.match(refus.body.error, /déjà une facture \(brouillon\) : la facture au temps passé est unique/);
       assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id } }), 1);
     });
+
+    // Tests ajoutés par l'audit interne n° 2 de #351 : heures de la suite non annulée d'une suite annulée (note N9
+    // de l'audit n° 1, montants), refus d'unicité après un avoir partiel (note N11), suite créée pendant la création
+    // de la facture (R1).
+    test('audit 2 — montants : la suite non annulée d’une suite annulée est facturée, la suite annulée non (lecture littérale, à confirmer)', async () => {
+      const { intervention } = await interventionTempsPasse('suite d’une suite annulée');
+      // La suite est annulée depuis sa fiche après la création de sa propre suite, qu'elle garde (première PR du suivi).
+      const suite = await suiteDe(intervention.id, null);
+      const suiteDeSuite = await suiteDe(suite.id);
+      await prisma.intervention.update({ where: { id: suite.id }, data: { statut: 'ANNULEE' } });
+      await heure(intervention.id, 0.5);
+      await heure(suite.id, 3); // suite annulée : hors facture
+      await heure(suiteDeSuite.id, 1); // suite non annulée d'une suite annulée : facturée
+      // 1,5 h comptées : le minimum d'une heure, puis deux tranches de 15 minutes, soit 1,5 h à 45,50 € et la fourniture.
+      const lu = await apercu(intervention.id);
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      assert.deepEqual([lu.body.heures.intervention, lu.body.heures.saisies, lu.body.heures.facturees, lu.body.totalHt, lu.body.totalTtc], [0.5, 1.5, 1.5, 78.25, 93.9]);
+      assert.deepEqual(lu.body.heures.suites.map((s) => [s.reference, s.statut, s.heures]).sort(), [[suite.reference, 'ANNULEE', null], [suiteDeSuite.reference, 'TERMINEE', 1]].sort());
+      const creee = await creerFacture(intervention.id, { totalHtAttendu: 78.25 });
+      assert.equal(creee.status, 201, JSON.stringify(creee.body));
+      assert.deepEqual([creee.body.totalHt, creee.body.totalTva, creee.body.totalTtc], [78.25, 15.65, 93.9]);
+      const ligne = (await prisma.factureLigne.findMany({ where: { factureId: creee.body.id }, orderBy: { ordre: 'asc' } }))[0];
+      assert.deepEqual([ligne.quantite.toString(), ligne.totalHt.toString()], ['1.5', '68.25']);
+    });
+
+    test('audit 2 — unicité après un avoir partiel : le refus dit que la facture se corrige par des avoirs partiels, son annulation totale étant refusée', async () => {
+      await assurerFacturation();
+      const { intervention } = await interventionTempsPasse('avoir partiel puis refus');
+      await heure(intervention.id, 1);
+      const creee = await creerFacture(intervention.id, { totalHtAttendu: 55.5 });
+      assert.equal(creee.status, 201, JSON.stringify(creee.body));
+      const emise = await request(app).post(`/api/factures/${creee.body.id}/emettre`).set(admin);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      const partiel = await envoyer('post', `/api/factures/${creee.body.id}/avoirs`, admin, { lignes: [{ designation: 'TEST Geste commercial', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 5, tauxTva: 20 }] });
+      assert.equal(partiel.status, 201, JSON.stringify(partiel.body));
+      const message = `Cette intervention ou l’une de ses suites a déjà une facture (${emise.body.numero}) : la facture au temps passé est unique. Pour la refaire, annulez d’abord la facture émise par son avoir total (un brouillon s’émet d’abord) ; une facture qui a reçu un avoir partiel, ou un règlement qui n’est pas contre-passé, ne s’annule plus en totalité et se corrige par des avoirs partiels.`;
+      for (const refus of [await apercu(intervention.id), await creerFacture(intervention.id, { totalHtAttendu: 55.5 })]) {
+        assert.deepEqual([refus.status, refus.body.error], [409, message]);
+      }
+      // Ce que dit le message : l'annulation totale de cette facture est refusée, et rien n'est écrit.
+      const annulation = await request(app).post(`/api/factures/${creee.body.id}/annuler`).set(admin);
+      assert.deepEqual([annulation.status, annulation.body.error], [409, 'Cette facture porte déjà un ou plusieurs avoirs partiels : elle ne peut plus être annulée en totalité.']);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id, type: 'FACTURE' } }), 1);
+    });
+
+    test('audit 2 — concurrence : une suite créée pendant la création de la facture la refuse (409, à relancer), sans interblocage', async () => {
+      const { intervention } = await interventionTempsPasse('suite pendant la facture');
+      await heure(intervention.id, 1);
+      let suite = null;
+      let creation = null;
+      // La numérotation des interventions est verrouillée ici : la création de la suite verrouille l'intervention,
+      // puis attend ce verrou ; la facture, qui a lu la chaîne sans la suite, attend l'intervention.
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "annee" FROM "SequenceIntervention" FOR UPDATE`;
+        suite = envoyer('post', `/api/interventions/${intervention.id}/suites`, admin, {}).then((r) => r);
+        assert.equal(await attendreBloques(1), true, 'la création de la suite attend la numérotation');
+        creation = creerFacture(intervention.id, { totalHtAttendu: 55.5 }).then((r) => r);
+        assert.equal(await attendreBloques(2), true, 'la facture attend l’intervention');
+      }, { timeout: 20000 });
+      const [creeeSuite, facture] = await Promise.all([suite, creation]);
+      assert.equal(creeeSuite.status, 201, JSON.stringify(creeeSuite.body));
+      assert.deepEqual([facture.status, facture.body.error], [409, 'Les suites de cette intervention changent en ce moment : réessayez.']);
+      assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id } }), 0);
+      // Relancée, la facture voit la suite, qui n'est pas terminée.
+      const relance = await creerFacture(intervention.id, { totalHtAttendu: 55.5 });
+      assert.deepEqual([relance.status, relance.body.error], [409, `La facture au temps passé attend la fin de toutes les suites de l’intervention : ${creeeSuite.body.reference} n’est ni terminée ni annulée.`]);
+    });
   });
 }
