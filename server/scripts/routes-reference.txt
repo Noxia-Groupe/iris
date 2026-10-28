@@ -38,7 +38,7 @@ GET /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191a
 POST /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9623ed8b265a
 GET /api/factures/:id/journal requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
 GET /api/factures/:id/tracabilite requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4d3a959b39f5
-POST /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d1503c57bcdd
+POST /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#cb12bc835bf5
 GET /api/facturation/prete-a-facturer requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#be63c1fffb33
 GET /api/comptabilite requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#13e90d7b003f
 POST /api/comptabilite/comptes requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#6b69dfe1117a
@@ -59,6 +59,8 @@ POST /api/factures/:id/emettre requireAuth#07b983da0ce5 > requireAdmin#72440b319
 POST /api/factures/:id/regler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7c4c1669baf6
 POST /api/factures/:id/annuler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9ae7ad2b98c2
 POST /api/factures/:id/avoirs requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4527855323e1
+GET /api/interventions/:id/facture-temps-passe requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1d9e6104d40b
+POST /api/interventions/:id/facture-temps-passe requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c1b8cb53998b
 GET /api/reglements requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c8df78a7855a
 POST /api/reglements requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#51f9704bcdc4
 POST /api/reglements/:id/contrepasser requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#f9592331ed59

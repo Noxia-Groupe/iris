@@ -7,11 +7,13 @@ import { situationReglement } from '../lib/reglements';
 import { telechargerPdf } from '../lib/documentPdf';
 import EnvoiDocument, { type DocumentAEnvoyer } from '../components/EnvoiDocument';
 import { nombreFr, totauxApercuAvoir, type AvoirPrecedent } from '../lib/apercuAvoir';
+import FactureTempsPasse from '../components/FactureTempsPasse';
+import { corpsFactureTempsPasse, type ApercuFactureTempsPasse } from '../lib/factureTempsPasse';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
 type NatureLigne = 'PRESTATION' | 'ARTICLE';
-type Source = { id: string; nom?: string; titre?: string; reference?: string; clientId?: string; client?: Client };
+type Source = { id: string; nom?: string; titre?: string; reference?: string; clientId?: string; client?: Client; auTempsPasse?: boolean };
 type Ligne = { designation: string; nature: NatureLigne; quantite: string; prixUnitaireHt: string; tauxTva: string };
 type Trace = {
   facture: { id: string; origine: Origine; motifHorsAffaire: string | null; client: Client;
@@ -42,6 +44,8 @@ type Facture = {
   resteDu?: number | null;
   origine: Origine;
   motifHorsAffaire?: string | null;
+  // Facture au temps passé d'une intervention : ses lignes reprennent le devis et les heures saisies.
+  tempsPasse?: boolean;
   client: Client;
   lignes: Ligne[];
 };
@@ -85,6 +89,14 @@ export default function Factures() {
   const [origine, setOrigine] = useState<Origine>('HORS_AFFAIRE');
   const [clientSelection, setClientSelection] = useState('');
   const [lignes, setLignes] = useState<Ligne[]>([nouvelleLigne()]);
+  // Intervention choisie pour une facture d'intervention : au temps passé, l'aperçu calculé par le serveur
+  // remplace la saisie des lignes ; une relecture le recalcule après un refus.
+  const [interventionChoisie, setInterventionChoisie] = useState('');
+  const [apercuTempsPasse, setApercuTempsPasse] = useState<ApercuFactureTempsPasse | null>(null);
+  const [relectureTempsPasse, setRelectureTempsPasse] = useState(0);
+  // Un autre client ou une autre origine écarte l'intervention choisie, qui n'est plus dans la liste.
+  useEffect(() => { setInterventionChoisie(''); }, [clientSelection, origine]);
+  const interventionTempsPasse = origine === 'INTERVENTION' && interventions.some((source) => source.id === interventionChoisie && source.auTempsPasse) ? interventionChoisie : '';
   // Fuseau de la société, lu avec la liste : tant qu'il n'est pas connu, les dates d'émission et
   // d'échéance ne sont pas préremplies (un jour d'Europe/Paris par défaut serait faux ailleurs).
   const [fuseauHoraire, setFuseauHoraire] = useState<string | null>(null);
@@ -226,6 +238,7 @@ export default function Factures() {
     setClientSelection('');
     chercherClient('');
     setOrigine('HORS_AFFAIRE');
+    setInterventionChoisie('');
     setLignes([nouvelleLigne()]);
     setOuvert(true);
   };
@@ -322,6 +335,19 @@ export default function Factures() {
     // le formulaire les omettrait, et le serveur ne refuserait qu'une « date invalide ».
     if (!fuseauHoraire) return setErreur('Les paramètres de la société ne sont pas chargés : actualisez la liste avant de créer la facture, ses dates suivent le jour de la société.');
     const form = new FormData(event.currentTarget);
+    if (interventionTempsPasse) {
+      if (!apercuTempsPasse) return setErreur('La facture au temps passé de cette intervention n’est pas disponible : lisez le motif affiché sous l’intervention.');
+      const dates = { dateEmission: String(form.get('dateEmission') || ''), dateEcheance: String(form.get('dateEcheance') || '') };
+      const res = await apiFetch(`/interventions/${interventionTempsPasse}/facture-temps-passe`, { method: 'POST', body: JSON.stringify(corpsFactureTempsPasse(dates, apercuTempsPasse)) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Les heures ou les suites ont pu changer : l'aperçu est relu, et l'utilisateur relit le nouveau total.
+        if (res.status === 409) setRelectureTempsPasse((n) => n + 1);
+        return setErreur(data.error || 'Création impossible.');
+      }
+      await brouillonCree();
+      return;
+    }
     const lignesConverties = lignes.map((ligne) => ({ ...ligne, quantite: nombreFr(ligne.quantite), prixUnitaireHt: nombreFr(ligne.prixUnitaireHt), tauxTva: nombreFr(ligne.tauxTva) }));
     const fautive = lignesConverties.findIndex((ligne) => ligne.quantite === null || ligne.quantite <= 0 || ligne.prixUnitaireHt === null || ligne.tauxTva === null || ligne.tauxTva > 100);
     if (fautive >= 0) return setErreur(`Ligne ${fautive + 1} : la quantité doit être supérieure à zéro, le prix et le taux de TVA doivent être des nombres (la virgule est acceptée, le taux ne dépasse pas 100).`);
@@ -340,6 +366,10 @@ export default function Factures() {
     const res = await apiFetch('/factures', { method: 'POST', body: JSON.stringify(payload) });
     const data = await res.json();
     if (!res.ok) return setErreur(data.error || 'Création impossible.');
+    await brouillonCree();
+  };
+
+  const brouillonCree = async () => {
     setOuvert(false);
     setSucces('Brouillon créé : il ne porte aucun numéro tant qu’il n’est pas émis. La liste est triée par date d’émission décroissante : si le brouillon n’apparaît pas en page 1, parcourez les pages suivantes.');
     pageCourante.current = 1;
@@ -506,40 +536,45 @@ export default function Factures() {
             {origine === 'HORS_AFFAIRE' ? (
               <input required name="motifHorsAffaire" minLength={3} className="form-input" placeholder="Motif obligatoire" />
             ) : (
-              <select required name={origine === 'CHANTIER' ? 'chantierId' : origine === 'INTERVENTION' ? 'interventionId' : 'contratMaintenanceId'} className="form-input">
+              <select key={origine} required name={origine === 'CHANTIER' ? 'chantierId' : origine === 'INTERVENTION' ? 'interventionId' : 'contratMaintenanceId'} className="form-input"
+                {...(origine === 'INTERVENTION' ? { value: interventionChoisie, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setInterventionChoisie(e.target.value), 'aria-label': 'Intervention facturée' } : {})}>
                 <option value="">Rattachement…</option>
-                {sources.map((source) => <option key={source.id} value={source.id}>{sourceName(source)}</option>)}
+                {sources.map((source) => <option key={source.id} value={source.id}>{sourceName(source)}{source.auTempsPasse ? ' — au temps passé' : ''}</option>)}
               </select>
             )}
           </div>
 
-          <section className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="font-medium">Lignes de facture</h3>
-                <p className="text-sm text-gray-500">Ajoutez prestations et articles. Au moins une ligne est obligatoire.</p>
-              </div>
-              <button type="button" className="btn btn-secondary" onClick={() => setLignes((lignesActuelles) => [...lignesActuelles, nouvelleLigne()])}>
-                <Plus size={16} /> Ajouter une ligne
-              </button>
-            </div>
-            {lignes.map((ligne, index) => (
-              <div key={index} className="grid gap-3 rounded-lg border p-3 sm:grid-cols-12">
-                <input required className="form-input sm:col-span-4" value={ligne.designation} onChange={(e) => modifierLigne(index, 'designation', e.target.value)} placeholder="Désignation" aria-label={`Désignation ligne ${index + 1}`} />
-                <select className="form-input sm:col-span-2" value={ligne.nature} onChange={(e) => modifierLigne(index, 'nature', e.target.value as NatureLigne)} aria-label={`Nature ligne ${index + 1}`}>
-                  <option value="PRESTATION">Prestation</option>
-                  <option value="ARTICLE">Article</option>
-                </select>
-                <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.quantite} onChange={(e) => modifierLigne(index, 'quantite', e.target.value)} placeholder="Qté" aria-label={`Quantité ligne ${index + 1}`} />
-                <input required inputMode="decimal" className="form-input sm:col-span-2" value={ligne.prixUnitaireHt} onChange={(e) => modifierLigne(index, 'prixUnitaireHt', e.target.value)} placeholder="PU HT" aria-label={`Prix unitaire HT ligne ${index + 1}`} />
-                <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.tauxTva} onChange={(e) => modifierLigne(index, 'tauxTva', e.target.value)} placeholder="TVA %" aria-label={`TVA ligne ${index + 1}`} />
-                <button type="button" className="btn btn-secondary sm:col-span-2" disabled={lignes.length === 1} onClick={() => supprimerLigne(index)} title={lignes.length === 1 ? 'Une facture doit conserver au moins une ligne' : 'Supprimer cette ligne'}>
-                  <Trash2 size={16} /> Supprimer
+          {interventionTempsPasse ? (
+            <FactureTempsPasse key={`${interventionTempsPasse}-${relectureTempsPasse}`} interventionId={interventionTempsPasse} onApercu={setApercuTempsPasse} />
+          ) : (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-medium">Lignes de facture</h3>
+                  <p className="text-sm text-gray-500">Ajoutez prestations et articles. Au moins une ligne est obligatoire.</p>
+                </div>
+                <button type="button" className="btn btn-secondary" onClick={() => setLignes((lignesActuelles) => [...lignesActuelles, nouvelleLigne()])}>
+                  <Plus size={16} /> Ajouter une ligne
                 </button>
               </div>
-            ))}
-          </section>
-          <button className="btn btn-primary" type="submit"><Send size={16} /> Créer le brouillon</button>
+              {lignes.map((ligne, index) => (
+                <div key={index} className="grid gap-3 rounded-lg border p-3 sm:grid-cols-12">
+                  <input required className="form-input sm:col-span-4" value={ligne.designation} onChange={(e) => modifierLigne(index, 'designation', e.target.value)} placeholder="Désignation" aria-label={`Désignation ligne ${index + 1}`} />
+                  <select className="form-input sm:col-span-2" value={ligne.nature} onChange={(e) => modifierLigne(index, 'nature', e.target.value as NatureLigne)} aria-label={`Nature ligne ${index + 1}`}>
+                    <option value="PRESTATION">Prestation</option>
+                    <option value="ARTICLE">Article</option>
+                  </select>
+                  <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.quantite} onChange={(e) => modifierLigne(index, 'quantite', e.target.value)} placeholder="Qté" aria-label={`Quantité ligne ${index + 1}`} />
+                  <input required inputMode="decimal" className="form-input sm:col-span-2" value={ligne.prixUnitaireHt} onChange={(e) => modifierLigne(index, 'prixUnitaireHt', e.target.value)} placeholder="PU HT" aria-label={`Prix unitaire HT ligne ${index + 1}`} />
+                  <input required inputMode="decimal" className="form-input sm:col-span-1" value={ligne.tauxTva} onChange={(e) => modifierLigne(index, 'tauxTva', e.target.value)} placeholder="TVA %" aria-label={`TVA ligne ${index + 1}`} />
+                  <button type="button" className="btn btn-secondary sm:col-span-2" disabled={lignes.length === 1} onClick={() => supprimerLigne(index)} title={lignes.length === 1 ? 'Une facture doit conserver au moins une ligne' : 'Supprimer cette ligne'}>
+                    <Trash2 size={16} /> Supprimer
+                  </button>
+                </div>
+              ))}
+            </section>
+          )}
+          <button className="btn btn-primary" type="submit" disabled={Boolean(interventionTempsPasse) && !apercuTempsPasse}><Send size={16} /> {interventionTempsPasse ? 'Créer le brouillon au temps passé' : 'Créer le brouillon'}</button>
         </form>
       )}
 
@@ -554,7 +589,7 @@ export default function Factures() {
                 <td className="p-3"><strong>{facture.type === 'AVOIR' ? 'Avoir' : 'Facture'}</strong><br />{facture.numero || 'Brouillon'}{facture.factureOrigine?.numero && <span className="block text-xs text-gray-500">Origine : {facture.factureOrigine.numero}</span>}</td>
                 <td className="p-3">{facture.client.raisonSociale}</td>
                 <td className="p-3">{formatDate(facture.dateEmission)}</td>
-                <td className="p-3">{facture.origine === 'HORS_AFFAIRE' ? `Hors affaire — ${facture.motifHorsAffaire || ''}` : facture.origine}</td>
+                <td className="p-3">{facture.origine === 'HORS_AFFAIRE' ? `Hors affaire — ${facture.motifHorsAffaire || ''}` : facture.origine}{facture.tempsPasse && <span className="block text-xs text-gray-600">Au temps passé</span>}</td>
                 <td className="p-3">{formatMontant(facture.totalTtc)}</td>
                 <td className="p-3">{facture.resteDu === null || facture.resteDu === undefined ? '—' : formatMontant(facture.resteDu)}</td>
                 <td className="p-3">{facture.statut}{situationReglement(facture, formatMontant) && <span className="block text-xs text-gray-600">{situationReglement(facture, formatMontant)}</span>}</td>

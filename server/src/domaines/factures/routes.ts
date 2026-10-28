@@ -20,6 +20,7 @@ import {
   lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee, refusDocumentFacture,
 } from './metier';
 import { rendreDocumentFacturePdf } from './pdf';
+import { tempsPasseDeLaChaine } from './tempsPasse';
 import { champsIdentiteManquants, figerIdentiteEmetteur, IdentiteEmetteurIncompleteError } from '../documents/identite';
 import { exigerIdentiteClient, IdentiteClientIncompleteError } from '../documents/identiteClient';
 import { avecSoldes, synchroniserStatutReglement } from '../reglements/metier';
@@ -190,6 +191,13 @@ export function enregistrerRoutesFactures(app: Express): void {
       // Une origine étrangère ou inexistante répond 404 afin de ne pas divulguer son existence.
       // L'affaire (origine CHANTIER) se contrôle dans la transaction de création, plus bas.
       if (origine === 'INTERVENTION' && !await prisma.intervention.findFirst({ where: { id: interventionId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Intervention facturable introuvable.' });
+      // Une intervention au temps passé, comme ses suites, se facture par sa facture au temps passé, qui
+      // reprend les heures saisies (lot « facture au temps passé », domaines/factures/tempsPasse.ts), ou,
+      // quand elle se facture avec le chantier de son affaire, par la facture de ce chantier.
+      const tempsPasse = origine === 'INTERVENTION' ? await tempsPasseDeLaChaine(prisma, interventionId!) : null;
+      if (tempsPasse) return res.status(409).json({ error: tempsPasse.avecLeChantier
+        ? `L’intervention ${tempsPasse.reference} est au temps passé et se facture avec le chantier de son affaire, comme ses suites : créez la facture du chantier.`
+        : `L’intervention ${tempsPasse.reference} est au temps passé : sa facture, et celle de ses suites, reprend les heures saisies. Créez-la par « Facture au temps passé ».` });
       if (origine === 'CONTRAT' && !await prisma.contratMaintenance.findFirst({ where: { id: contratMaintenanceId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Contrat facturable introuvable.' });
       const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
       if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });

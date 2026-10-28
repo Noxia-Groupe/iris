@@ -684,6 +684,11 @@ model Facture {
   contratMaintenanceId String?
   contratMaintenance   ContratMaintenance? @relation("FactureContratMaintenance", fields: [contratMaintenanceId], references: [id], onDelete: Restrict)
   motifHorsAffaire     String?
+  // Facture au temps passé (lot « facture au temps passé », seconde PR) : ses lignes reprennent le devis
+  // de l'intervention, la ligne au temps passé valant les heures saisies sur l'intervention et ses suites,
+  // arrondies au pas au-delà du minimum figé, avec au moins ce minimum. Posée à la création et figée ;
+  // une seule facture vivante par intervention (gardes de la migration 20261028180000_facture_temps_passe).
+  tempsPasse           Boolean   @default(false)
   mentionsLegalesVersionId String?
   mentionsLegalesVersion   MentionsLegalesVersion? @relation(fields: [mentionsLegalesVersionId], references: [id], onDelete: Restrict)
   // Identité de l'émetteur copiée à l'émission (lot 6a-1, décision 6) ; absente des pièces
