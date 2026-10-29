@@ -1110,7 +1110,8 @@ Ces lots restent non validés pour mise en service ; seule l'attente de la valid
 **Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; les mentions suivantes y sont levées par la présente section :
 
 - décision du 28-10-2026 sur le matériel des interventions curatives, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357 ;
-- réponses du 29-10-2026 sur le matériel d'une curative, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357.
+- réponses du 29-10-2026 sur le matériel d'une curative, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357 ;
+- décisions de la nuit du 26 au 27-10-2026 sur les questions de montants, lecture retenue, seconde PR de l'intervention de suivi liée, point 1 : « Aujourd'hui, seule une intervention d'un contrat actif, visite ou suite d'une visite, reçoit du matériel ; une curative, comme sa suite, ne porte que des heures. » ; une curative et sa suite en reçoivent depuis #357.
 
 ### Suivi ouvert pendant ce lot
 
